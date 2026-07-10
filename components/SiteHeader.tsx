@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser } from '@/lib/auth'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { formatUid } from '@/lib/uid'
@@ -18,6 +19,8 @@ export async function SiteHeader() {
     : null
 
   const displayName = profile?.displayName || user?.nickname || ''
+  const avatar = publicImageUrl(profile?.avatarUrl)
+  const navLogo = publicImageUrl(config.images.navLogoUrl)
   const mobileNav = navItems.slice(0, 5)
 
   return (
@@ -25,7 +28,7 @@ export async function SiteHeader() {
       <header className="sticky top-0 z-30 border-b border-sky-100/80 bg-white/88 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
           <Link href="/" className="flex min-w-0 shrink-0 items-center gap-3 text-lg font-black text-brand-950 sm:text-xl" title={config.text.siteName}>
-            {config.images.navLogoUrl ? <img src={config.images.navLogoUrl} alt={config.text.siteName} className="h-9 w-9 rounded-2xl object-cover sm:h-10 sm:w-10" /> : null}
+            {navLogo ? <img src={navLogo} alt={config.text.siteName} className="h-9 w-9 rounded-2xl object-cover sm:h-10 sm:w-10" /> : null}
             <span className="truncate">{config.text.siteName}</span>
           </Link>
 
@@ -53,7 +56,7 @@ export async function SiteHeader() {
             <details className="relative shrink-0">
               <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                  {profile?.avatarUrl ? <img src={profile.avatarUrl} alt={displayName} className="h-full w-full object-cover" /> : displayName.slice(0, 1)}
+                  {avatar ? <img src={avatar} alt={displayName} className="h-full w-full object-cover" /> : displayName.slice(0, 1)}
                 </span>
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
               </summary>

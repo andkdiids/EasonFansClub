@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, requireUser, sanitizeText } from '@/lib/security'
 
@@ -66,8 +67,8 @@ export async function PATCH(request: Request) {
 
   if (nickname) data.nickname = nickname
   if (body?.bio !== undefined) data.bio = bio
-  if (body?.avatarUrl !== undefined) data.avatarUrl = avatarUrl || null
-  if (body?.backgroundUrl !== undefined) data.backgroundUrl = backgroundUrl || null
+  if (body?.avatarUrl !== undefined) data.avatarUrl = publicImageUrl(avatarUrl) || null
+  if (body?.backgroundUrl !== undefined) data.backgroundUrl = publicImageUrl(backgroundUrl) || null
 
   const current = await prisma.user.findUnique({
     where: { id: guard.user.id },

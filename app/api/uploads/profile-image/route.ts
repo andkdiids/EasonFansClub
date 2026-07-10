@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
-import { mkdir, writeFile } from 'fs/promises'
-import path from 'path'
 import { NextResponse } from 'next/server'
+import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
+import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -17,6 +17,14 @@ const allowedTypes = new Map([
 export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'eason-fans-club'
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return NextResponse.json({ message: 'Supabase Storage 尚未配置' }, { status: 500 })
+  }
 
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
@@ -36,14 +44,53 @@ export async function POST(request: Request) {
   }
 
   const safeKind = kind === 'background' ? 'background' : 'avatar'
-  const fileName = `${guard.user.id}-${safeKind}-${randomUUID()}.${extension}`
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'profile')
-  await mkdir(uploadDir, { recursive: true })
-
+  const objectPath = `profiles/${guard.user.id}/${safeKind}-${randomUUID()}.${extension}`
   const bytes = Buffer.from(await file.arrayBuffer())
-  await writeFile(path.join(uploadDir, fileName), bytes)
+  const storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Cache-Control': '31536000',
+      'Content-Type': file.type,
+      'x-upsert': 'false',
+    },
+    body: bytes,
+  })
+
+  if (!storageResponse.ok) {
+    const errorText = await storageResponse.text().catch(() => '')
+    return NextResponse.json(
+      { message: 'Supabase Storage 上传失败', detail: errorText.slice(0, 200) },
+      { status: 502 },
+    )
+  }
+
+  const url = supabasePublicObjectUrl(supabaseUrl, bucket, objectPath)
+  const safeUrl = publicImageUrl(url)
+  if (!safeUrl) {
+    return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: guard.user.id },
+      data: safeKind === 'avatar' ? { avatarUrl: safeUrl } : { backgroundUrl: safeUrl },
+    })
+
+    await tx.profile.upsert({
+      where: { userId: guard.user.id },
+      update: safeKind === 'avatar' ? { avatarUrl: safeUrl } : { backgroundUrl: safeUrl },
+      create: {
+        userId: guard.user.id,
+        displayName: guard.user.nickname,
+        avatarUrl: safeKind === 'avatar' ? safeUrl : null,
+        backgroundUrl: safeKind === 'background' ? safeUrl : null,
+      },
+    })
+  })
 
   return NextResponse.json({
-    url: `/uploads/profile/${fileName}`,
+    url: safeUrl,
   })
 }

@@ -7,6 +7,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { isSameLocalDay, startOfLocalDay } from '@/lib/checkin'
 import { DAILY_MOODS, calcMoodIndex, getDailyQuote, getMood } from '@/lib/daily'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
@@ -158,7 +159,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
               {selectedMessages.length ? selectedMessages.map((item) => {
                 const mood = getMood(item.mood)
                 const name = item.user.profile?.displayName || item.user.nickname
-                const avatar = item.user.profile?.avatarUrl || item.user.avatarUrl
+                const avatar = publicImageUrl(item.user.profile?.avatarUrl || item.user.avatarUrl)
                 return (
                   <article key={item.id} className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
                     <div className="flex gap-4">

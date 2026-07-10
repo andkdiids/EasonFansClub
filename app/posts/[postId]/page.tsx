@@ -6,6 +6,7 @@ import { ReplyForm } from '@/components/ReplyForm'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
@@ -38,7 +39,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
 
   const liked = Array.isArray(post.likes) && post.likes.length > 0
   const favorited = Array.isArray(post.favorites) && post.favorites.length > 0
-  const authorAvatar = post.author.profile.avatarUrl || post.author.avatarUrl
+  const authorAvatar = publicImageUrl(post.author.profile.avatarUrl || post.author.avatarUrl)
   const authorName = post.author.profile.displayName || post.author.nickname
 
   return (
@@ -86,7 +87,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
             <div className="rounded-xl border border-dashed border-sky-200 bg-white/65 p-8 text-center text-slate-500">还没有回复。</div>
           ) : (
             post.replies.map((reply, index) => {
-              const avatar = reply.author.profile?.avatarUrl || reply.author.avatarUrl
+              const avatar = publicImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
               const name = reply.author.profile?.displayName || reply.author.nickname
               return (
                 <article key={reply.id} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">

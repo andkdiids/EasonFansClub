@@ -4,6 +4,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { getMood } from '@/lib/daily'
 import { formatDate } from '@/lib/format'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
@@ -59,8 +60,8 @@ export default async function ProfilePage() {
   if (!profile || !profile.profile) redirect('/login')
 
   const displayName = profile.profile.displayName || profile.nickname
-  const avatar = profile.profile.avatarUrl || profile.avatarUrl
-  const background = profile.profile.backgroundUrl || profile.backgroundUrl
+  const avatar = publicImageUrl(profile.profile.avatarUrl || profile.avatarUrl)
+  const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.profile.bio || profile.bio || ''
   const initial = displayName.slice(0, 1).toUpperCase()
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { publicImageUrl } from '@/lib/images'
 
 type InitialProfile = {
   nickname: string
@@ -78,6 +79,9 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  const avatarPreview = publicImageUrl(form.avatarUrl)
+  const backgroundPreview = publicImageUrl(form.backgroundUrl)
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5 rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm">
       <div>
@@ -103,7 +107,7 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
           <p className="text-sm font-black text-slate-700">头像</p>
           <div className="mt-3 flex items-center gap-4">
             <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">
-              {form.avatarUrl ? <img src={form.avatarUrl} alt="头像预览" className="h-full w-full object-cover" /> : form.nickname.slice(0, 1)}
+              {avatarPreview ? <img src={avatarPreview} alt="头像预览" className="h-full w-full object-cover" /> : form.nickname.slice(0, 1)}
             </span>
             <div className="min-w-0">
               <button type="button" onClick={() => avatarInputRef.current?.click()} className="rounded-xl bg-white px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
@@ -120,9 +124,9 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
           <div className="mt-3 overflow-hidden rounded-2xl bg-white">
             <div
               className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400"
-              style={form.backgroundUrl ? { backgroundImage: `url(${form.backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+              style={backgroundPreview ? { backgroundImage: `url(${backgroundPreview})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
             >
-              {form.backgroundUrl ? '' : '背景预览'}
+              {backgroundPreview ? '' : '背景预览'}
             </div>
           </div>
           <button type="button" onClick={() => backgroundInputRef.current?.click()} className="mt-3 rounded-xl bg-white px-4 py-2 text-sm font-black text-brand-950 shadow-sm">

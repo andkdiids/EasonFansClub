@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { AdminPostActions, FavoriteButton } from '@/components/PostActions'
 import { formatDate } from '@/lib/format'
+import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 type PostItem = {
@@ -46,7 +47,7 @@ export function PostList({ posts, canManage = false }: Readonly<{ posts: PostIte
       </p>
       {visiblePosts.map((post) => {
         const authorName = post.author.profile?.displayName || post.author.nickname
-        const authorAvatar = post.author.profile?.avatarUrl || post.author.avatarUrl
+        const authorAvatar = publicImageUrl(post.author.profile?.avatarUrl || post.author.avatarUrl)
         return (
           <article key={post.id} data-post-id={post.id} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
             <div className="mb-3 flex flex-wrap items-center gap-2">

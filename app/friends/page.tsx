@@ -5,6 +5,7 @@ import { AddFriendButton, FriendRequestDecision } from '@/components/FriendReque
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 
@@ -164,7 +165,7 @@ type FriendUser = {
 
 function UserCard({ user, status, action }: { user: FriendUser; status?: string; action?: ReactNode }) {
   const name = user.profile?.displayName || user.nickname
-  const avatar = user.profile?.avatarUrl || user.avatarUrl
+  const avatar = publicImageUrl(user.profile?.avatarUrl || user.avatarUrl)
   return (
     <div className="rounded-2xl bg-sky-50 p-4 transition hover:bg-sky-100">
       <div className="flex items-center justify-between gap-3">

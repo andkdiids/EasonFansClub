@@ -74,32 +74,48 @@ export async function syncUserAchievements(userId: string) {
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   })
 
-  return Promise.all(
-    achievements.map(async (achievement) => {
-      const progress = getProgressValue(achievement.conditionKey, stats)
-      const target = achievement.conditionValue || 1
-      const shouldUnlock = achievement.isAutoGrant && progress >= target
-      const existing = await prisma.userAchievement.findUnique({
-        where: { userId_achievementId: { userId, achievementId: achievement.id } },
-        select: { unlocked: true, unlockedAt: true },
-      })
+  const existingRecords = await prisma.userAchievement.findMany({
+    where: { userId, achievementId: { in: achievements.map((achievement) => achievement.id) } },
+  })
+  const existingByAchievementId = new Map(existingRecords.map((record) => [record.achievementId, record]))
 
-      return prisma.userAchievement.upsert({
-        where: { userId_achievementId: { userId, achievementId: achievement.id } },
-        update: {
-          progress,
-          unlocked: existing?.unlocked || shouldUnlock,
-          unlockedAt: existing?.unlockedAt || (shouldUnlock ? new Date() : null),
-        },
-        create: {
-          userId,
-          achievementId: achievement.id,
-          progress,
-          unlocked: shouldUnlock,
-          unlockedAt: shouldUnlock ? new Date() : null,
-        },
-        include: { achievement: true },
-      })
-    }),
-  )
+  for (const achievement of achievements) {
+    const progress = getProgressValue(achievement.conditionKey, stats)
+    const target = achievement.conditionValue || 1
+    const shouldUnlock = achievement.isAutoGrant && progress >= target
+    const existing = existingByAchievementId.get(achievement.id)
+    const unlocked = existing?.unlocked || shouldUnlock
+    const unlockedAt = existing?.unlockedAt || (shouldUnlock ? new Date() : null)
+
+    if (
+      existing &&
+      existing.progress === progress &&
+      existing.unlocked === unlocked &&
+      existing.unlockedAt?.getTime() === unlockedAt?.getTime()
+    ) {
+      continue
+    }
+
+    await prisma.userAchievement.upsert({
+      where: { userId_achievementId: { userId, achievementId: achievement.id } },
+      update: {
+        progress,
+        unlocked,
+        unlockedAt,
+      },
+      create: {
+        userId,
+        achievementId: achievement.id,
+        progress,
+        unlocked,
+        unlockedAt,
+      },
+    })
+  }
+
+  return prisma.userAchievement.findMany({
+    where: { userId, achievement: { isVisible: true } },
+    include: { achievement: true },
+    orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
+  })
 }

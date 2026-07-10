@@ -3,10 +3,11 @@ import { notFound } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { PostList } from '@/components/PostList'
 import { SiteHeader } from '@/components/SiteHeader'
-import { categoryText, rarityText, syncUserAchievements } from '@/lib/achievements'
+import { categoryText, rarityText } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
 import { normalizeFriendPair } from '@/lib/friends'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
 
@@ -135,18 +136,16 @@ export default async function PublicUserPage({ params }: PageProps) {
           select: { senderId: true, receiverId: true },
         })
       : Promise.resolve(null),
-    isSelf
-      ? syncUserAchievements(user.id)
-      : prisma.userAchievement.findMany({
-          where: { userId: user.id, unlocked: true, achievement: { isVisible: true } },
-          include: { achievement: true },
-          orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
-          take: 12,
-        }),
+    prisma.userAchievement.findMany({
+      where: { userId: user.id, unlocked: true, achievement: { isVisible: true } },
+      include: { achievement: true },
+      orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 12,
+    }),
   ])
 
-  const avatar = user.profile.avatarUrl || user.avatarUrl
-  const background = user.profile.backgroundUrl || user.backgroundUrl
+  const avatar = publicImageUrl(user.profile.avatarUrl || user.avatarUrl)
+  const background = publicImageUrl(user.profile.backgroundUrl || user.backgroundUrl)
   const name = user.profile.displayName || user.nickname
   const bio = user.profile.bio || user.bio || '这个成员还没有填写个人简介。'
   const friendCount = user._count.friendshipsA + user._count.friendshipsB
