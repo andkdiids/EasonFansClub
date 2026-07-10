@@ -1,0 +1,11 @@
+.next/
+node_modules/
+.env
+.env.local
+dist/
+coverage/
+*.log
+tsconfig.tsbuildinfo
+public/uploads/
+supabase/.temp/
+.codex-start-8000.cmd

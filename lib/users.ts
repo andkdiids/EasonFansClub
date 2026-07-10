@@ -1,0 +1,73 @@
+import type { Prisma, User } from '@prisma/client'
+import { prisma } from '@/lib/prisma'
+
+export const inactiveUserStatuses = ['BANNED', 'DELETED', 'MERGED', 'DISABLED'] as const
+
+export function publicUserSelect() {
+  return {
+    id: true,
+    uid: true,
+    username: true,
+    nickname: true,
+    email: true,
+    phone: true,
+    avatarUrl: true,
+    backgroundUrl: true,
+    bio: true,
+    role: true,
+    status: true,
+    level: true,
+    exp: true,
+    points: true,
+    createdAt: true,
+    profile: true,
+  } satisfies Prisma.UserSelect
+}
+
+export function isCompleteActiveUser(
+  user: Pick<User, 'uid' | 'status' | 'isDeleted'> & { profile?: unknown | null },
+) {
+  return Boolean(user.uid && user.status === 'ACTIVE' && !user.isDeleted && user.profile)
+}
+
+export async function findCompleteActiveUserByIdentifier(identifier: string) {
+  const normalized = identifier.trim()
+  const lower = normalized.toLowerCase()
+
+  const user = await prisma.user.findFirst({
+    where: {
+      status: 'ACTIVE',
+      isDeleted: false,
+      OR: [{ phone: normalized }, { email: lower }, { username: normalized }],
+    },
+    select: {
+      id: true,
+      uid: true,
+      username: true,
+      nickname: true,
+      role: true,
+      status: true,
+      isDeleted: true,
+      passwordHash: true,
+      profile: { select: { id: true } },
+    },
+  })
+
+  if (!user || !isCompleteActiveUser(user)) return null
+  return user
+}
+
+export async function findActiveConflict(input: { phone?: string | null; email?: string | null; username?: string | null }) {
+  return prisma.user.findFirst({
+    where: {
+      status: 'ACTIVE',
+      isDeleted: false,
+      OR: [
+        ...(input.phone ? [{ phone: input.phone }] : []),
+        ...(input.email ? [{ email: input.email.toLowerCase() }] : []),
+        ...(input.username ? [{ username: input.username }] : []),
+      ],
+    },
+    select: { id: true, phone: true, email: true, username: true },
+  })
+}

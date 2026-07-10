@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #071722;
+  background: #eef8ff;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 80% 10%, rgba(25, 133, 194, 0.16), transparent 28%),
+    linear-gradient(135deg, #eaf7ff 0%, #ffffff 45%, #dceffa 100%);
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+@media (max-width: 767px) {
+  body {
+    padding-bottom: 84px;
+  }
+}
