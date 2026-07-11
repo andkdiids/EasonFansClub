@@ -10,7 +10,7 @@ const createPrismaClient = () => {
   if (useDriverAdapter) {
     const adapter = new PrismaPg({
       connectionString: process.env.DATABASE_URL ?? '',
-      maxUses: 1,
+      max: 5,
     })
 
     return new PrismaClient({
