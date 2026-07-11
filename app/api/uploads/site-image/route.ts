@@ -1,7 +1,5 @@
-import { randomUUID } from 'crypto'
-import { mkdir, writeFile } from 'fs/promises'
-import path from 'path'
 import { NextResponse } from 'next/server'
+import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
 import { requireAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -18,6 +16,14 @@ export async function POST(request: Request) {
   const guard = await requireAdmin('site_config_manage')
   if (!guard.user) return guard.response
 
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'eason-fans-club'
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return NextResponse.json({ message: 'Supabase Storage 尚未配置' }, { status: 500 })
+  }
+
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
   if (!(file instanceof File)) {
@@ -28,14 +34,36 @@ export async function POST(request: Request) {
   if (!extension) {
     return NextResponse.json({ message: '仅支持 JPG、PNG、WEBP 或 GIF 图片' }, { status: 400 })
   }
+
   if (file.size > maxFileSize) {
     return NextResponse.json({ message: '图片不能超过 8MB' }, { status: 400 })
   }
 
-  const fileName = `site-${randomUUID()}.${extension}`
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'site')
-  await mkdir(uploadDir, { recursive: true })
-  await writeFile(path.join(uploadDir, fileName), Buffer.from(await file.arrayBuffer()))
+  const objectPath = `site/site-${crypto.randomUUID()}.${extension}`
+  const storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Cache-Control': '31536000',
+      'Content-Type': file.type,
+      'x-upsert': 'false',
+    },
+    body: await file.arrayBuffer(),
+  })
 
-  return NextResponse.json({ url: `/uploads/site/${fileName}` })
+  if (!storageResponse.ok) {
+    const errorText = await storageResponse.text().catch(() => '')
+    return NextResponse.json(
+      { message: 'Supabase Storage 上传失败', detail: errorText.slice(0, 200) },
+      { status: 502 },
+    )
+  }
+
+  const url = publicImageUrl(supabasePublicObjectUrl(supabaseUrl, bucket, objectPath))
+  if (!url) {
+    return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
+  }
+
+  return NextResponse.json({ url })
 }

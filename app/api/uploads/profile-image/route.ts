@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -44,8 +43,7 @@ export async function POST(request: Request) {
   }
 
   const safeKind = kind === 'background' ? 'background' : 'avatar'
-  const objectPath = `profiles/${guard.user.id}/${safeKind}-${randomUUID()}.${extension}`
-  const bytes = Buffer.from(await file.arrayBuffer())
+  const objectPath = `profiles/${guard.user.id}/${safeKind}-${crypto.randomUUID()}.${extension}`
   const storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
     method: 'POST',
     headers: {
@@ -55,7 +53,7 @@ export async function POST(request: Request) {
       'Content-Type': file.type,
       'x-upsert': 'false',
     },
-    body: bytes,
+    body: await file.arrayBuffer(),
   })
 
   if (!storageResponse.ok) {

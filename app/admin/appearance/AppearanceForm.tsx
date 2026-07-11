@@ -154,7 +154,7 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
                   value={value}
                   onChange={(event) => setConfig((current) => ({ ...current, images: { ...current.images, [key]: event.target.value } }))}
                   className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none"
-                  placeholder="/uploads/site/..."
+                  placeholder="https://PROJECT_REF.supabase.co/storage/v1/object/public/..."
                 />
                 <label className="mt-3 inline-block cursor-pointer rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 shadow-sm">
                   {uploadingKey === key ? '上传中...' : '上传图片'}

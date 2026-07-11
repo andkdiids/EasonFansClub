@@ -1,7 +1,12 @@
 .next/
+.open-next/
+.wrangler/
 node_modules/
 .env
 .env.local
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 dist/
 coverage/
 *.log
