@@ -1,17 +1,24 @@
 import Link from 'next/link'
 import { isAdminUser } from '@/lib/admin-permissions'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { getSiteAppearance } from '@/lib/site-config'
+import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
 import { formatUid } from '@/lib/uid'
 
-export async function SiteHeader() {
-  const user = await getCurrentUser()
-  const config = await getSiteAppearance()
+type SiteHeaderProps = {
+  user?: SessionUser | null
+  config?: SiteAppearanceConfig
+}
+
+export async function SiteHeader({ user: providedUser, config: providedConfig }: SiteHeaderProps = {}) {
+  console.log('[site-header:ssr] start')
+  const user = providedUser !== undefined ? providedUser : await getCurrentUser()
+  const config = providedConfig ?? (await getSiteAppearance())
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
+  console.log('[site-header:ssr] profile query', user ? 'required' : 'skipped')
   const profile = user
     ? await safeDb(
         'header.profile',
@@ -22,6 +29,7 @@ export async function SiteHeader() {
         null,
       )
     : null
+  console.log('[site-header:ssr] profile loaded')
 
   const displayName = profile?.displayName || user?.nickname || ''
   const avatar = publicImageUrl(profile?.avatarUrl)

@@ -9,14 +9,19 @@ import { getSiteAppearance } from '@/lib/site-config'
 export const dynamic = 'force-dynamic'
 
 export default async function HomePage() {
+  console.log('[home:ssr] start')
   const user = await getCurrentUser()
+  console.log('[home:ssr] auth', user ? 'authenticated' : 'anonymous')
   if (!user) redirect('/login')
 
   const config = await getSiteAppearance()
+  console.log('[home:ssr] appearance loaded')
+  console.log('[home:ssr] rendering shell')
+  console.log('[home:ssr] home modules included')
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} config={config} />
       <main
         className="space-y-20 px-5 py-8"
         style={{

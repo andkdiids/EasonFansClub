@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { SignJWT, jwtVerify } from 'jose'
 import type { UserRole } from '@prisma/client'
+import { withDbTimeout } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
 
@@ -44,23 +45,27 @@ export async function getCurrentUser() {
   if (!sessionUser) return null
 
   try {
-    const user = await prisma.user.findFirst({
-      where: {
-        id: sessionUser.id,
-        isDeleted: false,
-        status: 'ACTIVE',
-      },
-      select: {
-        id: true,
-        uid: true,
-        username: true,
-        nickname: true,
-        role: true,
-        status: true,
-        isDeleted: true,
-        profile: { select: { id: true } },
-      },
-    })
+    const user = await withDbTimeout(
+      'auth.currentUser',
+      prisma.user.findFirst({
+        where: {
+          id: sessionUser.id,
+          isDeleted: false,
+          status: 'ACTIVE',
+        },
+        select: {
+          id: true,
+          uid: true,
+          username: true,
+          nickname: true,
+          role: true,
+          status: true,
+          isDeleted: true,
+          profile: { select: { id: true } },
+        },
+      }),
+      3000,
+    )
 
     if (!user || !isCompleteActiveUser(user)) {
       return null
@@ -73,7 +78,8 @@ export async function getCurrentUser() {
       nickname: user.nickname,
       role: user.role,
     }
-  } catch {
+  } catch (error) {
+    console.error('[auth.currentUser]', error)
     return null
   }
 }
