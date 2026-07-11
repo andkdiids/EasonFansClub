@@ -1,5 +1,15 @@
 import { prisma } from '@/lib/prisma'
 
+export type AchievementSyncCategory =
+  | 'REGISTER'
+  | 'CHECKIN_STREAK'
+  | 'CHECKIN_TOTAL'
+  | 'POST'
+  | 'MUSIC'
+  | 'FRIEND'
+  | 'ACTIVE'
+  | 'SPECIAL'
+
 export const rarityText: Record<string, string> = {
   NORMAL: '普通',
   RARE: '稀有',
@@ -65,12 +75,12 @@ export function getProgressValue(
   return Number(stats[conditionKey as keyof typeof stats] || 0)
 }
 
-export async function syncUserAchievements(userId: string) {
+export async function syncUserAchievements(userId: string, categories?: AchievementSyncCategory[]) {
   const stats = await getUserAchievementStats(userId)
   if (!stats) return []
 
   const achievements = await prisma.achievement.findMany({
-    where: { isVisible: true },
+    where: { isVisible: true, ...(categories?.length ? { category: { in: categories } } : {}) },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   })
 

@@ -7,6 +7,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { isSameLocalDay, startOfLocalDay } from '@/lib/checkin'
 import { DAILY_MOODS, calcMoodIndex, getDailyQuote, getMood } from '@/lib/daily'
+import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
@@ -46,13 +47,22 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const today = startOfLocalDay()
   const sort = params.sort === 'hot' ? 'hot' : 'latest'
 
-  const [user, activeUsers, todayCount, selectedMessages, moodStats, totalCheckIns] = await Promise.all([
+  const user = await safeDb(
+    'checkin.user',
     prisma.user.findUnique({
       where: { id: sessionUser.id },
       select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
     }),
+    null,
+  )
+  const activeUsers = await safeDb(
+    'checkin.activeUsers',
     prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
-    prisma.checkIn.count({ where: { checkDate: today } }),
+    0,
+  )
+  const todayCount = await safeDb('checkin.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
+  const selectedMessages = await safeDb(
+    'checkin.messages',
     prisma.dailyMessage.findMany({
       where: {
         date: { gte: selectedDate, lt: nextDate },
@@ -75,13 +85,18 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
         },
       },
     }),
+    [],
+  )
+  const moodStats = await safeDb(
+    'checkin.moodStats',
     prisma.checkIn.groupBy({
       by: ['mood'],
       where: { checkDate: today, mood: { not: null } },
       _count: { mood: true },
     }),
-    prisma.checkIn.count({ where: { userId: sessionUser.id } }),
-  ])
+    [],
+  )
+  const totalCheckIns = await safeDb('checkin.totalCheckIns', prisma.checkIn.count({ where: { userId: sessionUser.id } }), 0)
 
   if (!user) redirect('/login')
 

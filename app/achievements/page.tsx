@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation'
 import { SiteHeader } from '@/components/SiteHeader'
-import { categoryText, rarityText, syncUserAchievements } from '@/lib/achievements'
+import { categoryText, rarityText } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
+import { safeDb } from '@/lib/db-timeout'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +11,15 @@ export default async function AchievementsPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login?redirect=%2Fachievements')
 
-  const records = await syncUserAchievements(user.id)
+  const records = await safeDb(
+    'achievements.read',
+    prisma.userAchievement.findMany({
+      where: { userId: user.id, achievement: { isVisible: true } },
+      include: { achievement: true },
+      orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
+    }),
+    [],
+  )
   const grouped = records.reduce<Record<string, typeof records>>((acc, item) => {
     const key = item.achievement.category
     acc[key] ||= []

@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
+import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { isSameLocalDay, startOfLocalDay, startOfYesterday } from '@/lib/checkin'
 import { CHECK_IN_EXP, CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
+import { safeDb } from '@/lib/db-timeout'
 import { calcLevel } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, sanitizeText } from '@/lib/security'
@@ -13,7 +15,8 @@ export async function GET() {
   const today = startOfLocalDay()
   const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
 
-  const [profile, todayCount, moodStats] = await Promise.all([
+  const profile = await safeDb(
+    'checkinApi.profile',
     prisma.user.findUnique({
       where: { id: user.id },
       select: {
@@ -28,13 +31,18 @@ export async function GET() {
         },
       },
     }),
-    prisma.checkIn.count({ where: { checkDate: today } }),
+    null,
+  )
+  const todayCount = await safeDb('checkinApi.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
+  const moodStats = await safeDb(
+    'checkinApi.moodStats',
     prisma.checkIn.groupBy({
       by: ['mood'],
       where: { checkDate: today, mood: { not: null } },
       _count: { mood: true },
     }),
-  ])
+    [],
+  )
 
   if (!profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
@@ -177,6 +185,10 @@ export async function POST(request: Request) {
     }
 
     return { user: updatedUser, gainedPoints, gainedExp, bonus, dailyMessageId }
+  })
+
+  await syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']).catch((achievementError) => {
+    console.error('[achievements:checkin]', achievementError)
   })
 
   return NextResponse.json({

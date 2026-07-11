@@ -1,4 +1,5 @@
 import { unstable_noStore as noStore } from 'next/cache'
+import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 
 export type SiteNavItem = {
@@ -142,10 +143,14 @@ function mergeConfig(value: unknown): SiteAppearanceConfig {
 
 export async function getSiteAppearance() {
   noStore()
-  const setting = await prisma.siteSetting.findUnique({
-    where: { key: 'site.appearance' },
-    select: { value: true },
-  })
+  const setting = await safeDb(
+    'site.appearance',
+    prisma.siteSetting.findUnique({
+      where: { key: 'site.appearance' },
+      select: { value: true },
+    }),
+    null,
+  )
 
   if (!setting?.value) return defaultSiteAppearance
   try {

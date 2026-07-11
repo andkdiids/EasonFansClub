@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser } from '@/lib/auth'
+import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -12,10 +13,14 @@ export async function SiteHeader() {
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
   const profile = user
-    ? await prisma.profile.findUnique({
-        where: { userId: user.id },
-        select: { avatarUrl: true, displayName: true },
-      })
+    ? await safeDb(
+        'header.profile',
+        prisma.profile.findUnique({
+          where: { userId: user.id },
+          select: { avatarUrl: true, displayName: true },
+        }),
+        null,
+      )
     : null
 
   const displayName = profile?.displayName || user?.nickname || ''

@@ -17,9 +17,8 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
   const { postId } = await params
   const user = await getCurrentUser()
 
-  const post = await prisma.post.update({
+  const post = await prisma.post.findUnique({
     where: { id: postId },
-    data: { viewCount: { increment: 1 } },
     include: {
       author: { select: { uid: true, nickname: true, level: true, avatarUrl: true, profile: true, status: true, isDeleted: true } },
       board: { select: { name: true, slug: true } },

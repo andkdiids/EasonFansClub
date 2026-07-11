@@ -1,8 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { ProfileDeferredModules } from '@/components/ProfileDeferredModules'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
-import { getMood } from '@/lib/daily'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -15,47 +15,25 @@ export default async function ProfilePage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const monthStart = new Date()
-  monthStart.setDate(1)
-  monthStart.setHours(0, 0, 0, 0)
-
-  const [profile, monthCheckIns, recentMessages, longestStreak] = await Promise.all([
-    prisma.user.findFirst({
-      where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
-      select: {
-        uid: true,
-        username: true,
-        nickname: true,
-        avatarUrl: true,
-        backgroundUrl: true,
-        bio: true,
-        email: true,
-        phone: true,
-        level: true,
-        exp: true,
-        points: true,
-        consecutiveDays: true,
-        createdAt: true,
-        profile: true,
-        _count: { select: { posts: true, replies: true, likes: true, checkIns: true } },
-      },
-    }),
-    prisma.checkIn.findMany({
-      where: { userId: user.id, checkDate: { gte: monthStart } },
-      orderBy: { checkDate: 'asc' },
-      select: { id: true, checkDate: true, mood: true, message: true, points: true, exp: true, streakDay: true },
-    }),
-    prisma.dailyMessage.findMany({
-      where: { userId: user.id, isDeleted: false },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    }),
-    prisma.checkIn.findFirst({
-      where: { userId: user.id },
-      orderBy: { streakDay: 'desc' },
-      select: { streakDay: true },
-    }),
-  ])
+  const profile = await prisma.user.findFirst({
+    where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
+    select: {
+      uid: true,
+      nickname: true,
+      avatarUrl: true,
+      backgroundUrl: true,
+      bio: true,
+      email: true,
+      phone: true,
+      level: true,
+      exp: true,
+      points: true,
+      consecutiveDays: true,
+      createdAt: true,
+      profile: true,
+      _count: { select: { checkIns: true } },
+    },
+  })
 
   if (!profile || !profile.profile) redirect('/login')
 
@@ -113,7 +91,6 @@ export default async function ProfilePage() {
                 ['经验', profile.exp],
                 ['连续挂号', `${profile.consecutiveDays} 天`],
                 ['累计挂号', `${profile._count.checkIns} 天`],
-                ['最长连续', `${longestStreak?.streakDay || 0} 天`],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-sky-100 bg-sky-50/70 p-4">
                   <p className="text-xs font-black text-slate-500">{label}</p>
@@ -133,42 +110,7 @@ export default async function ProfilePage() {
               bio,
             }}
           />
-
-          <aside className="space-y-6">
-            <div className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
-              <h2 className="text-2xl font-black text-brand-950">本月挂号日历</h2>
-              <div className="mt-5 grid grid-cols-7 gap-2">
-                {Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
-                  const day = index + 1
-                  const record = monthCheckIns.find((item) => item.checkDate.getDate() === day)
-                  const mood = getMood(record?.mood)
-                  return (
-                    <div key={day} className={`aspect-square rounded-2xl p-2 text-center text-xs font-black ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'}`}>
-                      <span>{day}</span>
-                      <span className="mt-1 block text-lg">{mood?.icon || ''}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
-              <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
-              <div className="mt-5 space-y-3">
-                {recentMessages.length ? recentMessages.map((item) => {
-                  const mood = getMood(item.mood)
-                  return (
-                    <article key={item.id} className="rounded-2xl bg-sky-50/75 p-4">
-                      <p className="font-black text-brand-950">{mood?.icon || '🎵'} {formatDate(item.createdAt)}</p>
-                      <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{item.content}</p>
-                    </article>
-                  )
-                }) : (
-                  <p className="rounded-2xl bg-sky-50/75 p-5 text-sm font-bold text-slate-500">还没有历史留言。</p>
-                )}
-              </div>
-            </div>
-          </aside>
+          <ProfileDeferredModules />
         </section>
       </main>
     </>

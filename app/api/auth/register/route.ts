@@ -1,7 +1,8 @@
 import bcrypt from 'bcrypt'
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { syncUserAchievements } from '@/lib/achievements'
 import { authCookieName, createSessionToken, getSessionCookieOptions } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
 import { findActiveConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
 import { normalizeText } from '@/lib/validators'
@@ -98,6 +99,9 @@ export async function POST(request: Request) {
       { status: 201, headers: { 'Cache-Control': 'no-store, max-age=0' } },
     )
     response.cookies.set(authCookieName, token, getSessionCookieOptions(request))
+    await syncUserAchievements(user.id, ['REGISTER']).catch((achievementError) => {
+      console.error('[achievements:register]', achievementError)
+    })
 
     return response
   } catch (error) {

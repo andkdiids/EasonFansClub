@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
+import { safeDb } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -20,7 +21,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const numericUid = Number(q)
 
   const activeUserFilter = { status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } }
-  const [friendships, received, sent, searchUsers] = await Promise.all([
+  const friendships = await safeDb(
+    'friends.friendships',
     prisma.friendship.findMany({
       where: { OR: [{ userAId: user.id }, { userBId: user.id }] },
       include: {
@@ -29,17 +31,29 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
       },
       orderBy: { createdAt: 'desc' },
     }),
+    [],
+  )
+  const received = await safeDb(
+    'friends.received',
     prisma.friendRequest.findMany({
       where: { receiverId: user.id, status: 'PENDING', sender: activeUserFilter },
       include: { sender: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
     }),
+    [],
+  )
+  const sent = await safeDb(
+    'friends.sent',
     prisma.friendRequest.findMany({
       where: { senderId: user.id, receiver: activeUserFilter },
       include: { receiver: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
       take: 20,
     }),
+    [],
+  )
+  const searchUsers = await safeDb(
+    'friends.search',
     q
       ? prisma.user.findMany({
           where: {
@@ -57,7 +71,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
           take: 20,
         })
       : Promise.resolve([]),
-  ])
+    [],
+  )
 
   const friends = friendships
     .map((item) => (item.userAId === user.id ? item.userB : item.userA))

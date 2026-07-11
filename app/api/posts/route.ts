@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { POINTS, calcLevel } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
@@ -120,6 +121,10 @@ export async function POST(request: Request) {
     })
 
     return post
+  })
+
+  await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
+    console.error('[achievements:post]', achievementError)
   })
 
   return NextResponse.json({ post: result }, { status: 201 })
