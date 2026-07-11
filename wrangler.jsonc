@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "eason-fans-club",
+  "name": "easonfansclub",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-04-01",
   "compatibility_flags": [
@@ -14,7 +14,7 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "eason-fans-club"
+      "service": "easonfansclub"
     }
   ],
   "images": {
@@ -24,6 +24,6 @@
     "NEXTJS_ENV": "production",
     "COOKIE_SECURE": "true",
     "PRISMA_USE_DRIVER_ADAPTER": "true",
-    "SUPABASE_STORAGE_BUCKET": "eason-fans-club"
+    "SUPABASE_STORAGE_BUCKET": "avatars"
   }
 }
