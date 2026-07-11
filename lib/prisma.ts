@@ -10,7 +10,10 @@ const createPrismaClient = () => {
   if (useDriverAdapter) {
     const adapter = new PrismaPg({
       connectionString: process.env.DATABASE_URL ?? '',
-      maxUses: 1,
+      max: Number(process.env.PRISMA_POOL_MAX || 2),
+      idleTimeoutMillis: Number(process.env.PRISMA_POOL_IDLE_TIMEOUT_MS || 10000),
+      connectionTimeoutMillis: Number(process.env.PRISMA_POOL_CONNECTION_TIMEOUT_MS || 5000),
+      allowExitOnIdle: true,
     })
 
     return new PrismaClient({
@@ -28,8 +31,6 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: ReturnType<typeof createPrismaClient>
 }
 
-export const prisma = useDriverAdapter ? createPrismaClient() : (globalForPrisma.prisma ?? createPrismaClient())
+export const prisma = globalForPrisma.prisma ?? createPrismaClient()
 
-if (!useDriverAdapter) {
-  globalForPrisma.prisma = prisma
-}
+globalForPrisma.prisma = prisma

@@ -14,13 +14,17 @@ function stripUnsafeHtml(value: string) {
     .trim()
 }
 
+function createSummary(content: string, length = 180) {
+  return content.length > length ? `${content.slice(0, length)}...` : content
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const boardSlug = searchParams.get('board')
   const take = Math.min(Number(searchParams.get('take') || 20), 50)
 
   try {
-    const posts = await prisma.post.findMany({
+    const rows = await prisma.post.findMany({
       where: {
         isDeleted: false,
         status: 'PUBLISHED',
@@ -29,7 +33,18 @@ export async function GET(request: Request) {
       },
       orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
       take,
-      include: {
+      select: {
+        id: true,
+        title: true,
+        summary: true,
+        content: true,
+        likeCount: true,
+        favoriteCount: true,
+        replyCount: true,
+        viewCount: true,
+        isPinned: true,
+        isFeatured: true,
+        createdAt: true,
         author: {
           select: {
             uid: true,
@@ -42,8 +57,15 @@ export async function GET(request: Request) {
         board: { select: { name: true, slug: true } },
       },
     })
+    const posts = rows.map(({ summary, content, ...post }) => ({
+      ...post,
+      content: summary || createSummary(content),
+    }))
 
-    return NextResponse.json({ posts })
+    return NextResponse.json(
+      { posts },
+      { headers: { 'Cache-Control': 'public, max-age=15, s-maxage=45, stale-while-revalidate=120' } },
+    )
   } catch (error) {
     console.error('[posts:list:error]', { boardSlug, error })
     return NextResponse.json({ message: '帖子列表暂时无法加载，请稍后重试', posts: [] }, { status: 503 })
@@ -95,6 +117,7 @@ export async function POST(request: Request) {
           authorId: user.id,
           title: input.title,
           content: input.content,
+          summary: createSummary(input.content),
           status: 'PUBLISHED',
         },
         select: { id: true },

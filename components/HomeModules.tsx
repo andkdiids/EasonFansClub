@@ -33,7 +33,7 @@ function initial<T>(data: T): LoadState<T> {
 }
 
 async function loadJson<T>(url: string) {
-  const response = await fetch(url, { cache: 'no-store' })
+  const response = await fetch(url)
   if (!response.ok) throw new Error(url)
   return (await response.json()) as T
 }
@@ -45,18 +45,19 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
   const [tracks, setTracks] = useState<LoadState<Track[]>>(initial([]))
 
   useEffect(() => {
-    loadJson<{ posts: Post[] }>('/api/home/posts')
-      .then((data) => setPosts({ loading: false, failed: false, data: data.posts }))
-      .catch(() => setPosts({ loading: false, failed: true, data: [] }))
-    loadJson<{ messages: DailyMessage[] }>('/api/home/daily-messages')
-      .then((data) => setMessages({ loading: false, failed: false, data: data.messages }))
-      .catch(() => setMessages({ loading: false, failed: true, data: [] }))
-    loadJson<{ activities: Activity[] }>('/api/home/activities')
-      .then((data) => setActivities({ loading: false, failed: false, data: data.activities }))
-      .catch(() => setActivities({ loading: false, failed: true, data: [] }))
-    loadJson<{ tracks: Track[] }>('/api/home/music')
-      .then((data) => setTracks({ loading: false, failed: false, data: data.tracks }))
-      .catch(() => setTracks({ loading: false, failed: true, data: [] }))
+    loadJson<{ posts: Post[]; messages: DailyMessage[]; activities: Activity[]; tracks: Track[] }>('/api/home')
+      .then((data) => {
+        setPosts({ loading: false, failed: false, data: data.posts })
+        setMessages({ loading: false, failed: false, data: data.messages })
+        setActivities({ loading: false, failed: false, data: data.activities })
+        setTracks({ loading: false, failed: false, data: data.tracks })
+      })
+      .catch(() => {
+        setPosts({ loading: false, failed: true, data: [] })
+        setMessages({ loading: false, failed: true, data: [] })
+        setActivities({ loading: false, failed: true, data: [] })
+        setTracks({ loading: false, failed: true, data: [] })
+      })
   }, [])
 
   return (

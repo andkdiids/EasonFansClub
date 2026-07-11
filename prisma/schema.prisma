@@ -408,8 +408,11 @@ model Post {
   adminActions AdminAction[]
 
   @@index([boardId, createdAt])
+  @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt])
   @@index([authorId, createdAt])
   @@index([status])
+  @@index([status, isDeleted, isPinned, isFeatured, createdAt])
+  @@index([status, isDeleted, isPinned, isFeatured, likeCount, replyCount])
   @@index([contentType])
   @@index([isPinned, createdAt])
   @@index([isFeatured, createdAt])
@@ -637,6 +640,8 @@ model DailyMessage {
 
   @@index([date, createdAt])
   @@index([date, likeCount])
+  @@index([date, isDeleted, isPinned, isFeatured, createdAt])
+  @@index([date, isDeleted, isPinned, isFeatured, likeCount, commentCount, createdAt])
   @@index([userId, createdAt])
   @@index([isPinned, isFeatured])
   @@index([isDeleted])
@@ -1133,6 +1138,7 @@ model Activity {
   lotteries     Lottery[]
 
   @@index([status, startsAt])
+  @@index([status, createdAt])
   @@index([type])
 }
 
@@ -1476,6 +1482,7 @@ model LyricCardTemplate {
   cards LyricCard[]
 
   @@index([isVisible, sortOrder])
+  @@index([isVisible, sortOrder, createdAt])
 }
 
 model LyricCard {
