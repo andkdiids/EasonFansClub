@@ -1,9 +1,6 @@
 import type { Prisma, UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 
-export const archivedUserUid = 0
-export const archivedUserName = '已注销用户'
-
 type Tx = Prisma.TransactionClient
 
 export type UserDeletionPreview = {
@@ -43,22 +40,20 @@ export type DeleteUserInput = {
 
 export type DeleteUserResult = {
   success: true
+  message: string
   targetUserId: string
   targetUid: string
-  deletedPrivateRecords: Record<string, number>
-  deletedPublicRecords: Record<string, number>
-  anonymizedPublicRecords: Record<string, number>
+  deletedRows: Record<string, number>
   storageFilesDeleted: number
-  authUserDeleted: boolean
-  message: string
+  authUserDeleted: false
 }
 
 function uidLabel(uid: number) {
   return String(uid).padStart(5, '0')
 }
 
-async function getDeletionPreviewWithClient(client: typeof prisma | Tx, userId: string): Promise<UserDeletionPreview | null> {
-  const user = await client.user.findUnique({
+export async function getUserDeletionPreview(userId: string): Promise<UserDeletionPreview | null> {
+  const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
@@ -73,7 +68,7 @@ async function getDeletionPreviewWithClient(client: typeof prisma | Tx, userId: 
     },
   })
 
-  if (!user || user.uid === archivedUserUid) return null
+  if (!user || user.uid <= 0) return null
 
   const [
     posts,
@@ -92,21 +87,21 @@ async function getDeletionPreviewWithClient(client: typeof prisma | Tx, userId: 
     replyLikes,
     dailyLikes,
   ] = await Promise.all([
-    client.post.count({ where: { authorId: userId } }),
-    client.reply.count({ where: { authorId: userId } }),
-    client.friendship.count({ where: { userAId: userId } }),
-    client.friendship.count({ where: { userBId: userId } }),
-    client.checkIn.count({ where: { userId } }),
-    client.userAchievement.count({ where: { userId } }),
-    client.dailyMessage.count({ where: { userId } }),
-    client.dailyMessageComment.count({ where: { authorId: userId } }),
-    client.directMessage.count({ where: { senderId: userId } }),
-    client.notification.count({ where: { recipientId: userId } }),
-    client.postFavorite.count({ where: { userId } }),
-    client.dailyMessageFavorite.count({ where: { userId } }),
-    client.like.count({ where: { userId } }),
-    client.replyLike.count({ where: { userId } }),
-    client.dailyMessageLike.count({ where: { userId } }),
+    prisma.post.count({ where: { authorId: userId } }),
+    prisma.reply.count({ where: { authorId: userId } }),
+    prisma.friendship.count({ where: { userAId: userId } }),
+    prisma.friendship.count({ where: { userBId: userId } }),
+    prisma.checkIn.count({ where: { userId } }),
+    prisma.userAchievement.count({ where: { userId } }),
+    prisma.dailyMessage.count({ where: { userId } }),
+    prisma.dailyMessageComment.count({ where: { authorId: userId } }),
+    prisma.directMessage.count({ where: { senderId: userId } }),
+    prisma.notification.count({ where: { recipientId: userId } }),
+    prisma.postFavorite.count({ where: { userId } }),
+    prisma.dailyMessageFavorite.count({ where: { userId } }),
+    prisma.like.count({ where: { userId } }),
+    prisma.replyLike.count({ where: { userId } }),
+    prisma.dailyMessageLike.count({ where: { userId } }),
   ])
 
   return {
@@ -134,52 +129,6 @@ async function getDeletionPreviewWithClient(client: typeof prisma | Tx, userId: 
       likes: likes + replyLikes + dailyLikes,
     },
     hasPublicContent: posts + replies + dailyMessages + publicDailyReplies > 0,
-  }
-}
-
-export async function getUserDeletionPreview(userId: string) {
-  return getDeletionPreviewWithClient(prisma, userId)
-}
-
-async function getOrCreateArchivedUser(tx: Tx) {
-  const existing = await tx.user.findUnique({
-    where: { uid: archivedUserUid },
-    select: { id: true },
-  })
-
-  if (existing) return existing
-
-  return tx.user.create({
-    data: {
-      uid: archivedUserUid,
-      username: 'deleted-user',
-      passwordHash: 'archived-user-no-login',
-      nickname: archivedUserName,
-      role: 'USER',
-      status: 'ACTIVE',
-      isDeleted: false,
-      profile: {
-        create: {
-          displayName: archivedUserName,
-          bio: '该账号已注销，公开内容已归档。',
-        },
-      },
-    },
-    select: { id: true },
-  })
-}
-
-async function recalculatePostReplyCounts(tx: Tx, postIds: string[]) {
-  for (const postId of [...new Set(postIds)]) {
-    const replyCount = await tx.reply.count({ where: { postId, isDeleted: false } })
-    await tx.post.update({ where: { id: postId }, data: { replyCount } }).catch(() => null)
-  }
-}
-
-async function recalculateDailyMessageCommentCounts(tx: Tx, messageIds: string[]) {
-  for (const messageId of [...new Set(messageIds)]) {
-    const commentCount = await tx.dailyMessageComment.count({ where: { messageId, isDeleted: false } })
-    await tx.dailyMessage.update({ where: { id: messageId }, data: { commentCount } }).catch(() => null)
   }
 }
 
@@ -219,146 +168,166 @@ async function deleteStorageFiles(paths: string[]) {
   }
 }
 
+async function deleteUserRows(tx: Tx, userId: string, deletePublicContent: boolean) {
+  const deletedRows: Record<string, number> = {}
+
+  deletedRows.friendships = (
+    await tx.friendship.deleteMany({
+      where: { OR: [{ userAId: userId }, { userBId: userId }] },
+    })
+  ).count
+  deletedRows.friendRequests = (
+    await tx.friendRequest.deleteMany({
+      where: { OR: [{ senderId: userId }, { receiverId: userId }] },
+    })
+  ).count
+  deletedRows.follows = (
+    await tx.follow.deleteMany({
+      where: { OR: [{ followerId: userId }, { followingId: userId }] },
+    })
+  ).count
+  deletedRows.blocks = (
+    await tx.block.deleteMany({
+      where: { OR: [{ blockerId: userId }, { blockedId: userId }] },
+    })
+  ).count
+
+  deletedRows.likes = (await tx.like.deleteMany({ where: { userId } })).count
+  deletedRows.replyLikes = (await tx.replyLike.deleteMany({ where: { userId } })).count
+  deletedRows.dailyMessageLikes = (await tx.dailyMessageLike.deleteMany({ where: { userId } })).count
+  deletedRows.favorites = (await tx.postFavorite.deleteMany({ where: { userId } })).count
+  deletedRows.boardFavorites = (await tx.boardFavorite.deleteMany({ where: { userId } })).count
+  deletedRows.dailyMessageFavorites = (await tx.dailyMessageFavorite.deleteMany({ where: { userId } })).count
+  deletedRows.activityFavorites = (await tx.activityFavorite.deleteMany({ where: { userId } })).count
+  deletedRows.musicFavorites = (await tx.musicFavorite.deleteMany({ where: { userId } })).count
+  deletedRows.cultureFavorites = (await tx.cultureFavorite.deleteMany({ where: { userId } })).count
+
+  deletedRows.checkIns = (await tx.checkIn.deleteMany({ where: { userId } })).count
+  deletedRows.dailyTaskProgress = (await tx.dailyTaskProgress.deleteMany({ where: { userId } })).count
+  deletedRows.userAchievements = (await tx.userAchievement.deleteMany({ where: { userId } })).count
+  deletedRows.userBadges = (await tx.userBadge.deleteMany({ where: { userId } })).count
+  deletedRows.pointLogs = (await tx.pointLog.deleteMany({ where: { userId } })).count
+  deletedRows.notifications = (
+    await tx.notification.deleteMany({
+      where: { OR: [{ recipientId: userId }, { actorId: userId }] },
+    })
+  ).count
+
+  deletedRows.directMessages = (await tx.directMessage.deleteMany({ where: { senderId: userId } })).count
+  deletedRows.conversationParticipants = (await tx.conversationParticipant.deleteMany({ where: { userId } })).count
+  deletedRows.emptyConversations = (await tx.conversation.deleteMany({ where: { participants: { none: {} } } })).count
+
+  deletedRows.reports = (
+    await tx.report.deleteMany({
+      where: { OR: [{ reporterId: userId }, { targetUserId: userId }] },
+    })
+  ).count
+  deletedRows.feedbackReplies = (await tx.feedbackReply.deleteMany({ where: { adminId: userId } })).count
+  deletedRows.feedback = (await tx.feedback.deleteMany({ where: { userId } })).count
+
+  deletedRows.musicPlayRecords = (await tx.musicPlayRecord.deleteMany({ where: { userId } })).count
+  deletedRows.loginDevices = (await tx.loginDevice.deleteMany({ where: { userId } })).count
+  deletedRows.onlineSessions = (await tx.onlineSession.deleteMany({ where: { userId } })).count
+  deletedRows.emailVerifications = (await tx.emailVerification.deleteMany({ where: { userId } })).count
+  deletedRows.passwordResetTokens = (await tx.passwordResetToken.deleteMany({ where: { userId } })).count
+  deletedRows.searchHistory = (await tx.searchHistory.deleteMany({ where: { userId } })).count
+  deletedRows.activityRegistrations = (await tx.activityRegistration.deleteMany({ where: { userId } })).count
+  deletedRows.lotteryEntries = (await tx.lotteryEntry.deleteMany({ where: { userId } })).count
+  deletedRows.pollVotes = (await tx.pollVote.deleteMany({ where: { userId } })).count
+  deletedRows.adminPermissions = (await tx.adminPermission.deleteMany({ where: { userId } })).count
+  deletedRows.userAlbumCollections = (await tx.userAlbumCollection.deleteMany({ where: { userId } })).count
+  deletedRows.lyricCards = (await tx.lyricCard.deleteMany({ where: { userId } })).count
+
+  await tx.reply.updateMany({ where: { parent: { is: { authorId: userId } } }, data: { parentId: null } })
+  await tx.dailyMessageComment.updateMany({ where: { parent: { is: { authorId: userId } } }, data: { parentId: null } })
+
+  deletedRows.replies = (await tx.reply.deleteMany({ where: { authorId: userId } })).count
+  deletedRows.dailyMessageComments = (await tx.dailyMessageComment.deleteMany({ where: { authorId: userId } })).count
+  deletedRows.cultureComments = (await tx.cultureComment.deleteMany({ where: { userId } })).count
+  deletedRows.dailyMessages = (await tx.dailyMessage.deleteMany({ where: { userId } })).count
+  deletedRows.posts = (await tx.post.deleteMany({ where: { authorId: userId } })).count
+
+  deletedRows.profile = (await tx.profile.deleteMany({ where: { userId } })).count
+  deletedRows.user = 1
+  await tx.user.delete({ where: { id: userId } })
+
+  return deletedRows
+}
+
 export async function deleteUserPermanently(input: DeleteUserInput): Promise<DeleteUserResult> {
-  const storagePaths: string[] = []
-  const result = await prisma.$transaction(async (tx) => {
-    const preview = await getDeletionPreviewWithClient(tx, input.userId)
-    if (!preview) throw new Error('USER_NOT_FOUND')
-    if (input.confirmUid !== uidLabel(preview.user.uid)) throw new Error('UID_CONFIRM_MISMATCH')
-
-    const admin = await tx.user.findUnique({
-      where: { id: input.adminId },
-      select: { id: true, role: true },
-    })
-    if (!admin) throw new Error('ADMIN_NOT_FOUND')
-
-    const isSelf = admin.id === input.userId
-    if (isSelf && !input.confirmSelf) throw new Error('SELF_DELETE_REQUIRES_CONFIRMATION')
-
-    if (preview.user.role === 'SUPER_ADMIN') {
-      const superAdminCount = await tx.user.count({
-        where: { role: 'SUPER_ADMIN', status: 'ACTIVE', isDeleted: false, uid: { not: archivedUserUid } },
-      })
-      if (superAdminCount <= 1) throw new Error('LAST_SUPER_ADMIN')
-    }
-
-    const target = await tx.user.findUnique({
-      where: { id: input.userId },
-      select: {
-        id: true,
-        uid: true,
-        avatarUrl: true,
-        backgroundUrl: true,
-        phone: true,
-        profile: { select: { avatarUrl: true, backgroundUrl: true } },
-      },
-    })
-    if (!target) throw new Error('USER_NOT_FOUND')
-
-    storagePaths.push(...collectStoragePaths([target.avatarUrl, target.backgroundUrl, target.profile?.avatarUrl, target.profile?.backgroundUrl]))
-
-    const archivedUser = await getOrCreateArchivedUser(tx)
-    const affectedReplies = await tx.reply.findMany({ where: { authorId: input.userId }, select: { postId: true } })
-    const affectedDailyComments = await tx.dailyMessageComment.findMany({
-      where: { authorId: input.userId },
-      select: { messageId: true },
-    })
-
-    const deletedPublicRecords: Record<string, number> = {}
-    const anonymizedPublicRecords: Record<string, number> = {}
-
-    if (input.deletePublicContent) {
-      deletedPublicRecords.posts = (await tx.post.deleteMany({ where: { authorId: input.userId } })).count
-      deletedPublicRecords.dailyMessages = (await tx.dailyMessage.deleteMany({ where: { userId: input.userId } })).count
-      anonymizedPublicRecords.replies = (
-        await tx.reply.updateMany({
-          where: { authorId: input.userId },
-          data: { authorId: archivedUser.id, isDeleted: true, deletedAt: new Date(), content: '该回复已随账号删除。' },
-        })
-      ).count
-      anonymizedPublicRecords.dailyMessageComments = (
-        await tx.dailyMessageComment.updateMany({
-          where: { authorId: input.userId },
-          data: { authorId: archivedUser.id, isDeleted: true, deletedAt: new Date(), content: '该评论已随账号删除。' },
-        })
-      ).count
-      anonymizedPublicRecords.cultureComments = (
-        await tx.cultureComment.updateMany({
-          where: { userId: input.userId },
-          data: { userId: archivedUser.id, isDeleted: true, content: '该评论已随账号删除。' },
-        })
-      ).count
-    } else {
-      anonymizedPublicRecords.posts = (await tx.post.updateMany({ where: { authorId: input.userId }, data: { authorId: archivedUser.id } })).count
-      anonymizedPublicRecords.replies = (await tx.reply.updateMany({ where: { authorId: input.userId }, data: { authorId: archivedUser.id } })).count
-      anonymizedPublicRecords.dailyMessages = (await tx.dailyMessage.updateMany({ where: { userId: input.userId }, data: { userId: archivedUser.id, checkInId: null } })).count
-      anonymizedPublicRecords.dailyMessageComments = (
-        await tx.dailyMessageComment.updateMany({ where: { authorId: input.userId }, data: { authorId: archivedUser.id } })
-      ).count
-      anonymizedPublicRecords.cultureComments = (await tx.cultureComment.updateMany({ where: { userId: input.userId }, data: { userId: archivedUser.id } })).count
-    }
-
-    await recalculatePostReplyCounts(tx, affectedReplies.map((item) => item.postId))
-    await recalculateDailyMessageCommentCounts(tx, affectedDailyComments.map((item) => item.messageId))
-
-    const conversationIds = await tx.conversationParticipant.findMany({
-      where: { userId: input.userId },
-      select: { conversationId: true },
-    })
-
-    const deletedPrivateRecords: Record<string, number> = {
-      onlineSessions: (await tx.onlineSession.deleteMany({ where: { userId: input.userId } })).count,
-      pollVotes: (await tx.pollVote.deleteMany({ where: { userId: input.userId } })).count,
-      smsCodes: target.phone ? (await tx.smsCode.deleteMany({ where: { phone: target.phone } })).count : 0,
-    }
-
-    await tx.user.delete({ where: { id: input.userId } })
-    deletedPrivateRecords.user = 1
-
-    if (conversationIds.length > 0) {
-      deletedPrivateRecords.emptyConversations = (
-        await tx.conversation.deleteMany({
-          where: {
-            id: { in: conversationIds.map((item) => item.conversationId) },
-            participants: { none: {} },
-          },
-        })
-      ).count
-    }
-
-    if (!isSelf) {
-      await tx.adminAction.create({
-        data: {
-          adminId: input.adminId,
-          targetUserId: null,
-          action: 'DELETE_USER',
-          reason: '永久删除用户',
-          metadata: {
-            targetUserId: input.userId,
-            targetUid: uidLabel(preview.user.uid),
-            targetNickname: preview.user.nickname,
-            deletePublicContent: input.deletePublicContent,
-            deletedPrivateRecords,
-            deletedPublicRecords,
-            anonymizedPublicRecords,
-          },
+  const transactionResult = await prisma.$transaction(
+    async (tx) => {
+      const target = await tx.user.findUnique({
+        where: { id: input.userId },
+        select: {
+          id: true,
+          uid: true,
+          nickname: true,
+          role: true,
+          phone: true,
+          avatarUrl: true,
+          backgroundUrl: true,
+          profile: { select: { avatarUrl: true, backgroundUrl: true } },
         },
       })
-    }
+      if (!target || target.uid <= 0) throw new Error('USER_NOT_FOUND')
+      if (input.confirmUid !== uidLabel(target.uid)) throw new Error('UID_CONFIRM_MISMATCH')
 
-    return {
-      success: true as const,
-      targetUserId: input.userId,
-      targetUid: uidLabel(preview.user.uid),
-      deletedPrivateRecords,
-      deletedPublicRecords,
-      anonymizedPublicRecords,
-      storageFilesDeleted: 0,
-      authUserDeleted: false,
-      message: '用户已永久删除。',
-    }
-  })
+      const admin = await tx.user.findUnique({
+        where: { id: input.adminId },
+        select: { id: true },
+      })
+      if (!admin) throw new Error('ADMIN_NOT_FOUND')
 
-  const storageFilesDeleted = await deleteStorageFiles([...new Set(storagePaths)])
-  return { ...result, storageFilesDeleted }
+      const isSelf = admin.id === input.userId
+      if (isSelf && !input.confirmSelf) throw new Error('SELF_DELETE_REQUIRES_CONFIRMATION')
+
+      if (target.role === 'SUPER_ADMIN') {
+        const superAdminCount = await tx.user.count({
+          where: { role: 'SUPER_ADMIN', status: 'ACTIVE', isDeleted: false, uid: { gt: 0 } },
+        })
+        if (superAdminCount <= 1) throw new Error('LAST_SUPER_ADMIN')
+      }
+
+      const storagePaths = collectStoragePaths([target.avatarUrl, target.backgroundUrl, target.profile?.avatarUrl, target.profile?.backgroundUrl])
+      const deletedRows = await deleteUserRows(tx, input.userId, input.deletePublicContent)
+
+      if (!isSelf) {
+        await tx.adminAction.create({
+          data: {
+            adminId: input.adminId,
+            targetUserId: null,
+            action: 'DELETE_USER',
+            reason: 'Permanent user deletion',
+            metadata: {
+              targetUserId: input.userId,
+              targetUid: uidLabel(target.uid),
+              targetNickname: target.nickname,
+              deletePublicContent: input.deletePublicContent,
+              deletedRows,
+            },
+          },
+        })
+      }
+
+      return {
+        targetUid: uidLabel(target.uid),
+        storagePaths,
+        deletedRows,
+      }
+    },
+    { maxWait: 5000, timeout: 15000 },
+  )
+
+  const storageFilesDeleted = await deleteStorageFiles([...new Set(transactionResult.storagePaths)])
+
+  return {
+    success: true,
+    message: 'User permanently deleted.',
+    targetUserId: input.userId,
+    targetUid: transactionResult.targetUid,
+    deletedRows: transactionResult.deletedRows,
+    storageFilesDeleted,
+    authUserDeleted: false,
+  }
 }
