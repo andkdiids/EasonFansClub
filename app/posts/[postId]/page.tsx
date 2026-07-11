@@ -13,11 +13,28 @@ import { formatUid } from '@/lib/uid'
 
 export const dynamic = 'force-dynamic'
 
-export default async function PostDetailPage({ params }: Readonly<{ params: Promise<{ postId: string }> }>) {
-  const { postId } = await params
-  const user = await getCurrentUser()
+function PostLoadFallback() {
+  return (
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-4xl px-5 py-8">
+        <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
+          <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post</p>
+          <h1 className="mt-3 text-3xl font-black text-brand-950">帖子暂时无法加载，请稍后重试</h1>
+          <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
+            数据库连接可能正在恢复中。请稍后刷新页面，或返回 E院广场继续浏览。
+          </p>
+          <Link href="/" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+            返回首页
+          </Link>
+        </section>
+      </main>
+    </>
+  )
+}
 
-  const post = await prisma.post.findUnique({
+function loadPost(postId: string, userId?: string) {
+  return prisma.post.findUnique({
     where: { id: postId },
     include: {
       author: { select: { uid: true, nickname: true, level: true, avatarUrl: true, profile: true, status: true, isDeleted: true } },
@@ -27,13 +44,31 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
         orderBy: { createdAt: 'asc' },
         include: { author: { select: { id: true, uid: true, nickname: true, level: true, avatarUrl: true, profile: true } } },
       },
-      likes: user ? { where: { userId: user.id }, select: { id: true } } : false,
-      favorites: user ? { where: { userId: user.id }, select: { id: true } } : false,
+      likes: userId ? { where: { userId }, select: { id: true } } : false,
+      favorites: userId ? { where: { userId }, select: { id: true } } : false,
     },
-  }).catch(() => null)
+  })
+}
 
-  if (!post || post.isDeleted || post.status !== 'PUBLISHED' || post.author.isDeleted || post.author.status !== 'ACTIVE' || !post.author.profile) {
+export default async function PostDetailPage({ params }: Readonly<{ params: Promise<{ postId: string }> }>) {
+  const { postId } = await params
+  const user = await getCurrentUser()
+
+  let post: Awaited<ReturnType<typeof loadPost>>
+  try {
+    post = await loadPost(postId, user?.id)
+  } catch (error) {
+    console.error('[post:detail:load-error]', { postId, userId: user?.id, error })
+    return <PostLoadFallback />
+  }
+
+  if (post === null) {
     notFound()
+  }
+
+  if (post.isDeleted || post.status !== 'PUBLISHED' || post.author.isDeleted || post.author.status !== 'ACTIVE' || !post.author.profile) {
+    console.warn('[post:detail:unavailable]', { postId, postStatus: post.status, authorStatus: post.author.status })
+    return <PostLoadFallback />
   }
 
   const liked = Array.isArray(post.likes) && post.likes.length > 0
@@ -50,16 +85,25 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
             {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
-            <Link href={`/boards/${post.board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
+            <Link href={`/boards/${post.board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
+              {post.board.name}
+            </Link>
           </div>
           <h1 className="text-4xl font-black leading-tight text-brand-950">{post.title}</h1>
           <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold text-slate-500">
-            <Link href={`/user/${formatUid(post.author.uid)}`} className="flex items-center gap-2 text-brand-950">
-              <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : authorName.slice(0, 1)}
+            {isArchivedAuthor ? (
+              <span className="flex items-center gap-2 text-brand-950">
+                <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">{authorName.slice(0, 1)}</span>
+                <span>{authorName}</span>
               </span>
-              <span>{authorName} · Lv.{post.author.level}</span>
-            </Link>
+            ) : (
+              <Link href={`/user/${formatUid(post.author.uid)}`} className="flex items-center gap-2 text-brand-950">
+                <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
+                  {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : authorName.slice(0, 1)}
+                </span>
+                <span>{authorName} · Lv.{post.author.level}</span>
+              </Link>
+            )}
             <span>{formatDate(post.createdAt)}</span>
             <span>浏览 {post.viewCount}</span>
             <span>回复 {post.replyCount}</span>
@@ -71,12 +115,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
             {user && isAdminRole(user.role) ? (
-              <AdminPostActions
-                postId={post.id}
-                isPinned={post.isPinned}
-                isFeatured={post.isFeatured}
-                redirectTo={`/boards/${post.board.slug}`}
-              />
+              <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.board.slug}`} />
             ) : null}
           </div>
         </article>
@@ -115,9 +154,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
         {user ? (
           <ReplyForm postId={post.id} />
         ) : (
-          <div className="rounded-xl border border-sky-100 bg-white/82 p-5 text-center font-bold text-slate-600">
-            请先登录后再回复。
-          </div>
+          <div className="rounded-xl border border-sky-100 bg-white/82 p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
         )}
       </main>
     </>

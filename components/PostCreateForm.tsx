@@ -42,7 +42,15 @@ export function PostCreateForm({ boards }: Readonly<{ boards: Board[] }>) {
       setErrors({ form: data.message, ...data.errors })
       return
     }
-    router.push(`/posts/${data.post.id}`)
+    const postId = typeof data?.post?.id === 'string' ? data.post.id : ''
+    const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : postId ? `/posts/${postId}` : ''
+    if (!postId || !detailUrl) {
+      console.error('[post:create:invalid-response]', data)
+      setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
+      return
+    }
+    console.info('[post:create:navigate]', { postId, detailUrl })
+    router.push(detailUrl)
     router.refresh()
   }
 

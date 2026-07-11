@@ -19,30 +19,35 @@ export async function GET(request: Request) {
   const boardSlug = searchParams.get('board')
   const take = Math.min(Number(searchParams.get('take') || 20), 50)
 
-  const posts = await prisma.post.findMany({
-    where: {
-      isDeleted: false,
-      status: 'PUBLISHED',
-      author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-      ...(boardSlug ? { board: { slug: boardSlug } } : {}),
-    },
-    orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
-    take,
-    include: {
-      author: {
-        select: {
-          uid: true,
-          nickname: true,
-          avatarUrl: true,
-          level: true,
-          profile: { select: { avatarUrl: true, displayName: true } },
-        },
+  try {
+    const posts = await prisma.post.findMany({
+      where: {
+        isDeleted: false,
+        status: 'PUBLISHED',
+        author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+        ...(boardSlug ? { board: { slug: boardSlug } } : {}),
       },
-      board: { select: { name: true, slug: true } },
-    },
-  })
+      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
+      take,
+      include: {
+        author: {
+          select: {
+            uid: true,
+            nickname: true,
+            avatarUrl: true,
+            level: true,
+            profile: { select: { avatarUrl: true, displayName: true } },
+          },
+        },
+        board: { select: { name: true, slug: true } },
+      },
+    })
 
-  return NextResponse.json({ posts })
+    return NextResponse.json({ posts })
+  } catch (error) {
+    console.error('[posts:list:error]', { boardSlug, error })
+    return NextResponse.json({ message: '帖子列表暂时无法加载，请稍后重试', posts: [] }, { status: 503 })
+  }
 }
 
 export async function POST(request: Request) {
@@ -67,65 +72,73 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '请检查帖子内容', errors }, { status: 400 })
   }
 
-  const board = await prisma.board.findFirst({
-    where: { id: input.boardId, isActive: true },
-    select: { id: true },
-  })
-  if (!board) {
-    return NextResponse.json({ message: '板块不存在或已停用', errors: { boardId: '板块无效' } }, { status: 404 })
-  }
-
-  const result = await prisma.$transaction(async (tx) => {
-    const currentUser = await tx.user.findFirstOrThrow({
-      where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-      select: { points: true, exp: true },
-    })
-    const nextPoints = currentUser.points + POINTS.postCreate
-    const nextExp = currentUser.exp + POINTS.postCreate
-
-    const post = await tx.post.create({
-      data: {
-        boardId: input.boardId,
-        authorId: user.id,
-        title: input.title,
-        content: input.content,
-        status: 'PUBLISHED',
-      },
+  try {
+    const board = await prisma.board.findFirst({
+      where: { id: input.boardId, isActive: true },
       select: { id: true },
     })
+    if (!board) {
+      return NextResponse.json({ message: '板块不存在或已停用', errors: { boardId: '板块无效' } }, { status: 404 })
+    }
 
-    await tx.board.update({
-      where: { id: input.boardId },
-      data: { postCount: { increment: 1 } },
+    const result = await prisma.$transaction(async (tx) => {
+      const currentUser = await tx.user.findFirstOrThrow({
+        where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+        select: { points: true, exp: true },
+      })
+      const nextPoints = currentUser.points + POINTS.postCreate
+      const nextExp = currentUser.exp + POINTS.postCreate
+
+      const post = await tx.post.create({
+        data: {
+          boardId: input.boardId,
+          authorId: user.id,
+          title: input.title,
+          content: input.content,
+          status: 'PUBLISHED',
+        },
+        select: { id: true },
+      })
+
+      await tx.board.update({
+        where: { id: input.boardId },
+        data: { postCount: { increment: 1 } },
+      })
+
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          points: nextPoints,
+          exp: nextExp,
+          level: calcLevel(nextPoints + nextExp),
+        },
+      })
+
+      await tx.pointLog.create({
+        data: {
+          userId: user.id,
+          action: 'POST_CREATE',
+          points: POINTS.postCreate,
+          before: currentUser.points,
+          after: nextPoints,
+          postId: post.id,
+          reason: '发布帖子',
+        },
+      })
+
+      return post
     })
 
-    await tx.user.update({
-      where: { id: user.id },
-      data: {
-        points: nextPoints,
-        exp: nextExp,
-        level: calcLevel(nextPoints + nextExp),
-      },
+    const detailUrl = `/posts/${result.id}`
+    console.info('[post:create:success]', { postId: result.id, detailUrl, userId: user.id, boardId: input.boardId })
+
+    await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
+      console.error('[achievements:post]', achievementError)
     })
 
-    await tx.pointLog.create({
-      data: {
-        userId: user.id,
-        action: 'POST_CREATE',
-        points: POINTS.postCreate,
-        before: currentUser.points,
-        after: nextPoints,
-        postId: post.id,
-        reason: '发布帖子',
-      },
-    })
-
-    return post
-  })
-
-  await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
-    console.error('[achievements:post]', achievementError)
-  })
-
-  return NextResponse.json({ post: result }, { status: 201 })
+    return NextResponse.json({ post: { ...result, detailUrl }, detailUrl }, { status: 201 })
+  } catch (error) {
+    console.error('[post:create:error]', { userId: user.id, boardId: input.boardId, error })
+    return NextResponse.json({ message: '发布帖子暂时失败，请稍后重试' }, { status: 503 })
+  }
 }
