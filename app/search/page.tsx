@@ -31,6 +31,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         }),
         prisma.user.findMany({
           where: {
+            uid: { gt: 0 },
             isDeleted: false,
             OR: [
               { nickname: { contains: q, mode: 'insensitive' } },

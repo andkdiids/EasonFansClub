@@ -1,5 +1,28 @@
-import { AdminSectionPage } from '@/components/AdminSectionPage'
+import Link from 'next/link'
+import { requireAdminPage } from '@/components/AdminAccess'
+import { AdminUsersManager } from '@/components/AdminUsersManager'
+import { SiteHeader } from '@/components/SiteHeader'
+import { adminModulePermissions } from '@/lib/admin-permissions'
 
-export default function AdminUsersPage() {
-  return <AdminSectionPage path="/admin/users" title="用户管理" description="管理用户状态、管理员权限、封禁、删除、重复账号和资料同步。" />
+export default async function AdminUsersPage() {
+  await requireAdminPage('/admin/users', adminModulePermissions['/admin/users'])
+
+  return (
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
+        <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm sm:p-8">
+          <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Admin Center</p>
+          <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">用户管理</h1>
+          <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">
+            管理用户状态、管理员权限、封禁和永久删除。永久删除前必须核对影响范围并输入 UID。
+          </p>
+          <Link href="/admin" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-950 px-5 text-sm font-black text-white">
+            返回后台首页
+          </Link>
+        </section>
+        <AdminUsersManager />
+      </main>
+    </>
+  )
 }

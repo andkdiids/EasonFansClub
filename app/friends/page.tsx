@@ -20,7 +20,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const q = (params.q || '').trim()
   const numericUid = Number(q)
 
-  const activeUserFilter = { status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } }
+  const activeUserFilter = { uid: { gt: 0 }, status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } }
   const friendships = await safeDb(
     'friends.friendships',
     prisma.friendship.findMany({

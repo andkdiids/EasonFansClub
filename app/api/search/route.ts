@@ -29,6 +29,7 @@ export async function GET(request: Request) {
   const [users, posts, boards, tags] = await Promise.all([
     prisma.user.findMany({
       where: {
+        uid: { gt: 0 },
         isDeleted: false,
         OR: [
           { nickname: { contains: keyword, mode: 'insensitive' } },

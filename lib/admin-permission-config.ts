@@ -1,4 +1,5 @@
 export const adminPermissionGroups = [
+  { key: 'user_delete', label: '永久删除用户', description: '永久删除用户账号、私有数据，并处理公开内容归属。' },
   { key: 'user_manage', label: '用户管理', description: '查看、编辑、封禁、删除用户。' },
   { key: 'post_manage', label: '帖子管理', description: '删除、置顶、精华、推荐和锁定帖子。' },
   { key: 'reply_manage', label: '回复管理', description: '删除、恢复和屏蔽回复。' },

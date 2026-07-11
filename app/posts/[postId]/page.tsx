@@ -40,6 +40,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
   const favorited = Array.isArray(post.favorites) && post.favorites.length > 0
   const authorAvatar = publicImageUrl(post.author.profile.avatarUrl || post.author.avatarUrl)
   const authorName = post.author.profile.displayName || post.author.nickname
+  const isArchivedAuthor = post.author.uid === 0
 
   return (
     <>

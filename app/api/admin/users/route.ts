@@ -24,6 +24,7 @@ export async function GET(request: Request) {
 
   const users = await prisma.user.findMany({
     where: {
+      uid: { gt: 0 },
       profile: { isNot: null },
       ...(keyword
         ? {

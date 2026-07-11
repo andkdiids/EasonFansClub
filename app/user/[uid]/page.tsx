@@ -18,6 +18,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   const { uid } = await params
   const numericUid = parseUidParam(uid)
   if (numericUid === null) notFound()
+  if (numericUid <= 0) notFound()
 
   const viewer = await getCurrentUser()
   const user = await prisma.user.findFirst({

@@ -48,6 +48,7 @@ export function PostList({ posts, canManage = false }: Readonly<{ posts: PostIte
       {visiblePosts.map((post) => {
         const authorName = post.author.profile?.displayName || post.author.nickname
         const authorAvatar = publicImageUrl(post.author.profile?.avatarUrl || post.author.avatarUrl)
+        const isArchivedAuthor = post.author.uid === 0
         return (
           <article key={post.id} data-post-id={post.id} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -62,13 +63,20 @@ export function PostList({ posts, canManage = false }: Readonly<{ posts: PostIte
             </Link>
             <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
             <footer className="mt-4 flex flex-wrap items-center gap-4 text-xs font-bold text-slate-500">
-              {post.author.uid !== undefined ? (
+              {post.author.uid !== undefined && !isArchivedAuthor ? (
                 <Link href={`/user/${formatUid(post.author.uid)}`} className="flex items-center gap-2 text-brand-950">
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                     {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : authorName.slice(0, 1)}
                   </span>
                   <span>{authorName} · UID {formatUid(post.author.uid)} · Lv.{post.author.level}</span>
                 </Link>
+              ) : post.author.uid !== undefined ? (
+                <span className="flex items-center gap-2 text-brand-950">
+                  <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">
+                    {authorName.slice(0, 1)}
+                  </span>
+                  <span>{authorName}</span>
+                </span>
               ) : null}
               <span>{formatDate(post.createdAt)}</span>
               <span>浏览 {post.viewCount}</span>

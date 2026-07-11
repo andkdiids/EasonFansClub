@@ -1,9 +1,50 @@
 import { NextResponse } from 'next/server'
 import type { UserRole, UserStatus } from '@prisma/client'
+import { deleteUserPermanently, getUserDeletionPreview } from '@/lib/admin-user-deletion'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
+
+async function requireUserDeletionPermission() {
+  const guard = await requireAdmin()
+  if (!guard.user) return guard
+
+  const canDelete = (await hasAdminPermission(guard.user, 'user_delete')) || (await hasAdminPermission(guard.user, 'user_manage'))
+  if (!canDelete) {
+    return {
+      user: null,
+      response: NextResponse.json({ message: '当前管理员未获得永久删除用户权限' }, { status: 403 }),
+    }
+  }
+
+  return guard
+}
+
+function deletionErrorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  const messages: Record<string, string> = {
+    USER_NOT_FOUND: '用户不存在',
+    UID_CONFIRM_MISMATCH: 'UID 确认不匹配',
+    ADMIN_NOT_FOUND: '管理员身份无效',
+    SELF_DELETE_REQUIRES_CONFIRMATION: '删除自己的账号需要额外确认',
+    LAST_SUPER_ADMIN: '不能删除最后一个超级管理员',
+  }
+
+  return NextResponse.json({ message: messages[message] || '删除失败，请稍后重试' }, { status: message === 'USER_NOT_FOUND' ? 404 : 400 })
+}
+
+export async function GET(_request: Request, context: RouteContext) {
+  const guard = await requireUserDeletionPermission()
+  if (!guard.user) return guard.response
+
+  const { userId } = await context.params
+  const preview = await getUserDeletionPreview(userId)
+  if (!preview) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+
+  return NextResponse.json({ preview })
+}
 
 export async function PATCH(request: Request, context: RouteContext) {
   const guard = await requireAdmin('user_manage')
@@ -12,6 +53,24 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { userId } = await context.params
   const body = await request.json().catch(() => null)
   const action = sanitizeText(body?.action, 40)
+
+  if (action === 'delete') {
+    const deleteGuard = await requireUserDeletionPermission()
+    if (!deleteGuard.user) return deleteGuard.response
+
+    try {
+      const result = await deleteUserPermanently({
+        adminId: deleteGuard.user.id,
+        userId,
+        confirmUid: sanitizeText(body?.confirmUid, 16),
+        deletePublicContent: Boolean(body?.deletePublicContent),
+        confirmSelf: Boolean(body?.confirmSelf),
+      })
+      return NextResponse.json(result)
+    } catch (error) {
+      return deletionErrorResponse(error)
+    }
+  }
 
   const data: {
     role?: UserRole
@@ -29,11 +88,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (body?.exp !== undefined) data.exp = Number(body.exp)
   if (body?.points !== undefined) data.points = Number(body.points)
 
-  if (action === 'delete') {
-    data.status = 'DELETED'
-    data.isDeleted = true
-    data.deletedAt = new Date()
-  } else if (action === 'ban') {
+  if (action === 'ban') {
     data.status = 'BANNED'
   } else if (action === 'unban') {
     data.status = 'ACTIVE'
@@ -45,6 +100,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     data.status = 'DISABLED'
   } else if (action === 'resetNicknameCooldown') {
     data.nicknameChangedAt = null
+  } else if (body?.status === 'DELETED') {
+    return NextResponse.json({ message: '删除用户请使用永久删除确认流程' }, { status: 400 })
   } else if (body?.status) {
     data.status = body.status
   }
@@ -99,4 +156,25 @@ export async function PATCH(request: Request, context: RouteContext) {
   })
 
   return NextResponse.json({ user })
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  const guard = await requireUserDeletionPermission()
+  if (!guard.user) return guard.response
+
+  const { userId } = await context.params
+  const body = await request.json().catch(() => null)
+
+  try {
+    const result = await deleteUserPermanently({
+      adminId: guard.user.id,
+      userId,
+      confirmUid: sanitizeText(body?.confirmUid, 16),
+      deletePublicContent: Boolean(body?.deletePublicContent),
+      confirmSelf: Boolean(body?.confirmSelf),
+    })
+    return NextResponse.json(result)
+  } catch (error) {
+    return deletionErrorResponse(error)
+  }
 }
