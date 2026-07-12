@@ -16,29 +16,41 @@ export default async function ProfilePage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const profile = await withDbTimeout(
-    'profile.user',
-    prisma.user.findFirst({
-      where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
-      select: {
-        uid: true,
-        nickname: true,
-        avatarUrl: true,
-        backgroundUrl: true,
-        bio: true,
-        email: true,
-        phone: true,
-        level: true,
-        exp: true,
-        points: true,
-        consecutiveDays: true,
-        createdAt: true,
-        profile: true,
-        _count: { select: { checkIns: true } },
-      },
-    }),
-    3000,
-  )
+  let profile
+  try {
+    profile = await withDbTimeout(
+      'User.findFirst profile.user',
+      prisma.user.findFirst({
+        where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
+        select: {
+          uid: true,
+          nickname: true,
+          avatarUrl: true,
+          backgroundUrl: true,
+          bio: true,
+          email: true,
+          phone: true,
+          level: true,
+          exp: true,
+          points: true,
+          consecutiveDays: true,
+          createdAt: true,
+          profile: true,
+          _count: { select: { checkIns: true } },
+        },
+      }),
+      3000,
+    )
+  } catch (error) {
+    console.error('[profile] prisma query failed', {
+      model: 'User',
+      query: 'findFirst',
+      feature: 'profile.user',
+      where: ['id=sessionUser.id', 'isDeleted=false', 'status=ACTIVE', 'profile is not null'],
+      includeCounts: ['checkIns'],
+    }, error)
+    throw error
+  }
 
   if (!profile || !profile.profile) redirect('/login')
 

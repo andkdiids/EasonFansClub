@@ -13,7 +13,7 @@ function excerpt(value: string | null | undefined, length = 180) {
 
 export async function getHomePosts() {
   const rows = await safeDb(
-    'home.posts',
+    'Post.findMany home.posts',
     prisma.post.findMany({
       where: {
         isDeleted: false,
@@ -57,7 +57,7 @@ export async function getHomePosts() {
 export async function getHomeDailyMessages() {
   const today = startOfLocalDay()
   const rows = await safeDb(
-    'home.dailyMessages',
+    'DailyMessage.findMany home.dailyMessages',
     prisma.dailyMessage.findMany({
       where: {
         date: today,
@@ -89,7 +89,7 @@ export async function getHomeDailyMessages() {
 
 export async function getHomeActivities() {
   return safeDb(
-    'home.activities',
+    'Activity.findMany home.activities',
     prisma.activity.findMany({
       where: { status: 'PUBLISHED' },
       orderBy: { createdAt: 'desc' },
@@ -103,7 +103,7 @@ export async function getHomeActivities() {
 
 export async function getHomeTracks() {
   return safeDb(
-    'home.music',
+    'MusicTrack.findMany home.music',
     prisma.musicTrack.findMany({
       where: { isVisible: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],

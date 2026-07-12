@@ -25,36 +25,49 @@ export default async function PublicUserPage({ params }: PageProps) {
   const viewer = await getSessionUserFromCookie()
   console.log('[public-user:ssr] viewer', viewer ? 'session' : 'anonymous')
   console.log('[public-user:ssr] user-query:start')
-  const user = await withDbTimeout('publicUser.profile', prisma.user.findFirst({
-    where: {
-      uid: numericUid,
-      status: 'ACTIVE',
-      isDeleted: false,
-      profile: { isNot: null },
-    },
-    select: {
-      id: true,
-      uid: true,
-      nickname: true,
-      avatarUrl: true,
-      backgroundUrl: true,
-      bio: true,
-      email: true,
-      phone: true,
-      level: true,
-      createdAt: true,
-      profile: true,
-      _count: {
-        select: {
-          posts: true,
-          replies: true,
-          checkIns: true,
-          friendshipsA: true,
-          friendshipsB: true,
+  let user
+  try {
+    user = await withDbTimeout('User.findFirst publicUser.profile', prisma.user.findFirst({
+      where: {
+        uid: numericUid,
+        status: 'ACTIVE',
+        isDeleted: false,
+        profile: { isNot: null },
+      },
+      select: {
+        id: true,
+        uid: true,
+        nickname: true,
+        avatarUrl: true,
+        backgroundUrl: true,
+        bio: true,
+        email: true,
+        phone: true,
+        level: true,
+        createdAt: true,
+        profile: true,
+        _count: {
+          select: {
+            posts: true,
+            replies: true,
+            checkIns: true,
+            friendshipsA: true,
+            friendshipsB: true,
+          },
         },
       },
-    },
-  }), 3500)
+    }), 3500)
+  } catch (error) {
+    console.error('[public-user:ssr] prisma query failed', {
+      model: 'User',
+      query: 'findFirst',
+      feature: 'publicUser.profile',
+      uid: numericUid,
+      where: ['uid=params.uid', 'status=ACTIVE', 'isDeleted=false', 'profile is not null'],
+      includeCounts: ['posts', 'replies', 'checkIns', 'friendshipsA', 'friendshipsB'],
+    }, error)
+    throw error
+  }
   console.log('[public-user:ssr] user-query:done')
 
   if (!user || !user.profile) notFound()
@@ -67,11 +80,11 @@ export default async function PublicUserPage({ params }: PageProps) {
     try {
       console.log('[public-user:ssr] relationship-query:start')
       const [userAId, userBId] = normalizeFriendPair(viewer.id, user.id)
-      friendship = await withDbTimeout('publicUser.friendship', prisma.friendship.findUnique({
+      friendship = await withDbTimeout('Friendship.findUnique publicUser.friendship', prisma.friendship.findUnique({
         where: { userAId_userBId: { userAId, userBId } },
         select: { id: true },
       }), 2500)
-      pendingRequest = await withDbTimeout('publicUser.pendingRequest', prisma.friendRequest.findFirst({
+      pendingRequest = await withDbTimeout('FriendRequest.findFirst publicUser.pendingRequest', prisma.friendRequest.findFirst({
         where: {
           status: 'PENDING',
           OR: [
@@ -83,7 +96,12 @@ export default async function PublicUserPage({ params }: PageProps) {
       }), 2500)
       console.log('[public-user:ssr] relationship-query:done')
     } catch (error) {
-      console.error('[public-user:ssr] relationship-query:failed', error)
+      console.error('[public-user:ssr] relationship-query:failed', {
+        queries: [
+          { model: 'Friendship', query: 'findUnique', feature: 'publicUser.friendship' },
+          { model: 'FriendRequest', query: 'findFirst', feature: 'publicUser.pendingRequest' },
+        ],
+      }, error)
       friendship = null
       pendingRequest = null
     }

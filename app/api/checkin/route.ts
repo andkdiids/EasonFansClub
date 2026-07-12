@@ -16,7 +16,7 @@ export async function GET() {
   const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
 
   const profile = await safeDb(
-    'checkinApi.profile',
+    'User.findUnique checkinApi.profile',
     prisma.user.findUnique({
       where: { id: user.id },
       select: {
@@ -33,9 +33,9 @@ export async function GET() {
     }),
     null,
   )
-  const todayCount = await safeDb('checkinApi.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
+  const todayCount = await safeDb('CheckIn.count checkinApi.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
   const moodStats = await safeDb(
-    'checkinApi.moodStats',
+    'CheckIn.groupBy checkinApi.moodStats',
     prisma.checkIn.groupBy({
       by: ['mood'],
       where: { checkDate: today, mood: { not: null } },
@@ -77,15 +77,37 @@ export async function POST(request: Request) {
   const today = startOfLocalDay()
   const yesterday = startOfYesterday()
 
-  const existing = await prisma.checkIn.findUnique({
-    where: { userId_checkDate: { userId: user.id, checkDate: today } },
-  })
+  let existing
+  try {
+    existing = await prisma.checkIn.findUnique({
+      where: { userId_checkDate: { userId: user.id, checkDate: today } },
+    })
+  } catch (error) {
+    console.error('[api/checkin] prisma query failed', {
+      model: 'CheckIn',
+      query: 'findUnique',
+      feature: 'checkinApi.existing',
+      where: ['userId=currentUser.id', 'checkDate=today'],
+    }, error)
+    throw error
+  }
 
   if (existing) {
-    const profile = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { points: true, exp: true, consecutiveDays: true },
-    })
+    let profile
+    try {
+      profile = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { points: true, exp: true, consecutiveDays: true },
+      })
+    } catch (error) {
+      console.error('[api/checkin] prisma query failed', {
+        model: 'User',
+        query: 'findUnique',
+        feature: 'checkinApi.existingProfile',
+        where: ['id=currentUser.id'],
+      }, error)
+      throw error
+    }
     return NextResponse.json({
       message: '今天已经挂号过了',
       checkedToday: true,
@@ -97,7 +119,9 @@ export async function POST(request: Request) {
     })
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  let result
+  try {
+    result = await prisma.$transaction(async (tx) => {
     const currentUser = await tx.user.findUniqueOrThrow({
       where: { id: user.id },
       select: { points: true, exp: true, consecutiveDays: true, lastCheckInDate: true },
@@ -185,7 +209,22 @@ export async function POST(request: Request) {
     }
 
     return { user: updatedUser, gainedPoints, gainedExp, bonus, dailyMessageId }
-  })
+    })
+  } catch (error) {
+    console.error('[api/checkin] prisma transaction failed', {
+      feature: 'checkinApi.createCheckIn',
+      queries: [
+        { model: 'User', query: 'findUniqueOrThrow' },
+        { model: 'CheckIn', query: 'create' },
+        { model: 'DailyMessage', query: 'create', conditional: 'when message exists' },
+        { model: 'User', query: 'update' },
+        { model: 'PointLog', query: 'create' },
+        { model: 'DailyTaskTemplate', query: 'findUnique' },
+        { model: 'DailyTaskProgress', query: 'upsert', conditional: 'when template exists' },
+      ],
+    }, error)
+    throw error
+  }
 
   await syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']).catch((achievementError) => {
     console.error('[achievements:checkin]', achievementError)

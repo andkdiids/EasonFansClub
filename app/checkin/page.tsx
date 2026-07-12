@@ -47,21 +47,32 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const today = startOfLocalDay()
   const sort = params.sort === 'hot' ? 'hot' : 'latest'
 
-  const user = await withDbTimeout(
-    'checkin.user',
-    prisma.user.findUnique({
-      where: { id: sessionUser.id },
-      select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
-    }),
-  )
+  let user
+  try {
+    user = await withDbTimeout(
+      'User.findUnique checkin.user',
+      prisma.user.findUnique({
+        where: { id: sessionUser.id },
+        select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
+      }),
+    )
+  } catch (error) {
+    console.error('[checkin] prisma query failed', {
+      model: 'User',
+      query: 'findUnique',
+      feature: 'checkin.user',
+      where: ['id=sessionUser.id'],
+    }, error)
+    throw error
+  }
   const activeUsers = await safeDb(
-    'checkin.activeUsers',
+    'User.count checkin.activeUsers',
     prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
     0,
   )
-  const todayCount = await safeDb('checkin.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
+  const todayCount = await safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
   const selectedMessages = await safeDb(
-    'checkin.messages',
+    'DailyMessage.findMany checkin.messages',
     prisma.dailyMessage.findMany({
       where: {
         date: { gte: selectedDate, lt: nextDate },
@@ -87,7 +98,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     [],
   )
   const moodStats = await safeDb(
-    'checkin.moodStats',
+    'CheckIn.groupBy checkin.moodStats',
     prisma.checkIn.groupBy({
       by: ['mood'],
       where: { checkDate: today, mood: { not: null } },
@@ -95,7 +106,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     }),
     [],
   )
-  const totalCheckIns = await safeDb('checkin.totalCheckIns', prisma.checkIn.count({ where: { userId: sessionUser.id } }), 0)
+  const totalCheckIns = await safeDb('CheckIn.count checkin.totalCheckIns', prisma.checkIn.count({ where: { userId: sessionUser.id } }), 0)
 
   if (!user) redirect('/login')
 
