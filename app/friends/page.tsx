@@ -12,6 +12,9 @@ import { formatUid } from '@/lib/uid'
 
 export const dynamic = 'force-dynamic'
 
+const FRIEND_LIST_LIMIT = 50
+const FRIEND_REQUEST_LIMIT = 50
+
 export default async function FriendsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
@@ -30,6 +33,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
         userB: { include: { profile: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: FRIEND_LIST_LIMIT,
     }),
     [],
   )
@@ -39,6 +43,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
       where: { receiverId: user.id, status: 'PENDING', sender: activeUserFilter },
       include: { sender: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
+      take: FRIEND_REQUEST_LIMIT,
     }),
     [],
   )
@@ -48,7 +53,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
       where: { senderId: user.id, receiver: activeUserFilter },
       include: { receiver: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: FRIEND_REQUEST_LIMIT,
     }),
     [],
   )

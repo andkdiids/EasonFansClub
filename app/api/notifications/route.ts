@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 
+const NOTIFICATION_ID_BATCH_LIMIT = 100
+
 export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
@@ -33,7 +35,9 @@ export async function PATCH(request: Request) {
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)
-  const ids = Array.isArray(body?.ids) ? body.ids.filter(Boolean) : []
+  const ids = Array.isArray(body?.ids)
+    ? body.ids.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0).slice(0, NOTIFICATION_ID_BATCH_LIMIT)
+    : []
 
   await prisma.notification.updateMany({
     where: {

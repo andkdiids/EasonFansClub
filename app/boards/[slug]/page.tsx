@@ -9,6 +9,8 @@ import { isAdminRole } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
+const BOARD_POST_PAGE_SIZE = 50
+
 export default async function BoardPage({ params }: Readonly<{ params: Promise<{ slug: string }> }>) {
   const { slug } = await params
   const user = await getCurrentUser()
@@ -30,7 +32,18 @@ export default async function BoardPage({ params }: Readonly<{ params: Promise<{
       author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
     },
     orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
-    include: {
+    take: BOARD_POST_PAGE_SIZE,
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      likeCount: true,
+      favoriteCount: true,
+      replyCount: true,
+      viewCount: true,
+      isPinned: true,
+      isFeatured: true,
+      createdAt: true,
       author: { select: { uid: true, nickname: true, avatarUrl: true, level: true, profile: true } },
       board: { select: { name: true, slug: true } },
       favorites: user ? { where: { userId: user.id }, select: { id: true } } : false,

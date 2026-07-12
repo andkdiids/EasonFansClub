@@ -4,16 +4,21 @@ import { filterSensitiveWords, requireUser, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
+const COMMENT_PAGE_SIZE = 50
+const CHILD_COMMENT_PREVIEW_SIZE = 10
+
 export async function GET(_request: Request, context: RouteContext) {
   const { messageId } = await context.params
   const comments = await prisma.dailyMessageComment.findMany({
     where: { messageId, isDeleted: false, parentId: null },
     orderBy: { createdAt: 'desc' },
+    take: COMMENT_PAGE_SIZE,
     include: {
       author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, profile: true } },
       children: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'asc' },
+        take: CHILD_COMMENT_PREVIEW_SIZE,
         include: { author: { select: { id: true, uid: true, nickname: true, level: true, profile: true } } },
       },
     },

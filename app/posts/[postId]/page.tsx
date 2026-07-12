@@ -13,6 +13,8 @@ import { formatUid } from '@/lib/uid'
 
 export const dynamic = 'force-dynamic'
 
+const POST_DETAIL_REPLY_LIMIT = 50
+
 function PostLoadFallback() {
   return (
     <>
@@ -42,6 +44,7 @@ function loadPost(postId: string, userId?: string) {
       replies: {
         where: { isDeleted: false, author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
         orderBy: { createdAt: 'asc' },
+        take: POST_DETAIL_REPLY_LIMIT,
         include: { author: { select: { id: true, uid: true, nickname: true, level: true, avatarUrl: true, profile: true } } },
       },
       likes: userId ? { where: { userId }, select: { id: true } } : false,
@@ -121,7 +124,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
         </article>
 
         <section className="space-y-3">
-          <h2 className="text-2xl font-black text-brand-950">回复 {post.replies.length}</h2>
+          <h2 className="text-2xl font-black text-brand-950">回复 {post.replyCount}</h2>
           {post.replies.length === 0 ? (
             <div className="rounded-xl border border-dashed border-sky-200 bg-white/65 p-8 text-center text-slate-500">还没有回复。</div>
           ) : (

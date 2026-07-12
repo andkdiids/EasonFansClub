@@ -4,6 +4,10 @@ import { type AdminPermissionKey, hasAdminPermission, isAdminUser } from '@/lib/
 import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+const SENSITIVE_WORD_CACHE_TTL_MS = 60_000
+
+let sensitiveWordCache: { expiresAt: number; words: string[] } | null = null
+
 export type GuardResult =
   | { user: SessionUser; response: null }
   | { user: null; response: NextResponse }
@@ -59,23 +63,36 @@ export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<
 }
 
 export function sanitizeText(value: unknown, maxLength = 5000) {
-  return String(value ?? '')
+  const bounded = String(value ?? '').slice(0, Math.max(maxLength * 2, maxLength))
+
+  return bounded
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
     .replace(/javascript:/gi, '')
     .trim()
     .slice(0, maxLength)
 }
 
+async function getSensitiveWords() {
+  const now = Date.now()
+  if (sensitiveWordCache && sensitiveWordCache.expiresAt > now) {
+    return sensitiveWordCache.words
+  }
+
+  const rows = await prisma.sensitiveWord.findMany({
+    where: { isActive: true },
+    select: { word: true },
+  })
+  const words = rows.map((item) => item.word).filter(Boolean)
+  sensitiveWordCache = { words, expiresAt: now + SENSITIVE_WORD_CACHE_TTL_MS }
+  return words
+}
+
 export async function filterSensitiveWords(content: string) {
   try {
-    const words = await prisma.sensitiveWord.findMany({
-      where: { isActive: true },
-      select: { word: true },
-    })
+    const words = await getSensitiveWords()
 
-    return words.reduce((text, item) => {
-      if (!item.word) return text
-      return text.replaceAll(item.word, '*'.repeat(Math.min(item.word.length, 6)))
+    return words.reduce((text, word) => {
+      return text.replaceAll(word, '*'.repeat(Math.min(word.length, 6)))
     }, content)
   } catch {
     return content

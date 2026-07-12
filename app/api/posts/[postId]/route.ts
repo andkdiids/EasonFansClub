@@ -4,6 +4,8 @@ import { requireAdmin } from '@/lib/security'
 
 type Params = { params: Promise<{ postId: string }> }
 
+const POST_DETAIL_REPLY_LIMIT = 50
+
 export async function GET(_request: Request, { params }: Params) {
   const { postId } = await params
   const post = await prisma.post.findFirst({
@@ -14,6 +16,7 @@ export async function GET(_request: Request, { params }: Params) {
       replies: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'asc' },
+        take: POST_DETAIL_REPLY_LIMIT,
         include: { author: { select: { nickname: true, level: true, avatarUrl: true } } },
       },
     },
