@@ -50,7 +50,7 @@ export default async function ProfilePage() {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
         <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
           <div

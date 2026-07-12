@@ -3,6 +3,9 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
+const DEFAULT_PAGE_SIZE = 100
+const MAX_PAGE_SIZE = 100
+
 export async function GET(request: Request) {
   const guard = await requireAdmin('user_manage')
   if (!guard.user) return guard.response
@@ -11,6 +14,9 @@ export async function GET(request: Request) {
   const keyword = sanitizeText(searchParams.get('q'), 60)
   const uidKeyword = Number(keyword)
   const sort = searchParams.get('sort') === 'uid_desc' ? 'desc' : 'asc'
+  const page = Math.max(Number(searchParams.get('page') || 1), 1)
+  const limit = Math.min(Math.max(Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE)
+  const skip = (page - 1) * limit
   const searchFilters: Prisma.UserWhereInput[] = keyword
     ? [
         ...(Number.isFinite(uidKeyword) ? [{ uid: uidKeyword }] : []),
@@ -33,7 +39,8 @@ export async function GET(request: Request) {
         : {}),
     },
     orderBy: { uid: sort },
-    take: 100,
+    skip,
+    take: limit + 1,
     select: {
       id: true,
       uid: true,
@@ -46,8 +53,6 @@ export async function GET(request: Request) {
         select: {
           displayName: true,
           avatarUrl: true,
-          backgroundUrl: true,
-          bio: true,
         },
       },
       role: true,
@@ -60,12 +65,17 @@ export async function GET(request: Request) {
       createdAt: true,
     },
   })
+  const hasMore = users.length > limit
+  const pageUsers = hasMore ? users.slice(0, limit) : users
 
   return NextResponse.json({
-    users: users.map((user) => ({
+    users: pageUsers.map((user) => ({
       ...user,
       nickname: user.profile?.displayName || user.nickname,
       avatarUrl: user.profile?.avatarUrl || user.avatarUrl,
     })),
+    page,
+    limit,
+    hasMore,
   })
 }

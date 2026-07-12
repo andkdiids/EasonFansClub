@@ -7,7 +7,7 @@ import { AdminManager } from './AdminManager'
 export const dynamic = 'force-dynamic'
 
 export default async function AdminAdminsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  await requireAdminPage('/admin/admins', adminModulePermissions['/admin/admins'])
+  const currentUser = await requireAdminPage('/admin/admins', adminModulePermissions['/admin/admins'])
   const params = await searchParams
   const q = (params.q || '').trim()
   const numericUid = Number(q)
@@ -57,7 +57,7 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={currentUser} />
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-5 sm:py-8">
         <AdminManager
           query={q}

@@ -19,7 +19,7 @@ export default async function NotificationsPage() {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-4xl px-5 py-8">
         <section className="rounded-2xl border border-sky-100 bg-white/80 p-7 shadow-sm">
           <p className="text-sm font-black uppercase text-brand-700">Notification Center</p>

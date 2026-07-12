@@ -18,6 +18,8 @@ export default async function BoardPage({ params }: Readonly<{ params: Promise<{
     prisma.board.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      take: 100,
+      select: { id: true, name: true, slug: true, description: true, postCount: true },
     }),
     prisma.board.findFirst({ where: { slug, isActive: true } }),
   ])
@@ -52,7 +54,7 @@ export default async function BoardPage({ params }: Readonly<{ params: Promise<{
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto grid max-w-6xl gap-6 px-5 py-8 lg:grid-cols-[280px_minmax(0,1fr)]">
         <BoardNav boards={boards} activeSlug={slug} />
         <section>

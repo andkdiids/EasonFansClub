@@ -106,7 +106,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={sessionUser} />
       <main className="mx-auto max-w-6xl space-y-6 px-5 py-6">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-7 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.22em] text-brand-700">Daily Clinic</p>

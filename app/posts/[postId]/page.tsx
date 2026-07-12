@@ -39,13 +39,34 @@ function loadPost(postId: string, userId?: string) {
   return prisma.post.findUnique({
     where: { id: postId },
     include: {
-      author: { select: { uid: true, nickname: true, level: true, avatarUrl: true, profile: true, status: true, isDeleted: true } },
+      author: {
+        select: {
+          uid: true,
+          nickname: true,
+          level: true,
+          avatarUrl: true,
+          status: true,
+          isDeleted: true,
+          profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
       board: { select: { name: true, slug: true } },
       replies: {
         where: { isDeleted: false, author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
         orderBy: { createdAt: 'asc' },
         take: POST_DETAIL_REPLY_LIMIT,
-        include: { author: { select: { id: true, uid: true, nickname: true, level: true, avatarUrl: true, profile: true } } },
+        include: {
+          author: {
+            select: {
+              id: true,
+              uid: true,
+              nickname: true,
+              level: true,
+              avatarUrl: true,
+              profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
       },
       likes: userId ? { where: { userId }, select: { id: true } } : false,
       favorites: userId ? { where: { userId }, select: { id: true } } : false,
@@ -82,7 +103,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-4xl space-y-6 px-5 py-8">
         <article className="rounded-2xl border border-sky-100 bg-white/85 p-7 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center gap-2">

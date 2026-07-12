@@ -90,7 +90,7 @@ export default async function PublicUserPage({ params }: PageProps) {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={viewer} />
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5">
         <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
           <div

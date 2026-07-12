@@ -82,6 +82,7 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
   const achievements = await prisma.achievement.findMany({
     where: { isVisible: true, ...(categories?.length ? { category: { in: categories } } : {}) },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    take: 200,
   })
 
   const existingRecords = await prisma.userAchievement.findMany({
@@ -123,9 +124,14 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
     })
   }
 
+  if (categories?.length) {
+    return []
+  }
+
   return prisma.userAchievement.findMany({
     where: { userId, achievement: { isVisible: true } },
     include: { achievement: true },
     orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
+    take: 200,
   })
 }

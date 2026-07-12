@@ -13,12 +13,13 @@ export default async function NewPostPage() {
   const boards = await prisma.board.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    take: 100,
     select: { id: true, name: true },
   })
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-3xl px-5 py-8">
         <div className="mb-6">
           <p className="text-sm font-black uppercase text-brand-700">CREATE POST</p>

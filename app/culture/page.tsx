@@ -42,7 +42,7 @@ export default async function CulturePage() {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-12 px-4 py-8 sm:px-5">
         <section className="overflow-hidden rounded-[36px] border border-sky-100 bg-white/82 shadow-xl shadow-sky-900/5">
           <div className="grid gap-8 p-8 sm:p-10 lg:grid-cols-[1fr_0.8fr]">

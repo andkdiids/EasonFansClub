@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 export const dynamic = 'force-dynamic'
 
 export default async function AdminAchievementsPage() {
-  await requireAdminPage('/admin/achievements', 'achievement_manage')
+  const user = await requireAdminPage('/admin/achievements', 'achievement_manage')
 
   const [achievements, userAchievements] = await Promise.all([
     prisma.achievement.findMany({
@@ -18,7 +18,7 @@ export default async function AdminAchievementsPage() {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Achievement Admin</p>

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 
 const NOTIFICATION_ID_BATCH_LIMIT = 100
+const NOTIFICATION_PAGE_SIZE = 50
 
 export async function GET(request: Request) {
   const guard = await requireUser()
@@ -10,6 +11,9 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const unreadOnly = searchParams.get('unread') === '1'
+  const page = Math.max(Number(searchParams.get('page') || 1), 1)
+  const limit = Math.min(Math.max(Number(searchParams.get('limit') || NOTIFICATION_PAGE_SIZE), 1), NOTIFICATION_PAGE_SIZE)
+  const skip = (page - 1) * limit
 
   const notifications = await prisma.notification.findMany({
     where: {
@@ -17,17 +21,33 @@ export async function GET(request: Request) {
       ...(unreadOnly ? { isRead: false } : {}),
     },
     orderBy: { createdAt: 'desc' },
-    take: 50,
-    include: {
+    skip,
+    take: limit + 1,
+    select: {
+      id: true,
+      type: true,
+      title: true,
+      content: true,
+      link: true,
+      isRead: true,
+      createdAt: true,
+      readAt: true,
       actor: { select: { id: true, nickname: true, avatarUrl: true } },
     },
   })
+  const hasMore = notifications.length > limit
 
   const unreadCount = await prisma.notification.count({
     where: { recipientId: guard.user.id, isRead: false },
   })
 
-  return NextResponse.json({ notifications, unreadCount })
+  return NextResponse.json({
+    notifications: hasMore ? notifications.slice(0, limit) : notifications,
+    unreadCount,
+    page,
+    limit,
+    hasMore,
+  })
 }
 
 export async function PATCH(request: Request) {

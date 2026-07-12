@@ -6,13 +6,13 @@ import { AppearanceForm } from './AppearanceForm'
 export const dynamic = 'force-dynamic'
 
 export default async function AdminAppearancePage() {
-  await requireAdminPage('/admin/appearance')
+  const user = await requireAdminPage('/admin/appearance')
 
   const config = await getSiteAppearance()
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} config={config} />
       <main className="mx-auto max-w-6xl px-5 py-8">
         <AppearanceForm initialConfig={config} />
       </main>

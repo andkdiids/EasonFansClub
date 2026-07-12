@@ -19,6 +19,7 @@ export async function GET() {
     prisma.dailyTaskTemplate.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      take: 20,
     }),
     user
       ? prisma.dailyTaskProgress.findMany({

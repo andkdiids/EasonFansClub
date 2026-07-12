@@ -8,11 +8,11 @@ export async function AdminSectionPage({
   title,
   description,
 }: Readonly<{ path: keyof typeof adminModulePermissions; title: string; description: string }>) {
-  await requireAdminPage(path, adminModulePermissions[path])
+  const user = await requireAdminPage(path, adminModulePermissions[path])
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm sm:p-8">
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Admin Center</p>

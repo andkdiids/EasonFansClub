@@ -2,16 +2,45 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
-export async function GET() {
+const DEFAULT_PAGE_SIZE = 100
+const MAX_PAGE_SIZE = 100
+
+export async function GET(request: Request) {
   const guard = await requireAdmin('board_manage')
   if (!guard.user) return guard.response
 
+  const { searchParams } = new URL(request.url)
+  const page = Math.max(Number(searchParams.get('page') || 1), 1)
+  const limit = Math.min(Math.max(Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE)
+  const skip = (page - 1) * limit
+
   const boards = await prisma.board.findMany({
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-    include: { category: true, parent: true },
+    skip,
+    take: limit + 1,
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      description: true,
+      coverUrl: true,
+      sortOrder: true,
+      postCount: true,
+      followerCount: true,
+      isActive: true,
+      isHot: true,
+      isRecommended: true,
+      createdAt: true,
+      updatedAt: true,
+      categoryId: true,
+      parentId: true,
+      category: { select: { id: true, name: true, slug: true } },
+      parent: { select: { id: true, name: true, slug: true } },
+    },
   })
+  const hasMore = boards.length > limit
 
-  return NextResponse.json({ boards })
+  return NextResponse.json({ boards: hasMore ? boards.slice(0, limit) : boards, page, limit, hasMore })
 }
 
 export async function POST(request: Request) {

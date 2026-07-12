@@ -36,7 +36,7 @@ export default async function AdminDetailPage({ params }: PageProps) {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={currentUser} />
       <main className="mx-auto max-w-5xl space-y-6 px-5 py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
           <Link href="/admin/admins" className="text-sm font-black text-brand-700">返回管理员管理</Link>

@@ -12,26 +12,29 @@ const typeText: Record<string, string> = {
 }
 
 export default async function AdminCulturePage() {
-  await requireAdminPage('/admin/culture', 'culture_manage')
+  const user = await requireAdminPage('/admin/culture', 'culture_manage')
 
   const [items, quotes, templates] = await Promise.all([
     prisma.cultureItem.findMany({
       orderBy: [{ type: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
       take: 80,
+      select: { id: true, title: true, subtitle: true, summary: true, type: true, isVisible: true },
     }),
     prisma.dailyQuote.findMany({
       orderBy: [{ isPinned: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
       take: 20,
+      select: { id: true, content: true, songTitle: true, isPinned: true },
     }),
     prisma.lyricCardTemplate.findMany({
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
       take: 20,
+      select: { id: true, name: true, textColor: true, accentColor: true, isVisible: true },
     }),
   ])
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Culture Admin</p>

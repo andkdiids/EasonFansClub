@@ -21,7 +21,9 @@ function createSummary(content: string, length = 180) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const boardSlug = searchParams.get('board')
+  const page = Math.max(Number(searchParams.get('page') || 1), 1)
   const take = Math.min(Number(searchParams.get('take') || 20), 50)
+  const skip = (page - 1) * take
 
   try {
     const rows = await prisma.post.findMany({
@@ -32,7 +34,8 @@ export async function GET(request: Request) {
         ...(boardSlug ? { board: { slug: boardSlug } } : {}),
       },
       orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
-      take,
+      skip,
+      take: take + 1,
       select: {
         id: true,
         title: true,
@@ -57,18 +60,20 @@ export async function GET(request: Request) {
         board: { select: { name: true, slug: true } },
       },
     })
-    const posts = rows.map(({ summary, content, ...post }) => ({
+    const hasMore = rows.length > take
+    const pageRows = hasMore ? rows.slice(0, take) : rows
+    const posts = pageRows.map(({ summary, content, ...post }) => ({
       ...post,
       content: summary || createSummary(content),
     }))
 
     return NextResponse.json(
-      { posts },
+      { posts, page, hasMore },
       { headers: { 'Cache-Control': 'public, max-age=15, s-maxage=45, stale-while-revalidate=120' } },
     )
   } catch (error) {
-    console.error('[posts:list:error]', { boardSlug, error })
-    return NextResponse.json({ message: '帖子列表暂时无法加载，请稍后重试', posts: [] }, { status: 503 })
+    console.error('[posts:list:error]', { boardSlug, page, error })
+    return NextResponse.json({ message: '帖子列表暂时无法加载，请稍后重试', posts: [], page, hasMore: false }, { status: 503 })
   }
 }
 

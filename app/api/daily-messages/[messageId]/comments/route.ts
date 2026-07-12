@@ -14,12 +14,12 @@ export async function GET(_request: Request, context: RouteContext) {
     orderBy: { createdAt: 'desc' },
     take: COMMENT_PAGE_SIZE,
     include: {
-      author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, profile: true } },
+      author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, profile: { select: { displayName: true, avatarUrl: true } } } },
       children: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'asc' },
         take: CHILD_COMMENT_PREVIEW_SIZE,
-        include: { author: { select: { id: true, uid: true, nickname: true, level: true, profile: true } } },
+        include: { author: { select: { id: true, uid: true, nickname: true, level: true, profile: { select: { displayName: true, avatarUrl: true } } } } },
       },
     },
   })
@@ -54,7 +54,7 @@ export async function POST(request: Request, context: RouteContext) {
         content,
         parentId: parentId || null,
       },
-      include: { author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, profile: true } } },
+      include: { author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, profile: { select: { displayName: true, avatarUrl: true } } } } },
     })
 
     await tx.dailyMessage.update({

@@ -17,6 +17,7 @@ export default async function AchievementsPage() {
       where: { userId: user.id, achievement: { isVisible: true } },
       include: { achievement: true },
       orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
     }),
     [],
   )
@@ -29,7 +30,7 @@ export default async function AchievementsPage() {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-5">
         <section className="rounded-[34px] border border-sky-100 bg-white/82 p-8 shadow-xl shadow-sky-900/5 sm:p-10">
           <p className="text-sm font-black uppercase tracking-[0.22em] text-sky-700">Achievement System</p>

@@ -41,7 +41,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user} />
       <main className="mx-auto max-w-5xl space-y-8 px-4 py-8 sm:px-5">
         <section className="overflow-hidden rounded-[36px] border border-sky-100 bg-white/82 shadow-xl shadow-sky-900/5">
           <div className="aspect-[16/8] bg-gradient-to-br from-sky-100 via-white to-cyan-50">
