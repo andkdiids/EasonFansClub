@@ -1,7 +1,7 @@
-import bcrypt from 'bcryptjs'
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { authCookieName, createSessionToken, getSessionCookieOptions } from '@/lib/auth'
+import { hashPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { findActiveConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: '账号信息已存在', errors: duplicateErrors }, { status: 409 })
     }
 
-    const passwordHash = await bcrypt.hash(password, 12)
+    const passwordHash = await hashPassword(password)
     const user = await prisma.$transaction(async (tx) => {
       const latest = await tx.user.findFirst({
         orderBy: { uid: 'desc' },

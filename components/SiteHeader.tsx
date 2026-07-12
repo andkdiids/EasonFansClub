@@ -13,12 +13,10 @@ type SiteHeaderProps = {
 }
 
 export async function SiteHeader({ user: providedUser, config: providedConfig }: SiteHeaderProps = {}) {
-  console.log('[site-header:ssr] start')
   const user = providedUser !== undefined ? providedUser : await getCurrentUser()
   const config = providedConfig ?? (await getSiteAppearance())
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
-  console.log('[site-header:ssr] profile query', user ? 'required' : 'skipped')
   const profile = user
     ? await safeDb(
         'header.profile',
@@ -29,7 +27,6 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
         null,
       )
     : null
-  console.log('[site-header:ssr] profile loaded')
 
   const displayName = profile?.displayName || user?.nickname || ''
   const avatar = publicImageUrl(profile?.avatarUrl)

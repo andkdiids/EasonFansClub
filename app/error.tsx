@@ -1,8 +1,14 @@
 'use client'
 
-import Link from 'next/link'
+function reloadPage() {
+  window.location.reload()
+}
 
-export default function RootError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+function goHome() {
+  window.location.href = '/'
+}
+
+export default function RootError() {
   return (
     <main className="grid min-h-screen place-items-center bg-gradient-to-br from-sky-50 via-white to-cyan-50 px-5">
       <section className="w-full max-w-lg rounded-[32px] border border-sky-100 bg-white/85 p-8 text-center shadow-xl shadow-sky-900/10">
@@ -12,12 +18,12 @@ export default function RootError({ reset }: { error: Error & { digest?: string 
           可能是某个数据模块暂时超时。你可以重试，或先回到首页。
         </p>
         <div className="mt-6 flex justify-center gap-3">
-          <button onClick={reset} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">
+          <button onClick={reloadPage} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">
             重试
           </button>
-          <Link href="/" className="rounded-full bg-sky-50 px-5 py-3 text-sm font-black text-brand-700">
-            回到首页
-          </Link>
+          <button onClick={goHome} className="rounded-full bg-sky-50 px-5 py-3 text-sm font-black text-brand-700">
+            返回首页
+          </button>
         </div>
       </section>
     </main>

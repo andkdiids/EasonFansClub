@@ -1,5 +1,5 @@
-import bcrypt from 'bcryptjs'
 import { NextResponse } from 'next/server'
+import { hashPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   await prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: reset.userId },
-      data: { passwordHash: await bcrypt.hash(password, 12) },
+      data: { passwordHash: await hashPassword(password) },
     })
 
     await tx.passwordResetToken.update({

@@ -1,7 +1,8 @@
-import bcrypt from 'bcryptjs'
 import { NextResponse } from 'next/server'
 import { authCookieName, createSessionToken, getSessionCookieOptions } from '@/lib/auth'
 import { DbTimeoutError, withDbTimeout } from '@/lib/db-timeout'
+import { hashPassword, LegacyPasswordVerificationUnavailableError, verifyPassword } from '@/lib/password'
+import { prisma } from '@/lib/prisma'
 import { findCompleteActiveUserByIdentifier } from '@/lib/users'
 import { normalizeText } from '@/lib/validators'
 
@@ -22,6 +23,16 @@ function databaseUnavailableResponse() {
     {
       message: 'Login service is temporarily unavailable. Please try again later.',
       errors: { form: 'Login service is temporarily unavailable. Please try again later.' },
+    },
+    { status: 503, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+  )
+}
+
+function legacyPasswordUnavailableResponse() {
+  return NextResponse.json(
+    {
+      message: '当前 Workers 免费版无法完成旧密码校验，请先在 Vercel/Node 环境登录一次完成密码迁移。',
+      errors: { form: '当前 Workers 免费版无法完成旧密码校验，请先在 Vercel/Node 环境登录一次完成密码迁移。' },
     },
     { status: 503, headers: { 'Cache-Control': 'no-store, max-age=0' } },
   )
@@ -56,10 +67,10 @@ export async function POST(request: Request) {
       )
     }
 
-    console.log('login:bcrypt:start')
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash)
-    console.log('login:bcrypt:done')
-    if (!isValidPassword) {
+    console.log('login:password-verify:start')
+    const passwordResult = await verifyPassword(password, user.passwordHash)
+    console.log('login:password-verify:done')
+    if (!passwordResult.valid) {
       return NextResponse.json(
         { message: '账号或密码不正确', errors: { password: '账号或密码不正确' } },
         { status: 401 },
@@ -73,6 +84,19 @@ export async function POST(request: Request) {
       nickname: user.nickname,
       role: user.role,
     }
+    if (passwordResult.needsRehash) {
+      console.log('login:password-migration:start')
+      await withDbTimeout(
+        'login.password-migration',
+        prisma.user.update({
+          where: { id: user.id },
+          data: { passwordHash: await hashPassword(password) },
+        }),
+        3000,
+      )
+      console.log('login:password-migration:done')
+    }
+
     const token = await createSessionToken(sessionUser)
     console.log('login:token:done')
     const response = NextResponse.json(
@@ -84,6 +108,11 @@ export async function POST(request: Request) {
 
     return response
   } catch (error) {
+    if (error instanceof LegacyPasswordVerificationUnavailableError) {
+      console.error('login:legacy-bcrypt:unavailable')
+      return legacyPasswordUnavailableResponse()
+    }
+
     if (isDatabaseTimeout(error)) {
       console.error('login:user-query:timeout', error)
       return databaseUnavailableResponse()

@@ -1,5 +1,5 @@
-import bcrypt from 'bcryptjs'
 import { NextResponse } from 'next/server'
+import { hashPassword, LegacyPasswordVerificationUnavailableError, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 import { normalizeText } from '@/lib/validators'
@@ -21,13 +21,30 @@ export async function POST(request: Request) {
     select: { passwordHash: true },
   })
 
-  if (!user || !(await bcrypt.compare(oldPassword, user.passwordHash))) {
+  if (!user) {
+    return NextResponse.json({ message: '旧密码不正确' }, { status: 400 })
+  }
+
+  let passwordResult
+  try {
+    passwordResult = await verifyPassword(oldPassword, user.passwordHash)
+  } catch (error) {
+    if (error instanceof LegacyPasswordVerificationUnavailableError) {
+      return NextResponse.json(
+        { message: '当前 Workers 免费版无法完成旧密码校验，请先在 Vercel/Node 环境登录一次完成密码迁移。' },
+        { status: 503 },
+      )
+    }
+    throw error
+  }
+
+  if (!passwordResult.valid) {
     return NextResponse.json({ message: '旧密码不正确' }, { status: 400 })
   }
 
   await prisma.user.update({
     where: { id: guard.user.id },
-    data: { passwordHash: await bcrypt.hash(newPassword, 12) },
+    data: { passwordHash: await hashPassword(newPassword) },
   })
 
   return NextResponse.json({ message: '密码已修改' })

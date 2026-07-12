@@ -1,43 +1,63 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeModules } from '@/components/HomeModules'
-import { SiteHeader } from '@/components/SiteHeader'
-import { getCurrentUser } from '@/lib/auth'
-import { getSiteAppearance } from '@/lib/site-config'
+import type { SiteHeroSlide } from '@/lib/site-config'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 300
 
-export default async function HomePage() {
-  console.log('[home:ssr] start')
-  const user = await getCurrentUser()
-  console.log('[home:ssr] auth', user ? 'authenticated' : 'anonymous')
-  if (!user) redirect('/login')
+const heroSlides: SiteHeroSlide[] = [
+  {
+    title: '听见 Eason，也听见自己。',
+    subtitle: '今日挂号，记录此刻。',
+    buttonText: '开始挂号',
+    href: '/checkin',
+    imageUrl: '',
+    isVisible: true,
+    sortOrder: 1,
+  },
+  {
+    title: '在私家E院，和 E 友一起待会儿。',
+    subtitle: '帖子、留言、音乐，慢慢说。',
+    buttonText: '进入广场',
+    href: '/boards/announcements',
+    imageUrl: '',
+    isVisible: true,
+    sortOrder: 2,
+  },
+]
 
-  const config = await getSiteAppearance()
-  console.log('[home:ssr] appearance loaded')
-  console.log('[home:ssr] rendering shell')
-  console.log('[home:ssr] home modules included')
-
+export default function HomePage() {
   return (
     <>
-      <SiteHeader user={user} config={config} />
-      <main
-        className="space-y-20 px-5 py-8"
-        style={{
-          background: `linear-gradient(180deg, ${config.colors.background}, #ffffff 42%, #eff9ff)`,
-          color: config.colors.text,
-        }}
-      >
+      <header className="sticky top-0 z-30 border-b border-sky-100/80 bg-white/88 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
+          <Link href="/" className="text-lg font-black text-brand-950 sm:text-xl">
+            私家E院
+          </Link>
+          <nav className="flex items-center gap-2 text-sm font-black">
+            <Link href="/checkin" className="rounded-full px-3 py-2 text-brand-700 hover:bg-sky-50">
+              挂号
+            </Link>
+            <Link href="/boards/announcements" className="rounded-full px-3 py-2 text-brand-700 hover:bg-sky-50">
+              广场
+            </Link>
+            <Link href="/profile" className="rounded-full bg-brand-950 px-4 py-2 text-white">
+              进入
+            </Link>
+          </nav>
+        </div>
+      </header>
+
+      <main className="space-y-20 bg-gradient-to-b from-[#eef8ff] via-white to-[#eff9ff] px-5 py-8 text-[#102033]">
         <div className="mx-auto max-w-7xl">
-          <HomeHero slides={config.heroSlides} />
+          <HomeHero slides={heroSlides} />
         </div>
 
         <section className="mx-auto grid max-w-6xl gap-6 md:grid-cols-3">
           {[
-            ['今日挂号', config.text.checkinCopy, '/checkin'],
-            ['E院广场', config.text.forumCopy, '/boards/announcements'],
-            ['EasMusic', config.text.musicCopy, '/music'],
+            ['今日挂号', '留下今天的心情。', '/checkin'],
+            ['E院广场', '把一首歌聊成一段故事。', '/boards/announcements'],
+            ['EasMusic', '一首歌，也是一段病历。', '/music'],
           ].map(([title, copy, href]) => (
             <Link key={href} href={href} className="rounded-[30px] bg-white/78 p-8 shadow-xl shadow-sky-900/5 backdrop-blur transition hover:-translate-y-1">
               <h2 className="text-3xl font-black text-brand-950">{title}</h2>
@@ -47,10 +67,10 @@ export default async function HomePage() {
           ))}
         </section>
 
-        <HomeModules emptyText={config.text.emptyText} />
+        <HomeModules emptyText="这里还安静，等你留下第一句话。" />
 
         <footer className="mx-auto max-w-6xl pb-10 text-center text-sm font-bold text-slate-500">
-          {config.text.footerText}
+          Eason Chan Fans Club
         </footer>
       </main>
     </>
