@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { isSameLocalDay, startOfLocalDay, startOfYesterday } from '@/lib/checkin'
+import { formatBeijingDate, isSameLocalDay, startOfLocalDay, startOfYesterday } from '@/lib/checkin'
 import { CHECK_IN_EXP, CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb } from '@/lib/db-timeout'
 import { calcLevel } from '@/lib/points'
@@ -111,6 +111,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       message: '今天已经挂号过了',
       checkedToday: true,
+      checkDate: formatBeijingDate(today),
       consecutiveDays: profile?.consecutiveDays ?? existing.streakDay,
       points: profile?.points ?? 0,
       exp: profile?.exp ?? 0,
@@ -233,6 +234,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     message: '今日挂号成功！',
     checkedToday: true,
+    checkDate: formatBeijingDate(today),
     mood,
     gainedPoints: result.gainedPoints,
     gainedExp: result.gainedExp,

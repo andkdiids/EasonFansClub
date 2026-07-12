@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import type { CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
@@ -54,7 +54,7 @@ export function CheckInMessagesPanel({
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  async function loadMessages(nextDate = date, nextSort = sort) {
+  const loadMessages = useCallback(async (nextDate = date, nextSort = sort) => {
     if (isLoading) return
 
     setError('')
@@ -86,7 +86,24 @@ export function CheckInMessagesPanel({
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [date, isLoading, sort])
+
+  useEffect(() => {
+    setDate(initialDate)
+    setSort(initialSort)
+    setMessages(initialMessages)
+  }, [initialDate, initialMessages, initialSort])
+
+  useEffect(() => {
+    function handleCheckInCompleted(event: Event) {
+      const detail = (event as CustomEvent<{ date?: string }>).detail
+      const nextDate = detail?.date || maxDate
+      loadMessages(nextDate, sort)
+    }
+
+    window.addEventListener('checkin:completed', handleCheckInCompleted)
+    return () => window.removeEventListener('checkin:completed', handleCheckInCompleted)
+  }, [loadMessages, maxDate, sort])
 
   return (
     <div className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
