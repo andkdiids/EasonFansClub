@@ -25,8 +25,10 @@ function databaseUrlForPrismaClient() {
     if (!url.searchParams.has('pgbouncer')) {
       url.searchParams.set('pgbouncer', 'true')
     }
-    if (!url.searchParams.has('connection_limit')) {
-      url.searchParams.set('connection_limit', '1')
+
+    const connectionLimit = Number(url.searchParams.get('connection_limit'))
+    if (!Number.isFinite(connectionLimit) || connectionLimit < 5) {
+      url.searchParams.set('connection_limit', '5')
     }
     return url.toString()
   } catch {
