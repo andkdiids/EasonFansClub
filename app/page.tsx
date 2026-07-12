@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeModules } from '@/components/HomeModules'
-import type { SiteHeroSlide } from '@/lib/site-config'
+import { SiteHeader } from '@/components/SiteHeader'
+import { defaultSiteAppearance, type SiteHeroSlide } from '@/lib/site-config'
 
 export const revalidate = 300
 
@@ -29,24 +30,7 @@ const heroSlides: SiteHeroSlide[] = [
 export default function HomePage() {
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-sky-100/80 bg-white/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
-          <Link href="/" className="text-lg font-black text-brand-950 sm:text-xl">
-            私家E院
-          </Link>
-          <nav className="flex items-center gap-2 text-sm font-black">
-            <Link href="/checkin" className="rounded-full px-3 py-2 text-brand-700 hover:bg-sky-50">
-              挂号
-            </Link>
-            <Link href="/boards/announcements" className="rounded-full px-3 py-2 text-brand-700 hover:bg-sky-50">
-              广场
-            </Link>
-            <Link href="/profile" className="rounded-full bg-brand-950 px-4 py-2 text-white">
-              进入
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader user={null} config={defaultSiteAppearance} />
 
       <main className="space-y-20 bg-gradient-to-b from-[#eef8ff] via-white to-[#eff9ff] px-5 py-8 text-[#102033]">
         <div className="mx-auto max-w-7xl">
