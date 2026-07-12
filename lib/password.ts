@@ -11,13 +11,6 @@ export type PasswordVerifyResult = {
   needsRehash: boolean
 }
 
-export class LegacyPasswordVerificationUnavailableError extends Error {
-  constructor() {
-    super('Legacy bcrypt verification is disabled in this runtime')
-    this.name = 'LegacyPasswordVerificationUnavailableError'
-  }
-}
-
 export function isPbkdf2PasswordHash(hash: string) {
   return hash.startsWith(`${pbkdf2Prefix}$`)
 }
@@ -29,12 +22,6 @@ export function isLegacyBcryptHash(hash: string) {
 function pbkdf2Iterations() {
   const value = Number(process.env.PBKDF2_ITERATIONS)
   return Number.isFinite(value) && value >= 10000 ? Math.floor(value) : defaultPbkdf2Iterations
-}
-
-function canVerifyLegacyBcrypt() {
-  if (process.env.ALLOW_LEGACY_BCRYPT_VERIFY === 'true') return true
-  if (process.env.PRISMA_USE_DRIVER_ADAPTER === 'true') return false
-  return true
 }
 
 function toBase64(value: Uint8Array) {
@@ -127,10 +114,6 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   }
 
   if (isLegacyBcryptHash(storedHash)) {
-    if (!canVerifyLegacyBcrypt()) {
-      throw new LegacyPasswordVerificationUnavailableError()
-    }
-
     return {
       valid: await bcrypt.compare(password, storedHash),
       needsRehash: true,

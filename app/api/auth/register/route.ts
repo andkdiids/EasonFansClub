@@ -7,6 +7,8 @@ import { findActiveConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
 import { normalizeText } from '@/lib/validators'
 
+const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
+
 function unicodeLength(value: string) {
   return Array.from(value).length
 }
@@ -32,7 +34,7 @@ export async function POST(request: Request) {
     if (!acceptedAgreement) errors.acceptedAgreement = '请先勾选用户协议'
 
     if (Object.keys(errors).length) {
-      return NextResponse.json({ message: '请检查注册信息', errors }, { status: 400 })
+      return NextResponse.json({ message: '请检查注册信息', errors }, { status: 400, headers: noStoreHeaders })
     }
 
     const duplicate = await findActiveConflict({ phone, email: email || null, username })
@@ -42,7 +44,7 @@ export async function POST(request: Request) {
         ...(email && duplicate.email === email ? { email: '邮箱已被绑定' } : {}),
         ...(duplicate.username === username ? { nickname: '该昵称已被使用' } : {}),
       }
-      return NextResponse.json({ message: '账号信息已存在', errors: duplicateErrors }, { status: 409 })
+      return NextResponse.json({ message: '账号信息已存在', errors: duplicateErrors }, { status: 409, headers: noStoreHeaders })
     }
 
     const passwordHash = await hashPassword(password)
@@ -96,7 +98,7 @@ export async function POST(request: Request) {
     const token = await createSessionToken(user)
     const response = NextResponse.json(
       { user },
-      { status: 201, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+      { status: 201, headers: noStoreHeaders },
     )
     response.cookies.set(authCookieName, token, getSessionCookieOptions(request))
     await syncUserAchievements(user.id, ['REGISTER']).catch((achievementError) => {
@@ -109,13 +111,13 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message === 'UID_LIMIT_REACHED') {
       return NextResponse.json(
         { message: '成员 UID 已达到 5 位上限', errors: { form: '成员 UID 已达到 5 位上限' } },
-        { status: 409 },
+        { status: 409, headers: noStoreHeaders },
       )
     }
 
     return NextResponse.json(
       { message: '注册失败，请稍后再试', errors: { form: '注册失败，请稍后再试' } },
-      { status: 500 },
+      { status: 500, headers: noStoreHeaders },
     )
   }
 }

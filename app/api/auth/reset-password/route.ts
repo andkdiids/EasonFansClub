@@ -4,13 +4,15 @@ import { prisma } from '@/lib/prisma'
 import { hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
 
+const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const token = normalizeText(body?.token)
   const password = normalizeText(body?.password)
 
   if (!token || password.length < 8) {
-    return NextResponse.json({ message: '重置令牌无效或密码至少需要 8 位' }, { status: 400 })
+    return NextResponse.json({ message: '重置令牌无效或密码至少需要 8 位' }, { status: 400, headers: noStoreHeaders })
   }
 
   const reset = await prisma.passwordResetToken.findFirst({
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
   })
 
   if (!reset) {
-    return NextResponse.json({ message: '重置令牌无效或已过期' }, { status: 400 })
+    return NextResponse.json({ message: '重置令牌无效或已过期' }, { status: 400, headers: noStoreHeaders })
   }
 
   await prisma.$transaction(async (tx) => {
@@ -38,5 +40,5 @@ export async function POST(request: Request) {
     })
   })
 
-  return NextResponse.json({ message: '密码已重置，请重新登录' })
+  return NextResponse.json({ message: '密码已重置，请重新登录' }, { headers: noStoreHeaders })
 }

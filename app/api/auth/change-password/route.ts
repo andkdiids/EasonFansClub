@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
-import { hashPassword, LegacyPasswordVerificationUnavailableError, verifyPassword } from '@/lib/password'
+import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 import { normalizeText } from '@/lib/validators'
+
+const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
 export async function POST(request: Request) {
   const guard = await requireUser()
@@ -13,7 +15,7 @@ export async function POST(request: Request) {
   const newPassword = normalizeText(body?.newPassword)
 
   if (!oldPassword || newPassword.length < 8) {
-    return NextResponse.json({ message: '旧密码不能为空，新密码至少需要 8 位' }, { status: 400 })
+    return NextResponse.json({ message: '旧密码不能为空，新密码至少需要 8 位' }, { status: 400, headers: noStoreHeaders })
   }
 
   const user = await prisma.user.findUnique({
@@ -22,24 +24,13 @@ export async function POST(request: Request) {
   })
 
   if (!user) {
-    return NextResponse.json({ message: '旧密码不正确' }, { status: 400 })
+    return NextResponse.json({ message: '旧密码不正确' }, { status: 400, headers: noStoreHeaders })
   }
 
-  let passwordResult
-  try {
-    passwordResult = await verifyPassword(oldPassword, user.passwordHash)
-  } catch (error) {
-    if (error instanceof LegacyPasswordVerificationUnavailableError) {
-      return NextResponse.json(
-        { message: '当前 Workers 免费版无法完成旧密码校验，请先在 Vercel/Node 环境登录一次完成密码迁移。' },
-        { status: 503 },
-      )
-    }
-    throw error
-  }
+  const passwordResult = await verifyPassword(oldPassword, user.passwordHash)
 
   if (!passwordResult.valid) {
-    return NextResponse.json({ message: '旧密码不正确' }, { status: 400 })
+    return NextResponse.json({ message: '旧密码不正确' }, { status: 400, headers: noStoreHeaders })
   }
 
   await prisma.user.update({
@@ -47,5 +38,5 @@ export async function POST(request: Request) {
     data: { passwordHash: await hashPassword(newPassword) },
   })
 
-  return NextResponse.json({ message: '密码已修改' })
+  return NextResponse.json({ message: '密码已修改' }, { headers: noStoreHeaders })
 }

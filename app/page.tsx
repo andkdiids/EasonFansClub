@@ -1,10 +1,13 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeModules } from '@/components/HomeModules'
 import { SiteHeader } from '@/components/SiteHeader'
+import { getCurrentUser } from '@/lib/auth'
 import { defaultSiteAppearance, type SiteHeroSlide } from '@/lib/site-config'
 
-export const revalidate = 300
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 const heroSlides: SiteHeroSlide[] = [
   {
@@ -27,10 +30,13 @@ const heroSlides: SiteHeroSlide[] = [
   },
 ]
 
-export default function HomePage() {
+export default async function HomePage() {
+  const user = await getCurrentUser()
+  if (!user) redirect('/login?redirect=%2F')
+
   return (
     <>
-      <SiteHeader user={null} config={defaultSiteAppearance} />
+      <SiteHeader user={user} config={defaultSiteAppearance} />
 
       <main className="space-y-20 bg-gradient-to-b from-[#eef8ff] via-white to-[#eff9ff] px-5 py-8 text-[#102033]">
         <div className="mx-auto max-w-7xl">

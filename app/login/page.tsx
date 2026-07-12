@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
 import { LoginForm } from './LoginForm'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ redirect?: string }> }) {
   const params = await searchParams
 

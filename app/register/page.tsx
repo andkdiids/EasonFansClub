@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
 import { RegisterForm } from './RegisterForm'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default function RegisterPage() {
   return (
     <AuthFormShell
