@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { UserRole } from '@prisma/client'
 import { type AdminPermissionKey, hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
-import { getCurrentUser, type SessionUser } from '@/lib/auth'
+import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 export type GuardResult =
@@ -9,7 +9,19 @@ export type GuardResult =
   | { user: null; response: NextResponse }
 
 export async function requireUser(): Promise<GuardResult> {
-  const user = await getCurrentUser()
+  let user: SessionUser | null
+  try {
+    user = await getCurrentUser()
+  } catch (error) {
+    if (isAuthServiceUnavailableError(error)) {
+      return {
+        user: null,
+        response: NextResponse.json({ message: '登录服务暂时不可用，请稍后再试' }, { status: 503 }),
+      }
+    }
+    throw error
+  }
+
   if (!user) {
     return {
       user: null,

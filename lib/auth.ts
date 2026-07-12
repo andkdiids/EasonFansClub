@@ -15,6 +15,17 @@ export type SessionUser = {
   role: UserRole
 }
 
+export class AuthServiceUnavailableError extends Error {
+  constructor(message = 'Authentication service is temporarily unavailable', options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'AuthServiceUnavailableError'
+  }
+}
+
+export function isAuthServiceUnavailableError(error: unknown) {
+  return error instanceof AuthServiceUnavailableError
+}
+
 const secret = new TextEncoder().encode(
   process.env.JWT_SECRET || 'dev-secret-change-before-production',
 )
@@ -80,7 +91,7 @@ export async function getCurrentUser() {
     }
   } catch (error) {
     console.error('[auth.currentUser]', error)
-    return null
+    throw new AuthServiceUnavailableError(undefined, { cause: error })
   }
 }
 

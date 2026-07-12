@@ -7,7 +7,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { isSameLocalDay, startOfLocalDay } from '@/lib/checkin'
 import { DAILY_MOODS, calcMoodIndex, getDailyQuote, getMood } from '@/lib/daily'
-import { safeDb } from '@/lib/db-timeout'
+import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
@@ -47,13 +47,12 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const today = startOfLocalDay()
   const sort = params.sort === 'hot' ? 'hot' : 'latest'
 
-  const user = await safeDb(
+  const user = await withDbTimeout(
     'checkin.user',
     prisma.user.findUnique({
       where: { id: sessionUser.id },
       select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
     }),
-    null,
   )
   const activeUsers = await safeDb(
     'checkin.activeUsers',

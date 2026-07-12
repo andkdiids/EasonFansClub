@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ProfileDeferredModules } from '@/components/ProfileDeferredModules'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
+import { withDbTimeout } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -15,25 +16,29 @@ export default async function ProfilePage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const profile = await prisma.user.findFirst({
-    where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
-    select: {
-      uid: true,
-      nickname: true,
-      avatarUrl: true,
-      backgroundUrl: true,
-      bio: true,
-      email: true,
-      phone: true,
-      level: true,
-      exp: true,
-      points: true,
-      consecutiveDays: true,
-      createdAt: true,
-      profile: true,
-      _count: { select: { checkIns: true } },
-    },
-  })
+  const profile = await withDbTimeout(
+    'profile.user',
+    prisma.user.findFirst({
+      where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
+      select: {
+        uid: true,
+        nickname: true,
+        avatarUrl: true,
+        backgroundUrl: true,
+        bio: true,
+        email: true,
+        phone: true,
+        level: true,
+        exp: true,
+        points: true,
+        consecutiveDays: true,
+        createdAt: true,
+        profile: true,
+        _count: { select: { checkIns: true } },
+      },
+    }),
+    3000,
+  )
 
   if (!profile || !profile.profile) redirect('/login')
 
