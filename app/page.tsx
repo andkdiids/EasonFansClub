@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeModules } from '@/components/HomeModules'
 import { SiteHeader } from '@/components/SiteHeader'
-import { getCurrentUser } from '@/lib/auth'
+import { getSessionUserFromCookie } from '@/lib/auth'
 import { defaultSiteAppearance, type SiteHeroSlide } from '@/lib/site-config'
 
 export const dynamic = 'force-dynamic'
@@ -31,8 +31,10 @@ const heroSlides: SiteHeroSlide[] = [
 ]
 
 export default async function HomePage() {
-  const user = await getCurrentUser()
+  console.log('[home:ssr] start')
+  const user = await getSessionUserFromCookie()
   if (!user) redirect('/login?redirect=%2F')
+  console.log('[home:ssr] auth session')
 
   return (
     <>

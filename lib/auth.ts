@@ -49,10 +49,14 @@ export async function verifySessionToken(token?: string) {
   }
 }
 
-export async function getCurrentUser() {
+export async function getSessionUserFromCookie() {
   const cookieStore = await cookies()
   const token = cookieStore.get(authCookieName)?.value
-  const sessionUser = await verifySessionToken(token)
+  return verifySessionToken(token)
+}
+
+export async function getCurrentUser() {
+  const sessionUser = await getSessionUserFromCookie()
   if (!sessionUser) return null
 
   try {

@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { SiteHeader } from '@/components/SiteHeader'
-import { getCurrentUser } from '@/lib/auth'
+import { getSessionUserFromCookie } from '@/lib/auth'
+import { withDbTimeout } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
 import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
@@ -16,12 +17,15 @@ type PageProps = { params: Promise<{ uid: string }> }
 
 export default async function PublicUserPage({ params }: PageProps) {
   const { uid } = await params
+  console.log('[public-user:ssr] start', uid)
   const numericUid = parseUidParam(uid)
   if (numericUid === null) notFound()
   if (numericUid <= 0) notFound()
 
-  const viewer = await getCurrentUser()
-  const user = await prisma.user.findFirst({
+  const viewer = await getSessionUserFromCookie()
+  console.log('[public-user:ssr] viewer', viewer ? 'session' : 'anonymous')
+  console.log('[public-user:ssr] user-query:start')
+  const user = await withDbTimeout('publicUser.profile', prisma.user.findFirst({
     where: {
       uid: numericUid,
       status: 'ACTIVE',
@@ -50,7 +54,8 @@ export default async function PublicUserPage({ params }: PageProps) {
         },
       },
     },
-  })
+  }), 3500)
+  console.log('[public-user:ssr] user-query:done')
 
   if (!user || !user.profile) notFound()
 
@@ -60,12 +65,13 @@ export default async function PublicUserPage({ params }: PageProps) {
 
   if (viewer && !isSelf) {
     try {
+      console.log('[public-user:ssr] relationship-query:start')
       const [userAId, userBId] = normalizeFriendPair(viewer.id, user.id)
-      friendship = await prisma.friendship.findUnique({
+      friendship = await withDbTimeout('publicUser.friendship', prisma.friendship.findUnique({
         where: { userAId_userBId: { userAId, userBId } },
         select: { id: true },
-      })
-      pendingRequest = await prisma.friendRequest.findFirst({
+      }), 2500)
+      pendingRequest = await withDbTimeout('publicUser.pendingRequest', prisma.friendRequest.findFirst({
         where: {
           status: 'PENDING',
           OR: [
@@ -74,8 +80,10 @@ export default async function PublicUserPage({ params }: PageProps) {
           ],
         },
         select: { senderId: true, receiverId: true },
-      })
-    } catch {
+      }), 2500)
+      console.log('[public-user:ssr] relationship-query:done')
+    } catch (error) {
+      console.error('[public-user:ssr] relationship-query:failed', error)
       friendship = null
       pendingRequest = null
     }
