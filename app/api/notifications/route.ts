@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { getUnreadNotificationCount, listUnifiedNotifications, markAllUnifiedNotificationsRead, markUnifiedNotificationRead } from '@/lib/notifications'
 import { requireUser } from '@/lib/security'
 
 const NOTIFICATION_ID_BATCH_LIMIT = 100
 const NOTIFICATION_PAGE_SIZE = 50
+
+type NotificationReadInput = { id: string; source?: string }
 
 export async function GET(request: Request) {
   const guard = await requireUser()
@@ -11,42 +13,16 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const unreadOnly = searchParams.get('unread') === '1'
-  const page = Math.max(Number(searchParams.get('page') || 1), 1)
   const limit = Math.min(Math.max(Number(searchParams.get('limit') || NOTIFICATION_PAGE_SIZE), 1), NOTIFICATION_PAGE_SIZE)
-  const skip = (page - 1) * limit
-
-  const notifications = await prisma.notification.findMany({
-    where: {
-      recipientId: guard.user.id,
-      ...(unreadOnly ? { isRead: false } : {}),
-    },
-    orderBy: { createdAt: 'desc' },
-    skip,
-    take: limit + 1,
-    select: {
-      id: true,
-      type: true,
-      title: true,
-      content: true,
-      link: true,
-      isRead: true,
-      createdAt: true,
-      readAt: true,
-      actor: { select: { id: true, nickname: true, avatarUrl: true } },
-    },
-  })
-  const hasMore = notifications.length > limit
-
-  const unreadCount = await prisma.notification.count({
-    where: { recipientId: guard.user.id, isRead: false },
-  })
+  const notifications = await listUnifiedNotifications(guard.user.id, { unreadOnly, limit })
+  const unreadCount = await getUnreadNotificationCount(guard.user.id)
 
   return NextResponse.json({
-    notifications: hasMore ? notifications.slice(0, limit) : notifications,
+    notifications,
     unreadCount,
-    page,
+    page: 1,
     limit,
-    hasMore,
+    hasMore: notifications.length >= limit,
   })
 }
 
@@ -55,21 +31,17 @@ export async function PATCH(request: Request) {
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)
-  const ids = Array.isArray(body?.ids)
-    ? body.ids.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0).slice(0, NOTIFICATION_ID_BATCH_LIMIT)
+  const ids: NotificationReadInput[] = Array.isArray(body?.ids)
+    ? body.ids.filter((item: unknown): item is NotificationReadInput => {
+        return typeof item === 'object' && item !== null && typeof (item as { id?: unknown }).id === 'string'
+      }).slice(0, NOTIFICATION_ID_BATCH_LIMIT)
     : []
 
-  await prisma.notification.updateMany({
-    where: {
-      recipientId: guard.user.id,
-      ...(ids.length ? { id: { in: ids } } : {}),
-      isRead: false,
-    },
-    data: {
-      isRead: true,
-      readAt: new Date(),
-    },
-  })
+  if (!ids.length) {
+    await markAllUnifiedNotificationsRead(guard.user.id)
+    return NextResponse.json({ ok: true })
+  }
 
+  await Promise.all(ids.map((item) => markUnifiedNotificationRead(guard.user.id, item.source || 'personal', item.id)))
   return NextResponse.json({ ok: true })
 }

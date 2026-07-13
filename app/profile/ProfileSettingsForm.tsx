@@ -8,6 +8,10 @@ type InitialProfile = {
   avatarUrl: string
   backgroundUrl: string
   bio: string
+  email: string
+  phone: string
+  emailVerifiedAt: string | null
+  phoneVerifiedAt: string | null
 }
 
 type UploadKind = 'avatar' | 'background'
@@ -33,10 +37,7 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
     body.append('file', file)
     body.append('kind', kind)
 
-    const response = await fetch('/api/uploads/profile-image', {
-      method: 'POST',
-      body,
-    })
+    const response = await fetch('/api/uploads/profile-image', { method: 'POST', body })
     const data = await response.json().catch(() => null)
     setUploading(null)
 
@@ -72,7 +73,16 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
       return
     }
 
-    setMessage(data?.nicknameMessage || '资料已保存')
+    if (data?.profile) {
+      setForm((current) => ({
+        ...current,
+        email: data.profile.email || '',
+        phone: data.profile.phone || '',
+        emailVerifiedAt: data.profile.emailVerifiedAt || null,
+        phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
+      }))
+    }
+    setMessage(data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证' : data?.nicknameMessage || '资料已保存')
   }
 
   function update(key: keyof InitialProfile, value: string) {
@@ -87,7 +97,7 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
       <div>
         <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Account Settings</p>
         <h2 className="mt-2 text-2xl font-black text-brand-950">账号设置</h2>
-        <p className="mt-2 text-sm font-bold text-slate-500">可上传本地头像和背景图；昵称 30 天内仅可修改一次。</p>
+        <p className="mt-2 text-sm font-bold text-slate-500">手机号和邮箱仅自己可见；邮箱变更后需要重新验证。</p>
       </div>
 
       <label className="block">
@@ -101,6 +111,36 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
           placeholder="请输入昵称"
         />
       </label>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+          <span className="text-sm font-black text-slate-700">邮箱</span>
+          <input
+            value={form.email}
+            onChange={(event) => update('email', event.target.value)}
+            type="email"
+            className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+            placeholder="用于邮箱登录和找回账号"
+          />
+          <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-black ${form.emailVerifiedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+            {form.emailVerifiedAt ? '已验证' : '未验证'}
+          </span>
+        </label>
+
+        <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+          <span className="text-sm font-black text-slate-700">手机号</span>
+          <input
+            value={form.phone}
+            onChange={(event) => update('phone', event.target.value)}
+            type="tel"
+            className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+            placeholder="选填，绑定后可用于手机号登录"
+          />
+          <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
+            {form.phoneVerifiedAt ? '已验证' : '未验证，仅作为已绑定登录标识'}
+          </span>
+        </label>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">

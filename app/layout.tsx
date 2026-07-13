@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { NotificationToast } from '@/components/NotificationToast'
+import { getSessionUserFromCookie } from '@/lib/auth'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -6,10 +8,14 @@ export const metadata: Metadata = {
   description: '陈奕迅中文粉丝社区',
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const sessionUser = await getSessionUserFromCookie()
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        {children}
+        <NotificationToast enabled={Boolean(sessionUser)} />
+      </body>
     </html>
   )
 }

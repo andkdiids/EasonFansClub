@@ -13,6 +13,7 @@ export const adminPermissionGroups = [
   { key: 'nav_manage', label: '导航栏管理', description: '管理导航入口、图标、名称和排序。' },
   { key: 'site_config_manage', label: '网站外观配置', description: '管理网站文案、颜色、Logo 和图片。' },
   { key: 'feedback_manage', label: '反馈管理', description: '查看、回复和关闭用户反馈。' },
+  { key: 'notification_manage', label: '全站通知管理', description: '发布、隐藏和查看全站系统通知。' },
   { key: 'stats_view', label: '数据统计查看', description: '查看后台运营数据和统计面板。' },
   { key: 'admin_manage', label: '管理员管理', description: '添加管理员、移除管理员并编辑后台权限。' },
 ] as const
@@ -30,6 +31,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/culture': 'culture_manage',
   '/admin/music': 'music_manage',
   '/admin/feedback': 'feedback_manage',
+  '/admin/notifications': 'notification_manage',
   '/admin/appearance': 'site_config_manage',
   '/admin/admins': 'admin_manage',
 }

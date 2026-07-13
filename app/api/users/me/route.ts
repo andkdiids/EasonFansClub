@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, requireUser, sanitizeText } from '@/lib/security'
@@ -57,23 +58,65 @@ export async function PATCH(request: Request) {
   const bio = await filterSensitiveWords(sanitizeText(body?.bio, 300))
   const avatarUrl = sanitizeText(body?.avatarUrl, 500)
   const backgroundUrl = sanitizeText(body?.backgroundUrl, 500)
+  const email = body?.email === undefined ? undefined : normalizeEmail(body.email)
+  const phone = body?.phone === undefined ? undefined : sanitizeText(body.phone, 20).replace(/\s+/g, '')
 
   const data: {
     nickname?: string
     bio?: string
     avatarUrl?: string | null
     backgroundUrl?: string | null
+    email?: string | null
+    phone?: string | null
+    emailVerifiedAt?: Date | null
+    phoneVerifiedAt?: Date | null
   } = {}
 
   if (nickname) data.nickname = nickname
   if (body?.bio !== undefined) data.bio = bio
   if (body?.avatarUrl !== undefined) data.avatarUrl = publicImageUrl(avatarUrl) || null
   if (body?.backgroundUrl !== undefined) data.backgroundUrl = publicImageUrl(backgroundUrl) || null
+  if (email !== undefined) {
+    if (email && !isValidEmail(email)) {
+      return NextResponse.json({ message: '请输入有效邮箱' }, { status: 400 })
+    }
+    data.email = email || null
+  }
+  if (phone !== undefined) {
+    if (phone && !/^1\d{10}$/.test(phone)) {
+      return NextResponse.json({ message: '请输入 11 位中国大陆手机号' }, { status: 400 })
+    }
+    data.phone = phone || null
+  }
 
   const current = await prisma.user.findUnique({
     where: { id: guard.user.id },
-    select: { nickname: true, nicknameChangedAt: true },
+    select: { nickname: true, nicknameChangedAt: true, email: true, phone: true },
   })
+
+  if (!current) return NextResponse.json({ message: '账号不存在' }, { status: 404 })
+
+  if (email !== undefined && data.email !== current.email) {
+    if (data.email) {
+      const existing = await prisma.user.findFirst({
+        where: { email: data.email, isDeleted: false, NOT: { id: guard.user.id } },
+        select: { id: true },
+      })
+      if (existing) return NextResponse.json({ message: '该邮箱已被绑定' }, { status: 409 })
+    }
+    data.emailVerifiedAt = null
+  }
+
+  if (phone !== undefined && data.phone !== current.phone) {
+    if (data.phone) {
+      const existing = await prisma.user.findFirst({
+        where: { phone: data.phone, isDeleted: false, NOT: { id: guard.user.id } },
+        select: { id: true },
+      })
+      if (existing) return NextResponse.json({ message: '该手机号已被绑定' }, { status: 409 })
+    }
+    data.phoneVerifiedAt = null
+  }
 
   const now = new Date()
   const nicknameChanged = Boolean(nickname && current && nickname !== current.nickname)
@@ -97,6 +140,10 @@ export async function PATCH(request: Request) {
         id: true,
         uid: true,
         nickname: true,
+        email: true,
+        phone: true,
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
@@ -123,8 +170,16 @@ export async function PATCH(request: Request) {
     return updated
   })
 
+  let emailVerificationSent = false
+  if (profile.email && profile.email !== current.email) {
+    const verification = await createVerificationForUser(guard.user.id, profile.email)
+    await sendVerificationEmail(profile.email, verification.verificationUrl)
+    emailVerificationSent = true
+  }
+
   return NextResponse.json({
     profile,
+    emailVerificationSent,
     nicknameUpdated: !nicknameChanged || canChangeNickname,
     nicknameMessage: nicknameChanged && !canChangeNickname ? '昵称 30 天内只能修改一次，其他资料已保存' : undefined,
   })

@@ -16,6 +16,7 @@ const adminModules = [
   { href: '/admin/culture', title: 'Eason 文化馆', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },
   { href: '/admin/music', title: 'EasMusic', desc: '配置音乐馆服务状态、推荐歌曲和听歌记录。' },
   { href: '/admin/feedback', title: '反馈中心', desc: '查看用户反馈，回复并更新处理状态。' },
+  { href: '/admin/notifications', title: '全站通知', desc: '向所有用户发布系统通知，并查看已读和未读统计。' },
   { href: '/admin/admins', title: '管理员管理', desc: '添加管理员、移除管理员并编辑后台权限。' },
   { href: '/admin/appearance', title: '网站外观配置', desc: '修改前台文案、颜色、图片、导航图标和首页轮播。' },
 ] as const

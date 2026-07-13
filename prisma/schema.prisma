@@ -265,6 +265,8 @@ model User {
   passwordResets         PasswordResetToken[]
   sentNotifications      Notification[]            @relation("NotificationActor")
   notifications          Notification[]            @relation("NotificationRecipient")
+  createdSystemNotifications SystemNotification[]  @relation("SystemNotificationCreator")
+  systemNotificationReads SystemNotificationRead[]
   following              Follow[]                  @relation("FollowFollower")
   followers              Follow[]                  @relation("FollowFollowing")
   sentFriendRequests     FriendRequest[]           @relation("FriendRequestSender")
@@ -812,6 +814,41 @@ model Notification {
 
   @@index([recipientId, isRead, createdAt])
   @@index([type])
+}
+
+model SystemNotification {
+  id          String   @id @default(cuid())
+  title       String
+  content     String
+  link        String?
+  type        String   @default("SYSTEM")
+  isPublished Boolean  @default(true)
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdById String
+  createdBy   User   @relation("SystemNotificationCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  reads SystemNotificationRead[]
+
+  @@index([isPublished, publishedAt])
+  @@index([createdById, createdAt])
+}
+
+model SystemNotificationRead {
+  id             String   @id @default(cuid())
+  readAt         DateTime @default(now())
+
+  notificationId String
+  notification   SystemNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId, readAt])
+  @@index([notificationId])
 }
 
 model Conversation {

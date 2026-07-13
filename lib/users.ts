@@ -62,6 +62,35 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
   return user
 }
 
+export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email', identifier: string) {
+  const normalized = identifier.trim()
+  const lookup = identifierType === 'email' ? normalized.toLowerCase() : normalized
+
+  const user = await prisma.user.findFirst({
+    where: {
+      isDeleted: false,
+      ...(identifierType === 'email' ? { email: lookup } : { phone: lookup }),
+    },
+    select: {
+      id: true,
+      uid: true,
+      username: true,
+      nickname: true,
+      role: true,
+      status: true,
+      isDeleted: true,
+      passwordHash: true,
+      email: true,
+      phone: true,
+      emailVerifiedAt: true,
+      profile: { select: { id: true } },
+    },
+  })
+
+  if (!user || !user.profile || !user.uid || user.isDeleted) return null
+  return user
+}
+
 export async function findActiveConflict(input: { phone?: string | null; email?: string | null; username?: string | null }) {
   return prisma.user.findFirst({
     where: {

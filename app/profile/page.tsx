@@ -30,6 +30,8 @@ export default async function ProfilePage() {
           bio: true,
           email: true,
           phone: true,
+          emailVerifiedAt: true,
+          phoneVerifiedAt: true,
           level: true,
           exp: true,
           points: true,
@@ -125,6 +127,10 @@ export default async function ProfilePage() {
               avatarUrl: avatar || '',
               backgroundUrl: background || '',
               bio,
+              email: profile.email || '',
+              phone: profile.phone || '',
+              emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
+              phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
             }}
           />
           <ProfileDeferredModules />

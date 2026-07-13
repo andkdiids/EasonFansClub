@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FormError } from '@/components/FormError'
 
 type LoginErrors = Partial<{
@@ -9,6 +9,8 @@ type LoginErrors = Partial<{
   form: string
 }>
 
+type IdentifierType = 'phone' | 'email'
+
 function safeRedirectPath(path?: string) {
   if (!path || !path.startsWith('/') || path.startsWith('//')) return '/'
   if (path === '/login' || path.startsWith('/login?') || path === '/register' || path.startsWith('/register?')) return '/'
@@ -16,8 +18,19 @@ function safeRedirectPath(path?: string) {
 }
 
 export function LoginForm({ redirectTo }: Readonly<{ redirectTo?: string }>) {
+  const [identifierType, setIdentifierType] = useState<IdentifierType>('phone')
   const [errors, setErrors] = useState<LoginErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('ecfc-login-type')
+    if (saved === 'phone' || saved === 'email') setIdentifierType(saved)
+  }, [])
+
+  function chooseType(type: IdentifierType) {
+    setIdentifierType(type)
+    window.localStorage.setItem('ecfc-login-type', type)
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -31,7 +44,7 @@ export function LoginForm({ redirectTo }: Readonly<{ redirectTo?: string }>) {
     if (!identifier || !password) {
       setErrors({
         form: '请填写账号和密码',
-        ...(!identifier ? { identifier: '请输入手机号、邮箱或昵称' } : {}),
+        ...(!identifier ? { identifier: identifierType === 'email' ? '请输入邮箱' : '请输入手机号' } : {}),
         ...(!password ? { password: '请输入密码' } : {}),
       })
       return
@@ -49,13 +62,13 @@ export function LoginForm({ redirectTo }: Readonly<{ redirectTo?: string }>) {
         credentials: 'same-origin',
         cache: 'no-store',
         signal: controller.signal,
-        body: JSON.stringify({ identifier, password }),
+        body: JSON.stringify({ identifierType, identifier, password }),
       })
 
       const data = await response.json().catch(() => ({}))
 
       if (!response.ok) {
-        setErrors({ form: data.message || '登录服务暂不可用', ...data.errors })
+        setErrors({ form: data.message || '登录服务暂时不可用', ...data.errors })
         return
       }
 
@@ -73,20 +86,38 @@ export function LoginForm({ redirectTo }: Readonly<{ redirectTo?: string }>) {
     <form className="space-y-5" onSubmit={handleSubmit} autoComplete="on" noValidate>
       <FormError message={errors.form} />
 
+      <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
+        {[
+          ['phone', '手机号登录'],
+          ['email', '邮箱登录'],
+        ].map(([type, label]) => (
+          <button
+            key={type}
+            type="button"
+            onClick={() => chooseType(type as IdentifierType)}
+            className={`rounded-lg px-3 py-2 text-sm font-black transition ${
+              identifierType === type ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500 hover:text-brand-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <label className="block" htmlFor="login-identifier">
-        <span className="text-sm font-bold text-slate-700">手机号 / 邮箱 / 昵称</span>
+        <span className="text-sm font-bold text-slate-700">{identifierType === 'email' ? '邮箱' : '手机号'}</span>
         <input
           id="login-identifier"
           name="identifier"
-          type="text"
-          autoComplete="username"
+          type={identifierType === 'email' ? 'email' : 'tel'}
+          autoComplete={identifierType === 'email' ? 'email' : 'tel'}
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="next"
           required
           className="mt-2 min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
-          placeholder="请输入已注册账号"
+          placeholder={identifierType === 'email' ? '请输入已验证邮箱' : '请输入已绑定手机号'}
         />
         <FormError message={errors.identifier} />
       </label>
