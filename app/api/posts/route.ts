@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     }
     if (board.slug === 'announcements' && !isAdminRole(user.role)) {
       return NextResponse.json(
-        { message: '只有管理员可以在公告区发布帖子', errors: { boardId: '普通用户不能选择公告区' } },
+        { message: '只有管理员可以在公告区发布内容', errors: { boardId: '普通用户不能选择公告区' } },
         { status: 403 },
       )
     }

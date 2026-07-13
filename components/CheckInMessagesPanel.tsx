@@ -44,6 +44,10 @@ function buildCommentTree(comments: DailyComment[]) {
   return byParent
 }
 
+function buildCommentMap(comments: DailyComment[]) {
+  return new Map(comments.map((comment) => [comment.id, comment]))
+}
+
 export function CheckInMessagesPanel({
   initialMessages,
   initialDate,
@@ -79,11 +83,16 @@ export function CheckInMessagesPanel({
   function removeComment(messageId: string, commentId: string) {
     setMessages((current) => current.map((message) => (
       message.id === messageId
-        ? {
-            ...message,
-            commentCount: Math.max(message.commentCount - 1, 0),
-            comments: message.comments.filter((comment) => comment.id !== commentId && comment.parentId !== commentId),
-          }
+        ? (() => {
+            const tree = buildCommentTree(message.comments)
+            const collectIds = (parentId: string): string[] => (tree.get(parentId) || []).flatMap((comment) => [comment.id, ...collectIds(comment.id)])
+            const removeIds = new Set([commentId, ...collectIds(commentId)])
+            return {
+              ...message,
+              commentCount: Math.max(message.commentCount - removeIds.size, 0),
+              comments: message.comments.filter((comment) => !removeIds.has(comment.id)),
+            }
+          })()
         : message
     )))
   }
@@ -192,8 +201,22 @@ export function CheckInMessagesPanel({
           const name = item.user.profile?.displayName || item.user.nickname
           const avatar = publicImageUrl(item.user.profile?.avatarUrl || item.user.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
+          const commentMap = buildCommentMap(item.comments)
           const rootComments = commentTree.get(null) || []
           const replyTarget = replyTargets[item.id] || null
+          const collectThreadComments = (rootId: string) => {
+            const result: Array<{ comment: DailyComment; replyToName: string }> = []
+            const visit = (parentId: string) => {
+              const parent = commentMap.get(parentId)
+              const parentName = parent ? parent.author.profile?.displayName || parent.author.nickname : ''
+              ;(commentTree.get(parentId) || []).forEach((child) => {
+                result.push({ comment: child, replyToName: parentName })
+                visit(child.id)
+              })
+            }
+            visit(rootId)
+            return result
+          }
           return (
             <article key={item.id} className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
               <div className="flex gap-4">
@@ -214,7 +237,7 @@ export function CheckInMessagesPanel({
                       {rootComments.map((comment) => {
                         const commentName = comment.author.profile?.displayName || comment.author.nickname
                         const commentAvatar = publicImageUrl(comment.author.profile?.avatarUrl || comment.author.avatarUrl)
-                        const children = commentTree.get(comment.id) || []
+                        const children = collectThreadComments(comment.id)
                         const showAll = Boolean(expandedReplies[comment.id])
                         const visibleChildren = showAll ? children : children.slice(0, 3)
                         return (
@@ -244,24 +267,28 @@ export function CheckInMessagesPanel({
                                 </div>
 
                                 {visibleChildren.length ? (
-                                  <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
-                                    {visibleChildren.map((child) => {
+                                  <div className="mt-2 space-y-1 border-l-2 border-sky-100 pl-3 sm:pl-4">
+                                    {visibleChildren.map(({ comment: child, replyToName }) => {
                                       const childName = child.author.profile?.displayName || child.author.nickname
                                       const childAvatar = publicImageUrl(child.author.profile?.avatarUrl || child.author.avatarUrl)
                                       return (
-                                        <div key={child.id} className="rounded-xl bg-sky-50/70 p-3">
-                                          <div className="flex items-start gap-2">
-                                            <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
-                                              {childAvatar ? <Image src={childAvatar} alt={childName} width={28} height={28} className="h-full w-full object-cover" /> : childName.slice(0, 1)}
+                                        <div key={child.id} className="min-w-0 py-2">
+                                          <div className="flex min-w-0 items-start gap-2">
+                                            <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
+                                              {childAvatar ? <Image src={childAvatar} alt={childName} width={24} height={24} className="h-full w-full object-cover" /> : childName.slice(0, 1)}
                                             </a>
                                             <div className="min-w-0 flex-1">
-                                              <div className="flex flex-wrap items-center gap-2">
+                                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                                                 <a href={`/user/${formatUid(child.author.uid)}`} className="font-black text-brand-950">{childName}</a>
-                                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(child.author.uid)}</span>
-                                                <span className="text-xs font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
+                                                <span className="font-bold text-slate-400">UID {formatUid(child.author.uid)}</span>
+                                                <span className="font-bold text-slate-400">Lv.{child.author.level}</span>
+                                                <span className="font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
                                               </div>
-                                              <p className="mt-1 whitespace-pre-wrap">回复 {commentName}：{child.content}</p>
-                                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                              <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6">
+                                                <span className="font-black text-brand-700">回复 @{replyToName}：</span>
+                                                {child.content}
+                                              </p>
+                                              <div className="mt-1 flex flex-wrap items-center gap-3">
                                                 <button
                                                   type="button"
                                                   onClick={() => setReplyTargets((current) => ({ ...current, [item.id]: { id: child.id, name: childName } }))}
@@ -270,7 +297,7 @@ export function CheckInMessagesPanel({
                                                   回复
                                                 </button>
                                                 {sessionUserId === child.author.id || isAdminRole(sessionUserRole) ? (
-                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} onDeleted={() => removeComment(item.id, child.id)} />
+                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} variant="text" onDeleted={() => removeComment(item.id, child.id)} />
                                                 ) : null}
                                               </div>
                                             </div>
@@ -284,7 +311,7 @@ export function CheckInMessagesPanel({
                                         onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !showAll }))}
                                         className="text-xs font-black text-brand-700"
                                       >
-                                        {showAll ? '收起回复' : `展开更多回复（${children.length - 3}）`}
+                                        {showAll ? '收起回复' : `展开剩余 ${children.length - 3} 条回复`}
                                       </button>
                                     ) : null}
                                   </div>

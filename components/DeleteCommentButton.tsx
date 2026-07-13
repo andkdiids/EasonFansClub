@@ -7,10 +7,12 @@ export function DeleteCommentButton({
   endpoint,
   label = '删除',
   onDeleted,
+  variant = 'pill',
 }: Readonly<{
   endpoint: string
   label?: string
   onDeleted?: () => void
+  variant?: 'pill' | 'text'
 }>) {
   const router = useRouter()
   const [error, setError] = useState('')
@@ -44,7 +46,11 @@ export function DeleteCommentButton({
         type="button"
         onClick={() => setConfirmDelete(true)}
         disabled={isDeleting}
-        className="rounded-full bg-red-50 px-3 py-1 text-xs font-black text-red-600 disabled:opacity-60"
+        className={
+          variant === 'text'
+            ? 'text-xs font-black text-red-600 disabled:opacity-60'
+            : 'rounded-full bg-red-50 px-3 py-1 text-xs font-black text-red-600 disabled:opacity-60'
+        }
       >
         {isDeleting ? '删除中...' : label}
       </button>

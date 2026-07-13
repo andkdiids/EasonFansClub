@@ -23,13 +23,19 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return NextResponse.json({ message: '只能删除自己的评论' }, { status: 403 })
   }
 
+  const threadRows = await prisma.reply.findMany({
+    where: { postId: reply.postId, isDeleted: false },
+    select: { id: true, parentId: true },
+  })
+  const collectDescendantIds = (parentId: string): string[] => {
+    const children = threadRows.filter((item) => item.parentId === parentId)
+    return children.flatMap((child) => [child.id, ...collectDescendantIds(child.id)])
+  }
+  const deleteIds = [reply.id, ...collectDescendantIds(reply.id)]
+
   const replyCount = await prisma.$transaction(async (tx) => {
-    await tx.reply.update({
-      where: { id: reply.id },
-      data: { isDeleted: true, deletedAt: new Date() },
-    })
     await tx.reply.updateMany({
-      where: { parentId: reply.id, isDeleted: false },
+      where: { id: { in: deleteIds } },
       data: { isDeleted: true, deletedAt: new Date() },
     })
     const count = await tx.reply.count({
