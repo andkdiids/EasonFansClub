@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin } from '@/lib/security'
+import { isAdminRole, requireUser } from '@/lib/security'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -30,7 +30,7 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
-  const guard = await requireAdmin('post_manage')
+  const guard = await requireUser()
   if (!guard.user) return guard.response
 
   const { postId } = await params
@@ -48,24 +48,61 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json({ message: '没有可更新的字段' }, { status: 400 })
   }
 
-  const post = await prisma.post.update({
+  const existing = await prisma.post.findUnique({
     where: { id: postId },
-    data,
-    select: { id: true, isPinned: true, isFeatured: true, isDeleted: true },
+    select: { id: true, authorId: true, boardId: true, isDeleted: true },
   })
+  if (!existing) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
 
-  let action: 'DELETE_POST' | 'RESTORE_POST' | 'PIN_POST' | 'UNPIN_POST' | 'FEATURE_POST' | 'UNFEATURE_POST' = 'FEATURE_POST'
-  if (data.isDeleted !== undefined) action = data.isDeleted ? 'DELETE_POST' : 'RESTORE_POST'
-  else if (data.isPinned !== undefined) action = data.isPinned ? 'PIN_POST' : 'UNPIN_POST'
-  else if (data.isFeatured !== undefined) action = data.isFeatured ? 'FEATURE_POST' : 'UNFEATURE_POST'
+  const isAdmin = isAdminRole(guard.user.role)
+  const isOwner = existing.authorId === guard.user.id
+  const changesModeration = data.isPinned !== undefined || data.isFeatured !== undefined
+  if (changesModeration && !isAdmin) {
+    return NextResponse.json({ message: '只有管理员可以置顶或精选帖子' }, { status: 403 })
+  }
+  if (data.isDeleted !== undefined) {
+    if (data.isDeleted && !isOwner && !isAdmin) {
+      return NextResponse.json({ message: '只能删除自己发布的帖子' }, { status: 403 })
+    }
+    if (!data.isDeleted && !isAdmin) {
+      return NextResponse.json({ message: '只有管理员可以恢复帖子' }, { status: 403 })
+    }
+  }
 
-  await prisma.adminAction.create({
-    data: {
-      adminId: guard.user.id,
-      postId,
-      action,
-      metadata: data,
-    },
+  const post = await prisma.$transaction(async (tx) => {
+    const updated = await tx.post.update({
+      where: { id: postId },
+      data,
+      select: { id: true, isPinned: true, isFeatured: true, isDeleted: true },
+    })
+
+    if (data.isDeleted !== undefined && existing.isDeleted !== data.isDeleted) {
+      const postCount = await tx.post.count({
+        where: { boardId: existing.boardId, status: 'PUBLISHED', isDeleted: false },
+      })
+      await tx.board.update({
+        where: { id: existing.boardId },
+        data: { postCount },
+      })
+    }
+
+    if (isAdmin) {
+      let action: 'DELETE_POST' | 'RESTORE_POST' | 'PIN_POST' | 'UNPIN_POST' | 'FEATURE_POST' | 'UNFEATURE_POST' = 'FEATURE_POST'
+      if (data.isDeleted !== undefined) action = data.isDeleted ? 'DELETE_POST' : 'RESTORE_POST'
+      else if (data.isPinned !== undefined) action = data.isPinned ? 'PIN_POST' : 'UNPIN_POST'
+      else if (data.isFeatured !== undefined) action = data.isFeatured ? 'FEATURE_POST' : 'UNFEATURE_POST'
+
+      await tx.adminAction.create({
+        data: {
+          adminId: guard.user.id,
+          postId,
+          action,
+          metadata: data,
+        },
+      })
+    }
+
+    return updated
   })
 
   return NextResponse.json({ post })

@@ -3,6 +3,7 @@ import { PostCreateForm } from '@/components/PostCreateForm'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { isAdminRole } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,8 +11,12 @@ export default async function NewPostPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
+  const canPostAnnouncement = isAdminRole(user.role)
   const boards = await prisma.board.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      ...(canPostAnnouncement ? {} : { slug: { not: 'announcements' } }),
+    },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 100,
     select: { id: true, name: true },

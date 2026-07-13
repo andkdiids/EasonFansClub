@@ -198,3 +198,94 @@ export function AdminPostActions({
     </div>
   )
 }
+
+export function DeletePostButton({
+  postId,
+  redirectTo,
+  onDeleted,
+  label = '删除',
+}: Readonly<{
+  postId: string
+  redirectTo?: string
+  onDeleted?: () => void
+  label?: string
+}>) {
+  const router = useRouter()
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  async function deletePost() {
+    if (isDeleting) return
+    setError('')
+    setMessage('')
+    setIsDeleting(true)
+    const response = await fetch(`/api/posts/${postId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isDeleted: true }),
+    })
+    const data = await response.json().catch(() => ({}))
+    setIsDeleting(false)
+
+    if (!response.ok) {
+      setError(data.message || '删除失败，请稍后再试')
+      return
+    }
+
+    setConfirmDelete(false)
+    setMessage('帖子已删除')
+    onDeleted?.()
+    if (redirectTo) {
+      setTimeout(() => {
+        router.replace(redirectTo)
+      }, 700)
+    } else {
+      router.refresh()
+    }
+  }
+
+  return (
+    <div className="relative flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setConfirmDelete(true)}
+        disabled={isDeleting}
+        className="rounded-lg border border-red-200 px-3 py-2 text-sm font-black text-red-600 disabled:opacity-60"
+      >
+        {isDeleting ? '删除中...' : label}
+      </button>
+
+      {confirmDelete ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/25 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-[24px] border border-sky-100 bg-white p-6 shadow-2xl shadow-sky-900/15">
+            <h3 className="text-xl font-black text-brand-950">确认删除帖子</h3>
+            <p className="mt-3 text-sm font-bold leading-7 text-slate-600">删除后普通用户无法再看到这篇帖子，是否继续？</p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                disabled={isDeleting}
+                className="rounded-full bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={deletePost}
+                disabled={isDeleting}
+                className="rounded-full bg-red-600 px-5 py-3 text-sm font-black text-white disabled:opacity-60"
+              >
+                {isDeleting ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {message ? <p className="w-full text-sm font-bold text-emerald-600">{message}</p> : null}
+      {error ? <p className="w-full text-sm font-bold text-red-600">{error}</p> : null}
+    </div>
+  )
+}

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
-import { AdminPostActions, FavoriteButton, LikeButton } from '@/components/PostActions'
+import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { ReplyForm } from '@/components/ReplyForm'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
@@ -42,6 +42,7 @@ function loadPost(postId: string, userId?: string) {
       author: {
         select: {
           uid: true,
+          id: true,
           nickname: true,
           level: true,
           avatarUrl: true,
@@ -100,6 +101,8 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
   const authorAvatar = publicImageUrl(post.author.profile.avatarUrl || post.author.avatarUrl)
   const authorName = post.author.profile.displayName || post.author.nickname
   const isArchivedAuthor = post.author.uid === 0
+  const canManagePost = Boolean(user && isAdminRole(user.role))
+  const canDeletePost = Boolean(user && (user.id === post.author.id || isAdminRole(user.role)))
 
   return (
     <>
@@ -138,8 +141,10 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
               <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
-            {user && isAdminRole(user.role) ? (
+            {canManagePost ? (
               <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.board.slug}`} />
+            ) : canDeletePost ? (
+              <DeletePostButton postId={post.id} redirectTo={`/boards/${post.board.slug}`} />
             ) : null}
           </div>
         </article>

@@ -3,7 +3,7 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { POINTS, calcLevel } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, sanitizeText } from '@/lib/security'
+import { filterSensitiveWords, isAdminRole, sanitizeText } from '@/lib/security'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -102,10 +102,16 @@ export async function POST(request: Request) {
   try {
     const board = await prisma.board.findFirst({
       where: { id: input.boardId, isActive: true },
-      select: { id: true },
+      select: { id: true, slug: true },
     })
     if (!board) {
       return NextResponse.json({ message: '板块不存在或已停用', errors: { boardId: '板块无效' } }, { status: 404 })
+    }
+    if (board.slug === 'announcements' && !isAdminRole(user.role)) {
+      return NextResponse.json(
+        { message: '只有管理员可以在公告区发布帖子', errors: { boardId: '普通用户不能选择公告区' } },
+        { status: 403 },
+      )
     }
 
     const result = await prisma.$transaction(async (tx) => {

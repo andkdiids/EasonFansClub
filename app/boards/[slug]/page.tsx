@@ -46,7 +46,7 @@ export default async function BoardPage({ params }: Readonly<{ params: Promise<{
       isPinned: true,
       isFeatured: true,
       createdAt: true,
-      author: { select: { uid: true, nickname: true, avatarUrl: true, level: true, profile: true } },
+      author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, profile: true } },
       board: { select: { name: true, slug: true } },
       favorites: user ? { where: { userId: user.id }, select: { id: true } } : false,
     },
@@ -70,7 +70,7 @@ export default async function BoardPage({ params }: Readonly<{ params: Promise<{
               </Link>
             </div>
           </div>
-          <PostList posts={posts} canManage={Boolean(user && isAdminRole(user.role))} />
+          <PostList posts={posts} canManage={Boolean(user && isAdminRole(user.role))} currentUserId={user?.id} />
         </section>
       </main>
     </>

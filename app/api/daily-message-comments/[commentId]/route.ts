@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
+import { isAdminUser } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 
@@ -18,9 +18,9 @@ export async function DELETE(_request: Request, context: RouteContext) {
   if (!comment) return NextResponse.json({ message: '评论不存在' }, { status: 404 })
 
   const isOwner = comment.authorId === guard.user.id
-  const isAllowedAdmin = isAdminUser(guard.user) && (await hasAdminPermission(guard.user, 'daily_message_manage'))
+  const isAllowedAdmin = isAdminUser(guard.user)
   if (!isOwner && !isAllowedAdmin) {
-    return NextResponse.json({ message: '无权删除这条评论' }, { status: 403 })
+    return NextResponse.json({ message: '只能删除自己的留言评论' }, { status: 403 })
   }
 
   const commentCount = await prisma.$transaction(async (tx) => {

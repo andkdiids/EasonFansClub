@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { AdminPostActions, FavoriteButton } from '@/components/PostActions'
+import { AdminPostActions, DeletePostButton, FavoriteButton } from '@/components/PostActions'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -19,6 +19,7 @@ type PostItem = {
   isFeatured: boolean
   createdAt: Date
   author: {
+    id?: string
     uid?: number
     nickname: string
     avatarUrl?: string | null
@@ -29,7 +30,11 @@ type PostItem = {
   favorites?: Array<{ id: string }>
 }
 
-export function PostList({ posts, canManage = false }: Readonly<{ posts: PostItem[]; canManage?: boolean }>) {
+export function PostList({
+  posts,
+  canManage = false,
+  currentUserId,
+}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string }>) {
   const [visiblePosts, setVisiblePosts] = useState(posts)
 
   if (visiblePosts.length === 0) {
@@ -49,6 +54,7 @@ export function PostList({ posts, canManage = false }: Readonly<{ posts: PostIte
         const authorName = post.author.profile?.displayName || post.author.nickname
         const authorAvatar = publicImageUrl(post.author.profile?.avatarUrl || post.author.avatarUrl)
         const isArchivedAuthor = post.author.uid === 0
+        const canDelete = canManage || Boolean(currentUserId && post.author.id === currentUserId)
         return (
           <article key={post.id} data-post-id={post.id} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -90,6 +96,13 @@ export function PostList({ posts, canManage = false }: Readonly<{ posts: PostIte
                   postId={post.id}
                   isPinned={post.isPinned}
                   isFeatured={post.isFeatured}
+                  onDeleted={() => setVisiblePosts((current) => current.filter((item) => item.id !== post.id))}
+                />
+              </div>
+            ) : canDelete ? (
+              <div className="mt-4 border-t border-sky-100 pt-4">
+                <DeletePostButton
+                  postId={post.id}
                   onDeleted={() => setVisiblePosts((current) => current.filter((item) => item.id !== post.id))}
                 />
               </div>

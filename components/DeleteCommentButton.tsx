@@ -49,8 +49,8 @@ export function DeleteCommentButton({
       {confirmDelete ? (
         <span className="fixed inset-0 z-50 grid place-items-center bg-slate-950/25 px-4 backdrop-blur-sm">
           <span className="block w-full max-w-sm rounded-[24px] border border-sky-100 bg-white p-6 text-left shadow-2xl shadow-sky-900/15">
-            <strong className="block text-xl font-black text-brand-950">确认删除</strong>
-            <span className="mt-3 block text-sm font-bold leading-7 text-slate-600">删除后将无法恢复，是否继续？</span>
+            <strong className="block text-xl font-black text-brand-950">确认删除评论</strong>
+            <span className="mt-3 block text-sm font-bold leading-7 text-slate-600">删除后普通用户无法再看到这条评论，是否继续？</span>
             <span className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
