@@ -6,9 +6,11 @@ import { useState } from 'react'
 export function DeleteCommentButton({
   endpoint,
   label = '删除',
+  onDeleted,
 }: Readonly<{
   endpoint: string
   label?: string
+  onDeleted?: () => void
 }>) {
   const router = useRouter()
   const [error, setError] = useState('')
@@ -32,7 +34,8 @@ export function DeleteCommentButton({
 
     setConfirmDelete(false)
     setMessage('删除成功')
-    router.refresh()
+    onDeleted?.()
+    if (!onDeleted) router.refresh()
   }
 
   return (

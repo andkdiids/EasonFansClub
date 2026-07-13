@@ -38,15 +38,16 @@ export async function getCheckInMessages({
       likes: { where: { userId: viewerId }, select: { id: true } },
       favorites: { where: { userId: viewerId }, select: { id: true } },
       comments: {
-        where: { isDeleted: false, parentId: null },
-        orderBy: { createdAt: 'desc' },
-        take: 3,
+        where: { isDeleted: false },
+        orderBy: { createdAt: 'asc' },
+        take: 50,
         include: {
           author: {
             select: {
               id: true,
               uid: true,
               nickname: true,
+              avatarUrl: true,
               level: true,
               profile: { select: { displayName: true, avatarUrl: true } },
             },

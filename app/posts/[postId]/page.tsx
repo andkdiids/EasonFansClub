@@ -1,8 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
-import { ReplyForm } from '@/components/ReplyForm'
+import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
@@ -56,7 +55,11 @@ function loadPost(postId: string, userId?: string) {
         where: { isDeleted: false, author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
         orderBy: { createdAt: 'asc' },
         take: POST_DETAIL_REPLY_LIMIT,
-        include: {
+        select: {
+          id: true,
+          content: true,
+          parentId: true,
+          createdAt: true,
           author: {
             select: {
               id: true,
@@ -149,42 +152,13 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
           </div>
         </article>
 
-        <section className="space-y-3">
-          <h2 className="text-2xl font-black text-brand-950">回复 {post.replyCount}</h2>
-          {post.replies.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-sky-200 bg-white/65 p-8 text-center text-slate-500">还没有回复。</div>
-          ) : (
-            post.replies.map((reply, index) => {
-              const avatar = publicImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
-              const name = reply.author.profile?.displayName || reply.author.nickname
-              return (
-                <article key={reply.id} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between gap-3 text-sm font-bold text-slate-500">
-                    <Link href={`/user/${formatUid(reply.author.uid)}`} className="flex items-center gap-2 text-brand-950">
-                      <span className="grid h-8 w-8 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                        {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
-                      </span>
-                      <span>{name} · Lv.{reply.author.level}</span>
-                    </Link>
-                    <span>#{index + 1} · {formatDate(reply.createdAt)}</span>
-                  </div>
-                  <p className="whitespace-pre-wrap leading-7 text-slate-700">{reply.content}</p>
-                  {user && (user.id === reply.author.id || isAdminRole(user.role)) ? (
-                    <div className="mt-3">
-                      <DeleteCommentButton endpoint={`/api/replies/${reply.id}`} />
-                    </div>
-                  ) : null}
-                </article>
-              )
-            })
-          )}
-        </section>
-
-        {user ? (
-          <ReplyForm postId={post.id} />
-        ) : (
-          <div className="rounded-xl border border-sky-100 bg-white/82 p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
-        )}
+        <PostRepliesSection
+          postId={post.id}
+          initialReplies={post.replies}
+          initialReplyCount={post.replyCount}
+          currentUserId={user?.id}
+          currentUserRole={user?.role}
+        />
       </main>
     </>
   )

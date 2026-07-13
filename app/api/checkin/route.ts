@@ -8,6 +8,10 @@ import { calcLevel } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, sanitizeText } from '@/lib/security'
 
+function logPerf(metric: string, start: number, extra?: Record<string, unknown>) {
+  console.info('[perf]', { metric, ms: Date.now() - start, ...extra })
+}
+
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
@@ -61,8 +65,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const requestStart = Date.now()
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再挂号' }, { status: 401 })
+  logPerf('checkin.auth.ms', requestStart, { userId: user.id })
 
   const body = await request.json().catch(() => null)
   const moodKey = sanitizeText(body?.mood, 40)
@@ -78,10 +84,12 @@ export async function POST(request: Request) {
   const yesterday = startOfYesterday()
 
   let existing
+  const existingStart = Date.now()
   try {
     existing = await prisma.checkIn.findUnique({
       where: { userId_checkDate: { userId: user.id, checkDate: today } },
     })
+    logPerf('checkin.existing.ms', existingStart, { userId: user.id })
   } catch (error) {
     console.error('[api/checkin] prisma query failed', {
       model: 'CheckIn',
@@ -121,6 +129,7 @@ export async function POST(request: Request) {
   }
 
   let result
+  const transactionStart = Date.now()
   try {
     result = await prisma.$transaction(async (tx) => {
     const currentUser = await tx.user.findUniqueOrThrow({
@@ -187,30 +196,9 @@ export async function POST(request: Request) {
       },
     })
 
-    const signTask = await tx.dailyTaskTemplate.findUnique({ where: { key: 'daily-checkin' } })
-    if (signTask) {
-      await tx.dailyTaskProgress.upsert({
-        where: {
-          userId_templateId_taskDate: {
-            userId: user.id,
-            templateId: signTask.id,
-            taskDate: today,
-          },
-        },
-        update: { progress: 1, isCompleted: true, completedAt: new Date() },
-        create: {
-          userId: user.id,
-          templateId: signTask.id,
-          taskDate: today,
-          progress: 1,
-          isCompleted: true,
-          completedAt: new Date(),
-        },
-      })
-    }
-
-    return { user: updatedUser, gainedPoints, gainedExp, bonus, dailyMessageId }
+    return { user: updatedUser, gainedPoints, gainedExp, bonus, dailyMessageId, checkInId: checkIn.id }
     })
+    logPerf('checkin.transaction.ms', transactionStart, { userId: user.id })
   } catch (error) {
     console.error('[api/checkin] prisma transaction failed', {
       feature: 'checkinApi.createCheckIn',
@@ -220,17 +208,46 @@ export async function POST(request: Request) {
         { model: 'DailyMessage', query: 'create', conditional: 'when message exists' },
         { model: 'User', query: 'update' },
         { model: 'PointLog', query: 'create' },
-        { model: 'DailyTaskTemplate', query: 'findUnique' },
-        { model: 'DailyTaskProgress', query: 'upsert', conditional: 'when template exists' },
       ],
     }, error)
     throw error
   }
 
-  await syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']).catch((achievementError) => {
-    console.error('[achievements:checkin]', achievementError)
+  const afterStart = Date.now()
+  Promise.allSettled([
+    syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
+    prisma.dailyTaskTemplate.findUnique({ where: { key: 'daily-checkin' }, select: { id: true } }).then((signTask) => (
+      signTask
+        ? prisma.dailyTaskProgress.upsert({
+            where: {
+              userId_templateId_taskDate: {
+                userId: user.id,
+                templateId: signTask.id,
+                taskDate: today,
+              },
+            },
+            update: { progress: 1, isCompleted: true, completedAt: new Date() },
+            create: {
+              userId: user.id,
+              templateId: signTask.id,
+              taskDate: today,
+              progress: 1,
+              isCompleted: true,
+              completedAt: new Date(),
+            },
+          })
+        : null
+    )),
+  ]).then((results) => {
+    logPerf('checkin.afterwork.ms', afterStart, { userId: user.id })
+    results.forEach((item, index) => {
+      if (item.status === 'rejected') {
+        console.error(index === 0 ? '[achievements:checkin]' : '[dailyTask:checkin]', item.reason)
+      }
+    })
   })
 
+  logPerf('checkin.total.ms', requestStart, { userId: user.id })
   return NextResponse.json({
     message: '今日挂号成功！',
     checkedToday: true,

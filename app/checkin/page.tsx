@@ -25,8 +25,10 @@ function parseDate(value?: string) {
 }
 
 export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string }> }) {
+  const pageStart = Date.now()
   const sessionUser = await getCurrentUser()
   if (!sessionUser) redirect('/login')
+  console.info('[perf]', { metric: 'page.checkin.auth.ms', ms: Date.now() - pageStart })
 
   const params = await searchParams
   const selectedDate = parseDate(params.date)
@@ -35,14 +37,56 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const sort: CheckInMessageSort = params.sort === 'hot' ? 'hot' : 'latest'
 
   let user
+  let activeUsers = 0
+  let todayCount = 0
+  let selectedMessages: Awaited<ReturnType<typeof getCheckInMessages>> = []
+  let moodStats: Array<{ mood: string | null; _count: { mood: number } }> = []
+  let totalCheckIns = 0
+  const queryStart = Date.now()
   try {
-    user = await withDbTimeout(
-      'User.findUnique checkin.user',
-      prisma.user.findUnique({
-        where: { id: sessionUser.id },
-        select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
-      }),
-    )
+    ;[
+      user,
+      activeUsers,
+      todayCount,
+      selectedMessages,
+      moodStats,
+      totalCheckIns,
+    ] = await Promise.all([
+      withDbTimeout(
+        'User.findUnique checkin.user',
+        prisma.user.findUnique({
+          where: { id: sessionUser.id },
+          select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
+        }),
+      ),
+      safeDb(
+        'User.count checkin.activeUsers',
+        prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
+        0,
+      ),
+      safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0),
+      safeDb(
+        'DailyMessage.findMany checkin.messages',
+        getCheckInMessages({
+          selectedDate,
+          nextDate,
+          sort,
+          viewerId: sessionUser.id,
+        }),
+        [],
+      ),
+      safeDb(
+        'CheckIn.groupBy checkin.moodStats',
+        prisma.checkIn.groupBy({
+          by: ['mood'],
+          where: { checkDate: today, mood: { not: null } },
+          _count: { mood: true },
+        }),
+        [],
+      ),
+      safeDb('CheckIn.count checkin.totalCheckIns', prisma.checkIn.count({ where: { userId: sessionUser.id } }), 0),
+    ])
+    console.info('[perf]', { metric: 'page.checkin.parallelQueries.ms', ms: Date.now() - queryStart })
   } catch (error) {
     console.error('[checkin] prisma query failed', {
       model: 'User',
@@ -52,32 +96,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     }, error)
     throw error
   }
-  const activeUsers = await safeDb(
-    'User.count checkin.activeUsers',
-    prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
-    0,
-  )
-  const todayCount = await safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0)
-  const selectedMessages = await safeDb(
-    'DailyMessage.findMany checkin.messages',
-    getCheckInMessages({
-      selectedDate,
-      nextDate,
-      sort,
-      viewerId: sessionUser.id,
-    }),
-    [],
-  )
-  const moodStats = await safeDb(
-    'CheckIn.groupBy checkin.moodStats',
-    prisma.checkIn.groupBy({
-      by: ['mood'],
-      where: { checkDate: today, mood: { not: null } },
-      _count: { mood: true },
-    }),
-    [],
-  )
-  const totalCheckIns = await safeDb('CheckIn.count checkin.totalCheckIns', prisma.checkIn.count({ where: { userId: sessionUser.id } }), 0)
+  console.info('[perf]', { metric: 'page.checkin.total.ms', ms: Date.now() - pageStart })
 
   if (!user) redirect('/login')
 

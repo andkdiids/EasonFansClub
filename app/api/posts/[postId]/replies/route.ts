@@ -21,9 +21,25 @@ export async function POST(request: Request, { params }: Params) {
 
   const post = await prisma.post.findFirst({
     where: { id: postId, isDeleted: false, status: 'PUBLISHED' },
-    select: { id: true },
+    select: { id: true, authorId: true },
   })
   if (!post) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
+
+  let parentReply: { id: string; authorId: string; parentId: string | null; author: { nickname: string; profile: { displayName: string | null } | null } } | null = null
+  if (parentId) {
+    parentReply = await prisma.reply.findFirst({
+      where: { id: parentId, postId, isDeleted: false },
+      select: {
+        id: true,
+        authorId: true,
+        parentId: true,
+        author: { select: { nickname: true, profile: { select: { displayName: true } } } },
+      },
+    })
+    if (!parentReply) {
+      return NextResponse.json({ message: '不能回复不存在或已删除的评论' }, { status: 400 })
+    }
+  }
 
   const reply = await prisma.$transaction(async (tx) => {
     const currentUser = await tx.user.findFirstOrThrow({
@@ -40,7 +56,18 @@ export async function POST(request: Request, { params }: Params) {
         content,
         parentId: parentId || null,
       },
-      select: { id: true },
+      include: {
+        author: {
+          select: {
+            id: true,
+            uid: true,
+            nickname: true,
+            level: true,
+            avatarUrl: true,
+            profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
     })
 
     await tx.post.update({
@@ -65,6 +92,22 @@ export async function POST(request: Request, { params }: Params) {
         reason: '回复帖子',
       },
     })
+
+    const recipientId = parentReply?.authorId || post.authorId
+    if (recipientId !== user.id) {
+      await tx.notification.create({
+        data: {
+          recipientId,
+          actorId: user.id,
+          type: 'REPLY',
+          title: parentReply ? '有人回复了你的评论' : '你的帖子有新回复',
+          content: parentReply
+            ? `${user.nickname} 回复了你的评论`
+            : `${user.nickname} 回复了你的帖子`,
+          link: `/posts/${postId}`,
+        },
+      })
+    }
 
     return createdReply
   })

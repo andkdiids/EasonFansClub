@@ -4,7 +4,17 @@ import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiButton } from '@/components/EmojiPicker'
 
-export function ReplyForm({ postId }: Readonly<{ postId: string }>) {
+export function ReplyForm({
+  postId,
+  replyTo,
+  onReplyCancel,
+  onReplyCreated,
+}: Readonly<{
+  postId: string
+  replyTo?: { id: string; name: string } | null
+  onReplyCancel?: () => void
+  onReplyCreated?: (reply: unknown) => void
+}>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [content, setContent] = useState('')
@@ -31,7 +41,7 @@ export function ReplyForm({ postId }: Readonly<{ postId: string }>) {
     const response = await fetch(`/api/posts/${postId}/replies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, parentId: replyTo?.id }),
     })
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
@@ -40,13 +50,21 @@ export function ReplyForm({ postId }: Readonly<{ postId: string }>) {
       return
     }
     setContent('')
-    router.refresh()
+    onReplyCancel?.()
+    onReplyCreated?.(data.reply)
+    if (!onReplyCreated) router.refresh()
   }
 
   return (
     <form onSubmit={submitReply} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
+      {replyTo ? (
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-sky-50 px-4 py-3 text-sm font-black text-brand-700">
+          <span>正在回复 {replyTo.name}</span>
+          <button type="button" onClick={onReplyCancel} className="text-slate-500">取消</button>
+        </div>
+      ) : null}
       <label className="block">
-        <span className="text-sm font-black text-slate-700">回复帖子</span>
+        <span className="text-sm font-black text-slate-700">{replyTo ? '楼中楼回复' : '回复帖子'}</span>
         <textarea
           ref={textareaRef}
           value={content}

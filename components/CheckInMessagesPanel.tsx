@@ -9,6 +9,8 @@ import { getMood } from '@/lib/daily'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
+type DailyComment = CheckInMessageItem['comments'][number]
+
 function beijingDateTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -33,6 +35,15 @@ function updateUrl(date: string, sort: CheckInMessageSort) {
   window.history.pushState(null, '', `${url.pathname}?${url.searchParams.toString()}`)
 }
 
+function buildCommentTree(comments: DailyComment[]) {
+  const byParent = new Map<string | null, DailyComment[]>()
+  comments.forEach((comment) => {
+    const key = comment.parentId || null
+    byParent.set(key, [...(byParent.get(key) || []), comment])
+  })
+  return byParent
+}
+
 export function CheckInMessagesPanel({
   initialMessages,
   initialDate,
@@ -53,6 +64,29 @@ export function CheckInMessagesPanel({
   const [messages, setMessages] = useState(initialMessages)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [replyTargets, setReplyTargets] = useState<Record<string, { id: string; name: string } | null>>({})
+  const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
+
+  function addComment(messageId: string, comment: unknown) {
+    if (!comment || typeof comment !== 'object') return
+    setMessages((current) => current.map((message) => (
+      message.id === messageId
+        ? { ...message, commentCount: message.commentCount + 1, comments: [...message.comments, comment as DailyComment] }
+        : message
+    )))
+  }
+
+  function removeComment(messageId: string, commentId: string) {
+    setMessages((current) => current.map((message) => (
+      message.id === messageId
+        ? {
+            ...message,
+            commentCount: Math.max(message.commentCount - 1, 0),
+            comments: message.comments.filter((comment) => comment.id !== commentId && comment.parentId !== commentId),
+          }
+        : message
+    )))
+  }
 
   const loadMessages = useCallback(async (nextDate = date, nextSort = sort) => {
     if (isLoading) return
@@ -157,6 +191,9 @@ export function CheckInMessagesPanel({
           const mood = getMood(item.mood)
           const name = item.user.profile?.displayName || item.user.nickname
           const avatar = publicImageUrl(item.user.profile?.avatarUrl || item.user.avatarUrl)
+          const commentTree = buildCommentTree(item.comments)
+          const rootComments = commentTree.get(null) || []
+          const replyTarget = replyTargets[item.id] || null
           return (
             <article key={item.id} className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
               <div className="flex gap-4">
@@ -172,19 +209,91 @@ export function CheckInMessagesPanel({
                     <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span>
                   </div>
                   <p className="mt-3 whitespace-pre-wrap leading-8 text-slate-700">{item.content}</p>
-                  {item.comments.length ? (
+                  {rootComments.length ? (
                     <div className="mt-4 space-y-2 rounded-2xl bg-sky-50/70 p-3">
-                      {item.comments.map((comment) => (
-                        <div key={comment.id} className="text-sm leading-6 text-slate-600">
-                          <strong className="text-brand-950">{comment.author.profile?.displayName || comment.author.nickname}：</strong>
-                          {comment.content}
-                          {sessionUserId === comment.author.id || isAdminRole(sessionUserRole) ? (
-                            <span className="ml-2">
-                              <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} />
-                            </span>
-                          ) : null}
-                        </div>
-                      ))}
+                      {rootComments.map((comment) => {
+                        const commentName = comment.author.profile?.displayName || comment.author.nickname
+                        const commentAvatar = publicImageUrl(comment.author.profile?.avatarUrl || comment.author.avatarUrl)
+                        const children = commentTree.get(comment.id) || []
+                        const showAll = Boolean(expandedReplies[comment.id])
+                        const visibleChildren = showAll ? children : children.slice(0, 3)
+                        return (
+                          <div key={comment.id} className="rounded-xl bg-white/70 p-3 text-sm leading-6 text-slate-600">
+                            <div className="flex items-start gap-2">
+                              <a href={`/user/${formatUid(comment.author.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
+                                {commentAvatar ? <Image src={commentAvatar} alt={commentName} width={32} height={32} className="h-full w-full object-cover" /> : commentName.slice(0, 1)}
+                              </a>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <a href={`/user/${formatUid(comment.author.uid)}`} className="font-black text-brand-950">{commentName}</a>
+                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(comment.author.uid)}</span>
+                                  <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
+                                </div>
+                                <p className="mt-1 whitespace-pre-wrap">{comment.content}</p>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setReplyTargets((current) => ({ ...current, [item.id]: { id: comment.id, name: commentName } }))}
+                                    className="text-xs font-black text-brand-700"
+                                  >
+                                    回复
+                                  </button>
+                                  {sessionUserId === comment.author.id || isAdminRole(sessionUserRole) ? (
+                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} onDeleted={() => removeComment(item.id, comment.id)} />
+                                  ) : null}
+                                </div>
+
+                                {visibleChildren.length ? (
+                                  <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
+                                    {visibleChildren.map((child) => {
+                                      const childName = child.author.profile?.displayName || child.author.nickname
+                                      const childAvatar = publicImageUrl(child.author.profile?.avatarUrl || child.author.avatarUrl)
+                                      return (
+                                        <div key={child.id} className="rounded-xl bg-sky-50/70 p-3">
+                                          <div className="flex items-start gap-2">
+                                            <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
+                                              {childAvatar ? <Image src={childAvatar} alt={childName} width={28} height={28} className="h-full w-full object-cover" /> : childName.slice(0, 1)}
+                                            </a>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <a href={`/user/${formatUid(child.author.uid)}`} className="font-black text-brand-950">{childName}</a>
+                                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(child.author.uid)}</span>
+                                                <span className="text-xs font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
+                                              </div>
+                                              <p className="mt-1 whitespace-pre-wrap">回复 {commentName}：{child.content}</p>
+                                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setReplyTargets((current) => ({ ...current, [item.id]: { id: child.id, name: childName } }))}
+                                                  className="text-xs font-black text-brand-700"
+                                                >
+                                                  回复
+                                                </button>
+                                                {sessionUserId === child.author.id || isAdminRole(sessionUserRole) ? (
+                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} onDeleted={() => removeComment(item.id, child.id)} />
+                                                ) : null}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                    {children.length > 3 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !showAll }))}
+                                        className="text-xs font-black text-brand-700"
+                                      >
+                                        {showAll ? '收起回复' : `展开更多回复（${children.length - 3}）`}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   ) : null}
                   <DailyMessageActions
@@ -194,6 +303,9 @@ export function CheckInMessagesPanel({
                     commentCount={item.commentCount}
                     initialLiked={item.likes.length > 0}
                     initialFavorited={item.favorites.length > 0}
+                    replyTo={replyTarget}
+                    onReplyCancel={() => setReplyTargets((current) => ({ ...current, [item.id]: null }))}
+                    onCommentCreated={(comment) => addComment(item.id, comment)}
                   />
                 </div>
               </div>

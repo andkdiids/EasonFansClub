@@ -28,6 +28,10 @@ export async function DELETE(_request: Request, context: RouteContext) {
       where: { id: comment.id },
       data: { isDeleted: true, deletedAt: new Date() },
     })
+    await tx.dailyMessageComment.updateMany({
+      where: { parentId: comment.id, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date() },
+    })
     const count = await tx.dailyMessageComment.count({
       where: { messageId: comment.messageId, isDeleted: false },
     })

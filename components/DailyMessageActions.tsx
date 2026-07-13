@@ -11,6 +11,9 @@ export function DailyMessageActions({
   commentCount,
   initialLiked = false,
   initialFavorited = false,
+  replyTo,
+  onReplyCancel,
+  onCommentCreated,
 }: Readonly<{
   messageId: string
   likeCount: number
@@ -18,6 +21,9 @@ export function DailyMessageActions({
   commentCount: number
   initialLiked?: boolean
   initialFavorited?: boolean
+  replyTo?: { id: string; name: string } | null
+  onReplyCancel?: () => void
+  onCommentCreated?: (comment: unknown) => void
 }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -67,14 +73,16 @@ export function DailyMessageActions({
   }
 
   async function submitComment() {
-    if (!comment.trim()) return
+    if (isSubmitting || !comment.trim()) return
     setError('')
+    setIsSubmitting(true)
     const response = await fetch(`/api/daily-messages/${messageId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: comment }),
+      body: JSON.stringify({ content: comment, parentId: replyTo?.id }),
     })
     const data = await response.json().catch(() => ({}))
+    setIsSubmitting(false)
     if (!response.ok) {
       setError(data.message || '评论失败，请稍后再试')
       return
@@ -82,7 +90,8 @@ export function DailyMessageActions({
     setComment('')
     setComments((value) => value + 1)
     setIsOpen(false)
-    router.refresh()
+    onReplyCancel?.()
+    onCommentCreated?.(data.comment)
   }
 
   return (
@@ -95,8 +104,14 @@ export function DailyMessageActions({
         >
           {isLiked ? '♥' : '♡'} {likes}
         </button>
-        <button onClick={() => setIsOpen((value) => !value)} className="rounded-full bg-sky-50 px-3 py-2 text-brand-700">
-          评论 {comments}
+        <button
+          onClick={() => {
+            setIsOpen((value) => !value)
+            if (!isOpen) onReplyCancel?.()
+          }}
+          className="rounded-full bg-sky-50 px-3 py-2 text-brand-700"
+        >
+          {replyTo ? `回复 ${replyTo.name}` : '评论'} {comments}
         </button>
         <button
           onClick={() => toggle(`/api/daily-messages/${messageId}/favorite`, 'favorite')}
@@ -107,8 +122,14 @@ export function DailyMessageActions({
         </button>
       </div>
 
-      {isOpen ? (
+      {isOpen || replyTo ? (
         <div className="rounded-2xl border border-sky-100 bg-white p-3">
+          {replyTo ? (
+            <div className="mb-2 flex items-center justify-between rounded-xl bg-sky-50 px-3 py-2 text-xs font-black text-brand-700">
+              <span>正在回复 {replyTo.name}</span>
+              <button type="button" onClick={onReplyCancel} className="text-slate-500">取消</button>
+            </div>
+          ) : null}
           <textarea
             ref={textareaRef}
             value={comment}
@@ -128,8 +149,8 @@ export function DailyMessageActions({
               <EmojiButton onSelect={insertEmoji} />
               <span className="text-xs font-bold text-slate-400">{comment.length}/300</span>
             </div>
-            <button onClick={submitComment} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-black text-white">
-              发送评论
+            <button onClick={submitComment} disabled={isSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-black text-white disabled:opacity-60">
+              {isSubmitting ? '发送中...' : '发送评论'}
             </button>
           </div>
         </div>
