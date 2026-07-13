@@ -1,9 +1,9 @@
 'use client'
 
-import Image from 'next/image'
 import { useCallback, useEffect, useState } from 'react'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
+import { SafeAvatar } from '@/components/SafeAvatar'
 import type { CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
 import { getMood } from '@/lib/daily'
 import { publicImageUrl } from '@/lib/images'
@@ -143,9 +143,19 @@ export function CheckInMessagesPanel({
       const nextDate = detail?.date || maxDate
       loadMessages(nextDate, sort)
     }
+    function handleDayChanged(event: Event) {
+      const detail = (event as CustomEvent<{ date?: string }>).detail
+      const nextDate = detail?.date || maxDate
+      setDate(nextDate)
+      loadMessages(nextDate, sort)
+    }
 
     window.addEventListener('checkin:completed', handleCheckInCompleted)
-    return () => window.removeEventListener('checkin:completed', handleCheckInCompleted)
+    window.addEventListener('checkin:dayChanged', handleDayChanged)
+    return () => {
+      window.removeEventListener('checkin:completed', handleCheckInCompleted)
+      window.removeEventListener('checkin:dayChanged', handleDayChanged)
+    }
   }, [loadMessages, maxDate, sort])
 
   return (
@@ -221,7 +231,7 @@ export function CheckInMessagesPanel({
             <article key={item.id} className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
               <div className="flex gap-4">
                 <a href={`/user/${formatUid(item.user.uid)}`} className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-sky-50 text-2xl">
-                  {avatar ? <Image src={avatar} alt={name} width={48} height={48} className="h-full w-full object-cover" /> : mood?.icon || '🎵'}
+                  {avatar ? <SafeAvatar src={avatar} name={name} className="h-full w-full" /> : mood?.icon || '🎵'}
                 </a>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -244,7 +254,7 @@ export function CheckInMessagesPanel({
                           <div key={comment.id} className="rounded-xl bg-white/70 p-3 text-sm leading-6 text-slate-600">
                             <div className="flex items-start gap-2">
                               <a href={`/user/${formatUid(comment.author.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
-                                {commentAvatar ? <Image src={commentAvatar} alt={commentName} width={32} height={32} className="h-full w-full object-cover" /> : commentName.slice(0, 1)}
+                                <SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" />
                               </a>
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
@@ -275,7 +285,7 @@ export function CheckInMessagesPanel({
                                         <div key={child.id} className="min-w-0 py-2">
                                           <div className="flex min-w-0 items-start gap-2">
                                             <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
-                                              {childAvatar ? <Image src={childAvatar} alt={childName} width={24} height={24} className="h-full w-full object-cover" /> : childName.slice(0, 1)}
+                                              <SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" />
                                             </a>
                                             <div className="min-w-0 flex-1">
                                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
