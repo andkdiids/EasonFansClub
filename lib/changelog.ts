@@ -1,4 +1,9 @@
-import type { ChangelogStatus, ChangelogType, Prisma } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
+import { systemNotificationSelect, systemNotificationTypeLabels } from '@/lib/system-notifications'
+
+export type ChangelogStatus = 'DRAFT' | 'PUBLISHED' | 'UNPUBLISHED'
+export type ChangelogType = 'FEATURE' | 'IMPROVEMENT' | 'FIX' | 'SECURITY' | 'CONTENT'
+export type VersionBump = 'patch' | 'minor' | 'major'
 
 export const changelogTypeLabels: Record<ChangelogType, string> = {
   FEATURE: '新功能',
@@ -14,35 +19,33 @@ export const changelogStatusLabels: Record<ChangelogStatus, string> = {
   UNPUBLISHED: '已下架',
 }
 
-export type VersionBump = 'patch' | 'minor' | 'major'
-
 export const changelogTypes = Object.keys(changelogTypeLabels) as ChangelogType[]
 export const changelogStatuses = Object.keys(changelogStatusLabels) as ChangelogStatus[]
+export const changelogSelect = systemNotificationSelect
 
-export const changelogSelect = {
-  id: true,
-  version: true,
-  major: true,
-  minor: true,
-  patch: true,
-  title: true,
-  content: true,
-  type: true,
-  isMajor: true,
-  status: true,
-  publishedAt: true,
-  createdAt: true,
-  updatedAt: true,
-  createdBy: { select: { uid: true, nickname: true } },
-} satisfies Prisma.ChangelogSelect
-
-type ChangelogItem = Prisma.ChangelogGetPayload<{ select: typeof changelogSelect }>
+type ChangelogItem = Prisma.SystemNotificationGetPayload<{ select: typeof systemNotificationSelect }>
 
 export function serializeChangelog(item: ChangelogItem) {
+  const status: ChangelogStatus = item.published ? 'PUBLISHED' : 'DRAFT'
+  const changelogType = mapSystemTypeToChangelogType(item.type)
+  const [major, minor, patch] = parseVersionParts(item.version)
   return {
-    ...item,
-    typeLabel: changelogTypeLabels[item.type],
-    statusLabel: changelogStatusLabels[item.status],
+    id: item.id,
+    version: item.version || 'v0.0.0',
+    major,
+    minor,
+    patch,
+    title: item.title,
+    content: item.content,
+    type: changelogType,
+    typeLabel: changelogTypeLabels[changelogType] || systemNotificationTypeLabels.UPDATE,
+    isMajor: item.priority >= 80,
+    status,
+    statusLabel: changelogStatusLabels[status],
+    publishedAt: item.publishAt,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    createdBy: item.createdBy,
   }
 }
 
@@ -60,20 +63,34 @@ export function parseVersionBump(value: unknown): VersionBump {
   return value === 'major' || value === 'minor' || value === 'patch' ? value : 'patch'
 }
 
-export function nextVersion(
-  latest: { major: number; minor: number; patch: number } | null,
-  bump: VersionBump,
-) {
-  if (!latest) {
-    return { major: 1, minor: 0, patch: 0, version: 'v1.0.0' }
-  }
+export function parseVersionParts(version?: string | null) {
+  const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(version || '')
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] as const : [0, 0, 0] as const
+}
+
+export function nextVersion(latest: { version?: string | null } | null, bump: VersionBump) {
+  const [currentMajor, currentMinor, currentPatch] = parseVersionParts(latest?.version || null)
+  if (!latest || !latest.version) return { major: 1, minor: 0, patch: 0, version: 'v1.0.0' }
 
   const next =
     bump === 'major'
-      ? { major: latest.major + 1, minor: 0, patch: 0 }
+      ? { major: currentMajor + 1, minor: 0, patch: 0 }
       : bump === 'minor'
-        ? { major: latest.major, minor: latest.minor + 1, patch: 0 }
-        : { major: latest.major, minor: latest.minor, patch: latest.patch + 1 }
+        ? { major: currentMajor, minor: currentMinor + 1, patch: 0 }
+        : { major: currentMajor, minor: currentMinor, patch: currentPatch + 1 }
 
   return { ...next, version: `v${next.major}.${next.minor}.${next.patch}` }
+}
+
+export function mapChangelogTypeToPriority(type: ChangelogType, isMajor: boolean) {
+  if (isMajor) return 90
+  if (type === 'SECURITY') return 80
+  if (type === 'FEATURE') return 60
+  return 40
+}
+
+function mapSystemTypeToChangelogType(type: string): ChangelogType {
+  if (type === 'SECURITY') return 'SECURITY'
+  if (type === 'ACTIVITY') return 'CONTENT'
+  return 'IMPROVEMENT'
 }

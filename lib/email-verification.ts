@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { verificationMailTemplate, sendMail } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 
 const EMAIL_TOKEN_TTL_MS = 1000 * 60 * 60 * 24
-const RESEND_COOLDOWN_MS = 1000 * 60 * 10
+const RESEND_COOLDOWN_MS = 1000 * 60
 
 export function normalizeEmail(value: unknown) {
   return String(value ?? '').trim().toLowerCase()
@@ -58,40 +59,14 @@ export async function createVerificationForUser(userId: string, email: string) {
   return { token, verificationUrl: buildEmailVerificationUrl(token) }
 }
 
-export async function sendVerificationEmail(email: string, verificationUrl: string) {
-  const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.EMAIL_FROM || 'EasonFansClub <onboarding@resend.dev>'
-  const subject = '验证你的私家E院邮箱'
-  const text = `请点击下面的链接完成邮箱验证：\n\n${verificationUrl}\n\n链接 24 小时内有效，如果不是你本人操作，请忽略这封邮件。`
-
-  if (!apiKey) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
-    } else {
-      console.log('[email.verify.dev-link]', verificationUrl)
-    }
-    return { sent: false, reason: 'missing_resend_api_key' as const }
-  }
-
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: email,
-      subject,
-      text,
-      html: `<p>请点击下面的链接完成邮箱验证：</p><p><a href="${verificationUrl}">验证邮箱</a></p><p>链接 24 小时内有效，如果不是你本人操作，请忽略这封邮件。</p>`,
-    }),
+export async function sendVerificationEmail(
+  email: string,
+  verificationUrl: string,
+  reason: 'register' | 'change-email' | 'resend' = 'register',
+) {
+  return sendMail({
+    to: email,
+    subject: reason === 'change-email' ? '验证你的新邮箱 - 私家E院' : '验证你的私家E院邮箱',
+    template: verificationMailTemplate(verificationUrl, reason),
   })
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new Error(`EMAIL_SEND_FAILED:${detail.slice(0, 120)}`)
-  }
-
-  return { sent: true as const }
 }

@@ -154,6 +154,15 @@ enum NotificationType {
   BADGE
 }
 
+enum SystemNotificationType {
+  SYSTEM
+  UPDATE
+  ANNOUNCEMENT
+  ACTIVITY
+  MAINTENANCE
+  SECURITY
+}
+
 enum MessageType {
   TEXT
   IMAGE
@@ -260,58 +269,58 @@ model User {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
-  profile                Profile?
-  posts                  Post[]
-  replies                Reply[]
-  likes                  Like[]
-  replyLikes             ReplyLike[]
-  favorites              PostFavorite[]
-  boardFavorites         BoardFavorite[]
-  activityFavorites      ActivityFavorite[]
-  checkIns               CheckIn[]
-  dailyMessages          DailyMessage[]
-  dailyMessageLikes      DailyMessageLike[]
-  dailyMessageFavorites  DailyMessageFavorite[]
-  dailyMessageComments   DailyMessageComment[]
-  dailyTaskProgress      DailyTaskProgress[]
-  pointLogs              PointLog[]
-  badges                 UserBadge[]
-  devices                LoginDevice[]
-  onlineSessions         OnlineSession[]
-  emailVerifications     EmailVerification[]
-  passwordResets         PasswordResetToken[]
-  sentNotifications      Notification[]            @relation("NotificationActor")
-  notifications          Notification[]            @relation("NotificationRecipient")
-  createdSystemNotifications SystemNotification[]  @relation("SystemNotificationCreator")
-  systemNotificationReads SystemNotificationRead[]
-  following              Follow[]                  @relation("FollowFollower")
-  followers              Follow[]                  @relation("FollowFollowing")
-  sentFriendRequests     FriendRequest[]           @relation("FriendRequestSender")
-  receivedFriendRequests FriendRequest[]           @relation("FriendRequestReceiver")
-  friendshipsA           Friendship[]              @relation("FriendshipUserA")
-  friendshipsB           Friendship[]              @relation("FriendshipUserB")
-  blocksMade             Block[]                   @relation("Blocker")
-  blockedBy              Block[]                   @relation("Blocked")
-  conversations          ConversationParticipant[]
-  messages               DirectMessage[]
-  reports                Report[]                  @relation("Reporter")
-  reportedReports        Report[]                  @relation("ReportedUser")
-  activityRegistrations  ActivityRegistration[]
-  lotteryEntries         LotteryEntry[]
-  searchHistory          SearchHistory[]
-  feedbacks              Feedback[]
-  feedbackReplies        FeedbackReply[]
-  createdChangelogs      Changelog[]                @relation("ChangelogCreator")
-  musicFavorites         MusicFavorite[]
-  musicPlayRecords       MusicPlayRecord[]
-  achievements           UserAchievement[]
-  albumCollections       UserAlbumCollection[]
-  cultureFavorites       CultureFavorite[]
-  cultureComments        CultureComment[]
-  lyricCards             LyricCard[]
-  adminActions           AdminAction[]             @relation("AdminOperator")
-  targetAdminActions     AdminAction[]             @relation("AdminTargetUser")
-  adminPermissions       AdminPermission[]
+  profile                    Profile?
+  posts                      Post[]
+  replies                    Reply[]
+  likes                      Like[]
+  replyLikes                 ReplyLike[]
+  favorites                  PostFavorite[]
+  boardFavorites             BoardFavorite[]
+  activityFavorites          ActivityFavorite[]
+  checkIns                   CheckIn[]
+  dailyMessages              DailyMessage[]
+  dailyMessageLikes          DailyMessageLike[]
+  dailyMessageFavorites      DailyMessageFavorite[]
+  dailyMessageComments       DailyMessageComment[]
+  dailyTaskProgress          DailyTaskProgress[]
+  pointLogs                  PointLog[]
+  badges                     UserBadge[]
+  devices                    LoginDevice[]
+  onlineSessions             OnlineSession[]
+  emailVerifications         EmailVerification[]
+  passwordResets             PasswordResetToken[]
+  sentNotifications          Notification[]            @relation("NotificationActor")
+  notifications              Notification[]            @relation("NotificationRecipient")
+  createdSystemNotifications SystemNotification[]      @relation("SystemNotificationCreator")
+  systemNotificationReads    SystemNotificationRead[]
+  following                  Follow[]                  @relation("FollowFollower")
+  followers                  Follow[]                  @relation("FollowFollowing")
+  sentFriendRequests         FriendRequest[]           @relation("FriendRequestSender")
+  receivedFriendRequests     FriendRequest[]           @relation("FriendRequestReceiver")
+  friendshipsA               Friendship[]              @relation("FriendshipUserA")
+  friendshipsB               Friendship[]              @relation("FriendshipUserB")
+  blocksMade                 Block[]                   @relation("Blocker")
+  blockedBy                  Block[]                   @relation("Blocked")
+  conversations              ConversationParticipant[]
+  messages                   DirectMessage[]
+  reports                    Report[]                  @relation("Reporter")
+  reportedReports            Report[]                  @relation("ReportedUser")
+  activityRegistrations      ActivityRegistration[]
+  lotteryEntries             LotteryEntry[]
+  searchHistory              SearchHistory[]
+  feedbacks                  Feedback[]
+  feedbackReplies            FeedbackReply[]
+  createdChangelogs          Changelog[]               @relation("ChangelogCreator")
+  musicFavorites             MusicFavorite[]
+  musicPlayRecords           MusicPlayRecord[]
+  achievements               UserAchievement[]
+  albumCollections           UserAlbumCollection[]
+  cultureFavorites           CultureFavorite[]
+  cultureComments            CultureComment[]
+  lyricCards                 LyricCard[]
+  adminActions               AdminAction[]             @relation("AdminOperator")
+  targetAdminActions         AdminAction[]             @relation("AdminTargetUser")
+  adminPermissions           AdminPermission[]
 
   @@index([role])
   @@index([status])
@@ -835,15 +844,25 @@ model Notification {
 }
 
 model SystemNotification {
-  id          String   @id @default(cuid())
+  id          String                 @id @default(cuid())
   title       String
   content     String
   link        String?
-  type        String   @default("SYSTEM")
-  isPublished Boolean  @default(true)
-  publishedAt DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  type        SystemNotificationType @default(SYSTEM)
+  isPublished Boolean                @default(true)
+  publishedAt DateTime               @default(now())
+  cover       String?
+  priority    Int                    @default(0)
+  popup       Boolean                @default(false)
+  sticky      Boolean                @default(false)
+  publishAt   DateTime               @default(now())
+  expireAt    DateTime?
+  published   Boolean                @default(true)
+  buttonText  String?
+  buttonUrl   String?
+  version     String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
 
   createdById String
   createdBy   User   @relation("SystemNotificationCreator", fields: [createdById], references: [id], onDelete: Cascade)
@@ -851,12 +870,17 @@ model SystemNotification {
   reads SystemNotificationRead[]
 
   @@index([isPublished, publishedAt])
+  @@index([published, publishAt])
+  @@index([expireAt])
+  @@index([priority])
+  @@index([type])
+  @@index([sticky, priority, publishAt])
   @@index([createdById, createdAt])
 }
 
 model SystemNotificationRead {
-  id             String   @id @default(cuid())
-  readAt         DateTime @default(now())
+  id     String   @id @default(cuid())
+  readAt DateTime @default(now())
 
   notificationId String
   notification   SystemNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)

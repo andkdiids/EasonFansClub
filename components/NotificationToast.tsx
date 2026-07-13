@@ -9,6 +9,7 @@ type ToastNotification = {
   title: string
   content: string | null
   link: string | null
+  targetUrl?: string | null
 }
 
 const displayedKey = 'ecfc-displayed-notification-ids'
@@ -36,7 +37,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
     let closeTimer: number | undefined
 
     async function poll() {
-      const response = await fetch('/api/notifications?unread=1&limit=5', { cache: 'no-store' }).catch(() => null)
+      const response = await fetch('/api/notifications/popup', { cache: 'no-store' }).catch(() => null)
       if (!response?.ok || cancelled) return
       const data = await response.json().catch(() => null) as { notifications?: ToastNotification[] } | null
       const displayed = loadDisplayedIds()
@@ -72,7 +73,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
             ×
           </button>
         </div>
-        <Link href={toast.link || '/notifications'} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white">
+        <Link href={toast.targetUrl || toast.link || '/notifications'} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white">
           查看详情
         </Link>
       </div>
