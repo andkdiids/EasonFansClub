@@ -1,6 +1,6 @@
 export const adminPermissionGroups = [
   { key: 'user_delete', label: '永久删除用户', description: '永久删除用户账号、私有数据，并处理公开内容归属。' },
-  { key: 'user_manage', label: '用户管理', description: '查看、编辑、封禁、删除用户。' },
+  { key: 'user_manage', label: '用户管理', description: '查看、编辑、封禁和删除用户。' },
   { key: 'post_manage', label: '帖子管理', description: '删除、置顶、精华、推荐和锁定帖子。' },
   { key: 'reply_manage', label: '回复管理', description: '删除、恢复和屏蔽回复。' },
   { key: 'board_manage', label: '板块管理', description: '创建、编辑、隐藏和排序论坛板块。' },
@@ -13,6 +13,7 @@ export const adminPermissionGroups = [
   { key: 'nav_manage', label: '导航栏管理', description: '管理导航入口、图标、名称和排序。' },
   { key: 'site_config_manage', label: '网站外观配置', description: '管理网站文案、颜色、Logo 和图片。' },
   { key: 'feedback_manage', label: '反馈管理', description: '查看、回复和关闭用户反馈。' },
+  { key: 'changelog_manage', label: '更新日志管理', description: '创建、发布和维护网站更新日志。' },
   { key: 'notification_manage', label: '全站通知管理', description: '发布、隐藏和查看全站系统通知。' },
   { key: 'stats_view', label: '数据统计查看', description: '查看后台运营数据和统计面板。' },
   { key: 'admin_manage', label: '管理员管理', description: '添加管理员、移除管理员并编辑后台权限。' },
@@ -31,6 +32,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/culture': 'culture_manage',
   '/admin/music': 'music_manage',
   '/admin/feedback': 'feedback_manage',
+  '/admin/changelog': 'changelog_manage',
   '/admin/notifications': 'notification_manage',
   '/admin/appearance': 'site_config_manage',
   '/admin/admins': 'admin_manage',

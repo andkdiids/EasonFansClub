@@ -60,7 +60,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             ))}
             {isAdmin ? (
               <Link href="/admin" title="后台" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-lg text-brand-700 hover:bg-sky-50">
-                ⚙
+                <span aria-hidden>⚙</span>
                 <span className="sr-only">后台</span>
               </Link>
             ) : null}
@@ -75,12 +75,13 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
                 {unreadCount > 0 ? <span className="absolute left-8 top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" aria-label="有未读通知" /> : null}
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
               </summary>
-              <div className="absolute right-0 mt-3 w-52 rounded-2xl border border-sky-100 bg-white p-2 shadow-xl shadow-sky-900/10">
+              <div className="absolute right-0 mt-3 w-56 rounded-2xl border border-sky-100 bg-white p-2 shadow-xl shadow-sky-900/10">
                 <Link href={`/user/${formatUid(user.uid)}`} className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">个人主页</Link>
                 <Link href="/notifications" className="flex items-center justify-between rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">
                   <span>通知中心</span>
                   {unreadCount > 0 ? <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white">{unreadCount > 99 ? '99+' : unreadCount}</span> : null}
                 </Link>
+                <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈与更新</Link>
                 <Link href="/friends" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">我的好友</Link>
                 <Link href="/profile" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">账号设置</Link>
                 {isAdmin ? <Link href="/admin" className="block rounded-xl px-4 py-3 text-sm font-bold text-brand-700 hover:bg-sky-50">后台管理</Link> : null}

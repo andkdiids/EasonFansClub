@@ -201,16 +201,33 @@ enum FriendRequestStatus {
 
 enum FeedbackStatus {
   OPEN
+  PROCESSING
   REPLIED
+  RESOLVED
   CLOSED
 }
 
 enum FeedbackType {
   BUG
+  EXPERIENCE
   SUGGESTION
   CONTENT
   ACCOUNT
   OTHER
+}
+
+enum ChangelogType {
+  FEATURE
+  IMPROVEMENT
+  FIX
+  SECURITY
+  CONTENT
+}
+
+enum ChangelogStatus {
+  DRAFT
+  PUBLISHED
+  UNPUBLISHED
 }
 
 model User {
@@ -284,6 +301,7 @@ model User {
   searchHistory          SearchHistory[]
   feedbacks              Feedback[]
   feedbackReplies        FeedbackReply[]
+  createdChangelogs      Changelog[]                @relation("ChangelogCreator")
   musicFavorites         MusicFavorite[]
   musicPlayRecords       MusicPlayRecord[]
   achievements           UserAchievement[]
@@ -985,28 +1003,41 @@ model Report {
 }
 
 model Feedback {
-  id        String         @id @default(cuid())
-  type      FeedbackType
-  title     String
-  content   String
-  imageUrl  String?
-  status    FeedbackStatus @default(OPEN)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id               String         @id @default(cuid())
+  type             FeedbackType
+  title            String
+  content          String
+  imageUrl         String?
+  contact          String?
+  status           FeedbackStatus @default(OPEN)
+  adminUnread      Boolean        @default(true)
+  userUnread       Boolean        @default(false)
+  lastReplyAt      DateTime?
+  lastUserReplyAt  DateTime?
+  lastAdminReplyAt DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  replies FeedbackReply[]
+  replies     FeedbackReply[]
+  attachments FeedbackAttachment[]
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@index([lastReplyAt])
+  @@index([adminUnread, updatedAt])
 }
 
 model FeedbackReply {
-  id        String   @id @default(cuid())
-  content   String
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  content       String
+  authorRole    String   @default("ADMIN")
+  isReadByUser  Boolean  @default(false)
+  isReadByAdmin Boolean  @default(false)
+  createdAt     DateTime @default(now())
 
   feedbackId String
   feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
@@ -1014,7 +1045,49 @@ model FeedbackReply {
   adminId String
   admin   User   @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
+  attachments FeedbackAttachment[]
+
   @@index([feedbackId, createdAt])
+  @@index([adminId, createdAt])
+}
+
+model FeedbackAttachment {
+  id        String   @id @default(cuid())
+  url       String
+  mimeType  String?
+  createdAt DateTime @default(now())
+
+  feedbackId String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  replyId String?
+  reply   FeedbackReply? @relation(fields: [replyId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId])
+  @@index([replyId])
+}
+
+model Changelog {
+  id          String          @id @default(cuid())
+  version     String          @unique
+  major       Int
+  minor       Int
+  patch       Int
+  title       String
+  content     String
+  type        ChangelogType
+  isMajor     Boolean         @default(false)
+  status      ChangelogStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  createdById String
+  createdBy   User   @relation("ChangelogCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([status, publishedAt])
+  @@index([major, minor, patch])
+  @@index([createdById, createdAt])
 }
 
 model MusicTrack {
