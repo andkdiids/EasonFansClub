@@ -4,6 +4,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { adminModulePermissions } from '@/lib/admin-permission-config'
 import { getAdminPermissionSet, isSuperAdmin } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
+import { getRegistrationPolicy } from '@/lib/registration'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,13 +34,14 @@ export default async function AdminPage() {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const [users, posts, replies, checkIns, achievements, cultureItems] = await Promise.all([
+  const [users, posts, replies, checkIns, achievements, cultureItems, registrationPolicy] = await Promise.all([
     prisma.user.count({ where: { isDeleted: false, status: 'ACTIVE' } }),
     prisma.post.count({ where: { isDeleted: false } }),
     prisma.reply.count({ where: { isDeleted: false } }),
     prisma.checkIn.count({ where: { createdAt: { gte: today } } }),
     prisma.achievement.count().catch(() => 0),
     prisma.cultureItem.count().catch(() => 0),
+    getRegistrationPolicy(),
   ])
 
   return (
@@ -52,6 +54,21 @@ export default async function AdminPage() {
           <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">
             管理用户、帖子、板块、挂号、站点外观、EasMusic、成就系统和 Eason 文化馆。
           </p>
+        </section>
+
+        <section className={`rounded-[28px] border p-5 shadow-sm ${registrationPolicy.envForcedClosed ? 'border-red-100 bg-red-50' : registrationPolicy.registrationMode === 'PHONE' ? 'border-amber-100 bg-amber-50' : 'border-sky-100 bg-white/85'}`}>
+          <h2 className="text-lg font-black text-brand-950">注册状态</h2>
+          <div className="mt-3 grid gap-2 text-sm font-bold text-slate-600 md:grid-cols-3">
+            <p>当前注册模式：{registrationPolicy.registrationModeLabel}</p>
+            <p>手机号验证：未启用短信验证</p>
+            <p>环境总开关：{registrationPolicy.allowRegister ? '允许注册' : '强制关闭注册'}</p>
+          </div>
+          {registrationPolicy.envForcedClosed ? (
+            <p className="mt-3 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭，后台注册模式无法覆盖。</p>
+          ) : null}
+          {registrationPolicy.registrationMode === 'PHONE' ? (
+            <p className="mt-3 text-sm font-black text-amber-800">当前手机号注册未验证号码归属，请仅用于备案期间或受控测试。</p>
+          ) : null}
         </section>
 
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">

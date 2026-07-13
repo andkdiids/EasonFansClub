@@ -37,13 +37,23 @@ export async function canSendEmailVerification(email: string) {
 export async function createVerificationForUser(userId: string, email: string) {
   const token = createEmailVerificationToken()
   const tokenHash = hashEmailToken(token)
-  await prisma.emailVerification.create({
-    data: {
-      userId,
-      email,
-      tokenHash,
-      expiresAt: new Date(Date.now() + EMAIL_TOKEN_TTL_MS),
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.emailVerification.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    })
+    await tx.emailVerification.updateMany({
+      where: { email, usedAt: null },
+      data: { usedAt: new Date() },
+    })
+    await tx.emailVerification.create({
+      data: {
+        userId,
+        email,
+        tokenHash,
+        expiresAt: new Date(Date.now() + EMAIL_TOKEN_TTL_MS),
+      },
+    })
   })
   return { token, verificationUrl: buildEmailVerificationUrl(token) }
 }
@@ -55,7 +65,9 @@ export async function sendVerificationEmail(email: string, verificationUrl: stri
   const text = `请点击下面的链接完成邮箱验证：\n\n${verificationUrl}\n\n链接 24 小时内有效，如果不是你本人操作，请忽略这封邮件。`
 
   if (!apiKey) {
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
+    } else {
       console.log('[email.verify.dev-link]', verificationUrl)
     }
     return { sent: false, reason: 'missing_resend_api_key' as const }

@@ -9,6 +9,8 @@ type AdminUser = {
   nickname: string
   email: string | null
   phone: string | null
+  emailVerifiedAt: string | null
+  phoneVerifiedAt: string | null
   avatarUrl: string | null
   role: string
   status: string
@@ -203,7 +205,9 @@ export function AdminUsersManager() {
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-600">
                     <p>{user.phone || '未绑定手机'}</p>
-                    <p className="text-xs text-slate-400">{user.email || '未绑定邮箱'}</p>
+                    {user.phone ? <p className="text-xs text-amber-600">{user.phoneVerifiedAt ? '手机号已验证' : '手机号未验证'}</p> : null}
+                    <p className="mt-1 text-xs text-slate-400">{user.email || '未绑定邮箱'}</p>
+                    {user.email ? <p className="text-xs text-slate-400">{user.emailVerifiedAt ? '邮箱已验证' : '邮箱未验证'}</p> : null}
                   </td>
                   <td className="px-3 py-3 font-black text-brand-700">{user.role}</td>
                   <td className="px-3 py-3 font-black text-slate-600">{user.status}</td>
