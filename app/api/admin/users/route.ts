@@ -48,6 +48,8 @@ export async function GET(request: Request) {
       nickname: true,
       email: true,
       phone: true,
+      emailVerifiedAt: true,
+      phoneVerifiedAt: true,
       avatarUrl: true,
       profile: {
         select: {

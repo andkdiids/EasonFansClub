@@ -100,6 +100,12 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
         <p className="mt-2 text-sm font-bold text-slate-500">手机号和邮箱仅自己可见；邮箱变更后需要重新验证。</p>
       </div>
 
+      {!form.emailVerifiedAt ? (
+        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black leading-6 text-amber-800">
+          建议绑定并验证邮箱，提高账户安全性。未验证手机号不能用于找回密码或高风险操作验证。
+        </p>
+      ) : null}
+
       <label className="block">
         <span className="text-sm font-black text-slate-700">昵称</span>
         <input

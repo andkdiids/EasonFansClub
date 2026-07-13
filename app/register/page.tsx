@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
+import { getRegistrationPolicy } from '@/lib/registration'
 import { getSiteAppearance } from '@/lib/site-config'
 import { RegisterForm } from './RegisterForm'
 
@@ -7,7 +8,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function RegisterPage() {
-  const config = await getSiteAppearance()
+  const [config, policy] = await Promise.all([getSiteAppearance(), getRegistrationPolicy()])
 
   return (
     <AuthFormShell
@@ -24,7 +25,19 @@ export default async function RegisterPage() {
         </>
       }
     >
-      <RegisterForm />
+      <RegisterForm
+        policy={{
+          allowRegister: policy.allowRegister,
+          registrationMode: policy.registrationMode,
+          registrationModeLabel: policy.registrationModeLabel,
+          allowPhoneRegistration: policy.allowPhoneRegistration,
+          allowEmailRegistration: policy.allowEmailRegistration,
+          registrationClosed: policy.registrationClosed,
+          enableTurnstile: policy.enableTurnstile,
+          turnstileSiteKey: policy.turnstileSiteKey,
+          envForcedClosed: policy.envForcedClosed,
+        }}
+      />
     </AuthFormShell>
   )
 }

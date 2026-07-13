@@ -1,11 +1,14 @@
 export async function verifyTurnstileToken(token: unknown, request: Request) {
+  const enabled = process.env.ENABLE_TURNSTILE === 'true' || process.env.NEXT_PUBLIC_ENABLE_TURNSTILE === 'true'
+  if (!enabled) {
+    return { success: true, skipped: true }
+  }
+
   const secret = process.env.TURNSTILE_SECRET_KEY
   const responseToken = typeof token === 'string' ? token.trim() : ''
 
   if (!secret) {
-    return process.env.NODE_ENV !== 'production'
-      ? { success: true, skipped: true }
-      : { success: false, message: '人机验证尚未配置，请联系管理员' }
+    return { success: false, message: '人机验证尚未配置，请联系管理员' }
   }
 
   if (!responseToken) {
