@@ -29,6 +29,14 @@ jobs:
           script: |
             set -euo pipefail
 
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            export PATH="/home/ubuntu/.nvm/versions/node/v22.23.1/bin:$PATH"
+
+            node -v
+            pnpm -v
+            pm2 -v
+
             cd /home/ubuntu/EasonFansClub
 
             git fetch origin
