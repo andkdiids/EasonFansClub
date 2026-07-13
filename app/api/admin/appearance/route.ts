@@ -1,22 +1,33 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { defaultSiteAppearance } from '@/lib/site-config'
+import { defaultSiteAppearance, getSiteAppearance, mergeSiteAppearanceConfig } from '@/lib/site-config'
 import { requireAdmin } from '@/lib/security'
 
-const revalidateTargets = ['/', '/login', '/register', '/checkin', '/music', '/activities', '/achievements', '/culture', '/admin', '/admin/appearance']
+const revalidateTargets = [
+  '/',
+  '/login',
+  '/register',
+  '/checkin',
+  '/music',
+  '/activities',
+  '/achievements',
+  '/culture',
+  '/notifications',
+  '/friends',
+  '/profile',
+  '/rankings',
+  '/search',
+  '/admin',
+  '/admin/appearance',
+]
 
 export async function GET() {
   const guard = await requireAdmin('site_config_manage')
   if (!guard.user) return guard.response
 
-  const setting = await prisma.siteSetting.findUnique({
-    where: { key: 'site.appearance' },
-    select: { value: true },
-  })
-
   return NextResponse.json({
-    config: setting?.value ? JSON.parse(setting.value) : defaultSiteAppearance,
+    config: await getSiteAppearance(),
   })
 }
 
@@ -25,10 +36,11 @@ export async function PATCH(request: Request) {
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)
-  const config = body?.reset ? defaultSiteAppearance : body?.config
-  if (!config || typeof config !== 'object') {
+  const rawConfig = body?.reset ? defaultSiteAppearance : body?.config
+  if (!rawConfig || typeof rawConfig !== 'object') {
     return NextResponse.json({ message: '配置格式不正确' }, { status: 400 })
   }
+  const config = mergeSiteAppearanceConfig(rawConfig)
 
   await prisma.siteSetting.upsert({
     where: { key: 'site.appearance' },
@@ -47,7 +59,8 @@ export async function PATCH(request: Request) {
     },
   })
 
-  revalidateTargets.forEach((path) => revalidatePath(path))
+  revalidatePath('/', 'layout')
+  revalidateTargets.forEach((path) => revalidatePath(path, 'page'))
 
   return NextResponse.json({ config, message: '配置已保存' })
 }

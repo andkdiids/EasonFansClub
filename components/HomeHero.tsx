@@ -4,7 +4,15 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import type { SiteHeroSlide } from '@/lib/site-config'
 
-export function HomeHero({ slides }: { slides: SiteHeroSlide[] }) {
+export function HomeHero({
+  slides,
+  siteName,
+  buttonColor,
+}: {
+  slides: SiteHeroSlide[]
+  siteName: string
+  buttonColor: string
+}) {
   const visibleSlides = useMemo(
     () => slides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder),
     [slides],
@@ -39,11 +47,15 @@ export function HomeHero({ slides }: { slides: SiteHeroSlide[] }) {
       )}
       <div className="absolute inset-0 bg-gradient-to-r from-white/92 via-white/62 to-white/10" />
       <div className="relative z-10 flex min-h-[620px] max-w-3xl flex-col justify-center px-8 py-20 md:px-14">
-        <p className="text-sm font-black uppercase tracking-[0.28em] text-sky-700">Eason Chan Fans Club</p>
+        <p className="text-sm font-black uppercase tracking-[0.28em] text-sky-700">{siteName}</p>
         <h1 className="mt-5 text-5xl font-black leading-tight text-slate-950 md:text-7xl">{active.title}</h1>
         <p className="mt-6 max-w-xl text-xl font-bold leading-9 text-slate-600">{active.subtitle}</p>
         <div className="mt-9">
-          <Link href={active.href || '/checkin'} className="rounded-full bg-brand-950 px-7 py-4 text-sm font-black text-white shadow-xl shadow-sky-900/10 transition hover:-translate-y-0.5 hover:bg-brand-800">
+          <Link
+            href={active.href || '/checkin'}
+            className="rounded-full px-7 py-4 text-sm font-black text-white shadow-xl shadow-sky-900/10 transition hover:-translate-y-0.5"
+            style={{ backgroundColor: buttonColor }}
+          >
             {active.buttonText || '进入'}
           </Link>
         </div>

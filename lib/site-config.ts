@@ -129,7 +129,7 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
   ],
 }
 
-function mergeConfig(value: unknown): SiteAppearanceConfig {
+export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig {
   if (!value || typeof value !== 'object') return defaultSiteAppearance
   const partial = value as Partial<SiteAppearanceConfig>
   return {
@@ -154,7 +154,7 @@ export async function getSiteAppearance() {
 
   if (!setting?.value) return defaultSiteAppearance
   try {
-    return mergeConfig(JSON.parse(setting.value))
+    return mergeSiteAppearanceConfig(JSON.parse(setting.value))
   } catch {
     return defaultSiteAppearance
   }

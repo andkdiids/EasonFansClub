@@ -1,15 +1,20 @@
 import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
+import { getSiteAppearance } from '@/lib/site-config'
 import { RegisterForm } from './RegisterForm'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export default function RegisterPage() {
+export default async function RegisterPage() {
+  const config = await getSiteAppearance()
+
   return (
     <AuthFormShell
       title="创建账号"
-      subtitle="加入私家E院，开始发帖、回复、签到和积累应援积分。"
+      subtitle={config.text.registerHint}
+      siteName={config.text.siteName}
+      backgroundUrl={config.images.registerBackgroundUrl}
       footer={
         <>
           已经有账号？{' '}
