@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeModules } from '@/components/HomeModules'
+import { HomeSystemAnnouncement } from '@/components/HomeSystemAnnouncement'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getSessionUserFromCookie } from '@/lib/auth'
+import { getHomeAnnouncement } from '@/lib/home-announcement'
 import { getSiteAppearance, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
 
 export const dynamic = 'force-dynamic'
@@ -39,6 +41,7 @@ export default async function HomePage() {
   console.log('[home:ssr] auth session')
 
   const config = await getSiteAppearance()
+  const announcement = await getHomeAnnouncement()
   const slides = config.heroSlides.some((item) => item.isVisible) ? config.heroSlides : fallbackHeroSlides(config)
 
   return (
@@ -52,6 +55,8 @@ export default async function HomePage() {
         <div className="mx-auto max-w-7xl">
           <HomeHero slides={slides} siteName={config.text.siteName} buttonColor={config.colors.button} />
         </div>
+
+        <HomeSystemAnnouncement announcement={announcement} />
 
         <section className="mx-auto grid max-w-6xl gap-6 md:grid-cols-3">
           {[

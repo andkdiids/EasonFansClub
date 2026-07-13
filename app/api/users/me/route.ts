@@ -173,7 +173,7 @@ export async function PATCH(request: Request) {
   let emailVerificationSent = false
   if (profile.email && profile.email !== current.email) {
     const verification = await createVerificationForUser(guard.user.id, profile.email)
-    await sendVerificationEmail(profile.email, verification.verificationUrl)
+    await sendVerificationEmail(profile.email, verification.verificationUrl, 'change-email')
     emailVerificationSent = true
   }
 

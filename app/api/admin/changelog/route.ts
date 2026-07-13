@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { changelogSelect, changelogStatuses, changelogTypes, nextVersion, parseChangelogType, parseVersionBump, serializeChangelog } from '@/lib/changelog'
+import { changelogSelect, changelogStatuses, changelogTypes, mapChangelogTypeToPriority, nextVersion, parseChangelogType, parseVersionBump, serializeChangelog } from '@/lib/changelog'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -9,8 +9,9 @@ export async function GET() {
   const guard = await requireAdmin('changelog_manage')
   if (!guard.user) return guard.response
 
-  const logs = await prisma.changelog.findMany({
-    orderBy: [{ major: 'desc' }, { minor: 'desc' }, { patch: 'desc' }, { createdAt: 'desc' }],
+  const logs = await prisma.systemNotification.findMany({
+    where: { type: 'UPDATE' },
+    orderBy: [{ publishAt: 'desc' }, { createdAt: 'desc' }],
     take: 100,
     select: changelogSelect,
   })
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const title = sanitizeText(body?.title, 100)
   const content = sanitizeText(body?.content, 6000)
-  const type = parseChangelogType(body?.type)
+  const changelogType = parseChangelogType(body?.type)
   const isMajor = Boolean(body?.isMajor)
   const publishNow = Boolean(body?.publishNow)
   const bump = parseVersionBump(body?.bump)
@@ -39,21 +40,33 @@ export async function POST(request: Request) {
 
   try {
     const log = await prisma.$transaction(async (tx) => {
-      const latest = await tx.changelog.findFirst({
-        orderBy: [{ major: 'desc' }, { minor: 'desc' }, { patch: 'desc' }],
-        select: { major: true, minor: true, patch: true },
+      const latestRows = await tx.systemNotification.findMany({
+        where: { type: 'UPDATE', version: { not: null } },
+        select: { version: true },
+        take: 100,
       })
+      const latest = latestRows
+        .map((item) => ({ version: item.version }))
+        .sort((a, b) => {
+          const av = a.version || ''
+          const bv = b.version || ''
+          return bv.localeCompare(av, undefined, { numeric: true })
+        })[0] || null
       const version = nextVersion(latest, bump)
 
-      return tx.changelog.create({
+      return tx.systemNotification.create({
         data: {
-          ...version,
           title,
           content,
-          type,
-          isMajor,
-          status: publishNow ? 'PUBLISHED' : 'DRAFT',
-          publishedAt: publishNow ? new Date() : null,
+          type: 'UPDATE',
+          version: version.version,
+          priority: mapChangelogTypeToPriority(changelogType, isMajor),
+          sticky: isMajor,
+          popup: false,
+          published: publishNow,
+          isPublished: publishNow,
+          publishAt: new Date(),
+          publishedAt: new Date(),
           createdById: guard.user.id,
         },
         select: changelogSelect,
