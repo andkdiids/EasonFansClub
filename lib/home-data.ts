@@ -12,37 +12,69 @@ function excerpt(value: string | null | undefined, length = 180) {
 }
 
 export async function getHomePosts() {
-  const rows = await safeDb(
-    'Post.findMany home.posts',
-    prisma.post.findMany({
-      where: {
-        isDeleted: false,
-        status: 'PUBLISHED',
-        author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-      },
-      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { likeCount: 'desc' }, { replyCount: 'desc' }],
-      take: 6,
+  const baseWhere = {
+    isDeleted: false,
+    status: 'PUBLISHED' as const,
+    author: { status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } },
+  }
+  const featuredWhere = { ...baseWhere, isFeatured: true }
+  const select = {
+    id: true,
+    title: true,
+    summary: true,
+    content: true,
+    likeCount: true,
+    replyCount: true,
+    viewCount: true,
+    isPinned: true,
+    isFeatured: true,
+    createdAt: true,
+    board: { select: { name: true, slug: true } },
+    author: {
       select: {
-        id: true,
-        title: true,
-        summary: true,
-        content: true,
-        likeCount: true,
-        replyCount: true,
-        viewCount: true,
-        isPinned: true,
-        isFeatured: true,
-        createdAt: true,
-        board: { select: { name: true, slug: true } },
-        author: {
-          select: {
-            uid: true,
-            nickname: true,
-            level: true,
-            profile: { select: { displayName: true } },
-          },
-        },
+        uid: true,
+        nickname: true,
+        level: true,
+        profile: { select: { displayName: true } },
       },
+    },
+  }
+
+  const rows = await safeDb(
+    'Post.findMany home.posts.featured',
+    Promise.all([
+      prisma.post.findMany({
+        where: featuredWhere,
+        orderBy: [{ likeCount: 'desc' }, { createdAt: 'desc' }],
+        take: 3,
+        select,
+      }),
+      prisma.post.findMany({
+        where: featuredWhere,
+        orderBy: [{ replyCount: 'desc' }, { createdAt: 'desc' }],
+        take: 3,
+        select,
+      }),
+      prisma.post.findMany({
+        where: baseWhere,
+        orderBy: [{ likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }],
+        take: 6,
+        select,
+      }),
+    ]).then(([likeCandidates, replyCandidates, fallbackCandidates]) => {
+      const selected = new Map<string, (typeof likeCandidates)[number]>()
+      likeCandidates.slice(0, 2).forEach((post) => selected.set(post.id, post))
+      replyCandidates.filter((post) => !selected.has(post.id)).slice(0, 1).forEach((post) => selected.set(post.id, post))
+
+      if (selected.size < 3) {
+        ;[...likeCandidates, ...replyCandidates, ...fallbackCandidates]
+          .filter((post) => !selected.has(post.id))
+          .forEach((post) => {
+            if (selected.size < 3) selected.set(post.id, post)
+          })
+      }
+
+      return Array.from(selected.values()).slice(0, 3)
     }),
     [],
     2500,

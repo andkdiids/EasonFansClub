@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
+import { SafeAvatar } from '@/components/SafeAvatar'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { getUnreadNotificationCount } from '@/lib/notifications'
@@ -70,7 +71,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             <details className="relative shrink-0">
               <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                  {avatar ? <img src={avatar} alt={displayName} className="h-full w-full object-cover" /> : displayName.slice(0, 1)}
+                  <SafeAvatar src={avatar} name={displayName} className="h-full w-full" />
                 </span>
                 {unreadCount > 0 ? <span className="absolute left-8 top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" aria-label="有未读通知" /> : null}
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
