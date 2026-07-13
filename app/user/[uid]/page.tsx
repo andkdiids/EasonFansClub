@@ -10,10 +10,16 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
+import { ownerPrivateUserSelect } from '@/lib/users'
 
 export const dynamic = 'force-dynamic'
 
 type PageProps = { params: Promise<{ uid: string }> }
+
+function maskPhone(phone: string) {
+  if (!/^1\d{10}$/.test(phone)) return phone
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+}
 
 export default async function PublicUserPage({ params }: PageProps) {
   const { uid } = await params
@@ -41,8 +47,6 @@ export default async function PublicUserPage({ params }: PageProps) {
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
-        email: true,
-        phone: true,
         level: true,
         createdAt: true,
         profile: true,
@@ -73,6 +77,16 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (!user || !user.profile) notFound()
 
   const isSelf = viewer?.id === user.id
+  const privateContact = isSelf
+    ? await withDbTimeout(
+        'User.findUnique publicUser.privateContact',
+        prisma.user.findUnique({
+          where: { id: user.id },
+          select: ownerPrivateUserSelect(),
+        }),
+        2500,
+      )
+    : null
   let friendship = null
   let pendingRequest: { senderId: string; receiverId: string } | null = null
 
@@ -155,8 +169,18 @@ export default async function PublicUserPage({ params }: PageProps) {
             <div className="rounded-2xl border border-sky-100 bg-white/82 p-5 shadow-sm">
               <h2 className="font-black text-brand-950">个人档案</h2>
               <div className="mt-4 space-y-3 text-sm font-bold text-slate-600">
-                <p>邮箱：{user.email || '未绑定邮箱'}</p>
-                <p>手机号：{user.phone || '未绑定手机号'}</p>
+                {privateContact ? (
+                  <>
+                    <p>
+                      邮箱：{privateContact.email || '未绑定邮箱'}
+                      <span className="ml-2 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-black text-brand-700">仅自己可见</span>
+                    </p>
+                    <p>
+                      手机号：{privateContact.phone ? maskPhone(privateContact.phone) : '未绑定手机号'}
+                      <span className="ml-2 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-black text-brand-700">仅自己可见</span>
+                    </p>
+                  </>
+                ) : null}
                 <p>简介：{bio}</p>
               </div>
             </div>

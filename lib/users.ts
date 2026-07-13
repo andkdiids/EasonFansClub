@@ -9,8 +9,6 @@ export function publicUserSelect() {
     uid: true,
     username: true,
     nickname: true,
-    email: true,
-    phone: true,
     avatarUrl: true,
     backgroundUrl: true,
     bio: true,
@@ -21,6 +19,13 @@ export function publicUserSelect() {
     points: true,
     createdAt: true,
     profile: true,
+  } satisfies Prisma.UserSelect
+}
+
+export function ownerPrivateUserSelect() {
+  return {
+    email: true,
+    phone: true,
   } satisfies Prisma.UserSelect
 }
 
