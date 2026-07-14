@@ -12,6 +12,8 @@ export const adminPermissionGroups = [
   { key: 'home_manage', label: '首页装修管理', description: '管理首页模块、轮播图和展示顺序。' },
   { key: 'nav_manage', label: '导航栏管理', description: '管理导航入口、图标、名称和排序。' },
   { key: 'site_config_manage', label: '网站外观配置', description: '管理网站文案、颜色、Logo 和图片。' },
+  { key: 'layout.manage', label: '页面布局草稿管理', description: '查看布局编辑器、修改模块顺序、保存布局草稿。' },
+  { key: 'layout.publish', label: '页面布局发布', description: '发布线上页面布局并恢复默认布局。' },
   { key: 'feedback_manage', label: '反馈管理', description: '查看、回复和关闭用户反馈。' },
   { key: 'changelog_manage', label: '更新日志管理', description: '创建、发布和维护网站更新日志。' },
   { key: 'notification_manage', label: '全站通知管理', description: '发布、隐藏和查看全站系统通知。' },
@@ -35,5 +37,6 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/changelog': 'changelog_manage',
   '/admin/notifications': 'notification_manage',
   '/admin/appearance': 'site_config_manage',
+  '/admin/layout-editor': 'layout.manage',
   '/admin/admins': 'admin_manage',
 }

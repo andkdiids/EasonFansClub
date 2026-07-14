@@ -321,6 +321,8 @@ model User {
   adminActions               AdminAction[]             @relation("AdminOperator")
   targetAdminActions         AdminAction[]             @relation("AdminTargetUser")
   adminPermissions           AdminPermission[]
+  updatedPageLayouts         PageLayout[]              @relation("PageLayoutUpdatedBy")
+  publishedPageLayouts       PageLayout[]              @relation("PageLayoutPublishedBy")
 
   @@index([role])
   @@index([status])
@@ -1377,6 +1379,28 @@ model SiteSetting {
   createdAt DateTime             @default(now())
 
   @@index([group])
+}
+
+model PageLayout {
+  id                      String    @id @default(cuid())
+  pageKey                 String    @unique
+  draftConfig             Json
+  publishedConfig         Json
+  previousPublishedConfig Json?
+  version                 Int       @default(1)
+  publishedAt             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  updatedById String?
+  updatedBy   User?   @relation("PageLayoutUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  publishedById String?
+  publishedBy   User?   @relation("PageLayoutPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@index([pageKey])
+  @@index([updatedById])
+  @@index([publishedById])
 }
 
 model Banner {
