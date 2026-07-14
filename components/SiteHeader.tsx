@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
 import { isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { SafeAvatar } from '@/components/SafeAvatar'
@@ -108,6 +109,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
           </Link>
         ))}
       </nav>
+      <AdminLayoutQuickLink enabled={isAdmin} />
     </>
   )
 }
