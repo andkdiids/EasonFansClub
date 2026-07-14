@@ -60,7 +60,7 @@ export function PageLayoutFrame({
   className?: string
 }) {
   return (
-    <section data-layout-module={config.key} className={`${getPageLayoutFrameClass(config)} ${className}`.trim()}>
+    <section data-layout-module={config.key} data-layout-label={config.key} className={`${getPageLayoutFrameClass(config)} ${className}`.trim()}>
       {children}
     </section>
   )

@@ -1,0 +1,25 @@
+import { NextResponse } from 'next/server'
+import {
+  assertPageLayoutPageKey,
+  listPageLayoutRevisions,
+  pageLayoutErrorResponse,
+} from '@/lib/page-layout/service'
+import { requireAdmin } from '@/lib/security'
+
+type Params = { params: Promise<{ pageKey: string }> }
+
+export async function GET(request: Request, { params }: Params) {
+  const guard = await requireAdmin('layout.manage')
+  if (!guard.user) return guard.response
+
+  try {
+    const { pageKey } = await params
+    const url = new URL(request.url)
+    const limit = Number(url.searchParams.get('limit') || 20)
+    const revisions = await listPageLayoutRevisions(assertPageLayoutPageKey(pageKey), limit)
+    return NextResponse.json({ revisions })
+  } catch (error) {
+    const { status, body } = pageLayoutErrorResponse(error)
+    return NextResponse.json(body, { status })
+  }
+}
