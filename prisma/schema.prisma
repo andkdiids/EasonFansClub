@@ -239,6 +239,12 @@ enum ChangelogStatus {
   UNPUBLISHED
 }
 
+enum PageLayoutRevisionSource {
+  MANUAL
+  ROLLBACK
+  DEFAULT
+}
+
 model User {
   id                 String             @id @default(cuid())
   uid                Int                @unique @default(autoincrement())
@@ -323,6 +329,7 @@ model User {
   adminPermissions           AdminPermission[]
   updatedPageLayouts         PageLayout[]              @relation("PageLayoutUpdatedBy")
   publishedPageLayouts       PageLayout[]              @relation("PageLayoutPublishedBy")
+  pageLayoutRevisions        PageLayoutRevision[]      @relation("PageLayoutRevisionPublisher")
 
   @@index([role])
   @@index([status])
@@ -1398,9 +1405,31 @@ model PageLayout {
   publishedById String?
   publishedBy   User?   @relation("PageLayoutPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
 
+  revisions PageLayoutRevision[]
+
   @@index([pageKey])
   @@index([updatedById])
   @@index([publishedById])
+}
+
+model PageLayoutRevision {
+  id           String                   @id @default(cuid())
+  pageLayoutId String
+  version      Int
+  config       Json
+  note         String?
+  source       PageLayoutRevisionSource @default(MANUAL)
+  createdAt    DateTime                 @default(now())
+
+  pageLayout PageLayout @relation(fields: [pageLayoutId], references: [id], onDelete: Cascade)
+
+  publishedById String?
+  publishedBy   User?   @relation("PageLayoutRevisionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@unique([pageLayoutId, version])
+  @@index([pageLayoutId, createdAt])
+  @@index([publishedById])
+  @@index([source])
 }
 
 model Banner {

@@ -63,3 +63,16 @@ export type SerializedPageLayout = {
   updatedById?: string | null
   publishedById?: string | null
 }
+
+export type SerializedPageLayoutRevision = {
+  id: string
+  pageKey: PageLayoutPageKey
+  pageLayoutId: string
+  version: number
+  config: PageLayoutConfig
+  note: string | null
+  source: 'MANUAL' | 'ROLLBACK' | 'DEFAULT'
+  createdAt: string
+  publishedById: string | null
+  publishedByName: string | null
+}

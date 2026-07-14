@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
-import { isAdminUser } from '@/lib/admin-permissions'
+import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { safeDb } from '@/lib/db-timeout'
@@ -20,6 +20,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
   const config = providedConfig ?? (await getSiteAppearance())
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
+  const canManageLayout = user ? await hasAdminPermission(user, 'layout.manage') : false
   const [profile, unreadCount] = user
     ? await Promise.all([
         safeDb(
@@ -109,7 +110,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
           </Link>
         ))}
       </nav>
-      <AdminLayoutQuickLink enabled={isAdmin} />
+      <AdminLayoutQuickLink enabled={canManageLayout} />
     </>
   )
 }

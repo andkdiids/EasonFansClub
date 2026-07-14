@@ -48,6 +48,7 @@ function validateDeviceConfig(
   device: PageLayoutDevice,
   input: unknown,
   fallback: PageLayoutModuleConfig[],
+  strict = true,
 ) {
   if (!Array.isArray(input)) return fallback
 
@@ -64,19 +65,19 @@ function validateDeviceConfig(
     const key = typeof rawItem.key === 'string' ? rawItem.key : ''
     const definition = getPageLayoutModule(pageKey, key)
     if (!definition) {
-      errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
+      if (strict) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
       return
     }
     if (seen.has(key)) {
-      errors[`${device}.${key}`] = '同一设备布局中模块不能重复'
+      if (strict) errors[`${device}.${key}`] = '同一设备布局中模块不能重复'
       return
     }
     if (device === 'desktop' && !definition.supportsDesktop) {
-      errors[`${device}.${key}`] = '该模块不支持桌面端'
+      if (strict) errors[`${device}.${key}`] = '该模块不支持桌面端'
       return
     }
     if (device === 'mobile' && !definition.supportsMobile) {
-      errors[`${device}.${key}`] = '该模块不支持移动端'
+      if (strict) errors[`${device}.${key}`] = '该模块不支持移动端'
       return
     }
 
@@ -99,25 +100,25 @@ function validateDeviceConfig(
     const title = cleanText(rawItem.title, 60)
     const subtitle = cleanText(rawItem.subtitle, 160)
 
-    if (rawItem.width !== undefined && !definition.allowedWidths.includes(rawItem.width as LayoutWidth)) {
+    if (strict && rawItem.width !== undefined && !definition.allowedWidths.includes(rawItem.width as LayoutWidth)) {
       errors[`${device}.${key}.width`] = '宽度不在允许范围内'
     }
-    if (rawItem.gapTop !== undefined && !definition.allowedSpacing.includes(rawItem.gapTop as LayoutSpacing)) {
+    if (strict && rawItem.gapTop !== undefined && !definition.allowedSpacing.includes(rawItem.gapTop as LayoutSpacing)) {
       errors[`${device}.${key}.gapTop`] = '上间距不在允许范围内'
     }
-    if (rawItem.gapBottom !== undefined && !definition.allowedSpacing.includes(rawItem.gapBottom as LayoutSpacing)) {
+    if (strict && rawItem.gapBottom !== undefined && !definition.allowedSpacing.includes(rawItem.gapBottom as LayoutSpacing)) {
       errors[`${device}.${key}.gapBottom`] = '下间距不在允许范围内'
     }
-    if (rawItem.alignment !== undefined && !includes(layoutAlignments, rawItem.alignment)) {
+    if (strict && rawItem.alignment !== undefined && !includes(layoutAlignments, rawItem.alignment)) {
       errors[`${device}.${key}.alignment`] = '对齐方式不在允许范围内'
     }
-    if (rawItem.density !== undefined && !includes(layoutDensities, rawItem.density)) {
+    if (strict && rawItem.density !== undefined && !includes(layoutDensities, rawItem.density)) {
       errors[`${device}.${key}.density`] = '密度不在允许范围内'
     }
-    if (!definition.supportsTitle && title) {
+    if (strict && !definition.supportsTitle && title) {
       errors[`${device}.${key}.title`] = '该模块不支持自定义标题'
     }
-    if (!definition.supportsSubtitle && subtitle) {
+    if (strict && !definition.supportsSubtitle && subtitle) {
       errors[`${device}.${key}.subtitle`] = '该模块不支持自定义副标题'
     }
 
@@ -141,11 +142,26 @@ function validateDeviceConfig(
   })
   requiredModules.forEach((module) => {
     const item = sanitized.find((config) => config.key === module.key)
-    if (!item || !item.visible) errors[`${device}.${module.key}.visible`] = '核心模块必须保留显示'
+    if (!item) {
+      if (strict) errors[`${device}.${module.key}.visible`] = '核心模块必须保留显示'
+      return
+    }
+    if (!item.visible) {
+      if (strict) {
+        errors[`${device}.${module.key}.visible`] = '核心模块必须保留显示'
+      } else {
+        item.visible = true
+      }
+    }
   })
 
   if (sanitized.every((item) => !item.visible)) {
-    errors[`${device}.visible`] = '不能隐藏当前页面的所有模块'
+    if (strict) {
+      errors[`${device}.visible`] = '不能隐藏当前页面的所有模块'
+    } else {
+      const fallbackVisible = sanitized.find((item) => fallback.some((fallbackItem) => fallbackItem.key === item.key && fallbackItem.visible))
+      if (fallbackVisible) fallbackVisible.visible = true
+    }
   }
 
   if (Object.keys(errors).length) {
@@ -163,5 +179,15 @@ export function validatePageLayoutConfig(pageKey: PageLayoutPageKey, input: unkn
   return {
     desktop: validateDeviceConfig(pageKey, 'desktop', input.desktop, defaults.desktop),
     mobile: validateDeviceConfig(pageKey, 'mobile', input.mobile, defaults.mobile),
+  }
+}
+
+export function repairPageLayoutConfig(pageKey: PageLayoutPageKey, input: unknown): PageLayoutConfig {
+  const defaults = getDefaultPageLayoutConfig(pageKey)
+  if (!isPlainObject(input)) return defaults
+
+  return {
+    desktop: validateDeviceConfig(pageKey, 'desktop', input.desktop, defaults.desktop, false),
+    mobile: validateDeviceConfig(pageKey, 'mobile', input.mobile, defaults.mobile, false),
   }
 }
