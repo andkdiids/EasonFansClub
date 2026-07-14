@@ -84,7 +84,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
                   <span>通知中心</span>
                   {unreadCount > 0 ? <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white">{unreadCount > 99 ? '99+' : unreadCount}</span> : null}
                 </Link>
-                <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈与更新</Link>
+                <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈中心</Link>
                 <Link href="/friends" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">我的好友</Link>
                 <Link href="/profile" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">账号设置</Link>
                 {isAdmin ? <Link href="/admin" className="block rounded-xl px-4 py-3 text-sm font-bold text-brand-700 hover:bg-sky-50">后台管理</Link> : null}
