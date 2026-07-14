@@ -10,20 +10,36 @@ import {
 import { hashPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy, type RegistrationType } from '@/lib/registration'
-import { getClientIp, rateLimit } from '@/lib/security'
+import { checkRateLimit, consumeRateLimit, getClientIp } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
+const registerRequestLimit = {
+  action: 'register:request',
+  limit: 10,
+  windowSeconds: 30 * 60,
+} as const
+const registerSuccessLimit = {
+  action: 'register:success',
+  limit: 3,
+  windowSeconds: 60 * 60,
+} as const
 
 function unicodeLength(value: string) {
   return Array.from(value).length
 }
 
-function jsonError(message: string, status: number, code: string, errors: Record<string, string> = {}) {
-  return NextResponse.json({ message, code, errors }, { status, headers: noStoreHeaders })
+function jsonError(
+  message: string,
+  status: number,
+  code: string,
+  errors: Record<string, string> = {},
+  meta: Record<string, unknown> = {},
+) {
+  return NextResponse.json({ message, code, errors, ...meta }, { status, headers: noStoreHeaders })
 }
 
 function parseRegistrationType(value: unknown): RegistrationType | null {
@@ -35,6 +51,8 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null)
     const registrationType = parseRegistrationType(body?.registrationType)
     const policy = await getRegistrationPolicy()
+    const clientIp = getClientIp(request)
+    const ipRateLimitKey = `ip:${clientIp}`
 
     if (!policy.allowRegister || policy.registrationMode === 'CLOSED') {
       return jsonError('网站目前处于内测阶段，暂未开放注册，请关注后续公告。', 403, 'REGISTRATION_CLOSED')
@@ -49,9 +67,16 @@ export async function POST(request: Request) {
       return jsonError('当前未开放邮箱注册', 403, 'EMAIL_REGISTRATION_DISABLED', { registrationType: '当前未开放邮箱注册' })
     }
 
-    const limited = await rateLimit(`ip:${getClientIp(request)}`, 'register', 3, 60 * 60)
-    if (limited) {
-      return jsonError('注册过于频繁，请稍后再试', 429, 'RATE_LIMITED')
+    const requestLimit = await consumeRateLimit(
+      ipRateLimitKey,
+      registerRequestLimit.action,
+      registerRequestLimit.limit,
+      registerRequestLimit.windowSeconds,
+    )
+    if (requestLimit.limited) {
+      return jsonError('操作过于频繁，请稍后再试。', 429, 'REGISTER_REQUEST_RATE_LIMITED', {}, {
+        retryAfter: requestLimit.retryAfter,
+      })
     }
 
     const nickname = normalizeText(body?.nickname || body?.username)
@@ -116,7 +141,19 @@ export async function POST(request: Request) {
       })
     }
 
+    const successLimit = await checkRateLimit(
+      ipRateLimitKey,
+      registerSuccessLimit.action,
+      registerSuccessLimit.limit,
+    )
+    if (successLimit.limited) {
+      return jsonError('当前网络注册账号数量较多，请稍后再试。', 429, 'REGISTER_SUCCESS_RATE_LIMITED', {}, {
+        retryAfter: successLimit.retryAfter,
+      })
+    }
+
     const passwordHash = await hashPassword(password)
+    const successLimitExpiresAt = new Date(Date.now() + registerSuccessLimit.windowSeconds * 1000)
     const user = await prisma.$transaction(async (tx) => {
       const latest = await tx.user.findFirst({
         orderBy: { uid: 'desc' },
@@ -160,6 +197,14 @@ export async function POST(request: Request) {
           before: 0,
           after: 0,
           reason: registrationType === 'PHONE' ? '手机号注册账号' : '邮箱注册账号',
+        },
+      })
+
+      await tx.rateLimitLog.create({
+        data: {
+          key: ipRateLimitKey,
+          action: registerSuccessLimit.action,
+          expiresAt: successLimitExpiresAt,
         },
       })
 

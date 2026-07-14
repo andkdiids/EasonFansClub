@@ -99,23 +99,53 @@ export async function filterSensitiveWords(content: string) {
   }
 }
 
-export async function rateLimit(key: string, action: string, limit = 30, windowSeconds = 60) {
+export type RateLimitResult = {
+  limited: boolean
+  retryAfter?: number
+}
+
+async function pruneExpiredRateLimits(now: Date) {
+  await prisma.rateLimitLog.deleteMany({
+    where: { expiresAt: { lt: now } },
+  })
+}
+
+async function getRetryAfterSeconds(key: string, action: string, now: Date) {
+  const oldestActive = await prisma.rateLimitLog.aggregate({
+    where: { key, action, expiresAt: { gt: now } },
+    _min: { expiresAt: true },
+  })
+  const resetAt = oldestActive._min.expiresAt
+  if (!resetAt) return undefined
+  return Math.max(1, Math.ceil((resetAt.getTime() - now.getTime()) / 1000))
+}
+
+export async function checkRateLimit(key: string, action: string, limit = 30): Promise<RateLimitResult> {
   const now = new Date()
-  const expiresAt = new Date(now.getTime() + windowSeconds * 1000)
 
   try {
-    await prisma.rateLimitLog.deleteMany({
-      where: { expiresAt: { lt: now } },
-    })
+    await pruneExpiredRateLimits(now)
 
     const count = await prisma.rateLimitLog.count({
       where: { key, action, expiresAt: { gt: now } },
     })
 
     if (count >= limit) {
-      return NextResponse.json({ message: '操作过于频繁，请稍后再试' }, { status: 429 })
+      return { limited: true, retryAfter: await getRetryAfterSeconds(key, action, now) }
     }
+  } catch {
+    return { limited: false }
+  }
 
+  return { limited: false }
+}
+
+export async function recordRateLimitHit(key: string, action: string, windowSeconds = 60) {
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + windowSeconds * 1000)
+
+  try {
+    await pruneExpiredRateLimits(now)
     await prisma.rateLimitLog.create({ data: { key, action, expiresAt } })
   } catch {
     return null
@@ -124,8 +154,27 @@ export async function rateLimit(key: string, action: string, limit = 30, windowS
   return null
 }
 
+export async function consumeRateLimit(key: string, action: string, limit = 30, windowSeconds = 60): Promise<RateLimitResult> {
+  const status = await checkRateLimit(key, action, limit)
+  if (status.limited) return status
+
+  await recordRateLimitHit(key, action, windowSeconds)
+  return { limited: false }
+}
+
+export async function rateLimit(key: string, action: string, limit = 30, windowSeconds = 60) {
+  const status = await consumeRateLimit(key, action, limit, windowSeconds)
+  if (!status.limited) return null
+
+  return NextResponse.json(
+    { message: '操作过于频繁，请稍后再试', retryAfter: status.retryAfter },
+    { status: 429 },
+  )
+}
+
 export function getClientIp(request: Request) {
   return (
+    request.headers.get('cf-connecting-ip') ||
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     request.headers.get('x-real-ip') ||
     '127.0.0.1'

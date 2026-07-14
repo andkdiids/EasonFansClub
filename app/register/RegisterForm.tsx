@@ -37,6 +37,22 @@ type RegisterErrors = Partial<{
   form: string
 }>
 
+const errorFieldOrder: (keyof RegisterErrors)[] = [
+  'registrationType',
+  'nickname',
+  'phone',
+  'email',
+  'password',
+  'confirmPassword',
+  'acceptedAgreement',
+  'turnstileToken',
+  'form',
+]
+
+function unicodeLength(value: string) {
+  return Array.from(value).length
+}
+
 export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const initialType: RegistrationType = policy.allowEmailRegistration ? 'EMAIL' : 'PHONE'
   const [registrationType, setRegistrationType] = useState<RegistrationType>(initialType)
@@ -102,14 +118,59 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }))
   }
 
+  function focusFirstError(nextErrors: RegisterErrors) {
+    const field = errorFieldOrder.find((key) => nextErrors[key])
+    if (!field) return
+    const element = document.querySelector<HTMLElement>(`[data-register-field="${field}"]`)
+    element?.focus()
+    element?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+
+  function validateClientForm() {
+    const nextErrors: RegisterErrors = {}
+    const nickname = form.nickname.trim()
+    const phone = form.phone.trim().replace(/\s+/g, '')
+    const email = form.email.trim().toLowerCase()
+    const password = form.password.trim()
+    const confirmPassword = form.confirmPassword.trim()
+
+    if (registrationType === 'PHONE' && !policy.allowPhoneRegistration) {
+      nextErrors.registrationType = '当前未开放手机号注册'
+    }
+    if (registrationType === 'EMAIL' && !policy.allowEmailRegistration) {
+      nextErrors.registrationType = '当前未开放邮箱注册'
+    }
+    if (!nickname) {
+      nextErrors.nickname = '请填写用户名/昵称'
+    } else if (unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) {
+      nextErrors.nickname = '用户名长度需要 2-16 个字符'
+    }
+    if (registrationType === 'PHONE') {
+      if (!phone) nextErrors.phone = '请填写手机号'
+      if (phone && !/^1\d{10}$/.test(phone)) nextErrors.phone = '请输入 11 位中国大陆手机号'
+    }
+    if (registrationType === 'EMAIL') {
+      if (!email) nextErrors.email = '请填写邮箱'
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '请输入有效邮箱'
+    }
+    if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
+    if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
+    if (!form.acceptedAgreement) nextErrors.acceptedAgreement = '请先勾选用户协议'
+    if (shouldRenderTurnstile && !turnstileToken) nextErrors.turnstileToken = '请先完成人机验证'
+
+    return nextErrors
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setErrors({})
     setMessage('')
     setDevVerificationUrl('')
 
-    if (shouldRenderTurnstile && !turnstileToken) {
-      setErrors({ turnstileToken: '请先完成人机验证' })
+    const clientErrors = validateClientForm()
+    if (Object.keys(clientErrors).length) {
+      setErrors(clientErrors)
+      focusFirstError(clientErrors)
       return
     }
 
@@ -135,7 +196,13 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setTurnstileToken('')
 
     if (!response.ok) {
-      setErrors({ form: data.message, ...data.errors })
+      const retryAfter = typeof data.retryAfter === 'number' && data.retryAfter > 0 ? Math.ceil(data.retryAfter) : null
+      const formMessage = retryAfter
+        ? `${data.message || '请求失败'} 请在 ${retryAfter} 秒后重试。`
+        : data.message
+      const serverErrors = { form: formMessage, ...data.errors }
+      setErrors(serverErrors)
+      focusFirstError(serverErrors)
       return
     }
 
@@ -161,13 +228,16 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   return (
     <form className="space-y-5" onSubmit={handleSubmit}>
-      <FormError message={errors.form} />
+      <div data-register-field="form" tabIndex={-1}>
+        <FormError message={errors.form} />
+      </div>
 
       {showTabs ? (
         <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
           <button
             type="button"
             onClick={() => switchType('EMAIL')}
+            data-register-field="registrationType"
             className={`rounded-lg px-3 py-2 text-sm font-black transition ${registrationType === 'EMAIL' ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
           >
             邮箱注册
@@ -197,6 +267,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         <input
           value={form.nickname}
           onChange={(event) => updateField('nickname', event.target.value)}
+          data-register-field="nickname"
           className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="2-16 个字符"
         />
@@ -211,6 +282,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
             onChange={(event) => updateField('phone', event.target.value)}
             type="tel"
             autoComplete="tel"
+            data-register-field="phone"
             className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
             placeholder="中国大陆 11 位手机号"
           />
@@ -224,6 +296,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
             onChange={(event) => updateField('email', event.target.value)}
             type="email"
             autoComplete="email"
+            data-register-field="email"
             className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
             placeholder="用于验证账号和邮箱登录"
           />
@@ -238,6 +311,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           onChange={(event) => updateField('password', event.target.value)}
           type="password"
           autoComplete="new-password"
+          data-register-field="password"
           className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="至少 8 位"
         />
@@ -251,13 +325,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           onChange={(event) => updateField('confirmPassword', event.target.value)}
           type="password"
           autoComplete="new-password"
+          data-register-field="confirmPassword"
           className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="再次输入密码"
         />
         <FormError message={errors.confirmPassword} />
       </label>
 
-      {shouldRenderTurnstile ? <div ref={turnstileRef} className="min-h-[65px]" /> : null}
+      {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[65px]" /> : null}
       <FormError message={errors.turnstileToken} />
 
       <label className="flex items-start gap-3 rounded-xl bg-sky-50/70 p-4 text-sm font-bold text-slate-600">
@@ -265,6 +340,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           type="checkbox"
           checked={form.acceptedAgreement}
           onChange={(event) => updateField('acceptedAgreement', event.target.checked)}
+          data-register-field="acceptedAgreement"
           className="mt-1"
         />
         <span>我已阅读并同意《私家E院用户协议》和社区管理规范。</span>
