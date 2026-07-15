@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -169,6 +170,8 @@ export async function PATCH(request: Request) {
 
     return updated
   })
+
+  invalidateCurrentUserCache(guard.user.id)
 
   let emailVerificationSent = false
   if (profile.email && profile.email !== current.email) {

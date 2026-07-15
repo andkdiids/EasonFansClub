@@ -19,9 +19,17 @@ async function loadJson<T>(url: string) {
 }
 
 export function ProfileDeferredModules() {
+  return (
+    <section className="grid gap-4 lg:grid-cols-[minmax(0,40%)_minmax(0,60%)]">
+      <ProfileCheckInCalendar />
+      <ProfileRecentMessages />
+    </section>
+  )
+}
+
+export function ProfileCheckInCalendar() {
   const [checkIns, setCheckIns] = useState<LoadState<CheckIn[]>>(initial([]))
   const [longestStreak, setLongestStreak] = useState(0)
-  const [messages, setMessages] = useState<LoadState<Message[]>>(initial([]))
   const monthStart = useMemo(() => {
     const date = new Date()
     date.setDate(1)
@@ -36,58 +44,65 @@ export function ProfileDeferredModules() {
         setLongestStreak(data.longestStreak)
       })
       .catch(() => setCheckIns({ loading: false, failed: true, data: [] }))
+  }, [])
+
+  return (
+    <div className="h-full rounded-[22px] border border-sky-100 bg-white/85 p-3 pb-4 shadow-sm sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[22px] font-black leading-tight text-brand-950">本月挂号日历</h2>
+        <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700">
+          最长连续 {longestStreak} 天
+        </span>
+      </div>
+      <div className="mt-3">
+        {checkIns.failed ? <ModuleFallback /> : null}
+        {checkIns.loading ? <ModuleFallback title="正在加载签到..." /> : null}
+        {!checkIns.loading && !checkIns.failed ? (
+          <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+            {Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
+              const day = index + 1
+              const record = checkIns.data.find((item) => new Date(item.checkDate).getDate() === day)
+              const mood = getMood(record?.mood || '')
+              return (
+                <div key={day} className={`flex h-12 flex-col items-center justify-center rounded-lg p-1 text-center text-xs font-black sm:h-[60px] ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'}`}>
+                  <span>{day}</span>
+                  <span className="mt-0.5 block text-base leading-none">{mood?.icon || ''}</span>
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+export function ProfileRecentMessages() {
+  const [messages, setMessages] = useState<LoadState<Message[]>>(initial([]))
+
+  useEffect(() => {
     loadJson<{ messages: Message[] }>('/api/profile/messages')
       .then((data) => setMessages({ loading: false, failed: false, data: data.messages }))
       .catch(() => setMessages({ loading: false, failed: true, data: [] }))
   }, [])
 
   return (
-    <aside className="space-y-6">
-      <div className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-2xl font-black text-brand-950">本月挂号日历</h2>
-          <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700">
-            最长连续 {longestStreak} 天
-          </span>
-        </div>
-        <div className="mt-5">
-          {checkIns.failed ? <ModuleFallback /> : null}
-          {checkIns.loading ? <ModuleFallback title="正在加载签到..." /> : null}
-          {!checkIns.loading && !checkIns.failed ? (
-            <div className="grid grid-cols-7 gap-2">
-              {Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
-                const day = index + 1
-                const record = checkIns.data.find((item) => new Date(item.checkDate).getDate() === day)
-                const mood = getMood(record?.mood || '')
-                return (
-                  <div key={day} className={`aspect-square rounded-2xl p-2 text-center text-xs font-black ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'}`}>
-                    <span>{day}</span>
-                    <span className="mt-1 block text-lg">{mood?.icon || ''}</span>
-                  </div>
-                )
-              })}
-            </div>
-          ) : null}
-        </div>
+    <div className="h-full rounded-[24px] border border-sky-100 bg-white/85 p-5 shadow-sm">
+      <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
+      <div className="mt-5 space-y-3">
+        {messages.failed ? <ModuleFallback /> : null}
+        {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
+        {!messages.loading && !messages.failed && messages.data.length ? messages.data.map((item) => {
+          const mood = getMood(item.mood)
+          return (
+            <article key={item.id} className="rounded-2xl bg-sky-50/75 p-4">
+              <p className="font-black text-brand-950">{mood?.icon || '🎵'} {new Date(item.createdAt).toLocaleString('zh-CN')}</p>
+              <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{item.content}</p>
+            </article>
+          )
+        }) : null}
+        {!messages.loading && !messages.failed && !messages.data.length ? <ModuleFallback title="还没有历史留言。" /> : null}
       </div>
-
-      <div className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
-        <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
-        <div className="mt-5 space-y-3">
-          {messages.failed ? <ModuleFallback /> : null}
-          {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
-          {!messages.loading && !messages.failed && messages.data.length ? messages.data.map((item) => {
-            const mood = getMood(item.mood)
-            return (
-              <article key={item.id} className="rounded-2xl bg-sky-50/75 p-4">
-                <p className="font-black text-brand-950">{mood?.icon || '🎵'} {new Date(item.createdAt).toLocaleString('zh-CN')}</p>
-                <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{item.content}</p>
-              </article>
-            )
-          }) : null}
-          {!messages.loading && !messages.failed && !messages.data.length ? <ModuleFallback title="还没有历史留言。" /> : null}
-        </div>
-      </div>
-    </aside>
+    </div>
   )
 }

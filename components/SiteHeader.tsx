@@ -7,7 +7,6 @@ import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { publicImageUrl } from '@/lib/images'
 import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
-import { formatUid } from '@/lib/uid'
 
 type SiteHeaderProps = {
   user?: SessionUser | null
@@ -68,11 +67,10 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
               </summary>
               <div className="absolute right-0 mt-3 w-56 rounded-2xl border border-sky-100 bg-white p-2 shadow-xl shadow-sky-900/10">
-                <Link href={`/user/${formatUid(user.uid)}`} className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">个人主页</Link>
+                <Link href="/profile" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">个人主页</Link>
                 <Link href="/notifications" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">通知中心</Link>
                 <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈中心</Link>
                 <Link href="/friends" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">我的好友</Link>
-                <Link href="/profile" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">账号设置</Link>
                 {isAdmin ? <Link href="/admin" className="block rounded-xl px-4 py-3 text-sm font-bold text-brand-700 hover:bg-sky-50">后台管理</Link> : null}
                 <form action="/api/auth/logout" method="post">
                   <button className="w-full rounded-xl px-4 py-3 text-left text-sm font-bold text-red-600 hover:bg-red-50">退出登录</button>

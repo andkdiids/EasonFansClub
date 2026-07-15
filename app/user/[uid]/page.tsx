@@ -1,25 +1,19 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
+import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { SiteHeader } from '@/components/SiteHeader'
-import { getSessionUserFromCookie } from '@/lib/auth'
+import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
-import { formatDate } from '@/lib/format'
 import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
-import { ownerPrivateUserSelect } from '@/lib/users'
 
 export const dynamic = 'force-dynamic'
 
 type PageProps = { params: Promise<{ uid: string }> }
-
-function maskPhone(phone: string) {
-  if (!/^1\d{10}$/.test(phone)) return phone
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
-}
 
 export default async function PublicUserPage({ params }: PageProps) {
   const { uid } = await params
@@ -28,7 +22,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (numericUid === null) notFound()
   if (numericUid <= 0) notFound()
 
-  const viewer = await getSessionUserFromCookie()
+  const viewer = await getCurrentUser()
   console.log('[public-user:ssr] viewer', viewer ? 'session' : 'anonymous')
   console.log('[public-user:ssr] user-query:start')
   let user
@@ -77,16 +71,6 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (!user || !user.profile) notFound()
 
   const isSelf = viewer?.id === user.id
-  const privateContact = isSelf
-    ? await withDbTimeout(
-        'User.findUnique publicUser.privateContact',
-        prisma.user.findUnique({
-          where: { id: user.id },
-          select: ownerPrivateUserSelect(),
-        }),
-        2500,
-      )
-    : null
   let friendship = null
   let pendingRequest: { senderId: string; receiverId: string } | null = null
 
@@ -131,72 +115,50 @@ export default async function PublicUserPage({ params }: PageProps) {
   return (
     <>
       <SiteHeader user={viewer} />
-      <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5">
-        <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
-          <div
-            className="h-52 bg-gradient-to-r from-sky-100 via-white to-cyan-50"
-            style={background ? { backgroundImage: `url(${background})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
-          />
-          <div className="-mt-12 flex flex-col gap-5 px-6 pb-7 md:flex-row md:items-end md:justify-between">
-            <div className="flex items-end gap-5">
-              <div className="grid h-24 w-24 place-items-center overflow-hidden rounded-full border-4 border-white bg-brand-950 text-4xl font-black text-white shadow-lg">
-                {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
-              </div>
-              <div>
-                <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Eason Chan Fans Club</p>
-                <h1 className="mt-2 text-4xl font-black text-brand-950">{name}</h1>
-                <p className="mt-2 text-sm font-bold text-slate-500">
-                  UID {formatUid(user.uid)} · Lv.{user.level} · {formatDate(user.createdAt)} 加入
-                </p>
-              </div>
-            </div>
-            {isSelf ? (
-              <Link href="/profile" className="rounded-xl bg-brand-950 px-5 py-3 text-sm font-black text-white">
-                编辑个人资料
-              </Link>
-            ) : viewer ? (
-              <AddFriendButton uid={user.uid} initialStatus={friendStatus} />
-            ) : (
-              <Link href="/login" className="rounded-xl bg-brand-700 px-5 py-3 text-sm font-black text-white">
-                登录后加好友
-              </Link>
-            )}
-          </div>
-        </section>
+      <main className="mx-auto max-w-[1200px] space-y-5 px-4 py-6 sm:px-5 sm:py-7">
+        <ProfileHeader
+          displayName={name}
+          uid={user.uid}
+          level={user.level}
+          createdAt={user.createdAt}
+          avatarUrl={avatar}
+          backgroundUrl={background}
+        />
 
-        <section className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+        <section className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-sky-100 bg-white/82 p-5 shadow-sm">
-              <h2 className="font-black text-brand-950">个人档案</h2>
-              <div className="mt-4 space-y-3 text-sm font-bold text-slate-600">
-                {privateContact ? (
-                  <>
-                    <p>
-                      邮箱：{privateContact.email || '未绑定邮箱'}
-                      <span className="ml-2 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-black text-brand-700">仅自己可见</span>
-                    </p>
-                    <p>
-                      手机号：{privateContact.phone ? maskPhone(privateContact.phone) : '未绑定手机号'}
-                      <span className="ml-2 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-black text-brand-700">仅自己可见</span>
-                    </p>
-                  </>
-                ) : null}
-                <p>简介：{bio}</p>
+              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div>
+                  <h2 className="font-black text-brand-950">个人档案</h2>
+                  <div className="mt-4 space-y-3 text-sm font-bold text-slate-600">
+                    <p>简介：{bio}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
+                  {isSelf ? (
+                    <Link href="/profile?edit=1" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
+                      编辑个人资料
+                    </Link>
+                  ) : viewer && !friendship ? (
+                    <AddFriendButton uid={user.uid} initialStatus={friendStatus} />
+                  ) : !viewer ? (
+                    <Link href="/login" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
+                      登录后加好友
+                    </Link>
+                  ) : null}
+                </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              {[
+            <ProfileStatsGrid
+              compact
+              items={[
                 ['帖子', user._count.posts],
                 ['回复', user._count.replies],
                 ['挂号', user._count.checkIns],
                 ['好友', friendCount],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-2xl border border-sky-100 bg-sky-50/80 p-4 text-center">
-                  <p className="text-2xl font-black text-brand-950">{value}</p>
-                  <p className="mt-1 text-xs font-black text-slate-500">{label}</p>
-                </div>
-              ))}
-            </div>
+              ]}
+            />
           </aside>
 
           <PublicUserModules uid={formatUid(user.uid)} isSelf={isSelf} />

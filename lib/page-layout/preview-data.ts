@@ -150,10 +150,13 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     'message.main': await moduleData(() => prisma.notification.count({ where: { recipientId: user.id, isRead: false } })),
   }),
   profile: async (user) => ({
-    'profile.main': await moduleData(() => prisma.user.findUnique({
+    'profile.intro': await moduleData(() => prisma.user.findUnique({
       where: { id: user.id },
       select: { nickname: true, uid: true, level: true, points: true },
     })),
+    'profile.stats': { ok: true, data: {} },
+    'profile.calendar': { ok: true, data: {} },
+    'profile.recentMessages': { ok: true, data: {} },
   }),
   'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)
