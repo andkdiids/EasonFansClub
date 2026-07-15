@@ -1,4 +1,4 @@
-import { unstable_cache, revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import type { Prisma } from '@prisma/client'
 import {
   getDefaultPageLayoutConfig,
@@ -187,11 +187,9 @@ async function getPublishedPageLayoutUncached(pageKey: PageLayoutPageKey) {
   return layout ? fromJson(pageKey, layout.publishedConfig) : defaults
 }
 
-export const getPublishedPageLayoutConfig = unstable_cache(
-  async (pageKey: PageLayoutPageKey) => getPublishedPageLayoutUncached(pageKey),
-  ['published-page-layout'],
-  { tags: [`${pageLayoutCacheTagPrefix}:all`], revalidate: 300 },
-)
+export async function getPublishedPageLayoutConfig(pageKey: PageLayoutPageKey) {
+  return getPublishedPageLayoutUncached(pageKey)
+}
 
 export function getPageLayoutCacheTag(pageKey: PageLayoutPageKey) {
   return `${pageLayoutCacheTagPrefix}:${pageKey}`
