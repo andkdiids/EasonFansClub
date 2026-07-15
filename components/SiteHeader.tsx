@@ -63,7 +63,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             <details className="relative shrink-0">
               <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                  <SafeAvatar src={null} name={displayName} className="h-full w-full" />
+                  <SafeAvatar src={user.avatarUrl} name={displayName} className="h-full w-full" />
                 </span>
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
               </summary>

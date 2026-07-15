@@ -1,6 +1,7 @@
 'use client'
 
-import { useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent } from 'react'
+import { useRouter } from 'next/navigation'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { publicImageUrl } from '@/lib/images'
 
@@ -27,14 +28,112 @@ type CropState = {
 
 const maxAvatarSourceSize = 10 * 1024 * 1024
 const allowedAvatarTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const allowedAvatarExtensions = new Set(['jpg', 'jpeg', 'png', 'webp'])
+const unsupportedAvatarExtensions = new Set(['heic', 'heif'])
+const avatarProcessTimeoutMs = 12000
+const avatarUploadTimeoutMs = 30000
+
+function createCompatibleId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+
+  const bytes = new Uint8Array(16)
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes)
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
+
+function fileExtension(fileName: string) {
+  return fileName.split('.').pop()?.toLowerCase() || ''
+}
+
+function isAllowedAvatarFile(file: File) {
+  return allowedAvatarTypes.has(file.type) || allowedAvatarExtensions.has(fileExtension(file.name))
+}
+
+function isUnsupportedAvatarFile(file: File) {
+  return file.type === 'image/heic' || file.type === 'image/heif' || unsupportedAvatarExtensions.has(fileExtension(file.name))
+}
 
 async function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = reject
+    const timer = window.setTimeout(() => {
+      image.onload = null
+      image.onerror = null
+      reject(new Error('图片加载超时，请重新选择图片'))
+    }, avatarProcessTimeoutMs)
+    image.onload = () => {
+      window.clearTimeout(timer)
+      resolve(image)
+    }
+    image.onerror = () => {
+      window.clearTimeout(timer)
+      reject(new Error('图片加载失败，请重新选择图片'))
+    }
     image.src = src
   })
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const [header, data] = dataUrl.split(',')
+  const mime = header.match(/^data:(.*?);base64$/)?.[1]
+  if (!mime || !data) throw new Error('图片处理失败，请重新选择图片')
+
+  const binary = window.atob(data)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new Blob([bytes], { type: mime })
+}
+
+async function canvasToBlobWithFallback(canvas: HTMLCanvasElement) {
+  const preferredType = 'image/webp'
+  const fallbackType = 'image/jpeg'
+  const quality = 0.85
+
+  if (typeof canvas.toBlob === 'function') {
+    const blob = await new Promise<Blob | null>((resolve) => {
+      let settled = false
+      const timer = window.setTimeout(() => {
+        settled = true
+        resolve(null)
+      }, avatarProcessTimeoutMs)
+
+      canvas.toBlob(
+        (result) => {
+          if (settled) return
+          window.clearTimeout(timer)
+          settled = true
+          resolve(result)
+        },
+        preferredType,
+        quality,
+      )
+    })
+
+    if (blob?.size) return blob
+  }
+
+  try {
+    return dataUrlToBlob(canvas.toDataURL(fallbackType, quality))
+  } catch {
+    throw new Error('图片处理失败，请重新选择图片')
+  }
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 async function cropAvatarToWebp(crop: CropState) {
@@ -56,13 +155,15 @@ async function cropAvatarToWebp(crop: CropState) {
   const y = (512 - height) / 2 + crop.y
   ctx.drawImage(image, x, y, width, height)
 
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.84))
-  if (!blob) throw new Error('头像压缩失败，请换一张图片再试')
+  const blob = await canvasToBlobWithFallback(canvas)
+  if (!blob?.size) throw new Error('图片处理失败，请重新选择图片')
 
-  return new File([blob], `avatar-${crypto.randomUUID()}.webp`, { type: 'image/webp' })
+  const extension = blob.type === 'image/webp' ? 'webp' : 'jpg'
+  return { blob, fileName: `avatar-${createCompatibleId()}.${extension}` }
 }
 
 export function ProfileSettingsForm({ initialProfile }: { initialProfile: InitialProfile }) {
+  const router = useRouter()
   const [form, setForm] = useState(initialProfile)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -70,8 +171,22 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
   const [isSaving, setIsSaving] = useState(false)
   const [crop, setCrop] = useState<CropState | null>(null)
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
+  const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (crop?.url) URL.revokeObjectURL(crop.url)
+    }
+  }, [crop?.url])
 
   function update(key: keyof InitialProfile, value: string) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -90,13 +205,13 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
     setMessage('')
     setError('')
 
-    if (file.type === 'image/heic' || file.name.toLowerCase().endsWith('.heic')) {
-      setError('暂不支持 HEIC 图片，请先在手机相册中导出为 JPG/PNG 后再上传。')
+    if (isUnsupportedAvatarFile(file)) {
+      setError('暂不支持 HEIC/HEIF 图片，请先在相册中导出为 JPG、PNG 或 WebP 后再上传。')
       event.target.value = ''
       return
     }
 
-    if (!allowedAvatarTypes.has(file.type)) {
+    if (!isAllowedAvatarFile(file)) {
       setError('头像仅支持 JPG、PNG 或 WebP。')
       event.target.value = ''
       return
@@ -136,22 +251,34 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
     setMessage('')
 
     try {
-      const file = await cropAvatarToWebp(crop)
+      const cropped = await cropAvatarToWebp(crop)
       const body = new FormData()
-      body.append('file', file)
+      body.append('file', cropped.blob, cropped.fileName)
       body.append('kind', 'avatar')
 
-      const response = await fetch('/api/uploads/profile-image', { method: 'POST', body })
+      const response = await fetchWithTimeout('/api/uploads/profile-image', { method: 'POST', body }, avatarUploadTimeoutMs)
       const data = await response.json().catch(() => null)
       if (!response.ok) throw new Error(data?.message || '头像上传失败，请稍后再试')
+      if (!data?.url) throw new Error('头像已上传，但资料更新失败')
 
       setForm((current) => ({ ...current, avatarUrl: data.url }))
       setMessage('头像已更新，页面中的头像会使用新文件名立即刷新。')
       resetCrop()
+      if (typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('profile-avatar-updated', { detail: { avatarUrl: data.url } }))
+      }
+      router.refresh()
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : '头像上传失败，请换一张图片再试')
+      if (!mountedRef.current) return
+      const message =
+        uploadError instanceof DOMException && uploadError.name === 'AbortError'
+          ? '头像上传超时，请稍后重试'
+          : uploadError instanceof Error
+            ? uploadError.message
+            : '头像上传失败，请换一张图片再试'
+      setError(message)
     } finally {
-      setUploading(null)
+      if (mountedRef.current) setUploading(null)
     }
   }
 
@@ -283,8 +410,8 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
                 <button type="button" onClick={() => avatarInputRef.current?.click()} className="rounded-xl bg-white px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
                   {uploading === 'avatar' ? '上传中...' : '选择头像'}
                 </button>
-                <p className="mt-2 text-xs font-bold text-slate-500">自动裁剪为 512 × 512 WebP，原图最大 10MB。</p>
-                <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp,.heic" onChange={openAvatarCrop} className="hidden" />
+                <p className="mt-2 text-xs font-bold text-slate-500">自动裁剪为 512 × 512，优先 WebP，原图最大 10MB。</p>
+                <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" onChange={openAvatarCrop} className="hidden" />
               </div>
             </div>
           </div>
