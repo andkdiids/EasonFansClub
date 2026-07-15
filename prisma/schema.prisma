@@ -251,6 +251,17 @@ enum PageLayoutRevisionSource {
   DEFAULT
 }
 
+enum ExperienceLogType {
+  CHECKIN
+  TASK
+  POST
+  COMMENT
+  LIKE
+  ACTIVITY
+  ADMIN
+  OTHER
+}
+
 model User {
   id                 String             @id @default(cuid())
   uid                Int                @unique @default(autoincrement())
@@ -267,6 +278,7 @@ model User {
   verificationStatus VerificationStatus @default(NONE)
   level              Int                @default(1)
   exp                Int                @default(0)
+  experience         Int                @default(0)
   points             Int                @default(0)
   consecutiveDays    Int                @default(0)
   lastCheckInDate    DateTime?
@@ -339,6 +351,8 @@ model User {
   profileWallMessagesSent    ProfileWallMessage[]      @relation("ProfileWallSender")
   profileWallMessagesReceived ProfileWallMessage[]     @relation("ProfileWallReceiver")
   friendActivities           FriendActivity[]          @relation("FriendActivityActor")
+  experienceLogs             ExperienceLog[]
+  dailyExperienceRecords     DailyExperienceRecord[]
 
   @@index([role])
   @@index([status])
@@ -349,6 +363,7 @@ model User {
   @@index([email])
   @@index([points])
   @@index([level])
+  @@index([experience])
   @@index([lastActiveAt])
   @@index([createdAt])
 }
@@ -739,6 +754,58 @@ model FriendActivity {
   @@index([actorId, createdAt])
   @@index([checkInId])
   @@index([dailyMessageId])
+}
+
+model GrowthLevelConfig {
+  id          String   @id @default(cuid())
+  level       Int      @unique
+  name        String
+  requiredExp Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([requiredExp])
+}
+
+model ExperienceLog {
+  id          String            @id @default(cuid())
+  amount      Int
+  type        ExperienceLogType
+  description String
+  createdAt   DateTime          @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+}
+
+model DailyExperienceRecord {
+  id        String   @id @default(cuid())
+  date      DateTime
+  amount    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  expReward   Int
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([createdAt])
 }
 
 model DailyMessageLike {

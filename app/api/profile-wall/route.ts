@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   const viewer = await getCurrentUser()
   const { searchParams } = new URL(request.url)
   const uid = Number(searchParams.get('receiverUid'))
-  if (!Number.isSafeInteger(uid) || uid <= 0) return NextResponse.json({ message: 'User not found' }, { status: 404 })
+  if (!Number.isSafeInteger(uid) || uid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
     where: { uid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
       profile: { select: { wallVisibility: true } },
     },
   })
-  if (!receiver) return NextResponse.json({ message: 'User not found' }, { status: 404 })
+  if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const canView = await canViewWall(viewer?.id || null, receiver)
   if (!canView) {
@@ -107,25 +107,25 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ message: 'Please sign in first' }, { status: 401 })
+  if (!viewer) return NextResponse.json({ message: '请先登录' }, { status: 401 })
 
   const body = await request.json().catch(() => null)
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null
   const rawContent = sanitizeText(body?.content, 500)
   const content = await filterSensitiveWords(rawContent)
-  if (!content) return NextResponse.json({ message: 'Message content is required' }, { status: 400 })
-  if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: 'User not found' }, { status: 404 })
+  if (!content) return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
+  if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
     where: { uid: receiverUid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
     select: { id: true, profile: { select: { wallVisibility: true } } },
   })
-  if (!receiver) return NextResponse.json({ message: 'User not found' }, { status: 404 })
+  if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const canView = await canViewWall(viewer.id, receiver)
   if (!canView || receiver.profile?.wallVisibility === 'CLOSED') {
-    return NextResponse.json({ message: 'This wall is not open' }, { status: 403 })
+    return NextResponse.json({ message: '留言墙暂未开放' }, { status: 403 })
   }
 
   if (parentId) {
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
       where: { id: parentId, receiverId: receiver.id, deletedAt: null },
       select: { id: true },
     })
-    if (!parent) return NextResponse.json({ message: 'Parent message not found' }, { status: 404 })
+    if (!parent) return NextResponse.json({ message: '要回复的留言不存在' }, { status: 404 })
   }
 
   const message = await prisma.profileWallMessage.create({
@@ -146,5 +146,5 @@ export async function POST(request: Request) {
     select: { id: true },
   })
 
-  return NextResponse.json({ message: 'Message published', id: message.id }, { status: 201 })
+  return NextResponse.json({ message: '留言已发布', id: message.id }, { status: 201 })
 }

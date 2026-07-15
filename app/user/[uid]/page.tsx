@@ -8,6 +8,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { normalizeFriendPair } from '@/lib/friends'
+import { getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
@@ -43,6 +44,8 @@ export default async function PublicUserPage({ params }: PageProps) {
         backgroundUrl: true,
         bio: true,
         level: true,
+        exp: true,
+        experience: true,
         createdAt: true,
         profile: true,
         _count: {
@@ -112,6 +115,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   const bio = user.profile.bio || user.bio || '这个成员还没有填写个人简介。'
   const friendCount = user._count.friendshipsA + user._count.friendshipsB
   const friendStatus = friendship ? 'FRIEND' : pendingRequest?.senderId === viewer?.id ? 'PENDING' : pendingRequest ? 'RECEIVED' : 'NONE'
+  const growth = await getGrowthSummary(user.experience || user.exp || 0)
 
   return (
     <>
@@ -121,6 +125,10 @@ export default async function PublicUserPage({ params }: PageProps) {
           displayName={name}
           uid={user.uid}
           level={user.level}
+          levelName={growth.levelName}
+          experience={growth.experience}
+          nextRequiredExp={growth.nextRequiredExp}
+          progressPercent={growth.progressPercent}
           createdAt={user.createdAt}
           avatarUrl={avatar}
           backgroundUrl={background}

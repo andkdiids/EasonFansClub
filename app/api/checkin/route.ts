@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, isSameLocalDay, startOfLocalDay, startOfYesterday } from '@/lib/checkin'
-import { CHECK_IN_EXP, CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
+import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb } from '@/lib/db-timeout'
-import { calcLevel } from '@/lib/points'
+import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, sanitizeText } from '@/lib/security'
 
@@ -22,7 +22,7 @@ export async function GET() {
       'User.findUnique checkinApi.profile',
       prisma.user.findUnique({
         where: { id: user.id },
-        select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
+        select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true, lastCheckInDate: true },
       }),
       null,
     ),
@@ -56,6 +56,7 @@ export async function GET() {
     totalCheckIns,
     points: profile.points,
     exp: profile.exp,
+    experience: profile.experience,
     level: profile.level,
     todayCount,
     moodStats,
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
   if (existing) {
     const profile = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { points: true, exp: true, level: true, consecutiveDays: true },
+      select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true },
     })
     return NextResponse.json({
       message: '今天已经挂号过了',
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
       consecutiveDays: profile?.consecutiveDays ?? existing.streakDay,
       points: profile?.points ?? 0,
       exp: profile?.exp ?? 0,
+      experience: profile?.experience ?? 0,
       level: profile?.level ?? 1,
       gainedPoints: 0,
       gainedExp: 0,
@@ -112,7 +114,7 @@ export async function POST(request: Request) {
   const result = await prisma.$transaction(async (tx) => {
     const currentUser = await tx.user.findUniqueOrThrow({
       where: { id: user.id },
-      select: { points: true, exp: true, consecutiveDays: true, lastCheckInDate: true },
+      select: { points: true, consecutiveDays: true, lastCheckInDate: true },
     })
 
     const nextStreak = isSameLocalDay(currentUser.lastCheckInDate, yesterday)
@@ -120,9 +122,16 @@ export async function POST(request: Request) {
       : 1
     const bonus = getStreakBonus(nextStreak)
     const gainedPoints = CHECK_IN_POINTS + (bonus?.points || 0)
-    const gainedExp = CHECK_IN_EXP + (bonus?.exp || 0)
+    const requestedExp = getRandomCheckInExperience()
     const nextPoints = currentUser.points + gainedPoints
-    const nextExp = currentUser.exp + gainedExp
+
+    const expAward = await awardExperience(tx, {
+      userId: user.id,
+      amount: requestedExp,
+      type: 'CHECKIN',
+      description: '每日挂号',
+    })
+    const gainedExp = expAward.amount
 
     const checkIn = await tx.checkIn.create({
       data: {
@@ -166,12 +175,10 @@ export async function POST(request: Request) {
       where: { id: user.id },
       data: {
         points: nextPoints,
-        exp: nextExp,
         consecutiveDays: nextStreak,
         lastCheckInDate: today,
-        level: calcLevel(nextPoints + nextExp),
       },
-      select: { points: true, exp: true, consecutiveDays: true, level: true },
+      select: { points: true, exp: true, experience: true, consecutiveDays: true, level: true },
     })
 
     await tx.pointLog.create({
@@ -186,7 +193,7 @@ export async function POST(request: Request) {
       },
     })
 
-    return { user: updatedUser, checkIn, gainedPoints, gainedExp, bonus, dailyMessageId }
+    return { user: updatedUser, checkIn, gainedPoints, gainedExp, requestedExp, bonus, dailyMessageId }
   })
   logPerf('checkin.transaction.ms', transactionStart, { userId: user.id })
 
@@ -238,6 +245,7 @@ export async function POST(request: Request) {
     consecutiveDays: result.user.consecutiveDays,
     points: result.user.points,
     exp: result.user.exp,
+    experience: result.user.experience,
     level: result.user.level,
   })
 }

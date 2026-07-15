@@ -19,6 +19,7 @@ export const adminPermissionGroups = [
   { key: 'notification_manage', label: '全站通知管理', description: '发布、隐藏和查看全站系统通知。' },
   { key: 'stats_view', label: '数据统计查看', description: '查看后台运营数据和统计面板。' },
   { key: 'admin_manage', label: '管理员管理', description: '添加管理员、移除管理员并编辑后台权限。' },
+  { key: 'growth_manage', label: '成长系统管理', description: '维护等级名称、升级经验和任务奖励基础配置。' },
 ] as const
 
 export type AdminPermissionKey = (typeof adminPermissionGroups)[number]['key']
@@ -39,4 +40,5 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/appearance': 'site_config_manage',
   '/admin/layout-editor': 'layout.manage',
   '/admin/admins': 'admin_manage',
+  '/admin/growth': 'growth_manage',
 }

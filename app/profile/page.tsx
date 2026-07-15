@@ -8,6 +8,7 @@ import { ProfileWall } from '@/components/ProfileWall'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
+import { getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
@@ -43,6 +44,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           phoneVerifiedAt: true,
           level: true,
           exp: true,
+          experience: true,
           points: true,
           consecutiveDays: true,
           createdAt: true,
@@ -69,7 +71,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = publicImageUrl(profile.profile.avatarUrl || profile.avatarUrl)
   const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.profile.bio || profile.bio || ''
-  const layoutConfig = await getPublishedPageLayoutConfig('profile')
+  const [layoutConfig, growth] = await Promise.all([
+    getPublishedPageLayoutConfig('profile'),
+    getGrowthSummary(profile.experience || profile.exp || 0),
+  ])
   const headerUser = { ...user, avatarUrl: avatar || user.avatarUrl || null, nickname: displayName }
   const profileEditorInitialProfile = {
     nickname: displayName,
@@ -102,6 +107,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           displayName={displayName}
           uid={profile.uid}
           level={profile.level}
+          levelName={growth.levelName}
+          experience={growth.experience}
+          nextRequiredExp={growth.nextRequiredExp}
+          progressPercent={growth.progressPercent}
           createdAt={profile.createdAt}
           avatarUrl={avatar}
           backgroundUrl={background}
@@ -127,7 +136,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
                   items={[
                     ['等级', `Lv.${profile.level}`],
                     ['积分', profile.points],
-                    ['经验', profile.exp],
+                    ['经验', `${growth.experience} XP`],
                     ['连续挂号', `${profile.consecutiveDays} 天`],
                     ['累计挂号', `${profile._count.checkIns} 天`],
                   ]}
@@ -153,7 +162,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
                       items={[
                         ['等级', `Lv.${profile.level}`],
                         ['积分', profile.points],
-                        ['经验', profile.exp],
+                        ['经验', `${growth.experience} XP`],
                         ['连续挂号', `${profile.consecutiveDays} 天`],
                         ['累计挂号', `${profile._count.checkIns} 天`],
                       ]}

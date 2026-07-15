@@ -4,6 +4,10 @@ type ProfileHeaderProps = {
   displayName: string
   uid: number
   level: number
+  levelName?: string
+  experience?: number
+  nextRequiredExp?: number | null
+  progressPercent?: number
   createdAt: Date
   avatarUrl?: string | null
   backgroundUrl?: string | null
@@ -35,6 +39,10 @@ export function ProfileHeader({
   displayName,
   uid,
   level,
+  levelName,
+  experience = 0,
+  nextRequiredExp,
+  progressPercent = 0,
   createdAt,
   avatarUrl,
   backgroundUrl,
@@ -64,9 +72,18 @@ export function ProfileHeader({
           </div>
           <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
-            <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}</span>
+            <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}{levelName ? ` ${levelName}` : ''}</span>
             <span className="rounded-full border border-white/14 bg-slate-950/16 px-2 py-1 font-black text-white/92 backdrop-blur">{admissionInfo}</span>
           </p>
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-black text-white/85">
+              <span>成长经验</span>
+              <span>{experience} / {nextRequiredExp ?? experience} XP</span>
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/18">
+              <div className="h-full rounded-full bg-sky-200" style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }} />
+            </div>
+          </div>
         </div>
       </div>
     </section>

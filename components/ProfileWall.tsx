@@ -36,11 +36,11 @@ export function ProfileWall({ receiverUid }: { receiverUid: number }) {
     try {
       const response = await fetch(`/api/profile-wall?receiverUid=${receiverUid}`, { cache: 'no-store' })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.message || 'Profile wall failed to load')
+      if (!response.ok) throw new Error(data.message || '留言墙加载失败')
       setMessages(Array.isArray(data.messages) ? data.messages : [])
       setCanPost(Boolean(data.canPost))
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Profile wall failed to load')
+      setError(loadError instanceof Error ? loadError.message : '留言墙加载失败')
     } finally {
       setLoading(false)
     }
@@ -61,12 +61,12 @@ export function ProfileWall({ receiverUid }: { receiverUid: number }) {
         body: JSON.stringify({ receiverUid, content, parentId: replyTo }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.message || 'Message failed to publish')
+      if (!response.ok) throw new Error(data.message || '留言发布失败')
       setContent('')
       setReplyTo(null)
       await load()
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Message failed to publish')
+      setError(submitError instanceof Error ? submitError.message : '留言发布失败')
     } finally {
       setSubmitting(false)
     }
@@ -81,8 +81,8 @@ export function ProfileWall({ receiverUid }: { receiverUid: number }) {
     <section className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Wall</p>
-          <h2 className="mt-1 text-2xl font-black text-brand-950">Profile Wall</h2>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">留言墙</p>
+          <h2 className="mt-1 text-2xl font-black text-brand-950">个人留言墙</h2>
         </div>
       </div>
 
@@ -90,9 +90,9 @@ export function ProfileWall({ receiverUid }: { receiverUid: number }) {
         <div className="mt-4 rounded-2xl bg-sky-50/75 p-3">
           {replyTo ? (
             <p className="mb-2 text-xs font-black text-brand-700">
-              Replying to a message
+              正在回复一条留言
               <button className="ml-2 underline" onClick={() => setReplyTo(null)} type="button">
-                Cancel
+                取消
               </button>
             </p>
           ) : null}
@@ -100,20 +100,20 @@ export function ProfileWall({ receiverUid }: { receiverUid: number }) {
             value={content}
             onChange={(event) => setContent(event.target.value.slice(0, 500))}
             className="min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none"
-            placeholder="Leave a message..."
+            placeholder="留下你的留言..."
           />
           <div className="mt-2 flex items-center justify-between gap-3">
             <span className="text-xs font-bold text-slate-400">{content.length}/500</span>
             <button onClick={submit} disabled={submitting || !content.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
-              {submitting ? 'Publishing...' : 'Post'}
+              {submitting ? '发布中...' : '发布'}
             </button>
           </div>
         </div>
       ) : null}
 
       {error ? <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
-      {loading ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">Loading wall...</p> : null}
-      {!loading && !messages.length ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">No messages yet.</p> : null}
+      {loading ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">留言墙加载中...</p> : null}
+      {!loading && !messages.length ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">暂无留言</p> : null}
 
       <div className="mt-4 space-y-3">
         {messages.map((message) => <WallMessageCard key={message.id} message={message} onReply={setReplyTo} onDelete={remove} />)}
@@ -141,8 +141,8 @@ function WallMessageCard({ message, onReply, onDelete }: { message: WallMessage;
           </div>
           <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-700">{message.content}</p>
           <div className="mt-2 flex gap-3">
-            <button onClick={() => onReply(message.id)} className="text-xs font-black text-brand-700" type="button">Reply</button>
-            {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">Delete</button> : null}
+            <button onClick={() => onReply(message.id)} className="text-xs font-black text-brand-700" type="button">回复</button>
+            {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
           </div>
           {children.length ? (
             <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">

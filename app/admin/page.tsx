@@ -24,6 +24,7 @@ const adminModules = [
   { href: '/admin/admins', title: '管理员管理', desc: '添加管理员、移除管理员并编辑后台权限。' },
   { href: '/admin/appearance', title: '网站外观配置', desc: '修改前台文案、颜色、图片、导航图标和首页轮播。' },
   { href: '/admin/layout-editor', title: '页面布局编辑器', desc: '调整首页、每日挂号和后台首页的模块顺序、宽度、间距和发布状态。' },
+  { href: '/admin/growth', title: '成长系统管理', desc: '维护等级名称、升级经验和任务奖励基础配置。' },
 ] as const
 
 export default async function AdminPage() {

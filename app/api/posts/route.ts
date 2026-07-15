@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { POINTS, calcLevel } from '@/lib/points'
+import { awardExperience } from '@/lib/growth'
+import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, isAdminRole, sanitizeText } from '@/lib/security'
 
@@ -117,10 +118,9 @@ export async function POST(request: Request) {
     const result = await prisma.$transaction(async (tx) => {
       const currentUser = await tx.user.findFirstOrThrow({
         where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-        select: { points: true, exp: true },
+        select: { points: true },
       })
       const nextPoints = currentUser.points + POINTS.postCreate
-      const nextExp = currentUser.exp + POINTS.postCreate
 
       const post = await tx.post.create({
         data: {
@@ -143,9 +143,14 @@ export async function POST(request: Request) {
         where: { id: user.id },
         data: {
           points: nextPoints,
-          exp: nextExp,
-          level: calcLevel(nextPoints + nextExp),
         },
+      })
+
+      await awardExperience(tx, {
+        userId: user.id,
+        amount: POINTS.postCreate,
+        type: 'POST',
+        description: '发布帖子',
       })
 
       await tx.pointLog.create({
