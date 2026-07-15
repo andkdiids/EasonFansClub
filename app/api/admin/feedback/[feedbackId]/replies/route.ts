@@ -51,8 +51,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
     await tx.notification.create({
       data: {
         type: 'ADMIN',
-        title: `管理员回复了你的反馈：${feedback.title}`,
-        content: content.slice(0, 120) || '管理员上传了图片回复。',
+        title: '你的反馈收到回复',
+        content: '管理员回复了你的反馈。',
         link: `/feedback/${feedback.id}`,
         recipientId: feedback.userId,
         actorId: guard.user.id,

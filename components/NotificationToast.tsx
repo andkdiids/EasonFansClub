@@ -10,6 +10,7 @@ type ToastNotification = {
   content: string | null
   link: string | null
   targetUrl?: string | null
+  createdAt: string | Date
 }
 
 const displayedKey = 'ecfc-displayed-notification-ids'
@@ -62,20 +63,25 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
   }, [enabled])
 
   if (!enabled || !toast) return null
+  const createdAt = new Date(toast.createdAt)
 
   return (
     <div className="fixed inset-x-4 bottom-24 z-50 md:inset-x-auto md:bottom-6 md:right-6 md:w-96">
-      <div className="rounded-2xl border border-sky-100 bg-white p-4 shadow-2xl shadow-sky-900/20">
+      <div className="rounded-[24px] border border-sky-100/90 bg-white/88 p-4 shadow-2xl shadow-sky-900/20 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-black text-brand-950">{toast.title}</p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">重要提醒</p>
+            <p className="mt-1 text-sm font-black text-brand-950">{toast.title}</p>
             <p className="mt-1 line-clamp-2 text-sm font-bold leading-6 text-slate-600">{toast.content}</p>
+            <p className="mt-2 text-xs font-bold text-slate-400">
+              {createdAt.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </p>
           </div>
           <button onClick={() => setToast(null)} className="shrink-0 rounded-full px-2 text-lg font-black text-slate-400 hover:bg-slate-50">
             ×
           </button>
         </div>
-        <Link href={toast.targetUrl || toast.link || '/notifications'} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white">
+        <Link href={toast.targetUrl || toast.link || '/notifications'} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white shadow-sm">
           查看详情
         </Link>
       </div>

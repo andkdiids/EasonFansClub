@@ -69,10 +69,31 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const bio = profile.profile.bio || profile.bio || ''
   const layoutConfig = await getPublishedPageLayoutConfig('profile')
   const headerUser = { ...user, avatarUrl: avatar || user.avatarUrl || null, nickname: displayName }
+  const profileEditorInitialProfile = {
+    nickname: displayName,
+    avatarUrl: avatar || '',
+    backgroundUrl: background || '',
+    bio,
+    email: profile.email || '',
+    phone: profile.phone || '',
+    emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
+    phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
+  }
+  const renderProfileActions = () => (
+    <div className="flex flex-wrap items-center gap-3 md:justify-end">
+      <Link href="/profile?edit=1" scroll={false} className="inline-flex h-11 items-center justify-center rounded-xl border border-brand-900 bg-brand-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
+        编辑资料
+      </Link>
+      <Link href={`/user/${formatUid(profile.uid)}`} className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-brand-800 shadow-sm transition hover:bg-sky-50">
+        查看公开主页
+      </Link>
+    </div>
+  )
 
   return (
     <>
       <SiteHeader user={headerUser} />
+      <ProfileEditorDrawer initialOpen={query?.edit === '1'} initialProfile={profileEditorInitialProfile} hideTrigger />
       <main className="mx-auto max-w-[1200px] space-y-4 px-4 py-5 sm:px-5 sm:py-6">
         <ProfileHeader
           displayName={displayName}
@@ -93,24 +114,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
                     <h2 className="text-lg font-black text-slate-950">个人简介</h2>
                     <p className="mt-3 text-sm leading-7 text-slate-600">{bio || '这个成员还没有填写个人简介。'}</p>
                   </div>
-                  <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
-                    <ProfileEditorDrawer
-                      initialOpen={query?.edit === '1'}
-                      initialProfile={{
-                        nickname: displayName,
-                        avatarUrl: avatar || '',
-                        backgroundUrl: background || '',
-                        bio,
-                        email: profile.email || '',
-                        phone: profile.phone || '',
-                        emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
-                        phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
-                      }}
-                    />
-                    <Link href={`/user/${formatUid(profile.uid)}`} className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
-                      查看公开主页
-                    </Link>
-                  </div>
+                  {renderProfileActions()}
                 </div>
               </section>
             ),
@@ -137,24 +141,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
                       <h2 className="text-lg font-black text-slate-950">个人简介</h2>
                       <p className="mt-3 text-sm leading-7 text-slate-600">{bio || '这个成员还没有填写个人简介。'}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
-                      <ProfileEditorDrawer
-                        initialOpen={query?.edit === '1'}
-                        initialProfile={{
-                          nickname: displayName,
-                          avatarUrl: avatar || '',
-                          backgroundUrl: background || '',
-                          bio,
-                          email: profile.email || '',
-                          phone: profile.phone || '',
-                          emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
-                          phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
-                        }}
-                      />
-                      <Link href={`/user/${formatUid(profile.uid)}`} className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
-                        查看公开主页
-                      </Link>
-                    </div>
+                    {renderProfileActions()}
                   </div>
                   <div className="px-5 pb-5 sm:px-6">
                     <ProfileStatsGrid

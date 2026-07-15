@@ -21,21 +21,12 @@ export default async function NotificationsPage() {
   return (
     <>
       <SiteHeader user={user} />
-      <main className="mx-auto max-w-4xl px-5 py-8">
+      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-5 sm:py-8">
         <PageLayoutRenderer
           pageKey="message"
           config={layoutConfig}
           modules={{
-            'message.main': (
-              <>
-                <section className="rounded-2xl border border-sky-100 bg-white/80 p-7 shadow-sm">
-                  <p className="text-sm font-black uppercase text-brand-700">Notification Center</p>
-                  <h1 className="mt-2 text-4xl font-black text-brand-950">通知中心</h1>
-                  <p className="mt-3 text-sm font-bold text-slate-500">只有点击通知或标记已读后，通知才会变为已读。</p>
-                </section>
-                <NotificationsClient initialNotifications={notifications} initialUnreadCount={unreadCount} />
-              </>
-            ),
+            'message.main': <NotificationsClient initialNotifications={notifications} initialUnreadCount={unreadCount} />,
           }}
         />
       </main>

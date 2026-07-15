@@ -214,13 +214,6 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
     }
   }
 
-  async function resolveFeedback() {
-    if (!detail) return
-    const data = await requestJson(`/api/feedback/${detail.id}/resolve`, { method: 'PATCH' })
-    setDetail(data.feedback)
-    setFeedbacks((items) => items.map((item) => (item.id === data.feedback.id ? { ...item, ...data.feedback } : item)))
-  }
-
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
       <section className="rounded-[28px] border border-sky-100 bg-white/85 p-5 shadow-sm sm:p-7">
@@ -282,7 +275,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
 
           <div className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
             {detail || selected ? (
-              <FeedbackThread detail={detail || selected!} reply={reply} setReply={setReply} replyAttachments={replyAttachments} upload={upload} submitReply={submitReply} replying={replying} resolveFeedback={resolveFeedback} />
+              <FeedbackThread detail={detail || selected!} reply={reply} setReply={setReply} replyAttachments={replyAttachments} upload={upload} submitReply={submitReply} replying={replying} />
             ) : (
               <div className="grid min-h-80 place-items-center text-sm font-bold text-slate-500">选择一条反馈查看详情</div>
             )}
@@ -317,7 +310,6 @@ function FeedbackThread({
   upload,
   submitReply,
   replying,
-  resolveFeedback,
 }: {
   detail: FeedbackItem
   reply: string
@@ -326,7 +318,6 @@ function FeedbackThread({
   upload: (event: ChangeEvent<HTMLInputElement>, target: 'create' | 'reply') => Promise<void>
   submitReply: (event: FormEvent) => Promise<void>
   replying: boolean
-  resolveFeedback: () => Promise<void>
 }) {
   const isClosed = detail.status === 'RESOLVED' || detail.status === 'CLOSED'
   return (
@@ -367,7 +358,6 @@ function FeedbackThread({
             </label>
             {replyAttachments.length ? <span className="text-xs font-bold text-slate-500">已上传 {replyAttachments.length} 张图片</span> : null}
             <button disabled={replying} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : '发送回复'}</button>
-            <button type="button" onClick={resolveFeedback} className="rounded-full bg-emerald-50 px-5 py-2 text-sm font-black text-emerald-700">标记已完成</button>
           </div>
         </form>
       ) : (

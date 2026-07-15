@@ -6,6 +6,7 @@ import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { publicImageUrl } from '@/lib/images'
+import { getUnreadNotificationCount } from '@/lib/notifications'
 import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
 
 type SiteHeaderProps = {
@@ -23,6 +24,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
     providedUser !== undefined ? Promise.resolve(providedUser) : getCurrentUser(),
     providedConfig ? Promise.resolve(providedConfig) : measureBootstrap('site.appearance', getSiteAppearance()),
   ])
+  const unreadCount = user ? await measureBootstrap('header.notifications.unread', getUnreadNotificationCount(user.id)).catch(() => 0) : 0
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
   const displayName = user?.nickname || ''
@@ -61,8 +63,11 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
           {user ? (
             <details className="relative shrink-0">
               <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
-                <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                  <SafeAvatar src={user.avatarUrl} name={displayName} className="h-full w-full" />
+                <span className="relative">
+                  <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
+                    <SafeAvatar src={user.avatarUrl} name={displayName} className="h-full w-full" />
+                  </span>
+                  {unreadCount > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
                 </span>
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
               </summary>

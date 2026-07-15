@@ -18,9 +18,11 @@ type InitialProfile = {
 export function ProfileEditorDrawer({
   initialOpen = false,
   initialProfile,
+  hideTrigger = false,
 }: {
   initialOpen?: boolean
   initialProfile: InitialProfile
+  hideTrigger?: boolean
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -48,9 +50,11 @@ export function ProfileEditorDrawer({
 
   return (
     <>
-      <button type="button" onClick={openEditor} className="rounded-xl border border-white/25 bg-slate-950/30 px-4 py-2.5 text-center text-sm font-black text-white shadow-lg shadow-slate-950/20 backdrop-blur-xl transition hover:bg-slate-950/42">
-        编辑资料
-      </button>
+      {hideTrigger ? null : (
+        <button type="button" onClick={openEditor} className="h-11 rounded-xl border border-white/25 bg-slate-950/30 px-4 text-center text-sm font-black text-white shadow-lg shadow-slate-950/20 backdrop-blur-xl transition hover:bg-slate-950/42">
+          编辑资料
+        </button>
+      )}
 
       {isOpen ? (
         <div className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-sm">

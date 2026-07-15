@@ -1,16 +1,57 @@
 import { prisma } from '@/lib/prisma'
+import { publicImageUrl } from '@/lib/images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
+import type { SystemNotificationType } from '@prisma/client'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
+const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
+
+const personalTypeLabels: Record<string, string> = {
+  REPLY: '回复',
+  LIKE: '点赞',
+  FRIEND_REQUEST: '好友',
+  SYSTEM: '系统',
+  MESSAGE: '消息',
+  ACTIVITY: '活动',
+  ADMIN: '系统',
+  FOLLOW: '关注',
+  BADGE: '勋章',
+}
+
+const systemTypeLabels: Record<string, string> = {
+  SYSTEM: '系统',
+  UPDATE: '更新日志',
+  ANNOUNCEMENT: '公告',
+  ACTIVITY: '活动',
+  MAINTENANCE: '维护',
+  SECURITY: '安全',
+}
+
+function getNotificationCategory(type: string, link?: string | null) {
+  if (link?.startsWith('/feedback/')) return 'feedback'
+  if (type === 'REPLY') return 'reply'
+  if (type === 'LIKE') return 'like'
+  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'friend'
+  return 'system'
+}
+
+function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system') {
+  if (link?.startsWith('/feedback/')) return '反馈'
+  return source === 'system' ? systemTypeLabels[type] || type : personalTypeLabels[type] || type
+}
 
 export type UnifiedNotification = {
   id: string
   source: 'personal' | 'system'
   type: string
+  typeLabel: string
+  category: string
   title: string
   content: string | null
   link: string | null
   targetUrl: string | null
+  actorName: string | null
+  actorAvatarUrl: string | null
   popup: boolean
   sticky: boolean
   isRead: boolean
@@ -53,6 +94,13 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         isRead: true,
         createdAt: true,
         readAt: true,
+        actor: {
+          select: {
+            nickname: true,
+            avatarUrl: true,
+            profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
       },
     }),
     prisma.systemNotification.findMany({
@@ -83,10 +131,14 @@ export async function listUnifiedNotifications(userId: string, options: { unread
       id: item.id,
       source: 'personal' as const,
       type: item.type,
+      typeLabel: getNotificationTypeLabel(item.type, item.link, 'personal'),
+      category: getNotificationCategory(item.type, item.link),
       title: item.title,
       content: item.content,
       link: item.link,
       targetUrl: item.link,
+      actorName: item.actor?.profile?.displayName || item.actor?.nickname || null,
+      actorAvatarUrl: publicImageUrl(item.actor?.profile?.avatarUrl || item.actor?.avatarUrl),
       popup: false,
       sticky: false,
       isRead: item.isRead,
@@ -101,10 +153,14 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         id: item.id,
         source: 'system' as const,
         type: item.type,
+        typeLabel: getNotificationTypeLabel(item.type, targetUrl, 'system'),
+        category: getNotificationCategory(item.type, targetUrl),
         title: item.title,
         content: item.content,
         link: targetUrl,
         targetUrl,
+        actorName: null,
+        actorAvatarUrl: null,
         popup: item.popup,
         sticky: item.sticky,
         isRead,
@@ -126,6 +182,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
     where: {
       ...effectiveSystemNotificationWhere(now),
       popup: true,
+      type: { in: POPUP_SYSTEM_TYPES },
       reads: { none: { userId } },
     },
     orderBy: effectiveSystemNotificationOrder,
@@ -150,10 +207,14 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       id: item.id,
       source: 'system' as const,
       type: item.type,
+      typeLabel: getNotificationTypeLabel(item.type, targetUrl, 'system'),
+      category: getNotificationCategory(item.type, targetUrl),
       title: item.title,
       content: item.content,
       link: targetUrl,
       targetUrl,
+      actorName: null,
+      actorAvatarUrl: null,
       popup: item.popup,
       sticky: item.sticky,
       isRead: false,
