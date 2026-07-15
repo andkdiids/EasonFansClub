@@ -13,6 +13,9 @@ export type LayoutAlignment = (typeof layoutAlignments)[number]
 export const layoutDensities = ['compact', 'normal', 'spacious'] as const
 export type LayoutDensity = (typeof layoutDensities)[number]
 
+export const pageLayoutBehaviors = ['fixed', 'auto'] as const
+export type PageLayoutBehavior = (typeof pageLayoutBehaviors)[number]
+
 export const pageLayoutDevices = ['desktop', 'tablet', 'mobile'] as const
 export type PageLayoutDevice = (typeof pageLayoutDevices)[number]
 
@@ -59,6 +62,7 @@ export type PageLayoutModuleDefinition = {
   supportsDesktop: boolean
   supportsTablet: boolean
   supportsMobile: boolean
+  layoutBehavior: PageLayoutBehavior
   minW: number
   minH: number
   maxW?: number

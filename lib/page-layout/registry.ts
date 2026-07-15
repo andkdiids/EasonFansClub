@@ -1,6 +1,7 @@
 import type {
   LayoutSpacing,
   LayoutWidth,
+  PageLayoutBehavior,
   PageLayoutConfig,
   PageLayoutDevice,
   PageLayoutGridItem,
@@ -53,24 +54,28 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     desktop: grid(0, 10, 12, 5),
     mobile: grid(0, 9, 4, 5),
     required: true,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('home', 'home.dailyMessages', 'E友留言', '每日留言精选', 50, {
     desktop: grid(0, 15, 6, 4),
     mobile: grid(0, 14, 4, 4),
     width: 'half',
     allowedWidths: cardWidths,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('home', 'home.music', 'EasMusic', '音乐推荐入口', 60, {
     desktop: grid(6, 15, 6, 4),
     mobile: grid(0, 18, 4, 4),
     width: 'half',
     allowedWidths: cardWidths,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('home', 'home.culture', '活动与文化', '活动和文化内容入口', 70, {
     desktop: grid(0, 19, 6, 4),
     mobile: grid(0, 22, 4, 4),
     width: 'half',
     allowedWidths: cardWidths,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('home', 'home.latestPosts', '最新动态', '预留的首页动态模块', 80, {
     desktop: grid(6, 19, 6, 4),
@@ -78,6 +83,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     visible: false,
     width: 'half',
     allowedWidths: cardWidths,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('home', 'home.footer', '页脚', '首页页脚文案', 90, {
     desktop: grid(0, 23, 12, 2),
@@ -325,6 +331,7 @@ function defineLayoutModule(
     canResize?: boolean
     canHide?: boolean
     required?: boolean
+    layoutBehavior?: PageLayoutBehavior
   } = {},
 ): PageLayoutModuleDefinition {
   return {
@@ -350,6 +357,7 @@ function defineLayoutModule(
     supportsDesktop: options.supportsDesktop ?? true,
     supportsTablet: options.supportsTablet ?? true,
     supportsMobile: options.supportsMobile ?? true,
+    layoutBehavior: options.layoutBehavior || 'fixed',
     minW: options.minW ?? 1,
     minH: options.minH ?? 1,
     maxW: options.maxW,

@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
-import type { PageLayoutModuleConfig } from '@/lib/page-layout/types'
+import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
+import type { PageLayoutBehavior, PageLayoutModuleConfig } from '@/lib/page-layout/types'
 
 const widthClass = {
   full: 'mx-auto w-full max-w-none',
@@ -55,14 +56,31 @@ export function PageLayoutFrame({
   children,
   className = '',
   style,
+  'data-grid-w': gridW,
+  'data-grid-h': gridH,
+  'data-layout-density': density,
+  'data-layout-behavior': behavior,
 }: {
   config: PageLayoutModuleConfig
   children: ReactNode
   className?: string
   style?: CSSProperties
+  'data-grid-w'?: number
+  'data-grid-h'?: number
+  'data-layout-density'?: PageLayoutModuleDensity
+  'data-layout-behavior'?: PageLayoutBehavior
 }) {
   return (
-    <section data-layout-module={config.key} data-layout-label={config.key} className={`${getPageLayoutFrameClass(config)} ${className}`.trim()} style={style}>
+    <section
+      data-layout-module={config.key}
+      data-layout-label={config.key}
+      data-grid-w={gridW}
+      data-grid-h={gridH}
+      data-layout-density={density}
+      data-layout-behavior={behavior}
+      className={`${getPageLayoutFrameClass(config)} ${className}`.trim()}
+      style={style}
+    >
       {children}
     </section>
   )

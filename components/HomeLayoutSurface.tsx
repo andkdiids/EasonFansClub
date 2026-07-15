@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeSystemAnnouncement } from '@/components/HomeSystemAnnouncement'
 import { ModuleFallback } from '@/components/ModuleFallback'
-import { PageLayoutRenderer, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
+import { PageLayoutRenderer, type PageLayoutRenderContext, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
 import { getMood } from '@/lib/daily'
 import type { PageLayoutConfig, PageLayoutModuleConfig } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
@@ -95,28 +95,35 @@ export function HomeLayoutSurface({
       })
   }, [])
 
-  function renderModule(item: PageLayoutModuleConfig) {
+  function renderModule(item: PageLayoutModuleConfig, context: PageLayoutRenderContext) {
+    const isCompact = context.density !== 'normal'
+    const isMinimal = context.density === 'minimal'
+
     if (item.key === 'home.hero') {
       const heroSlides = item.title || item.subtitle
         ? slides.map((slide, index) => (index === 0 ? { ...slide, title: item.title || slide.title, subtitle: item.subtitle || slide.subtitle } : slide))
         : slides
-      return <HomeHero slides={heroSlides} siteName={siteConfig.text.siteName} buttonColor={siteConfig.colors.button} />
+      return <HomeHero slides={heroSlides} siteName={siteConfig.text.siteName} buttonColor={siteConfig.colors.button} density={context.density} />
     }
 
     if (item.key === 'home.announcement') return <HomeSystemAnnouncement announcement={announcement} />
 
     if (item.key === 'home.checkinSummary') {
       return (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className={`${isMinimal ? 'grid-cols-3 gap-2' : isCompact ? 'gap-3 md:grid-cols-3' : 'gap-4 md:grid-cols-3'} grid h-full min-h-0`}>
           {[
-            [siteConfig.text.homePrimaryButton, siteConfig.text.checkinCopy, '/checkin'],
-            [siteConfig.text.homeSecondaryButton, siteConfig.text.forumCopy, '/boards/announcements'],
-            ['EasMusic', siteConfig.text.musicCopy, '/music'],
+            [siteConfig.text.homePrimaryButton || '今日挂号', siteConfig.text.checkinCopy || '留下今天的心情', '/checkin'],
+            [siteConfig.text.homeSecondaryButton || '去E院广场看看', siteConfig.text.forumCopy || '帖子、留言、慢慢说。', '/boards/announcements'],
+            ['EasMusic', siteConfig.text.musicCopy || '一首歌，也是一段故事。', '/music'],
           ].map(([title, copy, href]) => (
-            <Link key={href} href={href} className="layout-card rounded-2xl bg-white/86 shadow-xl shadow-sky-900/5 transition hover:-translate-y-1">
-              <h2 className="text-2xl font-black text-brand-950">{title}</h2>
-              <p className="mt-3 min-h-14 text-base font-bold leading-7 text-slate-600">{copy}</p>
-              <span className="mt-5 inline-flex rounded-full bg-sky-100 px-4 py-2 text-sm font-black text-brand-700">打开</span>
+            <Link
+              key={href}
+              href={href}
+              className={`${isMinimal ? 'rounded-xl p-2' : isCompact ? 'rounded-2xl p-3' : 'layout-card rounded-2xl'} min-h-0 bg-white/86 shadow-xl shadow-sky-900/5 transition hover:-translate-y-1`}
+            >
+              <h2 className={`${isMinimal ? 'text-sm leading-tight' : isCompact ? 'text-xl' : 'text-2xl'} font-black text-brand-950`}>{title}</h2>
+              <p className={`${isMinimal ? 'mt-1 line-clamp-1 text-[11px] leading-4' : isCompact ? 'mt-1 line-clamp-1 text-xs leading-5' : 'mt-3 min-h-14 text-base leading-7'} font-bold text-slate-600`}>{copy}</p>
+              <span className={`${isMinimal ? 'mt-1.5 px-2.5 py-1 text-[11px]' : isCompact ? 'mt-2 px-3 py-1.5 text-xs' : 'mt-5 px-4 py-2 text-sm'} inline-flex rounded-full bg-sky-100 font-black text-brand-700`}>打开</span>
             </Link>
           ))}
         </div>
@@ -139,15 +146,15 @@ export function HomeLayoutSurface({
                 return (
                   <article key={post.id} className="layout-card rounded-xl border border-sky-100 bg-white/82 shadow-sm">
                     <div className="mb-3 flex flex-wrap gap-2">
-                      {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
-                      {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精选</span> : null}
+                      {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Pinned</span> : null}
+                      {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">Featured</span> : null}
                       <Link href={`/boards/${post.board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
                     </div>
                     <Link href={`/posts/${post.id}`} className="text-xl font-black text-brand-950 hover:text-brand-700 sm:text-2xl">{post.title}</Link>
                     <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
                     <p className="mt-4 text-xs font-bold text-slate-500">
                       <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950">{authorName}</Link>
-                      {' '}· 回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}
+                      {' '}回复 {post.replyCount} 赞 {post.likeCount} 浏览 {post.viewCount}
                     </p>
                   </article>
                 )
@@ -171,7 +178,7 @@ export function HomeLayoutSurface({
               const name = message.user.profile?.displayName || message.user.nickname
               return (
                 <article key={message.id} className="rounded-2xl bg-sky-50/80 p-4">
-                  <p className="font-black text-brand-950">{mood?.icon || '♪'} {name} · Lv.{message.user.level}</p>
+                  <p className="font-black text-brand-950">{mood?.icon || '*'} {name} Lv.{message.user.level}</p>
                   <p className="mt-2 line-clamp-2 leading-7 text-slate-600">{message.content}</p>
                 </article>
               )
@@ -185,7 +192,7 @@ export function HomeLayoutSurface({
     if (item.key === 'home.music') {
       return (
         <div className="layout-card rounded-[24px] bg-white/78 shadow-xl shadow-sky-900/5 backdrop-blur">
-          <ModuleHeading item={item} fallbackTitle="EasMusic" fallbackSubtitle="最近推荐的旋律。" />
+          <ModuleHeading item={item} fallbackTitle="EasMusic" fallbackSubtitle="一首歌，也是一段故事。" />
           <div className="layout-stack grid">
             {tracks.failed ? <ModuleFallback /> : null}
             {tracks.loading ? <ModuleFallback title="正在加载音乐..." /> : null}

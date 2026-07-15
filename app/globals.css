@@ -45,31 +45,139 @@ svg {
   gap: var(--layout-section-gap, 1rem);
 }
 
+.page-layout-flow {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.page-layout-flow-item-auto {
+  width: 100% !important;
+  max-width: none !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.page-layout-flow-item-auto > * {
+  height: auto !important;
+  overflow: visible;
+}
+
+.page-layout-auto-flow {
+  display: grid;
+  width: 100%;
+  gap: 1rem;
+  align-items: start;
+  grid-auto-flow: row;
+}
+
+.page-layout-auto-flow-item {
+  min-width: 0;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  overflow: visible;
+}
+
+.page-layout-auto-flow-item > * {
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible;
+}
+
 .page-layout-grid {
   display: grid;
-  grid-auto-rows: minmax(28px, auto);
+  grid-auto-rows: 36px;
   gap: 1rem;
   width: 100%;
+  align-items: stretch;
 }
 
 .page-layout-grid-item {
   min-width: 0;
+  min-height: 0;
   width: 100%;
+}
+
+.page-layout-grid-item-fixed {
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--layout-frame-radius, 36px);
+  isolation: isolate;
+}
+
+.page-layout-grid-item-fixed > * {
+  border-radius: inherit;
+}
+
+.page-layout-grid-item-auto {
+  height: auto;
+  align-self: start;
+  overflow: visible;
 }
 
 .page-layout-grid > .page-layout-grid-item {
   width: 100% !important;
   max-width: none !important;
+  margin-top: 0 !important;
   margin-left: 0;
   margin-right: 0;
+  margin-bottom: 0 !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-layout-grid > .page-layout-grid-item > * {
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden;
+}
+
+.page-layout-grid > .page-layout-grid-item-auto > * {
+  flex: 0 0 auto;
+  height: auto !important;
+  overflow: visible;
+}
+
+.checkin-layout-card {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  padding: clamp(0.75rem, 1.4vw, var(--layout-card-padding, 1.25rem));
+}
+
+.checkin-layout-card-compact-text {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .page-layout-grid-mobile {
+  grid-auto-rows: 32px;
+  gap: 0.875rem;
   max-width: 28rem;
   margin-inline: auto;
 }
 
+.page-layout-auto-flow-mobile {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 0.875rem;
+}
+
+.page-layout-auto-flow-mobile > .page-layout-auto-flow-item {
+  grid-column: 1 / -1 !important;
+}
+
 .page-layout-grid-tablet {
+  max-width: 56rem;
+  margin-inline: auto;
+}
+
+.page-layout-auto-flow-tablet {
   max-width: 56rem;
   margin-inline: auto;
 }
