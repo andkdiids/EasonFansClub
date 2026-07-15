@@ -37,6 +37,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
     let closeTimer: number | undefined
 
     async function poll() {
+      if (document.visibilityState === 'hidden') return
       const response = await fetch('/api/notifications/popup', { cache: 'no-store' }).catch(() => null)
       if (!response?.ok || cancelled) return
       const data = await response.json().catch(() => null) as { notifications?: ToastNotification[] } | null
@@ -50,10 +51,11 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
       closeTimer = window.setTimeout(() => setToast(null), 10_000)
     }
 
-    poll()
+    const initialTimer = window.setTimeout(poll, 12_000)
     const interval = window.setInterval(poll, 45_000)
     return () => {
       cancelled = true
+      window.clearTimeout(initialTimer)
       window.clearInterval(interval)
       window.clearTimeout(closeTimer)
     }

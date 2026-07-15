@@ -9,6 +9,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
 
   const { feedbackId } = await params
   const body = await request.json().catch(() => null)
+  const rawContent = typeof body?.content === 'string' ? body.content : ''
+  if (rawContent.length > 2000) return NextResponse.json({ message: '回复内容最多 2000 个字' }, { status: 400 })
   const content = await filterSensitiveWords(sanitizeText(body?.content, 2000))
   const attachments = parseFeedbackAttachments(body?.attachments)
 
@@ -22,7 +24,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   })
 
   if (!feedback) return NextResponse.json({ message: '反馈不存在' }, { status: 404 })
-  if (feedback.status === 'CLOSED') return NextResponse.json({ message: '该反馈已关闭，请先重新打开后再回复' }, { status: 400 })
+  if (feedback.status === 'RESOLVED' || feedback.status === 'CLOSED') {
+    return NextResponse.json({ message: '该反馈已完成，请先重新打开后再回复' }, { status: 400 })
+  }
 
   const now = new Date()
   const updated = await prisma.$transaction(async (tx) => {

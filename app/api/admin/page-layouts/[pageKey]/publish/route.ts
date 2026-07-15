@@ -20,7 +20,7 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ message: '布局版本不正确', code: 'INVALID_LAYOUT_VERSION' }, { status: 400 })
     }
 
-    const layout = await publishPageLayout(assertPageLayoutPageKey(pageKey), version, guard.user.id)
+    const layout = await publishPageLayout(assertPageLayoutPageKey(pageKey), version, guard.user.id, body?.config)
     return NextResponse.json({ ...layout, message: '布局已发布' })
   } catch (error) {
     const { status, body } = pageLayoutErrorResponse(error)

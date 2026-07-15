@@ -1,4 +1,4 @@
-export const pageLayoutPageKeys = ['home', 'checkin', 'admin-home'] as const
+export const pageLayoutPageKeys = ['home', 'checkin', 'forum', 'announcement', 'music', 'message', 'profile', 'admin-home'] as const
 export type PageLayoutPageKey = (typeof pageLayoutPageKeys)[number]
 
 export const layoutWidths = ['full', 'wide', 'medium', 'narrow', 'half', 'third'] as const
@@ -13,12 +13,22 @@ export type LayoutAlignment = (typeof layoutAlignments)[number]
 export const layoutDensities = ['compact', 'normal', 'spacious'] as const
 export type LayoutDensity = (typeof layoutDensities)[number]
 
-export type PageLayoutDevice = 'desktop' | 'mobile'
+export const pageLayoutDevices = ['desktop', 'tablet', 'mobile'] as const
+export type PageLayoutDevice = (typeof pageLayoutDevices)[number]
+
+export type PageLayoutGridItem = {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 export type PageLayoutModuleConfig = {
   key: string
   order: number
   visible: boolean
+  isHidden: boolean
+  grid: Record<PageLayoutDevice, PageLayoutGridItem>
   width: LayoutWidth
   gapTop: LayoutSpacing
   gapBottom: LayoutSpacing
@@ -37,6 +47,7 @@ export type PageLayoutModuleDefinition = {
   description: string
   defaultOrder: number
   defaultVisible: boolean
+  defaultGrid: Record<PageLayoutDevice, PageLayoutGridItem>
   defaultWidth: LayoutWidth
   defaultMobileWidth?: LayoutWidth
   defaultGapTop: LayoutSpacing
@@ -46,7 +57,15 @@ export type PageLayoutModuleDefinition = {
   supportsTitle: boolean
   supportsSubtitle: boolean
   supportsDesktop: boolean
+  supportsTablet: boolean
   supportsMobile: boolean
+  minW: number
+  minH: number
+  maxW?: number
+  maxH?: number
+  canMove: boolean
+  canResize: boolean
+  canHide: boolean
   required?: boolean
 }
 

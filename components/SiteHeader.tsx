@@ -1,12 +1,11 @@
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
 import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
+import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
-import { getUnreadNotificationCount } from '@/lib/notifications'
-import { prisma } from '@/lib/prisma'
 import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
 import { formatUid } from '@/lib/uid'
 
@@ -15,28 +14,19 @@ type SiteHeaderProps = {
   config?: SiteAppearanceConfig
 }
 
+async function HeaderLayoutQuickLink({ user }: { user: SessionUser }) {
+  const canManageLayout = await measureBootstrap('header.layoutPermission', hasAdminPermission(user, 'layout.manage'))
+  return <AdminLayoutQuickLink enabled={canManageLayout} />
+}
+
 export async function SiteHeader({ user: providedUser, config: providedConfig }: SiteHeaderProps = {}) {
-  const user = providedUser !== undefined ? providedUser : await getCurrentUser()
-  const config = providedConfig ?? (await getSiteAppearance())
+  const [user, config] = await Promise.all([
+    providedUser !== undefined ? Promise.resolve(providedUser) : getCurrentUser(),
+    providedConfig ? Promise.resolve(providedConfig) : measureBootstrap('site.appearance', getSiteAppearance()),
+  ])
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
-  const canManageLayout = user ? await hasAdminPermission(user, 'layout.manage') : false
-  const [profile, unreadCount] = user
-    ? await Promise.all([
-        safeDb(
-          'header.profile',
-          prisma.profile.findUnique({
-            where: { userId: user.id },
-            select: { avatarUrl: true, displayName: true },
-          }),
-          null,
-        ),
-        safeDb('header.notifications.unread', getUnreadNotificationCount(user.id), 0),
-      ])
-    : [null, 0]
-
-  const displayName = profile?.displayName || user?.nickname || ''
-  const avatar = publicImageUrl(profile?.avatarUrl)
+  const displayName = user?.nickname || ''
   const navLogo = publicImageUrl(config.images.navLogoUrl)
   const mobileNav = navItems.slice(0, 5)
 
@@ -73,18 +63,14 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             <details className="relative shrink-0">
               <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                  <SafeAvatar src={avatar} name={displayName} className="h-full w-full" />
+                  <SafeAvatar src={null} name={displayName} className="h-full w-full" />
                 </span>
-                {unreadCount > 0 ? <span className="absolute left-8 top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" aria-label="有未读通知" /> : null}
                 <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
               </summary>
               <div className="absolute right-0 mt-3 w-56 rounded-2xl border border-sky-100 bg-white p-2 shadow-xl shadow-sky-900/10">
                 <Link href={`/user/${formatUid(user.uid)}`} className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">个人主页</Link>
-                <Link href="/notifications" className="flex items-center justify-between rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">
-                  <span>通知中心</span>
-                  {unreadCount > 0 ? <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white">{unreadCount > 99 ? '99+' : unreadCount}</span> : null}
-                </Link>
-                <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈与更新</Link>
+                <Link href="/notifications" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">通知中心</Link>
+                <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈中心</Link>
                 <Link href="/friends" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">我的好友</Link>
                 <Link href="/profile" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">账号设置</Link>
                 {isAdmin ? <Link href="/admin" className="block rounded-xl px-4 py-3 text-sm font-bold text-brand-700 hover:bg-sky-50">后台管理</Link> : null}
@@ -110,7 +96,11 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
           </Link>
         ))}
       </nav>
-      <AdminLayoutQuickLink enabled={canManageLayout} />
+      {user ? (
+        <Suspense fallback={null}>
+          <HeaderLayoutQuickLink user={user} />
+        </Suspense>
+      ) : null}
     </>
   )
 }

@@ -1,23 +1,24 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { AdminInlineLayoutEditor } from '@/components/AdminInlineLayoutEditor'
+import { pageLayoutPages } from '@/lib/page-layout/registry'
 import type { PageLayoutPageKey } from '@/lib/page-layout/types'
 
-const editablePageMap: Record<string, PageLayoutPageKey> = {
-  '/': 'home',
-  '/checkin': 'checkin',
-  '/admin': 'admin-home',
-}
+const editablePageMap = Object.fromEntries(
+  Object.entries(pageLayoutPages).map(([key, page]) => [page.path, key as PageLayoutPageKey]),
+) as Record<string, PageLayoutPageKey>
 
 export function AdminLayoutQuickLink({ enabled }: { enabled: boolean }) {
   const pathname = usePathname()
   const [inlineEdit, setInlineEdit] = useState(false)
+
   useEffect(() => {
     setInlineEdit(new URLSearchParams(window.location.search).get('layoutEdit') === '1')
   }, [pathname])
+
   if (!enabled) return null
 
   const pageKey = editablePageMap[pathname || '']

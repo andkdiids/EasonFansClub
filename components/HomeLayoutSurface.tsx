@@ -1,11 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeSystemAnnouncement } from '@/components/HomeSystemAnnouncement'
 import { ModuleFallback } from '@/components/ModuleFallback'
-import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
+import { PageLayoutRenderer, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
 import { getMood } from '@/lib/daily'
 import type { PageLayoutConfig, PageLayoutModuleConfig } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
@@ -51,22 +51,6 @@ async function loadJson<T>(url: string) {
   return (await response.json()) as T
 }
 
-function useResponsiveLayout(config: PageLayoutConfig) {
-  const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop')
-  useEffect(() => {
-    const query = window.matchMedia('(max-width: 767px)')
-    const update = () => setDevice(query.matches ? 'mobile' : 'desktop')
-    update()
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
-  }, [])
-
-  return useMemo(
-    () => [...config[device]].filter((item) => item.visible).sort((a, b) => a.order - b.order),
-    [config, device],
-  )
-}
-
 function ModuleHeading({ item, fallbackTitle, fallbackSubtitle }: { item: PageLayoutModuleConfig; fallbackTitle: string; fallbackSubtitle?: string }) {
   const title = item.title || fallbackTitle
   const subtitle = item.subtitle || fallbackSubtitle
@@ -94,7 +78,6 @@ export function HomeLayoutSurface({
   const [messages, setMessages] = useState<LoadState<DailyMessage[]>>(initial([]))
   const [activities, setActivities] = useState<LoadState<Activity[]>>(initial([]))
   const [tracks, setTracks] = useState<LoadState<Track[]>>(initial([]))
-  const modules = useResponsiveLayout(layoutConfig)
 
   useEffect(() => {
     loadJson<{ posts: Post[]; messages: DailyMessage[]; activities: Activity[]; tracks: Track[] }>('/api/home')
@@ -234,13 +217,17 @@ export function HomeLayoutSurface({
     return null
   }
 
-  return (
-    <div className="mx-auto flex max-w-7xl flex-wrap gap-x-6">
-      {modules.map((item) => (
-        <PageLayoutFrame key={item.key} config={item}>
-          {renderModule(item)}
-        </PageLayoutFrame>
-      ))}
-    </div>
-  )
+  const rendererModules: PageLayoutRendererModules = {
+    'home.hero': renderModule,
+    'home.announcement': renderModule,
+    'home.checkinSummary': renderModule,
+    'home.featuredPosts': renderModule,
+    'home.latestPosts': renderModule,
+    'home.dailyMessages': renderModule,
+    'home.music': renderModule,
+    'home.culture': renderModule,
+    'home.footer': renderModule,
+  }
+
+  return <PageLayoutRenderer pageKey="home" config={layoutConfig} modules={rendererModules} className="mx-auto max-w-7xl" />
 }

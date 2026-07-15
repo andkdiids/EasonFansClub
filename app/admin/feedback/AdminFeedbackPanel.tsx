@@ -15,6 +15,7 @@ type FeedbackItem = {
   content?: string
   contact?: string | null
   createdAt: string
+  updatedAt: string
   lastReplyAt?: string | null
   user: { uid: number; nickname: string; avatarUrl?: string | null }
   attachments?: Array<{ id?: string; url: string }>
@@ -29,18 +30,16 @@ type FeedbackItem = {
 }
 
 const statusOptions = [
-  ['OPEN', '待处理'],
+  ['OPEN', '未处理'],
   ['PROCESSING', '处理中'],
   ['REPLIED', '已回复'],
-  ['RESOLVED', '已解决'],
-  ['CLOSED', '已关闭'],
+  ['RESOLVED', '已完成'],
 ]
 
 const typeOptions = [
-  ['BUG', '功能异常'],
-  ['EXPERIENCE', '使用体验'],
-  ['SUGGESTION', '功能建议'],
-  ['CONTENT', '内容问题'],
+  ['BUG', '问题反馈'],
+  ['FEATURE', '功能建议'],
+  ['EXPERIENCE', '体验建议'],
   ['ACCOUNT', '账号问题'],
   ['OTHER', '其他'],
 ]
@@ -62,10 +61,13 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [replying, setReplying] = useState(false)
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [total, setTotal] = useState(0)
 
   useEffect(() => {
     loadList()
-  }, [])
+  }, [page])
 
   useEffect(() => {
     if (selectedId) loadDetail(selectedId)
@@ -78,16 +80,20 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
     return data
   }
 
-  async function loadList() {
+  async function loadList(nextPage = page) {
     setLoading(true)
     setError('')
     const params = new URLSearchParams()
     if (status) params.set('status', status)
     if (type) params.set('type', type)
     if (q) params.set('q', q)
+    params.set('page', String(nextPage))
+    params.set('pageSize', '20')
     try {
       const data = await requestJson(`/api/admin/feedback?${params.toString()}`)
       setItems(data.feedbacks || [])
+      setHasMore(Boolean(data.hasMore))
+      setTotal(Number(data.total || 0))
       if (!selectedId && data.feedbacks?.[0]) setSelectedId(data.feedbacks[0].id)
     } catch (err) {
       setError(err instanceof Error ? err.message : '反馈列表加载失败')
@@ -141,6 +147,11 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
     setMessage('状态已更新')
   }
 
+  function applyFilters() {
+    setPage(1)
+    loadList(1)
+  }
+
   return (
     <main className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
       <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
@@ -163,11 +174,12 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
               <option value="">全部分类</option>
               {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
-            <button onClick={loadList} className="rounded-full bg-brand-950 px-4 py-3 text-sm font-black text-white">筛选</button>
+            <button onClick={applyFilters} className="rounded-full bg-brand-950 px-4 py-3 text-sm font-black text-white">筛选</button>
           </div>
 
           <div className="mt-4 space-y-2">
             {loading ? <p className="p-3 text-sm font-bold text-slate-500">加载中...</p> : null}
+            {!loading && !items.length ? <p className="rounded-2xl bg-sky-50 p-4 text-sm font-bold text-slate-500">没有匹配的反馈。</p> : null}
             {items.map((item) => (
               <button key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full rounded-2xl p-3 text-left ${selectedId === item.id ? 'bg-sky-100' : 'bg-sky-50/70 hover:bg-sky-50'}`}>
                 <div className="flex items-center justify-between gap-2">
@@ -176,8 +188,14 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
                 </div>
                 <p className="mt-1 text-xs font-bold text-slate-500">{item.user.nickname} · UID {String(item.user.uid).padStart(5, '0')}</p>
                 <p className="mt-1 text-xs font-bold text-slate-400">{item.typeLabel} · {item.statusLabel}</p>
+                <p className="mt-1 text-xs font-bold text-slate-400">更新：{formatTime(item.updatedAt)}</p>
               </button>
             ))}
+            <div className="flex items-center justify-between gap-2 pt-2 text-xs font-bold text-slate-500">
+              <button disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-full bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">上一页</button>
+              <span>第 {page} 页 / 共 {total} 条</span>
+              <button disabled={!hasMore || loading} onClick={() => setPage((current) => current + 1)} className="rounded-full bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">下一页</button>
+            </div>
           </div>
         </aside>
 
@@ -190,10 +208,8 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{detail.statusLabel}</span>
                 </div>
                 <h2 className="mt-3 text-2xl font-black text-brand-950">{detail.title}</h2>
-                <p className="mt-2 text-xs font-bold text-slate-500">提交人：{detail.user.nickname} / UID {String(detail.user.uid).padStart(5, '0')} · {formatTime(detail.createdAt)}</p>
+                <p className="mt-2 text-xs font-bold text-slate-500">提交人：{detail.user.nickname} / UID {String(detail.user.uid).padStart(5, '0')} · 创建 {formatTime(detail.createdAt)} · 更新 {formatTime(detail.updatedAt)}</p>
                 {detail.contact ? <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-black text-amber-700">联系方式：{detail.contact}</p> : null}
-                <p className="mt-4 whitespace-pre-wrap text-sm font-bold leading-7 text-slate-700">{detail.content}</p>
-                <AttachmentGrid attachments={detail.attachments || []} />
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -212,13 +228,13 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
                 ))}
               </div>
 
-              {detail.status !== 'CLOSED' ? (
+              {detail.status !== 'RESOLVED' && detail.status !== 'CLOSED' ? (
                 <form onSubmit={submitReply} className="space-y-3">
                   <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="回复用户" />
                   <button disabled={replying} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : '回复并通知用户'}</button>
                 </form>
               ) : (
-                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-black text-slate-500">该反馈已关闭，如需回复请先重新打开。</p>
+                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-black text-slate-500">该反馈已完成，如需回复请先改为处理中或已回复。</p>
               )}
             </div>
           ) : (

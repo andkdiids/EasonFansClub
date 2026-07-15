@@ -14,13 +14,15 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ f
   })
 
   if (!feedback) return NextResponse.json({ message: '反馈不存在，或你无权操作' }, { status: 404 })
-  if (feedback.status === 'CLOSED') return NextResponse.json({ message: '已关闭的反馈不能标记为已解决' }, { status: 400 })
+  if (feedback.status === 'RESOLVED' || feedback.status === 'CLOSED') {
+    return NextResponse.json({ message: '该反馈已完成' }, { status: 400 })
+  }
 
   const updated = await prisma.feedback.update({
     where: { id: feedbackId },
-    data: { status: 'RESOLVED', adminUnread: false, userUnread: false },
+    data: { status: 'RESOLVED', adminUnread: false, userUnread: false, closedAt: new Date() },
     include: feedbackInclude,
   })
 
-  return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '已标记为已解决' })
+  return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '已标记为已完成' })
 }

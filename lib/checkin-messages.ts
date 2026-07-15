@@ -2,9 +2,42 @@ import { prisma } from '@/lib/prisma'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
-export type CheckInMessageItem = Awaited<ReturnType<typeof getCheckInMessages>>[number]
+type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncached>>
+export type CheckInMessageItem = CheckInMessagesResult[number]
+
+const checkInMessagesCacheTtlMs = Number(process.env.CHECKIN_MESSAGES_CACHE_TTL_MS || 10000)
+const checkInMessagesCache = new Map<string, { expiresAt: number; promise: Promise<CheckInMessagesResult> }>()
 
 export async function getCheckInMessages({
+  selectedDate,
+  nextDate,
+  sort,
+  viewerId,
+}: {
+  selectedDate: Date
+  nextDate: Date
+  sort: CheckInMessageSort
+  viewerId: string
+}): Promise<CheckInMessagesResult> {
+  const cacheKey = [
+    selectedDate.toISOString(),
+    nextDate.toISOString(),
+    sort,
+    viewerId,
+  ].join(':')
+  const now = Date.now()
+  const cached = checkInMessagesCache.get(cacheKey)
+  if (cached && cached.expiresAt > now) return cached.promise
+
+  const promise = getCheckInMessagesUncached({ selectedDate, nextDate, sort, viewerId }).catch((error) => {
+    checkInMessagesCache.delete(cacheKey)
+    throw error
+  })
+  checkInMessagesCache.set(cacheKey, { expiresAt: now + checkInMessagesCacheTtlMs, promise })
+  return promise
+}
+
+async function getCheckInMessagesUncached({
   selectedDate,
   nextDate,
   sort,

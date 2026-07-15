@@ -1,11 +1,13 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { ProfileDeferredModules } from '@/components/ProfileDeferredModules'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
+import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
@@ -61,11 +63,18 @@ export default async function ProfilePage() {
   const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.profile.bio || profile.bio || ''
   const initial = displayName.slice(0, 1).toUpperCase()
+  const layoutConfig = await getPublishedPageLayoutConfig('profile')
 
   return (
     <>
       <SiteHeader user={user} />
       <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+        <PageLayoutRenderer
+          pageKey="profile"
+          config={layoutConfig}
+          modules={{
+            'profile.main': (
+              <>
         <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
           <div
             className="bg-gradient-to-r from-sky-100 via-white to-cyan-50 px-8 py-10"
@@ -135,6 +144,10 @@ export default async function ProfilePage() {
           />
           <ProfileDeferredModules />
         </section>
+              </>
+            ),
+          }}
+        />
       </main>
     </>
   )

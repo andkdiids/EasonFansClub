@@ -2,6 +2,7 @@ import { unstable_cache, revalidatePath, revalidateTag } from 'next/cache'
 import type { Prisma } from '@prisma/client'
 import {
   getDefaultPageLayoutConfig,
+  getPageLayoutPagePath,
   getPageLayoutRegistry,
   isPageLayoutPageKey,
   pageLayoutPages,
@@ -11,12 +12,6 @@ import { PageLayoutValidationError, repairPageLayoutConfig, validatePageLayoutCo
 import { prisma } from '@/lib/prisma'
 
 const pageLayoutCacheTagPrefix = 'page-layout'
-const pageLayoutPaths: Record<PageLayoutPageKey, string> = {
-  home: '/',
-  checkin: '/checkin',
-  'admin-home': '/admin',
-}
-
 export class PageLayoutNotFoundError extends Error {
   constructor() {
     super('页面不存在')
@@ -205,7 +200,7 @@ export function getPageLayoutCacheTag(pageKey: PageLayoutPageKey) {
 export function revalidatePageLayout(pageKey: PageLayoutPageKey) {
   revalidateTag(`${pageLayoutCacheTagPrefix}:all`)
   revalidateTag(getPageLayoutCacheTag(pageKey))
-  revalidatePath(pageLayoutPaths[pageKey], 'page')
+  revalidatePath(getPageLayoutPagePath(pageKey), 'page')
 }
 
 export async function savePageLayoutDraft(pageKey: PageLayoutPageKey, rawConfig: unknown, version: number, adminId: string) {
@@ -259,45 +254,43 @@ export async function savePageLayoutDraft(pageKey: PageLayoutPageKey, rawConfig:
   return serializeLayout(pageKey, updated)
 }
 
-export async function publishPageLayout(pageKey: PageLayoutPageKey, version: number, adminId: string) {
-  const published = await prisma.$transaction(async (tx) => {
-    const existing = await tx.pageLayout.findUnique({
-      where: { pageKey },
-      select: { id: true, draftConfig: true, publishedConfig: true, version: true },
+export async function publishPageLayout(pageKey: PageLayoutPageKey, version: number, adminId: string, rawConfig?: unknown) {
+  const existing = await prisma.pageLayout.findUnique({
+    where: { pageKey },
+    select: { id: true, draftConfig: true, publishedConfig: true, version: true },
+  })
+
+  let published: Prisma.PageLayoutGetPayload<{ select: typeof layoutSelect }>
+  let revisionConfig: PageLayoutConfig
+  let revisionNote: string | undefined
+  let revisionPageLayoutId: string
+
+  if (!existing) {
+    const defaultConfig = rawConfig === undefined ? getDefaultPageLayoutConfig(pageKey) : validatePageLayoutConfig(pageKey, rawConfig)
+    const created = await prisma.pageLayout.create({
+      data: {
+        pageKey,
+        draftConfig: toJson(defaultConfig),
+        publishedConfig: toJson(defaultConfig),
+        version: 2,
+        publishedAt: new Date(),
+        updatedById: adminId,
+        publishedById: adminId,
+      },
+      select: { id: true, ...layoutSelect },
     })
-
-    if (!existing) {
-      const defaultConfig = getDefaultPageLayoutConfig(pageKey)
-      const created = await tx.pageLayout.create({
-        data: {
-          pageKey,
-          draftConfig: toJson(defaultConfig),
-          publishedConfig: toJson(defaultConfig),
-          version: 2,
-          publishedAt: new Date(),
-          updatedById: adminId,
-          publishedById: adminId,
-        },
-      })
-      await tx.pageLayoutRevision.create({
-        data: {
-          pageLayoutId: created.id,
-          version: created.version,
-          config: toJson(defaultConfig),
-          publishedById: adminId,
-          source: 'MANUAL',
-          note: '首次发布默认布局',
-        },
-      })
-      return created
-    }
-
+    published = created
+    revisionConfig = defaultConfig
+    revisionNote = 'Initial default layout publish'
+    revisionPageLayoutId = created.id
+  } else {
     if (existing.version !== version) throw new PageLayoutVersionConflictError()
-    const draftConfig = validatePageLayoutConfig(pageKey, existing.draftConfig)
+    const draftConfig = validatePageLayoutConfig(pageKey, rawConfig === undefined ? existing.draftConfig : rawConfig)
 
-    const next = await tx.pageLayout.update({
+    published = await prisma.pageLayout.update({
       where: { pageKey },
       data: {
+        draftConfig: toJson(draftConfig),
         publishedConfig: toJson(draftConfig),
         previousPublishedConfig: existing.publishedConfig as Prisma.InputJsonValue,
         version: { increment: 1 },
@@ -305,29 +298,39 @@ export async function publishPageLayout(pageKey: PageLayoutPageKey, version: num
         updatedById: adminId,
         publishedById: adminId,
       },
+      select: layoutSelect,
     })
+    revisionConfig = draftConfig
+    revisionPageLayoutId = existing.id
+  }
 
-    await tx.pageLayoutRevision.create({
+  prisma.pageLayoutRevision
+    .create({
       data: {
-        pageLayoutId: existing.id,
-        version: next.version,
-        config: toJson(draftConfig),
+        pageLayoutId: revisionPageLayoutId,
+        version: published.version,
+        config: toJson(revisionConfig),
         publishedById: adminId,
         source: 'MANUAL',
+        note: revisionNote,
       },
     })
+    .catch((error) => {
+      console.error('[pageLayout.revision]', error)
+    })
 
-    await tx.adminAction.create({
+  prisma.adminAction
+    .create({
       data: {
         adminId,
         action: 'UPDATE_SETTING',
-        reason: `发布页面布局：${pageLayoutPages[pageKey].name}`,
-        metadata: { pageKey, version: next.version },
+        reason: `Publish page layout: ${pageLayoutPages[pageKey].name}`,
+        metadata: { pageKey, version: published.version },
       },
     })
-
-    return next
-  })
+    .catch((error) => {
+      console.error('[pageLayout.adminAction]', error)
+    })
 
   revalidatePageLayout(pageKey)
   return serializeLayout(pageKey, published)
@@ -367,7 +370,7 @@ export async function restorePageLayoutRevisionToDraft(pageKey: PageLayoutPageKe
       data: {
         adminId,
         action: 'UPDATE_SETTING',
-        reason: `恢复页面布局草稿：${pageLayoutPages[pageKey].name}`,
+        reason: `Restore page layout draft: ${pageLayoutPages[pageKey].name}`,
         metadata: { pageKey, revisionVersion: revision.version },
       },
     })
@@ -414,7 +417,7 @@ export async function publishPageLayoutRevision(pageKey: PageLayoutPageKey, revi
         config: toJson(config),
         publishedById: adminId,
         source: 'ROLLBACK',
-        note: `由 v${revision.version} 恢复并发布`,
+        note: `Publish from revision v${revision.version}`,
       },
     })
 
@@ -422,7 +425,7 @@ export async function publishPageLayoutRevision(pageKey: PageLayoutPageKey, revi
       data: {
         adminId,
         action: 'UPDATE_SETTING',
-        reason: `回滚发布页面布局：${pageLayoutPages[pageKey].name}`,
+        reason: `Rollback publish page layout: ${pageLayoutPages[pageKey].name}`,
         metadata: { pageKey, fromRevisionVersion: revision.version, version: next.version },
       },
     })
@@ -445,7 +448,8 @@ export function pageLayoutErrorResponse(error: unknown) {
     return { status: 409, body: { message: error.message, code: 'LAYOUT_VERSION_CONFLICT' } }
   }
   if (error instanceof PageLayoutValidationError) {
-    return { status: 400, body: { message: error.message, code: 'LAYOUT_VALIDATION_FAILED', errors: error.details } }
+    const firstDetail = Object.values(error.details)[0]
+    return { status: 400, body: { message: firstDetail || error.message, code: 'LAYOUT_VALIDATION_FAILED', errors: error.details } }
   }
   return { status: 500, body: { message: '页面布局操作失败', code: 'LAYOUT_OPERATION_FAILED' } }
 }

@@ -1,14 +1,16 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
+import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { PageLayoutCanvasEditor, type PageLayoutCanvasModules } from '@/components/page-layout/PageLayoutCanvasEditor'
+import { pageLayoutPages } from '@/lib/page-layout/registry'
 import {
   layoutAlignments,
   layoutDensities,
   layoutSpacings,
-  layoutWidths,
   type PageLayoutConfig,
   type PageLayoutDevice,
+  type PageLayoutGridItem,
   type PageLayoutModuleConfig,
   type PageLayoutModuleDefinition,
   type PageLayoutPageKey,
@@ -23,21 +25,28 @@ type PreviewPayload = {
   modules: Record<string, PreviewModulePayload>
 }
 
-const pageOptions: { key: PageLayoutPageKey; label: string }[] = [
-  { key: 'home', label: '首页' },
-  { key: 'checkin', label: '每日挂号' },
-  { key: 'admin-home', label: '管理后台首页' },
+const deviceOptions: { key: PageLayoutDevice; label: string; columns: number }[] = [
+  { key: 'desktop', label: '桌面端', columns: 12 },
+  { key: 'tablet', label: '平板端', columns: 8 },
+  { key: 'mobile', label: '移动端', columns: 4 },
 ]
+
+const pageOptions = Object.entries(pageLayoutPages).map(([key, page]) => ({
+  key: key as PageLayoutPageKey,
+  label: page.name,
+  path: page.path,
+}))
 
 function cloneConfig(config: PageLayoutConfig): PageLayoutConfig {
   return {
-    desktop: config.desktop.map((item) => ({ ...item })),
-    mobile: config.mobile.map((item) => ({ ...item })),
+    desktop: config.desktop.map((item) => ({ ...item, grid: { desktop: { ...item.grid.desktop }, tablet: { ...item.grid.tablet }, mobile: { ...item.grid.mobile } } })),
+    tablet: config.tablet.map((item) => ({ ...item, grid: { desktop: { ...item.grid.desktop }, tablet: { ...item.grid.tablet }, mobile: { ...item.grid.mobile } } })),
+    mobile: config.mobile.map((item) => ({ ...item, grid: { desktop: { ...item.grid.desktop }, tablet: { ...item.grid.tablet }, mobile: { ...item.grid.mobile } } })),
   }
 }
 
-function normalizeOrder(items: PageLayoutModuleConfig[]) {
-  return items.map((item, index) => ({ ...item, order: (index + 1) * 10 }))
+function columnsFor(device: PageLayoutDevice) {
+  return device === 'desktop' ? 12 : device === 'tablet' ? 8 : 4
 }
 
 function findModule(registry: PageLayoutModuleDefinition[], key: string) {
@@ -49,152 +58,113 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString('zh-CN')
 }
 
-function readArray(data: unknown) {
-  return Array.isArray(data) ? data : []
+function formatApiError(data: unknown, fallback: string) {
+  if (data && typeof data === 'object') {
+    const payload = data as { message?: unknown; errors?: unknown }
+    if (payload.errors && typeof payload.errors === 'object') {
+      const first = Object.values(payload.errors as Record<string, unknown>).find((value) => typeof value === 'string')
+      if (first) return String(first)
+    }
+    if (typeof payload.message === 'string' && payload.message.trim()) return payload.message
+  }
+  return fallback
+}
+
+function fits(grid: PageLayoutGridItem, occupied: Set<string>, columns: number) {
+  if (grid.x < 0 || grid.x + grid.w > columns) return false
+  for (let y = grid.y; y < grid.y + grid.h; y += 1) {
+    for (let x = grid.x; x < grid.x + grid.w; x += 1) {
+      if (occupied.has(`${x}:${y}`)) return false
+    }
+  }
+  return true
+}
+
+function occupy(grid: PageLayoutGridItem, occupied: Set<string>) {
+  for (let y = grid.y; y < grid.y + grid.h; y += 1) {
+    for (let x = grid.x; x < grid.x + grid.w; x += 1) {
+      occupied.add(`${x}:${y}`)
+    }
+  }
+}
+
+function compactItems(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {
+  const columns = columnsFor(device)
+  const occupied = new Set<string>()
+  return [...items]
+    .sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order)
+    .map((item, index) => {
+      const base = item.grid[device]
+      const nextGrid = { ...base, x: Math.min(base.x, Math.max(0, columns - base.w)), y: 0 }
+      let placed = false
+      for (let y = 0; y < 200 && !placed; y += 1) {
+        for (let x = 0; x <= columns - nextGrid.w; x += 1) {
+          const candidate = { ...nextGrid, x, y }
+          if (fits(candidate, occupied, columns)) {
+            nextGrid.x = x
+            nextGrid.y = y
+            placed = true
+            break
+          }
+        }
+      }
+      occupy(nextGrid, occupied)
+      return {
+        ...item,
+        order: (index + 1) * 10,
+        grid: { ...item.grid, [device]: nextGrid },
+      }
+    })
 }
 
 function readObject(data: unknown) {
   return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {}
 }
 
-function getModulePreview(preview: PreviewPayload | null, key: string): PreviewModulePayload | null {
-  return preview?.modules?.[key] || null
-}
-
-function PreviewFallback({ payload }: { payload: PreviewModulePayload | null }) {
-  if (payload?.ok === false) {
-    return <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{payload.message}</p>
-  }
-  return <p className="rounded-xl bg-sky-50 px-3 py-2 text-sm font-bold text-slate-500">暂无可预览数据</p>
-}
-
-function renderPreviewContent(item: PageLayoutModuleConfig, definition: PageLayoutModuleDefinition | undefined, payload: PreviewModulePayload | null) {
+function renderPreviewContent(item: PageLayoutModuleConfig, definition: PageLayoutModuleDefinition | undefined, payload: PreviewModulePayload | null, device: PageLayoutDevice) {
   const title = item.title || definition?.name || item.key
   const subtitle = item.subtitle || definition?.description
-  const data = payload?.ok ? payload.data : null
-
-  if (item.key === 'home.hero') {
-    const slides = readArray(readObject(data).slides)
-    const first = readObject(slides[0])
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-brand-950 text-white shadow-sm">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-sky-100">Preview Mode</p>
-        <h3 className="mt-3 text-2xl font-black">{item.title || String(first.title || title)}</h3>
-        <p className="mt-2 text-sm font-bold leading-6 text-sky-50">{item.subtitle || String(first.subtitle || subtitle || '')}</p>
-        <button disabled className="mt-4 rounded-full bg-white/20 px-4 py-2 text-sm font-black text-white">预览中不可操作</button>
-      </div>
-    )
-  }
-
-  if (item.key.includes('Posts')) {
-    const posts = readArray(data).slice(0, 3)
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-        <h3 className="text-xl font-black text-brand-950">{title}</h3>
-        {subtitle ? <p className="mt-1 text-sm font-bold text-slate-500">{subtitle}</p> : null}
-        <div className="mt-4 grid gap-2">
-          {posts.map((post, index) => {
-            const record = readObject(post)
-            return <p key={String(record.id || index)} className="rounded-xl bg-sky-50 px-3 py-2 text-sm font-bold text-slate-700">{String(record.title || '未命名帖子')}</p>
-          })}
-          {!posts.length ? <PreviewFallback payload={payload} /> : null}
-        </div>
-      </div>
-    )
-  }
-
-  if (item.key === 'home.dailyMessages' || item.key === 'checkin.messages') {
-    const messages = readArray(data).slice(0, 3)
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-        <h3 className="text-xl font-black text-brand-950">{title}</h3>
-        <div className="mt-4 grid gap-2">
-          {messages.map((message, index) => {
-            const record = readObject(message)
-            return <p key={String(record.id || index)} className="line-clamp-2 rounded-xl bg-sky-50 px-3 py-2 text-sm font-bold text-slate-700">{String(record.content || record.message || '留言内容')}</p>
-          })}
-          {!messages.length ? <PreviewFallback payload={payload} /> : null}
-        </div>
-      </div>
-    )
-  }
-
-  if (item.key === 'checkin.stats' || item.key === 'admin.stats') {
-    const record = readObject(data)
-    const values = Object.entries(record).slice(0, 6)
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-        <h3 className="text-xl font-black text-brand-950">{title}</h3>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {values.map(([label, value]) => (
-            <div key={label} className="rounded-xl bg-sky-50 px-3 py-2">
-              <p className="text-xs font-black text-slate-500">{label}</p>
-              <p className="mt-1 text-xl font-black text-brand-950">{String(value ?? 0)}</p>
-            </div>
-          ))}
-          {!values.length ? <PreviewFallback payload={payload} /> : null}
-        </div>
-      </div>
-    )
-  }
-
-  if (item.key === 'checkin.formOrMood') {
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-        <h3 className="text-xl font-black text-brand-950">{title}</h3>
-        {subtitle ? <p className="mt-1 text-sm font-bold text-slate-500">{subtitle}</p> : null}
-        <button disabled className="mt-4 rounded-full bg-slate-200 px-4 py-2 text-sm font-black text-slate-500">挂号按钮在预览中禁用</button>
-      </div>
-    )
-  }
-
-  if (item.key === 'admin.registrationStatus') {
-    const record = readObject(data)
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-        <h3 className="text-xl font-black text-brand-950">{title}</h3>
-        <p className="mt-3 text-sm font-bold text-slate-600">注册模式：{String(record.registrationModeLabel || record.registrationMode || '未知')}</p>
-        <p className="mt-1 text-sm font-bold text-slate-600">注册开关：{record.allowRegister ? '允许注册' : '关闭注册'}</p>
-      </div>
-    )
-  }
-
-  if (item.key === 'home.music' || item.key === 'home.culture') {
-    const rows = readArray(data).slice(0, 3)
-    return (
-      <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-        <h3 className="text-xl font-black text-brand-950">{title}</h3>
-        <div className="mt-4 grid gap-2">
-          {rows.map((row, index) => {
-            const record = readObject(row)
-            return <p key={String(record.id || index)} className="rounded-xl bg-sky-50 px-3 py-2 text-sm font-bold text-slate-700">{String(record.title || '预览条目')}</p>
-          })}
-          {!rows.length ? <PreviewFallback payload={payload} /> : null}
-        </div>
-      </div>
-    )
-  }
+  const data = payload?.ok ? readObject(payload.data) : {}
+  const grid = item.grid[device]
+  const columns = columnsFor(device)
 
   return (
-    <div className="layout-card rounded-2xl border border-sky-100 bg-white shadow-sm">
-      <p className="text-xs font-black uppercase tracking-[0.16em] text-sky-700">{item.key}</p>
+    <div className="layout-card h-full min-h-28 rounded-2xl border border-sky-100 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-sky-700">{item.key}</p>
+        <span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-black text-brand-700">
+          {grid.w}/{columns}
+        </span>
+      </div>
       <h3 className="mt-2 text-xl font-black text-brand-950">{title}</h3>
       {subtitle ? <p className="mt-2 text-sm font-bold leading-6 text-slate-600">{subtitle}</p> : null}
-      {payload?.ok === false ? <div className="mt-3"><PreviewFallback payload={payload} /></div> : null}
+      {payload?.ok === false ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">{payload.message}</p> : null}
+      {payload?.ok === true && Object.keys(data).length ? <p className="mt-3 text-xs font-bold text-slate-400">预览数据已加载</p> : null}
     </div>
   )
 }
 
-export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPageKey }) {
+export function LayoutEditorClient({
+  initialPage,
+  initialLayout,
+  initialPreviewData = null,
+  initialRevisions = [],
+}: {
+  initialPage: PageLayoutPageKey
+  initialLayout?: SerializedPageLayout
+  initialPreviewData?: PreviewPayload | null
+  initialRevisions?: SerializedPageLayoutRevision[]
+}) {
+  const initialLayoutRef = useRef(initialLayout)
+  const initialAsyncPageRef = useRef<PageLayoutPageKey | null>(initialPage)
   const [pageKey, setPageKeyState] = useState<PageLayoutPageKey>(initialPage)
   const [device, setDevice] = useState<PageLayoutDevice>('desktop')
-  const [layout, setLayout] = useState<SerializedPageLayout | null>(null)
-  const [workingConfig, setWorkingConfig] = useState<PageLayoutConfig | null>(null)
-  const [previewData, setPreviewData] = useState<PreviewPayload | null>(null)
-  const [revisions, setRevisions] = useState<SerializedPageLayoutRevision[]>([])
+  const [layout, setLayout] = useState<SerializedPageLayout | null>(initialLayout || null)
+  const [workingConfig, setWorkingConfig] = useState<PageLayoutConfig | null>(() => initialLayout ? cloneConfig(initialLayout.draftConfig) : null)
+  const [previewData, setPreviewData] = useState<PreviewPayload | null>(initialPreviewData)
+  const [revisions, setRevisions] = useState<SerializedPageLayoutRevision[]>(initialRevisions)
   const [selectedRevision, setSelectedRevision] = useState<SerializedPageLayoutRevision | null>(null)
-  const [selectedKey, setSelectedKey] = useState('')
-  const [draggingKey, setDraggingKey] = useState('')
+  const [selectedKey, setSelectedKey] = useState(() => initialLayout?.draftConfig.desktop?.[0]?.key || '')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -211,63 +181,91 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
   }
 
   useEffect(() => {
+    let cancelled = false
     setMessage('')
     setError('')
-    setLayout(null)
-    setWorkingConfig(null)
-    setPreviewData(null)
     setSelectedRevision(null)
     setIsDirty(false)
+    const shouldFetchAsyncData = initialAsyncPageRef.current !== pageKey
+    initialAsyncPageRef.current = null
 
-    fetch(`/api/admin/page-layouts/${pageKey}`)
+    const shouldFetchLayout = initialLayoutRef.current?.pageKey !== pageKey
+    initialLayoutRef.current = undefined
+    if (shouldFetchLayout) {
+      setLayout(null)
+      setWorkingConfig(null)
+      fetch(`/api/admin/page-layouts/${pageKey}`)
       .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
       .then(({ ok, data }) => {
+        if (cancelled) return
         if (!ok) throw new Error(data?.message || '加载布局失败')
         setLayout(data)
         setWorkingConfig(cloneConfig(data.draftConfig))
         setSelectedKey(data.draftConfig.desktop?.[0]?.key || '')
       })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : '加载布局失败'))
+      .catch((loadError) => {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : '加载布局失败')
+      })
 
-    fetch(`/api/admin/page-layouts/${pageKey}/preview`)
+    }
+
+    if (shouldFetchAsyncData) {
+      setPreviewData(null)
+      fetch(`/api/admin/page-layouts/${pageKey}/preview`)
       .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
       .then(({ ok, data }) => {
+        if (cancelled) return
         if (!ok) throw new Error(data?.message || '加载预览数据失败')
         setPreviewData(data)
       })
-      .catch(() => setPreviewData(null))
+      .catch(() => {
+        if (!cancelled) setPreviewData(null)
+      })
 
-    loadRevisions(pageKey)
+      fetch(`/api/admin/page-layouts/${pageKey}/revisions?limit=20`)
+      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then(({ ok, data }) => {
+        if (cancelled) return
+        if (!ok) throw new Error(data?.message || '加载版本历史失败')
+        setRevisions(data.revisions || [])
+      })
+      .catch(() => {
+        if (!cancelled) setRevisions([])
+      })
+    }
+
+    return () => {
+      cancelled = true
+    }
   }, [pageKey])
 
   const previewConfig = selectedRevision?.config || workingConfig
   const modules = useMemo(
-    () => (workingConfig ? [...workingConfig[device]].sort((a, b) => a.order - b.order) : []),
+    () => (workingConfig ? [...workingConfig[device]].sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order) : []),
     [workingConfig, device],
   )
-  const previewModules = useMemo(
-    () => (previewConfig ? [...previewConfig[device]].filter((item) => item.visible).sort((a, b) => a.order - b.order) : []),
-    [previewConfig, device],
-  )
+  const activeModules = useMemo(() => modules.filter((item) => item.visible && !item.isHidden), [modules])
+  const hiddenModules = useMemo(() => modules.filter((item) => item.isHidden), [modules])
   const selected = modules.find((item) => item.key === selectedKey) || modules[0]
   const selectedModule = selected ? findModule(layout?.registry || [], selected.key) : null
 
   useEffect(() => {
-    if (modules.length && !modules.some((item) => item.key === selectedKey)) {
-      setSelectedKey(modules[0].key)
-    }
+    if (modules.length && !modules.some((item) => item.key === selectedKey)) setSelectedKey(modules[0].key)
   }, [modules, selectedKey])
 
   function setPageKey(nextPageKey: PageLayoutPageKey) {
     if (nextPageKey === pageKey) return
     if (isDirty && !window.confirm('当前草稿有未保存修改，切换页面会丢失这些本地修改。继续切换吗？')) return
+    const url = new URL(window.location.href)
+    url.searchParams.set('page', nextPageKey)
+    window.history.pushState(null, '', `${url.pathname}?${url.searchParams.toString()}`)
     setPageKeyState(nextPageKey)
   }
 
   function updateDeviceItems(updater: (items: PageLayoutModuleConfig[]) => PageLayoutModuleConfig[]) {
     setSelectedRevision(null)
     setIsDirty(true)
-    setWorkingConfig((current) => current ? { ...current, [device]: updater([...current[device]].sort((a, b) => a.order - b.order)) } : current)
+    setWorkingConfig((current) => current ? { ...current, [device]: updater([...current[device]]) } : current)
   }
 
   function updateSelected(patch: Partial<PageLayoutModuleConfig>) {
@@ -275,45 +273,21 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
     updateDeviceItems((items) => items.map((item) => (item.key === selected.key ? { ...item, ...patch } : item)))
   }
 
-  function moveModule(key: string, direction: -1 | 1) {
-    updateDeviceItems((items) => {
-      const index = items.findIndex((item) => item.key === key)
-      const target = index + direction
-      if (index < 0 || target < 0 || target >= items.length) return items
-      const next = [...items]
-      const [item] = next.splice(index, 1)
-      next.splice(target, 0, item)
-      return normalizeOrder(next)
-    })
-  }
-
-  function dropModule(targetKey: string) {
-    if (!draggingKey || draggingKey === targetKey) return
-    updateDeviceItems((items) => {
-      const from = items.findIndex((item) => item.key === draggingKey)
-      const to = items.findIndex((item) => item.key === targetKey)
-      if (from < 0 || to < 0) return items
-      const next = [...items]
-      const [item] = next.splice(from, 1)
-      next.splice(to, 0, item)
-      return normalizeOrder(next)
-    })
-    setDraggingKey('')
-  }
-
   async function submit(url: string, method: 'PUT' | 'POST', successMessage: string, config = workingConfig) {
     if (!layout || !config) return
     setIsSaving(true)
     setMessage('')
     setError('')
-    const response = await fetch(url, {
+    try {
+      const response = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ version: layout.version, config }),
     })
-    const data = await response.json().catch(() => null)
-    setIsSaving(false)
+      const data = await response.json().catch(() => null)
     if (!response.ok) {
+      setError(formatApiError(data, '操作失败'))
+      return
       setError(data?.message || '操作失败')
       return
     }
@@ -323,6 +297,11 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
     setIsDirty(false)
     setMessage(data.message || successMessage)
     loadRevisions(pageKey)
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '操作失败')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   async function restoreRevision(revision: SerializedPageLayoutRevision, publish: boolean) {
@@ -337,37 +316,38 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
     )
   }
 
-  if (!workingConfig || !layout) {
+  if (!workingConfig || !layout || !previewConfig) {
     return (
       <section className="rounded-[24px] border border-sky-100 bg-white/88 p-6 text-sm font-black text-slate-600 shadow-sm">
-        {error || '正在加载布局编辑器...'}
+        {error || '正在加载 Visual Layout Editor v2 Final...'}
       </section>
     )
   }
+
+  const rendererModules: PageLayoutCanvasModules = Object.fromEntries(
+    previewConfig[device].map((item) => {
+      const definition = findModule(layout.registry, item.key)
+      return [item.key, renderPreviewContent(item, definition, previewData?.modules?.[item.key] || null, device)]
+    }),
+  )
+  const pageMeta = pageLayoutPages[pageKey]
+  const grid = selected?.grid[device]
+  const deviceMeta = deviceOptions.find((item) => item.key === device)
 
   return (
     <div className="space-y-5">
       <section className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Layout Editor</p>
+            <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Visual Layout Editor v2 Final</p>
             <h1 className="mt-1 text-3xl font-black text-brand-950">页面布局编辑器</h1>
+            <p className="mt-2 text-sm font-bold text-slate-500">{pageMeta.description}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button disabled={isSaving || !isDirty} onClick={() => { setWorkingConfig(cloneConfig(layout.draftConfig)); setSelectedRevision(null); setIsDirty(false) }} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">撤销未保存</button>
             <button disabled={isSaving} onClick={() => submit(`/api/admin/page-layouts/${pageKey}/reset`, 'POST', '已恢复默认草稿', layout.defaults)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">恢复默认草稿</button>
             <button disabled={isSaving} onClick={() => submit(`/api/admin/page-layouts/${pageKey}/draft`, 'PUT', '草稿已保存')} className="rounded-full bg-brand-700 px-4 py-2 text-sm font-black text-white">保存草稿</button>
-            <button
-              disabled={isSaving}
-              onClick={() => {
-                if (window.confirm('发布后将立即影响前台页面，确认发布当前草稿吗？')) {
-                  submit(`/api/admin/page-layouts/${pageKey}/publish`, 'POST', '布局已发布')
-                }
-              }}
-              className="rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white"
-            >
-              发布
-            </button>
+            <button disabled={isSaving} onClick={() => { if (window.confirm('发布后将立即影响前台页面，确认发布当前草稿吗？')) submit(`/api/admin/page-layouts/${pageKey}/publish`, 'POST', '布局已发布') }} className="rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white">发布</button>
           </div>
         </div>
 
@@ -375,16 +355,17 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
           <p>当前版本：{layout.version}{isDirty ? '（本地未保存）' : ''}</p>
           <p>发布时间：{formatDate(layout.publishedAt)}</p>
           <p>最近修改：{formatDate(layout.updatedAt)}</p>
-          <p>当前设备：{device === 'desktop' ? '桌面端' : '移动端'}</p>
+          <p>当前设备：{deviceMeta?.label} {deviceMeta?.columns} 列</p>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
           {pageOptions.map((item) => (
             <button key={item.key} onClick={() => setPageKey(item.key)} className={`rounded-full px-4 py-2 text-sm font-black ${pageKey === item.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>{item.label}</button>
           ))}
-          {(['desktop', 'mobile'] as const).map((item) => (
-            <button key={item} onClick={() => setDevice(item)} className={`rounded-full px-4 py-2 text-sm font-black ${device === item ? 'bg-brand-700 text-white' : 'bg-sky-50 text-brand-700'}`}>{item === 'desktop' ? '桌面端' : '移动端'}</button>
+          {deviceOptions.map((item) => (
+            <button key={item.key} onClick={() => setDevice(item.key)} className={`rounded-full px-4 py-2 text-sm font-black ${device === item.key ? 'bg-brand-700 text-white' : 'bg-sky-50 text-brand-700'}`}>{item.label}</button>
           ))}
+          <Link href={pageMeta.path} className="rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 shadow-sm">查看前台</Link>
         </div>
 
         {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
@@ -394,16 +375,14 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
         <aside className="rounded-[24px] border border-sky-100 bg-white/88 p-4 shadow-sm">
           <h2 className="text-lg font-black text-brand-950">模块列表</h2>
+          <p className="mt-1 text-xs font-bold leading-5 text-slate-500">列表用于选择模块；位置和尺寸请在画布中直接拖动或缩放。</p>
           <div className="mt-4 grid gap-2">
-            {modules.map((item, index) => {
+            {activeModules.map((item, index) => {
               const definition = findModule(layout.registry, item.key)
+              const currentGrid = item.grid[device]
               return (
                 <button
                   key={item.key}
-                  draggable
-                  onDragStart={() => setDraggingKey(item.key)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => dropModule(item.key)}
                   onClick={() => { setSelectedKey(item.key); setSelectedRevision(null) }}
                   className={`rounded-2xl border px-3 py-3 text-left transition ${selected?.key === item.key ? 'border-brand-700 bg-sky-50' : 'border-sky-100 bg-white hover:bg-sky-50/70'}`}
                 >
@@ -411,53 +390,94 @@ export function LayoutEditorClient({ initialPage }: { initialPage: PageLayoutPag
                     <span className="text-sm font-black text-brand-950">{definition?.name || item.key}</span>
                     <span className="text-xs font-black text-slate-400">#{index + 1}</span>
                   </div>
-                  <p className="mt-1 text-xs font-bold text-slate-500">{item.visible ? '显示' : '隐藏'} · {item.width} · {item.gapTop}/{item.gapBottom}</p>
-                  <div className="mt-2 flex gap-2">
-                    <span role="button" onClick={(event) => { event.stopPropagation(); moveModule(item.key, -1) }} className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">上移</span>
-                    <span role="button" onClick={(event) => { event.stopPropagation(); moveModule(item.key, 1) }} className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">下移</span>
-                  </div>
+                  <p className="mt-1 text-xs font-bold text-slate-500">{item.visible ? '显示' : '隐藏'} · x{currentGrid.x} y{currentGrid.y} · {currentGrid.w}x{currentGrid.h}</p>
                 </button>
               )
             })}
+          </div>
+          <div className="mt-6 border-t border-sky-100 pt-4">
+            <h3 className="text-sm font-black text-brand-950">已隐藏模块</h3>
+            <div className="mt-3 grid gap-2">
+              {hiddenModules.map((item) => {
+                const definition = findModule(layout.registry, item.key)
+                const currentGrid = item.grid[device]
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => { setSelectedKey(item.key); setSelectedRevision(null) }}
+                    className={`rounded-2xl border px-3 py-3 text-left transition ${selected?.key === item.key ? 'border-slate-500 bg-slate-100' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-black text-slate-600">{definition?.name || item.key}</span>
+                      <span className="text-xs font-black text-slate-400">隐藏</span>
+                    </div>
+                    <p className="mt-1 text-xs font-bold text-slate-500">x{currentGrid.x} y{currentGrid.y} · {currentGrid.w}x{currentGrid.h}</p>
+                  </button>
+                )
+              })}
+              {!hiddenModules.length ? <p className="rounded-xl bg-sky-50 px-3 py-2 text-xs font-bold text-slate-500">当前设备没有隐藏模块。</p> : null}
+            </div>
           </div>
         </aside>
 
         <section className="min-h-[620px] rounded-[24px] border border-sky-100 bg-sky-50/70 p-4 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-black text-brand-950">实时预览</h2>
-              <p className="mt-1 text-xs font-black text-slate-500">{selectedRevision ? `正在预览历史版本 v${selectedRevision.version}` : '正在预览当前草稿'} · 预览模式不执行写操作</p>
+              <h2 className="text-lg font-black text-brand-950">Canvas 画布</h2>
+              <p className="mt-1 text-xs font-black text-slate-500">{selectedRevision ? `正在预览历史版本 v${selectedRevision.version}` : '拖动模块调整位置，拖拉边缘调整宽高'} · 正式页仍共用 PageLayoutRenderer</p>
             </div>
-            {selectedRevision ? <button onClick={() => setSelectedRevision(null)} className="rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">返回草稿预览</button> : null}
+            <div className="flex gap-2">
+              {selectedRevision ? <button onClick={() => setSelectedRevision(null)} className="rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">返回草稿预览</button> : null}
+              <button onClick={() => updateDeviceItems((items) => compactItems(items, device))} className="rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">自动整理</button>
+            </div>
           </div>
-          <div className={`mx-auto flex flex-wrap gap-x-4 rounded-[22px] bg-white/78 p-4 ${device === 'mobile' ? 'max-w-sm' : 'max-w-6xl'}`}>
-            {previewModules.map((item) => {
-              const definition = findModule(layout.registry, item.key)
-              return (
-                <PageLayoutFrame key={item.key} config={item}>
-                  {renderPreviewContent(item, definition, getModulePreview(previewData, item.key))}
-                </PageLayoutFrame>
-              )
-            })}
+          <div className={`rounded-[22px] bg-white/78 p-4 ${device === 'mobile' ? 'mx-auto max-w-sm' : device === 'tablet' ? 'mx-auto max-w-3xl' : ''}`}>
+            <PageLayoutCanvasEditor
+              pageKey={pageKey}
+              config={previewConfig}
+              modules={rendererModules}
+              moduleDefinitions={layout.registry}
+              device={device}
+              selectedKey={selected?.key || ''}
+              readOnly={Boolean(selectedRevision)}
+              onSelect={(key) => { setSelectedKey(key); setSelectedRevision(null) }}
+              onChange={(items) => updateDeviceItems(() => items)}
+            />
           </div>
         </section>
 
         <aside className="space-y-4">
           <section className="rounded-[24px] border border-sky-100 bg-white/88 p-4 shadow-sm">
             <h2 className="text-lg font-black text-brand-950">属性面板</h2>
-            {selected && selectedModule ? (
+            {selected && selectedModule && grid ? (
               <div className="mt-4 space-y-4">
                 <div>
                   <p className="text-sm font-black text-brand-950">{selectedModule.name}</p>
                   <p className="mt-1 text-xs font-bold leading-5 text-slate-500">{selectedModule.description}</p>
                 </div>
 
+                <div className="rounded-2xl bg-sky-50 px-3 py-3 text-xs font-black leading-6 text-slate-600">
+                  位置与尺寸：x{grid.x} y{grid.y} · {grid.w}x{grid.h}
+                  <br />
+                  请在画布中直接拖动模块，或拖拉模块边缘调整大小。
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-black text-slate-600">显示状态</span>
+                  {selected.isHidden ? (
+                    <button type="button" onClick={() => updateSelected({ visible: true, isHidden: false })} className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700">显示模块</button>
+                  ) : selectedModule.canHide && !selectedModule.required ? (
+                    <button type="button" onClick={() => updateSelected({ visible: false, isHidden: true })} className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600">隐藏模块</button>
+                  ) : (
+                    <span className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700">核心模块不可隐藏</span>
+                  )}
+                </div>
+
                 <label className="flex items-center gap-2 text-sm font-black text-slate-600">
-                  <input type="checkbox" checked={selected.visible} disabled={selectedModule.required} onChange={(event) => updateSelected({ visible: event.target.checked })} />
+                  <input type="checkbox" checked={!selected.isHidden} disabled={selectedModule.required || !selectedModule.canHide} onChange={(event) => updateSelected({ visible: event.target.checked, isHidden: !event.target.checked })} />
                   显示模块{selectedModule.required ? '（核心模块）' : ''}
                 </label>
 
-                <SelectField label="宽度" value={selected.width} options={layoutWidths.filter((item) => selectedModule.allowedWidths.includes(item))} onChange={(value) => updateSelected({ width: value as PageLayoutModuleConfig['width'] })} />
                 <SelectField label="上间距" value={selected.gapTop} options={layoutSpacings.filter((item) => selectedModule.allowedSpacing.includes(item))} onChange={(value) => updateSelected({ gapTop: value as PageLayoutModuleConfig['gapTop'] })} />
                 <SelectField label="下间距" value={selected.gapBottom} options={layoutSpacings.filter((item) => selectedModule.allowedSpacing.includes(item))} onChange={(value) => updateSelected({ gapBottom: value as PageLayoutModuleConfig['gapBottom'] })} />
                 <SelectField label="对齐" value={selected.alignment} options={layoutAlignments} onChange={(value) => updateSelected({ alignment: value as PageLayoutModuleConfig['alignment'] })} />

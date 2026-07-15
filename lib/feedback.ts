@@ -2,8 +2,8 @@ import type { FeedbackStatus, FeedbackType, Prisma } from '@prisma/client'
 import { publicImageUrl } from '@/lib/images'
 
 export const feedbackTypeLabels: Record<FeedbackType, string> = {
-  BUG: '功能异常',
-  EXPERIENCE: '使用体验',
+  BUG: '问题反馈',
+  EXPERIENCE: '体验建议',
   SUGGESTION: '功能建议',
   CONTENT: '内容问题',
   ACCOUNT: '账号问题',
@@ -11,15 +11,16 @@ export const feedbackTypeLabels: Record<FeedbackType, string> = {
 }
 
 export const feedbackStatusLabels: Record<FeedbackStatus, string> = {
-  OPEN: '待处理',
+  OPEN: '未处理',
   PROCESSING: '处理中',
   REPLIED: '已回复',
-  RESOLVED: '已解决',
-  CLOSED: '已关闭',
+  RESOLVED: '已完成',
+  CLOSED: '已完成',
 }
 
 export const feedbackTypes = Object.keys(feedbackTypeLabels) as FeedbackType[]
 export const feedbackStatuses = Object.keys(feedbackStatusLabels) as FeedbackStatus[]
+export const feedbackVisibleStatuses = ['OPEN', 'PROCESSING', 'REPLIED', 'RESOLVED'] as const satisfies readonly FeedbackStatus[]
 
 export const feedbackInclude = {
   user: {
@@ -123,6 +124,33 @@ export function serializeFeedbackListItem(item: FeedbackListItem) {
 }
 
 export function serializeFeedback(item: FeedbackWithThread, options: { includeContact: boolean }) {
+  const user = displayUser(item.user)
+  const serializedReplies = item.replies.map((reply) => ({
+    id: reply.id,
+    content: reply.content,
+    authorRole: reply.authorRole,
+    isReadByUser: reply.isReadByUser,
+    isReadByAdmin: reply.isReadByAdmin,
+    createdAt: reply.createdAt,
+    author: displayUser(reply.admin),
+    attachments: reply.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
+  }))
+  const hasStoredInitialMessage = serializedReplies.some((reply) => (
+    reply.authorRole === 'USER' &&
+    reply.content === item.content &&
+    Math.abs(new Date(reply.createdAt).getTime() - item.createdAt.getTime()) < 10_000
+  ))
+  const initialMessage = {
+    id: `initial-${item.id}`,
+    content: item.content,
+    authorRole: 'USER',
+    isReadByUser: true,
+    isReadByAdmin: !item.adminUnread,
+    createdAt: item.createdAt,
+    author: user,
+    attachments: item.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
+  }
+
   return {
     id: item.id,
     title: item.title,
@@ -140,29 +168,32 @@ export function serializeFeedback(item: FeedbackWithThread, options: { includeCo
     closedAt: item.closedAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-    user: displayUser(item.user),
+    user,
     attachments: item.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
-    replies: item.replies.map((reply) => ({
-      id: reply.id,
-      content: reply.content,
-      authorRole: reply.authorRole,
-      isReadByUser: reply.isReadByUser,
-      isReadByAdmin: reply.isReadByAdmin,
-      createdAt: reply.createdAt,
-      author: displayUser(reply.admin),
-      attachments: reply.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
-    })),
+    replies: hasStoredInitialMessage ? serializedReplies : [initialMessage, ...serializedReplies],
   }
 }
 
 export function parseFeedbackType(value: unknown): FeedbackType | null {
   const type = String(value || '').toUpperCase()
+  if (type === 'FEATURE') return 'SUGGESTION'
   return feedbackTypes.includes(type as FeedbackType) ? (type as FeedbackType) : null
 }
 
 export function parseFeedbackStatus(value: unknown): FeedbackStatus | null {
   const status = String(value || '').toUpperCase()
+  if (status === 'PENDING') return 'OPEN'
+  if (status === 'COMPLETED') return 'RESOLVED'
   return feedbackStatuses.includes(status as FeedbackStatus) ? (status as FeedbackStatus) : null
+}
+
+export function parseFeedbackStatusFilter(value: unknown): FeedbackStatus[] | null {
+  const status = String(value || '').toUpperCase()
+  if (!status) return null
+  if (status === 'PENDING' || status === 'OPEN') return ['OPEN']
+  if (status === 'COMPLETED' || status === 'RESOLVED' || status === 'CLOSED') return ['RESOLVED', 'CLOSED']
+  const parsed = parseFeedbackStatus(status)
+  return parsed ? [parsed] : null
 }
 
 export function parseFeedbackAttachments(value: unknown) {

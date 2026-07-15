@@ -9,6 +9,9 @@ import { prisma } from '@/lib/prisma'
 
 export { adminModulePermissions, adminPermissionGroups, allAdminPermissionKeys, type AdminPermissionKey }
 
+const permissionCacheTtlMs = Number(process.env.ADMIN_PERMISSION_CACHE_TTL_MS || 10000)
+const permissionSetCache = new Map<string, { expiresAt: number; permissions: Set<AdminPermissionKey>; promise?: Promise<Set<AdminPermissionKey>> }>()
+
 export function isSuperAdmin(user?: Pick<SessionUser, 'role'> | null) {
   return user?.role === 'SUPER_ADMIN'
 }
@@ -21,12 +24,27 @@ export async function getAdminPermissionSet(user: Pick<SessionUser, 'id' | 'role
   if (isSuperAdmin(user)) return new Set<AdminPermissionKey>(allAdminPermissionKeys)
   if (user.role !== 'ADMIN') return new Set<AdminPermissionKey>()
 
-  const rows = await prisma.adminPermission.findMany({
+  const now = Date.now()
+  const cached = permissionSetCache.get(user.id)
+  if (cached && cached.expiresAt > now) {
+    if (cached.promise) return cached.promise
+    return new Set(cached.permissions)
+  }
+
+  const promise = prisma.adminPermission.findMany({
     where: { userId: user.id, enabled: true },
     select: { permissionKey: true },
+  }).then((rows) => {
+    return new Set(rows.map((row) => row.permissionKey as AdminPermissionKey).filter((key) => allAdminPermissionKeys.includes(key)))
+  }).catch((error) => {
+    permissionSetCache.delete(user.id)
+    throw error
   })
 
-  return new Set(rows.map((row) => row.permissionKey as AdminPermissionKey).filter((key) => allAdminPermissionKeys.includes(key)))
+  permissionSetCache.set(user.id, { expiresAt: now + permissionCacheTtlMs, permissions: new Set(), promise })
+  const permissions = await promise
+  permissionSetCache.set(user.id, { expiresAt: Date.now() + permissionCacheTtlMs, permissions })
+  return new Set(permissions)
 }
 
 export async function hasAdminPermission(user: Pick<SessionUser, 'id' | 'role'>, permissionKey?: AdminPermissionKey) {
@@ -34,10 +52,6 @@ export async function hasAdminPermission(user: Pick<SessionUser, 'id' | 'role'>,
   if (user.role !== 'ADMIN') return false
   if (!permissionKey) return true
 
-  const permission = await prisma.adminPermission.findUnique({
-    where: { userId_permissionKey: { userId: user.id, permissionKey } },
-    select: { enabled: true },
-  })
-
-  return Boolean(permission?.enabled)
+  const permissions = await getAdminPermissionSet(user)
+  return permissions.has(permissionKey)
 }

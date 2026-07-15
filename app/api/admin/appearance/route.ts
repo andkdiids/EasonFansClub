@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { defaultSiteAppearance, getSiteAppearance, mergeSiteAppearanceConfig } from '@/lib/site-config'
+import { clearSiteAppearanceCache, defaultSiteAppearance, getSiteAppearance, mergeSiteAppearanceConfig } from '@/lib/site-config'
 import { requireAdmin } from '@/lib/security'
 
 const revalidateTargets = [
@@ -59,6 +59,7 @@ export async function PATCH(request: Request) {
     },
   })
 
+  clearSiteAppearanceCache()
   revalidatePath('/', 'layout')
   revalidateTargets.forEach((path) => revalidatePath(path, 'page'))
 

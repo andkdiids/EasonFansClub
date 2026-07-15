@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { SignJWT, jwtVerify } from 'jose'
 import type { UserRole } from '@prisma/client'
+import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
@@ -29,6 +30,9 @@ export function isAuthServiceUnavailableError(error: unknown) {
 const secret = new TextEncoder().encode(
   process.env.JWT_SECRET || 'dev-secret-change-before-production',
 )
+
+const currentUserCacheTtlMs = Number(process.env.AUTH_USER_CACHE_TTL_MS || (process.env.NODE_ENV === 'production' ? 5000 : 15000))
+const currentUserCache = new Map<string, { expiresAt: number; user: SessionUser | null; promise?: Promise<SessionUser | null> }>()
 
 export async function createSessionToken(user: SessionUser) {
   return new SignJWT(user)
@@ -59,41 +63,56 @@ export async function getCurrentUser() {
   const sessionUser = await getSessionUserFromCookie()
   if (!sessionUser) return null
 
+  const now = Date.now()
+  const cached = currentUserCache.get(sessionUser.id)
+  if (cached && cached.expiresAt > now) {
+    if (cached.promise) return cached.promise
+    return cached.user
+  }
+
   try {
-    const user = await withDbTimeout(
+    const lookup = measureBootstrap(
       'auth.currentUser',
-      prisma.user.findFirst({
-        where: {
-          id: sessionUser.id,
-          isDeleted: false,
-          status: 'ACTIVE',
-        },
-        select: {
-          id: true,
-          uid: true,
-          username: true,
-          nickname: true,
-          role: true,
-          status: true,
-          isDeleted: true,
-          profile: { select: { id: true } },
-        },
-      }),
-      3000,
-    )
+      withDbTimeout(
+        'auth.currentUser',
+        prisma.user.findFirst({
+          where: {
+            id: sessionUser.id,
+            isDeleted: false,
+            status: 'ACTIVE',
+          },
+          select: {
+            id: true,
+            uid: true,
+            username: true,
+            nickname: true,
+            role: true,
+            status: true,
+            isDeleted: true,
+            profile: { select: { id: true } },
+          },
+        }),
+        8000,
+      ),
+    ).then((user) => {
+      if (!user || !isCompleteActiveUser(user)) return null
 
-    if (!user || !isCompleteActiveUser(user)) {
-      return null
-    }
+      return {
+        id: user.id,
+        uid: user.uid,
+        username: user.username,
+        nickname: user.nickname,
+        role: user.role,
+      }
+    })
 
-    return {
-      id: user.id,
-      uid: user.uid,
-      username: user.username,
-      nickname: user.nickname,
-      role: user.role,
-    }
+    currentUserCache.set(sessionUser.id, { expiresAt: now + currentUserCacheTtlMs, user: null, promise: lookup })
+    const currentUser = await lookup
+    currentUserCache.set(sessionUser.id, { expiresAt: Date.now() + currentUserCacheTtlMs, user: currentUser })
+
+    return currentUser
   } catch (error) {
+    currentUserCache.delete(sessionUser.id)
     console.error('[auth.currentUser]', error)
     throw new AuthServiceUnavailableError(undefined, { cause: error })
   }

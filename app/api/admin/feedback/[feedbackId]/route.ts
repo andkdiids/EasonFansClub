@@ -51,7 +51,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ fe
     where: { id: feedbackId },
     data: {
       status,
-      ...(status === 'CLOSED' ? { closedAt: new Date() } : { closedAt: null }),
+      ...(status === 'RESOLVED' || status === 'CLOSED' ? { closedAt: new Date() } : { closedAt: null }),
     },
     include: feedbackInclude,
   })

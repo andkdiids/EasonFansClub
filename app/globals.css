@@ -45,6 +45,118 @@ svg {
   gap: var(--layout-section-gap, 1rem);
 }
 
+.page-layout-grid {
+  display: grid;
+  grid-auto-rows: minmax(28px, auto);
+  gap: 1rem;
+  width: 100%;
+}
+
+.page-layout-grid-item {
+  min-width: 0;
+  width: 100%;
+}
+
+.page-layout-grid > .page-layout-grid-item {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.page-layout-grid-mobile {
+  max-width: 28rem;
+  margin-inline: auto;
+}
+
+.page-layout-grid-tablet {
+  max-width: 56rem;
+  margin-inline: auto;
+}
+
+.page-layout-canvas {
+  width: 100%;
+}
+
+.page-layout-rgl {
+  min-height: 420px;
+  width: 100%;
+}
+
+.react-grid-layout {
+  position: relative;
+  transition: height 200ms ease;
+}
+
+.react-grid-item {
+  transition: all 200ms ease;
+  transition-property: left, top, width, height;
+}
+
+.react-grid-item.cssTransforms {
+  transition-property: transform, width, height;
+}
+
+.react-grid-item.react-grid-placeholder {
+  z-index: 2;
+  border-radius: 20px;
+  background: rgba(14, 116, 144, 0.16);
+  border: 2px dashed rgba(14, 116, 144, 0.45);
+  opacity: 1;
+  transition-duration: 100ms;
+}
+
+.react-grid-item.react-draggable-dragging,
+.react-grid-item.resizing {
+  z-index: 30;
+  transition: none;
+}
+
+.page-layout-canvas-item {
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.react-draggable-dragging .page-layout-canvas-item {
+  cursor: grabbing;
+}
+
+.page-layout-canvas-item-selected {
+  outline: 3px solid rgba(15, 122, 174, 0.6);
+  outline-offset: -3px;
+}
+
+.react-resizable-handle {
+  position: absolute;
+  z-index: 40;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #0f7aae;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 8px 18px rgba(7, 23, 34, 0.2);
+}
+
+.react-resizable-handle-se {
+  right: 8px;
+  bottom: 8px;
+  cursor: se-resize;
+}
+
+.react-resizable-handle-e {
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+
+.react-resizable-handle-s {
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+
 body.layout-inline-editing [data-layout-module] {
   position: relative;
   outline: 2px dashed rgba(25, 133, 194, 0.65);

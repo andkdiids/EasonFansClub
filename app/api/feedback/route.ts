@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server'
-import { feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
+import { feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const { searchParams } = new URL(request.url)
+  const statusFilter = parseFeedbackStatusFilter(searchParams.get('status'))
 
   const feedbacks = await prisma.feedback.findMany({
-    where: { userId: guard.user.id },
+    where: { userId: guard.user.id, ...(statusFilter ? { status: { in: statusFilter } } : {}) },
     orderBy: [{ lastReplyAt: 'desc' }, { createdAt: 'desc' }],
     take: 50,
     select: feedbackListSelect,
@@ -27,6 +29,12 @@ export async function POST(request: Request) {
   if (limited) return limited
 
   const body = await request.json().catch(() => null)
+  const rawTitle = typeof body?.title === 'string' ? body.title : ''
+  const rawContent = typeof (body?.description ?? body?.content) === 'string' ? String(body?.description ?? body?.content) : ''
+  const rawContact = typeof body?.contact === 'string' ? body.contact : ''
+  if (rawTitle.length > 80) return NextResponse.json({ message: '反馈标题最多 80 个字' }, { status: 400 })
+  if (rawContent.length > 3000) return NextResponse.json({ message: '反馈描述最多 3000 个字' }, { status: 400 })
+  if (rawContact.length > 120) return NextResponse.json({ message: '联系方式最多 120 个字' }, { status: 400 })
   const title = sanitizeText(body?.title, 80)
   const content = await filterSensitiveWords(sanitizeText(body?.description ?? body?.content, 3000))
   const contact = sanitizeText(body?.contact, 120)
@@ -38,21 +46,46 @@ export async function POST(request: Request) {
   if (!content || content.length < 8) return NextResponse.json({ message: '请填写更完整的反馈描述' }, { status: 400 })
   if (attachments.length > 5) return NextResponse.json({ message: '最多只能上传 5 张图片' }, { status: 400 })
 
-  const feedback = await prisma.feedback.create({
-    data: {
-      userId: guard.user.id,
-      title,
-      type,
-      content,
-      contact: contact || null,
-      status: 'OPEN',
-      adminUnread: true,
-      userUnread: false,
-      lastReplyAt: new Date(),
-      lastUserReplyAt: new Date(),
-      attachments: attachments.length ? { createMany: { data: attachments } } : undefined,
-    },
-    include: feedbackInclude,
+  const now = new Date()
+  const feedback = await prisma.$transaction(async (tx) => {
+    const created = await tx.feedback.create({
+      data: {
+        userId: guard.user.id,
+        title,
+        type,
+        content,
+        contact: contact || null,
+        status: 'OPEN',
+        adminUnread: true,
+        userUnread: false,
+        lastReplyAt: now,
+        lastUserReplyAt: now,
+      },
+      select: { id: true },
+    })
+
+    const message = await tx.feedbackReply.create({
+      data: {
+        feedbackId: created.id,
+        adminId: guard.user.id,
+        authorRole: 'USER',
+        content,
+        isReadByAdmin: false,
+        isReadByUser: true,
+      },
+      select: { id: true },
+    })
+
+    if (attachments.length) {
+      await tx.feedbackAttachment.createMany({
+        data: attachments.map((item) => ({ ...item, feedbackId: created.id, replyId: message.id })),
+      })
+    }
+
+    return tx.feedback.findUniqueOrThrow({
+      where: { id: created.id },
+      include: feedbackInclude,
+    })
   })
 
   return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }), message: '反馈已提交' }, { status: 201 })

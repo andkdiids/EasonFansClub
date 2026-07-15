@@ -1,4 +1,3 @@
-import { unstable_noStore as noStore } from 'next/cache'
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 
@@ -141,21 +140,38 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
   }
 }
 
+const appearanceCacheTtlMs = Number(process.env.SITE_APPEARANCE_CACHE_TTL_MS || 30000)
+let appearanceCache: { expiresAt: number; config: SiteAppearanceConfig; promise?: Promise<SiteAppearanceConfig> } | null = null
+
+export function clearSiteAppearanceCache() {
+  appearanceCache = null
+}
+
 export async function getSiteAppearance() {
-  noStore()
-  const setting = await safeDb(
+  const now = Date.now()
+  if (appearanceCache && appearanceCache.expiresAt > now) {
+    if (appearanceCache.promise) return appearanceCache.promise
+    return appearanceCache.config
+  }
+
+  const promise = safeDb(
     'site.appearance',
     prisma.siteSetting.findUnique({
       where: { key: 'site.appearance' },
       select: { value: true },
     }),
     null,
-  )
+  ).then((setting) => {
+    if (!setting?.value) return defaultSiteAppearance
+    try {
+      return mergeSiteAppearanceConfig(JSON.parse(setting.value))
+    } catch {
+      return defaultSiteAppearance
+    }
+  })
 
-  if (!setting?.value) return defaultSiteAppearance
-  try {
-    return mergeSiteAppearanceConfig(JSON.parse(setting.value))
-  } catch {
-    return defaultSiteAppearance
-  }
+  appearanceCache = { expiresAt: now + appearanceCacheTtlMs, config: defaultSiteAppearance, promise }
+  const config = await promise
+  appearanceCache = { expiresAt: Date.now() + appearanceCacheTtlMs, config }
+  return config
 }
