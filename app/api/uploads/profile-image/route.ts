@@ -2,17 +2,34 @@ import { NextResponse } from 'next/server'
 import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
+import { invalidateCurrentUserCache } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
 const avatarMaxFileSize = 10 * 1024 * 1024
 const backgroundMaxFileSize = 8 * 1024 * 1024
+const avatarTypes = new Map([
+  ['image/webp', 'webp'],
+  ['image/jpeg', 'jpg'],
+])
 const backgroundTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
   ['image/webp', 'webp'],
   ['image/gif', 'gif'],
 ])
+
+function createCompatibleId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+
+  const bytes = new Uint8Array(16)
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes)
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
 
 function storagePathFromPublicUrl(url?: string | null) {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
@@ -70,8 +87,8 @@ export async function POST(request: Request) {
   }
 
   if (kind === 'avatar') {
-    if (file.type !== 'image/webp') {
-      return NextResponse.json({ message: '头像必须先裁剪并转换为 WebP 后上传' }, { status: 400 })
+    if (!avatarTypes.has(file.type)) {
+      return NextResponse.json({ message: '头像必须先裁剪为 WebP 或 JPEG 后上传' }, { status: 400 })
     }
     if (file.size > avatarMaxFileSize) {
       return NextResponse.json({ message: '头像文件不能超过 10MB' }, { status: 400 })
@@ -85,23 +102,35 @@ export async function POST(request: Request) {
     }
   }
 
-  const extension = kind === 'avatar' ? 'webp' : backgroundTypes.get(file.type)
+  const extension = kind === 'avatar' ? avatarTypes.get(file.type) : backgroundTypes.get(file.type)
   const objectPath =
     kind === 'avatar'
-      ? `avatars/${guard.user.id}/${crypto.randomUUID()}.webp`
-      : `profiles/${guard.user.id}/background-${crypto.randomUUID()}.${extension}`
+      ? `avatars/${guard.user.id}/${createCompatibleId()}.${extension}`
+      : `profiles/${guard.user.id}/background-${createCompatibleId()}.${extension}`
 
-  const storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
-    method: 'POST',
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Cache-Control': '31536000',
-      'Content-Type': file.type,
-      'x-upsert': 'false',
-    },
-    body: await file.arrayBuffer(),
-  })
+  let storageResponse: Response
+  try {
+    storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Cache-Control': '31536000',
+        'Content-Type': file.type,
+        'x-upsert': 'false',
+      },
+      body: await file.arrayBuffer(),
+    })
+  } catch (error) {
+    console.error('[profile-image] storage upload failed', {
+      userId: guard.user.id,
+      kind,
+      fileSize: file.size,
+      fileType: file.type,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    })
+    return NextResponse.json({ message: kind === 'avatar' ? '头像上传失败，请稍后再试' : '背景图上传失败，请稍后再试' }, { status: 502 })
+  }
 
   if (!storageResponse.ok) {
     const errorText = await storageResponse.text().catch(() => '')
@@ -122,23 +151,36 @@ export async function POST(request: Request) {
     },
   })
 
-  await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: guard.user.id },
-      data: kind === 'avatar' ? { avatarUrl: safeUrl } : { backgroundUrl: safeUrl },
+  try {
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: guard.user.id },
+        data: kind === 'avatar' ? { avatarUrl: safeUrl } : { backgroundUrl: safeUrl },
+      }),
+      prisma.profile.upsert({
+        where: { userId: guard.user.id },
+        update: kind === 'avatar' ? { avatarUrl: safeUrl } : { backgroundUrl: safeUrl },
+        create: {
+          userId: guard.user.id,
+          displayName: guard.user.nickname,
+          avatarUrl: kind === 'avatar' ? safeUrl : null,
+          backgroundUrl: kind === 'background' ? safeUrl : null,
+        },
+      }),
+    ])
+  } catch (error) {
+    console.error('[profile-image] profile update failed', {
+      userId: guard.user.id,
+      kind,
+      fileSize: file.size,
+      fileType: file.type,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
     })
+    void removeStorageObject(objectPath)
+    return NextResponse.json({ message: kind === 'avatar' ? '头像已上传，但资料更新失败，请稍后再试' : '背景图已上传，但资料更新失败，请稍后再试' }, { status: 500 })
+  }
 
-    await tx.profile.upsert({
-      where: { userId: guard.user.id },
-      update: kind === 'avatar' ? { avatarUrl: safeUrl } : { backgroundUrl: safeUrl },
-      create: {
-        userId: guard.user.id,
-        displayName: guard.user.nickname,
-        avatarUrl: kind === 'avatar' ? safeUrl : null,
-        backgroundUrl: kind === 'background' ? safeUrl : null,
-      },
-    })
-  })
+  invalidateCurrentUserCache(guard.user.id)
 
   if (kind === 'avatar') {
     const oldPath = storagePathFromPublicUrl(current?.profile?.avatarUrl || current?.avatarUrl)

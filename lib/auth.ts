@@ -13,6 +13,7 @@ export type SessionUser = {
   uid: number
   username: string
   nickname: string
+  avatarUrl?: string | null
   role: UserRole
 }
 
@@ -33,6 +34,10 @@ const secret = new TextEncoder().encode(
 
 const currentUserCacheTtlMs = Number(process.env.AUTH_USER_CACHE_TTL_MS || (process.env.NODE_ENV === 'production' ? 5000 : 15000))
 const currentUserCache = new Map<string, { expiresAt: number; user: SessionUser | null; promise?: Promise<SessionUser | null> }>()
+
+export function invalidateCurrentUserCache(userId: string) {
+  currentUserCache.delete(userId)
+}
 
 export async function createSessionToken(user: SessionUser) {
   return new SignJWT(user)
@@ -86,10 +91,11 @@ export async function getCurrentUser() {
             uid: true,
             username: true,
             nickname: true,
+            avatarUrl: true,
             role: true,
             status: true,
             isDeleted: true,
-            profile: { select: { id: true } },
+            profile: { select: { id: true, avatarUrl: true } },
           },
         }),
         8000,
@@ -102,6 +108,7 @@ export async function getCurrentUser() {
         uid: user.uid,
         username: user.username,
         nickname: user.nickname,
+        avatarUrl: user.profile?.avatarUrl || user.avatarUrl || null,
         role: user.role,
       }
     })
