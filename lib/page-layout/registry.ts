@@ -101,7 +101,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     supportsTitle: false,
     supportsSubtitle: false,
   }),
-  defineLayoutModule('checkin', 'checkin.formOrMood', '今日挂号', '签到按钮与今日心情', 30, {
+  defineLayoutModule('checkin', 'checkin.today', '今日挂号', '签到按钮与今日心情', 30, {
     desktop: grid(6, 3, 6, 4),
     mobile: grid(0, 7, 4, 4),
     required: true,
@@ -110,6 +110,21 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     desktop: grid(0, 7, 12, 6),
     mobile: grid(0, 11, 4, 6),
     required: true,
+    layoutBehavior: 'auto',
+  }),
+  defineLayoutModule('checkin', 'checkin.publicMessages', '公开挂号留言', '匿名展示所有用户每日挂号留言', 50, {
+    desktop: grid(0, 13, 6, 6),
+    tablet: grid(0, 13, 8, 6),
+    mobile: grid(0, 17, 4, 6),
+    visible: false,
+    layoutBehavior: 'auto',
+  }),
+  defineLayoutModule('checkin', 'checkin.friendMessages', '好友挂号留言', '展示好友每日挂号留言和互动', 60, {
+    desktop: grid(6, 13, 6, 6),
+    tablet: grid(0, 19, 8, 6),
+    mobile: grid(0, 23, 4, 6),
+    visible: false,
+    layoutBehavior: 'auto',
   }),
 
   defineLayoutModule('forum', 'forum.header', '论坛头部', '论坛页面标题与板块说明', 10, {
@@ -139,6 +154,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 9, 4, 5),
     minW: 3,
     minH: 3,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('forum', 'forum.featuredPosts', '精华帖子', '精华帖子列表区域', 50, {
     desktop: grid(3, 8, 6, 5),
@@ -146,6 +162,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 14, 4, 5),
     minW: 3,
     minH: 3,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('forum', 'forum.latestPosts', '最新帖子', '最新帖子列表区域', 60, {
     desktop: grid(3, 13, 6, 7),
@@ -153,6 +170,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 19, 4, 7),
     minW: 3,
     minH: 4,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('forum', 'forum.hotPosts', '热门帖子', '热门帖子区域', 70, {
     desktop: grid(9, 5, 3, 5),
@@ -160,6 +178,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 26, 4, 4),
     minW: 2,
     minH: 3,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('forum', 'forum.sidebar', '侧边信息', '论坛侧边信息区域', 80, {
     desktop: grid(9, 10, 3, 5),
@@ -189,6 +208,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 3, 4, 5),
     minW: 3,
     minH: 3,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('announcement', 'announcement.list', '公告列表', '公告列表主体区域', 30, {
     desktop: grid(0, 8, 8, 8),
@@ -196,6 +216,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 8, 4, 8),
     minW: 3,
     minH: 4,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('announcement', 'announcement.updateLogEntry', '更新日志入口', '更新日志与版本信息入口', 40, {
     desktop: grid(8, 3, 4, 3),
@@ -219,7 +240,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     minH: 1,
   }),
   singlePageModule('music', 'music.main', '音乐馆内容', 'EasMusic 搜索与曲目列表'),
-  singlePageModule('message', 'message.main', '消息中心内容', '通知列表与未读状态'),
+  singlePageModule('message', 'message.main', '消息中心内容', '通知列表与未读状态', 'auto'),
   defineLayoutModule('profile', 'profile.intro', '个人简介', '个人主页简介区域', 10, {
     desktop: grid(0, 0, 6, 4),
     tablet: grid(0, 0, 8, 3),
@@ -242,6 +263,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 6, 4, 7),
     minW: 3,
     minH: 4,
+    layoutBehavior: 'auto',
   }),
   defineLayoutModule('profile', 'profile.recentMessages', '最近留言', '个人最近留言记录', 40, {
     desktop: grid(5, 4, 7, 8),
@@ -249,6 +271,19 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     mobile: grid(0, 13, 4, 5),
     minW: 3,
     minH: 3,
+    layoutBehavior: 'auto',
+  }),
+  defineLayoutModule('profile', 'profile.wall', '留言墙', '个人主页访客留言与回复', 50, {
+    desktop: grid(0, 12, 7, 6),
+    tablet: grid(0, 18, 8, 6),
+    mobile: grid(0, 18, 4, 6),
+    layoutBehavior: 'auto',
+  }),
+  defineLayoutModule('profile', 'profile.friendActivity', '好友动态', '好友最近挂号与心情动态', 60, {
+    desktop: grid(7, 12, 5, 6),
+    tablet: grid(0, 24, 8, 6),
+    mobile: grid(0, 24, 4, 6),
+    layoutBehavior: 'auto',
   }),
 
   defineLayoutModule('admin-home', 'admin.header', '后台页头', '管理后台欢迎与说明', 10, {
@@ -369,7 +404,7 @@ function defineLayoutModule(
   }
 }
 
-function singlePageModule(page: PageLayoutPageKey, key: string, name: string, description: string) {
+function singlePageModule(page: PageLayoutPageKey, key: string, name: string, description: string, layoutBehavior: PageLayoutBehavior = 'fixed') {
   return defineLayoutModule(page, key, name, description, 10, {
     desktop: grid(0, 0, 12, 8),
     tablet: grid(0, 0, 8, 8),
@@ -379,6 +414,7 @@ function singlePageModule(page: PageLayoutPageKey, key: string, name: string, de
     required: true,
     supportsTitle: false,
     supportsSubtitle: false,
+    layoutBehavior,
   })
 }
 

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
+import { ProfileWall } from '@/components/ProfileWall'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
@@ -163,6 +164,7 @@ export default async function PublicUserPage({ params }: PageProps) {
 
           <PublicUserModules uid={formatUid(user.uid)} isSelf={isSelf} />
         </section>
+        <ProfileWall receiverUid={user.uid} />
       </main>
     </>
   )

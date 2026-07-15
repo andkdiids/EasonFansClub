@@ -152,6 +152,16 @@ export async function POST(request: Request) {
       dailyMessageId = dailyMessage.id
     }
 
+    await tx.friendActivity.create({
+      data: {
+        actorId: user.id,
+        checkInId: checkIn.id,
+        dailyMessageId,
+        mood: mood.key,
+        content: message || null,
+      },
+    })
+
     const updatedUser = await tx.user.update({
       where: { id: user.id },
       data: {

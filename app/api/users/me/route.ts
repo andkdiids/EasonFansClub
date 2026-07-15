@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
+import { ProfileWallVisibility } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, requireUser, sanitizeText } from '@/lib/security'
+
+const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
 export async function GET() {
   const guard = await requireUser()
@@ -61,6 +64,8 @@ export async function PATCH(request: Request) {
   const backgroundUrl = sanitizeText(body?.backgroundUrl, 500)
   const email = body?.email === undefined ? undefined : normalizeEmail(body.email)
   const phone = body?.phone === undefined ? undefined : sanitizeText(body.phone, 20).replace(/\s+/g, '')
+  const requestedWallVisibility = body?.wallVisibility === undefined ? undefined : sanitizeText(body.wallVisibility, 20)
+  const wallVisibility = requestedWallVisibility as ProfileWallVisibility | undefined
 
   const data: {
     nickname?: string
@@ -88,6 +93,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: '请输入 11 位中国大陆手机号' }, { status: 400 })
     }
     data.phone = phone || null
+  }
+  if (requestedWallVisibility !== undefined && !profileWallVisibilities.has(requestedWallVisibility)) {
+    return NextResponse.json({ message: '留言墙隐私设置无效' }, { status: 400 })
   }
 
   const current = await prisma.user.findUnique({
@@ -151,13 +159,14 @@ export async function PATCH(request: Request) {
       },
     })
 
-    await tx.profile.upsert({
+    const profileRecord = await tx.profile.upsert({
       where: { userId: guard.user.id },
       update: {
         ...(data.nickname ? { displayName: data.nickname } : {}),
         ...(data.avatarUrl !== undefined ? { avatarUrl: data.avatarUrl } : {}),
         ...(data.backgroundUrl !== undefined ? { backgroundUrl: data.backgroundUrl } : {}),
         ...(data.bio !== undefined ? { bio: data.bio } : {}),
+        ...(wallVisibility !== undefined ? { wallVisibility } : {}),
       },
       create: {
         userId: guard.user.id,
@@ -165,10 +174,12 @@ export async function PATCH(request: Request) {
         avatarUrl: updated.avatarUrl,
         backgroundUrl: updated.backgroundUrl,
         bio: updated.bio,
+        wallVisibility: wallVisibility || 'PUBLIC',
       },
+      select: { wallVisibility: true },
     })
 
-    return updated
+    return { ...updated, wallVisibility: profileRecord.wallVisibility }
   })
 
   invalidateCurrentUserCache(guard.user.id)

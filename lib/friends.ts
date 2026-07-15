@@ -10,6 +10,14 @@ export function normalizeFriendPair(userId: string, otherUserId: string) {
   return [userId, otherUserId].sort() as [string, string]
 }
 
+export async function getFriendIds(userId: string) {
+  const friendships = await prisma.friendship.findMany({
+    where: { OR: [{ userAId: userId }, { userBId: userId }] },
+    select: { userAId: true, userBId: true },
+  })
+  return friendships.map((item) => (item.userAId === userId ? item.userBId : item.userAId))
+}
+
 export const friendUserSelect = {
   id: true,
   uid: true,

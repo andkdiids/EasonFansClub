@@ -6,6 +6,7 @@ import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/chec
 import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
+import { getFriendIds } from '@/lib/friends'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
 
@@ -36,7 +37,8 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const sort: CheckInMessageSort = params.sort === 'hot' ? 'hot' : 'latest'
 
   const queryStart = Date.now()
-  const [user, activeUsers, todayCount, todayCheckIn, selectedMessages, moodStats, totalCheckIns] = await Promise.all([
+  const friendIdsPromise = safeDb('Friendship.findMany checkin.friendIds', getFriendIds(sessionUser.id), [], 3000)
+  const [user, activeUsers, todayCount, todayCheckIn, selectedMessages, friendIds, moodStats, totalCheckIns] = await Promise.all([
     withDbTimeout(
       'User.findUnique checkin.user',
       prisma.user.findUnique({
@@ -69,6 +71,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       [],
       8000,
     ),
+    friendIdsPromise,
     safeDb(
       'CheckIn.groupBy checkin.moodStats',
       prisma.checkIn.groupBy({
@@ -80,6 +83,18 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     ),
     safeDb('CheckIn.count checkin.totalCheckIns', prisma.checkIn.count({ where: { userId: sessionUser.id } }), 0),
   ])
+  const friendMessages = await safeDb(
+    'DailyMessage.findMany checkin.friendMessages',
+    getCheckInMessages({
+      selectedDate,
+      nextDate,
+      sort,
+      viewerId: sessionUser.id,
+      userIds: friendIds,
+    }),
+    [],
+    8000,
+  )
   console.info('[perf]', { metric: 'page.checkin.parallelQueries.ms', ms: Date.now() - queryStart })
   console.info('[perf]', { metric: 'page.checkin.total.ms', ms: Date.now() - pageStart })
 
@@ -111,6 +126,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           moodIndex={moodIndex}
           todayCheckIn={todayCheckInPayload}
           selectedMessages={selectedMessages}
+          friendMessages={friendMessages}
           selectedDateValue={selectedDateValue}
           todayValue={todayValue}
           sort={sort}

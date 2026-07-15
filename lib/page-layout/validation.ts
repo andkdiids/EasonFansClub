@@ -102,6 +102,11 @@ function isLegacySingleModule(pageKey: PageLayoutPageKey, key: string) {
   return (pageKey === 'forum' && key === 'forum.board') || (pageKey === 'announcement' && key === 'announcement.board')
 }
 
+function normalizeModuleKey(pageKey: PageLayoutPageKey, key: string) {
+  if (pageKey === 'checkin' && key === 'checkin.formOrMood') return 'checkin.today'
+  return key
+}
+
 function validateDeviceConfig(
   pageKey: PageLayoutPageKey,
   device: PageLayoutDevice,
@@ -121,10 +126,11 @@ function validateDeviceConfig(
       return
     }
 
-    const key = typeof rawItem.key === 'string' ? rawItem.key : ''
+    const rawKey = typeof rawItem.key === 'string' ? rawItem.key : ''
+    const key = normalizeModuleKey(pageKey, rawKey)
     const definition = getPageLayoutModule(pageKey, key)
     if (!definition) {
-      if (strict && !isLegacySingleModule(pageKey, key)) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
+      if (strict && !isLegacySingleModule(pageKey, rawKey)) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
       return
     }
     if (seen.has(key)) {

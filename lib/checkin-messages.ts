@@ -13,23 +13,26 @@ export async function getCheckInMessages({
   nextDate,
   sort,
   viewerId,
+  userIds,
 }: {
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
   viewerId: string
+  userIds?: string[]
 }): Promise<CheckInMessagesResult> {
   const cacheKey = [
     selectedDate.toISOString(),
     nextDate.toISOString(),
     sort,
     viewerId,
+    userIds?.sort().join(',') || 'all',
   ].join(':')
   const now = Date.now()
   const cached = checkInMessagesCache.get(cacheKey)
   if (cached && cached.expiresAt > now) return cached.promise
 
-  const promise = getCheckInMessagesUncached({ selectedDate, nextDate, sort, viewerId }).catch((error) => {
+  const promise = getCheckInMessagesUncached({ selectedDate, nextDate, sort, viewerId, userIds }).catch((error) => {
     checkInMessagesCache.delete(cacheKey)
     throw error
   })
@@ -42,16 +45,21 @@ async function getCheckInMessagesUncached({
   nextDate,
   sort,
   viewerId,
+  userIds,
 }: {
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
   viewerId: string
+  userIds?: string[]
 }) {
+  if (userIds && userIds.length === 0) return []
+
   const rows = await prisma.dailyMessage.findMany({
     where: {
       date: { gte: selectedDate, lt: nextDate },
       isDeleted: false,
+      ...(userIds ? { userId: { in: userIds } } : {}),
       user: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
     },
     orderBy: sort === 'hot'

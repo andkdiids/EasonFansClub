@@ -1,8 +1,10 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { FriendActivityPanel } from '@/components/FriendActivityPanel'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { ProfileCheckInCalendar, ProfileDeferredModules, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
+import { ProfileWall } from '@/components/ProfileWall'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
@@ -78,6 +80,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     phone: profile.phone || '',
     emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
     phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
+    wallVisibility: profile.profile.wallVisibility || 'PUBLIC',
   }
   const renderProfileActions = () => (
     <div className="flex flex-wrap items-center gap-3 md:justify-end">
@@ -133,6 +136,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
             ),
             'profile.calendar': <ProfileCheckInCalendar />,
             'profile.recentMessages': <ProfileRecentMessages />,
+            'profile.wall': <ProfileWall receiverUid={profile.uid} />,
+            'profile.friendActivity': <FriendActivityPanel />,
             'profile.main': (
               <section className="space-y-4">
                 <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">

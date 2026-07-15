@@ -109,8 +109,10 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     return {
       'checkin.header': { ok: true, data: { today: todayValue, quote: getDailyQuote(today) } },
       'checkin.stats': stats,
-      'checkin.formOrMood': { ok: true, data: { userStats, todayCheckIn } },
+      'checkin.today': { ok: true, data: { userStats, todayCheckIn } },
       'checkin.messages': messages,
+      'checkin.publicMessages': messages,
+      'checkin.friendMessages': { ok: true, data: [] },
     }
   },
   forum: async () => ({
@@ -157,6 +159,8 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     'profile.stats': { ok: true, data: {} },
     'profile.calendar': { ok: true, data: {} },
     'profile.recentMessages': { ok: true, data: {} },
+    'profile.wall': { ok: true, data: {} },
+    'profile.friendActivity': { ok: true, data: {} },
   }),
   'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)

@@ -13,6 +13,7 @@ type InitialProfile = {
   phone: string
   emailVerifiedAt: string | null
   phoneVerifiedAt: string | null
+  wallVisibility: 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 }
 
 export function ProfileEditorDrawer({

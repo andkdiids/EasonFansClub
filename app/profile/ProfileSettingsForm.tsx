@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
@@ -14,9 +14,11 @@ type InitialProfile = {
   phone: string
   emailVerifiedAt: string | null
   phoneVerifiedAt: string | null
+  wallVisibility: ProfileWallVisibility
 }
 
 type UploadKind = 'avatar' | 'background'
+type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
 type CropState = {
   file: File
@@ -218,7 +220,7 @@ export function ProfileSettingsForm({
     }
   }, [crop?.url])
 
-  function update(key: keyof InitialProfile, value: string) {
+  function update<K extends keyof InitialProfile>(key: K, value: InitialProfile[K]) {
     setForm((current) => ({ ...current, [key]: value }))
   }
 
@@ -364,6 +366,7 @@ export function ProfileSettingsForm({
         phone: data.profile.phone || '',
         emailVerifiedAt: data.profile.emailVerifiedAt || null,
         phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
+        wallVisibility: data.profile.wallVisibility || current.wallVisibility,
       }))
     }
     setMessage(data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')
@@ -445,6 +448,26 @@ export function ProfileSettingsForm({
               className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
               placeholder="写一点关于你的 Eason 故事"
             />
+          </label>
+        </section>
+
+        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Privacy</p>
+            <h3 className="mt-1 text-lg font-black text-brand-950">Wall privacy</h3>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">Choose who can view and post on your profile wall.</p>
+          </div>
+          <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+            <span className="text-sm font-black text-slate-700">Profile wall visibility</span>
+            <select
+              value={form.wallVisibility}
+              onChange={(event) => update('wallVisibility', event.target.value as ProfileWallVisibility)}
+              className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+            >
+              <option value="PUBLIC">Public</option>
+              <option value="FRIENDS">Friends only</option>
+              <option value="CLOSED">Closed</option>
+            </select>
           </label>
         </section>
 
