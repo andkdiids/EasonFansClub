@@ -90,11 +90,7 @@ function dataUrlToBlob(dataUrl: string) {
   return new Blob([bytes], { type: mime })
 }
 
-async function canvasToBlobWithFallback(canvas: HTMLCanvasElement) {
-  const preferredType = 'image/webp'
-  const fallbackType = 'image/jpeg'
-  const quality = 0.85
-
+async function canvasToBlobOfType(canvas: HTMLCanvasElement, type: 'image/webp' | 'image/jpeg') {
   if (typeof canvas.toBlob === 'function') {
     const blob = await new Promise<Blob | null>((resolve) => {
       let settled = false
@@ -110,19 +106,34 @@ async function canvasToBlobWithFallback(canvas: HTMLCanvasElement) {
           settled = true
           resolve(result)
         },
-        preferredType,
-        quality,
+        type,
+        0.85,
       )
     })
 
-    if (blob?.size) return blob
+    if (blob?.size && blob.type === type) return blob
   }
 
-  try {
-    return dataUrlToBlob(canvas.toDataURL(fallbackType, quality))
-  } catch {
-    throw new Error('图片处理失败，请重新选择图片')
-  }
+  return null
+}
+
+function canvasToDataUrlBlobOfType(canvas: HTMLCanvasElement, type: 'image/jpeg') {
+  const dataUrl = canvas.toDataURL(type, 0.85)
+  if (!dataUrl.startsWith(`data:${type};base64,`)) return null
+
+  const blob = dataUrlToBlob(dataUrl)
+  if (!blob.size || blob.type !== type) return null
+  return blob
+}
+
+async function canvasToBlobWithFallback(canvas: HTMLCanvasElement) {
+  const webpBlob = await canvasToBlobOfType(canvas, 'image/webp')
+  if (webpBlob) return { blob: webpBlob, type: 'image/webp' as const }
+
+  const jpegBlob = (await canvasToBlobOfType(canvas, 'image/jpeg')) || canvasToDataUrlBlobOfType(canvas, 'image/jpeg')
+  if (jpegBlob) return { blob: jpegBlob, type: 'image/jpeg' as const }
+
+  throw new Error('图片处理失败，请重新选择 JPG、PNG 或 WebP 图片')
 }
 
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
@@ -134,6 +145,17 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
   } finally {
     window.clearTimeout(timer)
   }
+}
+
+function maskPhone(phone: string) {
+  if (!phone) return '未绑定'
+  if (!/^1\d{10}$/.test(phone)) return phone
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+}
+
+function maskEmail(email: string) {
+  if (!email) return '未绑定'
+  return email
 }
 
 async function cropAvatarToWebp(crop: CropState) {
@@ -155,14 +177,22 @@ async function cropAvatarToWebp(crop: CropState) {
   const y = (512 - height) / 2 + crop.y
   ctx.drawImage(image, x, y, width, height)
 
-  const blob = await canvasToBlobWithFallback(canvas)
-  if (!blob?.size) throw new Error('图片处理失败，请重新选择图片')
+  const output = await canvasToBlobWithFallback(canvas)
+  if (!output.blob.size) throw new Error('图片处理失败，请重新选择 JPG、PNG 或 WebP 图片')
 
-  const extension = blob.type === 'image/webp' ? 'webp' : 'jpg'
-  return { blob, fileName: `avatar-${createCompatibleId()}.${extension}` }
+  const extension = output.type === 'image/webp' ? 'webp' : 'jpg'
+  return { blob: output.blob, fileName: `avatar-${createCompatibleId()}.${extension}` }
 }
 
-export function ProfileSettingsForm({ initialProfile }: { initialProfile: InitialProfile }) {
+export function ProfileSettingsForm({
+  initialProfile,
+  onCancel,
+  onSaved,
+}: {
+  initialProfile: InitialProfile
+  onCancel?: () => void
+  onSaved?: () => void
+}) {
   const router = useRouter()
   const [form, setForm] = useState(initialProfile)
   const [message, setMessage] = useState('')
@@ -337,6 +367,8 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
       }))
     }
     setMessage(data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')
+    router.refresh()
+    onSaved?.()
   }
 
   const avatarPreview = publicImageUrl(form.avatarUrl)
@@ -346,111 +378,135 @@ export function ProfileSettingsForm({ initialProfile }: { initialProfile: Initia
     <>
       <form onSubmit={handleSubmit} className="space-y-5 rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm">
         <div>
-          <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Account Settings</p>
-          <h2 className="mt-2 text-2xl font-black text-brand-950">账号设置</h2>
-          <p className="mt-2 text-sm font-bold text-slate-500">手机号和邮箱仅自己可见；邮箱变更后需要重新验证。</p>
+          <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Profile Editor</p>
+          <h2 className="mt-2 text-2xl font-black text-brand-950">编辑资料</h2>
+          <p className="mt-2 text-sm font-bold text-slate-500">编辑内容只会更新你的个人资料；手机号和邮箱仅在这里自己可见。</p>
         </div>
 
-        {!form.emailVerifiedAt ? (
-          <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black leading-6 text-amber-800">
-            建议绑定并验证邮箱，提高账户安全性。未验证手机号不能用于找回密码或高风险操作验证。
-          </p>
-        ) : null}
+        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/45 p-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Profile</p>
+            <h3 className="mt-1 text-lg font-black text-brand-950">个人资料</h3>
+          </div>
 
-        <label className="block">
-          <span className="text-sm font-black text-slate-700">昵称</span>
-          <input
-            value={form.nickname}
-            onChange={(event) => update('nickname', event.target.value)}
-            minLength={2}
-            maxLength={32}
-            className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none transition focus:border-brand-700"
-            placeholder="请输入昵称"
-          />
-        </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white bg-white/78 p-4">
+              <p className="text-sm font-black text-slate-700">头像</p>
+              <div className="mt-3 flex items-center gap-4">
+                <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">
+                  <SafeAvatar src={avatarPreview} name={form.nickname} className="h-full w-full" textClassName="text-2xl" />
+                </span>
+                <div className="min-w-0">
+                  <button type="button" onClick={() => avatarInputRef.current?.click()} className="rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
+                    {uploading === 'avatar' ? '上传中...' : '选择头像'}
+                  </button>
+                  <p className="mt-2 text-xs font-bold leading-5 text-slate-500">自动裁剪为 512 × 512，优先 WebP，原图最大 10MB。</p>
+                  <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" onChange={openAvatarCrop} className="hidden" />
+                </div>
+              </div>
+            </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-            <span className="text-sm font-black text-slate-700">邮箱</span>
+            <div className="rounded-2xl border border-white bg-white/78 p-4">
+              <p className="text-sm font-black text-slate-700">主页背景图</p>
+              <div className="mt-3 overflow-hidden rounded-2xl bg-white">
+                <div
+                  className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400"
+                  style={backgroundPreview ? { backgroundImage: `url(${backgroundPreview})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+                >
+                  {backgroundPreview ? '' : '背景预览'}
+                </div>
+              </div>
+              <button type="button" onClick={() => backgroundInputRef.current?.click()} className="mt-3 rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
+                {uploading === 'background' ? '上传中...' : '上传背景图'}
+              </button>
+              <input ref={backgroundInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={uploadBackground} className="hidden" />
+            </div>
+          </div>
+
+          <label className="block">
+            <span className="text-sm font-black text-slate-700">昵称</span>
             <input
-              value={form.email}
-              onChange={(event) => update('email', event.target.value)}
-              type="email"
-              className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
-              placeholder="用于邮箱登录和找回账号"
+              value={form.nickname}
+              onChange={(event) => update('nickname', event.target.value)}
+              minLength={2}
+              maxLength={32}
+              className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none transition focus:border-brand-700"
+              placeholder="请输入昵称"
             />
-            <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-black ${form.emailVerifiedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-              {form.emailVerifiedAt ? '已验证' : '未验证'}
-            </span>
           </label>
 
-          <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-            <span className="text-sm font-black text-slate-700">手机号</span>
-            <input
-              value={form.phone}
-              onChange={(event) => update('phone', event.target.value)}
-              type="tel"
-              className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
-              placeholder="选填，绑定后可用于手机号登录"
+          <label className="block">
+            <span className="text-sm font-black text-slate-700">个人简介</span>
+            <textarea
+              value={form.bio}
+              onChange={(event) => update('bio', event.target.value)}
+              rows={5}
+              maxLength={300}
+              className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
+              placeholder="写一点关于你的 Eason 故事"
             />
-            <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
-              {form.phoneVerifiedAt ? '已验证' : '未验证，仅作为已绑定登录标识'}
-            </span>
           </label>
-        </div>
+        </section>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-            <p className="text-sm font-black text-slate-700">头像</p>
-            <div className="mt-3 flex items-center gap-4">
-              <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">
-                <SafeAvatar src={avatarPreview} name={form.nickname} className="h-full w-full" textClassName="text-2xl" />
+        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Account</p>
+            <h3 className="mt-1 text-lg font-black text-brand-950">账号安全</h3>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">邮箱和手机号只在编辑资料中可见；修改邮箱后仍沿用现有验证规则。</p>
+          </div>
+
+          {!form.emailVerifiedAt ? (
+            <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black leading-6 text-amber-800">
+              建议绑定并验证邮箱，提高账户安全性。未验证手机号不能用于找回密码或高风险操作验证。
+            </p>
+          ) : null}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+              <span className="text-sm font-black text-slate-700">邮箱</span>
+              <span className="mt-2 block text-sm font-black text-brand-950">{maskEmail(form.email)}</span>
+              <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-black ${form.emailVerifiedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                {form.email ? (form.emailVerifiedAt ? '已验证' : '未验证') : '未绑定'}
               </span>
-              <div className="min-w-0">
-                <button type="button" onClick={() => avatarInputRef.current?.click()} className="rounded-xl bg-white px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
-                  {uploading === 'avatar' ? '上传中...' : '选择头像'}
-                </button>
-                <p className="mt-2 text-xs font-bold text-slate-500">自动裁剪为 512 × 512，优先 WebP，原图最大 10MB。</p>
-                <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" onChange={openAvatarCrop} className="hidden" />
-              </div>
-            </div>
-          </div>
+              <input
+                value={form.email}
+                onChange={(event) => update('email', event.target.value)}
+                type="email"
+                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+                placeholder={form.email ? '更换邮箱' : '绑定邮箱'}
+              />
+            </label>
 
-          <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-            <p className="text-sm font-black text-slate-700">主页背景图</p>
-            <div className="mt-3 overflow-hidden rounded-2xl bg-white">
-              <div
-                className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400"
-                style={backgroundPreview ? { backgroundImage: `url(${backgroundPreview})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
-              >
-                {backgroundPreview ? '' : '背景预览'}
-              </div>
-            </div>
-            <button type="button" onClick={() => backgroundInputRef.current?.click()} className="mt-3 rounded-xl bg-white px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
-              {uploading === 'background' ? '上传中...' : '上传背景图'}
-            </button>
-            <input ref={backgroundInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={uploadBackground} className="hidden" />
+            <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+              <span className="text-sm font-black text-slate-700">手机号</span>
+              <span className="mt-2 block text-sm font-black text-brand-950">{maskPhone(form.phone)}</span>
+              <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
+                {form.phone ? (form.phoneVerifiedAt ? '已验证' : '未验证，仅作为已绑定登录标识') : '未绑定'}
+              </span>
+              <input
+                value={form.phone}
+                onChange={(event) => update('phone', event.target.value)}
+                type="tel"
+                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+                placeholder={form.phone ? '更换手机号' : '绑定手机号'}
+              />
+            </label>
           </div>
-        </div>
-
-        <label className="block">
-          <span className="text-sm font-black text-slate-700">个人简介</span>
-          <textarea
-            value={form.bio}
-            onChange={(event) => update('bio', event.target.value)}
-            rows={5}
-            maxLength={300}
-            className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
-            placeholder="写一点关于你的 Eason 故事"
-          />
-        </label>
+        </section>
 
         {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
         {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
 
-        <button disabled={isSaving || uploading !== null} className="w-full rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60">
-          {isSaving ? '保存中...' : '保存资料'}
-        </button>
+        <div className="sticky bottom-0 -mx-6 -mb-6 flex gap-3 border-t border-sky-100 bg-white/95 p-4 backdrop-blur">
+          {onCancel ? (
+            <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60">
+              取消
+            </button>
+          ) : null}
+          <button disabled={isSaving || uploading !== null} className="flex-1 rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60">
+            {isSaving ? '保存中...' : '保存资料'}
+          </button>
+        </div>
       </form>
 
       {crop ? (

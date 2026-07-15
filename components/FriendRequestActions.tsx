@@ -14,6 +14,8 @@ export function AddFriendButton({
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  if (status === 'FRIEND') return null
+
   async function sendRequest() {
     if (isSubmitting || status !== 'NONE') return
     setError('')
@@ -37,9 +39,7 @@ export function AddFriendButton({
   }
 
   const label =
-    status === 'FRIEND'
-      ? '已是好友'
-      : status === 'PENDING'
+    status === 'PENDING'
         ? '等待通过'
         : status === 'RECEIVED'
           ? '对方已申请你'
@@ -53,7 +53,9 @@ export function AddFriendButton({
         onClick={sendRequest}
         disabled={isSubmitting || status !== 'NONE'}
         className={`rounded-full px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-70 ${
-          status === 'NONE' ? 'bg-brand-950 text-white hover:bg-brand-800' : 'bg-sky-100 text-brand-700'
+          status === 'NONE'
+            ? 'border border-sky-100 bg-brand-950 text-white shadow-sm hover:bg-brand-800'
+            : 'border border-sky-100 bg-sky-50 text-brand-700 shadow-sm'
         }`}
       >
         {label}

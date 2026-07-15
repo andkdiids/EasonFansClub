@@ -1,0 +1,87 @@
+import type { ReactNode } from 'react'
+
+type ProfileHeaderProps = {
+  displayName: string
+  uid: number
+  level: number
+  createdAt: Date
+  avatarUrl?: string | null
+  backgroundUrl?: string | null
+}
+
+type ProfileStatsGridProps = {
+  items: Array<[string, ReactNode]>
+  compact?: boolean
+}
+
+const oneDayMs = 24 * 60 * 60 * 1000
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+}
+
+function formatUid(uid: number) {
+  return String(uid).padStart(5, '0')
+}
+
+export function formatAdmissionInfo(createdAt: Date) {
+  const month = String(createdAt.getMonth() + 1).padStart(2, '0')
+  const day = String(createdAt.getDate()).padStart(2, '0')
+  const days = Math.max(1, Math.floor((startOfLocalDay(new Date()) - startOfLocalDay(createdAt)) / oneDayMs) + 1)
+  return `${month}/${day} 入院 · 已在院${days}天`
+}
+
+export function ProfileHeader({
+  displayName,
+  uid,
+  level,
+  createdAt,
+  avatarUrl,
+  backgroundUrl,
+}: ProfileHeaderProps) {
+  const initial = displayName.slice(0, 1).toUpperCase()
+  const admissionInfo = formatAdmissionInfo(createdAt)
+
+  return (
+    <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
+      <div
+        className="relative isolate h-[240px] overflow-hidden bg-slate-900 sm:h-[280px]"
+        style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+      >
+        {!backgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
+        <div className="absolute bottom-4 left-4 w-[min(90%,300px)] rounded-[20px] border border-white/12 bg-black/35 p-3 text-white shadow-md shadow-slate-950/20 backdrop-blur-md sm:bottom-5 sm:left-5">
+          <div className="flex min-w-0 items-center gap-3">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
+            ) : (
+              <div className="grid h-[60px] w-[60px] shrink-0 place-items-center rounded-full border-2 border-white/85 bg-brand-950 text-xl font-black text-white shadow-lg shadow-slate-950/25">
+                {initial}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-[26px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)]">{displayName}</h1>
+            </div>
+          </div>
+          <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
+            <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
+            <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}</span>
+            <span className="rounded-full border border-white/14 bg-slate-950/16 px-2 py-1 font-black text-white/92 backdrop-blur">{admissionInfo}</span>
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+export function ProfileStatsGrid({ items, compact = false }: ProfileStatsGridProps) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {items.map(([label, value]) => (
+        <div key={label} className={`rounded-2xl border border-sky-100 bg-sky-50/70 text-center ${compact ? 'p-3' : 'p-4'}`}>
+          <p className={`${compact ? 'text-lg' : 'text-xl sm:text-2xl'} font-black text-brand-950`}>{value}</p>
+          <p className="mt-1 text-[11px] font-black text-slate-500 sm:text-xs">{label}</p>
+        </div>
+      ))}
+    </div>
+  )
+}

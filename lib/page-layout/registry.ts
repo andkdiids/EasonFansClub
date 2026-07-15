@@ -214,7 +214,36 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
   }),
   singlePageModule('music', 'music.main', '音乐馆内容', 'EasMusic 搜索与曲目列表'),
   singlePageModule('message', 'message.main', '消息中心内容', '通知列表与未读状态'),
-  singlePageModule('profile', 'profile.main', '个人主页内容', '个人资料、设置与延迟模块'),
+  defineLayoutModule('profile', 'profile.intro', '个人简介', '个人主页简介区域', 10, {
+    desktop: grid(0, 0, 6, 4),
+    tablet: grid(0, 0, 8, 3),
+    mobile: grid(0, 0, 4, 3),
+    minW: 3,
+    minH: 2,
+  }),
+  defineLayoutModule('profile', 'profile.stats', '主页统计', '等级、积分、经验与挂号统计', 20, {
+    desktop: grid(6, 0, 6, 4),
+    tablet: grid(0, 3, 8, 3),
+    mobile: grid(0, 3, 4, 3),
+    minW: 3,
+    minH: 2,
+    supportsTitle: false,
+    supportsSubtitle: false,
+  }),
+  defineLayoutModule('profile', 'profile.calendar', '本月挂号日历', '个人本月挂号日历', 30, {
+    desktop: grid(0, 4, 5, 8),
+    tablet: grid(0, 6, 8, 7),
+    mobile: grid(0, 6, 4, 7),
+    minW: 3,
+    minH: 4,
+  }),
+  defineLayoutModule('profile', 'profile.recentMessages', '最近留言', '个人最近留言记录', 40, {
+    desktop: grid(5, 4, 7, 8),
+    tablet: grid(0, 13, 8, 5),
+    mobile: grid(0, 13, 4, 5),
+    minW: 3,
+    minH: 3,
+  }),
 
   defineLayoutModule('admin-home', 'admin.header', '后台页头', '管理后台欢迎与说明', 10, {
     desktop: grid(0, 0, 12, 3),

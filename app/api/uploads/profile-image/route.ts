@@ -88,7 +88,7 @@ export async function POST(request: Request) {
 
   if (kind === 'avatar') {
     if (!avatarTypes.has(file.type)) {
-      return NextResponse.json({ message: '头像必须先裁剪为 WebP 或 JPEG 后上传' }, { status: 400 })
+      return NextResponse.json({ message: '图片处理失败，请重新选择 JPG、PNG 或 WebP 图片' }, { status: 400 })
     }
     if (file.size > avatarMaxFileSize) {
       return NextResponse.json({ message: '头像文件不能超过 10MB' }, { status: 400 })
