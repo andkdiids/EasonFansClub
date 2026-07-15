@@ -48,7 +48,7 @@ export default async function AdminPage() {
     getRegistrationPolicy(),
     getPublishedPageLayoutConfig('admin-home'),
   ])
-  const layoutModules = [...layoutConfig.desktop].filter((item) => item.visible).sort((a, b) => a.order - b.order)
+  const layoutModules = [...layoutConfig.desktop].filter((item) => item.visible && !item.isHidden).sort((a, b) => a.order - b.order)
 
   return (
     <>

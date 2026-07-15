@@ -23,6 +23,8 @@ export type PageLayoutPreviewPayload = {
   modules: Record<string, PreviewModulePayload>
 }
 
+type PreviewLoader = (user: SessionUser) => Promise<Record<string, PreviewModulePayload>>
+
 function fallbackHeroSlides(config: SiteAppearanceConfig): SiteHeroSlide[] {
   return [
     {
@@ -54,10 +56,8 @@ async function moduleData(loader: () => Promise<unknown>): Promise<PreviewModule
   }
 }
 
-export async function getPageLayoutPreviewData(pageKey: PageLayoutPageKey, user: SessionUser): Promise<PageLayoutPreviewPayload> {
-  const modules: Record<string, PreviewModulePayload> = {}
-
-  if (pageKey === 'home') {
+const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
+  home: async () => {
     const config = await getSiteAppearance()
     const slides = config.heroSlides.some((item) => item.isVisible) ? config.heroSlides : fallbackHeroSlides(config)
     const [announcement, posts, messages, activities, tracks] = await Promise.all([
@@ -68,18 +68,19 @@ export async function getPageLayoutPreviewData(pageKey: PageLayoutPageKey, user:
       moduleData(() => getHomeTracks()),
     ])
 
-    modules['home.hero'] = { ok: true, data: { siteName: config.text.siteName, slides } }
-    modules['home.announcement'] = announcement
-    modules['home.checkinSummary'] = { ok: true, data: { text: config.text } }
-    modules['home.featuredPosts'] = posts
-    modules['home.latestPosts'] = posts
-    modules['home.dailyMessages'] = messages
-    modules['home.music'] = tracks
-    modules['home.culture'] = activities
-    modules['home.footer'] = { ok: true, data: { text: config.text.footerText } }
-  }
-
-  if (pageKey === 'checkin') {
+    return {
+      'home.hero': { ok: true, data: { siteName: config.text.siteName, slides } },
+      'home.announcement': announcement,
+      'home.checkinSummary': { ok: true, data: { text: config.text } },
+      'home.featuredPosts': posts,
+      'home.latestPosts': posts,
+      'home.dailyMessages': messages,
+      'home.music': tracks,
+      'home.culture': activities,
+      'home.footer': { ok: true, data: { text: config.text.footerText } },
+    }
+  },
+  checkin: async (user) => {
     const today = startOfLocalDay()
     const nextDate = new Date(today.getTime() + 24 * 60 * 60 * 1000)
     const todayValue = formatBeijingDate(today)
@@ -105,13 +106,56 @@ export async function getPageLayoutPreviewData(pageKey: PageLayoutPageKey, user:
       })),
     ])
 
-    modules['checkin.header'] = { ok: true, data: { today: todayValue, quote: getDailyQuote(today) } }
-    modules['checkin.stats'] = stats
-    modules['checkin.formOrMood'] = { ok: true, data: { userStats, todayCheckIn } }
-    modules['checkin.messages'] = messages
-  }
-
-  if (pageKey === 'admin-home') {
+    return {
+      'checkin.header': { ok: true, data: { today: todayValue, quote: getDailyQuote(today) } },
+      'checkin.stats': stats,
+      'checkin.formOrMood': { ok: true, data: { userStats, todayCheckIn } },
+      'checkin.messages': messages,
+    }
+  },
+  forum: async () => ({
+    'forum.header': await moduleData(() => prisma.board.findFirst({
+      where: { slug: 'daily-chat', isActive: true },
+      select: { name: true, description: true, postCount: true },
+    })),
+    'forum.categoryNav': { ok: true, data: {} },
+    'forum.createPost': { ok: true, data: {} },
+    'forum.pinnedPosts': { ok: true, data: {} },
+    'forum.featuredPosts': { ok: true, data: {} },
+    'forum.latestPosts': { ok: true, data: {} },
+    'forum.hotPosts': { ok: true, data: {} },
+    'forum.sidebar': { ok: true, data: {} },
+    'forum.pagination': { ok: true, data: {} },
+  }),
+  announcement: async () => ({
+    'announcement.header': await moduleData(() => prisma.board.findFirst({
+      where: { slug: 'announcements', isActive: true },
+      select: { name: true, description: true, postCount: true },
+    })),
+    'announcement.pinned': { ok: true, data: {} },
+    'announcement.list': { ok: true, data: {} },
+    'announcement.updateLogEntry': { ok: true, data: {} },
+    'announcement.sidebar': { ok: true, data: {} },
+    'announcement.pagination': { ok: true, data: {} },
+  }),
+  music: async () => ({
+    'music.main': await moduleData(() => prisma.musicTrack.findMany({
+      where: { isVisible: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      take: 5,
+      select: { title: true, artist: true },
+    })),
+  }),
+  message: async (user) => ({
+    'message.main': await moduleData(() => prisma.notification.count({ where: { recipientId: user.id, isRead: false } })),
+  }),
+  profile: async (user) => ({
+    'profile.main': await moduleData(() => prisma.user.findUnique({
+      where: { id: user.id },
+      select: { nickname: true, uid: true, level: true, points: true },
+    })),
+  }),
+  'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)
     const visibleModules = Object.entries(adminModulePermissions)
       .filter(([, permission]) => isSuperAdmin(user) || permissionSet.has(permission))
@@ -128,16 +172,20 @@ export async function getPageLayoutPreviewData(pageKey: PageLayoutPageKey, user:
       })),
     ])
 
-    modules['admin.header'] = { ok: true, data: { nickname: user.nickname } }
-    modules['admin.registrationStatus'] = registrationPolicy
-    modules['admin.stats'] = stats
-    modules['admin.modules'] = { ok: true, data: { visibleModules } }
-    modules['admin.deploymentStatus'] = { ok: true, data: { processName: 'easonfansclub' } }
-  }
+    return {
+      'admin.header': { ok: true, data: { nickname: user.nickname } },
+      'admin.registrationStatus': registrationPolicy,
+      'admin.stats': stats,
+      'admin.modules': { ok: true, data: { visibleModules } },
+      'admin.deploymentStatus': { ok: true, data: { processName: 'easonfansclub' } },
+    }
+  },
+}
 
+export async function getPageLayoutPreviewData(pageKey: PageLayoutPageKey, user: SessionUser): Promise<PageLayoutPreviewPayload> {
   return {
     pageKey,
     generatedAt: new Date().toISOString(),
-    modules,
+    modules: await previewLoaders[pageKey](user),
   }
 }

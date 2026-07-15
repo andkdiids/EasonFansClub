@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { PageLayoutModuleConfig } from '@/lib/page-layout/types'
 
 const widthClass = {
@@ -54,13 +54,15 @@ export function PageLayoutFrame({
   config,
   children,
   className = '',
+  style,
 }: {
   config: PageLayoutModuleConfig
   children: ReactNode
   className?: string
+  style?: CSSProperties
 }) {
   return (
-    <section data-layout-module={config.key} data-layout-label={config.key} className={`${getPageLayoutFrameClass(config)} ${className}`.trim()}>
+    <section data-layout-module={config.key} data-layout-label={config.key} className={`${getPageLayoutFrameClass(config)} ${className}`.trim()} style={style}>
       {children}
     </section>
   )

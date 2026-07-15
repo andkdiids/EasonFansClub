@@ -1,27 +1,22 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import {
-  layoutDensities,
-  layoutSpacings,
-  layoutWidths,
-  type PageLayoutConfig,
-  type PageLayoutDevice,
-  type PageLayoutModuleConfig,
-  type PageLayoutModuleDefinition,
-  type PageLayoutPageKey,
-  type SerializedPageLayout,
+import type {
+  PageLayoutConfig,
+  PageLayoutDevice,
+  PageLayoutGridItem,
+  PageLayoutModuleConfig,
+  PageLayoutModuleDefinition,
+  PageLayoutPageKey,
+  SerializedPageLayout,
 } from '@/lib/page-layout/types'
 
 function cloneConfig(config: PageLayoutConfig): PageLayoutConfig {
   return {
-    desktop: config.desktop.map((item) => ({ ...item })),
-    mobile: config.mobile.map((item) => ({ ...item })),
+    desktop: config.desktop.map((item) => ({ ...item, grid: { desktop: { ...item.grid.desktop }, tablet: { ...item.grid.tablet }, mobile: { ...item.grid.mobile } } })),
+    tablet: config.tablet.map((item) => ({ ...item, grid: { desktop: { ...item.grid.desktop }, tablet: { ...item.grid.tablet }, mobile: { ...item.grid.mobile } } })),
+    mobile: config.mobile.map((item) => ({ ...item, grid: { desktop: { ...item.grid.desktop }, tablet: { ...item.grid.tablet }, mobile: { ...item.grid.mobile } } })),
   }
-}
-
-function normalizeOrder(items: PageLayoutModuleConfig[]) {
-  return items.map((item, index) => ({ ...item, order: (index + 1) * 10 }))
 }
 
 function findModule(registry: PageLayoutModuleDefinition[], key: string) {
@@ -30,7 +25,23 @@ function findModule(registry: PageLayoutModuleDefinition[], key: string) {
 
 function getDevice(): PageLayoutDevice {
   if (typeof window === 'undefined') return 'desktop'
-  return window.matchMedia('(max-width: 767px)').matches ? 'mobile' : 'desktop'
+  if (window.matchMedia('(max-width: 767px)').matches) return 'mobile'
+  if (window.matchMedia('(max-width: 1100px)').matches) return 'tablet'
+  return 'desktop'
+}
+
+function columnsFor(device: PageLayoutDevice) {
+  return device === 'desktop' ? 12 : device === 'tablet' ? 8 : 4
+}
+
+function patchGrid(item: PageLayoutModuleConfig, device: PageLayoutDevice, patch: Partial<PageLayoutGridItem>) {
+  const columns = columnsFor(device)
+  const current = item.grid[device]
+  const w = Math.max(1, Math.min(columns, patch.w ?? current.w))
+  const h = Math.max(1, Math.min(40, patch.h ?? current.h))
+  const x = Math.max(0, Math.min(columns - w, patch.x ?? current.x))
+  const y = Math.max(0, Math.min(200, patch.y ?? current.y))
+  return { ...item, grid: { ...item.grid, [device]: { x, y, w, h } } }
 }
 
 function exitEditMode() {
@@ -69,18 +80,20 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
   }, [pageKey])
 
   const modules = useMemo(
-    () => (workingConfig ? [...workingConfig[device]].sort((a, b) => a.order - b.order) : []),
+    () => (workingConfig ? [...workingConfig[device]].sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order) : []),
     [workingConfig, device],
   )
   const selected = modules.find((item) => item.key === selectedKey) || modules[0]
   const selectedModule = selected ? findModule(layout?.registry || [], selected.key) : null
+  const grid = selected?.grid[device]
 
   useEffect(() => {
     document.body.classList.add('layout-inline-editing')
     return () => {
       document.body.classList.remove('layout-inline-editing')
       document.querySelectorAll<HTMLElement>('[data-layout-module]').forEach((element) => {
-        element.style.order = ''
+        element.style.gridColumn = ''
+        element.style.gridRow = ''
         element.style.display = ''
       })
     }
@@ -93,8 +106,10 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
       const key = element.dataset.layoutModule || ''
       const config = currentModules.find((item) => item.key === key)
       if (!config) return
-      element.style.order = String(config.order)
-      element.style.display = config.visible ? '' : 'none'
+      const nextGrid = config.grid[device]
+      element.style.gridColumn = `${nextGrid.x + 1} / span ${nextGrid.w}`
+      element.style.gridRow = `${nextGrid.y + 1} / span ${nextGrid.h}`
+      element.style.display = config.visible && !config.isHidden ? '' : 'none'
       element.dataset.layoutLabel = key
       element.dataset.layoutSelected = key === selected?.key ? 'true' : 'false'
     })
@@ -102,7 +117,7 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
 
   function updateDeviceItems(updater: (items: PageLayoutModuleConfig[]) => PageLayoutModuleConfig[]) {
     setIsDirty(true)
-    setWorkingConfig((current) => current ? { ...current, [device]: updater([...current[device]].sort((a, b) => a.order - b.order)) } : current)
+    setWorkingConfig((current) => current ? { ...current, [device]: updater([...current[device]]) } : current)
   }
 
   function updateSelected(patch: Partial<PageLayoutModuleConfig>) {
@@ -110,17 +125,9 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
     updateDeviceItems((items) => items.map((item) => (item.key === selected.key ? { ...item, ...patch } : item)))
   }
 
-  function moveModule(direction: -1 | 1) {
+  function updateSelectedGrid(patch: Partial<PageLayoutGridItem>) {
     if (!selected) return
-    updateDeviceItems((items) => {
-      const index = items.findIndex((item) => item.key === selected.key)
-      const target = index + direction
-      if (index < 0 || target < 0 || target >= items.length) return items
-      const next = [...items]
-      const [item] = next.splice(index, 1)
-      next.splice(target, 0, item)
-      return normalizeOrder(next)
-    })
+    updateDeviceItems((items) => items.map((item) => (item.key === selected.key ? patchGrid(item, device, patch) : item)))
   }
 
   async function submit(url: string, method: 'PUT' | 'POST', successMessage: string) {
@@ -157,9 +164,9 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
     <aside className="fixed bottom-20 right-4 z-50 max-h-[75vh] w-[min(92vw,360px)] overflow-auto rounded-2xl border border-sky-100 bg-white p-4 shadow-2xl shadow-sky-900/20 md:bottom-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Inline Layout</p>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Inline Layout v2</p>
           <h2 className="mt-1 text-lg font-black text-brand-950">前台布局编辑</h2>
-          <p className="mt-1 text-xs font-bold text-slate-500">{device === 'desktop' ? '桌面端' : '移动端'} · v{layout.version}{isDirty ? ' · 未保存' : ''}</p>
+          <p className="mt-1 text-xs font-bold text-slate-500">{device === 'desktop' ? '桌面端 12 列' : '移动端 4 列'} · v{layout.version}{isDirty ? ' · 未保存' : ''}</p>
         </div>
         <button onClick={exitEditMode} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700">退出</button>
       </div>
@@ -170,6 +177,7 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
       <div className="mt-4 grid gap-2">
         {modules.map((item, index) => {
           const definition = findModule(layout.registry, item.key)
+          const itemGrid = item.grid[device]
           return (
             <button
               key={item.key}
@@ -177,35 +185,19 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
               className={`rounded-xl border px-3 py-2 text-left ${selected?.key === item.key ? 'border-brand-700 bg-sky-50' : 'border-sky-100 bg-white'}`}
             >
               <span className="text-sm font-black text-brand-950">#{index + 1} {definition?.name || item.key}</span>
-              <span className="mt-1 block text-xs font-bold text-slate-500">{item.visible ? '显示' : '隐藏'} · {item.width} · {item.gapTop}/{item.gapBottom}</span>
+              <span className="mt-1 block text-xs font-bold text-slate-500">{item.visible ? '显示' : '隐藏'} · x{itemGrid.x} y{itemGrid.y} · {itemGrid.w}x{itemGrid.h}</span>
             </button>
           )
         })}
       </div>
 
-      {selected && selectedModule ? (
+      {selected && selectedModule && grid ? (
         <div className="mt-4 space-y-3 border-t border-sky-100 pt-4">
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => moveModule(-1)} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700">上移</button>
-            <button onClick={() => moveModule(1)} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700">下移</button>
-            <button disabled={selectedModule.required} onClick={() => updateSelected({ visible: !selected.visible })} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 disabled:opacity-50">{selected.visible ? '隐藏' : '显示'}</button>
-          </div>
-          <InlineSelect label="宽度" value={selected.width} options={layoutWidths.filter((item) => selectedModule.allowedWidths.includes(item))} onChange={(value) => updateSelected({ width: value as PageLayoutModuleConfig['width'] })} />
-          <InlineSelect label="上间距" value={selected.gapTop} options={layoutSpacings.filter((item) => selectedModule.allowedSpacing.includes(item))} onChange={(value) => updateSelected({ gapTop: value as PageLayoutModuleConfig['gapTop'] })} />
-          <InlineSelect label="下间距" value={selected.gapBottom} options={layoutSpacings.filter((item) => selectedModule.allowedSpacing.includes(item))} onChange={(value) => updateSelected({ gapBottom: value as PageLayoutModuleConfig['gapBottom'] })} />
-          <InlineSelect label="密度" value={selected.density} options={layoutDensities} onChange={(value) => updateSelected({ density: value as PageLayoutModuleConfig['density'] })} />
-          {selectedModule.supportsTitle ? (
-            <label className="block">
-              <span className="text-xs font-black text-slate-600">标题</span>
-              <input value={selected.title || ''} maxLength={60} onChange={(event) => updateSelected({ title: event.target.value })} className="mt-1 w-full rounded-xl border border-sky-100 px-3 py-2 text-sm font-bold outline-none" />
-            </label>
-          ) : null}
-          {selectedModule.supportsSubtitle ? (
-            <label className="block">
-              <span className="text-xs font-black text-slate-600">副标题</span>
-              <textarea value={selected.subtitle || ''} maxLength={160} onChange={(event) => updateSelected({ subtitle: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-sky-100 px-3 py-2 text-sm font-bold outline-none" />
-            </label>
-          ) : null}
+          <button disabled={selectedModule.required || !selectedModule.canHide} onClick={() => updateSelected({ visible: selected.isHidden, isHidden: !selected.isHidden })} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 disabled:opacity-50">{selected.isHidden ? '显示' : '隐藏'}</button>
+          <InlineNumber label="X" value={grid.x} min={0} max={columnsFor(device) - grid.w} onChange={(value) => updateSelectedGrid({ x: value })} />
+          <InlineNumber label="Y" value={grid.y} min={0} max={200} onChange={(value) => updateSelectedGrid({ y: value })} />
+          <InlineNumber label="W" value={grid.w} min={1} max={columnsFor(device)} onChange={(value) => updateSelectedGrid({ w: value })} />
+          <InlineNumber label="H" value={grid.h} min={1} max={40} onChange={(value) => updateSelectedGrid({ h: value })} />
         </div>
       ) : null}
 
@@ -217,23 +209,23 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
   )
 }
 
-function InlineSelect({
+function InlineNumber({
   label,
   value,
-  options,
+  min,
+  max,
   onChange,
 }: {
   label: string
-  value: string
-  options: readonly string[]
-  onChange: (value: string) => void
+  value: number
+  min: number
+  max: number
+  onChange: (value: number) => void
 }) {
   return (
     <label className="block">
       <span className="text-xs font-black text-slate-600">{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold outline-none">
-        {options.map((item) => <option key={item} value={item}>{item}</option>)}
-      </select>
+      <input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} className="mt-1 w-full rounded-xl border border-sky-100 px-3 py-2 text-sm font-bold outline-none" />
     </label>
   )
 }

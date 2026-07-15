@@ -12,6 +12,7 @@ import {
   type LayoutWidth,
   type PageLayoutConfig,
   type PageLayoutDevice,
+  type PageLayoutGridItem,
   type PageLayoutModuleConfig,
   type PageLayoutPageKey,
 } from '@/lib/page-layout/types'
@@ -31,6 +32,12 @@ function includes<T extends readonly string[]>(values: T, value: unknown): value
   return typeof value === 'string' && values.includes(value)
 }
 
+function columnsFor(device: PageLayoutDevice) {
+  if (device === 'desktop') return 12
+  if (device === 'tablet') return 8
+  return 4
+}
+
 function cleanText(value: unknown, maxLength: number) {
   if (value === null || value === undefined || value === '') return null
   const text = String(value).replace(/<[^>]*>/g, '').replace(/javascript:/gi, '').trim()
@@ -41,6 +48,58 @@ function normalizeOrder(value: unknown, fallback: number) {
   const order = Number(value)
   if (!Number.isSafeInteger(order) || order < 0 || order > 10000) return fallback
   return order
+}
+
+function normalizeGrid(value: unknown, fallback: PageLayoutGridItem, columns: number): PageLayoutGridItem {
+  const input = isPlainObject(value) ? value : {}
+  const rawW = Number(input.w)
+  const safeW = Number.isSafeInteger(rawW) && rawW >= 1 && rawW <= columns ? rawW : Math.min(fallback.w, columns)
+  const rawX = Number(input.x)
+  const safeX = Number.isSafeInteger(rawX) && rawX >= 0 && rawX + safeW <= columns ? rawX : Math.min(fallback.x, columns - safeW)
+  const rawY = Number(input.y)
+  const rawH = Number(input.h)
+
+  return {
+    x: safeX,
+    y: Number.isSafeInteger(rawY) && rawY >= 0 && rawY <= 200 ? rawY : fallback.y,
+    w: safeW,
+    h: Number.isSafeInteger(rawH) && rawH >= 1 && rawH <= 40 ? rawH : fallback.h,
+  }
+}
+
+function validateRawGrid(
+  errors: Record<string, string>,
+  device: PageLayoutDevice,
+  key: string,
+  value: unknown,
+) {
+  if (!isPlainObject(value)) return
+  const columns = columnsFor(device)
+  const rawW = Number(value.w)
+  const rawX = Number(value.x)
+  const rawY = Number(value.y)
+  const rawH = Number(value.h)
+
+  if (!Number.isSafeInteger(rawW) || rawW < 1 || rawW > columns) errors[`${device}.${key}.grid.w`] = `${device} 模块宽度超出 ${columns} 列`
+  if (!Number.isSafeInteger(rawX) || rawX < 0 || rawX + (Number.isSafeInteger(rawW) ? rawW : 1) > columns) errors[`${device}.${key}.grid.x`] = `${device} 模块横向位置超出 ${columns} 列`
+  if (!Number.isSafeInteger(rawY) || rawY < 0 || rawY > 200) errors[`${device}.${key}.grid.y`] = `${device} 模块纵向位置不在允许范围内`
+  if (!Number.isSafeInteger(rawH) || rawH < 1 || rawH > 40) errors[`${device}.${key}.grid.h`] = `${device} 模块高度不在允许范围内`
+}
+
+function compactGrid(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {
+  return [...items]
+    .sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order)
+    .map((item, index) => ({ ...item, order: (index + 1) * 10 }))
+}
+
+function supportsDevice(moduleDefinition: { supportsDesktop: boolean; supportsTablet: boolean; supportsMobile: boolean }, device: PageLayoutDevice) {
+  if (device === 'desktop') return moduleDefinition.supportsDesktop
+  if (device === 'tablet') return moduleDefinition.supportsTablet
+  return moduleDefinition.supportsMobile
+}
+
+function isLegacySingleModule(pageKey: PageLayoutPageKey, key: string) {
+  return (pageKey === 'forum' && key === 'forum.board') || (pageKey === 'announcement' && key === 'announcement.board')
 }
 
 function validateDeviceConfig(
@@ -65,68 +124,69 @@ function validateDeviceConfig(
     const key = typeof rawItem.key === 'string' ? rawItem.key : ''
     const definition = getPageLayoutModule(pageKey, key)
     if (!definition) {
-      if (strict) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
+      if (strict && !isLegacySingleModule(pageKey, key)) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
       return
     }
     if (seen.has(key)) {
-      if (strict) errors[`${device}.${key}`] = '同一设备布局中模块不能重复'
+      if (strict) errors[`${device}.${key}`] = '模块 ID 重复'
       return
     }
-    if (device === 'desktop' && !definition.supportsDesktop) {
-      if (strict) errors[`${device}.${key}`] = '该模块不支持桌面端'
-      return
-    }
-    if (device === 'mobile' && !definition.supportsMobile) {
-      if (strict) errors[`${device}.${key}`] = '该模块不支持移动端'
+    if (!supportsDevice(definition, device)) {
+      if (strict) errors[`${device}.${key}`] = '该模块不支持当前设备'
       return
     }
 
     const fallbackItem = fallback.find((item) => item.key === key)
+    if (!fallbackItem) return
     const width = definition.allowedWidths.includes(rawItem.width as LayoutWidth)
       ? rawItem.width as LayoutWidth
-      : fallbackItem?.width || definition.defaultWidth
+      : fallbackItem.width || definition.defaultWidth
     const gapTop = definition.allowedSpacing.includes(rawItem.gapTop as LayoutSpacing)
       ? rawItem.gapTop as LayoutSpacing
-      : fallbackItem?.gapTop || definition.defaultGapTop
+      : fallbackItem.gapTop || definition.defaultGapTop
     const gapBottom = definition.allowedSpacing.includes(rawItem.gapBottom as LayoutSpacing)
       ? rawItem.gapBottom as LayoutSpacing
-      : fallbackItem?.gapBottom || definition.defaultGapBottom
+      : fallbackItem.gapBottom || definition.defaultGapBottom
     const alignment = includes(layoutAlignments, rawItem.alignment)
       ? rawItem.alignment as LayoutAlignment
-      : fallbackItem?.alignment || 'left'
+      : fallbackItem.alignment || 'left'
     const density = includes(layoutDensities, rawItem.density)
       ? rawItem.density as LayoutDensity
-      : fallbackItem?.density || 'normal'
+      : fallbackItem.density || 'normal'
     const title = cleanText(rawItem.title, 60)
     const subtitle = cleanText(rawItem.subtitle, 160)
+    const grid = isPlainObject(rawItem.grid) && rawItem.grid[device] !== undefined
+      ? normalizeGrid(rawItem.grid[device], fallbackItem.grid[device], columnsFor(device))
+      : normalizeGrid(rawItem, fallbackItem.grid[device], columnsFor(device))
 
-    if (strict && rawItem.width !== undefined && !definition.allowedWidths.includes(rawItem.width as LayoutWidth)) {
-      errors[`${device}.${key}.width`] = '宽度不在允许范围内'
-    }
-    if (strict && rawItem.gapTop !== undefined && !definition.allowedSpacing.includes(rawItem.gapTop as LayoutSpacing)) {
-      errors[`${device}.${key}.gapTop`] = '上间距不在允许范围内'
-    }
-    if (strict && rawItem.gapBottom !== undefined && !definition.allowedSpacing.includes(rawItem.gapBottom as LayoutSpacing)) {
-      errors[`${device}.${key}.gapBottom`] = '下间距不在允许范围内'
-    }
-    if (strict && rawItem.alignment !== undefined && !includes(layoutAlignments, rawItem.alignment)) {
-      errors[`${device}.${key}.alignment`] = '对齐方式不在允许范围内'
-    }
-    if (strict && rawItem.density !== undefined && !includes(layoutDensities, rawItem.density)) {
-      errors[`${device}.${key}.density`] = '密度不在允许范围内'
-    }
-    if (strict && !definition.supportsTitle && title) {
-      errors[`${device}.${key}.title`] = '该模块不支持自定义标题'
-    }
-    if (strict && !definition.supportsSubtitle && subtitle) {
-      errors[`${device}.${key}.subtitle`] = '该模块不支持自定义副标题'
-    }
+    if (strict && rawItem.width !== undefined && !definition.allowedWidths.includes(rawItem.width as LayoutWidth)) errors[`${device}.${key}.width`] = '宽度不在允许范围内'
+    if (strict && rawItem.gapTop !== undefined && !definition.allowedSpacing.includes(rawItem.gapTop as LayoutSpacing)) errors[`${device}.${key}.gapTop`] = '上间距不在允许范围内'
+    if (strict && rawItem.gapBottom !== undefined && !definition.allowedSpacing.includes(rawItem.gapBottom as LayoutSpacing)) errors[`${device}.${key}.gapBottom`] = '下间距不在允许范围内'
+    if (strict && rawItem.alignment !== undefined && !includes(layoutAlignments, rawItem.alignment)) errors[`${device}.${key}.alignment`] = '对齐方式不在允许范围内'
+    if (strict && rawItem.density !== undefined && !includes(layoutDensities, rawItem.density)) errors[`${device}.${key}.density`] = '密度不在允许范围内'
+    if (strict && rawItem.isHidden !== undefined && typeof rawItem.isHidden !== 'boolean') errors[`${device}.${key}.isHidden`] = '模块隐藏状态必须是 boolean'
+    if (strict && isPlainObject(rawItem.grid) && rawItem.grid[device] !== undefined) validateRawGrid(errors, device, key, rawItem.grid[device])
+    if (strict && !definition.supportsTitle && title) errors[`${device}.${key}.title`] = '该模块不支持自定义标题'
+    if (strict && !definition.supportsSubtitle && subtitle) errors[`${device}.${key}.subtitle`] = '该模块不支持自定义副标题'
+
+    const rawHidden = typeof rawItem.isHidden === 'boolean'
+      ? rawItem.isHidden
+      : typeof rawItem.visible === 'boolean'
+        ? !rawItem.visible
+        : !definition.defaultVisible
+    const isHidden = definition.required ? false : rawHidden
 
     seen.add(key)
     sanitized.push({
       key,
-      order: normalizeOrder(rawItem.order, fallbackItem?.order || definition.defaultOrder),
-      visible: typeof rawItem.visible === 'boolean' ? rawItem.visible : definition.defaultVisible,
+      order: normalizeOrder(rawItem.order, fallbackItem.order || definition.defaultOrder),
+      visible: !isHidden,
+      isHidden,
+      grid: {
+        desktop: device === 'desktop' ? grid : fallbackItem.grid.desktop,
+        tablet: device === 'tablet' ? grid : fallbackItem.grid.tablet,
+        mobile: device === 'mobile' ? grid : fallbackItem.grid.mobile,
+      },
       width,
       gapTop,
       gapBottom,
@@ -137,39 +197,39 @@ function validateDeviceConfig(
     })
   })
 
-  const requiredModules = getPageLayoutRegistry(pageKey).filter((item) => {
-    return item.required && (device === 'desktop' ? item.supportsDesktop : item.supportsMobile)
-  })
-  requiredModules.forEach((module) => {
-    const item = sanitized.find((config) => config.key === module.key)
+  const requiredModules = getPageLayoutRegistry(pageKey).filter((item) => item.required && supportsDevice(item, device))
+  requiredModules.forEach((moduleDefinition) => {
+    const item = sanitized.find((config) => config.key === moduleDefinition.key)
     if (!item) {
-      if (strict) errors[`${device}.${module.key}.visible`] = '核心模块必须保留显示'
+      if (strict) errors[`${device}.${moduleDefinition.key}.isHidden`] = '核心模块必须保留显示'
       return
     }
-    if (!item.visible) {
+    if (item.isHidden) {
       if (strict) {
-        errors[`${device}.${module.key}.visible`] = '核心模块必须保留显示'
+        errors[`${device}.${moduleDefinition.key}.isHidden`] = '核心模块必须保留显示'
       } else {
+        item.isHidden = false
         item.visible = true
       }
     }
   })
 
-  if (sanitized.every((item) => !item.visible)) {
+  if (sanitized.length > 0 && sanitized.every((item) => item.isHidden)) {
     if (strict) {
-      errors[`${device}.visible`] = '不能隐藏当前页面的所有模块'
+      errors[`${device}.isHidden`] = '不能隐藏当前页面的所有模块'
     } else {
-      const fallbackVisible = sanitized.find((item) => fallback.some((fallbackItem) => fallbackItem.key === item.key && fallbackItem.visible))
-      if (fallbackVisible) fallbackVisible.visible = true
+      const fallbackVisible = sanitized.find((item) => fallback.some((fallbackItem) => fallbackItem.key === item.key && !fallbackItem.isHidden))
+      if (fallbackVisible) {
+        fallbackVisible.isHidden = false
+        fallbackVisible.visible = true
+      }
     }
   }
 
-  if (Object.keys(errors).length) {
-    throw new PageLayoutValidationError('页面布局配置不正确', errors)
-  }
+  if (Object.keys(errors).length) throw new PageLayoutValidationError('页面布局配置不正确', errors)
 
   const missingDefaults = fallback.filter((item) => !seen.has(item.key))
-  return [...sanitized, ...missingDefaults].sort((a, b) => a.order - b.order)
+  return compactGrid([...sanitized, ...missingDefaults], device)
 }
 
 export function validatePageLayoutConfig(pageKey: PageLayoutPageKey, input: unknown): PageLayoutConfig {
@@ -178,6 +238,7 @@ export function validatePageLayoutConfig(pageKey: PageLayoutPageKey, input: unkn
 
   return {
     desktop: validateDeviceConfig(pageKey, 'desktop', input.desktop, defaults.desktop),
+    tablet: validateDeviceConfig(pageKey, 'tablet', input.tablet, defaults.tablet),
     mobile: validateDeviceConfig(pageKey, 'mobile', input.mobile, defaults.mobile),
   }
 }
@@ -188,6 +249,7 @@ export function repairPageLayoutConfig(pageKey: PageLayoutPageKey, input: unknow
 
   return {
     desktop: validateDeviceConfig(pageKey, 'desktop', input.desktop, defaults.desktop, false),
+    tablet: validateDeviceConfig(pageKey, 'tablet', input.tablet, defaults.tablet, false),
     mobile: validateDeviceConfig(pageKey, 'mobile', input.mobile, defaults.mobile, false),
   }
 }
