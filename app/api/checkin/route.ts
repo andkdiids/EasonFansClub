@@ -107,6 +107,7 @@ export async function POST(request: Request) {
       level: profile?.level ?? 1,
       gainedPoints: 0,
       gainedExp: 0,
+      created: false,
     })
   }
 
@@ -247,5 +248,6 @@ export async function POST(request: Request) {
     exp: result.user.exp,
     experience: result.user.experience,
     level: result.user.level,
+    created: true,
   })
 }

@@ -1,24 +1,20 @@
 'use client'
 
 import { BeijingClock } from '@/components/BeijingClock'
-import { CheckInButton } from '@/components/CheckInButton'
+import { useCallback, useEffect, useState } from 'react'
+import { CheckInButton, type CheckInStateChange, type CheckInStats, type TodayCheckIn } from '@/components/CheckInButton'
 import { CheckInMessagesPanel } from '@/components/CheckInMessagesPanel'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
-import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
+import type {
+  PageLayoutModuleDensity,
+  PageLayoutModuleRenderer,
+} from '@/components/page-layout/PageLayoutRenderer'
 import type { CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
 import type { PageLayoutConfig } from '@/lib/page-layout/types'
 
-type TodayCheckInPayload = {
-  checkDate: string
-  points: number
-  exp: number
-  mood: string | null
-  message: string | null
-  streakDay: number
-  createdAt: string
-} | null
+export type TodayCheckInPayload = TodayCheckIn
 
-type CheckInLayoutSurfaceProps = {
+export type CheckInLayoutModuleProps = {
   layoutConfig: PageLayoutConfig
   dailyQuote: string
   activeUsers: number
@@ -40,6 +36,7 @@ type CheckInLayoutSurfaceProps = {
     exp: number
     consecutiveDays: number
   }
+  previewMode?: boolean
 }
 
 function densityCardClass(density: PageLayoutModuleDensity) {
@@ -48,14 +45,120 @@ function densityCardClass(density: PageLayoutModuleDensity) {
   return 'checkin-layout-card rounded-[24px] border border-sky-100 bg-white/85 shadow-sm'
 }
 
-export function CheckInLayoutSurface({
-  layoutConfig,
-  dailyQuote,
+function CheckInStatsCard({
+  density,
   activeUsers,
   todayCount,
   consecutiveDays,
   totalCheckIns,
-  moodIndex,
+}: Readonly<{
+  density: PageLayoutModuleDensity
+  activeUsers: number
+  todayCount: number
+  consecutiveDays: number
+  totalCheckIns: number
+}>) {
+  const items = [
+    ['医院人数', activeUsers],
+    ['今日挂号', todayCount],
+    ['连续天数', consecutiveDays],
+    ['累计天数', totalCheckIns],
+  ] as const
+  return (
+    <div data-checkin-stats-grid="true" className={`grid gap-2 ${density === 'minimal' ? 'grid-cols-4' : 'grid-cols-2 sm:grid-cols-4'}`}>
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-2xl bg-sky-50/75 p-2.5 text-center">
+          <p className="truncate text-[11px] font-black text-slate-500">{label}</p>
+          <p className="mt-0.5 text-lg font-black leading-tight text-brand-950">{value}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CheckInStatusContent({
+  title,
+  density,
+  activeUsers,
+  initialTodayCount,
+  initialTotalCheckIns,
+  initialCheckIn,
+  initialStats,
+  previewMode,
+}: Readonly<{
+  title: string
+  density: PageLayoutModuleDensity
+  activeUsers: number
+  initialTodayCount: number
+  initialTotalCheckIns: number
+  initialCheckIn: TodayCheckInPayload
+  initialStats: CheckInStats
+  previewMode: boolean
+}>) {
+  const [todayCheckIn, setTodayCheckIn] = useState(initialCheckIn)
+  const [stats, setStats] = useState(initialStats)
+  const [todayCount, setTodayCount] = useState(initialTodayCount)
+  const [totalCheckIns, setTotalCheckIns] = useState(initialTotalCheckIns)
+
+  useEffect(() => {
+    setTodayCheckIn(initialCheckIn)
+    setStats(initialStats)
+    setTodayCount(initialTodayCount)
+    setTotalCheckIns(initialTotalCheckIns)
+  }, [initialCheckIn, initialStats, initialTodayCount, initialTotalCheckIns])
+
+  const handleStateChange = useCallback((next: CheckInStateChange) => {
+    setTodayCheckIn(next.todayCheckIn)
+    setStats(next.stats)
+    setTodayCount((current) => next.todayCount ?? (next.created ? current + 1 : current))
+    setTotalCheckIns((current) => next.totalCheckIns ?? (next.created ? current + 1 : current))
+  }, [])
+
+  return (
+    <section className={densityCardClass(density)}>
+      <div className={density === 'minimal' ? 'flex flex-wrap items-center justify-between gap-2' : 'flex flex-wrap items-start justify-between gap-3'}>
+        <div className="min-w-0">
+          {density !== 'minimal' ? <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Daily Clinic</p> : null}
+          <h1 className={density === 'minimal' ? 'text-lg font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950 sm:text-[1.65rem]'}>
+            {title}
+          </h1>
+        </div>
+        <div className={density === 'minimal' ? 'flex items-center gap-2 rounded-xl bg-sky-50/75 px-2 py-1.5' : 'min-w-40 rounded-2xl bg-sky-50/75 px-3 py-2'}>
+          <p className="text-xs font-black text-slate-500">北京时间</p>
+          <p className={density === 'minimal' ? 'text-sm font-black text-brand-950' : 'mt-0.5 text-lg font-black text-brand-950'}><BeijingClock /></p>
+        </div>
+      </div>
+
+      {todayCheckIn ? (
+        <div className={density === 'minimal' ? 'mt-2' : 'mt-4'}>
+          <CheckInStatsCard
+            density={density}
+            activeUsers={activeUsers}
+            todayCount={todayCount}
+            consecutiveDays={stats.consecutiveDays}
+            totalCheckIns={totalCheckIns}
+          />
+        </div>
+      ) : null}
+
+      <div className={density === 'minimal' ? 'mt-2 min-h-0' : 'mt-4 min-h-0'}>
+        <CheckInButton
+          initialCheckIn={todayCheckIn}
+          initialStats={stats}
+          compact={density !== 'normal'}
+          density={density}
+          previewMode={previewMode}
+          onStateChange={handleStateChange}
+        />
+      </div>
+    </section>
+  )
+}
+
+export function createCheckInLayoutModules({
+  activeUsers,
+  todayCount,
+  totalCheckIns,
   todayCheckIn,
   selectedMessages,
   friendMessages,
@@ -65,99 +168,20 @@ export function CheckInLayoutSurface({
   sessionUserId,
   sessionUserRole,
   stats,
-}: CheckInLayoutSurfaceProps) {
-  return (
-    <PageLayoutRenderer
-      pageKey="checkin"
-      config={layoutConfig}
-      modules={{
+  previewMode = false,
+}: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
+  return {
         'checkin.header': (layoutItem, { density }) => (
-          <section className={densityCardClass(density)}>
-            {density !== 'minimal' ? <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Daily Clinic</p> : null}
-            <h1 className={density === 'minimal' ? 'truncate text-lg font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950 sm:text-[1.65rem]'}>
-              {layoutItem.title || '每日挂号'}
-            </h1>
-            {density === 'normal' ? (
-              <p className="checkin-layout-card-compact-text mt-2 line-clamp-2 text-xs font-bold leading-5 text-slate-600 sm:text-sm">{layoutItem.subtitle || dailyQuote}</p>
-            ) : null}
-            <div className={density === 'minimal' ? 'mt-auto flex items-center justify-between gap-2 rounded-xl bg-sky-50/75 px-2 py-1.5' : 'mt-auto rounded-2xl bg-sky-50/75 p-3'}>
-              <p className="text-xs font-black text-slate-500">北京时间</p>
-              <p className={density === 'minimal' ? 'text-sm font-black text-brand-950' : 'mt-0.5 text-xl font-black text-brand-950'}><BeijingClock /></p>
-            </div>
-          </section>
-        ),
-        'checkin.stats': (_layoutItem, { density }) => (
-          <section className={densityCardClass(density)}>
-            {(() => {
-              const items = [
-                ['医院人数', `${activeUsers}`],
-                ['今日挂号', `${todayCount}`],
-                ['连续天数', `${consecutiveDays}`],
-                ['累计天数', `${totalCheckIns}`],
-                ['情绪指数', moodIndex ? `${moodIndex}/100` : '待生成'],
-              ]
-              if (density === 'minimal') {
-                return (
-                  <div className="grid min-h-0 flex-1 grid-cols-4 items-center gap-1">
-                    {items.slice(0, 4).map(([label, value]) => (
-                      <div key={label} className="min-w-0 rounded-xl bg-sky-50/75 px-1.5 py-1 text-center">
-                        <p className="truncate text-[10px] font-black leading-tight text-slate-500">{label}</p>
-                        <p className="truncate text-sm font-black leading-tight text-brand-950">{value}</p>
-                      </div>
-                    ))}
-                  </div>
-                )
-              }
-              return (
-                <div className={`grid min-h-0 flex-1 auto-rows-fr gap-2 ${density === 'compact' ? 'grid-cols-2 sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                  {items.map(([label, value]) => (
-                    <div key={label} className={density === 'compact' ? 'min-h-0 rounded-2xl bg-sky-50/75 p-2' : 'min-h-0 rounded-2xl bg-sky-50/75 p-2.5'}>
-                      <p className="truncate text-[11px] font-black text-slate-500">{label}</p>
-                      <p className={density === 'compact' ? 'truncate text-base font-black leading-tight text-brand-950' : 'mt-0.5 truncate text-lg font-black leading-tight text-brand-950 sm:text-xl'}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-              )
-            })()}
-          </section>
-        ),
-        'checkin.today': (layoutItem, { density }) => (
-          <section className={densityCardClass(density)}>
-            {density !== 'minimal' ? <p className="text-xs font-black uppercase text-brand-700">{todayCheckIn ? 'Today Mood' : 'Check-in'}</p> : null}
-            <h2 className={density === 'minimal' ? 'truncate text-lg font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950 sm:text-[1.65rem]'}>
-              {layoutItem.title || '今日挂号'}
-            </h2>
-            {layoutItem.subtitle && density === 'normal' ? <p className="checkin-layout-card-compact-text mt-1 line-clamp-1 text-xs font-bold leading-5 text-slate-600">{layoutItem.subtitle}</p> : null}
-            <div className={density === 'minimal' ? 'mt-1 min-h-0 flex-1 overflow-hidden' : 'mt-3 min-h-0 flex-1 overflow-hidden'}>
-              <CheckInButton initialCheckIn={todayCheckIn} initialStats={stats} compact={density !== 'normal'} density={density} />
-            </div>
-          </section>
-        ),
-        'checkin.messages': (layoutItem, { density }) => (
-          <div className="grid gap-4 xl:grid-cols-2">
-            <CheckInMessagesPanel
-              title={layoutItem.title || 'E友留言'}
-              density={density}
-              anonymous
-              initialMessages={selectedMessages}
-              initialDate={selectedDateValue}
-              maxDate={todayValue}
-              initialSort={sort}
-              sessionUserId={sessionUserId}
-              sessionUserRole={sessionUserRole}
-            />
-            <CheckInMessagesPanel
-              title="好友挂号留言"
-              density={density}
-              initialMessages={friendMessages}
-              initialDate={selectedDateValue}
-              maxDate={todayValue}
-              initialSort={sort}
-              sessionUserId={sessionUserId}
-              sessionUserRole={sessionUserRole}
-              emptyText="今天还没有好友留言。"
-            />
-          </div>
+          <CheckInStatusContent
+            title={layoutItem.title || '每日挂号'}
+            density={density}
+            activeUsers={activeUsers}
+            initialTodayCount={todayCount}
+            initialTotalCheckIns={totalCheckIns}
+            initialCheckIn={todayCheckIn}
+            initialStats={stats}
+            previewMode={previewMode}
+          />
         ),
         'checkin.publicMessages': (layoutItem, { density }) => (
           <CheckInMessagesPanel
@@ -170,6 +194,7 @@ export function CheckInLayoutSurface({
             initialSort={sort}
             sessionUserId={sessionUserId}
             sessionUserRole={sessionUserRole}
+            previewMode={previewMode}
           />
         ),
         'checkin.friendMessages': (layoutItem, { density }) => (
@@ -182,10 +207,21 @@ export function CheckInLayoutSurface({
             initialSort={sort}
             sessionUserId={sessionUserId}
             sessionUserRole={sessionUserRole}
+            previewMode={previewMode}
             emptyText="今天还没有好友留言。"
           />
         ),
-      }}
+
+  }
+}
+
+export function CheckInLayoutSurface(props: CheckInLayoutModuleProps & { layoutConfig: PageLayoutConfig }) {
+  const modules = createCheckInLayoutModules(props)
+  return (
+    <PageLayoutRenderer
+      pageKey="checkin"
+      config={props.layoutConfig}
+      modules={modules}
     />
   )
 }

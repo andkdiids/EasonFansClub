@@ -89,8 +89,8 @@ svg {
 
 .page-layout-grid {
   display: grid;
-  grid-auto-rows: 36px;
-  gap: 1rem;
+  grid-auto-rows: 80px;
+  gap: 12px;
   width: 100%;
   align-items: stretch;
 }
@@ -103,9 +103,17 @@ svg {
 
 .page-layout-grid-item-fixed {
   height: 100%;
-  overflow: hidden;
+  overflow: visible;
   border-radius: var(--layout-frame-radius, 36px);
   isolation: isolate;
+}
+
+/* 编辑器模式取消高度裁剪 */
+.page-layout-canvas .page-layout-grid-item-fixed {
+  display: flex;
+  height: 100% !important;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .page-layout-grid-item-fixed > * {
@@ -133,7 +141,10 @@ svg {
   flex: 1 1 auto;
   min-height: 0 !important;
   height: 100% !important;
-  overflow: hidden;
+}
+
+[data-layout-page="checkin"] .page-layout-grid > .page-layout-grid-item > * {
+  overflow: visible;
 }
 
 .page-layout-grid > .page-layout-grid-item-auto > * {
@@ -147,18 +158,17 @@ svg {
   min-height: 0;
   height: 100%;
   flex-direction: column;
-  overflow: hidden;
   padding: clamp(0.75rem, 1.4vw, var(--layout-card-padding, 1.25rem));
 }
 
 .checkin-layout-card-compact-text {
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .page-layout-grid-mobile {
-  grid-auto-rows: 32px;
-  gap: 0.875rem;
+  grid-auto-rows: 80px;
+  gap: 12px;
   max-width: 28rem;
   margin-inline: auto;
 }
@@ -196,12 +206,12 @@ svg {
   transition: height 200ms ease;
 }
 
-.react-grid-item {
+.page-layout-canvas .react-grid-item {
   transition: all 200ms ease;
   transition-property: left, top, width, height;
 }
 
-.react-grid-item.cssTransforms {
+.page-layout-canvas .react-grid-item.cssTransforms {
   transition-property: transform, width, height;
 }
 
@@ -220,22 +230,76 @@ svg {
   transition: none;
 }
 
-.page-layout-canvas-item {
+.page-layout-canvas .page-layout-canvas-item {
   position: relative;
-  overflow: hidden;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  flex-direction: column;
+  border-radius: inherit;
+  background: inherit;
   cursor: grab;
 }
 
-.react-draggable-dragging .page-layout-canvas-item {
+.page-layout-canvas .react-grid-item {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  box-sizing: border-box;
+  border-radius: 20px;
+  background: #fff;
+}
+
+.page-layout-canvas .react-grid-item > .page-layout-canvas-item {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  margin: 0 !important;
+}
+
+.page-layout-canvas .page-layout-content-shell {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.page-layout-canvas .page-layout-content-measure {
+  width: 100%;
+  min-height: 0;
+  flex: 0 0 auto;
+  container-name: layout-module;
+  container-type: inline-size;
+}
+
+.page-layout-canvas [data-layout-content-measure="true"] > .checkin-layout-card,
+.page-layout-canvas [data-layout-content-measure="true"] > .checkin-messages-preview {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.page-layout-canvas .react-draggable-dragging .page-layout-canvas-item {
   cursor: grabbing;
 }
 
-.page-layout-canvas-item-selected {
+.page-layout-canvas .page-layout-canvas-grid-item-selected {
   outline: 3px solid rgba(15, 122, 174, 0.6);
   outline-offset: -3px;
 }
 
-.react-resizable-handle {
+.page-layout-canvas .react-grid-item {
+  position: absolute;
+}
+
+.page-layout-canvas .react-resizable-handle {
   position: absolute;
   z-index: 40;
   width: 18px;
@@ -245,24 +309,71 @@ svg {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 8px 18px rgba(7, 23, 34, 0.2);
 }
 
-.react-resizable-handle-se {
-  right: 8px;
-  bottom: 8px;
+.page-layout-canvas .react-resizable-handle-se {
+  right: 0;
+  bottom: 0;
+  transform: translate(50%, 50%);
   cursor: se-resize;
+  pointer-events: auto;
 }
 
-.react-resizable-handle-e {
-  right: 8px;
+.page-layout-canvas .react-resizable-handle-e {
+  right: 0;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(50%, -50%);
   cursor: ew-resize;
+  pointer-events: auto;
 }
 
-.react-resizable-handle-s {
+.page-layout-canvas .react-resizable-handle-s {
   left: 50%;
-  bottom: 8px;
-  transform: translateX(-50%);
+  bottom: 0;
+  transform: translate(-50%, 50%);
   cursor: ns-resize;
+  pointer-events: auto;
+}
+
+.page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-mood-grid="true"] {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+}
+
+.page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-stats-grid="true"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.page-layout-canvas [data-layout-content-key="checkin.header"] p,
+.page-layout-canvas [data-layout-content-key^="checkin."] button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@container layout-module (max-width: 720px) {
+  .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-mood-grid="true"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-stats-grid="true"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container layout-module (max-width: 560px) {
+  .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-mood-grid="true"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@container layout-module (max-width: 420px) {
+  .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-mood-grid="true"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container layout-module (max-width: 260px) {
+  .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-mood-grid="true"],
+  .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-stats-grid="true"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
 
 body.layout-inline-editing [data-layout-module] {
@@ -295,5 +406,16 @@ body.layout-inline-editing [data-layout-selected='true'] {
 @media (max-width: 767px) {
   body {
     padding-bottom: 84px;
+  }
+
+  .page-layout-grid-item-fixed {
+    height: 100%;
+    overflow: visible;
+  }
+
+  .page-layout-grid > .page-layout-grid-item > * {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: visible;
   }
 }

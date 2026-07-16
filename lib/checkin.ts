@@ -1,6 +1,7 @@
-const beijingTimeZone = 'Asia/Shanghai'
+import { BEIJING_TIME_ZONE } from '@/lib/beijing-time'
+
 const datePartsFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: beijingTimeZone,
+  timeZone: BEIJING_TIME_ZONE,
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',

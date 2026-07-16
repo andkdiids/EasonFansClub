@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
+import { PAGE_LAYOUT_ROW_GAP, PAGE_LAYOUT_ROW_HEIGHT } from '@/lib/page-layout/constants'
 import { getPageLayoutModule } from '@/lib/page-layout/registry'
 import type { PageLayoutBehavior, PageLayoutConfig, PageLayoutDevice, PageLayoutGridItem, PageLayoutModuleConfig, PageLayoutPageKey } from '@/lib/page-layout/types'
 
@@ -15,7 +16,8 @@ export type PageLayoutRenderContext = {
   layoutBehavior: PageLayoutBehavior
 }
 
-export type PageLayoutRendererModules = Record<string, ReactNode | ((item: PageLayoutModuleConfig, context: PageLayoutRenderContext) => ReactNode)>
+export type PageLayoutModuleRenderer = (item: PageLayoutModuleConfig, context: PageLayoutRenderContext) => ReactNode
+export type PageLayoutRendererModules = Record<string, ReactNode | PageLayoutModuleRenderer>
 
 function useLayoutDevice(forcedDevice?: PageLayoutDevice) {
   const [device, setDevice] = useState<PageLayoutDevice>(forcedDevice || 'desktop')
@@ -40,19 +42,9 @@ function useLayoutDevice(forcedDevice?: PageLayoutDevice) {
   return device
 }
 
-function getModuleDensity(grid: PageLayoutGridItem, device: PageLayoutDevice): PageLayoutModuleDensity {
-  if (device === 'mobile') {
-    if (grid.h <= 3) return 'minimal'
-    if (grid.h <= 6) return 'compact'
-    return 'normal'
-  }
-  if (device === 'tablet') {
-    if (grid.h <= 2) return 'minimal'
-    if (grid.h <= 5) return 'compact'
-    return 'normal'
-  }
-  if (grid.h <= 2) return 'minimal'
-  if (grid.h <= 4) return 'compact'
+export function getPageLayoutModuleDensity(grid: PageLayoutGridItem): PageLayoutModuleDensity {
+  if (grid.h <= 4) return 'minimal'
+  if (grid.h <= 6) return 'compact'
   return 'normal'
 }
 
@@ -122,7 +114,7 @@ export function PageLayoutRenderer({
         if (segment.type === 'auto') {
           const renderedItems = segment.items.map((item) => {
             const grid = item.grid[device]
-            const density = getModuleDensity(grid, device)
+            const density = getPageLayoutModuleDensity(grid)
             const layoutBehavior = 'auto'
             const content = renderModuleContent(modules, item, { device, grid, columns, density, layoutBehavior })
             if (!content) return null
@@ -160,11 +152,16 @@ export function PageLayoutRenderer({
           <div
             key={`fixed-${segmentIndex}`}
             className={`page-layout-grid page-layout-grid-${device}`}
-            style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+            style={{
+              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+              gridAutoRows: `${PAGE_LAYOUT_ROW_HEIGHT}px`,
+              columnGap: `${PAGE_LAYOUT_ROW_GAP}px`,
+              rowGap: `${PAGE_LAYOUT_ROW_GAP}px`,
+            }}
           >
             {segment.items.map((item) => {
               const grid = item.grid[device]
-              const density = getModuleDensity(grid, device)
+              const density = getPageLayoutModuleDensity(grid)
               const layoutBehavior = 'fixed'
               const content = renderModuleContent(modules, item, { device, grid, columns, density, layoutBehavior })
               if (!content) return null

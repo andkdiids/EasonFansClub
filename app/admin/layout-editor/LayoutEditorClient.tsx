@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageLayoutCanvasEditor, type PageLayoutCanvasModules } from '@/components/page-layout/PageLayoutCanvasEditor'
+import { createCheckInLayoutModules, type TodayCheckInPayload } from '@/components/CheckInLayoutSurface'
+import type { CheckInMessageItem } from '@/lib/checkin-messages'
 import { pageLayoutPages } from '@/lib/page-layout/registry'
 import {
   layoutAlignments,
@@ -24,6 +26,7 @@ type PreviewPayload = {
   generatedAt: string
   modules: Record<string, PreviewModulePayload>
 }
+type CheckInPreviewState = 'pending' | 'completed'
 
 const deviceOptions: { key: PageLayoutDevice; label: string; columns: number }[] = [
   { key: 'desktop', label: '桌面端', columns: 12 },
@@ -121,6 +124,40 @@ function readObject(data: unknown) {
   return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {}
 }
 
+function readNumber(data: Record<string, unknown>, key: string, fallback = 0) {
+  const value = data[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function readString(data: Record<string, unknown>, key: string, fallback = '') {
+  return typeof data[key] === 'string' ? data[key] : fallback
+}
+
+function readTodayCheckIn(data: unknown): TodayCheckInPayload {
+  const item = readObject(data)
+  if (!readString(item, 'checkDate') || !readString(item, 'createdAt')) return null
+  return {
+    checkDate: readString(item, 'checkDate'),
+    points: readNumber(item, 'points'),
+    exp: readNumber(item, 'exp'),
+    mood: typeof item.mood === 'string' ? item.mood : null,
+    message: typeof item.message === 'string' ? item.message : null,
+    streakDay: readNumber(item, 'streakDay'),
+    createdAt: readString(item, 'createdAt'),
+  }
+}
+
+function readCheckInMessages(data: unknown): CheckInMessageItem[] {
+  if (!Array.isArray(data)) return []
+  return data.filter((item): item is CheckInMessageItem => {
+    const value = readObject(item)
+    const user = readObject(value.user)
+    return typeof value.id === 'string' && typeof value.content === 'string' && typeof value.createdAt === 'string'
+      && typeof user.uid === 'string' && typeof user.nickname === 'string'
+      && Array.isArray(value.comments) && Array.isArray(value.likes) && Array.isArray(value.favorites)
+  })
+}
+
 function renderPreviewContent(item: PageLayoutModuleConfig, definition: PageLayoutModuleDefinition | undefined, payload: PreviewModulePayload | null, device: PageLayoutDevice) {
   const title = item.title || definition?.name || item.key
   const subtitle = item.subtitle || definition?.description
@@ -169,6 +206,7 @@ export function LayoutEditorClient({
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
+  const [checkInPreviewState, setCheckInPreviewState] = useState<CheckInPreviewState>('pending')
 
   function loadRevisions(nextPageKey: PageLayoutPageKey) {
     fetch(`/api/admin/page-layouts/${nextPageKey}/revisions?limit=20`)
@@ -186,6 +224,7 @@ export function LayoutEditorClient({
     setError('')
     setSelectedRevision(null)
     setIsDirty(false)
+    setCheckInPreviewState('pending')
     const shouldFetchAsyncData = initialAsyncPageRef.current !== pageKey
     initialAsyncPageRef.current = null
 
@@ -268,6 +307,31 @@ export function LayoutEditorClient({
     setWorkingConfig((current) => current ? { ...current, [device]: updater([...current[device]]) } : current)
   }
 
+  function updateAutoHeight(key: string, nextH: number) {
+    if (selectedRevision) return
+    setIsDirty(true)
+    setWorkingConfig((current) => {
+      if (!current) return current
+      const item = current[device].find((candidate) => candidate.key === key)
+      if (!item || nextH === item.grid[device].h) return current
+      return {
+        ...current,
+        [device]: current[device].map((candidate) => candidate.key === key
+          ? {
+              ...candidate,
+              grid: {
+                ...candidate.grid,
+                [device]: {
+                  ...candidate.grid[device],
+                  h: nextH,
+                },
+              },
+            }
+          : candidate),
+      }
+    })
+  }
+
   function updateSelected(patch: Partial<PageLayoutModuleConfig>) {
     if (!selected) return
     updateDeviceItems((items) => items.map((item) => (item.key === selected.key ? { ...item, ...patch } : item)))
@@ -324,12 +388,79 @@ export function LayoutEditorClient({
     )
   }
 
-  const rendererModules: PageLayoutCanvasModules = Object.fromEntries(
+let rendererModules: PageLayoutCanvasModules
+
+if (pageKey === 'checkin') {
+  const headerData =
+    previewData?.modules?.['checkin.header']?.ok
+      ? readObject(previewData.modules['checkin.header'].data)
+      : {}
+
+  const statsData = readObject(headerData.stats)
+  const userStatsData = readObject(headerData.userStats)
+  const loadedTodayCheckIn = readTodayCheckIn(headerData.todayCheckIn)
+  const todayValue = readString(headerData, 'today', new Date().toISOString().slice(0, 10))
+  const previewTodayCheckIn: TodayCheckInPayload = checkInPreviewState === 'completed'
+    ? loadedTodayCheckIn || {
+        checkDate: todayValue,
+        points: 10,
+        exp: 5,
+        mood: 'happy',
+        message: '今天也要好好生活，明天继续来私家E院报到。',
+        streakDay: Math.max(1, readNumber(userStatsData, 'consecutiveDays')),
+        createdAt: new Date().toISOString(),
+      }
+    : null
+
+  const messagesData: CheckInMessageItem[] =
+    previewData?.modules?.['checkin.publicMessages']?.ok
+      ? readCheckInMessages(previewData.modules['checkin.publicMessages'].data)
+      : []
+  const friendMessagesData: CheckInMessageItem[] =
+    previewData?.modules?.['checkin.friendMessages']?.ok
+      ? readCheckInMessages(previewData.modules['checkin.friendMessages'].data)
+      : []
+
+  rendererModules = createCheckInLayoutModules({
+    layoutConfig: previewConfig,
+    dailyQuote: readString(headerData, 'quote'),
+    activeUsers: readNumber(statsData, 'activeUsers'),
+    todayCount: readNumber(statsData, 'todayCount'),
+    consecutiveDays: readNumber(userStatsData, 'consecutiveDays'),
+    totalCheckIns: readNumber(statsData, 'totalCheckIns'),
+    moodIndex: 0,
+    todayCheckIn: previewTodayCheckIn,
+    selectedMessages: messagesData,
+    friendMessages: friendMessagesData,
+    selectedDateValue: todayValue,
+    todayValue,
+    sort: 'latest',
+    sessionUserId: '',
+    sessionUserRole: 'USER',
+    stats: {
+      level: readNumber(userStatsData, 'level', 1),
+      points: readNumber(userStatsData, 'points'),
+      exp: readNumber(userStatsData, 'exp'),
+      consecutiveDays: readNumber(userStatsData, 'consecutiveDays'),
+    },
+    previewMode: true,
+  })
+} else {
+  rendererModules = Object.fromEntries(
     previewConfig[device].map((item) => {
       const definition = findModule(layout.registry, item.key)
-      return [item.key, renderPreviewContent(item, definition, previewData?.modules?.[item.key] || null, device)]
+       return [
+         item.key,
+         () => renderPreviewContent(
+           item,
+           definition,
+           previewData?.modules?.[item.key] || null,
+           device,
+         ),
+      ]
     }),
   )
+}
   const pageMeta = pageLayoutPages[pageKey]
   const grid = selected?.grid[device]
   const deviceMeta = deviceOptions.find((item) => item.key === device)
@@ -427,6 +558,20 @@ export function LayoutEditorClient({
               <p className="mt-1 text-xs font-black text-slate-500">{selectedRevision ? `正在预览历史版本 v${selectedRevision.version}` : '拖动模块调整位置，拖拉边缘调整宽高'} · 正式页仍共用 PageLayoutRenderer</p>
             </div>
             <div className="flex gap-2">
+              {pageKey === 'checkin' ? (
+                <div className="flex rounded-full bg-white p-1 shadow-sm" aria-label="每日挂号状态预览">
+                  <button
+                    type="button"
+                    onClick={() => setCheckInPreviewState('pending')}
+                    className={`rounded-full px-3 py-1.5 text-xs font-black ${checkInPreviewState === 'pending' ? 'bg-brand-700 text-white' : 'text-brand-700'}`}
+                  >未挂号预览</button>
+                  <button
+                    type="button"
+                    onClick={() => setCheckInPreviewState('completed')}
+                    className={`rounded-full px-3 py-1.5 text-xs font-black ${checkInPreviewState === 'completed' ? 'bg-brand-700 text-white' : 'text-brand-700'}`}
+                  >已挂号预览</button>
+                </div>
+              ) : null}
               {selectedRevision ? <button onClick={() => setSelectedRevision(null)} className="rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">返回草稿预览</button> : null}
               <button onClick={() => updateDeviceItems((items) => compactItems(items, device))} className="rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">自动整理</button>
             </div>
@@ -442,6 +587,7 @@ export function LayoutEditorClient({
               readOnly={Boolean(selectedRevision)}
               onSelect={(key) => { setSelectedKey(key); setSelectedRevision(null) }}
               onChange={(items) => updateDeviceItems(() => items)}
+              onAutoHeightChange={updateAutoHeight}
             />
           </div>
         </section>

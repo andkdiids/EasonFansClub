@@ -33,6 +33,7 @@ export const pageLayoutPages: Record<PageLayoutPageKey, { name: string; descript
 export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
   defineLayoutModule('home', 'home.hero', '首页主视觉', '首页轮播与主要入口', 10, {
     desktop: grid(0, 0, 12, 5),
+    minH: 2,
     mobile: grid(0, 0, 4, 4),
     width: 'full',
     allowedWidths: ['full', 'wide'],
@@ -40,24 +41,28 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
   }),
   defineLayoutModule('home', 'home.announcement', '首页公告', '轻量公告提示', 20, {
     desktop: grid(0, 5, 12, 2),
+    minH: 2,
     mobile: grid(0, 4, 4, 2),
     supportsTitle: false,
     supportsSubtitle: false,
   }),
   defineLayoutModule('home', 'home.checkinSummary', '快捷入口', '挂号、广场、音乐快捷入口', 30, {
     desktop: grid(0, 7, 12, 3),
+    minH: 2,
     mobile: grid(0, 6, 4, 3),
     supportsTitle: false,
     supportsSubtitle: false,
   }),
   defineLayoutModule('home', 'home.featuredPosts', '精选帖子', '首页精选帖子列表', 40, {
     desktop: grid(0, 10, 12, 5),
+    minH: 2,
     mobile: grid(0, 9, 4, 5),
     required: true,
     layoutBehavior: 'auto',
   }),
   defineLayoutModule('home', 'home.dailyMessages', 'E友留言', '每日留言精选', 50, {
     desktop: grid(0, 15, 6, 4),
+    minH: 2,
     mobile: grid(0, 14, 4, 4),
     width: 'half',
     allowedWidths: cardWidths,
@@ -65,6 +70,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
   }),
   defineLayoutModule('home', 'home.music', 'EasMusic', '音乐推荐入口', 60, {
     desktop: grid(6, 15, 6, 4),
+    minH: 2,
     mobile: grid(0, 18, 4, 4),
     width: 'half',
     allowedWidths: cardWidths,
@@ -72,6 +78,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
   }),
   defineLayoutModule('home', 'home.culture', '活动与文化', '活动和文化内容入口', 70, {
     desktop: grid(0, 19, 6, 4),
+    minH: 2,
     mobile: grid(0, 22, 4, 4),
     width: 'half',
     allowedWidths: cardWidths,
@@ -79,6 +86,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
   }),
   defineLayoutModule('home', 'home.latestPosts', '最新动态', '预留的首页动态模块', 80, {
     desktop: grid(6, 19, 6, 4),
+    minH: 2,
     mobile: grid(0, 26, 4, 4),
     visible: false,
     width: 'half',
@@ -91,39 +99,27 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     supportsSubtitle: false,
   }),
 
-  defineLayoutModule('checkin', 'checkin.header', '挂号页头', '每日挂号标题、说明与北京时间', 10, {
-    desktop: grid(0, 0, 12, 3),
-    mobile: grid(0, 0, 4, 3),
-  }),
-  defineLayoutModule('checkin', 'checkin.stats', '挂号统计', '今日挂号、连续天数等统计', 20, {
-    desktop: grid(0, 3, 6, 4),
-    mobile: grid(0, 3, 4, 4),
-    supportsTitle: false,
-    supportsSubtitle: false,
-  }),
-  defineLayoutModule('checkin', 'checkin.today', '今日挂号', '签到按钮与今日心情', 30, {
-    desktop: grid(6, 3, 6, 4),
-    mobile: grid(0, 7, 4, 4),
+  defineLayoutModule('checkin', 'checkin.header', '每日挂号', '根据今日挂号状态显示挂号表单或完成结果', 10, {
+    desktop: grid(0, 0, 12, 8),
+    tablet: grid(0, 0, 8, 10),
+    mobile: grid(0, 0, 4, 12),
     required: true,
+    minH: 5,
   }),
-  defineLayoutModule('checkin', 'checkin.messages', 'E友留言', '每日留言列表', 40, {
-    desktop: grid(0, 7, 12, 6),
-    mobile: grid(0, 11, 4, 6),
+  defineLayoutModule('checkin', 'checkin.publicMessages', '公开挂号留言', '匿名展示所有用户每日挂号留言', 20, {
+    desktop: grid(0, 8, 6, 6),
+    tablet: grid(0, 8, 8, 6),
+    mobile: grid(0, 8, 4, 6),
     required: true,
+    minH: 4,
     layoutBehavior: 'auto',
   }),
-  defineLayoutModule('checkin', 'checkin.publicMessages', '公开挂号留言', '匿名展示所有用户每日挂号留言', 50, {
-    desktop: grid(0, 13, 6, 6),
-    tablet: grid(0, 13, 8, 6),
-    mobile: grid(0, 17, 4, 6),
-    visible: false,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('checkin', 'checkin.friendMessages', '好友挂号留言', '展示好友每日挂号留言和互动', 60, {
-    desktop: grid(6, 13, 6, 6),
-    tablet: grid(0, 19, 8, 6),
-    mobile: grid(0, 23, 4, 6),
-    visible: false,
+  defineLayoutModule('checkin', 'checkin.friendMessages', '好友挂号留言', '展示好友每日挂号留言和互动', 30, {
+    desktop: grid(6, 8, 6, 6),
+    tablet: grid(0, 14, 8, 6),
+    mobile: grid(0, 14, 4, 6),
+    required: true,
+    minH: 4,
     layoutBehavior: 'auto',
   }),
 
@@ -441,9 +437,29 @@ function defaultModuleConfig(moduleDefinition: PageLayoutModuleDefinition, devic
 
 export function getDefaultPageLayoutConfig(pageKey: PageLayoutPageKey): PageLayoutConfig {
   const modules = getPageLayoutRegistry(pageKey)
-  return {
+  const config = {
     desktop: modules.filter((item) => item.supportsDesktop).map((item) => defaultModuleConfig(item, 'desktop')),
     tablet: modules.filter((item) => item.supportsTablet).map((item) => defaultModuleConfig(item, 'tablet')),
     mobile: modules.filter((item) => item.supportsMobile).map((item) => defaultModuleConfig(item, 'mobile')),
   }
+  if (pageKey !== 'checkin') return config
+  return {
+    desktop: upgradeCheckInDefault(config.desktop, 'desktop'),
+    tablet: upgradeCheckInDefault(config.tablet, 'tablet'),
+    mobile: upgradeCheckInDefault(config.mobile, 'mobile'),
+  }
+}
+
+function upgradeCheckInDefault(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {
+  const header = items.find((item) => item.key === 'checkin.header')
+  const headerEnd = header ? header.grid[device].y + header.grid[device].h : 0
+  const publicMessages = items.find((item) => item.key === 'checkin.publicMessages')
+  const friendY = device === 'desktop'
+    ? headerEnd
+    : headerEnd + (publicMessages?.grid[device].h ?? 0)
+  return items.map((item) => {
+    if (item.key === 'checkin.publicMessages') return { ...item, grid: { ...item.grid, [device]: { ...item.grid[device], y: headerEnd } } }
+    if (item.key === 'checkin.friendMessages') return { ...item, grid: { ...item.grid, [device]: { ...item.grid[device], y: friendY } } }
+    return item
+  })
 }

@@ -96,7 +96,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
       })),
       moduleData(() => prisma.checkIn.findUnique({
         where: { userId_checkDate: { userId: user.id, checkDate: today } },
-        select: { mood: true, message: true, streakDay: true, points: true, exp: true },
+        select: { checkDate: true, mood: true, message: true, streakDay: true, points: true, exp: true, createdAt: true },
       })),
       moduleData(() => getCheckInMessages({
         selectedDate: today,
@@ -107,10 +107,16 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     ])
 
     return {
-      'checkin.header': { ok: true, data: { today: todayValue, quote: getDailyQuote(today) } },
-      'checkin.stats': stats,
-      'checkin.today': { ok: true, data: { userStats, todayCheckIn } },
-      'checkin.messages': messages,
+      'checkin.header': {
+        ok: true,
+        data: {
+          today: todayValue,
+          quote: getDailyQuote(today),
+          stats: stats.ok ? stats.data : null,
+          userStats: userStats.ok ? userStats.data : null,
+          todayCheckIn: todayCheckIn.ok ? todayCheckIn.data : null,
+        },
+      },
       'checkin.publicMessages': messages,
       'checkin.friendMessages': { ok: true, data: [] },
     }

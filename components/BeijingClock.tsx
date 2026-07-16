@@ -1,24 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatBeijingDateTime } from '@/lib/beijing-time'
 
 export function BeijingClock() {
   const [now, setNow] = useState('')
 
   useEffect(() => {
     function tick() {
-      setNow(
-        new Intl.DateTimeFormat('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-        }).format(new Date()),
-      )
+      setNow(formatBeijingDateTime())
     }
     tick()
     const timer = window.setInterval(tick, 1000)

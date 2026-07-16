@@ -86,12 +86,6 @@ function validateRawGrid(
   if (!Number.isSafeInteger(rawH) || rawH < 1 || rawH > 40) errors[`${device}.${key}.grid.h`] = `${device} 模块高度不在允许范围内`
 }
 
-function compactGrid(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {
-  return [...items]
-    .sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order)
-    .map((item, index) => ({ ...item, order: (index + 1) * 10 }))
-}
-
 function supportsDevice(moduleDefinition: { supportsDesktop: boolean; supportsTablet: boolean; supportsMobile: boolean }, device: PageLayoutDevice) {
   if (device === 'desktop') return moduleDefinition.supportsDesktop
   if (device === 'tablet') return moduleDefinition.supportsTablet
@@ -102,9 +96,13 @@ function isLegacySingleModule(pageKey: PageLayoutPageKey, key: string) {
   return (pageKey === 'forum' && key === 'forum.board') || (pageKey === 'announcement' && key === 'announcement.board')
 }
 
-function normalizeModuleKey(pageKey: PageLayoutPageKey, key: string) {
-  if (pageKey === 'checkin' && key === 'checkin.formOrMood') return 'checkin.today'
-  return key
+function isLegacyCheckInModule(pageKey: PageLayoutPageKey, key: string) {
+  return pageKey === 'checkin' && (
+    key === 'checkin.stats'
+    || key === 'checkin.today'
+    || key === 'checkin.formOrMood'
+    || key === 'checkin.messages'
+  )
 }
 
 function validateDeviceConfig(
@@ -119,6 +117,10 @@ function validateDeviceConfig(
   const errors: Record<string, string> = {}
   const seen = new Set<string>()
   const sanitized: PageLayoutModuleConfig[] = []
+  const hasLegacyToday = input.some((rawItem) => {
+    if (!isPlainObject(rawItem)) return false
+    return rawItem.key === 'checkin.today' || rawItem.key === 'checkin.formOrMood'
+  })
 
   input.forEach((rawItem, index) => {
     if (!isPlainObject(rawItem)) {
@@ -127,7 +129,8 @@ function validateDeviceConfig(
     }
 
     const rawKey = typeof rawItem.key === 'string' ? rawItem.key : ''
-    const key = normalizeModuleKey(pageKey, rawKey)
+    if (isLegacyCheckInModule(pageKey, rawKey)) return
+    const key = rawKey
     const definition = getPageLayoutModule(pageKey, key)
     if (!definition) {
       if (strict && !isLegacySingleModule(pageKey, rawKey)) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
@@ -235,7 +238,27 @@ function validateDeviceConfig(
   if (Object.keys(errors).length) throw new PageLayoutValidationError('页面布局配置不正确', errors)
 
   const missingDefaults = fallback.filter((item) => !seen.has(item.key))
-  return compactGrid([...sanitized, ...missingDefaults], device)
+  const merged = [...sanitized, ...missingDefaults]
+  if (pageKey !== 'checkin') return merged
+
+  const headerDefaultGrid = fallback.find((item) => item.key === 'checkin.header')?.grid[device]
+  const upgraded = hasLegacyToday
+    ? merged.map((item) => item.key === 'checkin.header'
+      ? {
+          ...item,
+          grid: {
+            ...item.grid,
+            [device]: {
+              ...item.grid[device],
+              x: 0,
+              w: columnsFor(device),
+              h: Math.max(item.grid[device].h, headerDefaultGrid?.h ?? 1),
+            },
+          },
+        }
+      : item)
+    : merged
+  return upgradeCheckInHeader(upgraded, device)
 }
 
 export function validatePageLayoutConfig(pageKey: PageLayoutPageKey, input: unknown): PageLayoutConfig {
@@ -253,9 +276,30 @@ export function repairPageLayoutConfig(pageKey: PageLayoutPageKey, input: unknow
   const defaults = getDefaultPageLayoutConfig(pageKey)
   if (!isPlainObject(input)) return defaults
 
-  return {
+  const repaired = {
     desktop: validateDeviceConfig(pageKey, 'desktop', input.desktop, defaults.desktop, false),
     tablet: validateDeviceConfig(pageKey, 'tablet', input.tablet, defaults.tablet, false),
     mobile: validateDeviceConfig(pageKey, 'mobile', input.mobile, defaults.mobile, false),
   }
+  if (pageKey !== 'checkin') return repaired
+
+  return {
+    desktop: upgradeCheckInHeader(repaired.desktop, 'desktop'),
+    tablet: upgradeCheckInHeader(repaired.tablet, 'tablet'),
+    mobile: upgradeCheckInHeader(repaired.mobile, 'mobile'),
+  }
+}
+
+function upgradeCheckInHeader(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {
+  const header = items.find((item) => item.key === 'checkin.header')
+  const headerEnd = header ? header.grid[device].y + header.grid[device].h : 0
+  const publicMessages = items.find((item) => item.key === 'checkin.publicMessages')
+  const friendY = device === 'desktop'
+    ? headerEnd
+    : headerEnd + (publicMessages?.grid[device].h ?? 0)
+  return items.map((item) => {
+    if (item.key === 'checkin.publicMessages') return { ...item, grid: { ...item.grid, [device]: { ...item.grid[device], y: headerEnd } } }
+    if (item.key === 'checkin.friendMessages') return { ...item, grid: { ...item.grid, [device]: { ...item.grid[device], y: friendY } } }
+    return item
+  })
 }

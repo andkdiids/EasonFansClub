@@ -6,6 +6,7 @@ import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
 import type { CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
+import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { getMood } from '@/lib/daily'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -14,16 +15,7 @@ type DailyComment = CheckInMessageItem['comments'][number]
 const messagesPerPage = 5
 
 function beijingDateTime(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(new Date(value))
+  return formatBeijingDateTime(value)
 }
 
 function isAdminRole(role: string) {
@@ -61,6 +53,7 @@ export function CheckInMessagesPanel({
   initialSort,
   sessionUserId,
   sessionUserRole,
+  previewMode = false,
 }: Readonly<{
   title?: string
   density?: PageLayoutModuleDensity
@@ -72,6 +65,7 @@ export function CheckInMessagesPanel({
   initialSort: CheckInMessageSort
   sessionUserId: string
   sessionUserRole: string
+  previewMode?: boolean
 }>) {
   const [date, setDate] = useState(initialDate)
   const [sort, setSort] = useState<CheckInMessageSort>(initialSort)
@@ -83,12 +77,13 @@ export function CheckInMessagesPanel({
   const [page, setPage] = useState(1)
   const isCompact = density !== 'normal'
   const isMinimal = density === 'minimal'
-  const totalPages = Math.max(1, Math.ceil(messages.length / messagesPerPage))
+  const previewPageSize = previewMode ? (isMinimal ? 1 : isCompact ? 2 : messagesPerPage) : messagesPerPage
+  const totalPages = Math.max(1, Math.ceil(messages.length / previewPageSize))
   const visibleMessages = useMemo(() => {
     const safePage = Math.min(Math.max(page, 1), totalPages)
-    const start = (safePage - 1) * messagesPerPage
-    return messages.slice(start, start + messagesPerPage)
-  }, [messages, page, totalPages])
+    const start = (safePage - 1) * previewPageSize
+    return messages.slice(start, start + previewPageSize)
+  }, [messages, page, previewPageSize, totalPages])
   const pageNumbers = useMemo(() => {
     const maxVisible = 5
     const start = Math.max(1, Math.min(page - 2, totalPages - maxVisible + 1))
@@ -169,6 +164,7 @@ export function CheckInMessagesPanel({
   }, [page, totalPages])
 
   useEffect(() => {
+    if (previewMode) return
     function handleCheckInCompleted(event: Event) {
       const detail = (event as CustomEvent<{ date?: string }>).detail
       const nextDate = detail?.date || maxDate
@@ -187,10 +183,10 @@ export function CheckInMessagesPanel({
       window.removeEventListener('checkin:completed', handleCheckInCompleted)
       window.removeEventListener('checkin:dayChanged', handleDayChanged)
     }
-  }, [loadMessages, maxDate, sort])
+  }, [loadMessages, maxDate, previewMode, sort])
 
   return (
-    <div className={`${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex min-h-0 flex-col overflow-visible rounded-[24px] border border-sky-100 bg-white/85 shadow-sm`}>
+    <div className={`${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex flex-col rounded-[24px] border border-sky-100 bg-white/85 shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{anonymous ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
@@ -209,6 +205,7 @@ export function CheckInMessagesPanel({
             value={date}
             max={maxDate}
             onChange={(event) => setDate(event.target.value)}
+            disabled={previewMode}
             className="rounded-full border border-sky-100 px-3 py-1.5 text-xs font-bold outline-none sm:text-sm"
           />
           <select
@@ -219,6 +216,7 @@ export function CheckInMessagesPanel({
               setSort(nextSort)
               loadMessages(date, nextSort)
             }}
+            disabled={previewMode}
             className="rounded-full border border-sky-100 px-3 py-1.5 text-xs font-bold outline-none sm:text-sm"
           >
             <option value="latest">最新</option>
@@ -226,7 +224,7 @@ export function CheckInMessagesPanel({
           </select>
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={previewMode || isLoading}
             className="rounded-full bg-brand-700 px-3 py-1.5 text-xs font-black text-white disabled:opacity-60 sm:text-sm"
           >
             {isLoading ? '加载中' : '查看'}
@@ -236,7 +234,7 @@ export function CheckInMessagesPanel({
 
       {error ? <p className="mt-3 shrink-0 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
 
-      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} min-h-0 overflow-visible`}>
+      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMood(item.mood)
           const name = item.user.profile?.displayName || item.user.nickname
@@ -282,7 +280,7 @@ export function CheckInMessagesPanel({
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
                   </div>
-                  <p className={isMinimal ? 'mt-0.5 line-clamp-1 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
+                  <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
                   {rootComments.length && !anonymous && !isMinimal ? (
                     <div className="mt-2 space-y-2 rounded-2xl bg-sky-50/70 p-2">
                       {rootComments.map((comment) => {
