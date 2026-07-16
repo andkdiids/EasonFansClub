@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { FormError } from '@/components/FormError'
 import type { RegistrationMode, RegistrationType } from '@/lib/registration'
 
@@ -23,6 +24,7 @@ type RegisterPolicy = {
   enableTurnstile: boolean
   turnstileSiteKey: string
   envForcedClosed: boolean
+  requireSecurityQuestionsForNewUsers: boolean
 }
 
 type RegisterErrors = Partial<{
@@ -35,6 +37,7 @@ type RegisterErrors = Partial<{
   turnstileToken: string
   registrationType: string
   form: string
+  securityQuestions: string
 }>
 
 const errorFieldOrder: (keyof RegisterErrors)[] = [
@@ -44,6 +47,7 @@ const errorFieldOrder: (keyof RegisterErrors)[] = [
   'email',
   'password',
   'confirmPassword',
+  'securityQuestions',
   'acceptedAgreement',
   'turnstileToken',
   'form',
@@ -63,14 +67,21 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     confirmPassword: '',
     nickname: '',
     acceptedAgreement: false,
+    securityQuestions: Array.from({ length: 3 }, () => ({ question: '', answer: '' })),
   })
   const [turnstileToken, setTurnstileToken] = useState('')
   const [errors, setErrors] = useState<RegisterErrors>({})
   const [message, setMessage] = useState('')
   const [devVerificationUrl, setDevVerificationUrl] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loginUrl, setLoginUrl] = useState('')
   const turnstileRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<string>('')
+  const requestControllerRef = useRef<AbortController | null>(null)
+  const redirectTimerRef = useRef<number | null>(null)
+  const idempotencyKeyRef = useRef('')
+  const submitLockedRef = useRef(false)
+  const mountedRef = useRef(true)
   const showTabs = policy.allowPhoneRegistration && policy.allowEmailRegistration
   const shouldRenderTurnstile = policy.enableTurnstile && policy.turnstileSiteKey && !policy.registrationClosed
 
@@ -102,8 +113,23 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     document.head.appendChild(script)
   }, [policy.turnstileSiteKey, shouldRenderTurnstile])
 
-  function updateField(field: keyof typeof form, value: string | boolean) {
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+      requestControllerRef.current?.abort()
+      if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current)
+    }
+  }, [])
+
+  function updateField(field: 'phone' | 'email' | 'password' | 'confirmPassword' | 'nickname' | 'acceptedAgreement', value: string | boolean) {
     setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateSecurityQuestion(index: number, field: 'question' | 'answer', value: string) {
+    setForm((current) => ({
+      ...current,
+      securityQuestions: current.securityQuestions.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item),
+    }))
   }
 
   function switchType(type: RegistrationType) {
@@ -156,6 +182,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
     if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
     if (!form.acceptedAgreement) nextErrors.acceptedAgreement = '请先勾选用户协议'
+    if (policy.requireSecurityQuestionsForNewUsers) {
+      const questions = form.securityQuestions.map((item) => item.question.trim().toLocaleLowerCase('zh-CN'))
+      if (form.securityQuestions.some((item) => !item.question.trim() || !item.answer.trim())) {
+        nextErrors.securityQuestions = '请完整填写三个密保问题和答案'
+      } else if (new Set(questions).size !== 3) {
+        nextErrors.securityQuestions = '三个密保问题不能相同'
+      }
+    }
     if (shouldRenderTurnstile && !turnstileToken) nextErrors.turnstileToken = '请先完成人机验证'
 
     return nextErrors
@@ -163,6 +197,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isSubmitting || submitLockedRef.current) return
     setErrors({})
     setMessage('')
     setDevVerificationUrl('')
@@ -175,6 +210,11 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
 
     setIsSubmitting(true)
+    submitLockedRef.current = true
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = window.crypto.randomUUID()
+    const account = registrationType === 'PHONE'
+      ? form.phone.trim().replace(/\s+/g, '')
+      : form.email.trim().toLowerCase()
     const payload = {
       registrationType,
       nickname: form.nickname,
@@ -182,33 +222,54 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       confirmPassword: form.confirmPassword,
       acceptedAgreement: form.acceptedAgreement,
       turnstileToken,
+      securityQuestions: form.securityQuestions,
       ...(registrationType === 'PHONE' ? { phone: form.phone } : { email: form.email }),
     }
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    const controller = new AbortController()
+    requestControllerRef.current = controller
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKeyRef.current },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: controller.signal,
+        body: JSON.stringify(payload),
+      })
 
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
-    window.turnstile?.reset(widgetIdRef.current)
-    setTurnstileToken('')
+      const data = await response.json().catch(() => ({}))
+      if (!mountedRef.current) return
+      window.turnstile?.reset(widgetIdRef.current)
+      setTurnstileToken('')
 
-    if (!response.ok) {
-      const retryAfter = typeof data.retryAfter === 'number' && data.retryAfter > 0 ? Math.ceil(data.retryAfter) : null
-      const formMessage = retryAfter
-        ? `${data.message || '请求失败'} 请在 ${retryAfter} 秒后重试。`
-        : data.message
-      const serverErrors = { form: formMessage, ...data.errors }
-      setErrors(serverErrors)
-      focusFirstError(serverErrors)
-      return
+      if (!response.ok) {
+        const retryAfter = typeof data.retryAfter === 'number' && data.retryAfter > 0 ? Math.ceil(data.retryAfter) : null
+        const formMessage = retryAfter
+          ? `${data.message || '请求失败'} 请在 ${retryAfter} 秒后重试。`
+          : data.message
+        const serverErrors = { form: formMessage, ...data.errors }
+        setErrors(serverErrors)
+        focusFirstError(serverErrors)
+        submitLockedRef.current = false
+        idempotencyKeyRef.current = ''
+        return
+      }
+
+      const nextLoginUrl = `/login?account=${encodeURIComponent(account)}`
+      setMessage('注册成功，请登录您的账号。')
+      setDevVerificationUrl('')
+      setLoginUrl(nextLoginUrl)
+      setForm({ phone: '', email: '', password: '', confirmPassword: '', nickname: '', acceptedAgreement: false, securityQuestions: Array.from({ length: 3 }, () => ({ question: '', answer: '' })) })
+      redirectTimerRef.current = window.setTimeout(() => window.location.assign(nextLoginUrl), 1000)
+    } catch (requestError) {
+      if (!mountedRef.current || (requestError instanceof Error && requestError.name === 'AbortError')) return
+      setErrors({ form: '网络连接失败，请稍后重试' })
+      submitLockedRef.current = false
+      idempotencyKeyRef.current = ''
+    } finally {
+      requestControllerRef.current = null
+      if (mountedRef.current) setIsSubmitting(false)
     }
-
-    setMessage(data.message || '注册成功')
-    setDevVerificationUrl(data.devVerificationUrl || '')
-    setForm({ phone: '', email: '', password: '', confirmPassword: '', nickname: '', acceptedAgreement: false })
   }
 
   if (policy.registrationClosed) {
@@ -273,6 +334,20 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         />
         <FormError message={errors.nickname} />
       </label>
+
+      {policy.requireSecurityQuestionsForNewUsers ? (
+        <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+          <legend className="px-2 text-sm font-black text-brand-950">设置密保问题</legend>
+          <p className="text-xs font-bold leading-6 text-amber-800">密保问题设置后不可修改，请妥善保存答案。</p>
+          {form.securityQuestions.map((item, index) => (
+            <div key={index} className="space-y-2 rounded-xl bg-white p-3">
+              <input value={item.question} onChange={(event) => updateSecurityQuestion(index, 'question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none focus:border-brand-500" placeholder={`密保问题 ${index + 1}`} />
+              <input value={item.answer} onChange={(event) => updateSecurityQuestion(index, 'answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none focus:border-brand-500" placeholder="答案" />
+            </div>
+          ))}
+          <FormError message={errors.securityQuestions} />
+        </fieldset>
+      ) : null}
 
       {registrationType === 'PHONE' ? (
         <label className="block">
@@ -347,7 +422,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       </label>
       <FormError message={errors.acceptedAgreement} />
 
-      {message ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{message}</p> : null}
+      {message ? <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm">{message}</p> : null}
+      {loginUrl ? <Link href={loginUrl} className="block rounded-xl border border-emerald-100 bg-white px-4 py-3 text-center text-sm font-black text-emerald-700">前往登录</Link> : null}
       {devVerificationUrl ? (
         <a className="block break-all rounded-xl bg-sky-50 px-4 py-3 text-xs font-bold text-brand-700" href={devVerificationUrl}>
           开发环境验证链接：{devVerificationUrl}

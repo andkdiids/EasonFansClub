@@ -71,6 +71,10 @@ async function main() {
     { key: 'site.englishName', value: 'Eason Fans Club', label: '英文名称' },
     { key: 'site.footer', value: '私家E院 · Eason Fans Club', label: '页脚' },
     { key: 'theme.mode', value: 'light', label: '默认主题' },
+    { key: 'security.requireQuestionsForNewUsers', value: 'true', label: '新用户必须设置密保问题' },
+    { key: 'security.notifyLegacyUsers', value: 'true', label: '通知历史用户设置密保问题' },
+    { key: 'security.enableQuestionRecovery', value: 'true', label: '启用密保问题找回' },
+    { key: 'security.enableEmailPasswordReset', value: 'false', label: '启用邮箱验证码重置密码' },
   ]
 
   for (const setting of settings) {

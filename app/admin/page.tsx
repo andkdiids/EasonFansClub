@@ -14,6 +14,7 @@ const adminModules = [
   { href: '/admin/dashboard', title: '数据面板', desc: '查看注册、发帖、回复、挂号等核心数据。' },
   { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
   { href: '/admin/settings', title: '网站设置', desc: '配置站点名称、SEO、页脚和联系方式。' },
+  { href: '/admin/security-settings', title: '账号安全设置', desc: '配置密保问题、历史用户通知与邮箱密码重置。' },
   { href: '/admin/content', title: '内容管理', desc: '管理首页模块、公告、板块、活动和友情链接。' },
   { href: '/admin/achievements', title: '成就 / 勋章', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
   { href: '/admin/culture', title: 'Eason 文化馆', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },

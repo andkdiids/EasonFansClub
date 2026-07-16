@@ -76,6 +76,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
                 <Link href="/notifications" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">通知中心</Link>
                 <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈中心</Link>
                 <Link href="/friends" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">我的好友</Link>
+                <Link href="/settings/security" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">账号安全</Link>
                 {isAdmin ? <Link href="/admin" className="block rounded-xl px-4 py-3 text-sm font-bold text-brand-700 hover:bg-sky-50">后台管理</Link> : null}
                 <form action="/api/auth/logout" method="post">
                   <button className="w-full rounded-xl px-4 py-3 text-left text-sm font-bold text-red-600 hover:bg-red-50">退出登录</button>

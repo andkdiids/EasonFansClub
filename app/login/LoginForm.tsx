@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { FormError } from '@/components/FormError'
+import Link from 'next/link'
 
 type LoginErrors = Partial<{
   identifier: string
@@ -17,15 +18,22 @@ function safeRedirectPath(path?: string) {
   return path
 }
 
-export function LoginForm({ redirectTo }: Readonly<{ redirectTo?: string }>) {
-  const [identifierType, setIdentifierType] = useState<IdentifierType>('phone')
+export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redirectTo?: string; initialAccount?: string }>) {
+  const normalizedInitialAccount = initialAccount.trim().slice(0, 254)
+  const [identifierType, setIdentifierType] = useState<IdentifierType>(normalizedInitialAccount.includes('@') ? 'email' : 'phone')
   const [errors, setErrors] = useState<LoginErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
+    if (normalizedInitialAccount) {
+      const initialType = normalizedInitialAccount.includes('@') ? 'email' : 'phone'
+      setIdentifierType(initialType)
+      window.localStorage.setItem('ecfc-login-type', initialType)
+      return
+    }
     const saved = window.localStorage.getItem('ecfc-login-type')
     if (saved === 'phone' || saved === 'email') setIdentifierType(saved)
-  }, [])
+  }, [normalizedInitialAccount])
 
   function chooseType(type: IdentifierType) {
     setIdentifierType(type)
@@ -116,11 +124,14 @@ export function LoginForm({ redirectTo }: Readonly<{ redirectTo?: string }>) {
           spellCheck={false}
           enterKeyHint="next"
           required
+          defaultValue={normalizedInitialAccount}
           className="mt-2 min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
           placeholder={identifierType === 'email' ? '请输入已验证邮箱' : '请输入已绑定手机号'}
         />
         <FormError message={errors.identifier} />
       </label>
+
+      <div className="text-right"><Link href="/forgot-password" className="text-sm font-black text-brand-700 hover:underline">忘记密码？</Link></div>
 
       <label className="block" htmlFor="login-password">
         <span className="text-sm font-bold text-slate-700">密码</span>

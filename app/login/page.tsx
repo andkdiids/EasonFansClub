@@ -6,7 +6,7 @@ import { LoginForm } from './LoginForm'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ redirect?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ redirect?: string; account?: string }> }) {
   const params = await searchParams
   const config = await getSiteAppearance()
 
@@ -25,7 +25,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </>
       }
     >
-      <LoginForm redirectTo={params.redirect} />
+      <LoginForm redirectTo={params.redirect} initialAccount={params.account} />
     </AuthFormShell>
   )
 }

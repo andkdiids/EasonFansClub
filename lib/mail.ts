@@ -103,3 +103,17 @@ export function verificationMailTemplate(verificationUrl: string, reason: 'regis
     note: '如果不是你本人操作，请忽略这封邮件。你的密码不会因此改变。',
   }
 }
+
+export async function sendPasswordResetCode(email: string, code: string): Promise<SendMailResult> {
+  return sendMail({
+    to: email,
+    subject: 'EasonFansClub 密码重置验证码',
+    template: {
+      title: '重置账号密码',
+      intro: `你的密码重置验证码是 ${code}，10 分钟内有效。验证码只能使用一次。`,
+      actionText: '返回密码重置页面',
+      actionUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/forgot-password`,
+      note: '请勿向任何人透露验证码。如果不是你本人操作，请忽略这封邮件。',
+    },
+  })
+}

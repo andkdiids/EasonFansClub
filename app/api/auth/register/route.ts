@@ -10,11 +10,13 @@ import {
 import { hashPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy, type RegistrationType } from '@/lib/registration'
-import { checkRateLimit, consumeRateLimit, getClientIp } from '@/lib/security'
+import { checkRateLimit, consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
 import { normalizeText } from '@/lib/validators'
+import { hashSecurityQuestions, parseSecurityQuestions, validateSecurityQuestions } from '@/lib/account-security'
+import { hashToken } from '@/lib/tokens'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 const registerRequestLimit = {
@@ -47,8 +49,26 @@ function parseRegistrationType(value: unknown): RegistrationType | null {
 }
 
 export async function POST(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
   try {
     const body = await request.json().catch(() => null)
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || ''
+    const idempotencyKeyHash = idempotencyKey.length >= 16 && idempotencyKey.length <= 128 ? hashToken(idempotencyKey) : null
+    if (idempotencyKeyHash) {
+      const replayUser = await prisma.user.findUnique({
+        where: { registrationIdempotencyKeyHash: idempotencyKeyHash },
+        select: { id: true, uid: true, username: true, nickname: true, role: true, email: true, phone: true },
+      })
+      if (replayUser) {
+        return NextResponse.json({
+          user: replayUser,
+          registrationType: replayUser.email ? 'EMAIL' : 'PHONE',
+          message: '注册成功，请登录您的账号。',
+          idempotentReplay: true,
+        }, { status: 200, headers: noStoreHeaders })
+      }
+    }
     const registrationType = parseRegistrationType(body?.registrationType)
     const policy = await getRegistrationPolicy()
     const clientIp = getClientIp(request)
@@ -86,6 +106,7 @@ export async function POST(request: Request) {
     const password = normalizeText(body?.password)
     const confirmPassword = normalizeText(body?.confirmPassword)
     const acceptedAgreement = Boolean(body?.acceptedAgreement)
+    const securityQuestions = parseSecurityQuestions(body?.securityQuestions)
 
     const errors: Record<string, string> = {}
     if (!nickname) errors.nickname = '请填写用户名/昵称'
@@ -103,6 +124,10 @@ export async function POST(request: Request) {
     if (!password || password.length < 8) errors.password = '密码至少需要 8 位'
     if (confirmPassword !== password) errors.confirmPassword = '两次输入的密码不一致'
     if (!acceptedAgreement) errors.acceptedAgreement = '请先勾选用户协议'
+    if (policy.requireSecurityQuestionsForNewUsers) {
+      const securityQuestionError = validateSecurityQuestions(securityQuestions)
+      if (securityQuestionError) errors.securityQuestions = securityQuestionError
+    }
     if (Object.keys(errors).length) {
       return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
     }
@@ -153,6 +178,9 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hashPassword(password)
+    const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
+      ? await hashSecurityQuestions(securityQuestions)
+      : []
     const successLimitExpiresAt = new Date(Date.now() + registerSuccessLimit.windowSeconds * 1000)
     const user = await prisma.$transaction(async (tx) => {
       const latest = await tx.user.findFirst({
@@ -174,6 +202,8 @@ export async function POST(request: Request) {
           passwordHash,
           status: 'ACTIVE',
           isDeleted: false,
+          securityQuestionRecoveryEnabled: hashedSecurityQuestions.length === 3,
+          registrationIdempotencyKeyHash: idempotencyKeyHash,
           profile: {
             create: {
               displayName: nickname,
@@ -188,6 +218,12 @@ export async function POST(request: Request) {
           role: true,
         },
       })
+
+      if (hashedSecurityQuestions.length) {
+        await tx.userSecurityQuestion.createMany({
+          data: hashedSecurityQuestions.map((item) => ({ ...item, userId: created.id })),
+        })
+      }
 
       await tx.pointLog.create({
         data: {
@@ -237,6 +273,21 @@ export async function POST(request: Request) {
       { status: 201, headers: noStoreHeaders },
     )
   } catch (error) {
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || ''
+    if (idempotencyKey.length >= 16 && idempotencyKey.length <= 128) {
+      const existing = await prisma.user.findUnique({
+        where: { registrationIdempotencyKeyHash: hashToken(idempotencyKey) },
+        select: { id: true, uid: true, username: true, nickname: true, role: true, email: true, phone: true },
+      }).catch(() => null)
+      if (existing) {
+        return NextResponse.json({
+          user: existing,
+          registrationType: existing.email ? 'EMAIL' : 'PHONE',
+          message: '注册成功，请登录您的账号。',
+          idempotentReplay: true,
+        }, { status: 200, headers: noStoreHeaders })
+      }
+    }
     console.error('[auth.register]', error)
     if (error instanceof Error && error.message === 'UID_LIMIT_REACHED') {
       return jsonError('成员 UID 已达到 5 位上限', 409, 'UID_LIMIT_REACHED', { form: '成员 UID 已达到 5 位上限' })

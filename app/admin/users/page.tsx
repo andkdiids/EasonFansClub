@@ -2,10 +2,11 @@ import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
 import { AdminUsersManager } from '@/components/AdminUsersManager'
 import { SiteHeader } from '@/components/SiteHeader'
-import { adminModulePermissions } from '@/lib/admin-permissions'
+import { adminModulePermissions, hasAdminPermission } from '@/lib/admin-permissions'
 
 export default async function AdminUsersPage() {
   const user = await requireAdminPage('/admin/users', adminModulePermissions['/admin/users'])
+  const canManageAccountSecurity = await hasAdminPermission(user, 'account_security_manage')
 
   return (
     <>
@@ -21,7 +22,7 @@ export default async function AdminUsersPage() {
             返回后台首页
           </Link>
         </section>
-        <AdminUsersManager />
+        <AdminUsersManager canManageAccountSecurity={canManageAccountSecurity} />
       </main>
     </>
   )

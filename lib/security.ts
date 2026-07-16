@@ -180,3 +180,20 @@ export function getClientIp(request: Request) {
     '127.0.0.1'
   )
 }
+
+export function hasValidRequestOrigin(request: Request) {
+  const fetchSite = request.headers.get('sec-fetch-site')
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'same-site' && fetchSite !== 'none') return false
+  const source = request.headers.get('origin') || request.headers.get('referer')
+  if (!source) return process.env.NODE_ENV !== 'production'
+  try {
+    return new URL(source).origin === new URL(request.url).origin
+  } catch {
+    return false
+  }
+}
+
+export function rejectInvalidRequestOrigin(request: Request) {
+  if (hasValidRequestOrigin(request)) return null
+  return NextResponse.json({ message: '请求来源校验失败，请刷新页面后重试' }, { status: 403 })
+}

@@ -19,6 +19,12 @@ type AdminUser = {
   points: number
   isDeleted: boolean
   createdAt: string
+  securityQuestionsSet: boolean
+  securityQuestionRecoveryEnabled: boolean
+  lastPasswordResetAt: string | null
+  securityQuestionFailureCount: number
+  securityQuestionLastFailedAt: string | null
+  securityQuestionLockedUntil: string | null
 }
 
 type DeletePreview = {
@@ -56,7 +62,7 @@ function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
-export function AdminUsersManager() {
+export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccountSecurity: boolean }) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -67,6 +73,7 @@ export function AdminUsersManager() {
   const [confirmUid, setConfirmUid] = useState('')
   const [deletePublicContent, setDeletePublicContent] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [securityBusyUserId, setSecurityBusyUserId] = useState<string | null>(null)
 
   async function loadUsers(search = query) {
     setLoading(true)
@@ -130,6 +137,37 @@ export function AdminUsersManager() {
     }
   }
 
+  async function updateSecurityRecovery(user: AdminUser) {
+    if (!canManageAccountSecurity || securityBusyUserId) return
+    const nextEnabled = !user.securityQuestionRecoveryEnabled
+    const confirmed = window.confirm(nextEnabled
+      ? '确认重新启用该用户的密保问题找回吗？'
+      : '确认停用该用户的密保问题找回吗？\n停用后，该用户将无法通过密保问题重置密码。')
+    if (!confirmed) return
+
+    setSecurityBusyUserId(user.id)
+    setError('')
+    setMessage('')
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/security-recovery`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ securityQuestionRecoveryEnabled: nextEnabled }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.message || '密保找回状态更新失败')
+      setUsers((current) => current.map((item) => item.id === user.id
+        ? { ...item, securityQuestionRecoveryEnabled: nextEnabled }
+        : item))
+      setMessage(data?.message || '密保找回状态已更新')
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : '密保找回状态更新失败')
+    } finally {
+      setSecurityBusyUserId(null)
+    }
+  }
+
   useEffect(() => {
     loadUsers('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -170,13 +208,14 @@ export function AdminUsersManager() {
       {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
 
       <div className="mt-5 overflow-x-auto">
-        <table className="min-w-[920px] w-full border-separate border-spacing-y-2 text-left text-sm">
+        <table className="min-w-[1240px] w-full border-separate border-spacing-y-2 text-left text-sm">
           <thead className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
             <tr>
               <th className="px-3 py-2">用户</th>
               <th className="px-3 py-2">联系方式</th>
               <th className="px-3 py-2">角色</th>
               <th className="px-3 py-2">状态</th>
+              <th className="px-3 py-2">密保</th>
               <th className="px-3 py-2">积分</th>
               <th className="px-3 py-2">注册时间</th>
               <th className="px-3 py-2 text-right">操作</th>
@@ -185,7 +224,7 @@ export function AdminUsersManager() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
+                <td colSpan={8} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
                   加载中...
                 </td>
               </tr>
@@ -211,11 +250,28 @@ export function AdminUsersManager() {
                   </td>
                   <td className="px-3 py-3 font-black text-brand-700">{user.role}</td>
                   <td className="px-3 py-3 font-black text-slate-600">{user.status}</td>
+                  <td className="px-3 py-3 text-slate-600">
+                    <p className={`font-black ${user.securityQuestionsSet ? 'text-emerald-700' : 'text-slate-500'}`}>密保问题：{user.securityQuestionsSet ? '已设置' : '未设置'}</p>
+                    <p className={`mt-1 text-xs font-black ${user.securityQuestionRecoveryEnabled ? 'text-emerald-700' : 'text-amber-700'}`}>密保找回：{user.securityQuestionRecoveryEnabled ? '已启用' : '已停用'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-400">邮箱：{user.email ? '已绑定' : '未绑定'} / {user.emailVerifiedAt ? '已验证' : '未验证'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-400">最近重置：{user.lastPasswordResetAt ? formatDate(user.lastPasswordResetAt) : '暂无'}</p>
+                    {user.securityQuestionFailureCount > 0 ? <p className="mt-1 text-xs font-bold text-amber-700">近期失败 {user.securityQuestionFailureCount} 次{user.securityQuestionLockedUntil ? `，锁定至 ${formatDate(user.securityQuestionLockedUntil)}` : ''}</p> : null}
+                  </td>
                   <td className="px-3 py-3 font-bold text-slate-600">
                     Lv.{user.level} / {user.points} 分
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-500">{formatDate(user.createdAt)}</td>
                   <td className="rounded-r-2xl px-3 py-3 text-right">
+                    {canManageAccountSecurity && user.role !== 'SUPER_ADMIN' ? (
+                      <button
+                        type="button"
+                        onClick={() => updateSecurityRecovery(user)}
+                        disabled={securityBusyUserId === user.id || (!user.securityQuestionRecoveryEnabled && !user.securityQuestionsSet)}
+                        className={`mb-2 min-h-10 rounded-full px-4 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 ${user.securityQuestionRecoveryEnabled ? 'border border-amber-200 bg-amber-50 text-amber-700' : 'bg-emerald-600 text-white'}`}
+                      >
+                        {securityBusyUserId === user.id ? '处理中...' : user.securityQuestionRecoveryEnabled ? '停用密保找回' : '启用密保找回'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => openDeleteModal(user)}
@@ -228,7 +284,7 @@ export function AdminUsersManager() {
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
+                <td colSpan={8} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
                   暂无用户。
                 </td>
               </tr>

@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { findCompleteUserByLoginIdentifier } from '@/lib/users'
 import { normalizeText } from '@/lib/validators'
+import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 
 const loginUserQueryTimeoutMs = 4500
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -96,6 +97,10 @@ export async function POST(request: Request) {
         3000,
       )
     }
+
+    await ensureSecurityQuestionNotification(user.id).catch((notificationError) => {
+      console.error('[auth.login.security-question-notification]', notificationError)
+    })
 
     const token = await createSessionToken(sessionUser)
     const response = NextResponse.json({ user: sessionUser }, { headers: noStoreHeaders })

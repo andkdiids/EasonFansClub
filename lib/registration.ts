@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { getAccountSecuritySettings } from '@/lib/account-security'
 
 export const registrationModes = ['PHONE', 'EMAIL', 'BOTH', 'CLOSED'] as const
 export type RegistrationMode = (typeof registrationModes)[number]
@@ -56,6 +57,7 @@ export async function getRegistrationPolicy() {
   const allowRegister = isRegisterEnvAllowed()
   const registrationMode = await getStoredRegistrationMode()
   const enableTurnstile = isTurnstileEnabled()
+  const securitySettings = await getAccountSecuritySettings()
   const allowPhoneRegistration = allowRegister && (registrationMode === 'PHONE' || registrationMode === 'BOTH')
   const allowEmailRegistration = allowRegister && (registrationMode === 'EMAIL' || registrationMode === 'BOTH')
   const registrationClosed = !allowRegister || registrationMode === 'CLOSED' || (!allowPhoneRegistration && !allowEmailRegistration)
@@ -70,6 +72,7 @@ export async function getRegistrationPolicy() {
     enableTurnstile,
     turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '',
     envForcedClosed: !allowRegister,
+    requireSecurityQuestionsForNewUsers: securitySettings.requireSecurityQuestionsForNewUsers,
   }
 }
 

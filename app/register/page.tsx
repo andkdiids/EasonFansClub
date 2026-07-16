@@ -36,6 +36,7 @@ export default async function RegisterPage() {
           enableTurnstile: policy.enableTurnstile,
           turnstileSiteKey: policy.turnstileSiteKey,
           envForcedClosed: policy.envForcedClosed,
+          requireSecurityQuestionsForNewUsers: policy.requireSecurityQuestionsForNewUsers,
         }}
       />
     </AuthFormShell>
