@@ -27,8 +27,15 @@ function excerpt(value: string | null | undefined, length = 180) {
   return value.length > length ? `${value.slice(0, length)}...` : value
 }
 
-export async function getHomePosts() {
-  return cachedHomeData('home.posts', getHomePostsUncached)
+export async function getHomePosts(userId?: string) {
+  const posts = await cachedHomeData('home.posts', getHomePostsUncached)
+  if (!userId || posts.length === 0) return posts.map((post) => ({ ...post, likedByMe: false }))
+  const liked = await prisma.like.findMany({
+    where: { userId, postId: { in: posts.map((post) => post.id) } },
+    select: { postId: true },
+  })
+  const likedIds = new Set(liked.map((item) => item.postId))
+  return posts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
 }
 
 async function getHomePostsUncached() {

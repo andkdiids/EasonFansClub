@@ -149,7 +149,6 @@ export function PageLayoutCanvasEditor({
   const configRef = useRef(config)
   const deviceRef = useRef(device)
   const onAutoHeightChangeRef = useRef(onAutoHeightChange)
-  const userHeightRef = useRef(new Map<string, number | undefined>())
   const contentPreferredHeightRef = useRef(new Map<string, number>())
   const autoAppliedHeightRef = useRef(new Map<string, number>())
   const pendingAutoHeightRef = useRef(new Map<string, { key: string; device: PageLayoutDevice; height: number }>())
@@ -167,25 +166,6 @@ export function PageLayoutCanvasEditor({
     tablet: toLayout(config.tablet, 'tablet', moduleDefinitions),
     mobile: toLayout(config.mobile, 'mobile', moduleDefinitions),
   }), [config, moduleDefinitions])
-
-  function getUserHeight(cacheKey: string) {
-    if (userHeightRef.current.has(cacheKey)) return userHeightRef.current.get(cacheKey)
-    const storedHeight = window.localStorage.getItem(`layout-editor:user-height:v2:${cacheKey}`)
-    const parsedHeight = storedHeight === null ? undefined : Number.parseInt(storedHeight, 10)
-    const userHeight = parsedHeight !== undefined && Number.isFinite(parsedHeight)
-      ? Math.max(1, Math.min(40, parsedHeight))
-      : undefined
-    userHeightRef.current.set(cacheKey, userHeight)
-    return userHeight
-  }
-
-  function setUserHeight(key: string, activeDevice: PageLayoutDevice, height: number) {
-    const definitionMinH = moduleDefinitions.find((definition) => definition.key === key)?.minH ?? 1
-    const cacheKey = getLayoutCacheKey(pageKey, activeDevice, key)
-    const userHeight = Math.max(definitionMinH, Math.min(40, height))
-    userHeightRef.current.set(cacheKey, userHeight)
-    window.localStorage.setItem(`layout-editor:user-height:v2:${cacheKey}`, String(userHeight))
-  }
 
   useEffect(() => {
     if (readOnly || typeof ResizeObserver === 'undefined') return
@@ -210,9 +190,8 @@ export function PageLayoutCanvasEditor({
         contentPreferredHeightRef.current.set(cacheKey, contentPreferredH)
         const currentH = item.grid[activeDevice].h
         const definitionMinH = moduleDefinitions.find((definition) => definition.key === key)?.minH ?? 1
-        const userH = getUserHeight(cacheKey)
         const preferredH = contentPreferredHeightRef.current.get(cacheKey) ?? contentPreferredH
-        const finalH = Math.max(definitionMinH, userH ?? preferredH)
+        const finalH = Math.max(definitionMinH, preferredH)
         const autoAppliedHeight = autoAppliedHeightRef.current.get(cacheKey)
         if (finalH === currentH) return
         if (applyingAutoHeights.has(cacheKey) && autoAppliedHeight === finalH) return
@@ -283,17 +262,14 @@ export function PageLayoutCanvasEditor({
         isDraggable={!readOnly}
         isResizable={!readOnly}
         isBounded
-        resizeHandles={['se', 'e', 's']}
+        resizeHandles={['e']}
         draggableCancel=".layout-editor-control, input, textarea, select, button, a"
         useCSSTransforms
         onDragStart={(_, oldItem) => { isUserInteractingRef.current = true; if (!readOnly && oldItem) onSelect(oldItem.i) }}
         onResizeStart={(_, oldItem) => { isUserInteractingRef.current = true; if (!readOnly && oldItem) onSelect(oldItem.i) }}
         onDragStop={(layout) => { isUserInteractingRef.current = false; applyUserLayout(layout) }}
-        onResizeStop={(layout, oldItem, newItem) => {
+        onResizeStop={(layout) => {
           isUserInteractingRef.current = false
-          if (oldItem && newItem && newItem.h !== oldItem.h) {
-            setUserHeight(newItem.i, device, newItem.h)
-          }
           applyUserLayout(layout)
         }}
       >

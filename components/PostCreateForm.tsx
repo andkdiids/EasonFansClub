@@ -4,12 +4,12 @@ import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiButton } from '@/components/EmojiPicker'
 
-type Board = { id: string; name: string }
+type Board = { id: string; name: string; slug: string }
 
-export function PostCreateForm({ boards }: Readonly<{ boards: Board[] }>) {
+export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: Board[]; initialBoardSlug?: string }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [boardId, setBoardId] = useState(boards[0]?.id || '')
+  const [boardId, setBoardId] = useState(boards.find((board) => board.slug === initialBoardSlug)?.id || boards[0]?.id || '')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})

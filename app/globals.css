@@ -197,7 +197,7 @@ svg {
 }
 
 .page-layout-rgl {
-  min-height: 420px;
+  min-height: 0;
   width: 100%;
 }
 
@@ -417,5 +417,18 @@ body.layout-inline-editing [data-layout-selected='true'] {
     height: 100% !important;
     min-height: 0 !important;
     overflow: visible;
+  }
+}
+
+@media (max-width: 767px) {
+  html[data-keyboard-open='true'] body {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  html[data-keyboard-open='true'] [data-mobile-main-nav] {
+    visibility: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(calc(100% + 2rem));
   }
 }

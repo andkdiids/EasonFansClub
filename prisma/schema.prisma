@@ -694,15 +694,16 @@ model PollVote {
 }
 
 model CheckIn {
-  id        String   @id @default(cuid())
-  checkDate DateTime
-  points    Int      @default(10)
-  exp       Int      @default(0)
-  streakDay Int      @default(1)
-  isMakeUp  Boolean  @default(false)
-  mood      String?
-  message   String?
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid())
+  checkDate      DateTime
+  checkinDateKey String
+  points         Int      @default(10)
+  exp            Int      @default(0)
+  streakDay      Int      @default(1)
+  isMakeUp       Boolean  @default(false)
+  mood           String?
+  message        String?
+  createdAt      DateTime @default(now())
 
   userId           String
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -710,6 +711,7 @@ model CheckIn {
   friendActivities FriendActivity[]
 
   @@unique([userId, checkDate])
+  @@unique([userId, checkinDateKey])
   @@index([checkDate])
   @@index([userId, createdAt])
 }
@@ -788,10 +790,13 @@ model ExperienceLog {
   type        ExperienceLogType
   description String
   createdAt   DateTime          @default(now())
+  sourceType  String?
+  sourceId    String?
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([sourceType, sourceId])
   @@index([userId, createdAt])
   @@index([type, createdAt])
 }
@@ -929,6 +934,7 @@ model PointLog {
   activityId String?
   badgeId    String?
 
+  @@unique([action, checkInId])
   @@index([userId, createdAt])
   @@index([action])
   @@index([postId])
@@ -1177,21 +1183,22 @@ model Report {
 }
 
 model Feedback {
-  id               String         @id @default(cuid())
-  type             FeedbackType
-  title            String
-  content          String
-  imageUrl         String?
-  contact          String?
-  status           FeedbackStatus @default(OPEN)
-  adminUnread      Boolean        @default(true)
-  userUnread       Boolean        @default(false)
-  lastReplyAt      DateTime?
-  lastUserReplyAt  DateTime?
-  lastAdminReplyAt DateTime?
-  closedAt         DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                 String         @id @default(cuid())
+  type               FeedbackType
+  title              String
+  content            String
+  imageUrl           String?
+  contact            String?
+  status             FeedbackStatus @default(OPEN)
+  adminUnread        Boolean        @default(true)
+  userUnread         Boolean        @default(false)
+  lastReplyAt        DateTime?
+  lastUserReplyAt    DateTime?
+  lastAdminReplyAt   DateTime?
+  closedAt           DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  idempotencyKeyHash String?        @unique
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
 import { requireUser } from '@/lib/security'
+import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
 
 export const runtime = 'nodejs'
 
-const maxFileSize = 8 * 1024 * 1024
 const allowedTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
@@ -35,8 +35,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '仅支持 JPG、PNG、WEBP 或 GIF 图片' }, { status: 400 })
   }
 
-  if (file.size > maxFileSize) {
-    return NextResponse.json({ message: '单张图片不能超过 8MB' }, { status: 400 })
+  if (!FEEDBACK_ALLOWED_IMAGE_TYPES.includes(file.type as typeof FEEDBACK_ALLOWED_IMAGE_TYPES[number])) {
+    return NextResponse.json({ message: '不支持的图片格式' }, { status: 400 })
+  }
+  if (file.size > FEEDBACK_MAX_FILE_SIZE) {
+    return NextResponse.json({ message: '单张图片不能超过 10MB' }, { status: 400 })
   }
 
   const objectPath = `feedback/${guard.user.id}/feedback-${crypto.randomUUID()}.${extension}`

@@ -16,6 +16,10 @@
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "lint": "eslint .",
     "test:account-security": "tsx --test tests/account-security.test.ts tests/account-recovery-permissions.test.ts",
+    "test:consistency": "tsx --test tests/forum-layout-feedback-checkin.test.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "checkin:recalculate": "tsx scripts/recalculate-checkin-stats.ts",
+    "checkin:audit-duplicates": "tsx scripts/audit-checkin-duplicates.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

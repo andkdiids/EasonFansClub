@@ -4,19 +4,20 @@ import {
   getHomeDailyMessages,
   getHomePosts,
   getHomeTracks,
-  homeCacheHeaders,
 } from '@/lib/home-data'
+import { getCurrentUser } from '@/lib/auth'
 
 export async function GET() {
   try {
+    const user = await getCurrentUser()
     const [posts, messages, activities, tracks] = await Promise.all([
-      getHomePosts(),
+      getHomePosts(user?.id),
       getHomeDailyMessages(),
       getHomeActivities(),
       getHomeTracks(),
     ])
 
-    return NextResponse.json({ posts, messages, activities, tracks }, { headers: homeCacheHeaders })
+    return NextResponse.json({ posts, messages, activities, tracks }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
   } catch (error) {
     console.error('[api/home] prisma module loading failed', {
       queries: [

@@ -87,6 +87,8 @@ export async function awardExperience(
     type: ExperienceLogType
     description: string
     now?: Date
+    sourceType?: string
+    sourceId?: string
   },
 ) {
   const requestedAmount = Math.max(0, Math.floor(input.amount || 0))
@@ -127,6 +129,8 @@ export async function awardExperience(
       amount,
       type: input.type,
       description: input.description,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
     },
   })
 

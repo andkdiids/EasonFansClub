@@ -120,6 +120,29 @@ export function CheckInButton({
     }
   }, [onStateChange, previewMode])
 
+  useEffect(() => {
+    if (previewMode) return
+    const refresh = async () => {
+      const response = await fetch('/api/checkin', { cache: 'no-store' }).catch(() => null)
+      const data = await response?.json().catch(() => null)
+      if (!response?.ok || !data) return
+      const nextCheckIn = data.todayCheckIn || null
+      const nextStats = {
+        level: data.level ?? stats.level,
+        points: data.points ?? stats.points,
+        exp: data.exp ?? stats.exp,
+        consecutiveDays: data.consecutiveDays ?? stats.consecutiveDays,
+      }
+      setTodayCheckIn(nextCheckIn)
+      setStats(nextStats)
+      onStateChange?.({ todayCheckIn: nextCheckIn, stats: nextStats, created: false, todayCount: data.todayCount, totalCheckIns: data.totalCheckIns })
+    }
+    const onStorage = (event: StorageEvent) => { if (event.key === 'checkin:last-updated') void refresh() }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('storage', onStorage)
+    return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', onStorage) }
+  }, [onStateChange, previewMode, stats.exp, stats.level, stats.points, stats.consecutiveDays])
+
   function insertEmoji(emoji: string) {
     const input = textareaRef.current
     const start = input?.selectionStart ?? note.length
@@ -189,6 +212,7 @@ export function CheckInButton({
           },
         }),
       )
+      window.localStorage.setItem('checkin:last-updated', `${data.checkDate}:${Date.now()}`)
     } catch {
       setError('挂号失败，请稍后重试')
     } finally {

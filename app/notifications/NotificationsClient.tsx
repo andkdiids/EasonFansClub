@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type MouseEvent } from 'react'
+import { getNotificationTarget } from '@/lib/notification-target'
 import type { UnifiedNotification } from '@/lib/notifications'
 
 type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'feedback' | 'system'
@@ -79,7 +80,20 @@ export function NotificationsClient({
     if (!response.ok) return
     setNotifications((current) => current.map((row) => row.id === item.id && row.source === item.source ? { ...row, isRead: true, readAt: new Date() } : row))
     setUnreadCount((count) => Math.max(count - 1, 0))
+    window.dispatchEvent(new Event('unread-summary:refresh'))
     router.refresh()
+  }
+
+  async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
+    event.preventDefault()
+    const target = getNotificationTarget(item)
+    try {
+      await markRead(item)
+    } catch (reason) {
+      if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
+    } finally {
+      router.push(target)
+    }
   }
 
   async function markAllRead() {
@@ -89,6 +103,7 @@ export function NotificationsClient({
     if (!response.ok) return
     setNotifications((current) => current.map((row) => ({ ...row, isRead: true, readAt: row.readAt || new Date() })))
     setUnreadCount(0)
+    window.dispatchEvent(new Event('unread-summary:refresh'))
     router.refresh()
   }
 
@@ -125,18 +140,10 @@ export function NotificationsClient({
       </article>
     )
 
-    if (item.targetUrl || item.link) {
-      return (
-        <Link key={`${item.source}:${item.id}`} href={item.targetUrl || item.link || '/notifications'} onClick={() => markRead(item)} className="block">
-          {content}
-        </Link>
-      )
-    }
-
     return (
-      <button key={`${item.source}:${item.id}`} type="button" onClick={() => markRead(item)} className="block w-full text-left" disabled={isUpdating}>
+      <Link key={`${item.source}:${item.id}`} href={getNotificationTarget(item)} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">
         {content}
-      </button>
+      </Link>
     )
   }
 

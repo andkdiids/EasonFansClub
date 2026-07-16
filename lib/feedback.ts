@@ -1,6 +1,11 @@
 import type { FeedbackStatus, FeedbackType, Prisma } from '@prisma/client'
 import { publicImageUrl } from '@/lib/images'
 
+export const FEEDBACK_DESCRIPTION_MIN_LENGTH = 10
+export const FEEDBACK_MAX_ATTACHMENTS = 5
+export const FEEDBACK_MAX_FILE_SIZE = 10 * 1024 * 1024
+export const FEEDBACK_ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const
+
 export const feedbackTypeLabels: Record<FeedbackType, string> = {
   BUG: '问题反馈',
   EXPERIENCE: '体验建议',

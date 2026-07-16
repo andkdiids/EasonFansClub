@@ -19,13 +19,16 @@ export async function POST(_request: Request, { params }: Params) {
 
     const existing = await tx.like.findUnique({ where: { postId_userId: { postId, userId: user.id } } })
     if (existing) {
-      return { isLiked: true, likeCount: post.likeCount }
+      const likeCount = await tx.like.count({ where: { postId } })
+      if (likeCount !== post.likeCount) await tx.post.update({ where: { id: postId }, data: { likeCount } })
+      return { isLiked: true, likeCount }
     }
 
     await tx.like.create({ data: { postId, userId: user.id } })
+    const likeCount = await tx.like.count({ where: { postId } })
     const updatedPost = await tx.post.update({
       where: { id: postId },
-      data: { likeCount: { increment: 1 } },
+      data: { likeCount },
       select: { likeCount: true },
     })
 
@@ -67,10 +70,8 @@ export async function DELETE(_request: Request, { params }: Params) {
     const post = await tx.post.findUnique({ where: { id: postId }, select: { likeCount: true } })
     if (!post) return null
 
-    const deleted = await tx.like.deleteMany({ where: { postId, userId: user.id } })
-    if (deleted.count === 0) return { isLiked: false, likeCount: Math.max(post.likeCount, 0) }
-
-    const nextCount = Math.max(post.likeCount - 1, 0)
+    await tx.like.deleteMany({ where: { postId, userId: user.id } })
+    const nextCount = await tx.like.count({ where: { postId } })
     const updatedPost = await tx.post.update({
       where: { id: postId },
       data: { likeCount: nextCount },

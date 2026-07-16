@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
-import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
+import { formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
@@ -34,6 +34,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const selectedDate = parseDate(params.date)
   const nextDate = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000)
   const today = startOfLocalDay()
+  const todayKey = getShanghaiDateKey(today)
   const sort: CheckInMessageSort = params.sort === 'hot' ? 'hot' : 'latest'
 
   const queryStart = Date.now()
@@ -51,11 +52,11 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
       0,
     ),
-    safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0),
+    safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),
     safeDb(
       'CheckIn.findUnique checkin.todayCheckIn',
       prisma.checkIn.findUnique({
-        where: { userId_checkDate: { userId: sessionUser.id, checkDate: today } },
+        where: { userId_checkinDateKey: { userId: sessionUser.id, checkinDateKey: todayKey } },
         select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
       }),
       null,
@@ -76,7 +77,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       'CheckIn.groupBy checkin.moodStats',
       prisma.checkIn.groupBy({
         by: ['mood'],
-        where: { checkDate: today, mood: { not: null } },
+        where: { checkinDateKey: todayKey, mood: { not: null } },
         _count: { mood: true },
       }),
       [],

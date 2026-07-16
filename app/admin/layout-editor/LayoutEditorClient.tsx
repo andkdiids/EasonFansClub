@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageLayoutCanvasEditor, type PageLayoutCanvasModules } from '@/components/page-layout/PageLayoutCanvasEditor'
+import { ForumHome } from '@/components/ForumHome'
 import { createCheckInLayoutModules, type TodayCheckInPayload } from '@/components/CheckInLayoutSurface'
 import type { CheckInMessageItem } from '@/lib/checkin-messages'
 import { pageLayoutPages } from '@/lib/page-layout/registry'
@@ -445,6 +446,8 @@ if (pageKey === 'checkin') {
     },
     previewMode: true,
   })
+} else if (pageKey === 'forum') {
+  rendererModules = { 'forum.main': () => <ForumHome previewMode /> }
 } else {
   rendererModules = Object.fromEntries(
     previewConfig[device].map((item) => {

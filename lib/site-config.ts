@@ -99,7 +99,7 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
   nav: [
     { label: '首页', href: '/', icon: '⌂', title: '首页', isVisible: true, sortOrder: 1 },
     { label: '每日挂号', href: '/checkin', icon: '+', title: '每日挂号', isVisible: true, sortOrder: 2 },
-    { label: 'E院广场', href: '/boards/announcements', icon: '□', title: 'E院广场', isVisible: true, sortOrder: 3 },
+    { label: 'E院广场', href: '/forum', icon: '□', title: 'E院广场', isVisible: true, sortOrder: 3 },
     { label: 'EasMusic', href: '/music', icon: '♪', title: 'EasMusic', isVisible: true, sortOrder: 4 },
     { label: '活动中心', href: '/activities', icon: '◇', title: '活动中心', isVisible: true, sortOrder: 5 },
     { label: '成就系统', href: '/achievements', icon: '◎', title: '成就系统', isVisible: true, sortOrder: 6 },
@@ -120,7 +120,7 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
       title: '在私家E院，和 E友一起待会儿。',
       subtitle: '帖子、留言、音乐，慢慢说。',
       buttonText: '进入广场',
-      href: '/boards/announcements',
+      href: '/forum',
       imageUrl: '',
       isVisible: true,
       sortOrder: 2,
@@ -135,8 +135,12 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
     text: { ...defaultSiteAppearance.text, ...(partial.text || {}) },
     colors: { ...defaultSiteAppearance.colors, ...(partial.colors || {}) },
     images: { ...defaultSiteAppearance.images, ...(partial.images || {}) },
-    nav: partial.nav?.length ? partial.nav : defaultSiteAppearance.nav,
-    heroSlides: partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides,
+    nav: (partial.nav?.length ? partial.nav : defaultSiteAppearance.nav).map((item) => (
+      item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
+    )),
+    heroSlides: (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => (
+      item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
+    )),
   }
 }
 

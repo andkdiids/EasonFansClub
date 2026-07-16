@@ -16,6 +16,7 @@ import {
   type PageLayoutModuleConfig,
   type PageLayoutPageKey,
 } from '@/lib/page-layout/types'
+import { isDeprecatedLayoutModule, normalizeLayoutItemHeight } from '@/lib/page-layout/normalize'
 
 export class PageLayoutValidationError extends Error {
   constructor(message: string, public readonly details: Record<string, string> = {}) {
@@ -92,19 +93,6 @@ function supportsDevice(moduleDefinition: { supportsDesktop: boolean; supportsTa
   return moduleDefinition.supportsMobile
 }
 
-function isLegacySingleModule(pageKey: PageLayoutPageKey, key: string) {
-  return (pageKey === 'forum' && key === 'forum.board') || (pageKey === 'announcement' && key === 'announcement.board')
-}
-
-function isLegacyCheckInModule(pageKey: PageLayoutPageKey, key: string) {
-  return pageKey === 'checkin' && (
-    key === 'checkin.stats'
-    || key === 'checkin.today'
-    || key === 'checkin.formOrMood'
-    || key === 'checkin.messages'
-  )
-}
-
 function validateDeviceConfig(
   pageKey: PageLayoutPageKey,
   device: PageLayoutDevice,
@@ -129,11 +117,11 @@ function validateDeviceConfig(
     }
 
     const rawKey = typeof rawItem.key === 'string' ? rawItem.key : ''
-    if (isLegacyCheckInModule(pageKey, rawKey)) return
+    if (isDeprecatedLayoutModule(pageKey, rawKey)) return
     const key = rawKey
     const definition = getPageLayoutModule(pageKey, key)
     if (!definition) {
-      if (strict && !isLegacySingleModule(pageKey, rawKey)) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
+      if (strict) errors[`${device}.${index}.key`] = '模块不存在或不属于当前页面'
       return
     }
     if (seen.has(key)) {
@@ -164,9 +152,14 @@ function validateDeviceConfig(
       : fallbackItem.density || 'normal'
     const title = cleanText(rawItem.title, 60)
     const subtitle = cleanText(rawItem.subtitle, 160)
-    const grid = isPlainObject(rawItem.grid) && rawItem.grid[device] !== undefined
+    const rawGrid = isPlainObject(rawItem.grid) && rawItem.grid[device] !== undefined
       ? normalizeGrid(rawItem.grid[device], fallbackItem.grid[device], columnsFor(device))
       : normalizeGrid(rawItem, fallbackItem.grid[device], columnsFor(device))
+    const grid = normalizeLayoutItemHeight(rawGrid, fallbackItem.grid[device], {
+      minH: definition.minH,
+      maxH: definition.maxH,
+      auto: definition.layoutBehavior === 'auto',
+    })
 
     if (strict && rawItem.width !== undefined && !definition.allowedWidths.includes(rawItem.width as LayoutWidth)) errors[`${device}.${key}.width`] = '宽度不在允许范围内'
     if (strict && rawItem.gapTop !== undefined && !definition.allowedSpacing.includes(rawItem.gapTop as LayoutSpacing)) errors[`${device}.${key}.gapTop`] = '上间距不在允许范围内'

@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, isAdminRole, sanitizeText } from '@/lib/security'
+import { filterSensitiveWords, sanitizeText } from '@/lib/security'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
     if (!board) {
       return NextResponse.json({ message: '板块不存在或已停用', errors: { boardId: '板块无效' } }, { status: 404 })
     }
-    if (board.slug === 'announcements' && !isAdminRole(user.role)) {
+    if (board.slug === 'announcements' && !await hasAdminPermission(user, 'post_manage')) {
       return NextResponse.json(
         { message: '只有管理员可以在公告区发布内容', errors: { boardId: '普通用户不能选择公告区' } },
         { status: 403 },

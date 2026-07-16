@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 import type { SystemNotificationType } from '@prisma/client'
+export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
@@ -58,6 +59,38 @@ export type UnifiedNotification = {
   read: boolean
   createdAt: Date
   readAt: Date | null
+}
+
+export type UnreadSummary = {
+  notifications: number
+  feedbackReplies: number
+  friendRequests: number
+  directMessages: number
+  total: number
+}
+
+export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
+  const now = new Date()
+  const [generalPersonal, system, feedbackReplies, friendRequests, directMessages] = await Promise.all([
+    prisma.notification.count({ where: {
+      recipientId: userId,
+      isRead: false,
+      type: { notIn: ['FRIEND_REQUEST', 'MESSAGE'] },
+      NOT: { link: { startsWith: '/feedback/' } },
+    } }),
+    prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), reads: { none: { userId } } } }),
+    prisma.feedback.count({ where: { userId, userUnread: true } }),
+    prisma.friendRequest.count({ where: { receiverId: userId, status: 'PENDING' } }),
+    prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'MESSAGE' } }),
+  ])
+  const notifications = generalPersonal + system
+  return {
+    notifications,
+    feedbackReplies,
+    friendRequests,
+    directMessages,
+    total: notifications + feedbackReplies + friendRequests + directMessages,
+  }
 }
 
 export async function getUnreadNotificationCount(userId: string) {

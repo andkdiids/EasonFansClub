@@ -1,7 +1,7 @@
 import { adminModulePermissions } from '@/lib/admin-permission-config'
 import { getAdminPermissionSet, isSuperAdmin } from '@/lib/admin-permissions'
 import type { SessionUser } from '@/lib/auth'
-import { formatBeijingDate, startOfLocalDay } from '@/lib/checkin'
+import { formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { getCheckInMessages } from '@/lib/checkin-messages'
 import { getDailyQuote } from '@/lib/daily'
 import {
@@ -40,7 +40,7 @@ function fallbackHeroSlides(config: SiteAppearanceConfig): SiteHeroSlide[] {
       title: config.text.homeTitle,
       subtitle: config.text.forumCopy,
       buttonText: config.text.homeSecondaryButton,
-      href: '/boards/announcements',
+      href: '/forum',
       imageUrl: config.images.logoUrl,
       isVisible: true,
       sortOrder: 2,
@@ -87,7 +87,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     const [stats, userStats, todayCheckIn, messages] = await Promise.all([
       moduleData(async () => ({
         activeUsers: await prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
-        todayCount: await prisma.checkIn.count({ where: { checkDate: today } }),
+        todayCount: await prisma.checkIn.count({ where: { checkinDateKey: getShanghaiDateKey(today) } }),
         totalCheckIns: await prisma.checkIn.count({ where: { userId: user.id } }),
       })),
       moduleData(() => prisma.user.findUnique({
@@ -95,7 +95,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
         select: { points: true, exp: true, level: true, consecutiveDays: true },
       })),
       moduleData(() => prisma.checkIn.findUnique({
-        where: { userId_checkDate: { userId: user.id, checkDate: today } },
+        where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: getShanghaiDateKey(today) } },
         select: { checkDate: true, mood: true, message: true, streakDay: true, points: true, exp: true, createdAt: true },
       })),
       moduleData(() => getCheckInMessages({
@@ -121,20 +121,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
       'checkin.friendMessages': { ok: true, data: [] },
     }
   },
-  forum: async () => ({
-    'forum.header': await moduleData(() => prisma.board.findFirst({
-      where: { slug: 'daily-chat', isActive: true },
-      select: { name: true, description: true, postCount: true },
-    })),
-    'forum.categoryNav': { ok: true, data: {} },
-    'forum.createPost': { ok: true, data: {} },
-    'forum.pinnedPosts': { ok: true, data: {} },
-    'forum.featuredPosts': { ok: true, data: {} },
-    'forum.latestPosts': { ok: true, data: {} },
-    'forum.hotPosts': { ok: true, data: {} },
-    'forum.sidebar': { ok: true, data: {} },
-    'forum.pagination': { ok: true, data: {} },
-  }),
+  forum: async () => ({ 'forum.main': { ok: true, data: {} } }),
   announcement: async () => ({
     'announcement.header': await moduleData(() => prisma.board.findFirst({
       where: { slug: 'announcements', isActive: true },
@@ -158,15 +145,13 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     'message.main': await moduleData(() => prisma.notification.count({ where: { recipientId: user.id, isRead: false } })),
   }),
   profile: async (user) => ({
-    'profile.intro': await moduleData(() => prisma.user.findUnique({
+    'profile.main': await moduleData(() => prisma.user.findUnique({
       where: { id: user.id },
       select: { nickname: true, uid: true, level: true, points: true },
     })),
-    'profile.stats': { ok: true, data: {} },
     'profile.calendar': { ok: true, data: {} },
     'profile.recentMessages': { ok: true, data: {} },
     'profile.wall': { ok: true, data: {} },
-    'profile.friendActivity': { ok: true, data: {} },
   }),
   'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)

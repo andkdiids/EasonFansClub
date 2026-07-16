@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { ProfileWall } from '@/components/ProfileWall'
@@ -8,7 +8,6 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { normalizeFriendPair } from '@/lib/friends'
-import { getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
@@ -25,6 +24,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (numericUid <= 0) notFound()
 
   const viewer = await getCurrentUser()
+  if (viewer?.uid === numericUid) redirect('/profile')
   console.log('[public-user:ssr] viewer', viewer ? 'session' : 'anonymous')
   console.log('[public-user:ssr] user-query:start')
   let user
@@ -43,16 +43,12 @@ export default async function PublicUserPage({ params }: PageProps) {
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
-        level: true,
-        exp: true,
-        experience: true,
         createdAt: true,
         profile: true,
         _count: {
           select: {
             posts: true,
             replies: true,
-            checkIns: true,
             friendshipsA: true,
             friendshipsB: true,
           },
@@ -66,7 +62,7 @@ export default async function PublicUserPage({ params }: PageProps) {
       feature: 'publicUser.profile',
       uid: numericUid,
       where: ['uid=params.uid', 'status=ACTIVE', 'isDeleted=false', 'profile is not null'],
-      includeCounts: ['posts', 'replies', 'checkIns', 'friendshipsA', 'friendshipsB'],
+      includeCounts: ['posts', 'replies', 'friendshipsA', 'friendshipsB'],
     }, error)
     throw error
   }
@@ -74,7 +70,7 @@ export default async function PublicUserPage({ params }: PageProps) {
 
   if (!user || !user.profile) notFound()
 
-  const isSelf = viewer?.id === user.id
+  const isSelf = false
   let friendship = null
   let pendingRequest: { senderId: string; receiverId: string } | null = null
 
@@ -115,7 +111,6 @@ export default async function PublicUserPage({ params }: PageProps) {
   const bio = user.profile.bio || user.bio || '这个成员还没有填写个人简介。'
   const friendCount = user._count.friendshipsA + user._count.friendshipsB
   const friendStatus = friendship ? 'FRIEND' : pendingRequest?.senderId === viewer?.id ? 'PENDING' : pendingRequest ? 'RECEIVED' : 'NONE'
-  const growth = await getGrowthSummary(user.experience || user.exp || 0)
 
   return (
     <>
@@ -124,11 +119,8 @@ export default async function PublicUserPage({ params }: PageProps) {
         <ProfileHeader
           displayName={name}
           uid={user.uid}
-          level={user.level}
-          levelName={growth.levelName}
-          experience={growth.experience}
-          nextRequiredExp={growth.nextRequiredExp}
-          progressPercent={growth.progressPercent}
+          level={1}
+          showGrowth={false}
           createdAt={user.createdAt}
           avatarUrl={avatar}
           backgroundUrl={background}
@@ -164,7 +156,6 @@ export default async function PublicUserPage({ params }: PageProps) {
               items={[
                 ['帖子', user._count.posts],
                 ['回复', user._count.replies],
-                ['挂号', user._count.checkIns],
                 ['好友', friendCount],
               ]}
             />

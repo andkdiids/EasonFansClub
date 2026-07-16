@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeSystemAnnouncement } from '@/components/HomeSystemAnnouncement'
 import { ModuleFallback } from '@/components/ModuleFallback'
+import { LikeButton } from '@/components/PostActions'
 import { PageLayoutRenderer, type PageLayoutRenderContext, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
 import { getMood } from '@/lib/daily'
 import type { PageLayoutConfig, PageLayoutModuleConfig } from '@/lib/page-layout/types'
@@ -29,6 +30,7 @@ type Post = {
   viewCount: number
   isPinned: boolean
   isFeatured: boolean
+  likedByMe: boolean
   board: { name: string; slug: string }
   author: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null }
 }
@@ -113,7 +115,7 @@ export function HomeLayoutSurface({
         <div className={`${isMinimal ? 'grid-cols-3 gap-2' : isCompact ? 'gap-3 md:grid-cols-3' : 'gap-4 md:grid-cols-3'} grid h-full min-h-0`}>
           {[
             [siteConfig.text.homePrimaryButton || '今日挂号', siteConfig.text.checkinCopy || '留下今天的心情', '/checkin'],
-            [siteConfig.text.homeSecondaryButton || '去E院广场看看', siteConfig.text.forumCopy || '帖子、留言、慢慢说。', '/boards/announcements'],
+            [siteConfig.text.homeSecondaryButton || '去E院广场看看', siteConfig.text.forumCopy || '帖子、留言、慢慢说。', '/forum'],
             ['EasMusic', siteConfig.text.musicCopy || '一首歌，也是一段故事。', '/music'],
           ].map(([title, copy, href]) => (
             <Link
@@ -144,18 +146,20 @@ export function HomeLayoutSurface({
               {posts.data.map((post) => {
                 const authorName = post.author.profile?.displayName || post.author.nickname
                 return (
-                  <article key={post.id} className="layout-card rounded-xl border border-sky-100 bg-white/82 shadow-sm">
-                    <div className="mb-3 flex flex-wrap gap-2">
+                  <article key={post.id} className="relative rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                    <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
+                    <div className="relative z-10 mb-2 flex w-fit flex-wrap gap-2">
                       {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Pinned</span> : null}
                       {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">Featured</span> : null}
-                      <Link href={`/boards/${post.board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
+                      <Link href={`/forum?board=${encodeURIComponent(post.board.slug)}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
                     </div>
-                    <Link href={`/posts/${post.id}`} className="text-xl font-black text-brand-950 hover:text-brand-700 sm:text-2xl">{post.title}</Link>
-                    <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-                    <p className="mt-4 text-xs font-bold text-slate-500">
+                    <h3 className="relative z-10 line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
+                    <p className="relative z-10 mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+                    <div className="relative z-10 mt-3 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
                       <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950">{authorName}</Link>
-                      {' '}回复 {post.replyCount} 赞 {post.likeCount} 浏览 {post.viewCount}
-                    </p>
+                      <span>回复 {post.replyCount}</span><span>浏览 {post.viewCount}</span>
+                      <LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} />
+                    </div>
                   </article>
                 )
               })}

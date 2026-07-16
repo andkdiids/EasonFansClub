@@ -1,8 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { FriendActivityPanel } from '@/components/FriendActivityPanel'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
-import { ProfileCheckInCalendar, ProfileDeferredModules, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
+import { ProfileCheckInCalendar, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { ProfileWall } from '@/components/ProfileWall'
 import { SiteHeader } from '@/components/SiteHeader'
@@ -119,37 +118,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           pageKey="profile"
           config={layoutConfig}
           modules={{
-            'profile.intro': (
-              <section className="h-full overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
-                <div className="grid h-full gap-4 px-5 py-5 sm:px-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                  <div>
-                    <h2 className="text-lg font-black text-slate-950">个人简介</h2>
-                    <p className="mt-3 text-sm leading-7 text-slate-600">{bio || '这个成员还没有填写个人简介。'}</p>
-                  </div>
-                  {renderProfileActions()}
-                </div>
-              </section>
-            ),
-            'profile.stats': (
-              <section className="h-full overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 p-5 shadow-sm sm:p-6">
-                <ProfileStatsGrid
-                  items={[
-                    ['等级', `Lv.${profile.level}`],
-                    ['积分', profile.points],
-                    ['经验', `${growth.experience} XP`],
-                    ['连续挂号', `${profile.consecutiveDays} 天`],
-                    ['累计挂号', `${profile._count.checkIns} 天`],
-                  ]}
-                />
-              </section>
-            ),
             'profile.calendar': <ProfileCheckInCalendar />,
             'profile.recentMessages': <ProfileRecentMessages />,
             'profile.wall': <ProfileWall receiverUid={profile.uid} />,
-            'profile.friendActivity': <FriendActivityPanel />,
             'profile.main': (
-              <section className="space-y-4">
-                <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
+              <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
                   <div className="grid gap-4 px-5 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center sm:px-6">
                     <div>
                       <h2 className="text-lg font-black text-slate-950">个人简介</h2>
@@ -168,8 +141,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
                       ]}
                     />
                   </div>
-                </section>
-                <ProfileDeferredModules />
               </section>
             ),
           }}

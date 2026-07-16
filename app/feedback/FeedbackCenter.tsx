@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { FeedbackImageUploader, type UploadedFeedbackAttachment } from '@/components/FeedbackImageUploader'
+import { FEEDBACK_DESCRIPTION_MIN_LENGTH } from '@/lib/feedback'
 
 type Attachment = { id?: string; url: string; mimeType?: string | null }
 type FeedbackReply = {
@@ -73,11 +75,16 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
   const [replying, setReplying] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState({ title: '', type: 'BUG', description: '', contact: '' })
   const [reply, setReply] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [replyAttachments, setReplyAttachments] = useState<Attachment[]>([])
+  const [attachments, setAttachments] = useState<UploadedFeedbackAttachment[]>([])
+  const [replyAttachments, setReplyAttachments] = useState<UploadedFeedbackAttachment[]>([])
+  const [uploadingCreate, setUploadingCreate] = useState(false)
+  const [uploadingReply, setUploadingReply] = useState(false)
+  const [uploadReset, setUploadReset] = useState(0)
+  const feedbackIdempotencyKey = useRef(crypto.randomUUID())
 
   const selected = useMemo(() => feedbacks.find((item) => item.id === selectedId), [feedbacks, selectedId])
 
@@ -117,6 +124,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
       const data = await requestJson(`/api/feedback/${id}`)
       setDetail(data.feedback)
       setFeedbacks((current) => current.map((item) => (item.id === id ? { ...item, ...data.feedback } : item)))
+      window.dispatchEvent(new Event('unread-summary:refresh'))
     } catch (err) {
       setError(err instanceof Error ? err.message : '反馈详情加载失败')
     }
@@ -131,40 +139,18 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
     }
   }
 
-  async function upload(event: ChangeEvent<HTMLInputElement>, target: 'create' | 'reply') {
-    const files = Array.from(event.target.files || []).slice(0, 5)
-    if (!files.length) return
-    setError('')
-
-    const current = target === 'create' ? attachments : replyAttachments
-    if (current.length + files.length > 5) {
-      setError('每条反馈最多上传 5 张图片')
-      event.target.value = ''
-      return
-    }
-
-    const uploaded: Attachment[] = []
-    for (const file of files) {
-      const body = new FormData()
-      body.append('file', file)
-      const data = await requestJson('/api/uploads/feedback-image', { method: 'POST', body })
-      uploaded.push({ url: data.url, mimeType: data.mimeType })
-    }
-
-    if (target === 'create') setAttachments((items) => [...items, ...uploaded])
-    else setReplyAttachments((items) => [...items, ...uploaded])
-    event.target.value = ''
-  }
-
   async function submitFeedback(event: FormEvent) {
     event.preventDefault()
-    if (submitting) return
+    if (submitting || uploadingCreate) return
+    setFieldErrors({})
     if (!form.title.trim()) {
+      setFieldErrors({ title: '请填写反馈标题' })
       setError('请填写反馈标题')
       return
     }
-    if (!form.description.trim() || form.description.trim().length < 8) {
-      setError('请填写更完整的反馈描述')
+    if (form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH) {
+      setFieldErrors({ description: `反馈描述至少需要 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字` })
+      setError(`反馈描述至少需要 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字`)
       return
     }
     setSubmitting(true)
@@ -173,7 +159,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
     try {
       const data = await requestJson('/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': feedbackIdempotencyKey.current },
         body: JSON.stringify({ ...form, attachments }),
       })
       setFeedbacks((items) => [data.feedback, ...items])
@@ -181,6 +167,8 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
       setDetail(data.feedback)
       setForm({ title: '', type: 'BUG', description: '', contact: '' })
       setAttachments([])
+      setUploadReset((value) => value + 1)
+      feedbackIdempotencyKey.current = crypto.randomUUID()
       setMessage('反馈已提交')
       router.replace(`/feedback/${data.feedback.id}`)
     } catch (err) {
@@ -192,7 +180,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
 
   async function submitReply(event: FormEvent) {
     event.preventDefault()
-    if (!detail || replying) return
+    if (!detail || replying || uploadingReply) return
     setReplying(true)
     setError('')
     setMessage('')
@@ -206,6 +194,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
       setFeedbacks((items) => items.map((item) => (item.id === data.feedback.id ? { ...item, ...data.feedback } : item)))
       setReply('')
       setReplyAttachments([])
+      setUploadReset((value) => value + 1)
       setMessage('回复已发送')
     } catch (err) {
       setError(err instanceof Error ? err.message : '回复失败')
@@ -235,17 +224,16 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
             <form id="feedback-create-form" onSubmit={submitFeedback} className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
               <h2 className="text-xl font-black text-brand-950">新建反馈</h2>
               <input value={form.title} maxLength={80} required onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-4 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="标题" />
+              {fieldErrors.title ? <p className="mt-1 text-xs font-bold text-red-600">{fieldErrors.title}</p> : null}
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
                 {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
               <textarea value={form.description} maxLength={3000} required onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-3 min-h-32 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="详细描述" />
+              <p className={`mt-1 text-xs font-bold ${form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH ? 'text-orange-600' : 'text-emerald-600'}`}>已输入 {form.description.trim().length} / 最少 {FEEDBACK_DESCRIPTION_MIN_LENGTH} 字</p>
+              {fieldErrors.description ? <p className="mt-1 text-xs font-bold text-red-600">{fieldErrors.description}</p> : null}
               <input value={form.contact} maxLength={120} onChange={(e) => setForm({ ...form, contact: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="联系方式（选填，仅本人和管理员可见）" />
-              <label className="mt-3 inline-block cursor-pointer rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
-                上传图片
-                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => upload(event, 'create')} className="hidden" />
-              </label>
-              {attachments.length ? <p className="mt-2 text-xs font-bold text-slate-500">已上传 {attachments.length} 张图片</p> : null}
-              <button disabled={submitting} className="mt-4 w-full rounded-full bg-brand-950 px-4 py-3 text-sm font-black text-white disabled:opacity-60">{submitting ? '提交中...' : '提交反馈'}</button>
+              <div className="mt-3"><FeedbackImageUploader key={`create-${uploadReset}`} onChange={setAttachments} onBusyChange={setUploadingCreate} /></div>
+              <button disabled={submitting || uploadingCreate || !form.title.trim() || form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH} className="mt-4 w-full rounded-full bg-brand-950 px-4 py-3 text-sm font-black text-white disabled:opacity-60">{submitting ? '提交中...' : uploadingCreate ? '请等待图片上传完成' : '提交反馈'}</button>
             </form>
 
             <div className="rounded-[24px] border border-sky-100 bg-white/88 p-3 shadow-sm">
@@ -275,7 +263,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
 
           <div className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
             {detail || selected ? (
-              <FeedbackThread detail={detail || selected!} reply={reply} setReply={setReply} replyAttachments={replyAttachments} upload={upload} submitReply={submitReply} replying={replying} />
+              <FeedbackThread detail={detail || selected!} reply={reply} setReply={setReply} setReplyAttachments={setReplyAttachments} setUploadingReply={setUploadingReply} uploadReset={uploadReset} submitReply={submitReply} replying={replying} uploadingReply={uploadingReply} />
             ) : (
               <div className="grid min-h-80 place-items-center text-sm font-bold text-slate-500">选择一条反馈查看详情</div>
             )}
@@ -306,18 +294,22 @@ function FeedbackThread({
   detail,
   reply,
   setReply,
-  replyAttachments,
-  upload,
+  setReplyAttachments,
+  setUploadingReply,
+  uploadReset,
   submitReply,
   replying,
+  uploadingReply,
 }: {
   detail: FeedbackItem
   reply: string
   setReply: (value: string) => void
-  replyAttachments: Attachment[]
-  upload: (event: ChangeEvent<HTMLInputElement>, target: 'create' | 'reply') => Promise<void>
+  setReplyAttachments: (attachments: UploadedFeedbackAttachment[]) => void
+  setUploadingReply: (busy: boolean) => void
+  uploadReset: number
   submitReply: (event: FormEvent) => Promise<void>
   replying: boolean
+  uploadingReply: boolean
 }) {
   const isClosed = detail.status === 'RESOLVED' || detail.status === 'CLOSED'
   return (
@@ -351,14 +343,8 @@ function FeedbackThread({
       {!isClosed ? (
         <form onSubmit={submitReply} className="space-y-3">
           <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="继续补充说明或回复管理员" />
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="cursor-pointer rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
-              上传图片
-              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => upload(event, 'reply')} className="hidden" />
-            </label>
-            {replyAttachments.length ? <span className="text-xs font-bold text-slate-500">已上传 {replyAttachments.length} 张图片</span> : null}
-            <button disabled={replying} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : '发送回复'}</button>
-          </div>
+          <FeedbackImageUploader key={`reply-${uploadReset}-${detail.id}`} onChange={setReplyAttachments} onBusyChange={setUploadingReply} />
+          <button disabled={replying || uploadingReply || !reply.trim()} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : uploadingReply ? '请等待图片上传完成' : '发送回复'}</button>
         </form>
       ) : (
         <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-black text-slate-500">该反馈已完成，不能继续追加。如需继续沟通，请提交新的反馈。</p>

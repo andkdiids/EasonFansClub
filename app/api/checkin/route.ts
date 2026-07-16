@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { formatBeijingDate, isSameLocalDay, startOfLocalDay, startOfYesterday } from '@/lib/checkin'
+import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
@@ -17,7 +18,8 @@ export async function GET() {
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
 
   const today = startOfLocalDay()
-  const [profile, todayCheckIn, todayCount, moodStats, totalCheckIns] = await Promise.all([
+  const todayKey = getShanghaiDateKey()
+  const [profile, todayCheckIn, todayCount, moodStats, history] = await Promise.all([
     safeDb(
       'User.findUnique checkinApi.profile',
       prisma.user.findUnique({
@@ -29,31 +31,35 @@ export async function GET() {
     safeDb(
       'CheckIn.findUnique checkinApi.todayCheckIn',
       prisma.checkIn.findUnique({
-        where: { userId_checkDate: { userId: user.id, checkDate: today } },
+        where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
         select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
       }),
       null,
     ),
-    safeDb('CheckIn.count checkinApi.todayCount', prisma.checkIn.count({ where: { checkDate: today } }), 0),
+    safeDb('CheckIn.count checkinApi.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),
     safeDb(
       'CheckIn.groupBy checkinApi.moodStats',
       prisma.checkIn.groupBy({
         by: ['mood'],
-        where: { checkDate: today, mood: { not: null } },
+        where: { checkinDateKey: todayKey, mood: { not: null } },
         _count: { mood: true },
       }),
       [],
     ),
-    safeDb('CheckIn.count checkinApi.totalCheckIns', prisma.checkIn.count({ where: { userId: user.id } }), 0),
+    safeDb('CheckIn.findMany checkinApi.history', prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }), []),
   ])
 
   if (!profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
+  const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
   return NextResponse.json({
     checkedToday: Boolean(todayCheckIn),
     todayCheckIn,
-    consecutiveDays: profile.consecutiveDays,
-    totalCheckIns,
+    consecutiveDays: streaks.currentStreak,
+    currentStreak: streaks.currentStreak,
+    longestStreak: streaks.longestStreak,
+    totalCheckIns: streaks.totalDays,
+    totalDays: streaks.totalDays,
     points: profile.points,
     exp: profile.exp,
     experience: profile.experience,
@@ -81,11 +87,11 @@ export async function POST(request: Request) {
   }
 
   const today = startOfLocalDay()
-  const yesterday = startOfYesterday()
+  const todayKey = getShanghaiDateKey()
 
   const existingStart = Date.now()
   const existing = await prisma.checkIn.findUnique({
-    where: { userId_checkDate: { userId: user.id, checkDate: today } },
+    where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
     select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
   })
   logPerf('checkin.existing.ms', existingStart, { userId: user.id })
@@ -112,38 +118,45 @@ export async function POST(request: Request) {
   }
 
   const transactionStart = Date.now()
-  const result = await prisma.$transaction(async (tx) => {
+  let result
+  try {
+    result = await prisma.$transaction(async (tx) => {
     const currentUser = await tx.user.findUniqueOrThrow({
       where: { id: user.id },
-      select: { points: true, consecutiveDays: true, lastCheckInDate: true },
+      select: { points: true },
     })
-
-    const nextStreak = isSameLocalDay(currentUser.lastCheckInDate, yesterday)
-      ? currentUser.consecutiveDays + 1
-      : 1
+    const history = await tx.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } })
+    const nextStreak = calculateCheckinStreaks(history.map((item) => item.checkinDateKey)).currentStreak + 1
     const bonus = getStreakBonus(nextStreak)
     const gainedPoints = CHECK_IN_POINTS + (bonus?.points || 0)
     const requestedExp = getRandomCheckInExperience()
     const nextPoints = currentUser.points + gainedPoints
 
+    const createdCheckIn = await tx.checkIn.create({
+      data: {
+        userId: user.id,
+        checkDate: today,
+        checkinDateKey: todayKey,
+        points: gainedPoints,
+        exp: 0,
+        streakDay: nextStreak,
+        mood: mood.key,
+        message: message || null,
+      },
+      select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+    })
     const expAward = await awardExperience(tx, {
       userId: user.id,
       amount: requestedExp,
       type: 'CHECKIN',
       description: '每日挂号',
+      sourceType: 'DAILY_CHECKIN',
+      sourceId: createdCheckIn.id,
     })
     const gainedExp = expAward.amount
-
-    const checkIn = await tx.checkIn.create({
-      data: {
-        userId: user.id,
-        checkDate: today,
-        points: gainedPoints,
-        exp: gainedExp,
-        streakDay: nextStreak,
-        mood: mood.key,
-        message: message || null,
-      },
+    const checkIn = await tx.checkIn.update({
+      where: { id: createdCheckIn.id },
+      data: { exp: gainedExp },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
     })
 
@@ -195,7 +208,22 @@ export async function POST(request: Request) {
     })
 
     return { user: updatedUser, checkIn, gainedPoints, gainedExp, requestedExp, bonus, dailyMessageId }
-  })
+    })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const [todayCheckIn, profile] = await Promise.all([
+        prisma.checkIn.findUnique({ where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } } }),
+        prisma.user.findUnique({ where: { id: user.id }, select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true } }),
+      ])
+      return NextResponse.json({
+        message: '今日已挂号', checkedToday: true, checkDate: todayKey, todayCheckIn,
+        consecutiveDays: profile?.consecutiveDays ?? todayCheckIn?.streakDay ?? 0,
+        points: profile?.points ?? 0, exp: profile?.exp ?? 0, experience: profile?.experience ?? 0,
+        level: profile?.level ?? 1, gainedPoints: 0, gainedExp: 0, created: false,
+      })
+    }
+    throw error
+  }
   logPerf('checkin.transaction.ms', transactionStart, { userId: user.id })
 
   const afterStart = Date.now()

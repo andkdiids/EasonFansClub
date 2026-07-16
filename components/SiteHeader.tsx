@@ -4,9 +4,9 @@ import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
 import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
-import { SafeAvatar } from '@/components/SafeAvatar'
 import { publicImageUrl } from '@/lib/images'
-import { getUnreadNotificationCount } from '@/lib/notifications'
+import { getUnreadSummary } from '@/lib/notifications'
+import { UserNotificationMenu } from '@/components/UserNotificationMenu'
 import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
 
 type SiteHeaderProps = {
@@ -24,7 +24,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
     providedUser !== undefined ? Promise.resolve(providedUser) : getCurrentUser(),
     providedConfig ? Promise.resolve(providedConfig) : measureBootstrap('site.appearance', getSiteAppearance()),
   ])
-  const unreadCount = user ? await measureBootstrap('header.notifications.unread', getUnreadNotificationCount(user.id)).catch(() => 0) : 0
+  const unreadSummary = user ? await measureBootstrap('header.notifications.unread', getUnreadSummary(user.id)).catch(() => ({ notifications: 0, feedbackReplies: 0, friendRequests: 0, directMessages: 0, total: 0 })) : null
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
   const displayName = user?.nickname || ''
@@ -61,28 +61,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
           </nav>
 
           {user ? (
-            <details className="relative shrink-0">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
-                <span className="relative">
-                  <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                    <SafeAvatar src={user.avatarUrl} name={displayName} className="h-full w-full" />
-                  </span>
-                  {unreadCount > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
-                </span>
-                <span className="hidden max-w-28 truncate text-sm font-black text-brand-950 sm:block">{displayName}</span>
-              </summary>
-              <div className="absolute right-0 mt-3 w-56 rounded-2xl border border-sky-100 bg-white p-2 shadow-xl shadow-sky-900/10">
-                <Link href="/profile" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">个人主页</Link>
-                <Link href="/notifications" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">通知中心</Link>
-                <Link href="/feedback" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">反馈中心</Link>
-                <Link href="/friends" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">我的好友</Link>
-                <Link href="/settings/security" className="block rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50">账号安全</Link>
-                {isAdmin ? <Link href="/admin" className="block rounded-xl px-4 py-3 text-sm font-bold text-brand-700 hover:bg-sky-50">后台管理</Link> : null}
-                <form action="/api/auth/logout" method="post">
-                  <button className="w-full rounded-xl px-4 py-3 text-left text-sm font-bold text-red-600 hover:bg-red-50">退出登录</button>
-                </form>
-              </div>
-            </details>
+            <UserNotificationMenu displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={isAdmin} initialSummary={unreadSummary!} />
           ) : (
             <div className="flex shrink-0 items-center gap-2">
               <Link href="/login" className="rounded-full px-3 py-2 text-sm font-black text-slate-700 hover:bg-sky-50">登录</Link>
@@ -92,7 +71,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
         </div>
       </header>
 
-      <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 gap-1 rounded-[24px] border border-sky-100 bg-white/92 p-2 shadow-2xl shadow-sky-900/10 backdrop-blur-xl md:hidden">
+      <nav data-mobile-main-nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 gap-1 rounded-[24px] border border-sky-100 bg-white/92 p-2 shadow-2xl shadow-sky-900/10 backdrop-blur-xl transition md:hidden">
         {mobileNav.map((item) => (
           <Link key={item.href} href={item.href} title={item.title || item.label} className="flex min-h-12 flex-col items-center justify-center rounded-2xl text-brand-950 hover:bg-sky-50">
             <span className="text-lg" aria-hidden>{item.icon}</span>

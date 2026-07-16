@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { startOfLocalDay } from '@/lib/checkin'
+import { calculateCheckinStreaks, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { DAILY_MOODS, calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
   const user = await getCurrentUser()
   const today = startOfLocalDay()
+  const todayKey = getShanghaiDateKey(today)
 
-  const [todayCount, onlineCount, moodStats, tasks, progress, totalCheckIns] = await Promise.all([
-    prisma.checkIn.count({ where: { checkDate: today } }),
+  const [todayCount, onlineCount, moodStats, tasks, progress, history] = await Promise.all([
+    prisma.checkIn.count({ where: { checkinDateKey: todayKey } }),
     prisma.user.count({ where: { isOnline: true, isDeleted: false } }),
     prisma.checkIn.groupBy({
       by: ['mood'],
-      where: { checkDate: today, mood: { not: null } },
+      where: { checkinDateKey: todayKey, mood: { not: null } },
       _count: { mood: true },
     }),
     prisma.dailyTaskTemplate.findMany({
@@ -27,12 +28,13 @@ export async function GET() {
         })
       : Promise.resolve([]),
     user
-      ? prisma.checkIn.count({ where: { userId: user.id } })
-      : Promise.resolve(0),
+      ? prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } })
+      : Promise.resolve([]),
   ])
 
   const progressMap = new Map(progress.map((item) => [item.templateId, item]))
   const moodMap = new Map(moodStats.map((item) => [item.mood, item._count.mood]))
+  const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
 
   return NextResponse.json({
     date: today,
@@ -45,7 +47,9 @@ export async function GET() {
     quote: getDailyQuote(today),
     todayCount,
     onlineCount,
-    totalCheckIns,
+    totalCheckIns: streaks.totalDays,
+    currentStreak: streaks.currentStreak,
+    longestStreak: streaks.longestStreak,
     moodIndex: calcMoodIndex(moodStats.map((item) => ({ mood: item.mood || '', _count: { mood: item._count.mood } }))),
     moods: DAILY_MOODS.map((mood) => ({
       ...mood,

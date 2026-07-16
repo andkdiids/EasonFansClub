@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
+import { createHash } from 'node:crypto'
+import { Prisma } from '@prisma/client'
+import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { filterSensitiveWords, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 
@@ -25,6 +27,12 @@ export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
+  const idempotencyKey = request.headers.get('Idempotency-Key')?.trim() || ''
+  if (idempotencyKey.length < 16 || idempotencyKey.length > 128) return NextResponse.json({ message: '提交标识无效，请刷新后重试' }, { status: 400 })
+  const idempotencyKeyHash = createHash('sha256').update(`${guard.user.id}:${idempotencyKey}`).digest('hex')
+  const replay = await prisma.feedback.findUnique({ where: { idempotencyKeyHash }, include: feedbackInclude })
+  if (replay) return NextResponse.json({ feedback: serializeFeedback(replay, { includeContact: true }), message: '反馈已提交', replayed: true })
+
   const limited = await rateLimit(getClientIp(request), 'feedback:create', 10, 60 * 60)
   if (limited) return limited
 
@@ -41,13 +49,15 @@ export async function POST(request: Request) {
   const type = parseFeedbackType(body?.type ?? body?.category)
   const attachments = parseFeedbackAttachments(body?.attachments)
 
-  if (!title) return NextResponse.json({ message: '请填写反馈标题' }, { status: 400 })
-  if (!type) return NextResponse.json({ message: '请选择反馈分类' }, { status: 400 })
-  if (!content || content.length < 8) return NextResponse.json({ message: '请填写更完整的反馈描述' }, { status: 400 })
-  if (attachments.length > 5) return NextResponse.json({ message: '最多只能上传 5 张图片' }, { status: 400 })
+  if (!title) return NextResponse.json({ message: '请填写反馈标题', errors: { title: '请填写反馈标题' } }, { status: 400 })
+  if (!type) return NextResponse.json({ message: '请选择反馈分类', errors: { type: '请选择反馈分类' } }, { status: 400 })
+  if (!content || content.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH) return NextResponse.json({ message: `反馈描述至少需要 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字`, errors: { description: `反馈描述至少需要 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字` } }, { status: 400 })
+  if (attachments.length > FEEDBACK_MAX_ATTACHMENTS) return NextResponse.json({ message: `最多只能上传 ${FEEDBACK_MAX_ATTACHMENTS} 张图片` }, { status: 400 })
 
   const now = new Date()
-  const feedback = await prisma.$transaction(async (tx) => {
+  let feedback
+  try {
+    feedback = await prisma.$transaction(async (tx) => {
     const created = await tx.feedback.create({
       data: {
         userId: guard.user.id,
@@ -60,6 +70,7 @@ export async function POST(request: Request) {
         userUnread: false,
         lastReplyAt: now,
         lastUserReplyAt: now,
+        idempotencyKeyHash,
       },
       select: { id: true },
     })
@@ -86,7 +97,14 @@ export async function POST(request: Request) {
       where: { id: created.id },
       include: feedbackInclude,
     })
-  })
+    })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      feedback = await prisma.feedback.findUnique({ where: { idempotencyKeyHash }, include: feedbackInclude })
+      if (feedback) return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }), message: '反馈已提交', replayed: true })
+    }
+    throw error
+  }
 
   return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }), message: '反馈已提交' }, { status: 201 })
 }

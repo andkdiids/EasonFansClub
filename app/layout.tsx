@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { NotificationToast } from '@/components/NotificationToast'
+import { VirtualKeyboardManager } from '@/components/VirtualKeyboardManager'
 import { getSessionUserFromCookie } from '@/lib/auth'
 import './globals.css'
 
@@ -13,6 +14,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="zh-CN">
       <body>
+        <VirtualKeyboardManager />
         {children}
         <NotificationToast enabled={Boolean(sessionUser)} />
       </body>

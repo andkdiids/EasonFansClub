@@ -16,26 +16,37 @@ export function LikeButton({
 
   async function toggleLike() {
     if (isSubmitting) return
+    const previousLiked = liked
+    const previousCount = count
+    const optimisticLiked = !liked
     setError('')
     setIsSubmitting(true)
-    const response = await fetch(`/api/posts/${postId}/like`, {
-      method: liked ? 'DELETE' : 'POST',
-    })
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
-    if (!response.ok) {
-      setError(data.message || '操作失败，请先登录')
-      return
+    setLiked(optimisticLiked)
+    setCount(Math.max(0, previousCount + (optimisticLiked ? 1 : -1)))
+    try {
+      const response = await fetch(`/api/posts/${postId}/like`, {
+        method: previousLiked ? 'DELETE' : 'POST',
+        cache: 'no-store',
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.message || '操作失败，请先登录')
+      setLiked(Boolean(data.isLiked))
+      setCount(Math.max(Number(data.likeCount || 0), 0))
+      router.refresh()
+    } catch (reason) {
+      setLiked(previousLiked)
+      setCount(previousCount)
+      setError(reason instanceof Error ? reason.message : '点赞失败，请稍后重试')
+    } finally {
+      setIsSubmitting(false)
     }
-    setLiked(Boolean(data.isLiked))
-    setCount(Math.max(Number(data.likeCount || 0), 0))
-    router.refresh()
   }
 
   return (
     <div>
       <button
-        onClick={toggleLike}
+        type="button"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation(); void toggleLike() }}
         disabled={isSubmitting}
         className={`rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
           liked ? 'bg-red-50 text-red-600' : 'bg-sky-50 text-brand-700'

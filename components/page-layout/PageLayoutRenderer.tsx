@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
-import { PAGE_LAYOUT_ROW_GAP, PAGE_LAYOUT_ROW_HEIGHT } from '@/lib/page-layout/constants'
 import { getPageLayoutModule } from '@/lib/page-layout/registry'
 import type { PageLayoutBehavior, PageLayoutConfig, PageLayoutDevice, PageLayoutGridItem, PageLayoutModuleConfig, PageLayoutPageKey } from '@/lib/page-layout/types'
 
@@ -57,9 +56,9 @@ function getLayoutBehavior(pageKey: PageLayoutPageKey, item: PageLayoutModuleCon
   return getPageLayoutModule(pageKey, item.key)?.layoutBehavior || 'fixed'
 }
 
-export function getPageLayoutModules(config: PageLayoutConfig, device: PageLayoutDevice) {
+export function getPageLayoutModules(config: PageLayoutConfig, device: PageLayoutDevice, pageKey?: PageLayoutPageKey) {
   return [...config[device]]
-    .filter((item) => item.visible && !item.isHidden)
+    .filter((item) => item.visible && !item.isHidden && (!pageKey || Boolean(getPageLayoutModule(pageKey, item.key))))
     .sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order)
 }
 
@@ -80,29 +79,30 @@ export function PageLayoutRenderer({
 }) {
   const device = useLayoutDevice(forcedDevice)
   const columns = device === 'desktop' ? 12 : device === 'tablet' ? 8 : 4
-  const items = useMemo(() => getPageLayoutModules(config, device), [config, device])
-  const segments = useMemo(() => {
-    const result: Array<{ type: 'fixed'; items: PageLayoutModuleConfig[] } | { type: 'auto'; items: PageLayoutModuleConfig[] }> = []
-    items.forEach((item) => {
-      const behavior = getLayoutBehavior(pageKey, item)
-      if (behavior === 'auto') {
-        const previous = result[result.length - 1]
-        if (previous?.type === 'auto') {
-          previous.items.push(item)
-        } else {
-          result.push({ type: 'auto', items: [item] })
-        }
-        return
-      }
-      const previous = result[result.length - 1]
-      if (previous?.type === 'fixed') {
-        previous.items.push(item)
-      } else {
-        result.push({ type: 'fixed', items: [item] })
-      }
-    })
-    return result
-  }, [items, pageKey])
+  const items = useMemo(() => getPageLayoutModules(config, device, pageKey), [config, device, pageKey])
+  const renderedItems = useMemo(() => items.map((item) => {
+    const grid = item.grid[device]
+    const density = getPageLayoutModuleDensity(grid)
+    const layoutBehavior = getLayoutBehavior(pageKey, item)
+    const content = renderModuleContent(modules, item, { device, grid, columns, density, layoutBehavior })
+    if (!content) return null
+    const span = Math.max(1, Math.min(grid.w, columns))
+    const start = Math.max(1, Math.min(grid.x + 1, columns - span + 1))
+    return (
+      <PageLayoutFrame
+        key={item.key}
+        config={item}
+        className="page-layout-auto-flow-item"
+        style={device === 'mobile' ? undefined : { gridColumn: `${start} / span ${span}` }}
+        data-grid-w={grid.w}
+        data-grid-h={grid.h}
+        data-layout-density={density}
+        data-layout-behavior="auto"
+      >
+        {content}
+      </PageLayoutFrame>
+    )
+  }).filter(Boolean), [columns, device, items, modules, pageKey])
 
   return (
     <div
@@ -110,82 +110,14 @@ export function PageLayoutRenderer({
       data-layout-preview={previewMode ? 'true' : 'false'}
       className={`page-layout-flow page-layout-flow-${device} ${className}`.trim()}
     >
-      {segments.map((segment, segmentIndex) => {
-        if (segment.type === 'auto') {
-          const renderedItems = segment.items.map((item) => {
-            const grid = item.grid[device]
-            const density = getPageLayoutModuleDensity(grid)
-            const layoutBehavior = 'auto'
-            const content = renderModuleContent(modules, item, { device, grid, columns, density, layoutBehavior })
-            if (!content) return null
-            const span = Math.max(1, Math.min(grid.w, columns))
-            const start = Math.max(1, Math.min(grid.x + 1, columns - span + 1))
-            return (
-              <PageLayoutFrame
-                key={item.key}
-                config={item}
-                className="page-layout-auto-flow-item"
-                style={device === 'mobile' ? undefined : { gridColumn: `${start} / span ${span}` }}
-                data-grid-w={grid.w}
-                data-grid-h={grid.h}
-                data-layout-density={density}
-                data-layout-behavior={layoutBehavior}
-              >
-                {content}
-              </PageLayoutFrame>
-            )
-          }).filter(Boolean)
-          if (!renderedItems.length) return null
-          return (
-            <div
-              key={`auto-${segmentIndex}`}
-              className={`page-layout-auto-flow page-layout-auto-flow-${device}`}
-              style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-            >
-              {renderedItems}
-            </div>
-          )
-        }
-
-        const minY = Math.min(...segment.items.map((item) => item.grid[device].y))
-        return (
-          <div
-            key={`fixed-${segmentIndex}`}
-            className={`page-layout-grid page-layout-grid-${device}`}
-            style={{
-              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-              gridAutoRows: `${PAGE_LAYOUT_ROW_HEIGHT}px`,
-              columnGap: `${PAGE_LAYOUT_ROW_GAP}px`,
-              rowGap: `${PAGE_LAYOUT_ROW_GAP}px`,
-            }}
-          >
-            {segment.items.map((item) => {
-              const grid = item.grid[device]
-              const density = getPageLayoutModuleDensity(grid)
-              const layoutBehavior = 'fixed'
-              const content = renderModuleContent(modules, item, { device, grid, columns, density, layoutBehavior })
-              if (!content) return null
-              return (
-                <PageLayoutFrame
-                  key={item.key}
-                  config={item}
-                  className="page-layout-grid-item page-layout-grid-item-fixed"
-                  style={{
-                    gridColumn: `${grid.x + 1} / span ${grid.w}`,
-                    gridRow: `${grid.y - minY + 1} / span ${grid.h}`,
-                  }}
-                  data-grid-w={grid.w}
-                  data-grid-h={grid.h}
-                  data-layout-density={density}
-                  data-layout-behavior={layoutBehavior}
-                >
-                  {content}
-                </PageLayoutFrame>
-              )
-            })}
-          </div>
-        )
-      })}
+      {renderedItems.length ? (
+        <div
+          className={`page-layout-auto-flow page-layout-auto-flow-${device}`}
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        >
+          {renderedItems}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -11,6 +11,7 @@ type ProfileHeaderProps = {
   createdAt: Date
   avatarUrl?: string | null
   backgroundUrl?: string | null
+  showGrowth?: boolean
 }
 
 type ProfileStatsGridProps = {
@@ -46,6 +47,7 @@ export function ProfileHeader({
   createdAt,
   avatarUrl,
   backgroundUrl,
+  showGrowth = true,
 }: ProfileHeaderProps) {
   const initial = displayName.slice(0, 1).toUpperCase()
   const admissionInfo = formatAdmissionInfo(createdAt)
@@ -57,7 +59,7 @@ export function ProfileHeader({
         style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
       >
         {!backgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
-        <div className="absolute bottom-4 left-4 w-[min(90%,300px)] rounded-[20px] border border-white/12 bg-black/35 p-3 text-white shadow-md shadow-slate-950/20 backdrop-blur-md sm:bottom-5 sm:left-5">
+        <div className="absolute bottom-4 left-4 min-w-[220px] max-w-[min(88vw,420px)] rounded-[20px] border border-white/12 bg-black/35 p-3 text-white shadow-md shadow-slate-950/20 backdrop-blur-md sm:bottom-5 sm:left-5">
           <div className="flex min-w-0 items-center gap-3">
             {avatarUrl ? (
               <img src={avatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
@@ -72,10 +74,10 @@ export function ProfileHeader({
           </div>
           <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
-            <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}{levelName ? ` ${levelName}` : ''}</span>
+            {showGrowth ? <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}{levelName ? ` ${levelName}` : ''}</span> : null}
             <span className="rounded-full border border-white/14 bg-slate-950/16 px-2 py-1 font-black text-white/92 backdrop-blur">{admissionInfo}</span>
           </p>
-          <div className="mt-3">
+          {showGrowth ? <div className="mt-3 max-w-sm">
             <div className="flex items-center justify-between gap-2 text-[11px] font-black text-white/85">
               <span>成长经验</span>
               <span>{experience} / {nextRequiredExp ?? experience} XP</span>
@@ -83,7 +85,7 @@ export function ProfileHeader({
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/18">
               <div className="h-full rounded-full bg-sky-200" style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }} />
             </div>
-          </div>
+          </div> : null}
         </div>
       </div>
     </section>

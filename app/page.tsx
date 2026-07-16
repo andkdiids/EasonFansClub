@@ -24,7 +24,7 @@ function fallbackHeroSlides(config: SiteAppearanceConfig): SiteHeroSlide[] {
       title: config.text.homeTitle,
       subtitle: config.text.forumCopy,
       buttonText: config.text.homeSecondaryButton,
-      href: '/boards/announcements',
+      href: '/forum',
       imageUrl: config.images.logoUrl,
       isVisible: true,
       sortOrder: 2,

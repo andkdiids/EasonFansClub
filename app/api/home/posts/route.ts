@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getHomePosts, homeCacheHeaders } from '@/lib/home-data'
+import { getHomePosts } from '@/lib/home-data'
+import { getCurrentUser } from '@/lib/auth'
 
 export async function GET() {
-  const posts = await getHomePosts()
-  return NextResponse.json({ posts }, { headers: homeCacheHeaders })
+  const user = await getCurrentUser()
+  const posts = await getHomePosts(user?.id)
+  return NextResponse.json({ posts }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

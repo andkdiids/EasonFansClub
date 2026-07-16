@@ -2,16 +2,16 @@ import { redirect } from 'next/navigation'
 import { PostCreateForm } from '@/components/PostCreateForm'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
-import { isAdminRole } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
-export default async function NewPostPage() {
+export default async function NewPostPage({ searchParams }: { searchParams: Promise<{ board?: string }> }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const canPostAnnouncement = isAdminRole(user.role)
+  const canPostAnnouncement = await hasAdminPermission(user, 'post_manage')
   const boards = await prisma.board.findMany({
     where: {
       isActive: true,
@@ -19,8 +19,9 @@ export default async function NewPostPage() {
     },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 100,
-    select: { id: true, name: true },
+    select: { id: true, name: true, slug: true },
   })
+  const query = await searchParams
 
   return (
     <>
@@ -30,7 +31,7 @@ export default async function NewPostPage() {
           <p className="text-sm font-black uppercase text-brand-700">CREATE POST</p>
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
-        <PostCreateForm boards={boards} />
+        <PostCreateForm boards={boards} initialBoardSlug={query.board} />
       </main>
     </>
   )

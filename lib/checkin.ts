@@ -13,6 +13,42 @@ export function formatBeijingDate(date = new Date()) {
   return `${values.year}-${values.month}-${values.day}`
 }
 
+export const getShanghaiDateKey = formatBeijingDate
+
+export function normalizeCheckinDateToShanghai(date = new Date()) {
+  return parseBeijingDate(getShanghaiDateKey(date)) || new Date()
+}
+
+export function getShanghaiDayRange(date = new Date()) {
+  const start = normalizeCheckinDateToShanghai(date)
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000), dateKey: getShanghaiDateKey(date) }
+}
+
+export function shiftShanghaiDateKey(value: string, days: number) {
+  const date = parseBeijingDate(value)
+  if (!date) return value
+  return getShanghaiDateKey(new Date(date.getTime() + days * 24 * 60 * 60 * 1000))
+}
+
+export function calculateCheckinStreaks(dateKeys: Iterable<string>, now = new Date()) {
+  const uniqueKeys = new Set([...dateKeys].filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)))
+  const today = getShanghaiDateKey(now)
+  const currentStart = uniqueKeys.has(today) ? today : shiftShanghaiDateKey(today, -1)
+  let currentStreak = 0
+  for (let key = currentStart; uniqueKeys.has(key); key = shiftShanghaiDateKey(key, -1)) currentStreak += 1
+
+  const sorted = [...uniqueKeys].sort()
+  let longestStreak = 0
+  let running = 0
+  let previous: string | null = null
+  sorted.forEach((key) => {
+    running = previous && shiftShanghaiDateKey(previous, 1) === key ? running + 1 : 1
+    longestStreak = Math.max(longestStreak, running)
+    previous = key
+  })
+  return { currentStreak, longestStreak, totalDays: uniqueKeys.size }
+}
+
 export function parseBeijingDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
   const date = new Date(`${value}T00:00:00+08:00`)
