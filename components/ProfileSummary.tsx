@@ -21,20 +21,52 @@ type ProfileStatsGridProps = {
 
 const oneDayMs = 24 * 60 * 60 * 1000
 
-function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-}
+
 
 function formatUid(uid: number) {
   return String(uid).padStart(5, '0')
 }
 
 export function formatAdmissionInfo(createdAt: Date) {
-  const year = createdAt.getFullYear()
-  const month = String(createdAt.getMonth() + 1).padStart(2, '0')
-  const day = String(createdAt.getDate()).padStart(2, '0')
-  const days = Math.max(1, Math.floor((startOfLocalDay(new Date()) - startOfLocalDay(createdAt)) / oneDayMs) + 1)
-  return { date: `${year}/${month}/${day}`, days }
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+
+  const parts = formatter.formatToParts(createdAt)
+
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  )
+
+  const date = `${values.year}/${values.month}/${values.day}`
+
+  const todayFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+const today = todayFormatter.format(new Date())
+const admission = todayFormatter.format(createdAt)
+
+const startToday = new Date(`${today}T00:00:00+08:00`)
+const startAdmission = new Date(`${admission}T00:00:00+08:00`)
+
+  const days = Math.max(
+    1,
+    Math.floor(
+      (startToday.getTime() - startAdmission.getTime()) / oneDayMs
+    ) + 1
+  )
+
+  return {
+    date,
+    days,
+  }
 }
 
 export function ProfileHeader({
@@ -78,7 +110,7 @@ export function ProfileHeader({
             {showGrowth ? <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}{levelName ? ` ${levelName}` : ''}</span> : null}
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">
-            {admissionInfo.date} 入院 <span aria-hidden>·</span> 已住院 {admissionInfo.days} 天
+            {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天
           </p>
           {showGrowth ? <div className="mt-2.5 w-56 max-w-full">
             <div className="flex items-center justify-between gap-2 text-[11px] font-black text-white/85">
