@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, isSameLocalDay, startOfLocalDay } from '@/lib/checkin'
+import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, isSameLocalDay, startOfLocalDay, shiftShanghaiDateKey } from '@/lib/checkin'
 import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
@@ -136,8 +136,23 @@ export async function POST(request: Request) {
       where: { id: user.id },
       select: { points: true },
     })
-    const history = await tx.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } })
-    const nextStreak = calculateCheckinStreaks(history.map((item) => item.checkinDateKey)).currentStreak + 1
+    const yesterdayKey = shiftShanghaiDateKey(todayKey, -1)
+
+const yesterdayCheckIn = await tx.checkIn.findUnique({
+  where: {
+    userId_checkinDateKey: {
+      userId: user.id,
+      checkinDateKey: yesterdayKey,
+    },
+  },
+  select: {
+    streakDay: true,
+  },
+})
+
+const nextStreak = yesterdayCheckIn
+  ? yesterdayCheckIn.streakDay + 1
+  : 1
     const bonus = getStreakBonus(nextStreak)
     const gainedPoints = CHECK_IN_POINTS + (bonus?.points || 0)
     const requestedExp = getRandomCheckInExperience()
