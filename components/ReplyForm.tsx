@@ -61,7 +61,7 @@ export function ReplyForm({
   return (
     <form onSubmit={submitReply} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
       {replyTo ? (
-        <div className="mb-3 flex items-center justify-between rounded-xl bg-sky-50 px-4 py-3 text-sm font-black text-brand-700">
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
           <span>正在回复 {replyTo.name}</span>
           <button type="button" onClick={onReplyCancel} className="text-slate-500">取消</button>
         </div>
@@ -79,7 +79,7 @@ export function ReplyForm({
             }
           }}
           rows={5}
-          className="mt-3 w-full rounded-lg border border-sky-100 px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
+          className="mt-3 w-full rounded-lg border border-sky-100 px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="写下你的回复..."
         />
       </label>

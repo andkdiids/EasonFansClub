@@ -502,8 +502,8 @@ if (pageKey === 'checkin') {
           <Link href={pageMeta.path} className="rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 shadow-sm">查看前台</Link>
         </div>
 
-        {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-        {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+        {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+        {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
       </section>
 
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_360px]">

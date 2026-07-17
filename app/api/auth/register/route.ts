@@ -92,7 +92,9 @@ if (originError) return originError
       }
     }
     const registrationType = parseRegistrationType(body?.registrationType)
-    const policy = await getRegistrationPolicy()
+    console.time('register:getPolicy')
+const policy = await getRegistrationPolicy()
+console.timeEnd('register:getPolicy')
     const clientIp = getClientIp(request)
     const ipRateLimitKey = `ip:${clientIp}`
 
@@ -109,12 +111,16 @@ if (originError) return originError
       return jsonError('当前未开放邮箱注册', 403, 'EMAIL_REGISTRATION_DISABLED', { registrationType: '当前未开放邮箱注册' })
     }
 
-    const requestLimit = await consumeRateLimit(
-      ipRateLimitKey,
-      registerRequestLimit.action,
-      registerRequestLimit.limit,
-      registerRequestLimit.windowSeconds,
-    )
+    console.time('register:requestRateLimit')
+
+  const requestLimit = await consumeRateLimit(
+  ipRateLimitKey,
+  registerRequestLimit.action,
+  registerRequestLimit.limit,
+  registerRequestLimit.windowSeconds,
+)
+
+console.timeEnd('register:requestRateLimit')
     if (requestLimit.limited) {
       return jsonError('操作过于频繁，请稍后再试。', 429, 'REGISTER_REQUEST_RATE_LIMITED', {}, {
         retryAfter: requestLimit.retryAfter,
@@ -161,7 +167,9 @@ if (originError) return originError
       return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
     }
 
-    const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
+    console.time('register:turnstile')
+const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
+console.timeEnd('register:turnstile')
     if (!turnstile.success) {
       return jsonError(turnstile.message || '人机验证失败', 400, turnstile.message === '请先完成人机验证' ? 'TURNSTILE_REQUIRED' : 'TURNSTILE_FAILED', {
         turnstileToken: turnstile.message || '人机验证失败',
@@ -172,11 +180,15 @@ if (originError) return originError
       return jsonError('邮件服务尚未配置，暂时无法开放邮箱注册', 503, 'EMAIL_SERVICE_NOT_CONFIGURED')
     }
 
-    const duplicate = await findActiveConflict({
-      phone: registrationType === 'PHONE' ? phone : null,
-      email: registrationType === 'EMAIL' ? email : null,
-      username,
-    })
+    console.time('register:duplicateCheck')
+
+const duplicate = await findActiveConflict({
+  phone: registrationType === 'PHONE' ? phone : null,
+  email: registrationType === 'EMAIL' ? email : null,
+  username,
+})
+
+console.timeEnd('register:duplicateCheck')
     if (duplicate) {
       if (registrationType === 'PHONE' && duplicate.phone === phone) {
         return jsonError('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
@@ -195,21 +207,36 @@ if (originError) return originError
       })
     }
 
-    const successLimit = await checkRateLimit(
-      ipRateLimitKey,
-      registerSuccessLimit.action,
-      registerSuccessLimit.limit,
-    )
-    if (successLimit.limited) {
-      return jsonError('当前网络注册账号数量较多，请稍后再试。', 429, 'REGISTER_SUCCESS_RATE_LIMITED', {}, {
-        retryAfter: successLimit.retryAfter,
-      })
-    }
+    console.time('register:successRateLimit')
 
-    const passwordHash = await hashPassword(password)
-    const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
-  ? await hashSecurityQuestions(securityQuestions.slice(0, 1))
-  : []
+const successLimit = await checkRateLimit(
+  ipRateLimitKey,
+  registerSuccessLimit.action,
+  registerSuccessLimit.limit,
+)
+
+console.timeEnd('register:successRateLimit')
+
+if (successLimit.limited) {
+  return jsonError('当前网络注册账号数量较多，请稍后再试。', 429, 'REGISTER_SUCCESS_RATE_LIMITED', {}, {
+    retryAfter: successLimit.retryAfter,
+  })
+}
+
+console.time('register:hashPassword')
+
+const passwordHash = await hashPassword(password)
+
+console.timeEnd('register:hashPassword')
+
+    console.time('register:hashSecurityQuestions')
+
+const hashedSecurityQuestions =
+  policy.requireSecurityQuestionsForNewUsers
+    ? await hashSecurityQuestions(securityQuestions.slice(0, 1))
+    : []
+
+console.timeEnd('register:hashSecurityQuestions')
     const successLimitExpiresAt = new Date(Date.now() + registerSuccessLimit.windowSeconds * 1000)
    console.time('register:transaction')
     const user = await prisma.$transaction(async (tx) => {
@@ -294,9 +321,9 @@ console.timeEnd('register:transaction')
       devVerificationUrl = process.env.NODE_ENV === 'production' ? '' : verification.verificationUrl
     }
 
-    await syncUserAchievements(user.id, ['REGISTER']).catch((achievementError) => {
-      console.error('[achievements:register]', achievementError)
-    })
+    void syncUserAchievements(user.id, ['REGISTER']).catch((achievementError) => {
+  console.error('[achievements:register]', achievementError)
+})
 
     return NextResponse.json(
       {

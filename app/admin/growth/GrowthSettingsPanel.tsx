@@ -68,18 +68,18 @@ export function GrowthSettingsPanel({
         </button>
       </div>
 
-      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-sky-100">
-        <div className="grid grid-cols-[70px_minmax(0,1fr)_130px] bg-sky-50 px-4 py-3 text-xs font-black text-slate-500">
+        <div className="grid grid-cols-[70px_minmax(0,1fr)_130px] bg-sky-50 px-4 py-2 text-xs font-black text-slate-500">
           <span>等级</span>
           <span>等级名称</span>
           <span>所需经验</span>
         </div>
         <div className="divide-y divide-sky-100">
           {levels.map((item, index) => (
-            <div key={item.level} className="grid grid-cols-[70px_minmax(0,1fr)_130px] items-center gap-3 px-4 py-3">
+            <div key={item.level} className="grid grid-cols-[70px_minmax(0,1fr)_130px] items-center gap-3 px-4 py-2">
               <span className="text-sm font-black text-brand-950">Lv.{item.level}</span>
               <input
                 value={item.name}

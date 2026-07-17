@@ -204,8 +204,8 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
         </form>
       </div>
 
-      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
       <div className="mt-5 overflow-x-auto">
         <table className="min-w-[1240px] w-full border-separate border-spacing-y-2 text-left text-sm">

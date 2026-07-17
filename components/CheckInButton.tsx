@@ -258,9 +258,9 @@ export function CheckInButton({
             </div>
           </div>
           {todayCheckIn.message ? (
-            <p className={isCompact ? 'mt-2 whitespace-pre-wrap rounded-2xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-slate-700' : 'mt-4 whitespace-pre-wrap rounded-2xl bg-white/80 px-4 py-3 text-sm font-bold leading-7 text-slate-700'}>{todayCheckIn.message}</p>
+            <p className={isCompact ? 'mt-2 whitespace-pre-wrap rounded-2xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-slate-700' : 'mt-4 whitespace-pre-wrap rounded-2xl bg-white/80 px-4 py-2 text-sm font-bold leading-7 text-slate-700'}>{todayCheckIn.message}</p>
           ) : (
-            <p className={isCompact ? 'mt-2 rounded-2xl bg-white/80 px-3 py-2 text-xs font-bold text-slate-500' : 'mt-4 rounded-2xl bg-white/80 px-4 py-3 text-sm font-bold text-slate-500'}>今天没有填写留言。</p>
+            <p className={isCompact ? 'mt-2 rounded-2xl bg-white/80 px-3 py-2 text-xs font-bold text-slate-500' : 'mt-4 rounded-2xl bg-white/80 px-4 py-2 text-sm font-bold text-slate-500'}>今天没有填写留言。</p>
           )}
           <p className={isCompact ? 'mt-2 text-xs font-black text-emerald-700' : 'mt-4 text-sm font-black text-emerald-700'}>本次获得 +{todayCheckIn.points} 积分、+{todayCheckIn.exp} 经验</p>
         </div>
@@ -302,7 +302,7 @@ export function CheckInButton({
           disabled={previewMode || isSubmitting}
           rows={isMinimal || isPreviewCompact ? 1 : isCompact ? 2 : 4}
           placeholder="可以写一点今天的心情，也可以留空完成挂号。"
-          className={isCompact ? 'mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white/85 px-3 py-2 text-sm font-bold leading-6 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70' : 'mt-3 w-full resize-none rounded-2xl border border-sky-100 bg-white/85 px-4 py-3 font-bold leading-7 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70'}
+          className={isCompact ? 'mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white/85 px-3 py-2 text-sm font-bold leading-6 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70' : 'mt-3 w-full resize-none rounded-2xl border border-sky-100 bg-white/85 px-4 py-2 font-bold leading-7 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70'}
         />
         <div className={isCompact ? 'mt-1 flex items-center justify-between' : 'mt-2 flex items-center justify-between'}>
           <EmojiButton onSelect={insertEmoji} />
@@ -313,7 +313,7 @@ export function CheckInButton({
       <button
         onClick={checkIn}
         disabled={previewMode || isSubmitting}
-        className={isMinimal ? 'relative w-full overflow-hidden rounded-xl bg-brand-700 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60' : isCompact ? 'relative w-full overflow-hidden rounded-2xl bg-brand-700 px-4 py-3 text-sm font-black text-white shadow-lg shadow-sky-900/10 transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60' : 'relative w-full overflow-hidden rounded-2xl bg-brand-700 px-6 py-4 text-lg font-black text-white shadow-xl shadow-sky-900/10 transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60'}
+        className={isMinimal ? 'relative w-full overflow-hidden rounded-xl bg-brand-700 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60' : isCompact ? 'relative w-full overflow-hidden rounded-2xl bg-brand-700 px-4 py-2 text-sm font-black text-white shadow-lg shadow-sky-900/10 transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60' : 'relative w-full overflow-hidden rounded-2xl bg-brand-700 px-6 py-4 text-lg font-black text-white shadow-xl shadow-sky-900/10 transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60'}
       >
         {!isSubmitting ? <span className="absolute inset-0 animate-pulse bg-white/10" /> : null}
         <span className="relative">{isSubmitting ? '挂号中...' : '完成今日挂号'}</span>

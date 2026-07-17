@@ -34,7 +34,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-sky-100/80 bg-white/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2 sm:px-5 sm:py-4">
           <Link href="/" className="flex min-w-0 shrink-0 items-center gap-3 text-lg font-black text-brand-950 sm:text-xl" title={config.text.siteName}>
             {navLogo ? <img src={navLogo} alt={config.text.siteName} className="h-9 w-9 rounded-2xl object-cover sm:h-10 sm:w-10" /> : null}
             <span className="truncate">{config.text.siteName}</span>

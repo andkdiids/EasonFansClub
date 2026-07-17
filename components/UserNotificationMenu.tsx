@@ -34,7 +34,7 @@ export function UserNotificationMenu({
     return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('unread-summary:refresh', listener) }
   }, [])
 
-  const itemClass = 'flex min-h-11 items-center rounded-xl px-4 py-3 text-sm font-bold text-slate-700 hover:bg-sky-50'
+  const itemClass = 'flex min-h-11 items-center rounded-xl px-4 py-2 text-sm font-bold text-slate-700 hover:bg-sky-50'
   return <details className="relative shrink-0">
     <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3">
       <span className="relative">
@@ -53,7 +53,7 @@ export function UserNotificationMenu({
       <Link href="/notifications?category=message" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
       <Link href="/settings/security" className={itemClass}>账号安全</Link>
       {isAdmin ? <Link href="/admin" className={`${itemClass} text-brand-700`}>后台管理</Link> : null}
-      <form action="/api/auth/logout" method="post"><button className="w-full rounded-xl px-4 py-3 text-left text-sm font-bold text-red-600 hover:bg-red-50">退出登录</button></form>
+      <form action="/api/auth/logout" method="post"><button className="w-full rounded-xl px-4 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50">退出登录</button></form>
     </div>
   </details>
 }

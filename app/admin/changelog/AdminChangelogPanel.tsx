@@ -108,25 +108,25 @@ export function AdminChangelogPanel() {
         <h1 className="mt-2 text-3xl font-black text-brand-950">更新日志</h1>
       </section>
 
-      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
       <form onSubmit={create} className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
         <h2 className="text-xl font-black text-brand-950">新建更新日志</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="更新标题" />
-          <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="更新标题" />
+          <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
             {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <select value={form.bump} onChange={(e) => setForm({ ...form, bump: e.target.value })} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+          <select value={form.bump} onChange={(e) => setForm({ ...form, bump: e.target.value })} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
             {bumpOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-sky-50 px-4 py-3 text-sm font-black text-slate-600">
+          <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-sky-50 px-4 py-2 text-sm font-black text-slate-600">
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.isMajor} onChange={(e) => setForm({ ...form, isMajor: e.target.checked })} />重大更新</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.publishNow} onChange={(e) => setForm({ ...form, publishNow: e.target.checked })} />立即发布</label>
           </div>
         </div>
-        <textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} className="mt-3 min-h-36 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="支持分条或 Markdown 文本" />
+        <textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} className="mt-3 min-h-36 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="支持分条或 Markdown 文本" />
         <button disabled={submitting} className="mt-4 rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{submitting ? '创建中...' : '创建更新日志'}</button>
       </form>
 

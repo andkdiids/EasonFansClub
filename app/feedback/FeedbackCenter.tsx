@@ -219,25 +219,25 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
         </div>
       </section>
 
-      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
       {tab === 'feedback' ? (
         <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <div className="space-y-4">
             <form id="feedback-create-form" onSubmit={submitFeedback} className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
               <h2 className="text-xl font-black text-brand-950">新建反馈</h2>
-              <input value={form.title} maxLength={80} required onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-4 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="标题" />
+              <input value={form.title} maxLength={80} required onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-4 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="标题" />
               {fieldErrors.title ? <p className="mt-1 text-xs font-bold text-red-600">{fieldErrors.title}</p> : null}
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
                 {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
-              <textarea value={form.description} maxLength={3000} required onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-3 min-h-32 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="详细描述" />
+              <textarea value={form.description} maxLength={3000} required onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-3 min-h-32 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="详细描述" />
               <p className={`mt-1 text-xs font-bold ${form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH ? 'text-orange-600' : 'text-emerald-600'}`}>已输入 {form.description.trim().length} / 最少 {FEEDBACK_DESCRIPTION_MIN_LENGTH} 字</p>
               {fieldErrors.description ? <p className="mt-1 text-xs font-bold text-red-600">{fieldErrors.description}</p> : null}
-              <input value={form.contact} maxLength={120} onChange={(e) => setForm({ ...form, contact: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="联系方式（选填，仅本人和管理员可见）" />
+              <input value={form.contact} maxLength={120} onChange={(e) => setForm({ ...form, contact: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="联系方式（选填，仅本人和管理员可见）" />
               <div className="mt-3"><FeedbackImageUploader key={`create-${uploadReset}`} onChange={setAttachments} onBusyChange={setUploadingCreate} /></div>
-              <button disabled={submitting || uploadingCreate || !form.title.trim() || form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH} className="mt-4 w-full rounded-full bg-brand-950 px-4 py-3 text-sm font-black text-white disabled:opacity-60">{submitting ? '提交中...' : uploadingCreate ? '请等待图片上传完成' : '提交反馈'}</button>
+              <button disabled={submitting || uploadingCreate || !form.title.trim() || form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH} className="mt-4 w-full rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-60">{submitting ? '提交中...' : uploadingCreate ? '请等待图片上传完成' : '提交反馈'}</button>
             </form>
 
             <div className="rounded-[24px] border border-sky-100 bg-white/88 p-3 shadow-sm">
@@ -245,7 +245,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
                 <h2 className="text-lg font-black text-brand-950">我的反馈</h2>
                 <button onClick={loadFeedbacks} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700">重新加载</button>
               </div>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="mb-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="mb-3 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
                 {statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
               <button onClick={loadFeedbacks} className="mb-3 w-full rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white">筛选反馈</button>
@@ -325,7 +325,7 @@ function FeedbackThread({
         </div>
         <h2 className="mt-3 text-2xl font-black text-brand-950">{detail.title}</h2>
         <p className="mt-2 text-xs font-bold text-slate-500">创建：{formatTime(detail.createdAt)} · 更新：{formatTime(detail.updatedAt)}</p>
-        {detail.contact ? <p className="mt-3 rounded-2xl bg-sky-50 px-4 py-3 text-xs font-black text-brand-700">联系方式：{detail.contact}</p> : null}
+        {detail.contact ? <p className="mt-3 rounded-2xl bg-sky-50 px-4 py-2 text-xs font-black text-brand-700">联系方式：{detail.contact}</p> : null}
       </div>
 
       <div className="space-y-3">
@@ -346,12 +346,12 @@ function FeedbackThread({
 
       {!isClosed ? (
         <form onSubmit={submitReply} className="space-y-3">
-          <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="继续补充说明或回复管理员" />
+          <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="继续补充说明或回复管理员" />
           <FeedbackImageUploader key={`reply-${uploadReset}-${detail.id}`} onChange={setReplyAttachments} onBusyChange={setUploadingReply} />
           <button disabled={replying || uploadingReply || !reply.trim()} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : uploadingReply ? '请等待图片上传完成' : '发送回复'}</button>
         </form>
       ) : (
-        <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-black text-slate-500">该反馈已完成，不能继续追加。如需继续沟通，请提交新的反馈。</p>
+        <p className="rounded-2xl bg-slate-50 px-4 py-2 text-sm font-black text-slate-500">该反馈已完成，不能继续追加。如需继续沟通，请提交新的反馈。</p>
       )}
     </div>
   )

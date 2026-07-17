@@ -83,19 +83,19 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
       </div>
 
       {policy.envForcedClosed ? (
-        <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">
+        <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">
           注册已被服务器环境变量强制关闭，后台注册模式无法覆盖。
         </p>
       ) : null}
 
       {mode === 'PHONE' ? (
-        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">
+        <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">
           当前手机号注册未验证号码归属，请仅用于备案期间或受控测试。
         </p>
       ) : null}
 
-      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</p> : null}
+      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">{error}</p> : null}
 
       <button
         onClick={save}

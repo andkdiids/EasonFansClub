@@ -159,22 +159,22 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
         <h1 className="mt-2 text-3xl font-black text-brand-950">反馈中心</h1>
       </section>
 
-      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
       <section className="grid gap-5 lg:grid-cols-[380px_1fr]">
         <aside className="rounded-[24px] border border-sky-100 bg-white/88 p-4 shadow-sm">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-            <input value={q} onChange={(e) => setQ(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="搜索标题、昵称、UID" />
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+            <input value={q} onChange={(e) => setQ(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="搜索标题、昵称、UID" />
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
               <option value="">全部状态</option>
               {statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
-            <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+            <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
               <option value="">全部分类</option>
               {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
-            <button onClick={applyFilters} className="rounded-full bg-brand-950 px-4 py-3 text-sm font-black text-white">筛选</button>
+            <button onClick={applyFilters} className="rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white">筛选</button>
           </div>
 
           <div className="mt-4 space-y-2">
@@ -209,7 +209,7 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
                 </div>
                 <h2 className="mt-3 text-2xl font-black text-brand-950">{detail.title}</h2>
                 <p className="mt-2 text-xs font-bold text-slate-500">提交人：{detail.user.nickname} / UID {String(detail.user.uid).padStart(5, '0')} · 创建 {formatTime(detail.createdAt)} · 更新 {formatTime(detail.updatedAt)}</p>
-                {detail.contact ? <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-black text-amber-700">联系方式：{detail.contact}</p> : null}
+                {detail.contact ? <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-2 text-xs font-black text-amber-700">联系方式：{detail.contact}</p> : null}
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -230,11 +230,11 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
 
               {detail.status !== 'RESOLVED' && detail.status !== 'CLOSED' ? (
                 <form onSubmit={submitReply} className="space-y-3">
-                  <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="回复用户" />
+                  <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="回复用户" />
                   <button disabled={replying} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : '回复并通知用户'}</button>
                 </form>
               ) : (
-                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-black text-slate-500">该反馈已完成，如需回复请先改为处理中或已回复。</p>
+                <p className="rounded-2xl bg-slate-50 px-4 py-2 text-sm font-black text-slate-500">该反馈已完成，如需回复请先改为处理中或已回复。</p>
               )}
             </div>
           ) : (

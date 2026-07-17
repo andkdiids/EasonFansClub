@@ -112,7 +112,7 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
                 <input
                   value={value}
                   onChange={(event) => setConfig((current) => ({ ...current, text: { ...current.text, [key]: event.target.value } }))}
-                  className="mt-2 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none"
+                  className="mt-2 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none"
                 />
               </label>
             ))}
@@ -134,7 +134,7 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
                   <input
                     value={value}
                     onChange={(event) => setConfig((current) => ({ ...current, colors: { ...current.colors, [key]: event.target.value } }))}
-                    className="min-w-0 flex-1 rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none"
+                    className="min-w-0 flex-1 rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none"
                   />
                 </div>
               </label>
@@ -153,7 +153,7 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
                 <input
                   value={value}
                   onChange={(event) => setConfig((current) => ({ ...current, images: { ...current.images, [key]: event.target.value } }))}
-                  className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none"
+                  className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none"
                   placeholder="https://PROJECT_REF.supabase.co/storage/v1/object/public/..."
                 />
                 <label className="mt-3 inline-block cursor-pointer rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 shadow-sm">
@@ -216,8 +216,8 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
         ) : null}
       </div>
 
-      {message ? <p className="mt-5 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+      {message ? <p className="mt-5 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+      {error ? <p className="mt-5 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
     </div>
   )
 

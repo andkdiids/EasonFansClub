@@ -174,31 +174,31 @@ export function NotificationBroadcastForm() {
           <p className="mt-2 text-sm font-bold text-slate-500">系统通知不会为每位用户创建独立记录，已读状态由读取表记录。</p>
         </div>
 
-        <input value={form.title} onChange={(event) => update('title', event.target.value)} maxLength={100} className="w-full rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="标题" />
-        <textarea value={form.content} onChange={(event) => update('content', event.target.value)} rows={6} maxLength={8000} className="w-full resize-none rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold leading-7 outline-none" placeholder="内容，可使用纯文本分行" />
+        <input value={form.title} onChange={(event) => update('title', event.target.value)} maxLength={100} className="w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="标题" />
+        <textarea value={form.content} onChange={(event) => update('content', event.target.value)} rows={6} maxLength={8000} className="w-full resize-none rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold leading-7 outline-none" placeholder="内容，可使用纯文本分行" />
 
         <div className="grid gap-3 md:grid-cols-2">
-          <select value={form.type} onChange={(event) => update('type', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none">
+          <select value={form.type} onChange={(event) => update('type', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
             {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <input value={form.version} onChange={(event) => update('version', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="版本号，UPDATE 必填，如 v1.0.1" />
-          <input value={form.link} onChange={(event) => update('link', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="详情链接 /notifications" />
-          <input value={form.buttonUrl} onChange={(event) => update('buttonUrl', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="按钮链接，可选" />
-          <input value={form.buttonText} onChange={(event) => update('buttonText', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="按钮文字，可选" />
-          <input value={form.cover} onChange={(event) => update('cover', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="封面图 URL，可选" />
-          <input type="number" min={0} max={100} value={form.priority} onChange={(event) => update('priority', Number(event.target.value))} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" placeholder="优先级" />
-          <input type="datetime-local" value={form.publishAt} onChange={(event) => update('publishAt', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" />
-          <input type="datetime-local" value={form.expireAt} onChange={(event) => update('expireAt', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none" />
+          <input value={form.version} onChange={(event) => update('version', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="版本号，UPDATE 必填，如 v1.0.1" />
+          <input value={form.link} onChange={(event) => update('link', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="详情链接 /notifications" />
+          <input value={form.buttonUrl} onChange={(event) => update('buttonUrl', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="按钮链接，可选" />
+          <input value={form.buttonText} onChange={(event) => update('buttonText', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="按钮文字，可选" />
+          <input value={form.cover} onChange={(event) => update('cover', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="封面图 URL，可选" />
+          <input type="number" min={0} max={100} value={form.priority} onChange={(event) => update('priority', Number(event.target.value))} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="优先级" />
+          <input type="datetime-local" value={form.publishAt} onChange={(event) => update('publishAt', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" />
+          <input type="datetime-local" value={form.expireAt} onChange={(event) => update('expireAt', event.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" />
         </div>
 
-        <div className="grid gap-2 rounded-2xl bg-sky-50 px-4 py-3 text-sm font-black text-slate-600 sm:grid-cols-2">
+        <div className="grid gap-2 rounded-2xl bg-sky-50 px-4 py-2 text-sm font-black text-slate-600 sm:grid-cols-2">
           <label className="flex items-center gap-2"><input type="checkbox" checked={form.published} onChange={(event) => update('published', event.target.checked)} />发布</label>
           <label className="flex items-center gap-2"><input type="checkbox" checked={form.sticky} onChange={(event) => update('sticky', event.target.checked)} />置顶</label>
           <label className="flex items-center gap-2"><input type="checkbox" checked={form.popup} onChange={(event) => update('popup', event.target.checked)} />右下角弹窗</label>
         </div>
 
-        {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-        {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+        {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+        {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
         <div className="flex gap-2">
           <button disabled={isSubmitting} className="flex-1 rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60">

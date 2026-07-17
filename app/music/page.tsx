@@ -38,7 +38,7 @@ export default async function MusicPage({ searchParams }: { searchParams: Promis
                     只记录歌单、收藏和听歌时长，不存储盗版音乐文件。不可播放时可前往官方平台收听。
                   </p>
                   <form action="/music" className="mt-5 flex gap-3">
-                    <input name="q" defaultValue={q} placeholder="搜索陈奕迅歌曲" className="min-w-0 flex-1 rounded-xl border border-sky-100 px-4 py-3 font-bold outline-none" />
+                    <input name="q" defaultValue={q} placeholder="搜索陈奕迅歌曲" className="min-w-0 flex-1 rounded-xl border border-sky-100 px-4 py-2 font-bold outline-none" />
                     <button className="rounded-xl bg-brand-700 px-5 py-3 font-black text-white">搜索</button>
                   </form>
                 </section>

@@ -61,7 +61,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       {errors.form ? <p className="text-sm font-bold text-red-600">{errors.form}</p> : null}
       <label className="block">
         <span className="text-sm font-black text-slate-700">选择板块</span>
-        <select value={boardId} onChange={(event) => setBoardId(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-3">
+        <select value={boardId} onChange={(event) => setBoardId(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2">
           {boards.map((board) => (
             <option key={board.id} value={board.id}>{board.name}</option>
           ))}
@@ -71,12 +71,12 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       <ContentImageUploader value={imageUrls} onChange={setImageUrls} />
       <label className="block">
         <span className="text-sm font-black text-slate-700">标题</span>
-        <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-3" placeholder="请输入帖子标题" />
+        <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2" placeholder="请输入帖子标题" />
         {errors.title ? <p className="mt-2 text-sm font-bold text-red-600">{errors.title}</p> : null}
       </label>
       <label className="block">
         <span className="text-sm font-black text-slate-700">正文</span>
-        <textarea ref={textareaRef} value={content} onChange={(event) => setContent(event.target.value)} rows={10} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-3" placeholder="分享你的想法..." />
+        <textarea ref={textareaRef} value={content} onChange={(event) => setContent(event.target.value)} rows={10} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2" placeholder="分享你的想法..." />
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
       </label>
       <div className="flex items-center justify-between gap-3">

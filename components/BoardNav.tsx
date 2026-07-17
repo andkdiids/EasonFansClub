@@ -17,7 +17,7 @@ export function BoardNav({ boards, activeSlug }: Readonly<{ boards: Board[]; act
           <Link
             key={board.id}
             href={`/boards/${board.slug}`}
-            className={`rounded-lg px-4 py-3 transition ${
+            className={`rounded-lg px-4 py-2 transition ${
               activeSlug === board.slug ? 'bg-brand-700 text-white' : 'bg-sky-50/70 text-slate-700 hover:bg-sky-100'
             }`}
           >

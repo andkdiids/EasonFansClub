@@ -99,7 +99,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
               name="q"
               defaultValue={q}
               placeholder="搜索 UID、昵称、手机号或邮箱"
-              className="min-w-0 flex-1 rounded-xl border border-sky-100 px-4 py-3 font-bold outline-none"
+              className="min-w-0 flex-1 rounded-xl border border-sky-100 px-4 py-2 font-bold outline-none"
             />
             <button className="rounded-xl bg-brand-700 px-5 py-3 font-black text-white">搜索</button>
           </form>

@@ -300,12 +300,12 @@ try {
 }
   if (policy.registrationClosed) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-bold leading-7 text-amber-800">
           网站目前处于内测阶段，暂未开放注册，请关注后续公告。
         </div>
         {policy.envForcedClosed ? (
-          <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">
+          <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">
             注册已被服务器环境变量强制关闭，后台注册模式无法覆盖。
           </p>
         ) : null}
@@ -314,7 +314,7 @@ try {
   }
 
   return (
-    <form className="space-y-5" onSubmit={handleSubmit}>
+    <form className="space-y-2" onSubmit={handleSubmit}>
       <div data-register-field="form" tabIndex={-1}>
         <FormError message={errors.form} />
       </div>
@@ -339,95 +339,121 @@ try {
         </div>
       ) : null}
 
-      <p className="rounded-2xl bg-sky-50 px-4 py-3 text-xs font-bold leading-6 text-slate-600">
-        当前注册模式：{policy.registrationModeLabel}。注册方式只影响新用户注册，不影响已有用户登录。
-      </p>
+     
 
-      {registrationType === 'PHONE' ? (
-        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-6 text-amber-800">
-          当前开放手机号注册，手机号尚未经过短信验证，请妥善保管密码并尽快绑定邮箱。
-        </p>
-      ) : null}
+     
+
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+  <label className="block">
+    <span className="text-sm font-bold text-white">用户名 / 昵称</span>
+    <input
+      value={form.nickname}
+      onChange={(event) => updateField('nickname', event.target.value)}
+      data-register-field="nickname"
+      className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+      placeholder="2-16 个字符"
+    />
+    <FormError message={errors.nickname} />
+  </label>
+
+  {registrationType === 'PHONE' ? (
+    <label className="block">
+      <span className="text-sm font-bold text-white">手机号</span>
+      <input
+        value={form.phone}
+        onChange={(event) => updateField('phone', event.target.value)}
+        type="tel"
+        autoComplete="tel"
+        data-register-field="phone"
+        className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+        placeholder="中国大陆 11 位手机号"
+      />
+      <FormError message={errors.phone} />
+    </label>
+  ) : (
+    <label className="block">
+      <span className="text-sm font-bold text-white">邮箱</span>
+      <input
+        value={form.email}
+        onChange={(event) => updateField('email', event.target.value)}
+        type="email"
+        autoComplete="email"
+        data-register-field="email"
+        className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+        placeholder="用于验证账号和邮箱登录"
+      />
+      <FormError message={errors.email} />
+    </label>
+  )}
+</div>
 
       <label className="block">
-        <span className="text-sm font-bold text-slate-700">用户名 / 昵称</span>
+        {policy.requireSecurityQuestionsForNewUsers ? (
+  <fieldset
+    data-register-field="securityQuestions"
+    tabIndex={-1}
+    className="space-y-1 rounded-xl border border-sky-100 bg-sky-50/50 p-2"
+  >
+   <p className="text-sm font-black text-brand-950">
+  设置密保问题
+</p>
+
+    <p className="text-[11px] leading-4 text-amber-700">
+      密保问题设置后不可修改，请妥善保存答案。
+    </p>
+
+    {form.securityQuestions.map((item, index) => (
+      <div key={index} className="grid grid-cols-1 gap-2 md:grid-cols-2">
         <input
-          value={form.nickname}
-          onChange={(event) => updateField('nickname', event.target.value)}
-          data-register-field="nickname"
-          className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
-          placeholder="2-16 个字符"
+          value={item.question}
+          onChange={(event) =>
+            updateSecurityQuestion(index, 'question', event.target.value)
+          }
+          maxLength={120}
+          className="w-full rounded-lg border border-sky-100 px-3 py-1.5 text-sm font-bold outline-none focus:border-brand-500"
+          placeholder="密保问题"
         />
-        <FormError message={errors.nickname} />
-      </label>
 
-      {policy.requireSecurityQuestionsForNewUsers ? (
-        <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-          <legend className="px-2 text-sm font-black text-brand-950">设置密保问题</legend>
-          <p className="text-xs font-bold leading-6 text-amber-800">密保问题设置后不可修改，请妥善保存答案。</p>
-          {form.securityQuestions.map((item, index) => (
-            <div key={index} className="space-y-2 rounded-xl bg-white p-3">
-              <input value={item.question} onChange={(event) => updateSecurityQuestion(index, 'question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none focus:border-brand-500" placeholder={`密保问题 ${index + 1}`} />
-              <input value={item.answer} onChange={(event) => updateSecurityQuestion(index, 'answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none focus:border-brand-500" placeholder="答案" />
-            </div>
-          ))}
-          <FormError message={errors.securityQuestions} />
-        </fieldset>
-      ) : null}
+        <input
+          value={item.answer}
+          onChange={(event) =>
+            updateSecurityQuestion(index, 'answer', event.target.value)
+          }
+          maxLength={200}
+          autoComplete="off"
+          className="w-full rounded-lg border border-sky-100 px-3 py-1.5 text-sm font-bold outline-none focus:border-brand-500"
+          placeholder="答案"
+        />
+      </div>
+    ))}
 
-      {registrationType === 'PHONE' ? (
-        <label className="block">
-          <span className="text-sm font-bold text-slate-700">手机号</span>
-          <input
-            value={form.phone}
-            onChange={(event) => updateField('phone', event.target.value)}
-            type="tel"
-            autoComplete="tel"
-            data-register-field="phone"
-            className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
-            placeholder="中国大陆 11 位手机号"
-          />
-          <FormError message={errors.phone} />
-        </label>
-      ) : (
-        <label className="block">
-          <span className="text-sm font-bold text-slate-700">邮箱</span>
-          <input
-            value={form.email}
-            onChange={(event) => updateField('email', event.target.value)}
-            type="email"
-            autoComplete="email"
-            data-register-field="email"
-            className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
-            placeholder="用于验证账号和邮箱登录"
-          />
-          <FormError message={errors.email} />
-        </label>
-      )}
-
-      <label className="block">
-        <span className="text-sm font-bold text-slate-700">密码</span>
+    <FormError message={errors.securityQuestions} />
+  </fieldset>
+) : null}
+        <span className="text-sm font-bold text-white">密码</span>
         <input
           value={form.password}
           onChange={(event) => updateField('password', event.target.value)}
           type="password"
           autoComplete="new-password"
           data-register-field="password"
-          className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
+          className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="至少 8 位"
         />
         <FormError message={errors.password} />
       </label>
 
       <label className="block">
-        <span className="text-sm font-bold text-slate-700">确认密码</span>
+        <span className="text-sm font-bold text-white">
+  确认密码
+</span>
         <input
           value={form.confirmPassword}
           onChange={(event) => updateField('confirmPassword', event.target.value)}
           type="password"
           autoComplete="new-password"
           data-register-field="confirmPassword"
-          className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-3 outline-none ring-brand-500/20 focus:ring-4"
+          className="mt-2 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="再次输入密码"
         />
         <FormError message={errors.confirmPassword} />
@@ -436,7 +462,7 @@ try {
       {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[65px]" /> : null}
       <FormError message={errors.turnstileToken} />
 
-      <label className="flex items-start gap-3 rounded-xl bg-sky-50/70 p-4 text-sm font-bold text-slate-600">
+      <label className="flex items-start gap-3 rounded-xl bg-white/25 p-4 text-sm font-bold text-white">
         <input
           type="checkbox"
           checked={form.acceptedAgreement}
@@ -444,22 +470,28 @@ try {
           data-register-field="acceptedAgreement"
           className="mt-1"
         />
-        <span>我已阅读并同意《私家E院用户协议》和社区管理规范。</span>
+        <span className="leading-6 drop-shadow-md">
+  我已阅读并同意
+  <span className="font-black text-sky-300">
+    《私家E院用户协议》
+  </span>
+  和社区管理规范。
+</span>
       </label>
       <FormError message={errors.acceptedAgreement} />
 
-      {message ? <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm">{message}</p> : null}
-      {loginUrl ? <Link href={loginUrl} className="block rounded-xl border border-emerald-100 bg-white px-4 py-3 text-center text-sm font-black text-emerald-700">前往登录</Link> : null}
+      {message ? <p role="status" className="rounded-xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700 shadow-sm">{message}</p> : null}
+      {loginUrl ? <Link href={loginUrl} className="block rounded-xl border border-emerald-100 bg-white px-4 py-2 text-center text-sm font-black text-emerald-700">前往登录</Link> : null}
       {devVerificationUrl ? (
-        <a className="block break-all rounded-xl bg-sky-50 px-4 py-3 text-xs font-bold text-brand-700" href={devVerificationUrl}>
+        <a className="block break-all rounded-xl bg-sky-50 px-4 py-2 text-xs font-bold text-brand-700" href={devVerificationUrl}>
           开发环境验证链接：{devVerificationUrl}
         </a>
       ) : null}
 
       <button
         disabled={isSubmitting}
-        className="w-full rounded-lg bg-brand-700 px-4 py-3 font-black text-white shadow-lg shadow-sky-900/10 disabled:cursor-not-allowed disabled:opacity-60"
-      >
+       className="w-full rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 px-4 py-3 font-black text-white shadow-lg shadow-sky-900/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:from-sky-500 hover:to-blue-600 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+       >
         {isSubmitting ? '注册中...' : registrationType === 'PHONE' ? '手机号注册' : '注册并发送验证邮件'}
       </button>
     </form>

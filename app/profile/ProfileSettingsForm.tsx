@@ -433,7 +433,7 @@ export function ProfileSettingsForm({
               onChange={(event) => update('nickname', event.target.value)}
               minLength={2}
               maxLength={32}
-              className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none transition focus:border-brand-700"
+              className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none transition focus:border-brand-700"
               placeholder="请输入昵称"
             />
           </label>
@@ -445,7 +445,7 @@ export function ProfileSettingsForm({
               onChange={(event) => update('bio', event.target.value)}
               rows={5}
               maxLength={300}
-              className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
+              className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
               placeholder="写一点关于你的 Eason 故事"
             />
           </label>
@@ -462,7 +462,7 @@ export function ProfileSettingsForm({
             <select
               value={form.wallVisibility}
               onChange={(event) => update('wallVisibility', event.target.value as ProfileWallVisibility)}
-              className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+              className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
             >
               <option value="PUBLIC">Public</option>
               <option value="FRIENDS">Friends only</option>
@@ -479,7 +479,7 @@ export function ProfileSettingsForm({
           </div>
 
           {!form.emailVerifiedAt ? (
-            <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black leading-6 text-amber-800">
+            <p className="rounded-2xl bg-amber-50 px-4 py-2 text-sm font-black leading-6 text-amber-800">
               建议绑定并验证邮箱，提高账户安全性。未验证手机号不能用于找回密码或高风险操作验证。
             </p>
           ) : null}
@@ -495,7 +495,7 @@ export function ProfileSettingsForm({
                 value={form.email}
                 onChange={(event) => update('email', event.target.value)}
                 type="email"
-                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
                 placeholder={form.email ? '更换邮箱' : '绑定邮箱'}
               />
             </label>
@@ -510,15 +510,15 @@ export function ProfileSettingsForm({
                 value={form.phone}
                 onChange={(event) => update('phone', event.target.value)}
                 type="tel"
-                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-3 text-sm font-bold outline-none"
+                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
                 placeholder={form.phone ? '更换手机号' : '绑定手机号'}
               />
             </label>
           </div>
         </section>
 
-        {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-        {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-600">{error}</p> : null}
+        {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+        {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
         <div className="sticky bottom-0 -mx-6 -mb-6 flex gap-3 border-t border-sky-100 bg-white/95 p-4 backdrop-blur">
           {onCancel ? (

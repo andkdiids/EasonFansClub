@@ -89,8 +89,8 @@ export function AdminManager({
         <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">
           搜索用户，设置管理员身份，并为普通管理员分配可访问的后台模块。
         </p>
-        {message ? <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{message}</p> : null}
-        {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p> : null}
+        {message ? <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700">{message}</p> : null}
+        {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-700">{error}</p> : null}
       </section>
 
       <section className="rounded-2xl border border-sky-100 bg-white/82 p-5 shadow-sm sm:p-6">

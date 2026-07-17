@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 function HeaderFallback() {
   return (
     <header className="sticky top-0 z-30 border-b border-sky-100/80 bg-white/88 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2 sm:px-5 sm:py-4">
         <div className="text-lg font-black text-brand-950 sm:text-xl">私家E院</div>
         <div className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-slate-500">Header loading...</div>
       </div>

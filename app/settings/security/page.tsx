@@ -83,7 +83,7 @@ export default async function SecurityPage() {
           ) : null}
 
           {!settings.enableEmailPasswordReset ? (
-            <p className="mt-5 rounded-2xl bg-sky-50 px-4 py-3 text-sm font-black text-sky-700">邮箱重置功能暂未开放。</p>
+            <p className="mt-5 rounded-2xl bg-sky-50 px-4 py-2 text-sm font-black text-sky-700">邮箱重置功能暂未开放。</p>
           ) : null}
 
           <div className="mt-6 rounded-2xl border border-sky-100 bg-white px-4 py-4 text-sm font-bold leading-7 text-slate-600">

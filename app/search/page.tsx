@@ -57,7 +57,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               name="q"
               defaultValue={q}
               placeholder="搜索帖子、用户、板块、标签"
-              className="min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-4 py-3 font-bold outline-none focus:border-brand-400"
+              className="min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-4 py-2 font-bold outline-none focus:border-brand-400"
             />
             <button className="rounded-xl bg-brand-700 px-6 py-3 font-black text-white">搜索</button>
           </form>
