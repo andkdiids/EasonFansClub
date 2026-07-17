@@ -19,6 +19,11 @@ export async function GET() {
 
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey()
+  console.log('[checkin-time]', {
+  now: new Date(),
+  today,
+  todayKey,
+})
   const [profile, todayCheckIn, todayCount, moodStats, history] = await Promise.all([
     safeDb(
       'User.findUnique checkinApi.profile',
