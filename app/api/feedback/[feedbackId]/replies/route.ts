@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { feedbackInclude, parseFeedbackAttachments, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
   const guard = await requireUser()
@@ -13,7 +13,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   const body = await request.json().catch(() => null)
   const rawContent = typeof body?.content === 'string' ? body.content : ''
   if (rawContent.length > 2000) return NextResponse.json({ message: '回复内容最多 2000 个字' }, { status: 400 })
-  const content = await filterSensitiveWords(sanitizeText(body?.content, 2000))
+  const content = sanitizeText(body?.content, 2000)
+  if (await containsSensitiveContent(content)) return NextResponse.json({ message: '内容包含违禁词，无法发布' }, { status: 400 })
   const attachments = parseFeedbackAttachments(body?.attachments)
 
   if (!content && attachments.length === 0) {

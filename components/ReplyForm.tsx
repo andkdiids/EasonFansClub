@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiButton } from '@/components/EmojiPicker'
+import { ContentImageUploader } from '@/components/ContentImageUploader'
 
 export function ReplyForm({
   postId,
@@ -18,6 +19,7 @@ export function ReplyForm({
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [content, setContent] = useState('')
+  const [imageUrls, setImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -41,7 +43,7 @@ export function ReplyForm({
     const response = await fetch(`/api/posts/${postId}/replies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, parentId: replyTo?.id }),
+      body: JSON.stringify({ content, parentId: replyTo?.id, imageUrls }),
     })
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
@@ -50,6 +52,7 @@ export function ReplyForm({
       return
     }
     setContent('')
+    setImageUrls([])
     onReplyCancel?.()
     onReplyCreated?.(data.reply)
     if (!onReplyCreated) router.refresh()
@@ -80,6 +83,7 @@ export function ReplyForm({
           placeholder="写下你的回复..."
         />
       </label>
+      <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
       <div className="mt-3 flex items-center justify-between gap-3">
         <EmojiButton onSelect={insertEmoji} />
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">

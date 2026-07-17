@@ -84,7 +84,11 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
   const [uploadingCreate, setUploadingCreate] = useState(false)
   const [uploadingReply, setUploadingReply] = useState(false)
   const [uploadReset, setUploadReset] = useState(0)
-  const feedbackIdempotencyKey = useRef(crypto.randomUUID())
+  const feedbackIdempotencyKey = useRef(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`,
+  )
 
   const selected = useMemo(() => feedbacks.find((item) => item.id === selectedId), [feedbacks, selectedId])
 

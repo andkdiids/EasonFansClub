@@ -3,9 +3,10 @@ import { redirect } from 'next/navigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { ProfileCheckInCalendar, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
-import { ProfileWall } from '@/components/ProfileWall'
+import { PublicUserModules } from '@/components/PublicUserModules'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
+import { calculateCheckinStreaks } from '@/lib/checkin'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
@@ -70,10 +71,12 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = publicImageUrl(profile.profile.avatarUrl || profile.avatarUrl)
   const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.profile.bio || profile.bio || ''
-  const [layoutConfig, growth] = await Promise.all([
+  const [layoutConfig, growth, checkInHistory] = await Promise.all([
     getPublishedPageLayoutConfig('profile'),
     getGrowthSummary(profile.experience || profile.exp || 0),
+    prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
   ])
+  const streaks = calculateCheckinStreaks(checkInHistory.map((item) => item.checkinDateKey))
   const headerUser = { ...user, avatarUrl: avatar || user.avatarUrl || null, nickname: displayName }
   const profileEditorInitialProfile = {
     nickname: displayName,
@@ -93,6 +96,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       </Link>
       <Link href={`/user/${formatUid(profile.uid)}`} className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-brand-800 shadow-sm transition hover:bg-sky-50">
         查看公开主页
+      </Link>
+      <Link href={`/user/${formatUid(profile.uid)}/wall`} className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-brand-800 shadow-sm transition hover:bg-sky-50">
+        去留言
       </Link>
     </div>
   )
@@ -120,24 +126,24 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           modules={{
             'profile.calendar': <ProfileCheckInCalendar />,
             'profile.recentMessages': <ProfileRecentMessages />,
-            'profile.wall': <ProfileWall receiverUid={profile.uid} />,
             'profile.main': (
-              <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
-                  <div className="grid gap-4 px-5 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center sm:px-6">
+              <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/88 shadow-sm">
+                  <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center sm:px-5">
                     <div>
                       <h2 className="text-lg font-black text-slate-950">个人简介</h2>
-                      <p className="mt-3 text-sm leading-7 text-slate-600">{bio || '这个成员还没有填写个人简介。'}</p>
+                      <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{bio || '这个成员还没有填写个人简介。'}</p>
                     </div>
                     {renderProfileActions()}
                   </div>
-                  <div className="px-5 pb-5 sm:px-6">
+                  <div className="px-4 pb-4 sm:px-5">
                     <ProfileStatsGrid
+                      compact
                       items={[
                         ['等级', `Lv.${profile.level}`],
                         ['积分', profile.points],
                         ['经验', `${growth.experience} XP`],
-                        ['连续挂号', `${profile.consecutiveDays} 天`],
-                        ['累计挂号', `${profile._count.checkIns} 天`],
+                        ['连续挂号', `${streaks.currentStreak} 天`],
+                        ['累计挂号', `${streaks.totalDays} 天`],
                       ]}
                     />
                   </div>
@@ -145,6 +151,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
             ),
           }}
         />
+        <PublicUserModules uid={formatUid(profile.uid)} isSelf />
       </main>
     </>
   )

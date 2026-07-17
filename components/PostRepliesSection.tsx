@@ -7,6 +7,7 @@ import { ReplyForm } from '@/components/ReplyForm'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
+import { splitContentImages } from '@/lib/content-images'
 
 type ReplyItem = {
   id: string
@@ -93,6 +94,7 @@ export function PostRepliesSection({
     const name = reply.author.profile?.displayName || reply.author.nickname
     const avatar = publicImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const canDelete = currentUserId === reply.author.id || isAdminRole(currentUserRole)
+    const replyBody = splitContentImages(reply.content)
 
     return (
       <div key={reply.id} className="min-w-0 py-2">
@@ -109,8 +111,9 @@ export function PostRepliesSection({
             </div>
             <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6 text-slate-700">
               {replyToName ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}
-              {reply.content}
+              {replyBody.text}
             </p>
+            {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url) => <img key={url} src={url} alt="回复图片" className="max-h-48 w-full rounded-xl object-cover" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               {currentUserId ? (
                 <button
@@ -138,6 +141,7 @@ export function PostRepliesSection({
     const showAll = Boolean(expandedReplies[reply.id])
     const visibleChildren = showAll ? children : children.slice(0, 3)
     const canDelete = currentUserId === reply.author.id || isAdminRole(currentUserRole)
+    const replyBody = splitContentImages(reply.content)
 
     return (
       <article key={reply.id}>
@@ -152,8 +156,9 @@ export function PostRepliesSection({
             <span>#{index + 1} · {formatDate(new Date(reply.createdAt))}</span>
           </div>
           <p className="whitespace-pre-wrap leading-7 text-slate-700">
-            {reply.content}
+            {replyBody.text}
           </p>
+          {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url) => <img key={url} src={url} alt="回复图片" className="max-h-72 w-full rounded-xl object-cover" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {currentUserId ? (
               <button

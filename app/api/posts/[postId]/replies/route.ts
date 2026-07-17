@@ -3,7 +3,8 @@ import { getCurrentUser } from '@/lib/auth'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -13,10 +14,15 @@ export async function POST(request: Request, { params }: Params) {
 
   const { postId } = await params
   const body = await request.json().catch(() => null)
-  const content = await filterSensitiveWords(sanitizeText(body?.content, 5000))
+  const textContent = sanitizeText(body?.content, 5000)
+  const imageUrls = parseContentImageUrls(body?.imageUrls)
+  const content = appendContentImages(textContent, imageUrls)
+  if (await containsSensitiveContent(content)) {
+    return NextResponse.json({ message: '回复包含违禁词，无法发布' }, { status: 400 })
+  }
   const parentId = sanitizeText(body?.parentId, 80)
 
-  if (content.length < 2) {
+  if (textContent.length < 2 && imageUrls.length === 0) {
     return NextResponse.json({ message: '回复内容至少需要 2 个字符', errors: { content: '回复太短了' } }, { status: 400 })
   }
 

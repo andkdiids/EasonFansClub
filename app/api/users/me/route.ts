@@ -4,7 +4,7 @@ import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, requireUser, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -59,7 +59,8 @@ export async function PATCH(request: Request) {
 
   const body = await request.json().catch(() => null)
   const nickname = sanitizeText(body?.nickname, 32)
-  const bio = await filterSensitiveWords(sanitizeText(body?.bio, 300))
+  const bio = sanitizeText(body?.bio, 300)
+  if (await containsSensitiveContent(bio)) return NextResponse.json({ message: '个人简介包含违禁词，无法保存' }, { status: 400 })
   const avatarUrl = sanitizeText(body?.avatarUrl, 500)
   const backgroundUrl = sanitizeText(body?.backgroundUrl, 500)
   const email = body?.email === undefined ? undefined : normalizeEmail(body.email)

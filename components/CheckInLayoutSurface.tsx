@@ -187,7 +187,6 @@ export function createCheckInLayoutModules({
           <CheckInMessagesPanel
             title={layoutItem.title ?? undefined}
             density={density}
-            anonymous
             scope="public"
             initialMessages={selectedMessages}
             initialDate={selectedDateValue}

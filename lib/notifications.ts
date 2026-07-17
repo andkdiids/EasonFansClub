@@ -78,7 +78,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
       type: { notIn: ['FRIEND_REQUEST', 'MESSAGE'] },
       NOT: { link: { startsWith: '/feedback/' } },
     } }),
-    prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), reads: { none: { userId } } } }),
+    prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, reads: { none: { userId } } } }),
     prisma.feedback.count({ where: { userId, userUnread: true } }),
     prisma.friendRequest.count({ where: { receiverId: userId, status: 'PENDING' } }),
     prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'MESSAGE' } }),
@@ -100,6 +100,7 @@ export async function getUnreadNotificationCount(userId: string) {
     prisma.systemNotification.count({
       where: {
         ...effectiveSystemNotificationWhere(now),
+        type: { not: 'UPDATE' },
         reads: { none: { userId } },
       },
     }),
@@ -139,6 +140,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
     prisma.systemNotification.findMany({
       where: {
         ...effectiveSystemNotificationWhere(now),
+        type: { not: 'UPDATE' },
         ...(options.unreadOnly ? { reads: { none: { userId } } } : {}),
       },
       orderBy: effectiveSystemNotificationOrder,
@@ -283,7 +285,7 @@ export async function markUnifiedNotificationRead(userId: string, source: string
 export async function markAllUnifiedNotificationsRead(userId: string) {
   const now = new Date()
   const unreadSystem = await prisma.systemNotification.findMany({
-    where: { ...effectiveSystemNotificationWhere(now), reads: { none: { userId } } },
+    where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, reads: { none: { userId } } },
     select: { id: true },
     take: 500,
   })

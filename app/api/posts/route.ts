@@ -5,7 +5,8 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { parseContentImageUrls } from '@/lib/content-images'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -86,11 +87,17 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null)
+  const rawTitle = sanitizeText(body?.title, 120)
+  const rawContent = stripUnsafeHtml(sanitizeText(body?.content, 20000))
+  if (await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
+    return NextResponse.json({ message: '帖子包含违禁词，无法发布', errors: { content: '请修改后重新发布' } }, { status: 400 })
+  }
   const input = {
     boardId: sanitizeText(body?.boardId, 80),
-    title: sanitizeText(body?.title, 120),
-    content: await filterSensitiveWords(stripUnsafeHtml(sanitizeText(body?.content, 20000))),
+    title: rawTitle,
+    content: rawContent,
   }
+  const imageUrls = parseContentImageUrls(body?.imageUrls)
 
   const errors: Record<string, string> = {}
   if (!input.boardId) errors.boardId = '请选择板块'
@@ -134,6 +141,9 @@ export async function POST(request: Request) {
         },
         select: { id: true },
       })
+      if (imageUrls.length) {
+        await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => ({ postId: post.id, type: 'IMAGE', url, sortOrder })) })
+      }
 
       await tx.board.update({
         where: { id: input.boardId },

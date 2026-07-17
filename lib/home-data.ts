@@ -77,14 +77,14 @@ async function getHomePostsUncached() {
       const selected = new Map<string, (typeof candidates)[number]>()
       candidates
         .filter((post) => post.isFeatured)
-        .slice(0, 6)
+        .slice(0, 4)
         .forEach((post) => selected.set(post.id, post))
 
       candidates.forEach((post) => {
-        if (selected.size < 6) selected.set(post.id, post)
+        if (selected.size < 4) selected.set(post.id, post)
       })
 
-      return Array.from(selected.values()).slice(0, 6)
+      return Array.from(selected.values()).slice(0, 4)
     }),
     [],
     8000,

@@ -50,7 +50,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const sent = await safeDb(
     'friends.sent',
     prisma.friendRequest.findMany({
-      where: { senderId: user.id, receiver: activeUserFilter },
+      where: { senderId: user.id, status: 'PENDING', receiver: activeUserFilter },
       include: { receiver: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
       take: FRIEND_REQUEST_LIMIT,

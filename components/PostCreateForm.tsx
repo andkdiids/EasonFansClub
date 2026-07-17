@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiButton } from '@/components/EmojiPicker'
+import { ContentImageUploader } from '@/components/ContentImageUploader'
 
 type Board = { id: string; name: string; slug: string }
 
@@ -12,6 +13,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [boardId, setBoardId] = useState(boards.find((board) => board.slug === initialBoardSlug)?.id || boards[0]?.id || '')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [imageUrls, setImageUrls] = useState<string[]>([])
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -34,7 +36,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
     const response = await fetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ boardId, title, content }),
+      body: JSON.stringify({ boardId, title, content, imageUrls }),
     })
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
@@ -66,6 +68,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         </select>
         {errors.boardId ? <p className="mt-2 text-sm font-bold text-red-600">{errors.boardId}</p> : null}
       </label>
+      <ContentImageUploader value={imageUrls} onChange={setImageUrls} />
       <label className="block">
         <span className="text-sm font-black text-slate-700">标题</span>
         <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-3" placeholder="请输入帖子标题" />

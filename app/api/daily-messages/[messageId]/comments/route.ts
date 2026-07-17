@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, requireUser, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -26,11 +26,14 @@ export async function POST(request: Request, context: RouteContext) {
 
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)
-  const content = await filterSensitiveWords(sanitizeText(body?.content, 300))
+  const content = sanitizeText(body?.content, 300)
   const parentId = sanitizeText(body?.parentId, 80)
 
   if (!content) {
     return NextResponse.json({ message: '评论内容不能为空' }, { status: 400 })
+  }
+  if (await containsSensitiveContent(content)) {
+    return NextResponse.json({ message: '内容包含违禁词，无法发布' }, { status: 400 })
   }
 
   let parentComment: { id: string; authorId: string; messageId: string } | null = null

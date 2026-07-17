@@ -46,13 +46,13 @@ test('详情真实挂载调用计数接口且列表、首页、详情统一读�
   assert.match(home, /viewCount: true/)
 })
 
-test('首页精选限制六篇并使用容器响应式一至三列 Grid', () => {
+test('首页精选限制四篇并固定为响应式两列 Grid', () => {
   const data = readFileSync('lib/home-data.ts', 'utf8')
   const surface = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
-  assert.match(data, /selected\.size < 6/)
-  assert.match(data, /slice\(0, 6\)/)
-  assert.match(surface, /posts\.data\.slice\(0, 6\)/)
-  assert.match(surface, /grid-cols-1 gap-4 @\[42rem\]:grid-cols-2 @\[72rem\]:grid-cols-3/)
+  assert.match(data, /selected\.size < 4/)
+  assert.match(data, /slice\(0, 4\)/)
+  assert.match(surface, /posts\.data\.slice\(0, 4\)/)
+  assert.match(surface, /grid grid-cols-1 gap-4 md:grid-cols-2/)
 })
 
 test('Hero 默认样式美观且合法后台枚举映射到前台', () => {

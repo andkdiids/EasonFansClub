@@ -2,9 +2,11 @@ import { PAGE_LAYOUT_ROW_GAP, PAGE_LAYOUT_ROW_HEIGHT } from '@/lib/page-layout/c
 import type { PageLayoutGridItem, PageLayoutPageKey } from '@/lib/page-layout/types'
 
 const deprecatedModules = new Set([
+  'home.checkinSummary',
   'profile.intro',
   'profile.stats',
   'profile.friendActivity',
+  'profile.wall',
   'forum.board',
   'forum.header',
   'forum.categoryNav',

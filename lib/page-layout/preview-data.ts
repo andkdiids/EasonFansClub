@@ -71,7 +71,9 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     return {
       'home.hero': { ok: true, data: { siteName: config.text.siteName, slides } },
       'home.announcement': announcement,
-      'home.checkinSummary': { ok: true, data: { text: config.text } },
+      'home.checkinEntry': { ok: true, data: { text: config.text } },
+      'home.forumEntry': { ok: true, data: { text: config.text } },
+      'home.musicEntry': { ok: true, data: { text: config.text } },
       'home.featuredPosts': posts,
       'home.latestPosts': posts,
       'home.dailyMessages': messages,
@@ -151,7 +153,6 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     })),
     'profile.calendar': { ok: true, data: {} },
     'profile.recentMessages': { ok: true, data: {} },
-    'profile.wall': { ok: true, data: {} },
   }),
   'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)

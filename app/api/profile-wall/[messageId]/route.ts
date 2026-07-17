@@ -9,11 +9,11 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const { messageId } = await params
   const message = await prisma.profileWallMessage.findUnique({
     where: { id: messageId },
-    select: { id: true, senderId: true, deletedAt: true },
+    select: { id: true, senderId: true, receiverId: true, deletedAt: true },
   })
   if (!message || message.deletedAt) return NextResponse.json({ message: '留言不存在' }, { status: 404 })
 
-  const canDelete = viewer.id === message.senderId || viewer.role === 'ADMIN' || viewer.role === 'SUPER_ADMIN'
+  const canDelete = viewer.id === message.senderId || viewer.id === message.receiverId || viewer.role === 'ADMIN' || viewer.role === 'SUPER_ADMIN'
   if (!canDelete) return NextResponse.json({ message: '没有权限删除这条留言' }, { status: 403 })
 
   await prisma.profileWallMessage.update({

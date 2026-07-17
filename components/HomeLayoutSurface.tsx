@@ -6,7 +6,7 @@ import { HomeHero } from '@/components/HomeHero'
 import { HomeSystemAnnouncement } from '@/components/HomeSystemAnnouncement'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { LikeButton } from '@/components/PostActions'
-import { PageLayoutRenderer, type PageLayoutRenderContext, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
+import { PageLayoutRenderer, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
 import { getMood } from '@/lib/daily'
 import type { PageLayoutConfig, PageLayoutModuleConfig } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
@@ -80,6 +80,7 @@ export function HomeLayoutSurface({
   const [messages, setMessages] = useState<LoadState<DailyMessage[]>>(initial([]))
   const [activities, setActivities] = useState<LoadState<Activity[]>>(initial([]))
   const [tracks, setTracks] = useState<LoadState<Track[]>>(initial([]))
+  const [dailyMessagesHidden, setDailyMessagesHidden] = useState(false)
 
   useEffect(() => {
     loadJson<{ posts: Post[]; messages: DailyMessage[]; activities: Activity[]; tracks: Track[] }>('/api/home')
@@ -97,10 +98,9 @@ export function HomeLayoutSurface({
       })
   }, [])
 
-  function renderModule(item: PageLayoutModuleConfig, context: PageLayoutRenderContext) {
-    const isCompact = context.density !== 'normal'
-    const isMinimal = context.density === 'minimal'
+  useEffect(() => setDailyMessagesHidden(window.localStorage.getItem('home:dailyMessages:hidden') === '1'), [])
 
+  function renderModule(item: PageLayoutModuleConfig) {
     if (item.key === 'home.hero') {
       const heroSlides = item.title || item.subtitle
         ? slides.map((slide, index) => (index === 0 ? { ...slide, title: item.title || slide.title, subtitle: item.subtitle || slide.subtitle } : slide))
@@ -110,25 +110,18 @@ export function HomeLayoutSurface({
 
     if (item.key === 'home.announcement') return <HomeSystemAnnouncement announcement={announcement} />
 
-    if (item.key === 'home.checkinSummary') {
+    const quickEntries: Record<string, [string, string, string]> = {
+      'home.checkinEntry': [siteConfig.text.homePrimaryButton || '今日挂号', siteConfig.text.checkinCopy || '留下今天的心情', '/checkin'],
+      'home.forumEntry': [siteConfig.text.homeSecondaryButton || '去E院广场看看', siteConfig.text.forumCopy || '帖子、留言、慢慢说。', '/forum'],
+      'home.musicEntry': ['EasMusic', siteConfig.text.musicCopy || '一首歌，也是一段故事。', '/music'],
+    }
+    if (quickEntries[item.key]) {
+      const [title, copy, href] = quickEntries[item.key]
       return (
-        <div className={`${isMinimal ? 'grid-cols-3 gap-2' : isCompact ? 'gap-3 md:grid-cols-3' : 'gap-4 md:grid-cols-3'} grid h-full min-h-0`}>
-          {[
-            [siteConfig.text.homePrimaryButton || '今日挂号', siteConfig.text.checkinCopy || '留下今天的心情', '/checkin'],
-            [siteConfig.text.homeSecondaryButton || '去E院广场看看', siteConfig.text.forumCopy || '帖子、留言、慢慢说。', '/forum'],
-            ['EasMusic', siteConfig.text.musicCopy || '一首歌，也是一段故事。', '/music'],
-          ].map(([title, copy, href]) => (
-            <Link
-              key={href}
-              href={href}
-              className={`${isMinimal ? 'rounded-xl p-2' : isCompact ? 'rounded-2xl p-3' : 'layout-card rounded-2xl'} min-h-0 bg-white/86 shadow-xl shadow-sky-900/5 transition hover:-translate-y-1`}
-            >
-              <h2 className={`${isMinimal ? 'text-sm leading-tight' : isCompact ? 'text-xl' : 'text-2xl'} font-black text-brand-950`}>{title}</h2>
-              <p className={`${isMinimal ? 'mt-1 line-clamp-1 text-[11px] leading-4' : isCompact ? 'mt-1 line-clamp-1 text-xs leading-5' : 'mt-3 min-h-14 text-base leading-7'} font-bold text-slate-600`}>{copy}</p>
-              <span className={`${isMinimal ? 'mt-1.5 px-2.5 py-1 text-[11px]' : isCompact ? 'mt-2 px-3 py-1.5 text-xs' : 'mt-5 px-4 py-2 text-sm'} inline-flex rounded-full bg-sky-100 font-black text-brand-700`}>打开</span>
-            </Link>
-          ))}
-        </div>
+        <Link href={href} className="flex min-h-28 flex-col justify-between rounded-2xl border border-sky-100 bg-white/86 p-4 shadow-sm transition hover:-translate-y-1">
+          <div><h2 className="text-lg font-black text-brand-950">{item.title || title}</h2><p className="mt-1 line-clamp-2 text-sm font-bold leading-6 text-slate-600">{item.subtitle || copy}</p></div>
+          <span className="mt-3 w-fit rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black text-brand-700">打开</span>
+        </Link>
       )
     }
 
@@ -142,20 +135,20 @@ export function HomeLayoutSurface({
           {posts.failed ? <ModuleFallback /> : null}
           {posts.loading ? <ModuleFallback title="正在加载帖子..." /> : null}
           {!posts.loading && !posts.failed ? (
-            <div className="grid grid-cols-1 gap-4 @[42rem]:grid-cols-2 @[72rem]:grid-cols-3">
-              {posts.data.slice(0, 6).map((post) => {
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {posts.data.slice(0, 4).map((post) => {
                 const authorName = post.author.profile?.displayName || post.author.nickname
                 return (
                   <article key={post.id} className="relative flex min-h-52 min-w-0 flex-col rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                    <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
-                    <div className="relative z-10 mb-2 flex w-fit flex-wrap gap-2">
+                    <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-20 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
+                    <div className="relative z-30 mb-2 flex w-fit flex-wrap gap-2">
                       {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Pinned</span> : null}
                       {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">Featured</span> : null}
                       <Link href={`/forum?board=${encodeURIComponent(post.board.slug)}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
                     </div>
-                    <h3 className="relative z-10 line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
-                    <p className="relative z-10 mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-                    <div className="relative z-10 mt-auto flex flex-wrap items-center gap-3 pt-4 text-xs font-bold text-slate-500">
+                    <h3 className="pointer-events-none relative z-10 line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
+                    <p className="pointer-events-none relative z-10 mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+                    <div className="relative z-30 mt-auto flex flex-wrap items-center gap-3 pt-4 text-xs font-bold text-slate-500">
                       <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950">{authorName}</Link>
                       <span>回复 {post.replyCount}</span><span>浏览 {post.viewCount}</span>
                       <LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} />
@@ -171,9 +164,10 @@ export function HomeLayoutSurface({
     }
 
     if (item.key === 'home.dailyMessages') {
+      if (dailyMessagesHidden) return null
       return (
         <div className="layout-card rounded-[24px] bg-white/78 shadow-xl shadow-sky-900/5 backdrop-blur">
-          <ModuleHeading item={item} fallbackTitle="E友留言精选" fallbackSubtitle="今天大家留下的声音。" />
+          <div className="flex items-start justify-between gap-3"><ModuleHeading item={item} fallbackTitle="E友留言精选" fallbackSubtitle="今天大家留下的声音。" /><button type="button" onClick={() => { window.localStorage.setItem('home:dailyMessages:hidden', '1'); setDailyMessagesHidden(true) }} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-slate-500">关闭</button></div>
           <div className="layout-stack grid">
             {messages.failed ? <ModuleFallback /> : null}
             {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
@@ -231,7 +225,9 @@ export function HomeLayoutSurface({
   const rendererModules: PageLayoutRendererModules = {
     'home.hero': renderModule,
     'home.announcement': renderModule,
-    'home.checkinSummary': renderModule,
+    'home.checkinEntry': renderModule,
+    'home.forumEntry': renderModule,
+    'home.musicEntry': renderModule,
     'home.featuredPosts': renderModule,
     'home.latestPosts': renderModule,
     'home.dailyMessages': renderModule,

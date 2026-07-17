@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, isSameLocalDay, startOfLocalDay } from '@/lib/checkin'
 import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 function logPerf(metric: string, start: number, extra?: Record<string, unknown>) {
   console.info('[perf]', { metric, ms: Date.now() - start, ...extra })
@@ -52,9 +52,12 @@ export async function GET() {
   if (!profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
+  const resolvedTodayCheckIn = todayCheckIn || (isSameLocalDay(profile.lastCheckInDate, today)
+    ? { checkDate: today, points: 0, exp: 0, mood: null, message: null, streakDay: streaks.currentStreak, createdAt: profile.lastCheckInDate || today }
+    : null)
   return NextResponse.json({
-    checkedToday: Boolean(todayCheckIn),
-    todayCheckIn,
+    checkedToday: Boolean(resolvedTodayCheckIn),
+    todayCheckIn: resolvedTodayCheckIn,
     consecutiveDays: streaks.currentStreak,
     currentStreak: streaks.currentStreak,
     longestStreak: streaks.longestStreak,
@@ -80,7 +83,10 @@ export async function POST(request: Request) {
   const moodKey = sanitizeText(body?.mood, 40)
   const mood = getMood(moodKey)
   const rawMessage = sanitizeText(body?.message, 300)
-  const message = await filterSensitiveWords(rawMessage)
+  if (await containsSensitiveContent(rawMessage)) {
+    return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
+  }
+  const message = rawMessage
 
   if (!mood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })

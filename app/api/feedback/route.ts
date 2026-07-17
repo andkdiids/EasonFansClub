@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { safeDb } from '@/lib/db-timeout'
+import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,12 +14,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const statusFilter = parseFeedbackStatusFilter(searchParams.get('status'))
 
-  const feedbacks = await prisma.feedback.findMany({
+  const feedbacks = await safeDb('Feedback.findMany user', prisma.feedback.findMany({
     where: { userId: guard.user.id, ...(statusFilter ? { status: { in: statusFilter } } : {}) },
     orderBy: [{ lastReplyAt: 'desc' }, { createdAt: 'desc' }],
     take: 50,
     select: feedbackListSelect,
-  })
+  }), [], 8000)
 
   return NextResponse.json({ feedbacks: feedbacks.map(serializeFeedbackListItem) })
 }
@@ -44,10 +45,11 @@ export async function POST(request: Request) {
   if (rawContent.length > 3000) return NextResponse.json({ message: '反馈描述最多 3000 个字' }, { status: 400 })
   if (rawContact.length > 120) return NextResponse.json({ message: '联系方式最多 120 个字' }, { status: 400 })
   const title = sanitizeText(body?.title, 80)
-  const content = await filterSensitiveWords(sanitizeText(body?.description ?? body?.content, 3000))
+  const content = sanitizeText(body?.description ?? body?.content, 3000)
   const contact = sanitizeText(body?.contact, 120)
   const type = parseFeedbackType(body?.type ?? body?.category)
   const attachments = parseFeedbackAttachments(body?.attachments)
+  if (await containsSensitiveContent(`${title}\n${content}`)) return NextResponse.json({ message: '内容包含违禁词，无法提交' }, { status: 400 })
 
   if (!title) return NextResponse.json({ message: '请填写反馈标题', errors: { title: '请填写反馈标题' } }, { status: 400 })
   if (!type) return NextResponse.json({ message: '请选择反馈分类', errors: { type: '请选择反馈分类' } }, { status: 400 })

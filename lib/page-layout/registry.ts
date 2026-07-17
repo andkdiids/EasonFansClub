@@ -46,12 +46,14 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     supportsTitle: false,
     supportsSubtitle: false,
   }),
-  defineLayoutModule('home', 'home.checkinSummary', '快捷入口', '挂号、广场、音乐快捷入口', 30, {
-    desktop: grid(0, 7, 12, 3),
-    minH: 2,
-    mobile: grid(0, 6, 4, 3),
-    supportsTitle: false,
-    supportsSubtitle: false,
+  defineLayoutModule('home', 'home.checkinEntry', '今日挂号', '每日挂号快捷入口', 30, {
+    desktop: grid(0, 7, 4, 2), minH: 2, mobile: grid(0, 6, 4, 2), width: 'third', allowedWidths: cardWidths,
+  }),
+  defineLayoutModule('home', 'home.forumEntry', '去E院广场看看', '论坛快捷入口', 31, {
+    desktop: grid(4, 7, 4, 2), minH: 2, mobile: grid(0, 8, 4, 2), width: 'third', allowedWidths: cardWidths,
+  }),
+  defineLayoutModule('home', 'home.musicEntry', 'EasMusic', '音乐快捷入口', 32, {
+    desktop: grid(8, 7, 4, 2), minH: 2, mobile: grid(0, 10, 4, 2), width: 'third', allowedWidths: cardWidths,
   }),
   defineLayoutModule('home', 'home.featuredPosts', '精选帖子', '首页精选帖子列表', 40, {
     desktop: grid(0, 10, 12, 5),
@@ -199,13 +201,6 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     minH: 3,
     layoutBehavior: 'auto',
   }),
-  defineLayoutModule('profile', 'profile.wall', '留言墙', '个人主页访客留言与回复', 50, {
-    desktop: grid(0, 12, 7, 6),
-    tablet: grid(0, 18, 8, 6),
-    mobile: grid(0, 18, 4, 6),
-    layoutBehavior: 'auto',
-  }),
-
   defineLayoutModule('admin-home', 'admin.header', '后台页头', '管理后台欢迎与说明', 10, {
     desktop: grid(0, 0, 12, 3),
     mobile: grid(0, 0, 4, 3),

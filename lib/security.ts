@@ -181,6 +181,17 @@ export function getClientIp(request: Request) {
   )
 }
 
+export async function containsSensitiveContent(content: string) {
+  if (!content.trim()) return false
+  try {
+    const normalized = content.toLocaleLowerCase('zh-CN')
+    const words = await getSensitiveWords()
+    return words.some((word) => normalized.includes(word.toLocaleLowerCase('zh-CN')))
+  } catch {
+    return false
+  }
+}
+
 export function hasValidRequestOrigin(request: Request) {
   const fetchSite = request.headers.get('sec-fetch-site')
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'same-site' && fetchSite !== 'none') return false

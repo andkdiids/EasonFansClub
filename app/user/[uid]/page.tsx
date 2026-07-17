@@ -2,7 +2,6 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
-import { ProfileWall } from '@/components/ProfileWall'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
@@ -137,6 +136,7 @@ export default async function PublicUserPage({ params }: PageProps) {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
+                  {viewer ? <Link href={`/user/${formatUid(user.uid)}/wall`} className="rounded-xl border border-sky-100 bg-brand-700 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">去留言</Link> : null}
                   {isSelf ? (
                     <Link href="/profile?edit=1" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
                       编辑个人资料
@@ -163,7 +163,6 @@ export default async function PublicUserPage({ params }: PageProps) {
 
           <PublicUserModules uid={formatUid(user.uid)} isSelf={isSelf} />
         </section>
-        <ProfileWall receiverUid={user.uid} />
       </main>
     </>
   )

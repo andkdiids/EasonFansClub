@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { getNotificationTarget } from '@/lib/notification-target'
 import type { UnifiedNotification } from '@/lib/notifications'
 
@@ -52,6 +52,11 @@ export function NotificationsClient({
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount)
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all')
   const [isUpdating, setIsUpdating] = useState(false)
+
+  useEffect(() => {
+    const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
+    if (dismissed.size) setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
+  }, [])
 
   const categoryCounts = useMemo(() => {
     const counts = Object.fromEntries(Object.keys(categoryLabels).map((key) => [key, 0])) as Record<NotificationCategory, number>
@@ -107,6 +112,28 @@ export function NotificationsClient({
     router.refresh()
   }
 
+  async function clearNotifications(items: UnifiedNotification[]) {
+    const personalIds = items.filter((item) => item.source === 'personal').map((item) => item.id)
+    if (personalIds.length) {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: personalIds }),
+      })
+      if (!response.ok) return
+    }
+    const systemIds = items.filter((item) => item.source === 'system').map((item) => item.id)
+    if (systemIds.length) {
+      const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
+      systemIds.forEach((id) => dismissed.add(id))
+      window.localStorage.setItem('notifications:dismissed-system', JSON.stringify(Array.from(dismissed).slice(-500)))
+    }
+    const keys = new Set(items.map((item) => `${item.source}:${item.id}`))
+    setNotifications((current) => current.filter((item) => !keys.has(`${item.source}:${item.id}`)))
+    setUnreadCount((count) => Math.max(0, count - items.filter((item) => !item.isRead).length))
+    window.dispatchEvent(new Event('unread-summary:refresh'))
+  }
+
   function renderNotification(item: UnifiedNotification) {
     const category = (item.category || 'system') as NotificationCategory
     const content = (
@@ -141,9 +168,10 @@ export function NotificationsClient({
     )
 
     return (
-      <Link key={`${item.source}:${item.id}`} href={getNotificationTarget(item)} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">
-        {content}
-      </Link>
+      <div key={`${item.source}:${item.id}`} className="relative">
+        <Link href={getNotificationTarget(item)} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
+        <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-full bg-white/90 px-3 py-1.5 text-xs font-black text-slate-500 shadow-sm hover:text-red-600">清除</button>
+      </div>
     )
   }
 
@@ -156,14 +184,14 @@ export function NotificationsClient({
             <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">通知中心</h1>
             <p className="mt-3 text-sm font-bold text-slate-500">未读通知 <span className="text-brand-700">{unreadCount}</span> 条</p>
           </div>
-          <button
+          <div className="flex flex-wrap gap-2"><button
             type="button"
             onClick={markAllRead}
             disabled={isUpdating || unreadCount === 0}
             className="inline-flex h-11 items-center justify-center rounded-xl bg-brand-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             全部已读
-          </button>
+          </button><button type="button" onClick={() => void clearNotifications(notifications)} disabled={isUpdating || notifications.length === 0} className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-slate-600 disabled:opacity-50">清除通知</button></div>
         </div>
       </div>
 

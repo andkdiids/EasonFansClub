@@ -11,6 +11,28 @@ test('旧好友动态与论坛碎片模块会被过滤', () => {
   assert.equal(isDeprecatedLayoutModule('profile', 'profile.friendActivity'), true)
   assert.equal(isDeprecatedLayoutModule('forum', 'forum.pinnedPosts'), true)
   assert.equal(isDeprecatedLayoutModule('forum', 'forum.main'), false)
+  assert.equal(isDeprecatedLayoutModule('profile', 'profile.wall'), true)
+  assert.equal(isDeprecatedLayoutModule('home', 'home.checkinSummary'), true)
+})
+
+test('验收修复保持签到兜底、整卡点击、申请过滤与通知清除', () => {
+  const checkin = readFileSync('app/api/checkin/route.ts', 'utf8')
+  const cards = readFileSync('components/PostList.tsx', 'utf8')
+  const friends = readFileSync('app/friends/page.tsx', 'utf8')
+  const notifications = readFileSync('app/api/notifications/route.ts', 'utf8')
+  assert.match(checkin, /isSameLocalDay\(profile\.lastCheckInDate/)
+  assert.match(cards, /absolute inset-0 z-20/)
+  assert.match(friends, /senderId: user\.id, status: 'PENDING'/)
+  assert.match(notifications, /export async function DELETE/)
+})
+
+test('帖子与回复图片在浏览器压缩为 WebP 且服务端限制格式', () => {
+  const uploader = readFileSync('components/ContentImageUploader.tsx', 'utf8')
+  const route = readFileSync('app/api/uploads/content-image/route.ts', 'utf8')
+  const posts = readFileSync('app/api/posts/route.ts', 'utf8')
+  assert.match(uploader, /canvas\.toBlob\(resolve, 'image\/webp'/)
+  assert.match(route, /file\.type !== 'image\/webp'/)
+  assert.match(posts, /postMedia\.createMany/)
 })
 
 test('异常旧布局高度会按默认高度规范化', () => {

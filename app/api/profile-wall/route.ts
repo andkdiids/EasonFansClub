@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
-import { filterSensitiveWords, sanitizeText } from '@/lib/security'
+import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
-function canManageWallMessage(user: { id: string; role: string } | null, senderId: string) {
-  return Boolean(user && (user.id === senderId || user.role === 'ADMIN' || user.role === 'SUPER_ADMIN'))
+function canManageWallMessage(user: { id: string; role: string } | null, senderId: string, receiverId: string) {
+  return Boolean(user && (user.id === senderId || user.id === receiverId || user.role === 'ADMIN' || user.role === 'SUPER_ADMIN'))
 }
 
 async function isFriend(userId: string, targetId: string) {
@@ -93,13 +93,13 @@ export async function GET(request: Request) {
       ...item,
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
-      canDelete: canManageWallMessage(viewer, item.senderId),
+      canDelete: canManageWallMessage(viewer, item.senderId, item.receiverId),
       children: item.children.map((child) => ({
         ...child,
         children: [],
         createdAt: child.createdAt.toISOString(),
         updatedAt: child.updatedAt.toISOString(),
-        canDelete: canManageWallMessage(viewer, child.senderId),
+        canDelete: canManageWallMessage(viewer, child.senderId, child.receiverId),
       })),
     })),
   })
@@ -113,13 +113,16 @@ export async function POST(request: Request) {
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null
   const rawContent = sanitizeText(body?.content, 500)
-  const content = await filterSensitiveWords(rawContent)
+  if (await containsSensitiveContent(rawContent)) {
+    return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
+  }
+  const content = rawContent
   if (!content) return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
   if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
     where: { uid: receiverUid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-    select: { id: true, profile: { select: { wallVisibility: true } } },
+    select: { id: true, uid: true, profile: { select: { wallVisibility: true } } },
   })
   if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
@@ -136,14 +139,24 @@ export async function POST(request: Request) {
     if (!parent) return NextResponse.json({ message: '要回复的留言不存在' }, { status: 404 })
   }
 
-  const message = await prisma.profileWallMessage.create({
-    data: {
-      senderId: viewer.id,
-      receiverId: receiver.id,
-      parentId,
-      content,
-    },
-    select: { id: true },
+  const message = await prisma.$transaction(async (tx) => {
+    const created = await tx.profileWallMessage.create({
+      data: { senderId: viewer.id, receiverId: receiver.id, parentId, content },
+      select: { id: true },
+    })
+    if (receiver.id !== viewer.id) {
+      await tx.notification.create({
+        data: {
+          recipientId: receiver.id,
+          actorId: viewer.id,
+          type: 'MESSAGE',
+          title: '你的留言墙有新留言',
+          content: `${viewer.nickname} 给你留言了`,
+          link: `/user/${String(receiver.uid).padStart(5, '0')}/wall`,
+        },
+      })
+    }
+    return created
   })
 
   return NextResponse.json({ message: '留言已发布', id: message.id }, { status: 201 })
