@@ -198,7 +198,15 @@ export function hasValidRequestOrigin(request: Request) {
   const source = request.headers.get('origin') || request.headers.get('referer')
   if (!source) return process.env.NODE_ENV !== 'production'
   try {
-    return new URL(source).origin === new URL(request.url).origin
+    const sourceOrigin = new URL(source).origin
+const requestOrigin = new URL(request.url).origin
+const host = request.headers.get('host')
+
+return (
+  sourceOrigin === requestOrigin ||
+  sourceOrigin === `http://${host}` ||
+  sourceOrigin === `https://${host}`
+)
   } catch {
     return false
   }
