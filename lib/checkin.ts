@@ -16,7 +16,11 @@ export function formatBeijingDate(date = new Date()) {
 export const getShanghaiDateKey = formatBeijingDate
 
 export function normalizeCheckinDateToShanghai(date = new Date()) {
-  return parseBeijingDate(getShanghaiDateKey(date)) || new Date()
+  const parsed = parseBeijingDate(getShanghaiDateKey(date))
+
+  if (parsed) return parsed
+
+  return new Date('1974-07-27T00:00:00+08:00')
 }
 
 export function getShanghaiDayRange(date = new Date()) {
@@ -70,7 +74,9 @@ export function parseBeijingDate(value: string) {
 }
 
 export function startOfLocalDay(date = new Date()) {
-  return parseBeijingDate(formatBeijingDate(date)) || new Date()
+  const key = formatBeijingDate(date)
+
+  return new Date(`${key}T00:00:00+08:00`)
 }
 
 export function startOfYesterday(date = new Date()) {
