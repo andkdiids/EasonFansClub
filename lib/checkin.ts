@@ -41,7 +41,15 @@ export function calculateCheckinStreaks(dateKeys: Iterable<string>, now = new Da
   uniqueKeys: [...uniqueKeys].sort(),
 })
   let currentStreak = 0
-  for (let key = currentStart; uniqueKeys.has(key); key = shiftShanghaiDateKey(key, -1)) currentStreak += 1
+
+for (
+  let key = currentStart;
+  uniqueKeys.has(key);
+  key = shiftShanghaiDateKey(key, -1)
+) {
+  console.log('DEBUG LOOP', key)
+  currentStreak += 1
+}
 
   const sorted = [...uniqueKeys].sort()
   let longestStreak = 0
