@@ -67,7 +67,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     confirmPassword: '',
     nickname: '',
     acceptedAgreement: false,
-    securityQuestions: Array.from({ length: 3 }, () => ({ question: '', answer: '' })),
+    securityQuestions: Array.from({ length: 1 }, () => ({ question: '', answer: '' })),
   })
   const [turnstileToken, setTurnstileToken] = useState('')
   const [errors, setErrors] = useState<RegisterErrors>({})
@@ -114,12 +114,17 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }, [policy.turnstileSiteKey, shouldRenderTurnstile])
 
   useEffect(() => {
-    return () => {
-      mountedRef.current = false
-      requestControllerRef.current?.abort()
-      if (redirectTimerRef.current !== null) window.clearTimeout(redirectTimerRef.current)
+  mountedRef.current = true
+
+  return () => {
+    mountedRef.current = false
+    requestControllerRef.current?.abort()
+
+    if (redirectTimerRef.current !== null) {
+      window.clearTimeout(redirectTimerRef.current)
     }
-  }, [])
+  }
+}, [])
 
   function updateField(field: 'phone' | 'email' | 'password' | 'confirmPassword' | 'nickname' | 'acceptedAgreement', value: string | boolean) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -182,14 +187,17 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
     if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
     if (!form.acceptedAgreement) nextErrors.acceptedAgreement = '请先勾选用户协议'
-    if (policy.requireSecurityQuestionsForNewUsers) {
-      const questions = form.securityQuestions.map((item) => item.question.trim().toLocaleLowerCase('zh-CN'))
-      if (form.securityQuestions.some((item) => !item.question.trim() || !item.answer.trim())) {
-        nextErrors.securityQuestions = '请完整填写三个密保问题和答案'
-      } else if (new Set(questions).size !== 3) {
-        nextErrors.securityQuestions = '三个密保问题不能相同'
-      }
-    }
+   if (policy.requireSecurityQuestionsForNewUsers) {
+  const firstQuestion = form.securityQuestions[0]
+
+  if (
+    !firstQuestion ||
+    !firstQuestion.question.trim() ||
+    !firstQuestion.answer.trim()
+  ) {
+    nextErrors.securityQuestions = '请完整填写密保问题和答案'
+  }
+  }
     if (shouldRenderTurnstile && !turnstileToken) nextErrors.turnstileToken = '请先完成人机验证'
 
     return nextErrors
@@ -226,8 +234,13 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       ...(registrationType === 'PHONE' ? { phone: form.phone } : { email: form.email }),
     }
     const controller = new AbortController()
-    requestControllerRef.current = controller
-    try {
+requestControllerRef.current = controller
+
+const timeoutId = window.setTimeout(() => {
+  controller.abort()
+}, 30000)
+
+try {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKeyRef.current },
@@ -259,19 +272,32 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       setMessage('注册成功，请登录您的账号。')
       setDevVerificationUrl('')
       setLoginUrl(nextLoginUrl)
-      setForm({ phone: '', email: '', password: '', confirmPassword: '', nickname: '', acceptedAgreement: false, securityQuestions: Array.from({ length: 3 }, () => ({ question: '', answer: '' })) })
+      setForm({ phone: '', email: '', password: '', confirmPassword: '', nickname: '', acceptedAgreement: false, securityQuestions: Array.from({ length: 1 }, () => ({ question: '', answer: '' })) })
       redirectTimerRef.current = window.setTimeout(() => window.location.assign(nextLoginUrl), 1000)
     } catch (requestError) {
-      if (!mountedRef.current || (requestError instanceof Error && requestError.name === 'AbortError')) return
-      setErrors({ form: '网络连接失败，请稍后重试' })
-      submitLockedRef.current = false
-      idempotencyKeyRef.current = ''
-    } finally {
-      requestControllerRef.current = null
-      if (mountedRef.current) setIsSubmitting(false)
-    }
+  if (!mountedRef.current) return
+
+  if (requestError instanceof Error && requestError.name === 'AbortError') {
+    setErrors({
+      form: '注册请求超时，请检查数据库连接后重试',
+    })
+  } else {
+    setErrors({
+      form: '网络连接失败，请稍后重试',
+    })
   }
 
+  submitLockedRef.current = false
+  idempotencyKeyRef.current = ''
+} finally {
+  window.clearTimeout(timeoutId)
+  requestControllerRef.current = null
+
+  if (mountedRef.current) {
+    setIsSubmitting(false)
+  }
+  }
+}
   if (policy.registrationClosed) {
     return (
       <div className="space-y-4">

@@ -47,19 +47,41 @@ function jsonError(
 function parseRegistrationType(value: unknown): RegistrationType | null {
   return value === 'PHONE' || value === 'EMAIL' ? value : null
 }
-
 export async function POST(request: Request) {
-  const originError = rejectInvalidRequestOrigin(request)
-  if (originError) return originError
+  console.log('① register api')
+const originError = rejectInvalidRequestOrigin(request)
+
+console.log('①.5 origin checked', {
+  blocked: Boolean(originError),
+  origin: request.headers.get('origin'),
+  host: request.headers.get('host'),
+})
+
+if (originError) return originError
+
   try {
     const body = await request.json().catch(() => null)
+    console.log('② body parsed')
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() || ''
     const idempotencyKeyHash = idempotencyKey.length >= 16 && idempotencyKey.length <= 128 ? hashToken(idempotencyKey) : null
     if (idempotencyKeyHash) {
-      const replayUser = await prisma.user.findUnique({
-        where: { registrationIdempotencyKeyHash: idempotencyKeyHash },
-        select: { id: true, uid: true, username: true, nickname: true, role: true, email: true, phone: true },
-      })
+  console.time('register:replayUser')
+
+  const replayUser = await prisma.user.findUnique({
+    where: { registrationIdempotencyKeyHash: idempotencyKeyHash },
+    select: {
+      id: true,
+      uid: true,
+      username: true,
+      nickname: true,
+      role: true,
+      email: true,
+      phone: true,
+    },
+  })
+
+  console.timeEnd('register:replayUser')
+       
       if (replayUser) {
         return NextResponse.json({
           user: replayUser,
@@ -125,9 +147,16 @@ export async function POST(request: Request) {
     if (confirmPassword !== password) errors.confirmPassword = '两次输入的密码不一致'
     if (!acceptedAgreement) errors.acceptedAgreement = '请先勾选用户协议'
     if (policy.requireSecurityQuestionsForNewUsers) {
-      const securityQuestionError = validateSecurityQuestions(securityQuestions)
-      if (securityQuestionError) errors.securityQuestions = securityQuestionError
-    }
+  const firstQuestion = securityQuestions[0]
+
+  if (
+    !firstQuestion ||
+    !firstQuestion.question?.trim() ||
+    !firstQuestion.answer?.trim()
+  ) {
+    errors.securityQuestions = '请完整填写密保问题和答案'
+  }
+}
     if (Object.keys(errors).length) {
       return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
     }
@@ -179,9 +208,10 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password)
     const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
-      ? await hashSecurityQuestions(securityQuestions)
-      : []
+  ? await hashSecurityQuestions(securityQuestions.slice(0, 1))
+  : []
     const successLimitExpiresAt = new Date(Date.now() + registerSuccessLimit.windowSeconds * 1000)
+   console.time('register:transaction')
     const user = await prisma.$transaction(async (tx) => {
       const latest = await tx.user.findFirst({
         orderBy: { uid: 'desc' },
@@ -190,7 +220,9 @@ export async function POST(request: Request) {
       if ((latest?.uid ?? -1) >= MAX_UID) {
         throw new Error('UID_LIMIT_REACHED')
       }
-
+       console.time('register:userCreate')
+       console.log('准备创建用户')
+       console.time('createUser')
       const created = await tx.user.create({
         data: {
           username,
@@ -202,7 +234,7 @@ export async function POST(request: Request) {
           passwordHash,
           status: 'ACTIVE',
           isDeleted: false,
-          securityQuestionRecoveryEnabled: hashedSecurityQuestions.length === 3,
+          securityQuestionRecoveryEnabled: hashedSecurityQuestions.length >= 1,
           registrationIdempotencyKeyHash: idempotencyKeyHash,
           profile: {
             create: {
@@ -218,7 +250,12 @@ export async function POST(request: Request) {
           role: true,
         },
       })
+  
+      console.timeEnd('createUser')
+    console.timeEnd('register:userCreate')
+    console.log('用户创建完成', created.id)
 
+    console.time('createSecurityQuestions')
       if (hashedSecurityQuestions.length) {
         await tx.userSecurityQuestion.createMany({
           data: hashedSecurityQuestions.map((item) => ({ ...item, userId: created.id })),
@@ -235,6 +272,7 @@ export async function POST(request: Request) {
           reason: registrationType === 'PHONE' ? '手机号注册账号' : '邮箱注册账号',
         },
       })
+console.timeEnd('createSecurityQuestions')
 
       await tx.rateLimitLog.create({
         data: {
@@ -246,7 +284,7 @@ export async function POST(request: Request) {
 
       return created
     })
-
+console.timeEnd('register:transaction')
     let devVerificationUrl = ''
     let emailSent = false
     if (registrationType === 'EMAIL') {
