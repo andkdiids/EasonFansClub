@@ -237,39 +237,7 @@ export async function POST(request: Request) {
   }
   logPerf('checkin.transaction.ms', transactionStart, { userId: user.id })
 
-  const afterStart = Date.now()
-  Promise.allSettled([
-    syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
-    prisma.dailyTaskTemplate.findUnique({ where: { key: 'daily-checkin' }, select: { id: true } }).then((signTask) => (
-      signTask
-        ? prisma.dailyTaskProgress.upsert({
-            where: {
-              userId_templateId_taskDate: {
-                userId: user.id,
-                templateId: signTask.id,
-                taskDate: today,
-              },
-            },
-            update: { progress: 1, isCompleted: true, completedAt: new Date() },
-            create: {
-              userId: user.id,
-              templateId: signTask.id,
-              taskDate: today,
-              progress: 1,
-              isCompleted: true,
-              completedAt: new Date(),
-            },
-          })
-        : null
-    )),
-  ]).then((results) => {
-    logPerf('checkin.afterwork.ms', afterStart, { userId: user.id })
-    results.forEach((item, index) => {
-      if (item.status === 'rejected') {
-        console.error(index === 0 ? '[achievements:checkin]' : '[dailyTask:checkin]', item.reason)
-      }
-    })
-  })
+  
 
   
   const verifyStart = Date.now()
@@ -283,6 +251,13 @@ const verifyCheckIn = await prisma.checkIn.findUnique({
   },
   select: {
     id: true,
+    checkDate: true,
+    points: true,
+    exp: true,
+    mood: true,
+    message: true,
+    streakDay: true,
+    createdAt: true,
   },
 })
 
@@ -304,12 +279,62 @@ if (!verifyCheckIn) {
     },
   )
 }
-logPerf('checkin.total.ms', requestStart, { userId: user.id })
-  return NextResponse.json({
+
+
+
+const afterStart = Date.now()
+
+Promise.allSettled([
+  syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
+  prisma.dailyTaskTemplate.findUnique({ 
+    where: { key: 'daily-checkin' }, 
+    select: { id: true } 
+  }).then((signTask) => (
+    signTask
+      ? prisma.dailyTaskProgress.upsert({
+          where: {
+            userId_templateId_taskDate: {
+              userId: user.id,
+              templateId: signTask.id,
+              taskDate: today,
+            },
+          },
+          update: { 
+            progress: 1, 
+            isCompleted: true, 
+            completedAt: new Date() 
+          },
+          create: {
+            userId: user.id,
+            templateId: signTask.id,
+            taskDate: today,
+            progress: 1,
+            isCompleted: true,
+            completedAt: new Date(),
+          },
+        })
+      : null
+  )),
+]).then((results) => {
+  logPerf('checkin.afterwork.ms', afterStart, { userId: user.id })
+  results.forEach((item, index) => {
+    if (item.status === 'rejected') {
+      console.error(
+        index === 0 
+          ? '[achievements:checkin]' 
+          : '[dailyTask:checkin]', 
+        item.reason
+      )
+    }
+  })
+})
+
+logPerf('checkin.response.ready.ms', requestStart, { userId: user.id })
+return NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
-    todayCheckIn: result.checkIn,
+    todayCheckIn: verifyCheckIn,
     mood,
     gainedPoints: result.gainedPoints,
     gainedExp: result.gainedExp,
