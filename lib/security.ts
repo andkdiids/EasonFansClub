@@ -192,6 +192,13 @@ export async function containsSensitiveContent(content: string) {
   }
 }
 
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:8000',
+  'http://43.138.254.68',
+  'https://ecfc.fans',
+]
+
 export function hasValidRequestOrigin(request: Request) {
   const fetchSite = request.headers.get('sec-fetch-site')
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'same-site' && fetchSite !== 'none') return false
@@ -203,6 +210,7 @@ const requestOrigin = new URL(request.url).origin
 const host = request.headers.get('host')
 
 return (
+  allowedOrigins.includes(sourceOrigin) ||
   sourceOrigin === requestOrigin ||
   sourceOrigin === `http://${host}` ||
   sourceOrigin === `https://${host}`
