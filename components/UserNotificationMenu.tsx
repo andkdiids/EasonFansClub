@@ -49,7 +49,7 @@ export function UserNotificationMenu({
       <Link href="/profile" className={itemClass}>个人主页</Link>
       <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} /></Link>
       <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} /></Link>
-      <Link href="/friends" className={itemClass}>好友申请<Badge count={summary.friendRequests} /></Link>
+      <Link href="/friends" className={itemClass}>我的好友<Badge count={summary.friendRequests} /></Link>
       <Link href="/notifications?category=message" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
       <Link href="/settings/security" className={itemClass}>账号安全</Link>
       {isAdmin ? <Link href="/admin" className={`${itemClass} text-brand-700`}>后台管理</Link> : null}

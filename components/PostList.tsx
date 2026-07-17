@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
@@ -38,8 +38,11 @@ export function PostList({
   currentUserId,
   emptyText = '暂时还没有帖子。',
   onBoardSelect,
-}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string; emptyText?: string; onBoardSelect?: (slug: string) => void }>) {
+  responsiveColumns = false,
+}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string; emptyText?: string; onBoardSelect?: (slug: string) => void; responsiveColumns?: boolean }>) {
   const [visiblePosts, setVisiblePosts] = useState(posts)
+
+  useEffect(() => setVisiblePosts(posts), [posts])
 
   if (visiblePosts.length === 0) {
     return (
@@ -50,8 +53,8 @@ export function PostList({
   }
 
   return (
-    <div className="grid gap-3">
-      <p aria-live="polite" className="text-right text-xs font-bold text-slate-500">
+    <div className={`grid items-start gap-3 ${responsiveColumns ? 'md:grid-cols-2' : ''}`}>
+      <p aria-live="polite" className={`text-right text-xs font-bold text-slate-500 ${responsiveColumns ? 'md:col-span-2' : ''}`}>
         共 {visiblePosts.length} 篇帖子
       </p>
       {visiblePosts.map((post) => {
@@ -60,7 +63,7 @@ export function PostList({
         const isArchivedAuthor = post.author.uid === 0
         const canDelete = canManage || Boolean(currentUserId && post.author.id === currentUserId)
         return (
-          <article key={post.id} data-post-id={post.id} className="relative rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-5">
+          <article key={post.id} data-post-id={post.id} className={`relative min-w-0 rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-5 ${responsiveColumns && post.isPinned ? 'md:col-span-2' : ''}`}>
             <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
             <div className="relative z-10 mb-2 flex w-fit flex-wrap items-center gap-2">
               {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}

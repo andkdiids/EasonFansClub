@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { PostList } from '@/components/PostList'
 import type { ForumFeedResponse, ForumSort } from '@/lib/forum'
-import { parseForumSort } from '@/lib/forum'
+import { clampForumPage, getForumPageWindow, parseForumSort } from '@/lib/forum'
 
 const sortOptions: Array<[ForumSort, string]> = [
   ['latest', '最新'],
@@ -23,7 +23,7 @@ const previewData: ForumFeedResponse = {
   ],
   selectedBoard: null,
   posts: [],
-  pagination: { page: 1, pageSize: 20, total: 0, hasMore: false },
+  pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1, hasMore: false },
   permissions: { canCreatePost: true, canCreateAnnouncement: false },
 }
 
@@ -41,6 +41,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   const [loading, setLoading] = useState(!previewMode)
   const [error, setError] = useState('')
   const requestSequence = useRef(0)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   function updateQuery(values: Record<string, string | number | null>) {
     if (previewMode) return
@@ -50,6 +51,14 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
       else next.set(key, String(value))
     })
     router.push(`${pathname}${next.size ? `?${next.toString()}` : ''}`, { scroll: false })
+  }
+
+  function navigateToPage(nextPage: number) {
+    if (!data || loading) return
+    const target = clampForumPage(nextPage, data.pagination.totalPages)
+    if (target === page) return
+    updateQuery({ page: target })
+    contentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   useEffect(() => setSearchValue(query), [query])
@@ -125,19 +134,24 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         ))}
       </nav>
 
-      <div className="rounded-[28px] border border-sky-100 bg-white/72 p-3 shadow-sm sm:p-5">
+      <div ref={contentRef} className="scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/72 p-3 shadow-sm sm:p-5">
         <div className="mb-4 flex gap-2 overflow-x-auto">
           {sortOptions.map(([value, label]) => <button key={value} type="button" onClick={() => updateQuery({ sort: value === 'latest' ? null : value, page: null })} className={`shrink-0 rounded-full px-4 py-2 text-xs font-black ${sort === value ? 'bg-sky-600 text-white' : 'bg-white text-slate-600'}`}>{label}</button>)}
         </div>
         {loading && !data ? <div className="space-y-3" aria-label="正在加载"><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /></div> : null}
         {error ? <div className="rounded-2xl bg-red-50 p-4 text-sm font-black text-red-600">{error}</div> : null}
-        {!error && data ? <PostList posts={data.posts} emptyText={emptyText} onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
-        {data && data.pagination.total > data.pagination.pageSize ? (
-          <div className="mt-5 flex items-center justify-center gap-3">
-            <button type="button" disabled={page <= 1 || loading} onClick={() => updateQuery({ page: page - 1 })} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-40">上一页</button>
-            <span className="text-sm font-black text-slate-500">第 {page} 页</span>
-            <button type="button" disabled={!data.pagination.hasMore || loading} onClick={() => updateQuery({ page: page + 1 })} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-40">下一页</button>
-          </div>
+        {loading && data ? <p aria-live="polite" className="mb-3 rounded-xl bg-sky-50 px-3 py-2 text-center text-xs font-black text-brand-700">正在加载第 {page} 页…</p> : null}
+        {!error && data ? <PostList posts={data.posts} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
+        {data && data.pagination.totalPages > 1 ? (
+          <nav aria-label="论坛分页" className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
+            <button type="button" disabled={page <= 1 || loading} onClick={() => navigateToPage(1)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">首页</button>
+            <button type="button" disabled={page <= 1 || loading} onClick={() => navigateToPage(page - 1)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">上一页</button>
+            {getForumPageWindow(page, data.pagination.totalPages).map((pageNumber) => (
+              <button key={pageNumber} type="button" aria-current={pageNumber === page ? 'page' : undefined} disabled={loading} onClick={() => navigateToPage(pageNumber)} className={`grid h-9 min-w-9 place-items-center rounded-full px-2 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40 ${pageNumber === page ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'}`}>{pageNumber}</button>
+            ))}
+            <button type="button" disabled={page >= data.pagination.totalPages || loading} onClick={() => navigateToPage(page + 1)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">下一页</button>
+            <button type="button" disabled={page >= data.pagination.totalPages || loading} onClick={() => navigateToPage(data.pagination.totalPages)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">末页</button>
+          </nav>
         ) : null}
       </div>
     </section>

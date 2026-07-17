@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { calculateCheckinStreaks, getShanghaiDateKey } from '../lib/checkin'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '../lib/feedback'
-import { excerptForumPost, parseForumSort } from '../lib/forum'
+import { clampForumPage, excerptForumPost, getForumPageWindow, getForumTotalPages, parseForumSort } from '../lib/forum'
 import { getNotificationTarget } from '../lib/notification-target'
 import { calculateGridHeightFromPixels, isDeprecatedLayoutModule, normalizeLayoutItemHeight } from '../lib/page-layout/normalize'
 
@@ -46,7 +46,7 @@ test('帖子摘要被压缩为空格并限制长度', () => {
 
 test('通知目标支持显式链接、好友、私信和无目标通知', () => {
   const base = { id: 'n1', source: 'personal' as const, link: null, targetUrl: null }
-  assert.equal(getNotificationTarget({ ...base, type: 'FRIEND_REQUEST' }), '/friends')
+  assert.equal(getNotificationTarget({ ...base, type: 'FRIEND_REQUEST' }), '/friends#received-requests')
   assert.equal(getNotificationTarget({ ...base, type: 'MESSAGE' }), '/notifications?category=message')
   assert.equal(getNotificationTarget({ ...base, type: 'SYSTEM' }), '/notifications?detail=personal:n1')
   assert.equal(getNotificationTarget({ ...base, type: 'REPLY', link: '/posts/p1' }), '/posts/p1')
@@ -76,4 +76,47 @@ test('论坛 Feed 使用服务端分页筛选且用户态禁止公共缓存', ()
 test('旧分区路由统一重定向到单页论坛', () => {
   const route = readFileSync('app/boards/[slug]/page.tsx', 'utf8')
   assert.match(route, /redirect\(`\/forum\?board=/)
+})
+
+test('论坛分页窗口始终显示连续页码并在边界正确收缩', () => {
+  assert.equal(getForumTotalPages(41, 20), 3)
+  assert.equal(getForumTotalPages(0, 20), 1)
+  assert.equal(clampForumPage(99, 6), 6)
+  assert.deepEqual(getForumPageWindow(1, 9), [1, 2, 3])
+  assert.deepEqual(getForumPageWindow(5, 9), [4, 5, 6])
+  assert.deepEqual(getForumPageWindow(9, 9), [7, 8, 9])
+  assert.deepEqual(getForumPageWindow(1, 2), [1, 2])
+})
+
+test('论坛翻页同步 URL、重新请求并用新 props 刷新双列列表', () => {
+  const forumHome = readFileSync('components/ForumHome.tsx', 'utf8')
+  const postList = readFileSync('components/PostList.tsx', 'utf8')
+  assert.match(forumHome, /page: String\(page\)/)
+  assert.match(forumHome, /navigateToPage\(page \+ 1\)/)
+  assert.match(forumHome, /responsiveColumns/)
+  assert.match(postList, /useEffect\(\(\) => setVisiblePosts\(posts\), \[posts\]\)/)
+  assert.match(postList, /md:grid-cols-2/)
+})
+
+test('好友挂号留言只查询当前用户好友且空好友缓存不与公开缓存碰撞', () => {
+  const messages = readFileSync('lib/checkin-messages.ts', 'utf8')
+  const route = readFileSync('app/api/checkin/messages/route.ts', 'utf8')
+  const friends = readFileSync('lib/friends.ts', 'utf8')
+  assert.match(messages, /friends:\$\{\[\.\.\.userIds\]\.sort\(\)\.join\(','\) \|\| 'none'\}/)
+  assert.match(route, /scope === 'friends'/)
+  assert.match(route, /getFriendIds\(user\.id\)/)
+  assert.match(friends, /prisma\.friendship\.findMany/)
+  assert.match(friends, /userA: activeUserWhere/)
+  assert.match(friends, /userB: activeUserWhere/)
+})
+
+test('好友入口、申请锚点和个人资料卡结构保持统一', () => {
+  const menu = readFileSync('components/UserNotificationMenu.tsx', 'utf8')
+  const friendsPage = readFileSync('app/friends/page.tsx', 'utf8')
+  const profile = readFileSync('components/ProfileSummary.tsx', 'utf8')
+  assert.match(menu, />我的好友<Badge/)
+  assert.match(friendsPage, /id="received-requests"/)
+  assert.match(profile, /admissionInfo\.date/)
+  assert.match(profile, /已住院 \{admissionInfo\.days\} 天/)
+  assert.match(profile, /w-56 max-w-full/)
 })

@@ -128,10 +128,10 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
         ) : null}
 
         <section className="grid gap-6 lg:grid-cols-3">
-          <Panel title="好友列表">
+          <Panel id="friend-list" title="好友列表">
             {friends.length ? friends.map((item) => <UserCard key={item.id} user={item} status="已是好友" />) : <Empty />}
           </Panel>
-          <Panel title="收到的申请">
+          <Panel id="received-requests" title="收到的申请">
             {received.length ? (
               received.map((item) => (
                 <RequestCard key={item.id} user={item.sender} createdAt={item.createdAt} status="等待处理">
@@ -142,7 +142,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
               <Empty />
             )}
           </Panel>
-          <Panel title="发出的申请">
+          <Panel id="sent-requests" title="发出的申请">
             {sent.length ? (
               sent.map((item) => <RequestCard key={item.id} user={item.receiver} createdAt={item.createdAt} status={statusText(item.status)} />)
             ) : (
@@ -163,9 +163,9 @@ function statusText(status: string) {
   return status
 }
 
-function Panel({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
+function Panel({ id, title, children }: Readonly<{ id: string; title: string; children: ReactNode }>) {
   return (
-    <div className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
+    <div id={id} className="scroll-mt-24 rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
       <h2 className="text-2xl font-black text-brand-950">{title}</h2>
       <div className="mt-4 space-y-3">{children}</div>
     </div>

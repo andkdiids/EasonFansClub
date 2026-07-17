@@ -10,6 +10,23 @@ export function excerptForumPost(value: string | null | undefined, length = 180)
   return text.length > length ? `${text.slice(0, length)}…` : text
 }
 
+export function getForumTotalPages(total: number, pageSize: number) {
+  return Math.max(1, Math.ceil(Math.max(0, total) / Math.max(1, pageSize)))
+}
+
+export function clampForumPage(page: number, totalPages: number) {
+  return Math.min(Math.max(1, Math.trunc(page) || 1), Math.max(1, totalPages))
+}
+
+export function getForumPageWindow(currentPage: number, totalPages: number, size = 3) {
+  const safeTotal = Math.max(1, totalPages)
+  const safeSize = Math.max(1, Math.min(Math.trunc(size) || 1, safeTotal))
+  const current = clampForumPage(currentPage, safeTotal)
+  const offset = Math.floor(safeSize / 2)
+  const start = Math.max(1, Math.min(current - offset, safeTotal - safeSize + 1))
+  return Array.from({ length: safeSize }, (_, index) => start + index)
+}
+
 export type ForumFeedResponse = {
   boards: Array<{ id: string; name: string; slug: string; description: string | null; postCount: number; isAnnouncement: boolean }>
   selectedBoard: { id: string; name: string; slug: string; description: string | null; isAnnouncement: boolean } | null
@@ -28,6 +45,6 @@ export type ForumFeedResponse = {
     board: { name: string; slug: string }
     author: { uid: number; nickname: string; avatarUrl: string | null; level: number; profile: { displayName: string | null; avatarUrl: string | null } | null }
   }>
-  pagination: { page: number; pageSize: number; total: number; hasMore: boolean }
+  pagination: { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean }
   permissions: { canCreatePost: boolean; canCreateAnnouncement: boolean }
 }

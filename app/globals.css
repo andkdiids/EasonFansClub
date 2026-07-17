@@ -87,6 +87,18 @@ svg {
   overflow: visible;
 }
 
+[data-layout-page='checkin'] .page-layout-auto-flow-desktop,
+[data-layout-page='checkin'] .page-layout-auto-flow-tablet {
+  align-items: stretch;
+}
+
+[data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.publicMessages'] > *,
+[data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.friendMessages'] > *,
+[data-layout-page='checkin'] .page-layout-auto-flow-tablet > [data-layout-label='checkin.publicMessages'] > *,
+[data-layout-page='checkin'] .page-layout-auto-flow-tablet > [data-layout-label='checkin.friendMessages'] > * {
+  height: 100% !important;
+}
+
 .page-layout-grid {
   display: grid;
   grid-auto-rows: 80px;

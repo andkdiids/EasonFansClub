@@ -30,10 +30,11 @@ function formatUid(uid: number) {
 }
 
 export function formatAdmissionInfo(createdAt: Date) {
+  const year = createdAt.getFullYear()
   const month = String(createdAt.getMonth() + 1).padStart(2, '0')
   const day = String(createdAt.getDate()).padStart(2, '0')
   const days = Math.max(1, Math.floor((startOfLocalDay(new Date()) - startOfLocalDay(createdAt)) / oneDayMs) + 1)
-  return `${month}/${day} 入院 · 已在院${days}天`
+  return { date: `${year}/${month}/${day}`, days }
 }
 
 export function ProfileHeader({
@@ -59,7 +60,7 @@ export function ProfileHeader({
         style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
       >
         {!backgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
-        <div className="absolute bottom-4 left-4 min-w-[220px] max-w-[min(88vw,420px)] rounded-[20px] border border-white/12 bg-black/35 p-3 text-white shadow-md shadow-slate-950/20 backdrop-blur-md sm:bottom-5 sm:left-5">
+        <div className="absolute bottom-4 left-4 w-fit min-w-[190px] max-w-[calc(100%_-_2rem)] rounded-[20px] border border-white/12 bg-black/35 p-3 text-white shadow-md shadow-slate-950/20 backdrop-blur-md sm:bottom-5 sm:left-5 sm:max-w-[380px]">
           <div className="flex min-w-0 items-center gap-3">
             {avatarUrl ? (
               <img src={avatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
@@ -68,16 +69,18 @@ export function ProfileHeader({
                 {initial}
               </div>
             )}
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-[26px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)]">{displayName}</h1>
+            <div className="min-w-0 max-w-[250px] flex-1">
+              <h1 className="truncate text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]">{displayName}</h1>
             </div>
           </div>
-          <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
             {showGrowth ? <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}{levelName ? ` ${levelName}` : ''}</span> : null}
-            <span className="rounded-full border border-white/14 bg-slate-950/16 px-2 py-1 font-black text-white/92 backdrop-blur">{admissionInfo}</span>
+          </div>
+          <p className="mt-2 text-[11px] font-bold text-white/82">
+            {admissionInfo.date} 入院 <span aria-hidden>·</span> 已住院 {admissionInfo.days} 天
           </p>
-          {showGrowth ? <div className="mt-3 max-w-sm">
+          {showGrowth ? <div className="mt-2.5 w-56 max-w-full">
             <div className="flex items-center justify-between gap-2 text-[11px] font-black text-white/85">
               <span>成长经验</span>
               <span>{experience} / {nextRequiredExp ?? experience} XP</span>

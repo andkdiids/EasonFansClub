@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { withDbTimeout } from '@/lib/db-timeout'
+import { getFriendIds } from '@/lib/friends'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,8 +29,12 @@ export async function GET(request: Request) {
   const selectedDate = parseRequestedDate(url.searchParams.get('date'))
   const nextDate = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000)
   const sort: CheckInMessageSort = url.searchParams.get('sort') === 'hot' ? 'hot' : 'latest'
+  const scope = url.searchParams.get('scope') === 'friends' ? 'friends' : 'public'
 
   try {
+    const friendIds = scope === 'friends'
+      ? await withDbTimeout('Friendship.findMany checkin.messages.api', getFriendIds(user.id))
+      : undefined
     const messages = await withDbTimeout(
       'DailyMessage.findMany checkin.messages.api',
       getCheckInMessages({
@@ -37,12 +42,13 @@ export async function GET(request: Request) {
         nextDate,
         sort,
         viewerId: user.id,
+        userIds: friendIds,
       }),
     )
 
     return NextResponse.json(
-      { date: formatBeijingDate(selectedDate), sort, messages },
-      { headers: { 'Cache-Control': 'no-store' } },
+      { date: formatBeijingDate(selectedDate), sort, scope, messages },
+      { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } },
     )
   } catch (error) {
     console.error(
@@ -53,6 +59,7 @@ export async function GET(request: Request) {
         feature: 'checkin.messages.api',
         date: formatBeijingDate(selectedDate),
         sort,
+        scope,
       },
       error,
     )

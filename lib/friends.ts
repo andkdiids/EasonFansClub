@@ -12,7 +12,13 @@ export function normalizeFriendPair(userId: string, otherUserId: string) {
 
 export async function getFriendIds(userId: string) {
   const friendships = await prisma.friendship.findMany({
-    where: { OR: [{ userAId: userId }, { userBId: userId }] },
+    where: {
+      AND: [
+        { OR: [{ userAId: userId }, { userBId: userId }] },
+        { userA: activeUserWhere },
+        { userB: activeUserWhere },
+      ],
+    },
     select: { userAId: true, userBId: true },
   })
   return friendships.map((item) => (item.userAId === userId ? item.userBId : item.userAId))
@@ -90,7 +96,7 @@ export async function createFriendRequest(
         type: 'FRIEND_REQUEST',
         title: '好友申请',
         content: `${currentUser.nickname} 向你发送了好友申请`,
-        link: '/friends',
+        link: '/friends#received-requests',
       },
     })
 
@@ -132,7 +138,7 @@ export async function decideFriendRequest(userId: string, requestId: string, act
           type: 'FRIEND_REQUEST',
           title: '好友申请已通过',
           content: '你的好友申请已通过',
-          link: '/friends',
+          link: '/friends#received-requests',
         },
       })
     }

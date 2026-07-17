@@ -21,12 +21,15 @@ export async function getCheckInMessages({
   viewerId: string
   userIds?: string[]
 }): Promise<CheckInMessagesResult> {
+  const userScope = userIds === undefined
+    ? 'public'
+    : `friends:${[...userIds].sort().join(',') || 'none'}`
   const cacheKey = [
     selectedDate.toISOString(),
     nextDate.toISOString(),
     sort,
     viewerId,
-    userIds?.sort().join(',') || 'all',
+    userScope,
   ].join(':')
   const now = Date.now()
   const cached = checkInMessagesCache.get(cacheKey)

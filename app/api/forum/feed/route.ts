@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { excerptForumPost, parseForumSort } from '@/lib/forum'
+import { clampForumPage, excerptForumPost, getForumTotalPages, parseForumSort } from '@/lib/forum'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const boardValue = sanitizeText(searchParams.get('board'), 80)
   const query = sanitizeText(searchParams.get('query'), 100)
   const sort = parseForumSort(searchParams.get('sort'))
-  const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const requestedPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
   const pageSize = Math.min(40, Math.max(5, Number.parseInt(searchParams.get('pageSize') || '20', 10) || 20))
 
   const boards = await prisma.board.findMany({
@@ -49,9 +49,11 @@ export async function GET(request: Request) {
           ? [{ createdAt: 'desc' }]
           : [{ isPinned: 'desc' }, { createdAt: 'desc' }]
 
-  const [total, rows] = await prisma.$transaction([
-    prisma.post.count({ where }),
-    prisma.post.findMany({
+  const { total, totalPages, page, rows } = await prisma.$transaction(async (tx) => {
+    const total = await tx.post.count({ where })
+    const totalPages = getForumTotalPages(total, pageSize)
+    const page = clampForumPage(requestedPage, totalPages)
+    const rows = await tx.post.findMany({
       where,
       orderBy,
       skip: (page - 1) * pageSize,
@@ -64,8 +66,9 @@ export async function GET(request: Request) {
         author: { select: { uid: true, nickname: true, avatarUrl: true, level: true, profile: { select: { displayName: true, avatarUrl: true } } } },
         likes: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
       },
-    }),
-  ])
+    })
+    return { total, totalPages, page, rows }
+  })
 
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
@@ -77,7 +80,7 @@ export async function GET(request: Request) {
       content: excerptForumPost(summary || content),
       likedByMe: likes.length > 0,
     })),
-    pagination: { page, pageSize, total, hasMore: page * pageSize < total },
+    pagination: { page, pageSize, total, totalPages, hasMore: page < totalPages },
     permissions: {
       canCreatePost: Boolean(user && (!announcement || canCreateAnnouncement)),
       canCreateAnnouncement,

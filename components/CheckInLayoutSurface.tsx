@@ -188,6 +188,7 @@ export function createCheckInLayoutModules({
             title={layoutItem.title ?? undefined}
             density={density}
             anonymous
+            scope="public"
             initialMessages={selectedMessages}
             initialDate={selectedDateValue}
             maxDate={todayValue}
@@ -201,6 +202,7 @@ export function createCheckInLayoutModules({
           <CheckInMessagesPanel
             title={layoutItem.title ?? '好友挂号留言'}
             density={density}
+            scope="friends"
             initialMessages={friendMessages}
             initialDate={selectedDateValue}
             maxDate={todayValue}
@@ -208,7 +210,7 @@ export function createCheckInLayoutModules({
             sessionUserId={sessionUserId}
             sessionUserRole={sessionUserRole}
             previewMode={previewMode}
-            emptyText="今天还没有好友留言。"
+            emptyText="暂无好友挂号留言"
           />
         ),
 

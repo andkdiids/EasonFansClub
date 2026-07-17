@@ -46,6 +46,7 @@ export function CheckInMessagesPanel({
   title,
   density = 'normal',
   anonymous = false,
+  scope = 'public',
   emptyText,
   initialMessages,
   initialDate,
@@ -58,6 +59,7 @@ export function CheckInMessagesPanel({
   title?: string
   density?: PageLayoutModuleDensity
   anonymous?: boolean
+  scope?: 'public' | 'friends'
   emptyText?: string
   initialMessages: CheckInMessageItem[]
   initialDate: string
@@ -122,7 +124,7 @@ export function CheckInMessagesPanel({
 
     setError('')
     setIsLoading(true)
-    const params = new URLSearchParams({ date: nextDate, sort: nextSort })
+    const params = new URLSearchParams({ date: nextDate, sort: nextSort, scope })
 
     try {
       const response = await fetch(`/api/checkin/messages?${params.toString()}`, {
@@ -150,7 +152,7 @@ export function CheckInMessagesPanel({
     } finally {
       setIsLoading(false)
     }
-  }, [date, isLoading, sort])
+  }, [date, isLoading, scope, sort])
 
   useEffect(() => {
     setDate(initialDate)
@@ -186,7 +188,7 @@ export function CheckInMessagesPanel({
   }, [loadMessages, maxDate, previewMode, sort])
 
   return (
-    <div className={`${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex flex-col rounded-[24px] border border-sky-100 bg-white/85 shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
+    <div className={`${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex h-full flex-col rounded-[24px] border border-sky-100 bg-white/85 shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{anonymous ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
@@ -234,7 +236,7 @@ export function CheckInMessagesPanel({
 
       {error ? <p className="mt-3 shrink-0 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
 
-      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
+      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} flex-1 ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMood(item.mood)
           const name = item.user.profile?.displayName || item.user.nickname
@@ -391,7 +393,7 @@ export function CheckInMessagesPanel({
           <div className="rounded-2xl bg-sky-50/80 p-8 text-center font-bold text-slate-500">{emptyText || '这一天还没有 E友留言。'}</div>
         )}
       </div>
-      {messages.length > messagesPerPage ? (
+      {messages.length > previewPageSize ? (
         <nav className={`${isMinimal ? 'mt-1 gap-1' : 'mt-3 gap-1.5'} flex shrink-0 flex-wrap items-center justify-center`} aria-label="E友留言分页">
           <button
             type="button"
