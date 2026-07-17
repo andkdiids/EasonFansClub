@@ -35,10 +35,10 @@ export function calculateCheckinStreaks(dateKeys: Iterable<string>, now = new Da
   const today = getShanghaiDateKey(now)
   
   const currentStart = uniqueKeys.has(today) ? today : shiftShanghaiDateKey(today, -1)
-  console.log('DEBUG CHECKIN', {
+  console.log('DEBUG CHECKIN STREAK', {
   today,
   currentStart,
-  uniqueKeys: [...uniqueKeys],
+  uniqueKeys: [...uniqueKeys].sort(),
 })
   let currentStreak = 0
   for (let key = currentStart; uniqueKeys.has(key); key = shiftShanghaiDateKey(key, -1)) currentStreak += 1
