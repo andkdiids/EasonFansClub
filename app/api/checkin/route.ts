@@ -271,7 +271,40 @@ export async function POST(request: Request) {
     })
   })
 
-  logPerf('checkin.total.ms', requestStart, { userId: user.id })
+  
+  const verifyStart = Date.now()
+
+const verifyCheckIn = await prisma.checkIn.findUnique({
+  where: {
+    userId_checkinDateKey: {
+      userId: user.id,
+      checkinDateKey: todayKey,
+    },
+  },
+  select: {
+    id: true,
+  },
+})
+
+logPerf('checkin.verify.ms', verifyStart, { userId: user.id })
+
+if (!verifyCheckIn) {
+  console.error('[checkin.verify.failed]', {
+    userId: user.id,
+    todayKey,
+  })
+
+  return NextResponse.json(
+    {
+      message: '签到保存失败，请刷新后重试',
+      checkedToday: false,
+    },
+    {
+      status: 500,
+    },
+  )
+}
+logPerf('checkin.total.ms', requestStart, { userId: user.id })
   return NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,
