@@ -181,28 +181,46 @@ export function CheckInButton({
         return
       }
 
-      const nextCheckIn = data.todayCheckIn || {
-        checkDate: data.checkDate,
-        points: data.gainedPoints || 0,
-        exp: data.gainedExp || 0,
-        mood: data.mood?.key || mood,
-        message: note || null,
-        streakDay: data.consecutiveDays || 1,
-        createdAt: new Date().toISOString(),
-      }
-      setTodayCheckIn(nextCheckIn)
-      const nextStats = {
-        level: data.level ?? stats.level,
-        points: data.points ?? stats.points,
-        exp: data.exp ?? stats.exp,
-        consecutiveDays: data.consecutiveDays ?? stats.consecutiveDays,
-      }
-      setStats(nextStats)
-      onStateChange?.({
-        todayCheckIn: nextCheckIn,
-        stats: nextStats,
-        created: data.created === true,
-      })
+      // POST成功后重新读取数据库真实状态
+const verifyResponse = await fetch('/api/checkin', {
+  cache: 'no-store',
+})
+
+const verifyData = await verifyResponse.json().catch(() => null)
+
+if (!verifyResponse.ok || !verifyData) {
+  setError('签到成功，但状态同步失败，请刷新页面')
+  return
+}
+
+const nextCheckIn = verifyData.todayCheckIn || null
+
+setTodayCheckIn(nextCheckIn)
+
+const nextStats = {
+  level: verifyData.level ?? stats.level,
+  points: verifyData.points ?? stats.points,
+  exp: verifyData.exp ?? stats.exp,
+  consecutiveDays:
+    verifyData.consecutiveDays ?? stats.consecutiveDays,
+}
+
+setStats(nextStats)
+
+onStateChange?.({
+  todayCheckIn: nextCheckIn,
+  stats: nextStats,
+  created: true,
+  todayCount:
+    typeof verifyData.todayCount === 'number'
+      ? verifyData.todayCount
+      : undefined,
+  totalCheckIns:
+    typeof verifyData.totalCheckIns === 'number'
+      ? verifyData.totalCheckIns
+      : undefined,
+})
+      
       setMessage(`今日挂号成功，获得 +${data.gainedPoints || 0} 积分、+${data.gainedExp || 0} 经验`)
       window.dispatchEvent(
         new CustomEvent('checkin:completed', {
