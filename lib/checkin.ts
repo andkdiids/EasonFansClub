@@ -33,7 +33,13 @@ export function shiftShanghaiDateKey(value: string, days: number) {
 export function calculateCheckinStreaks(dateKeys: Iterable<string>, now = new Date()) {
   const uniqueKeys = new Set([...dateKeys].filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)))
   const today = getShanghaiDateKey(now)
+  
   const currentStart = uniqueKeys.has(today) ? today : shiftShanghaiDateKey(today, -1)
+  console.log('DEBUG CHECKIN', {
+  today,
+  currentStart,
+  uniqueKeys: [...uniqueKeys],
+})
   let currentStreak = 0
   for (let key = currentStart; uniqueKeys.has(key); key = shiftShanghaiDateKey(key, -1)) currentStreak += 1
 
