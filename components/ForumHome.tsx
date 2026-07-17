@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { PostList } from '@/components/PostList'
 import type { ForumFeedResponse, ForumSort } from '@/lib/forum'
-import { clampForumPage, getForumPageWindow, parseForumSort } from '@/lib/forum'
+import { buildForumHref, getForumPageWindow, parseForumSort } from '@/lib/forum'
 
 const sortOptions: Array<[ForumSort, string]> = [
   ['latest', '最新'],
@@ -23,6 +23,9 @@ const previewData: ForumFeedResponse = {
   ],
   selectedBoard: null,
   posts: [],
+  total: 0,
+  totalPages: 1,
+  page: 1,
   pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1, hasMore: false },
   permissions: { canCreatePost: true, canCreateAnnouncement: false },
 }
@@ -45,20 +48,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
 
   function updateQuery(values: Record<string, string | number | null>) {
     if (previewMode) return
-    const next = new URLSearchParams(searchParams.toString())
-    Object.entries(values).forEach(([key, value]) => {
-      if (value === null || value === '' || value === 1 && key === 'page') next.delete(key)
-      else next.set(key, String(value))
-    })
-    router.push(`${pathname}${next.size ? `?${next.toString()}` : ''}`, { scroll: false })
-  }
-
-  function navigateToPage(nextPage: number) {
-    if (!data || loading) return
-    const target = clampForumPage(nextPage, data.pagination.totalPages)
-    if (target === page) return
-    updateQuery({ page: target })
-    contentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    router.push(buildForumHref(pathname, searchParams.toString(), values), { scroll: false })
   }
 
   useEffect(() => setSearchValue(query), [query])
@@ -141,19 +131,27 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         {loading && !data ? <div className="space-y-3" aria-label="正在加载"><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /></div> : null}
         {error ? <div className="rounded-2xl bg-red-50 p-4 text-sm font-black text-red-600">{error}</div> : null}
         {loading && data ? <p aria-live="polite" className="mb-3 rounded-xl bg-sky-50 px-3 py-2 text-center text-xs font-black text-brand-700">正在加载第 {page} 页…</p> : null}
-        {!error && data ? <PostList posts={data.posts} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
-        {data && data.pagination.totalPages > 1 ? (
+        {!error && data ? <PostList posts={data.posts} total={data.total} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
+        {data && data.totalPages > 1 ? (
           <nav aria-label="论坛分页" className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
-            <button type="button" disabled={page <= 1 || loading} onClick={() => navigateToPage(1)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">首页</button>
-            <button type="button" disabled={page <= 1 || loading} onClick={() => navigateToPage(page - 1)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">上一页</button>
-            {getForumPageWindow(page, data.pagination.totalPages).map((pageNumber) => (
-              <button key={pageNumber} type="button" aria-current={pageNumber === page ? 'page' : undefined} disabled={loading} onClick={() => navigateToPage(pageNumber)} className={`grid h-9 min-w-9 place-items-center rounded-full px-2 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40 ${pageNumber === page ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'}`}>{pageNumber}</button>
+            <ForumPageLink label="首页" page={1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} />
+            <ForumPageLink label="上一页" page={page - 1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} />
+            {getForumPageWindow(page, data.totalPages).map((pageNumber) => (
+              <ForumPageLink key={pageNumber} label={String(pageNumber)} page={pageNumber} currentPage={page} disabled={loading} pathname={pathname} query={queryString} numbered />
             ))}
-            <button type="button" disabled={page >= data.pagination.totalPages || loading} onClick={() => navigateToPage(page + 1)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">下一页</button>
-            <button type="button" disabled={page >= data.pagination.totalPages || loading} onClick={() => navigateToPage(data.pagination.totalPages)} className="rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">末页</button>
+            <ForumPageLink label="下一页" page={page + 1} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} />
+            <ForumPageLink label="末页" page={data.totalPages} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} />
           </nav>
         ) : null}
       </div>
     </section>
   )
+}
+
+function ForumPageLink({ label, page, currentPage, disabled, pathname, query, numbered = false }: { label: string; page: number; currentPage: number; disabled: boolean; pathname: string; query: string; numbered?: boolean }) {
+  const className = numbered
+    ? `grid h-9 min-w-9 place-items-center rounded-full px-2 text-xs font-black ${page === currentPage ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'}`
+    : 'rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700'
+  if (disabled || page === currentPage) return <span aria-disabled="true" aria-current={page === currentPage ? 'page' : undefined} className={`${className} cursor-not-allowed opacity-40`}>{label}</span>
+  return <Link href={buildForumHref(pathname, query, { page })} scroll={false} className={className}>{label}</Link>
 }

@@ -108,7 +108,7 @@ export function PageLayoutRenderer({
     <div
       data-layout-page={pageKey}
       data-layout-preview={previewMode ? 'true' : 'false'}
-      className={`page-layout-flow page-layout-flow-${device} ${className}`.trim()}
+      className={`page-layout-flow page-layout-flow-${device} @container ${className}`.trim()}
     >
       {renderedItems.length ? (
         <div

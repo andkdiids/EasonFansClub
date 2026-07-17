@@ -105,7 +105,7 @@ export function HomeLayoutSurface({
       const heroSlides = item.title || item.subtitle
         ? slides.map((slide, index) => (index === 0 ? { ...slide, title: item.title || slide.title, subtitle: item.subtitle || slide.subtitle } : slide))
         : slides
-      return <HomeHero slides={heroSlides} siteName={siteConfig.text.siteName} buttonColor={siteConfig.colors.button} density={context.density} />
+      return <HomeHero slides={heroSlides} siteName={siteConfig.text.siteName} buttonColor={siteConfig.colors.button} styleConfig={siteConfig.heroStyle} />
     }
 
     if (item.key === 'home.announcement') return <HomeSystemAnnouncement announcement={announcement} />
@@ -142,11 +142,11 @@ export function HomeLayoutSurface({
           {posts.failed ? <ModuleFallback /> : null}
           {posts.loading ? <ModuleFallback title="正在加载帖子..." /> : null}
           {!posts.loading && !posts.failed ? (
-            <div className="grid gap-3">
-              {posts.data.map((post) => {
+            <div className="grid grid-cols-1 gap-4 @[42rem]:grid-cols-2 @[72rem]:grid-cols-3">
+              {posts.data.slice(0, 6).map((post) => {
                 const authorName = post.author.profile?.displayName || post.author.nickname
                 return (
-                  <article key={post.id} className="relative rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                  <article key={post.id} className="relative flex min-h-52 min-w-0 flex-col rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                     <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
                     <div className="relative z-10 mb-2 flex w-fit flex-wrap gap-2">
                       {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Pinned</span> : null}
@@ -155,7 +155,7 @@ export function HomeLayoutSurface({
                     </div>
                     <h3 className="relative z-10 line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
                     <p className="relative z-10 mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-                    <div className="relative z-10 mt-3 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
+                    <div className="relative z-10 mt-auto flex flex-wrap items-center gap-3 pt-4 text-xs font-bold text-slate-500">
                       <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950">{authorName}</Link>
                       <span>回复 {post.replyCount}</span><span>浏览 {post.viewCount}</span>
                       <LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} />

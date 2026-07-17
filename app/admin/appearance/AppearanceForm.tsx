@@ -185,6 +185,17 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
 
         {section === 'hero' ? (
           <div className="space-y-4">
+            <div className="rounded-2xl border border-sky-100 bg-white p-4">
+              <h2 className="text-lg font-black text-brand-950">Hero 全局样式</h2>
+              <p className="mt-1 text-sm font-bold text-slate-500">文字内容和链接按每张轮播设置；字号、按钮、留白和圆角对所有轮播生效。</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <HeroStyleSelect label="标题字号" value={config.heroStyle.titleSize} options={[['small', '小'], ['medium', '中'], ['large', '大'], ['extra-large', '特大']]} onChange={(value) => updateHeroStyle('titleSize', value)} />
+                <HeroStyleSelect label="描述字号" value={config.heroStyle.descriptionSize} options={[['small', '小'], ['medium', '中'], ['large', '大']]} onChange={(value) => updateHeroStyle('descriptionSize', value)} />
+                <HeroStyleSelect label="按钮大小" value={config.heroStyle.buttonSize} options={[['small', '小'], ['medium', '中'], ['large', '大']]} onChange={(value) => updateHeroStyle('buttonSize', value)} />
+                <HeroStyleSelect label="Hero 高度" value={config.heroStyle.height} options={[['compact', '紧凑'], ['standard', '标准'], ['spacious', '宽松']]} onChange={(value) => updateHeroStyle('height', value)} />
+                <HeroStyleSelect label="圆角" value={config.heroStyle.radius} options={[['small', '小'], ['medium', '中'], ['large', '大']]} onChange={(value) => updateHeroStyle('radius', value)} />
+              </div>
+            </div>
             {config.heroSlides.map((item, index) => (
               <div key={index} className="grid gap-3 rounded-2xl bg-sky-50/70 p-4 md:grid-cols-2">
                 <input value={item.title} onChange={(event) => updateHero(index, 'title', event.target.value)} className="rounded-xl border border-sky-100 px-3 py-2 font-bold" placeholder="标题" />
@@ -223,4 +234,19 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
       heroSlides: current.heroSlides.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
     }))
   }
+
+  function updateHeroStyle(key: keyof SiteAppearanceConfig['heroStyle'], value: string) {
+    setConfig((current) => ({ ...current, heroStyle: { ...current.heroStyle, [key]: value } }))
+  }
+}
+
+function HeroStyleSelect({ label, value, options, onChange }: { label: string; value: string; options: Array<readonly [string, string]>; onChange: (value: string) => void }) {
+  return (
+    <label className="text-sm font-black text-slate-600">
+      {label}
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2 font-bold outline-none">
+        {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
+      </select>
+    </label>
+  )
 }

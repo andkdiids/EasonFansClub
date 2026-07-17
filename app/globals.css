@@ -87,6 +87,25 @@ svg {
   overflow: visible;
 }
 
+.page-layout-auto-flow-item > .home-hero {
+  min-height: 24rem !important;
+  overflow: hidden !important;
+}
+
+.page-layout-auto-flow-item > .home-hero[data-hero-height='compact'] {
+  min-height: 20rem !important;
+}
+
+.page-layout-auto-flow-item > .home-hero[data-hero-height='spacious'] {
+  min-height: 30rem !important;
+}
+
+@media (max-width: 640px) {
+  .page-layout-auto-flow-item > .home-hero { min-height: 25rem !important; }
+  .page-layout-auto-flow-item > .home-hero[data-hero-height='compact'] { min-height: 21rem !important; }
+  .page-layout-auto-flow-item > .home-hero[data-hero-height='spacious'] { min-height: 29rem !important; }
+}
+
 [data-layout-page='checkin'] .page-layout-auto-flow-desktop,
 [data-layout-page='checkin'] .page-layout-auto-flow-tablet {
   align-items: stretch;

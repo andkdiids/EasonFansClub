@@ -39,7 +39,8 @@ export function PostList({
   emptyText = '暂时还没有帖子。',
   onBoardSelect,
   responsiveColumns = false,
-}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string; emptyText?: string; onBoardSelect?: (slug: string) => void; responsiveColumns?: boolean }>) {
+  total,
+}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string; emptyText?: string; onBoardSelect?: (slug: string) => void; responsiveColumns?: boolean; total?: number }>) {
   const [visiblePosts, setVisiblePosts] = useState(posts)
 
   useEffect(() => setVisiblePosts(posts), [posts])
@@ -55,7 +56,7 @@ export function PostList({
   return (
     <div className={`grid items-start gap-3 ${responsiveColumns ? 'md:grid-cols-2' : ''}`}>
       <p aria-live="polite" className={`text-right text-xs font-bold text-slate-500 ${responsiveColumns ? 'md:col-span-2' : ''}`}>
-        共 {visiblePosts.length} 篇帖子
+        共 {total ?? visiblePosts.length} 篇帖子
       </p>
       {visiblePosts.map((post) => {
         const authorName = post.author.profile?.displayName || post.author.nickname

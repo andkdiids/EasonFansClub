@@ -27,6 +27,20 @@ export function getForumPageWindow(currentPage: number, totalPages: number, size
   return Array.from({ length: safeSize }, (_, index) => start + index)
 }
 
+export function getForumOffset(page: number, pageSize: number) {
+  return (Math.max(1, Math.trunc(page) || 1) - 1) * Math.max(1, Math.trunc(pageSize) || 1)
+}
+
+export function buildForumHref(pathname: string, currentQuery: string, values: Record<string, string | number | null>) {
+  const next = new URLSearchParams(currentQuery)
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === null || value === '' || (key === 'page' && value === 1)) next.delete(key)
+    else next.set(key, String(value))
+  })
+  const query = next.toString()
+  return `${pathname}${query ? `?${query}` : ''}`
+}
+
 export type ForumFeedResponse = {
   boards: Array<{ id: string; name: string; slug: string; description: string | null; postCount: number; isAnnouncement: boolean }>
   selectedBoard: { id: string; name: string; slug: string; description: string | null; isAnnouncement: boolean } | null
@@ -45,6 +59,9 @@ export type ForumFeedResponse = {
     board: { name: string; slug: string }
     author: { uid: number; nickname: string; avatarUrl: string | null; level: number; profile: { displayName: string | null; avatarUrl: string | null } | null }
   }>
+  total: number
+  totalPages: number
+  page: number
   pagination: { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean }
   permissions: { canCreatePost: boolean; canCreateAnnouncement: boolean }
 }

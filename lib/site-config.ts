@@ -20,6 +20,19 @@ export type SiteHeroSlide = {
   sortOrder: number
 }
 
+export const heroTitleSizes = ['small', 'medium', 'large', 'extra-large'] as const
+export const heroDescriptionSizes = ['small', 'medium', 'large'] as const
+export const heroButtonSizes = ['small', 'medium', 'large'] as const
+export const heroHeightSizes = ['compact', 'standard', 'spacious'] as const
+export const heroRadiusSizes = ['small', 'medium', 'large'] as const
+export type SiteHeroStyle = {
+  titleSize: typeof heroTitleSizes[number]
+  descriptionSize: typeof heroDescriptionSizes[number]
+  buttonSize: typeof heroButtonSizes[number]
+  height: typeof heroHeightSizes[number]
+  radius: typeof heroRadiusSizes[number]
+}
+
 export type SiteAppearanceConfig = {
   text: {
     siteName: string
@@ -58,6 +71,7 @@ export type SiteAppearanceConfig = {
   }
   nav: SiteNavItem[]
   heroSlides: SiteHeroSlide[]
+  heroStyle: SiteHeroStyle
 }
 
 export const defaultSiteAppearance: SiteAppearanceConfig = {
@@ -126,6 +140,17 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
       sortOrder: 2,
     },
   ],
+  heroStyle: {
+    titleSize: 'large',
+    descriptionSize: 'medium',
+    buttonSize: 'medium',
+    height: 'standard',
+    radius: 'large',
+  },
+}
+
+function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && allowed.includes(value as T) ? value as T : fallback
 }
 
 export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig {
@@ -141,6 +166,13 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
     heroSlides: (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => (
       item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
     )),
+    heroStyle: {
+      titleSize: enumValue(partial.heroStyle?.titleSize, heroTitleSizes, defaultSiteAppearance.heroStyle.titleSize),
+      descriptionSize: enumValue(partial.heroStyle?.descriptionSize, heroDescriptionSizes, defaultSiteAppearance.heroStyle.descriptionSize),
+      buttonSize: enumValue(partial.heroStyle?.buttonSize, heroButtonSizes, defaultSiteAppearance.heroStyle.buttonSize),
+      height: enumValue(partial.heroStyle?.height, heroHeightSizes, defaultSiteAppearance.heroStyle.height),
+      radius: enumValue(partial.heroStyle?.radius, heroRadiusSizes, defaultSiteAppearance.heroStyle.radius),
+    },
   }
 }
 

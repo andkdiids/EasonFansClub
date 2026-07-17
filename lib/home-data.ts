@@ -28,7 +28,7 @@ function excerpt(value: string | null | undefined, length = 180) {
 }
 
 export async function getHomePosts(userId?: string) {
-  const posts = await cachedHomeData('home.posts', getHomePostsUncached)
+  const posts = await getHomePostsUncached()
   if (!userId || posts.length === 0) return posts.map((post) => ({ ...post, likedByMe: false }))
   const liked = await prisma.like.findMany({
     where: { userId, postId: { in: posts.map((post) => post.id) } },
@@ -71,20 +71,20 @@ async function getHomePostsUncached() {
     prisma.post.findMany({
       where: baseWhere,
       orderBy: [{ isFeatured: 'desc' }, { likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }],
-      take: 12,
+      take: 18,
       select,
     }).then((candidates) => {
       const selected = new Map<string, (typeof candidates)[number]>()
       candidates
         .filter((post) => post.isFeatured)
-        .slice(0, 3)
+        .slice(0, 6)
         .forEach((post) => selected.set(post.id, post))
 
       candidates.forEach((post) => {
-        if (selected.size < 3) selected.set(post.id, post)
+        if (selected.size < 6) selected.set(post.id, post)
       })
 
-      return Array.from(selected.values()).slice(0, 3)
+      return Array.from(selected.values()).slice(0, 6)
     }),
     [],
     8000,

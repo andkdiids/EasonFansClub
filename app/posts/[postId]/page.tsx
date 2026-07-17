@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
+import { PostViewCounter } from '@/components/PostViewCounter'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
@@ -135,7 +136,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
               </Link>
             )}
             <span>{formatDate(post.createdAt)}</span>
-            <span>浏览 {post.viewCount}</span>
+            <PostViewCounter postId={post.id} initialCount={post.viewCount} />
             <span>回复 {post.replyCount}</span>
           </div>
           <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{post.content}</div>

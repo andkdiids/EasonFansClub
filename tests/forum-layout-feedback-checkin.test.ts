@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { calculateCheckinStreaks, getShanghaiDateKey } from '../lib/checkin'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '../lib/feedback'
-import { clampForumPage, excerptForumPost, getForumPageWindow, getForumTotalPages, parseForumSort } from '../lib/forum'
+import { buildForumHref, clampForumPage, excerptForumPost, getForumOffset, getForumPageWindow, getForumTotalPages, parseForumSort } from '../lib/forum'
 import { getNotificationTarget } from '../lib/notification-target'
 import { calculateGridHeightFromPixels, isDeprecatedLayoutModule, normalizeLayoutItemHeight } from '../lib/page-layout/normalize'
 
@@ -68,7 +68,8 @@ test('反馈接口使用幂等键且挂号先建唯一记录再发经验', () =>
 
 test('论坛 Feed 使用服务端分页筛选且用户态禁止公共缓存', () => {
   const route = readFileSync('app/api/forum/feed/route.ts', 'utf8')
-  assert.match(route, /skip: \(page - 1\) \* pageSize/)
+  assert.match(route, /skip: getForumOffset\(page, pageSize\)/)
+  assert.match(route, /total,\s*totalPages,\s*page,/)
   assert.match(route, /private, no-store/)
   assert.match(route, /likedByMe/)
 })
@@ -86,13 +87,18 @@ test('论坛分页窗口始终显示连续页码并在边界正确收缩', () =>
   assert.deepEqual(getForumPageWindow(5, 9), [4, 5, 6])
   assert.deepEqual(getForumPageWindow(9, 9), [7, 8, 9])
   assert.deepEqual(getForumPageWindow(1, 2), [1, 2])
+  assert.equal(getForumOffset(2, 20), 20)
+  assert.equal(getForumOffset(3, 20), 40)
+  assert.equal(buildForumHref('/forum', 'board=concert&sort=featured&query=live', { page: 2 }), '/forum?board=concert&sort=featured&query=live&page=2')
+  assert.equal(buildForumHref('/forum', 'board=concert&page=2', { sort: 'latest', page: null }), '/forum?board=concert&sort=latest')
 })
 
 test('论坛翻页同步 URL、重新请求并用新 props 刷新双列列表', () => {
   const forumHome = readFileSync('components/ForumHome.tsx', 'utf8')
   const postList = readFileSync('components/PostList.tsx', 'utf8')
   assert.match(forumHome, /page: String\(page\)/)
-  assert.match(forumHome, /navigateToPage\(page \+ 1\)/)
+  assert.match(forumHome, /buildForumHref\(pathname, query, \{ page \}\)/)
+  assert.match(forumHome, /label="下一页" page=\{page \+ 1\}/)
   assert.match(forumHome, /responsiveColumns/)
   assert.match(postList, /useEffect\(\(\) => setVisiblePosts\(posts\), \[posts\]\)/)
   assert.match(postList, /md:grid-cols-2/)

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { clampForumPage, excerptForumPost, getForumTotalPages, parseForumSort } from '@/lib/forum'
+import { clampForumPage, excerptForumPost, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     const rows = await tx.post.findMany({
       where,
       orderBy,
-      skip: (page - 1) * pageSize,
+      skip: getForumOffset(page, pageSize),
       take: pageSize,
       select: {
         id: true, title: true, summary: true, content: true,
@@ -80,6 +80,9 @@ export async function GET(request: Request) {
       content: excerptForumPost(summary || content),
       likedByMe: likes.length > 0,
     })),
+    total,
+    totalPages,
+    page,
     pagination: { page, pageSize, total, totalPages, hasMore: page < totalPages },
     permissions: {
       canCreatePost: Boolean(user && (!announcement || canCreateAnnouncement)),
