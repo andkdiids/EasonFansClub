@@ -242,24 +242,39 @@ export async function POST(request: Request) {
   
   const verifyStart = Date.now()
 
-const verifyCheckIn = await prisma.checkIn.findUnique({
-  where: {
-    userId_checkinDateKey: {
-      userId: user.id,
-      checkinDateKey: todayKey,
+const [verifyCheckIn, verifyUser] = await Promise.all([
+  prisma.checkIn.findUnique({
+    where: {
+      userId_checkinDateKey: {
+        userId: user.id,
+        checkinDateKey: todayKey,
+      },
     },
-  },
-  select: {
-    id: true,
-    checkDate: true,
-    points: true,
-    exp: true,
-    mood: true,
-    message: true,
-    streakDay: true,
-    createdAt: true,
-  },
-})
+    select: {
+      id: true,
+      checkDate: true,
+      points: true,
+      exp: true,
+      mood: true,
+      message: true,
+      streakDay: true,
+      createdAt: true,
+    },
+  }),
+
+  prisma.user.findUnique({
+    where: {
+      id: user.id,
+    },
+    select: {
+      points: true,
+      exp: true,
+      experience: true,
+      level: true,
+      consecutiveDays: true,
+    },
+  }),
+])
 
 logPerf('checkin.verify.ms', verifyStart, { userId: user.id })
 
@@ -340,11 +355,11 @@ return NextResponse.json({
     gainedExp: result.gainedExp,
     bonus: result.bonus,
     dailyMessageId: result.dailyMessageId,
-    consecutiveDays: result.user.consecutiveDays,
-    points: result.user.points,
-    exp: result.user.exp,
-    experience: result.user.experience,
-    level: result.user.level,
+    consecutiveDays: verifyUser?.consecutiveDays ?? result.user.consecutiveDays,
+points: verifyUser?.points ?? result.user.points,
+exp: verifyUser?.exp ?? result.user.exp,
+experience: verifyUser?.experience ?? result.user.experience,
+level: verifyUser?.level ?? result.user.level,
     created: true,
   })
 }
