@@ -219,7 +219,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
     setIsSubmitting(true)
     submitLockedRef.current = true
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = window.crypto.randomUUID()
+   if (!idempotencyKeyRef.current) {
+  idempotencyKeyRef.current =
+    typeof window.crypto?.randomUUID === 'function'
+      ? window.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+}
     const account = registrationType === 'PHONE'
       ? form.phone.trim().replace(/\s+/g, '')
       : form.email.trim().toLowerCase()
