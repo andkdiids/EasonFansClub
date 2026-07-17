@@ -10,41 +10,62 @@ concurrency:
   group: production-deploy
   cancel-in-progress: true
 
+
 jobs:
   deploy:
     name: Deploy production
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
-      - name: Deploy over SSH
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+
+      - name: Upload project
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "."
+          target: "/home/ubuntu/EasonFansClub"
+
+
+      - name: Build and restart
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          command_timeout: 20m
+          command_timeout: 30m
           script_stop: true
+
           script: |
             set -euo pipefail
 
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
             export PATH="/home/ubuntu/.nvm/versions/node/v22.23.1/bin:$PATH"
+
+            cd /home/ubuntu/EasonFansClub
+
 
             node -v
             pnpm -v
             pm2 -v
 
-            cd /home/ubuntu/EasonFansClub
-
-            git fetch origin
-            git checkout main
-            git reset --hard origin/main
 
             pnpm install --frozen-lockfile
+
             pnpm prisma generate
+
             pnpm prisma migrate deploy
+
             pnpm build
+
             pm2 restart easonfansclub --update-env
