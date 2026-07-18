@@ -7,7 +7,8 @@ export const dynamic = 'force-dynamic'
 
 export default async function MusicAlbumsPage() {
   const albums = await prisma.musicAlbum.findMany({
-    orderBy: [{ releaseYear: 'desc' }, { createdAt: 'desc' }],
+    where: { status: 'PUBLISHED' },
+    orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'desc' }],
     include: { _count: { select: { songs: true } } },
   })
 

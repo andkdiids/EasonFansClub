@@ -6,38 +6,63 @@ import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type Context = { params: Promise<{ albumId: string }> }
 
+function parseReleaseDate(value: unknown) {
+  const raw = sanitizeText(value, 20)
+  if (!raw) return null
+  const date = new Date(`${raw}T00:00:00.000Z`)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+export async function GET(_request: Request, { params }: Context) {
+  const guard = await requireAdmin('music_manage')
+  if (!guard.user) return guard.response
+  const { albumId } = await params
+  const album = await prisma.musicAlbum.findUnique({
+    where: { id: albumId },
+    include: { songs: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } },
+  })
+  if (!album) return NextResponse.json({ message: '专辑不存在' }, { status: 404 })
+  return NextResponse.json({ album })
+}
+
 export async function PATCH(request: Request, { params }: Context) {
   const guard = await requireAdmin('music_manage')
   if (!guard.user) return guard.response
 
   const { albumId } = await params
   const body = await request.json().catch(() => null)
-  const name = sanitizeText(body?.name, 160)
-  const artist = sanitizeText(body?.artist, 100) || '陈奕迅'
-  const releaseYear = parseMusicYear(body?.releaseYear)
-  const language = sanitizeText(body?.language, 40) || '粤语'
+  const current = await prisma.musicAlbum.findUnique({ where: { id: albumId }, select: { id: true, coverUrl: true } })
+  if (!current) return NextResponse.json({ message: '专辑不存在' }, { status: 404 })
 
+  const name = sanitizeText(body?.albumName ?? body?.name, 160)
+  const releaseYear = parseMusicYear(body?.releaseYear)
+  const releaseDate = parseReleaseDate(body?.releaseDate)
+  const requestedStatus = body?.status === 'PUBLISHED' || body?.status === 'published' ? 'PUBLISHED' : 'DRAFT'
+  const displayOrder = Number.isInteger(Number(body?.displayOrder)) ? Math.max(0, Number(body.displayOrder)) : 0
   if (!name) return NextResponse.json({ message: '请填写专辑名称' }, { status: 400 })
   if (!releaseYear) return NextResponse.json({ message: '请填写有效发行年份' }, { status: 400 })
+  if (releaseDate === undefined) return NextResponse.json({ message: '请填写有效发行日期' }, { status: 400 })
+  if (requestedStatus === 'PUBLISHED' && !current.coverUrl) return NextResponse.json({ message: '发布前请先上传专辑封面' }, { status: 400 })
 
   try {
     const album = await prisma.musicAlbum.update({
       where: { id: albumId },
       data: {
         name,
-        artist,
+        artist: sanitizeText(body?.artist, 100) || '陈奕迅',
+        releaseDate,
         releaseYear,
-        language,
-        coverUrl: optionalMusicText(body?.coverUrl, 1000),
+        language: sanitizeText(body?.language, 40) || '粤语',
+        company: optionalMusicText(body?.company, 200),
         description: optionalMusicText(body?.description, 10000),
+        story: optionalMusicText(body?.story, 20000),
+        displayOrder,
+        status: requestedStatus,
       },
       include: { songs: { orderBy: { trackNumber: 'asc' } } },
     })
-    return NextResponse.json({ album, message: '专辑已保存' })
+    return NextResponse.json({ album, message: requestedStatus === 'PUBLISHED' ? '专辑已发布' : '专辑草稿已保存' })
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-      return NextResponse.json({ message: '专辑不存在' }, { status: 404 })
-    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return NextResponse.json({ message: '同名、同艺人和同年份的专辑已存在' }, { status: 409 })
     }
@@ -48,15 +73,12 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(_request: Request, { params }: Context) {
   const guard = await requireAdmin('music_manage')
   if (!guard.user) return guard.response
-
   const { albumId } = await params
   try {
     await prisma.musicAlbum.delete({ where: { id: albumId } })
     return NextResponse.json({ ok: true, message: '专辑及其歌曲已删除' })
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-      return NextResponse.json({ message: '专辑不存在' }, { status: 404 })
-    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return NextResponse.json({ message: '专辑不存在' }, { status: 404 })
     throw error
   }
 }

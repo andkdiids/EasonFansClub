@@ -256,6 +256,11 @@ enum ChangelogStatus {
   UNPUBLISHED
 }
 
+enum MusicPublicationStatus {
+  DRAFT
+  PUBLISHED
+}
+
 enum PageLayoutRevisionSource {
   MANUAL
   ROLLBACK
@@ -1291,20 +1296,26 @@ model MusicTrack {
 }
 
 model MusicAlbum {
-  id          String   @id @default(cuid())
-  name        String
-  artist      String   @default("陈奕迅")
-  releaseYear Int
-  coverUrl    String?
-  description String?
-  language    String   @default("粤语")
-  era         String?
-  albumType   String?
-  createdAt   DateTime @default(now())
+  id           String                 @id @default(cuid())
+  name         String
+  artist       String                 @default("陈奕迅")
+  releaseDate  DateTime?
+  releaseYear  Int
+  coverUrl     String?
+  company      String?
+  description  String?
+  story        String?
+  language     String                 @default("粤语")
+  era          String?
+  albumType    String?
+  status       MusicPublicationStatus @default(DRAFT)
+  displayOrder Int                    @default(0)
+  createdAt    DateTime               @default(now())
 
   songs MusicSong[]
 
   @@unique([name, artist, releaseYear])
+  @@index([status, displayOrder, releaseYear])
   @@index([releaseYear, createdAt])
 }
 
@@ -1322,6 +1333,7 @@ model MusicSong {
   arranger       String?
   producer       String?
   story          String?
+  description    String?
   lyrics         String?
   sourceType     String?
   sourceUrl      String?
