@@ -89,8 +89,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
   }
 
-  const today = startOfLocalDay()
-  const todayKey = getShanghaiDateKey()
+  const checkedAt = new Date()
+  const today = startOfLocalDay(checkedAt)
+  const todayKey = getShanghaiDateKey(checkedAt)
 
   const existingStart = Date.now()
   const existing = await prisma.checkIn.findUnique({
@@ -153,8 +154,9 @@ const nextStreak = yesterdayCheckIn
     const createdCheckIn = await tx.checkIn.create({
       data: {
         userId: user.id,
-        checkDate: today,
+        checkDate: checkedAt,
         checkinDateKey: todayKey,
+        createdAt: checkedAt,
         points: gainedPoints,
         exp: 0,
         streakDay: nextStreak,

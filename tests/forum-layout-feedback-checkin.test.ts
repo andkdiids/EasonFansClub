@@ -108,6 +108,13 @@ test('北京时间零点边界使用 Asia/Shanghai 日期键', () => {
 
 test('挂号时间按北京时间显示真实创建分钟', () => {
   assert.equal(formatBeijingDateTimeMinute(new Date('2026-07-18T08:03:19.000Z')), '2026-07-18 16:03')
+  const route = readFileSync('app/api/checkin/route.ts', 'utf8')
+  assert.match(route, /const checkedAt = new Date\(\)/)
+  assert.match(route, /const today = startOfLocalDay\(checkedAt\)/)
+  assert.match(route, /const todayKey = getShanghaiDateKey\(checkedAt\)/)
+  assert.match(route, /checkDate: checkedAt,\s*checkinDateKey: todayKey,\s*createdAt: checkedAt,/)
+  assert.doesNotMatch(route, /checkDate: today,\s*checkinDateKey: todayKey/)
+  assert.doesNotMatch(route, /createdAt: today/)
 })
 
 test('移动端资料卡与布局编辑器使用独立尺寸和显式网格', () => {
