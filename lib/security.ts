@@ -62,6 +62,20 @@ export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<
   return result
 }
 
+export async function requireSuperAdmin(): Promise<GuardResult> {
+  const result = await requireUser()
+  if (!result.user) return result
+
+  if (result.user.role !== 'SUPER_ADMIN') {
+    return {
+      user: null,
+      response: NextResponse.json({ message: '只有超级管理员可以执行此操作' }, { status: 403 }),
+    }
+  }
+
+  return result
+}
+
 export function sanitizeText(value: unknown, maxLength = 5000) {
   const bounded = String(value ?? '').slice(0, Math.max(maxLength * 2, maxLength))
 

@@ -107,11 +107,27 @@ test('沉浸式专辑墙支持 Framer Motion、拖动、滚轮、触摸和详情
   assert.match(hero, /variant="glass"/)
   assert.match(search, /backdrop-blur/)
   assert.match(carousel, /Math\.abs\(offsets\[index\]\) <= 1/)
-  assert.match(carousel, /sm:w-\[540px\]/)
+  assert.match(carousel, /md:w-\[540px\]/)
   assert.match(carousel, /lg:w-\[660px\]/)
   assert.match(card, /left-1\/2/)
   assert.match(card, /-translate-x-1\/2/)
   assert.doesNotMatch(card, /translateZ|rotate:/)
+})
+
+test('EasMusic 移动端封面缩小且桌面切换按钮位于舞台两侧', () => {
+  const carousel = readFileSync('components/music/MusicAlbumCarousel.tsx', 'utf8')
+  const card = readFileSync('components/music/MusicAlbum3DCard.tsx', 'utf8')
+  const navigation = readFileSync('components/SiteNavigation.tsx', 'utf8')
+  assert.match(card, /w-\[62vw\]/)
+  assert.match(card, /max-w-\[238px\]/)
+  assert.match(carousel, /h-\[300px\]/)
+  assert.match(carousel, /absolute left-0/)
+  assert.match(carousel, /absolute right-0/)
+  assert.match(carousel, /hidden size-\[52px\][\s\S]*md:grid/)
+  assert.equal((carousel.match(/查看当前专辑/g) || []).length, 1)
+  assert.match(navigation, /usePathname/)
+  assert.match(navigation, /aria-current=\{active \? 'page'/)
+  assert.match(navigation, /pathname\.startsWith\(`\$\{target\}\//)
 })
 
 test('音乐搜索弹窗使用 body portal、最高层级并锁定底层交互', () => {

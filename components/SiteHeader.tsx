@@ -8,6 +8,7 @@ import { publicImageUrl } from '@/lib/images'
 import { getUnreadSummary } from '@/lib/notifications'
 import { UserNotificationMenu } from '@/components/UserNotificationMenu'
 import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
+import { DesktopSiteNavigation, MobileSiteNavigation } from '@/components/SiteNavigation'
 
 type SiteHeaderProps = {
   user?: SessionUser | null
@@ -40,25 +41,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             <span className="truncate">{config.text.siteName}</span>
           </Link>
 
-          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-2 overflow-x-auto text-sm font-bold text-slate-700 md:flex">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={item.title || item.label}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-transparent text-lg text-brand-950 transition hover:border-sky-100 hover:bg-sky-50"
-              >
-                <span aria-hidden>{item.icon}</span>
-                <span className="sr-only">{item.label}</span>
-              </Link>
-            ))}
-            {isAdmin ? (
-              <Link href="/admin" title="后台" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-lg text-brand-700 hover:bg-sky-50">
-                <span aria-hidden>⚙</span>
-                <span className="sr-only">后台</span>
-              </Link>
-            ) : null}
-          </nav>
+          <DesktopSiteNavigation items={navItems} isAdmin={isAdmin} />
 
           {user ? (
             <UserNotificationMenu displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={isAdmin} initialSummary={unreadSummary!} />
@@ -71,14 +54,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
         </div>
       </header>
 
-      <nav data-mobile-main-nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 gap-1 rounded-[24px] border border-sky-100 bg-white/92 p-2 shadow-2xl shadow-sky-900/10 backdrop-blur-xl transition md:hidden">
-        {mobileNav.map((item) => (
-          <Link key={item.href} href={item.href} title={item.title || item.label} className="flex min-h-12 flex-col items-center justify-center rounded-2xl text-brand-950 hover:bg-sky-50">
-            <span className="text-lg" aria-hidden>{item.icon}</span>
-            <span className="mt-0.5 max-w-full truncate text-[10px] font-black">{item.label}</span>
-          </Link>
-        ))}
-      </nav>
+      <MobileSiteNavigation items={mobileNav} />
       {user ? (
         <Suspense fallback={null}>
           <HeaderLayoutQuickLink user={user} />

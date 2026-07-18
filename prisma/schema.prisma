@@ -307,6 +307,7 @@ model User {
   isDeleted                       Boolean            @default(false)
   deletedAt                       DateTime?
   securityQuestionRecoveryEnabled Boolean            @default(false)
+  mustSetupSecurity               Boolean            @default(false)
   registrationIdempotencyKeyHash  String?            @unique
   createdAt                       DateTime           @default(now())
   updatedAt                       DateTime           @updatedAt
@@ -364,6 +365,8 @@ model User {
   lyricCards                  LyricCard[]
   adminActions                AdminAction[]             @relation("AdminOperator")
   targetAdminActions          AdminAction[]             @relation("AdminTargetUser")
+  administeredActionLogs      AdminActionLog[]          @relation("AdminActionLogAdmin")
+  targetedActionLogs          AdminActionLog[]          @relation("AdminActionLogTarget")
   adminPermissions            AdminPermission[]
   updatedPageLayouts          PageLayout[]              @relation("PageLayoutUpdatedBy")
   publishedPageLayouts        PageLayout[]              @relation("PageLayoutPublishedBy")
@@ -1741,6 +1744,23 @@ model AdminAction {
   @@index([postId])
   @@index([replyId])
   @@index([boardId])
+}
+
+model AdminActionLog {
+  id        String   @id @default(cuid())
+  action    String
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  adminId String
+  admin   User   @relation("AdminActionLogAdmin", fields: [adminId], references: [id], onDelete: Cascade)
+
+  targetUserId String
+  targetUser   User   @relation("AdminActionLogTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 model AdminPermission {

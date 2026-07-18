@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 
 type AdminUser = {
@@ -262,6 +263,7 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-500">{formatDate(user.createdAt)}</td>
                   <td className="rounded-r-2xl px-3 py-3 text-right">
+                    <Link href={`/admin/users/${user.id}`} className="mb-2 ml-2 inline-flex min-h-10 items-center rounded-full border border-sky-200 bg-sky-50 px-4 text-sm font-black text-brand-700">查看详情</Link>
                     {canManageAccountSecurity && user.role !== 'SUPER_ADMIN' ? (
                       <button
                         type="button"
