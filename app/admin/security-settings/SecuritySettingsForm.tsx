@@ -25,6 +25,6 @@ export function SecuritySettingsForm({ initial }: { initial: AccountSecuritySett
   return <section className="rounded-[28px] border border-sky-100 bg-white p-6 shadow-sm">
     <div className="space-y-3">{(Object.keys(labels) as (keyof AccountSecuritySettings)[]).map((key) => <label key={key} className="flex items-start gap-4 rounded-2xl bg-sky-50/60 p-4"><input type="checkbox" checked={settings[key]} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.checked }))} className="mt-1 size-5" /><span><span className="block font-black text-brand-950">{labels[key].title}</span><span className="mt-1 block text-sm font-bold leading-6 text-slate-500">{labels[key].description}</span></span></label>)}</div>
     {message ? <p className="mt-4 text-sm font-black text-emerald-700">{message}</p> : null}{error ? <p className="mt-4 text-sm font-black text-red-700">{error}</p> : null}
-    <button onClick={save} disabled={saving} className="mt-5 w-full rounded-2xl bg-brand-950 px-5 py-3 font-black text-white disabled:opacity-50">{saving ? '保存中...' : '保存账号安全设置'}</button>
+    <button onClick={save} disabled={saving} className="mt-5 w-full rounded-2xl bg-brand-950 px-5 py-3 font-black text-white disabled:opacity-50">{saving ? '保存中...' : '保存账户安全设置'}</button>
   </section>
 }

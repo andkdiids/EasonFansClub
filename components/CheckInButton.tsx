@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmojiButton } from '@/components/EmojiPicker'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
-import { BEIJING_TIME_ZONE, formatBeijingMonthDayTime } from '@/lib/beijing-time'
+import { BEIJING_TIME_ZONE, formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { DAILY_MOODS, getMood } from '@/lib/daily'
 
 export type TodayCheckIn = {
@@ -33,7 +33,7 @@ export type CheckInStateChange = {
 
 function formatBeijingTime(value?: string | Date | null) {
   if (!value) return '暂无'
-  return formatBeijingMonthDayTime(value)
+  return formatBeijingDateTimeMinute(value)
 }
 
 function msUntilNextBeijingMidnight() {
@@ -266,7 +266,7 @@ onStateChange?.({
           <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">{stats.exp} 经验</span>
         </div>
         <div className={isCompact ? 'rounded-2xl border border-sky-100 bg-sky-50/70 p-3' : 'rounded-3xl border border-sky-100 bg-sky-50/70 p-5'}>
-          <p className="text-xs font-black uppercase tracking-[0.14em] text-brand-700 sm:text-sm">Today Mood</p>
+          <p className="text-xs font-black tracking-[0.14em] text-brand-700 sm:text-sm">今日心情</p>
           <h3 className={isCompact ? 'mt-1 text-xl font-black text-brand-950' : 'mt-2 text-3xl font-black text-brand-950'}>今日心情</h3>
           <div className={isCompact ? 'mt-2 flex items-center gap-2' : 'mt-4 flex items-center gap-3'}>
             <span className={isCompact ? 'text-3xl' : 'text-4xl'}>{selectedMood?.icon || '♪'}</span>

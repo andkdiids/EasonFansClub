@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
-import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, isSameLocalDay, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
+import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { anonymizeCheckInMessages, getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
@@ -44,7 +44,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       'User.findUnique checkin.user',
       prisma.user.findUnique({
         where: { id: sessionUser.id },
-        select: { points: true, exp: true, level: true, consecutiveDays: true, lastCheckInDate: true },
+        select: { points: true, exp: true, level: true, consecutiveDays: true },
       }),
     ),
     safeDb(
@@ -53,13 +53,13 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       0,
     ),
     safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),
-    safeDb(
+    withDbTimeout(
       'CheckIn.findUnique checkin.todayCheckIn',
       prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: sessionUser.id, checkinDateKey: todayKey } },
         select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
       }),
-      null,
+      8000,
     ),
     safeDb(
       'DailyMessage.findMany checkin.messages',
@@ -104,19 +104,15 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   if (!user) redirect('/login')
 
   const streaks = calculateCheckinStreaks(checkInHistory.map((item) => item.checkinDateKey))
-  const resolvedTodayCheckIn = todayCheckIn || (isSameLocalDay(user.lastCheckInDate, today)
-    ? { checkDate: today, points: 0, exp: 0, mood: null, message: null, streakDay: streaks.currentStreak, createdAt: user.lastCheckInDate || today }
-    : null)
-
   const moodIndex = calcMoodIndex(moodStats.map((item) => ({ mood: item.mood || '', _count: { mood: item._count.mood } })))
   const selectedDateValue = formatBeijingDate(selectedDate)
   const todayValue = formatBeijingDate(today)
   const layoutConfig = await getPublishedPageLayoutConfig('checkin')
-  const todayCheckInPayload = resolvedTodayCheckIn
+  const todayCheckInPayload = todayCheckIn
     ? {
-        ...resolvedTodayCheckIn,
-        checkDate: resolvedTodayCheckIn.checkDate.toISOString(),
-        createdAt: resolvedTodayCheckIn.createdAt.toISOString(),
+        ...todayCheckIn,
+        checkDate: todayCheckIn.checkDate.toISOString(),
+        createdAt: todayCheckIn.createdAt.toISOString(),
       }
     : null
 

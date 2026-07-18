@@ -56,7 +56,7 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
   return (
     <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
       <div>
-        <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Registration</p>
+        <p className="text-sm font-black tracking-[0.18em] text-brand-700">注册安全</p>
         <h1 className="mt-2 text-3xl font-black text-brand-950">注册模式设置</h1>
         <p className="mt-3 text-sm font-bold leading-7 text-slate-600">
           注册方式不等于登录方式。切换注册模式只影响新用户注册，旧手机号用户仍可继续手机号登录。

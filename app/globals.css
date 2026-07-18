@@ -364,6 +364,16 @@ svg {
   pointer-events: auto;
 }
 
+.page-layout-canvas-mobile .page-layout-canvas-item,
+.page-layout-canvas-mobile .react-resizable-handle {
+  touch-action: none;
+}
+
+.page-layout-canvas-mobile .react-resizable-handle {
+  width: 22px;
+  height: 22px;
+}
+
 .page-layout-canvas [data-layout-content-key="checkin.header"] [data-checkin-mood-grid="true"] {
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
 }

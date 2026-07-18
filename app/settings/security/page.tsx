@@ -60,7 +60,7 @@ export default async function SecurityPage() {
       <SiteHeader user={session} />
       <main className="mx-auto max-w-3xl px-5 py-8">
         <section className="rounded-[32px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
-          <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Account Recovery</p>
+          <p className="text-sm font-black tracking-[0.18em] text-brand-700">账户恢复</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950">账号恢复方式</h1>
           <p className="mt-3 text-sm font-bold leading-7 text-slate-500">查看当前账号可用的恢复方式与验证状态。</p>
 

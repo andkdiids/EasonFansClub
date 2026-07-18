@@ -3,7 +3,7 @@ import { getRegistrationPolicy, isValidRegistrationMode, setStoredRegistrationMo
 import { requireAdmin } from '@/lib/security'
 
 export async function GET() {
-  const guard = await requireAdmin('site_config_manage')
+  const guard = await requireAdmin('account_security_manage')
   if (!guard.user) return guard.response
 
   const policy = await getRegistrationPolicy()
@@ -11,7 +11,7 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const guard = await requireAdmin('site_config_manage')
+  const guard = await requireAdmin('account_security_manage')
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)

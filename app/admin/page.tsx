@@ -13,8 +13,7 @@ export const dynamic = 'force-dynamic'
 const adminModules = [
   { href: '/admin/dashboard', title: '数据面板', desc: '查看注册、发帖、回复、挂号等核心数据。' },
   { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
-  { href: '/admin/settings', title: '网站设置', desc: '配置站点名称、SEO、页脚和联系方式。' },
-  { href: '/admin/security-settings', title: '账号安全设置', desc: '配置密保问题、历史用户通知与邮箱密码重置。' },
+  { href: '/admin/security-settings', title: '账户安全设置', desc: '统一配置注册方式、密保、邮箱、手机与密码找回策略。' },
   { href: '/admin/content', title: '内容管理', desc: '管理首页模块、公告、板块、活动和友情链接。' },
   { href: '/admin/achievements', title: '成就 / 勋章', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
   { href: '/admin/culture', title: 'Eason 文化馆', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },
@@ -61,7 +60,7 @@ export default async function AdminPage() {
             return (
               <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
                 <section className="layout-card rounded-[28px] border border-sky-100 bg-white/85 shadow-sm">
-                  <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Admin Center</p>
+                  <p className="text-sm font-black tracking-[0.18em] text-brand-700">管理后台</p>
                   <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">{layoutItem.title || '管理后台'}</h1>
                   <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">
                     {layoutItem.subtitle || '管理用户、帖子、板块、挂号、站点外观、EasMusic、成就系统和 Eason 文化馆。'}

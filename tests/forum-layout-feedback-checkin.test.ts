@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { calculateCheckinStreaks, getShanghaiDateKey } from '../lib/checkin'
+import { formatBeijingDateTimeMinute } from '../lib/beijing-time'
 import { anonymizeCheckInMessages } from '../lib/checkin-messages'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '../lib/feedback'
 import { buildForumHref, clampForumPage, excerptForumPost, getForumOffset, getForumPageWindow, getForumTotalPages, parseForumSort } from '../lib/forum'
@@ -64,12 +65,13 @@ test('统一返回按钮优先返回历史，无历史时回首页或业务列�
   assert.match(detail, /<BackButton fallbackHref="\/forum"/)
 })
 
-test('验收修复保持签到兜底、整卡点击、申请过滤与通知清除', () => {
+test('验收修复保持真实签到记录、整卡点击、申请过滤与通知清除', () => {
   const checkin = readFileSync('app/api/checkin/route.ts', 'utf8')
   const cards = readFileSync('components/PostList.tsx', 'utf8')
   const friends = readFileSync('app/friends/page.tsx', 'utf8')
   const notifications = readFileSync('app/api/notifications/route.ts', 'utf8')
-  assert.match(checkin, /isSameLocalDay\(profile\.lastCheckInDate/)
+  assert.match(checkin, /withDbTimeout\(\s*'CheckIn\.findUnique checkinApi\.todayCheckIn'/)
+  assert.doesNotMatch(checkin, /isSameLocalDay|resolvedTodayCheckIn/)
   assert.match(cards, /absolute inset-0 z-20/)
   assert.match(friends, /senderId: user\.id, status: 'PENDING'/)
   assert.match(notifications, /export async function DELETE/)
@@ -104,6 +106,20 @@ test('北京时间零点边界使用 Asia/Shanghai 日期键', () => {
   assert.equal(getShanghaiDateKey(new Date('2026-07-16T15:59:59.999Z')), '2026-07-16')
 })
 
+test('挂号时间按北京时间显示真实创建分钟', () => {
+  assert.equal(formatBeijingDateTimeMinute(new Date('2026-07-18T08:03:19.000Z')), '2026-07-18 16:03')
+})
+
+test('移动端资料卡与布局编辑器使用独立尺寸和显式网格', () => {
+  const profile = readFileSync('components/ProfileSummary.tsx', 'utf8')
+  const editor = readFileSync('components/page-layout/PageLayoutCanvasEditor.tsx', 'utf8')
+  assert.match(profile, /w-40 max-w-full sm:w-56/)
+  assert.match(editor, /cols=\{cols\[device\]\}/)
+  assert.match(editor, /layout=\{layout\}/)
+  assert.match(editor, /resizeHandles=\{\['e', 's', 'se'\]\}/)
+  assert.doesNotMatch(editor, /ResponsiveGridLayout/)
+})
+
 test('论坛默认排序与非法排序统一回退到最新', () => {
   assert.equal(parseForumSort(null), 'latest')
   assert.equal(parseForumSort('unknown'), 'latest')
@@ -115,11 +131,12 @@ test('帖子摘要被压缩为空格并限制长度', () => {
   assert.equal(excerptForumPost('123456', 4), '1234…')
 })
 
-test('通知目标支持显式链接、好友、私信和无目标通知', () => {
+test('通知目标支持显式链接、好友、活动和无目标通知', () => {
   const base = { id: 'n1', source: 'personal' as const, link: null, targetUrl: null }
   assert.equal(getNotificationTarget({ ...base, type: 'FRIEND_REQUEST' }), '/friends#received-requests')
-  assert.equal(getNotificationTarget({ ...base, type: 'MESSAGE' }), '/notifications?category=message')
-  assert.equal(getNotificationTarget({ ...base, type: 'SYSTEM' }), '/notifications?detail=personal:n1')
+  assert.equal(getNotificationTarget({ ...base, type: 'ACTIVITY' }), '/activities')
+  assert.equal(getNotificationTarget({ ...base, type: 'MESSAGE' }), null)
+  assert.equal(getNotificationTarget({ ...base, type: 'SYSTEM' }), null)
   assert.equal(getNotificationTarget({ ...base, type: 'REPLY', link: '/posts/p1' }), '/posts/p1')
 })
 
@@ -195,5 +212,5 @@ test('好友入口、申请锚点和个人资料卡结构保持统一', () => {
   assert.match(friendsPage, /id="received-requests"/)
   assert.match(profile, /admissionInfo\.date/)
   assert.match(profile, /已入院 \{admissionInfo\.days\} 天/)
-  assert.match(profile, /w-56 max-w-full/)
+  assert.match(profile, /w-40 max-w-full sm:w-56/)
 })

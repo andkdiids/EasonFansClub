@@ -62,7 +62,7 @@ export function ProfileEditorDrawer({
           <aside className="ml-auto flex h-full w-full flex-col bg-white shadow-2xl md:max-w-2xl">
             <div className="flex items-center justify-between border-b border-sky-100 px-5 py-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Profile Editor</p>
+                <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
                 <h2 className="mt-1 text-xl font-black text-brand-950">编辑资料</h2>
               </div>
               <button type="button" onClick={cancelEditor} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 hover:bg-sky-100">

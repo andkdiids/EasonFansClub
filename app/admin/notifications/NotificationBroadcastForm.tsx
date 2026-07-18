@@ -169,7 +169,7 @@ export function NotificationBroadcastForm() {
     <main className="mx-auto grid max-w-7xl gap-6 px-5 py-8 lg:grid-cols-[430px_minmax(0,1fr)]">
       <form onSubmit={submit} className="space-y-4 rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
         <div>
-          <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Notifications</p>
+          <p className="text-sm font-black tracking-[0.18em] text-brand-700">全站通知</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950">{form.id ? '编辑系统通知' : '新建系统通知'}</h1>
           <p className="mt-2 text-sm font-bold text-slate-500">系统通知不会为每位用户创建独立记录，已读状态由读取表记录。</p>
         </div>

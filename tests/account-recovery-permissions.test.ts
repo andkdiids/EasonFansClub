@@ -15,7 +15,9 @@ test('普通用户账号安全接口固定拒绝修改恢复开关', () => {
 
 test('管理员用户级接口要求 account_security_manage 权限', () => {
   const route = source('app/api/admin/users/[userId]/security-recovery/route.ts')
+  const registrationRoute = source('app/api/admin/registration-settings/route.ts')
   assert.match(route, /requireAdmin\('account_security_manage'\)/)
+  assert.equal((registrationRoute.match(/requireAdmin\('account_security_manage'\)/g) || []).length, 2)
 })
 
 test('管理员启用前校验单题已设置并保护超级管理员和系统账号', () => {

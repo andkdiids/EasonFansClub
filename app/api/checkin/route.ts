@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, isSameLocalDay, startOfLocalDay, shiftShanghaiDateKey } from '@/lib/checkin'
+import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay, shiftShanghaiDateKey } from '@/lib/checkin'
 import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
-import { safeDb } from '@/lib/db-timeout'
+import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
@@ -19,27 +19,22 @@ export async function GET() {
 
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey()
-  console.log('[checkin-time]', {
-  now: new Date(),
-  today,
-  todayKey,
-})
   const [profile, todayCheckIn, todayCount, moodStats, history] = await Promise.all([
     safeDb(
       'User.findUnique checkinApi.profile',
       prisma.user.findUnique({
         where: { id: user.id },
-        select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true, lastCheckInDate: true },
+        select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true },
       }),
       null,
     ),
-    safeDb(
+    withDbTimeout(
       'CheckIn.findUnique checkinApi.todayCheckIn',
       prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
         select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
       }),
-      null,
+      8000,
     ),
     safeDb('CheckIn.count checkinApi.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),
     safeDb(
@@ -57,12 +52,9 @@ export async function GET() {
   if (!profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
-  const resolvedTodayCheckIn = todayCheckIn || (isSameLocalDay(profile.lastCheckInDate, today)
-    ? { checkDate: today, points: 0, exp: 0, mood: null, message: null, streakDay: streaks.currentStreak, createdAt: profile.lastCheckInDate || today }
-    : null)
   return NextResponse.json({
-    checkedToday: Boolean(resolvedTodayCheckIn),
-    todayCheckIn: resolvedTodayCheckIn,
+    checkedToday: Boolean(todayCheckIn),
+    todayCheckIn,
     consecutiveDays: streaks.currentStreak,
     currentStreak: streaks.currentStreak,
     longestStreak: streaks.longestStreak,

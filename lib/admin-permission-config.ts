@@ -30,7 +30,7 @@ export const allAdminPermissionKeys = adminPermissionGroups.map((item) => item.k
 export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/dashboard': 'stats_view',
   '/admin/users': 'user_manage',
-  '/admin/settings': 'site_config_manage',
+  '/admin/settings': 'account_security_manage',
   '/admin/security-settings': 'account_security_manage',
   '/admin/content': 'home_manage',
   '/admin/achievements': 'achievement_manage',

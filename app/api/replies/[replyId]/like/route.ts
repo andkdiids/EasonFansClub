@@ -12,7 +12,7 @@ export async function POST(_request: Request, context: RouteContext) {
   const result = await prisma.$transaction(async (tx) => {
     const reply = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
-      select: { id: true, authorId: true },
+      select: { id: true, authorId: true, postId: true },
     })
     if (!reply) return null
 
@@ -32,6 +32,7 @@ export async function POST(_request: Request, context: RouteContext) {
             type: 'LIKE',
             title: '你的回复收到点赞',
             content: `${guard.user.nickname} 点赞了你的回复`,
+            link: `/posts/${reply.postId}`,
           },
         })
       }

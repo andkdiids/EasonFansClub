@@ -381,14 +381,14 @@ export function ProfileSettingsForm({
     <>
       <form onSubmit={handleSubmit} className="space-y-5 rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm">
         <div>
-          <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Profile Editor</p>
+          <p className="text-sm font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
           <h2 className="mt-2 text-2xl font-black text-brand-950">编辑资料</h2>
           <p className="mt-2 text-sm font-bold text-slate-500">编辑内容只会更新你的个人资料；手机号和邮箱仅在这里自己可见。</p>
         </div>
 
         <section className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/45 p-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Profile</p>
+            <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">个人资料</h3>
           </div>
 
@@ -453,28 +453,28 @@ export function ProfileSettingsForm({
 
         <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Privacy</p>
-            <h3 className="mt-1 text-lg font-black text-brand-950">Wall privacy</h3>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">Choose who can view and post on your profile wall.</p>
+            <p className="text-xs font-black tracking-[0.18em] text-sky-700">隐私设置</p>
+            <h3 className="mt-1 text-lg font-black text-brand-950">留言墙隐私</h3>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">选择谁可以查看你的个人主页留言墙并发布留言。</p>
           </div>
           <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-            <span className="text-sm font-black text-slate-700">Profile wall visibility</span>
+            <span className="text-sm font-black text-slate-700">留言墙可见范围</span>
             <select
               value={form.wallVisibility}
               onChange={(event) => update('wallVisibility', event.target.value as ProfileWallVisibility)}
               className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
             >
-              <option value="PUBLIC">Public</option>
-              <option value="FRIENDS">Friends only</option>
-              <option value="CLOSED">Closed</option>
+              <option value="PUBLIC">公开</option>
+              <option value="FRIENDS">仅好友</option>
+              <option value="CLOSED">关闭</option>
             </select>
           </label>
         </section>
 
         <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Account</p>
-            <h3 className="mt-1 text-lg font-black text-brand-950">账号安全</h3>
+            <p className="text-xs font-black tracking-[0.18em] text-sky-700">账户安全</p>
+            <h3 className="mt-1 text-lg font-black text-brand-950">账户安全</h3>
             <p className="mt-1 text-sm font-bold leading-6 text-slate-500">邮箱和手机号只在编辑资料中可见；修改邮箱后仍沿用现有验证规则。</p>
           </div>
 

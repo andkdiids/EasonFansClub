@@ -112,10 +112,10 @@ export function ProfileHeader({
           <p className="mt-2 text-[11px] font-bold text-white/82">
             {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天
           </p>
-          {showGrowth ? <div className="mt-2.5 w-56 max-w-full">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-black text-white/85">
-              <span>成长经验</span>
-              <span>{experience} / {nextRequiredExp ?? experience} XP</span>
+          {showGrowth ? <div className="mt-2.5 w-40 max-w-full sm:w-56">
+            <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] font-black text-white/85 sm:text-[11px]">
+              <span className="shrink-0">成长经验</span>
+              <span className="min-w-0 truncate text-right">{experience} / {nextRequiredExp ?? experience} XP</span>
             </div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/18">
               <div className="h-full rounded-full bg-sky-200" style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }} />

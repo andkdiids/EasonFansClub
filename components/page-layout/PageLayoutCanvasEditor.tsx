@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import {
-  Responsive,
+  default as ReactGridLayout,
   WidthProvider,
   type Layout,
-  type ResponsiveLayouts,
 } from 'react-grid-layout/legacy'
 import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
 import { getPageLayoutModuleDensity, type PageLayoutModuleRenderer, type PageLayoutRenderContext } from '@/components/page-layout/PageLayoutRenderer'
@@ -14,13 +13,7 @@ import type { PageLayoutConfig, PageLayoutDevice, PageLayoutModuleConfig, PageLa
 
 export type PageLayoutCanvasModules = Record<string, PageLayoutModuleRenderer>
 
-const ResponsiveGridLayout = WidthProvider(Responsive)
-
-const breakpoints: Record<PageLayoutDevice, number> = {
-  desktop: 1200,
-  tablet: 768,
-  mobile: 0,
-}
+const GridLayout = WidthProvider(ReactGridLayout)
 
 const cols: Record<PageLayoutDevice, number> = {
   desktop: 12,
@@ -161,11 +154,7 @@ export function PageLayoutCanvasEditor({
   onAutoHeightChangeRef.current = onAutoHeightChange
   const items = useMemo(() => sortByGrid((config[device] || []).filter((item) => item.visible && !item.isHidden), device), [config, device])
   const visibleKeys = items.map((item) => item.key).join('|')
-  const layouts = useMemo<ResponsiveLayouts<PageLayoutDevice>>(() => ({
-    desktop: toLayout(config.desktop, 'desktop', moduleDefinitions),
-    tablet: toLayout(config.tablet, 'tablet', moduleDefinitions),
-    mobile: toLayout(config.mobile, 'mobile', moduleDefinitions),
-  }), [config, moduleDefinitions])
+  const layout = useMemo(() => toLayout(config[device], device, moduleDefinitions), [config, device, moduleDefinitions])
 
   useEffect(() => {
     if (readOnly || typeof ResizeObserver === 'undefined') return
@@ -247,12 +236,12 @@ export function PageLayoutCanvasEditor({
       data-layout-canvas="react-grid-layout"
       className={`page-layout-canvas page-layout-canvas-${device}`}
     >
-      <ResponsiveGridLayout
+      <GridLayout
+        key={`${pageKey}:${device}`}
         className="page-layout-rgl"
-        breakpoints={breakpoints}
-        cols={cols}
-        breakpoint={device}
-        layouts={layouts}
+        measureBeforeMount
+        cols={cols[device]}
+        layout={layout}
         rowHeight={PAGE_LAYOUT_ROW_HEIGHT}
         margin={[PAGE_LAYOUT_ROW_GAP, PAGE_LAYOUT_ROW_GAP]}
         containerPadding={[0, 0]}
@@ -262,7 +251,7 @@ export function PageLayoutCanvasEditor({
         isDraggable={!readOnly}
         isResizable={!readOnly}
         isBounded
-        resizeHandles={['e']}
+        resizeHandles={['e', 's', 'se']}
         draggableCancel=".layout-editor-control, input, textarea, select, button, a"
         useCSSTransforms
         onDragStart={(_, oldItem) => { isUserInteractingRef.current = true; if (!readOnly && oldItem) onSelect(oldItem.i) }}
@@ -298,7 +287,7 @@ export function PageLayoutCanvasEditor({
             </div>
           )
         })}
-      </ResponsiveGridLayout>
+      </GridLayout>
       {!items.length ? (
         <p className="rounded-2xl bg-white px-4 py-6 text-center text-sm font-black text-slate-500">当前设备没有可显示模块</p>
       ) : null}

@@ -92,6 +92,7 @@ export function NotificationsClient({
   async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
     event.preventDefault()
     const target = getNotificationTarget(item)
+    if (!target) return
     try {
       await markRead(item)
     } catch (reason) {
@@ -136,11 +137,12 @@ export function NotificationsClient({
 
   function renderNotification(item: UnifiedNotification) {
     const category = (item.category || 'system') as NotificationCategory
+    const target = getNotificationTarget(item)
     const content = (
       <article
         className={`group relative overflow-hidden rounded-[24px] border p-4 shadow-sm transition sm:p-5 ${
           item.isRead
-            ? 'border-sky-100 bg-white/82 hover:bg-white'
+            ? `border-sky-100 bg-white/82 ${target ? 'hover:bg-white' : 'opacity-80'}`
             : 'border-sky-200 bg-sky-50/88 shadow-sky-900/5'
         }`}
       >
@@ -158,6 +160,7 @@ export function NotificationsClient({
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{item.typeLabel}</span>
               {!item.isRead ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
+              {!target ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-500">暂无详情页</span> : null}
               <time className="text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
             </div>
             <h2 className="mt-2 break-words text-base font-black text-slate-950 sm:text-lg">{item.title}</h2>
@@ -169,7 +172,11 @@ export function NotificationsClient({
 
     return (
       <div key={`${item.source}:${item.id}`} className="relative">
-        <Link href={getNotificationTarget(item)} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
+        {target ? (
+          <Link href={target} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
+        ) : (
+          <div className="min-h-12 w-full cursor-default text-left" aria-disabled="true">{content}</div>
+        )}
         <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-full bg-white/90 px-3 py-1.5 text-xs font-black text-slate-500 shadow-sm hover:text-red-600">清除</button>
       </div>
     )
@@ -180,7 +187,7 @@ export function NotificationsClient({
       <div className="rounded-[28px] border border-sky-100 bg-white/78 p-5 shadow-sm shadow-sky-900/5 backdrop-blur-xl sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-brand-700">Message Center</p>
+            <p className="text-xs font-black tracking-[0.2em] text-brand-700">通知中心</p>
             <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">通知中心</h1>
             <p className="mt-3 text-sm font-bold text-slate-500">未读通知 <span className="text-brand-700">{unreadCount}</span> 条</p>
           </div>
