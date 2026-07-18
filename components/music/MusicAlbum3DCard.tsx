@@ -3,21 +3,62 @@
 import Image from 'next/image'
 import { motion } from 'framer-motion'
 
-export type MusicCarouselAlbum = { id: string; name: string; releaseYear: number; coverUrl: string; language: string; artist: string }
+export type MusicCarouselAlbum = {
+  id: string
+  name: string
+  releaseYear: number
+  coverUrl: string
+  language: string
+  artist: string
+  songCount: number
+}
 
-export function MusicAlbum3DCard({ album, offset, spacing, selected, onActivate }: Readonly<{ album: MusicCarouselAlbum; offset: number; spacing: number; selected: boolean; onActivate: () => void }>) {
+type MusicAlbumCardProps = {
+  album: MusicCarouselAlbum
+  offset: number
+  spacing: number
+  selected: boolean
+  onActivate: () => void
+}
+
+export function MusicAlbum3DCard({ album, offset, spacing, selected, onActivate }: Readonly<MusicAlbumCardProps>) {
   const distance = Math.abs(offset)
-  return <motion.button
-    type="button"
-    aria-label={selected ? `打开专辑《${album.name}》` : `选择专辑《${album.name}》`}
-    onClick={onActivate}
-    initial={false}
-    animate={{ x: offset * spacing, scale: selected ? 1 : Math.max(0.62, 0.86 - distance * 0.08), rotateY: selected ? 0 : offset < 0 ? 38 : -38, opacity: selected ? 1 : Math.max(0.24, 0.72 - distance * 0.16), z: selected ? 80 : -distance * 90 }}
-    transition={{ type: 'spring', stiffness: 230, damping: 28 }}
-    style={{ zIndex: 20 - distance, transformStyle: 'preserve-3d' }}
-    className="absolute left-1/2 top-1/2 aspect-square w-[58vw] max-w-[330px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] border border-white/35 bg-slate-900 text-left shadow-2xl shadow-black/35 outline-none focus-visible:ring-4 focus-visible:ring-sky-300 sm:w-[310px]"
-  >
-    <Image src={album.coverUrl} alt={`${album.name}专辑封面`} fill sizes="(max-width: 640px) 58vw, 330px" loading="lazy" className="object-cover" />
-    <span className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-5 pb-5 pt-16 text-white transition ${selected ? 'opacity-100' : 'opacity-70'}`}><span className="block truncate text-xl font-black">{album.name}</span><span className="mt-1 block text-xs font-bold text-white/75">{album.releaseYear}</span></span>
-  </motion.button>
+
+  return (
+    <motion.button
+      type="button"
+      aria-label={selected ? `打开专辑《${album.name}》` : `选择专辑《${album.name}》`}
+      onClick={onActivate}
+      initial={false}
+      animate={{
+        x: offset * spacing,
+        y: selected ? -10 : Math.min(distance * 8, 16),
+        scale: selected ? 1.1 : 0.9,
+        opacity: selected ? 1 : Math.max(0.42, 0.72 - distance * 0.08),
+      }}
+      whileHover={{ y: selected ? -16 : -10, scale: selected ? 1.1 : 0.95 }}
+      transition={{ type: 'spring', stiffness: 210, damping: 26 }}
+      style={{ zIndex: selected ? 20 : 10 - distance }}
+      className="absolute left-1/2 top-4 w-[72vw] max-w-[260px] -translate-x-1/2 text-left outline-none focus-visible:rounded-[24px] focus-visible:ring-4 focus-visible:ring-sky-300/70 sm:w-[220px] lg:w-[260px]"
+    >
+      <span className={`relative block aspect-square overflow-hidden rounded-[24px] border transition-shadow duration-500 ${selected ? 'border-sky-200/45 shadow-[0_24px_70px_rgba(39,154,241,0.32)]' : 'border-white/15 shadow-[0_16px_45px_rgba(2,12,27,0.35)]'}`}>
+        <Image
+          src={album.coverUrl}
+          alt={`${album.name}专辑封面`}
+          fill
+          sizes="(max-width: 639px) 72vw, (max-width: 1023px) 220px, 260px"
+          loading="lazy"
+          className="object-cover"
+        />
+      </span>
+      <span className="mt-4 block px-1 text-white">
+        <span className="block truncate text-lg font-black tracking-tight sm:text-xl">《{album.name}》</span>
+        <span className="mt-1.5 flex items-center gap-2 text-xs font-bold text-slate-300/75 sm:text-sm">
+          <span>{album.releaseYear}</span>
+          <span aria-hidden="true" className="h-1 w-1 rounded-full bg-sky-300/60" />
+          <span>{album.songCount} Tracks</span>
+        </span>
+      </span>
+    </motion.button>
+  )
 }

@@ -89,16 +89,24 @@ test('前台只获取已发布专辑和已发布专辑下的歌曲', () => {
   for (const source of [home, albums, album, song]) assert.match(source, /status: 'PUBLISHED'/)
 })
 
-test('3D 专辑墙支持 Framer Motion、拖动、滚轮、触摸和详情跳转', () => {
+test('沉浸式专辑墙支持 Framer Motion、拖动、滚轮、触摸和详情跳转', () => {
   const carousel = readFileSync('components/music/MusicAlbumCarousel.tsx', 'utf8')
   const card = readFileSync('components/music/MusicAlbum3DCard.tsx', 'utf8')
+  const hero = readFileSync('components/music/MusicHero.tsx', 'utf8')
+  const search = readFileSync('components/music/MusicSearchDialog.tsx', 'utf8')
   assert.match(carousel, /from 'framer-motion'/)
   assert.match(carousel, /drag="x"/)
   assert.match(carousel, /onWheel=\{onWheel\}/)
   assert.match(carousel, /touch-pan-y/)
   assert.match(carousel, /router\.push\(`\/music\/album\/\$\{album\.id\}`\)/)
-  assert.match(card, /rotateY/)
+  assert.doesNotMatch(card, /rotateY|perspective/)
+  assert.match(card, /scale: selected \? 1\.1 : 0\.9/)
   assert.match(card, /opacity:/)
+  assert.match(card, /260px/)
+  assert.match(card, /Tracks/)
+  assert.match(hero, /#050914/)
+  assert.match(hero, /variant="glass"/)
+  assert.match(search, /backdrop-blur/)
 })
 
 test('音乐搜索覆盖歌曲、专辑、年份、作词和作曲', () => {

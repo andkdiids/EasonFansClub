@@ -3,10 +3,39 @@
 import Link from 'next/link'
 import { useEffect, useState, type FormEvent } from 'react'
 
-type Result = { albums: Array<{ id: string; name: string; releaseYear: number }>; songs: Array<{ id: string; title: string; releaseYear: number; lyricist?: string | null; composer?: string | null; album: { name: string } }> }
-export function MusicSearchDialog() {
-  const [open, setOpen] = useState(false); const [query, setQuery] = useState(''); const [result, setResult] = useState<Result | null>(null); const [loading, setLoading] = useState(false)
-  useEffect(() => { if (!open) return; const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close) }, [open])
-  async function search(event: FormEvent) { event.preventDefault(); if (!query.trim()) return; setLoading(true); const response = await fetch(`/api/music/search?q=${encodeURIComponent(query.trim())}`); const data = await response.json().catch(() => null); setResult(response.ok ? data : { albums: [], songs: [] }); setLoading(false) }
-  return <><button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white px-6 py-3 text-sm font-black text-brand-950 shadow-lg shadow-sky-950/10">⌕ 搜索音乐资料</button>{open ? <div role="dialog" aria-modal="true" aria-label="搜索音乐资料" className="fixed inset-0 z-50 grid place-items-center bg-slate-950/65 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}><div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[30px] bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between"><h2 className="text-2xl font-black text-brand-950">搜索 EasMusic</h2><button type="button" onClick={() => setOpen(false)} className="grid h-9 w-9 place-items-center rounded-full bg-sky-50 font-black text-brand-700">×</button></div><form onSubmit={search} className="mt-5 flex gap-2"><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="歌曲、专辑、年份、作词、作曲" className="min-w-0 flex-1 rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none focus:border-brand-300" /><button className="rounded-2xl bg-brand-950 px-5 text-sm font-black text-white">{loading ? '搜索中' : '搜索'}</button></form>{result ? <div className="mt-6 space-y-6"><section><h3 className="text-sm font-black text-brand-700">专辑</h3><div className="mt-2 space-y-2">{result.albums.map((album) => <Link key={album.id} href={`/music/album/${album.id}`} className="flex justify-between rounded-2xl bg-sky-50 p-3 font-black text-brand-950"><span>{album.name}</span><span className="text-slate-400">{album.releaseYear}</span></Link>)}{result.albums.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配专辑</p> : null}</div></section><section><h3 className="text-sm font-black text-brand-700">歌曲</h3><div className="mt-2 space-y-2">{result.songs.map((song) => <Link key={song.id} href={`/music/song/${song.id}`} className="block rounded-2xl border border-sky-100 p-3"><span className="font-black text-brand-950">{song.title}</span><span className="ml-2 text-xs font-bold text-slate-400">{song.album.name} · {song.releaseYear}</span></Link>)}{result.songs.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配歌曲</p> : null}</div></section></div> : null}</div></div> : null}</>
+type Result = {
+  albums: Array<{ id: string; name: string; releaseYear: number }>
+  songs: Array<{ id: string; title: string; releaseYear: number; lyricist?: string | null; composer?: string | null; album: { name: string } }>
+}
+
+type MusicSearchDialogProps = { variant?: 'default' | 'glass'; label?: string }
+
+export function MusicSearchDialog({ variant = 'default', label = '搜索音乐资料' }: Readonly<MusicSearchDialogProps>) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [result, setResult] = useState<Result | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [open])
+
+  async function search(event: FormEvent) {
+    event.preventDefault()
+    if (!query.trim()) return
+    setLoading(true)
+    const response = await fetch(`/api/music/search?q=${encodeURIComponent(query.trim())}`)
+    const data = await response.json().catch(() => null)
+    setResult(response.ok ? data : { albums: [], songs: [] })
+    setLoading(false)
+  }
+
+  const triggerClassName = variant === 'glass'
+    ? 'inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-black text-white shadow-lg shadow-sky-950/20 backdrop-blur-xl transition hover:border-sky-200/40 hover:bg-white/15'
+    : 'inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white px-6 py-3 text-sm font-black text-brand-950 shadow-lg shadow-sky-950/10 transition hover:-translate-y-0.5 hover:shadow-xl'
+
+  return <><button type="button" onClick={() => setOpen(true)} className={triggerClassName}><span aria-hidden="true">⌕</span>{label}</button>{open ? <div role="dialog" aria-modal="true" aria-label="搜索音乐资料" className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4 backdrop-blur-md" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}><div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[30px] bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between"><div><p className="text-xs font-black tracking-[0.2em] text-brand-700">EASMUSIC SEARCH</p><h2 className="mt-1 text-2xl font-black text-brand-950">搜索音乐资料</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="关闭搜索" className="grid h-9 w-9 place-items-center rounded-full bg-sky-50 font-black text-brand-700">×</button></div><form onSubmit={search} className="mt-5 flex gap-2"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="歌曲、专辑、年份、作词、作曲" className="min-w-0 flex-1 rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none focus:border-brand-500" /><button className="rounded-2xl bg-brand-950 px-5 text-sm font-black text-white">{loading ? '搜索中' : '搜索'}</button></form>{result ? <div className="mt-6 space-y-6"><section><h3 className="text-sm font-black text-brand-700">专辑</h3><div className="mt-2 space-y-2">{result.albums.map((album) => <Link key={album.id} href={`/music/album/${album.id}`} className="flex justify-between rounded-2xl bg-sky-50 p-3 font-black text-brand-950"><span>{album.name}</span><span className="text-slate-400">{album.releaseYear}</span></Link>)}{result.albums.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配专辑</p> : null}</div></section><section><h3 className="text-sm font-black text-brand-700">歌曲</h3><div className="mt-2 space-y-2">{result.songs.map((song) => <Link key={song.id} href={`/music/song/${song.id}`} className="block rounded-2xl border border-sky-100 p-3"><span className="font-black text-brand-950">{song.title}</span><span className="ml-2 text-xs font-bold text-slate-400">{song.album.name} · {song.releaseYear}</span></Link>)}{result.songs.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配歌曲</p> : null}</div></section></div> : null}</div></div> : null}</>
 }
