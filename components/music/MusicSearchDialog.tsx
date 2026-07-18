@@ -1,26 +1,41 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
+import { createPortal } from 'react-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 
 type Result = {
-  albums: Array<{ id: string; name: string; releaseYear: number }>
+  albums: Array<{ id: string; name: string; releaseYear: number; coverUrl?: string | null }>
   songs: Array<{ id: string; title: string; releaseYear: number; lyricist?: string | null; composer?: string | null; album: { name: string } }>
 }
-
 type MusicSearchDialogProps = { variant?: 'default' | 'glass'; label?: string }
 
 export function MusicSearchDialog({ variant = 'default', label = '搜索音乐资料' }: Readonly<MusicSearchDialogProps>) {
+  const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<Result | null>(null)
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => setMounted(true), [])
   useEffect(() => {
     if (!open) return
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
+    const body = document.body
+    const previousOverflow = body.style.overflow
+    const previousPaddingRight = body.style.paddingRight
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+    body.style.overflow = 'hidden'
+    if (scrollbarWidth > 0) body.style.paddingRight = `${scrollbarWidth}px`
+    window.dispatchEvent(new CustomEvent('easmusic:search-dialog', { detail: true }))
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      body.style.overflow = previousOverflow
+      body.style.paddingRight = previousPaddingRight
+      window.dispatchEvent(new CustomEvent('easmusic:search-dialog', { detail: false }))
+      window.removeEventListener('keydown', closeOnEscape)
+    }
   }, [open])
 
   async function search(event: FormEvent) {
@@ -34,8 +49,17 @@ export function MusicSearchDialog({ variant = 'default', label = '搜索音乐�
   }
 
   const triggerClassName = variant === 'glass'
-    ? 'inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-black text-white shadow-lg shadow-sky-950/20 backdrop-blur-xl transition hover:border-sky-200/40 hover:bg-white/15'
+    ? 'inline-flex items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-xl transition hover:bg-white/[0.12]'
     : 'inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white px-6 py-3 text-sm font-black text-brand-950 shadow-lg shadow-sky-950/10 transition hover:-translate-y-0.5 hover:shadow-xl'
 
-  return <><button type="button" onClick={() => setOpen(true)} className={triggerClassName}><span aria-hidden="true">⌕</span>{label}</button>{open ? <div role="dialog" aria-modal="true" aria-label="搜索音乐资料" className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4 backdrop-blur-md" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}><div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[30px] bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between"><div><p className="text-xs font-black tracking-[0.2em] text-brand-700">EASMUSIC SEARCH</p><h2 className="mt-1 text-2xl font-black text-brand-950">搜索音乐资料</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="关闭搜索" className="grid h-9 w-9 place-items-center rounded-full bg-sky-50 font-black text-brand-700">×</button></div><form onSubmit={search} className="mt-5 flex gap-2"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="歌曲、专辑、年份、作词、作曲" className="min-w-0 flex-1 rounded-2xl border border-sky-100 px-4 py-3 text-sm font-bold outline-none focus:border-brand-500" /><button className="rounded-2xl bg-brand-950 px-5 text-sm font-black text-white">{loading ? '搜索中' : '搜索'}</button></form>{result ? <div className="mt-6 space-y-6"><section><h3 className="text-sm font-black text-brand-700">专辑</h3><div className="mt-2 space-y-2">{result.albums.map((album) => <Link key={album.id} href={`/music/album/${album.id}`} className="flex justify-between rounded-2xl bg-sky-50 p-3 font-black text-brand-950"><span>{album.name}</span><span className="text-slate-400">{album.releaseYear}</span></Link>)}{result.albums.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配专辑</p> : null}</div></section><section><h3 className="text-sm font-black text-brand-700">歌曲</h3><div className="mt-2 space-y-2">{result.songs.map((song) => <Link key={song.id} href={`/music/song/${song.id}`} className="block rounded-2xl border border-sky-100 p-3"><span className="font-black text-brand-950">{song.title}</span><span className="ml-2 text-xs font-bold text-slate-400">{song.album.name} · {song.releaseYear}</span></Link>)}{result.songs.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配歌曲</p> : null}</div></section></div> : null}</div></div> : null}</>
+  const dialog = mounted && open ? createPortal(<div role="dialog" aria-modal="true" aria-label="搜索音乐资料" className="fixed inset-0 z-[10000] grid place-items-center bg-[rgba(3,10,20,.72)] p-4 backdrop-blur-[18px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}>
+    <div className="max-h-[84vh] w-[90%] max-w-[720px] overflow-y-auto rounded-[26px] border border-white/[0.12] bg-[#07182d]/90 p-5 text-white shadow-[0_28px_90px_rgba(0,0,0,.42)] backdrop-blur-2xl sm:p-7">
+      <div className="flex items-center justify-between gap-4"><div><p className="text-[10px] font-black tracking-[0.22em] text-sky-300/60 sm:text-xs">EASMUSIC SEARCH</p><h2 className="mt-1 text-2xl font-black">搜索音乐资料</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="关闭搜索" className="grid h-10 w-10 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-xl text-white transition hover:bg-white/[0.12]">×</button></div>
+      <form onSubmit={search} className="mt-6 flex gap-2"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索歌曲、专辑、年份、作词、作曲……" className="min-w-0 flex-1 rounded-2xl border border-white/[0.12] bg-white/[0.07] px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-slate-400 focus:border-sky-300/40" /><button className="rounded-2xl border border-white/[0.12] bg-white/[0.1] px-5 text-sm font-black text-white transition hover:bg-white/[0.14]">{loading ? '搜索中' : '搜索'}</button></form>
+      {result ? <div className="mt-7 space-y-7"><section><h3 className="text-xs font-black tracking-[0.18em] text-sky-300/65">专辑</h3><div className="mt-3 grid gap-2">{result.albums.map((album) => <Link key={album.id} href={`/music/album/${album.id}`} className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-3 transition hover:bg-white/[0.1]"><span className="relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/[0.08] text-sky-200/60">{album.coverUrl ? <Image src={album.coverUrl} alt={`${album.name}专辑封面`} fill sizes="48px" className="object-cover" /> : '♪'}</span><span className="min-w-0 flex-1"><span className="block truncate font-black text-white">{album.name}</span><span className="mt-1 block text-xs font-bold text-slate-300/55">专辑 · {album.releaseYear}</span></span></Link>)}{result.albums.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配专辑</p> : null}</div></section>
+      <section><h3 className="text-xs font-black tracking-[0.18em] text-sky-300/65">歌曲</h3><div className="mt-3 grid gap-2">{result.songs.map((song) => <Link key={song.id} href={`/music/song/${song.id}`} className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-3 transition hover:bg-white/[0.1]"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white/[0.08] text-xl text-sky-200/60">♪</span><span className="min-w-0 flex-1"><span className="block truncate font-black text-white">{song.title}</span><span className="mt-1 block truncate text-xs font-bold text-slate-300/55">{song.album.name} · {song.releaseYear}</span></span></Link>)}{result.songs.length === 0 ? <p className="text-sm font-bold text-slate-400">没有匹配歌曲</p> : null}</div></section></div> : null}
+    </div>
+  </div>, document.body) : null
+
+  return <><button type="button" onClick={() => setOpen(true)} className={triggerClassName}><span aria-hidden="true">⌕</span>{label}</button>{dialog}</>
 }
