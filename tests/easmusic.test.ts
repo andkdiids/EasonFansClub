@@ -109,6 +109,23 @@ test('沉浸式专辑墙支持 Framer Motion、拖动、滚轮、触摸和详情
   assert.match(search, /backdrop-blur/)
 })
 
+test('音乐首页、专辑详情和歌曲详情统一使用沉浸式档案馆视觉', () => {
+  const home = readFileSync('app/music/page.tsx', 'utf8')
+  const album = readFileSync('app/music/album/[id]/page.tsx', 'utf8')
+  const song = readFileSync('app/music/song/[id]/page.tsx', 'utf8')
+  const shell = readFileSync('components/music/MusicArchiveShell.tsx', 'utf8')
+  for (const source of [home, album, song]) assert.match(source, /MusicArchiveShell/)
+  assert.match(shell, /#050914/)
+  assert.match(shell, /#07182d/)
+  assert.match(shell, /#0b2038/)
+  assert.match(album, /formatMusicReleaseDate/)
+  assert.match(album, /album\.story/)
+  assert.match(album, /song\.arranger/)
+  assert.match(song, /song\.album\.coverUrl/)
+  assert.match(song, /whitespace-pre-wrap/)
+  assert.match(song, /max-h-\[680px\]/)
+})
+
 test('音乐搜索覆盖歌曲、专辑、年份、作词和作曲', () => {
   const route = readFileSync('app/api/music/search/route.ts', 'utf8')
   const dialog = readFileSync('components/music/MusicSearchDialog.tsx', 'utf8')

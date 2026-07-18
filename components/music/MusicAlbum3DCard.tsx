@@ -11,6 +11,7 @@ export type MusicCarouselAlbum = {
   language: string
   artist: string
   songCount: number
+  releaseLabel: string
 }
 
 type MusicAlbumCardProps = {
@@ -54,7 +55,7 @@ export function MusicAlbum3DCard({ album, offset, spacing, selected, onActivate 
       <span className="mt-4 block px-1 text-white">
         <span className="block truncate text-lg font-black tracking-tight sm:text-xl">《{album.name}》</span>
         <span className="mt-1.5 flex items-center gap-2 text-xs font-bold text-slate-300/75 sm:text-sm">
-          <span>{album.releaseYear}</span>
+          <span>{album.releaseLabel}</span>
           <span aria-hidden="true" className="h-1 w-1 rounded-full bg-sky-300/60" />
           <span>{album.songCount} Tracks</span>
         </span>

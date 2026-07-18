@@ -1,23 +1,55 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicCover } from '@/components/music/MusicCover'
+import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicPlayer } from '@/components/music/MusicPlayer'
 import { SiteHeader } from '@/components/SiteHeader'
-import { musicCover } from '@/lib/music'
+import { formatMusicReleaseDate } from '@/lib/music-display'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
+
 export default async function MusicSongPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const song = await prisma.musicSong.findFirst({ where: { id, album: { status: 'PUBLISHED' } }, include: { album: true } })
   if (!song) notFound()
-  const coverUrl = musicCover(song.album.coverUrl, song.coverUrl)
-  const credits = [['作词', song.lyricist], ['作曲', song.composer], ['编曲', song.arranger], ['制作人', song.producer]]
-  return <><SiteHeader /><main className="mx-auto max-w-5xl space-y-8 px-4 py-7 sm:px-5 sm:py-11"><Link href={`/music/album/${song.albumId}`} className="text-sm font-black text-brand-700">← 《{song.album.name}》</Link><section className="grid items-end gap-7 sm:grid-cols-[240px_minmax(0,1fr)] sm:gap-10"><MusicCover src={coverUrl} alt={`${song.title}封面`} className="aspect-square w-full rounded-[32px] shadow-2xl shadow-sky-950/15 sm:w-[240px]" sizes="(max-width: 640px) 100vw, 240px" /><div><p className="text-sm font-black tracking-[0.18em] text-brand-700">歌曲资料</p><h1 className="mt-3 text-5xl font-black text-brand-950 sm:text-7xl">{song.title}</h1><p className="mt-4 text-lg font-bold text-slate-500">{song.artist} · {song.album.name} · {song.releaseYear}</p></div></section>
-    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{credits.map(([label, value]) => <div key={label} className="rounded-2xl border border-sky-100 bg-white/88 p-4"><p className="text-xs font-black text-brand-700">{label}</p><p className="mt-2 font-black text-brand-950">{value || '待补充'}</p></div>)}</section>
-    <MusicPlayer title={song.title} artist={song.artist} coverUrl={coverUrl} sourceType={song.sourceType} />
-    <section className="grid gap-6 lg:grid-cols-2"><div className="rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm"><h2 className="text-3xl font-black text-brand-950">歌曲介绍</h2><p className="mt-5 whitespace-pre-wrap text-sm font-bold leading-8 text-slate-600">{song.description || '歌曲介绍正在整理中。'}</p></div><div className="rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm"><h2 className="text-3xl font-black text-brand-950">歌曲故事</h2><p className="mt-5 whitespace-pre-wrap text-sm font-bold leading-8 text-slate-600">{song.story || '歌曲故事正在整理中。'}</p></div></section>
-    <section className="rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm sm:p-8"><h2 className="text-3xl font-black text-brand-950">歌词</h2><p className="mt-5 whitespace-pre-wrap text-sm font-bold leading-8 text-slate-600">{song.lyrics || '歌词内容暂未收录。'}</p></section>
-    <section className="flex flex-wrap gap-3 rounded-[28px] border border-sky-100 bg-sky-50/70 p-5"><button disabled className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white opacity-60">▶ 播放</button><button disabled className="rounded-full bg-white px-5 py-3 text-sm font-black text-brand-700 opacity-60">♡ 收藏</button><button disabled className="rounded-full bg-white px-5 py-3 text-sm font-black text-brand-700 opacity-60">评论</button><button disabled className="rounded-full bg-white px-5 py-3 text-sm font-black text-brand-700 opacity-60">分享</button></section>
-  </main></>
+
+  const coverUrl = song.album.coverUrl
+  const releaseLabel = formatMusicReleaseDate(song.album.releaseDate, song.releaseYear)
+  const tags = song.tags?.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) || []
+  const credits = [['作词', song.lyricist], ['作曲', song.composer], ['编曲', song.arranger]]
+  const songStory = song.description || song.story
+
+  return <><SiteHeader /><MusicArchiveShell maxWidth="max-w-5xl">
+    <Link href={`/music/album/${song.albumId}`} className="inline-flex items-center gap-2 text-sm font-black text-sky-300/80 transition hover:text-white">← 返回《{song.album.name}》</Link>
+
+    <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
+      <MusicDetailReveal direction="left" hover className="mx-auto w-full max-w-[320px]">
+        <MusicCover src={coverUrl} alt={`${song.album.name}专辑封面`} className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" />
+      </MusicDetailReveal>
+      <MusicDetailReveal direction="right" delay={0.08}>
+        <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">SONG ARCHIVE</p>
+        <h1 className="mt-4 text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{song.title}</h1>
+        <p className="mt-5 text-xl font-black text-slate-200">{song.artist}</p>
+        <p className="mt-3 text-sm font-bold text-slate-300/65">《{song.album.name}》 · {releaseLabel}</p>
+        {tags.length ? <div className="mt-5 flex flex-wrap gap-2">{tags.map((tag) => <span key={tag} className="rounded-full border border-sky-200/15 bg-sky-300/[0.08] px-3 py-1.5 text-xs font-black text-sky-100/75">{tag}</span>)}</div> : null}
+        <div className="mt-7 flex flex-wrap gap-3"><button type="button" disabled className="rounded-full bg-white px-6 py-3 text-sm font-black text-[#07182d] opacity-75 disabled:cursor-not-allowed">▶ 播放歌曲</button><Link href={`/music/album/${song.albumId}`} className="rounded-full border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/15">返回专辑</Link></div>
+      </MusicDetailReveal>
+    </section>
+
+    <MusicDetailReveal delay={0.12} className="mt-14 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8">
+      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CREATIVE CREDITS</p><h2 className="mt-2 text-3xl font-black text-white">创作资料</h2>
+      <dl className="mt-7 grid gap-4 sm:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
+    </MusicDetailReveal>
+
+    <div className="mt-8"><MusicPlayer title={song.title} artist={song.artist} coverUrl={coverUrl} sourceType={song.sourceType} /></div>
+
+    <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">
+      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">LYRICS ARCHIVE</p><h2 className="mt-2 text-3xl font-black text-white">歌词</h2>
+      <div className="mt-7 max-h-[680px] overflow-y-auto pr-3 [scrollbar-color:rgba(125,211,252,.35)_transparent]"><p className="whitespace-pre-wrap text-sm font-medium leading-9 text-slate-200/80 sm:text-base">{song.lyrics || '歌词内容暂未收录。'}</p></div>
+    </MusicDetailReveal>
+
+    {songStory ? <MusicDetailReveal delay={0.2} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SONG STORY</p><h2 className="mt-2 text-3xl font-black text-white">歌曲故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{songStory}</p></MusicDetailReveal> : null}
+  </MusicArchiveShell></>
 }
