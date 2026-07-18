@@ -172,7 +172,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     minW: 3,
     minH: 1,
   }),
-  singlePageModule('music', 'music.main', '音乐馆内容', 'EasMusic 搜索与曲目列表'),
+  singlePageModule('music', 'music.main', '音乐馆内容', 'EasMusic 专辑、歌曲资料与播放框架'),
   singlePageModule('message', 'message.main', '消息中心内容', '通知列表与未读状态', 'auto'),
   defineLayoutModule('profile', 'profile.main', '个人简介与成长资料', '本人可见的简介、资料操作与成长数据', 10, {
     desktop: grid(0, 0, 12, 5),

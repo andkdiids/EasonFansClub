@@ -6,7 +6,7 @@ export const adminPermissionGroups = [
   { key: 'board_manage', label: '板块管理', description: '创建、编辑、隐藏和排序论坛板块。' },
   { key: 'checkin_manage', label: '每日挂号管理', description: '查看签到记录、补签和重置签到。' },
   { key: 'daily_message_manage', label: 'E友留言管理', description: '删除、精选和管理留言互动。' },
-  { key: 'music_manage', label: 'EasMusic 管理', description: '配置音乐服务、推荐歌曲和听歌记录。' },
+  { key: 'music_manage', label: 'EasMusic 管理', description: '维护音乐专辑、歌曲资料和播放来源预留信息。' },
   { key: 'achievement_manage', label: '成就 / 勋章管理', description: '管理成就、勋章、称号和奖励。' },
   { key: 'culture_manage', label: 'Eason 文化馆管理', description: '管理歌曲、专辑、电影、Live 档案和歌词卡片。' },
   { key: 'home_manage', label: '首页装修管理', description: '管理首页模块、轮播图和展示顺序。' },

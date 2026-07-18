@@ -1,5 +1,15 @@
-import { AdminSectionPage } from '@/components/AdminSectionPage'
+import { AdminMusicManager } from '@/app/admin/music/AdminMusicManager'
+import { requireAdminPage } from '@/components/AdminAccess'
+import { SiteHeader } from '@/components/SiteHeader'
 
-export default function AdminMusicPage() {
-  return <AdminSectionPage path="/admin/music" title="EasMusic 管理" description="配置音乐服务状态、推荐歌曲、歌单展示和听歌数据。" />
+export const dynamic = 'force-dynamic'
+
+export default async function AdminMusicPage() {
+  const user = await requireAdminPage('/admin/music', 'music_manage')
+  return (
+    <>
+      <SiteHeader user={user} />
+      <AdminMusicManager />
+    </>
+  )
 }

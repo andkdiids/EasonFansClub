@@ -1290,6 +1290,48 @@ model MusicTrack {
   @@index([isVisible, sortOrder])
 }
 
+model MusicAlbum {
+  id          String   @id @default(cuid())
+  name        String
+  artist      String   @default("陈奕迅")
+  releaseYear Int
+  coverUrl    String?
+  description String?
+  language    String   @default("粤语")
+  createdAt   DateTime @default(now())
+
+  songs MusicSong[]
+
+  @@unique([name, artist, releaseYear])
+  @@index([releaseYear, createdAt])
+}
+
+model MusicSong {
+  id          String   @id @default(cuid())
+  title       String
+  artist      String   @default("陈奕迅")
+  albumId     String
+  trackNumber Int
+  releaseYear Int
+  duration    Int?
+  coverUrl    String?
+  composer    String?
+  lyricist    String?
+  arranger    String?
+  producer    String?
+  story       String?
+  lyrics      String?
+  sourceType  String?
+  sourceUrl   String?
+  createdAt   DateTime @default(now())
+
+  album MusicAlbum @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([albumId, trackNumber])
+  @@index([albumId, trackNumber])
+  @@index([title, artist])
+}
+
 model MusicFavorite {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())

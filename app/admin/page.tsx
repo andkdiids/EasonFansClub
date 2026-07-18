@@ -17,7 +17,7 @@ const adminModules = [
   { href: '/admin/content', title: '内容管理', desc: '管理首页模块、公告、板块、活动和友情链接。' },
   { href: '/admin/achievements', title: '成就 / 勋章', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
   { href: '/admin/culture', title: 'Eason 文化馆', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },
-  { href: '/admin/music', title: 'EasMusic', desc: '配置音乐馆服务状态、推荐歌曲和听歌记录。' },
+  { href: '/admin/music', title: 'EasMusic 管理', desc: '维护陈奕迅音乐专辑、歌曲资料与播放来源预留信息。' },
   { href: '/admin/feedback', title: '反馈中心', desc: '查看用户反馈，回复并更新处理状态。' },
   { href: '/admin/changelog', title: '更新日志', desc: '发布网站更新记录，让用户了解新功能和修复。' },
   { href: '/admin/notifications', title: '全站通知', desc: '向所有用户发布系统通知，并查看已读和未读统计。' },
