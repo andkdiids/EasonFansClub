@@ -36,6 +36,7 @@ export type CheckInLayoutModuleProps = {
     exp: number
     consecutiveDays: number
   }
+  checkinMoodEnabled?: boolean
   previewMode?: boolean
 }
 
@@ -85,6 +86,7 @@ function CheckInStatusContent({
   initialCheckIn,
   initialStats,
   previewMode,
+  checkinMoodEnabled = true,
 }: Readonly<{
   title: string
   density: PageLayoutModuleDensity
@@ -94,6 +96,7 @@ function CheckInStatusContent({
   initialCheckIn: TodayCheckInPayload
   initialStats: CheckInStats
   previewMode: boolean
+  checkinMoodEnabled: boolean
 }>) {
   const [todayCheckIn, setTodayCheckIn] = useState(initialCheckIn)
   const [stats, setStats] = useState(initialStats)
@@ -148,6 +151,7 @@ function CheckInStatusContent({
           compact={density !== 'normal'}
           density={density}
           previewMode={previewMode}
+          checkinMoodEnabled={checkinMoodEnabled}
           onStateChange={handleStateChange}
         />
       </div>
@@ -166,6 +170,7 @@ export function createCheckInLayoutModules({
   todayValue,
   sort,
   stats,
+  checkinMoodEnabled = true,
   previewMode = false,
 }: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
   return {
@@ -179,6 +184,7 @@ export function createCheckInLayoutModules({
             initialCheckIn={todayCheckIn}
             initialStats={stats}
             previewMode={previewMode}
+            checkinMoodEnabled={checkinMoodEnabled}
           />
         ),
         'checkin.publicMessages': (layoutItem, { density }) => (

@@ -10,7 +10,13 @@ type LoginErrors = Partial<{
   form: string
 }>
 
-type IdentifierType = 'phone' | 'email'
+type IdentifierType = 'account' | 'phone' | 'email'
+
+function inferIdentifierType(value: string): IdentifierType {
+  if (value.includes('@')) return 'email'
+  if (/^\+?\d{7,}$/.test(value)) return 'phone'
+  return 'account'
+}
 
 function safeRedirectPath(path?: string) {
   if (!path || !path.startsWith('/') || path.startsWith('//')) return '/'
@@ -20,19 +26,19 @@ function safeRedirectPath(path?: string) {
 
 export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redirectTo?: string; initialAccount?: string }>) {
   const normalizedInitialAccount = initialAccount.trim().slice(0, 254)
-  const [identifierType, setIdentifierType] = useState<IdentifierType>(normalizedInitialAccount.includes('@') ? 'email' : 'phone')
+  const [identifierType, setIdentifierType] = useState<IdentifierType>(inferIdentifierType(normalizedInitialAccount))
   const [errors, setErrors] = useState<LoginErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     if (normalizedInitialAccount) {
-      const initialType = normalizedInitialAccount.includes('@') ? 'email' : 'phone'
+      const initialType = inferIdentifierType(normalizedInitialAccount)
       setIdentifierType(initialType)
       window.localStorage.setItem('ecfc-login-type', initialType)
       return
     }
     const saved = window.localStorage.getItem('ecfc-login-type')
-    if (saved === 'phone' || saved === 'email') setIdentifierType(saved)
+    if (saved === 'account' || saved === 'phone' || saved === 'email') setIdentifierType(saved)
   }, [normalizedInitialAccount])
 
   function chooseType(type: IdentifierType) {
@@ -52,7 +58,7 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
     if (!identifier || !password) {
       setErrors({
         form: '请填写账号和密码',
-        ...(!identifier ? { identifier: identifierType === 'email' ? '请输入邮箱' : '请输入手机号' } : {}),
+        ...(!identifier ? { identifier: identifierType === 'email' ? '请输入邮箱' : identifierType === 'phone' ? '请输入手机号' : '请输入登录账号' } : {}),
         ...(!password ? { password: '请输入密码' } : {}),
       })
       return
@@ -94,8 +100,9 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
     <form className="space-y-5" onSubmit={handleSubmit} autoComplete="on" noValidate>
       <FormError message={errors.form} />
 
-      <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
+      <div className="grid grid-cols-3 gap-2 rounded-xl bg-sky-50 p-1">
         {[
+          ['account', '账号登录'],
           ['phone', '手机号登录'],
           ['email', '邮箱登录'],
         ].map(([type, label]) => (
@@ -113,12 +120,12 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
       </div>
 
       <label className="block" htmlFor="login-identifier">
-        <span className="text-sm font-bold text-slate-700">{identifierType === 'email' ? '邮箱' : '手机号'}</span>
+        <span className="text-sm font-bold text-slate-700">{identifierType === 'email' ? '邮箱' : identifierType === 'phone' ? '手机号' : '登录账号'}</span>
         <input
           id="login-identifier"
           name="identifier"
-          type={identifierType === 'email' ? 'email' : 'tel'}
-          autoComplete={identifierType === 'email' ? 'email' : 'tel'}
+          type={identifierType === 'email' ? 'email' : identifierType === 'phone' ? 'tel' : 'text'}
+          autoComplete="username"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
@@ -126,7 +133,7 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
           required
           defaultValue={normalizedInitialAccount}
           className="mt-2 min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
-          placeholder={identifierType === 'email' ? '请输入已验证邮箱' : '请输入已绑定手机号'}
+          placeholder={identifierType === 'email' ? '请输入已验证邮箱' : identifierType === 'phone' ? '请输入已绑定手机号' : '请输入登录账号'}
         />
         <FormError message={errors.identifier} />
       </label>

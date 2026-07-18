@@ -32,6 +32,6 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
       <div className="mt-5 grid gap-3 sm:grid-cols-5">{Object.entries(user._count).map(([label, value]) => <div key={label} className="rounded-2xl border border-sky-100 p-4 text-center"><p className="text-2xl font-black text-brand-950">{value}</p><p className="mt-1 text-xs font-bold text-slate-400">{label}</p></div>)}</div>
       {user.mustSetupSecurity ? <p className="mt-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black text-amber-700">该用户需要重新确认密保设置。</p> : null}
     </section>
-    {currentUser.role === 'SUPER_ADMIN' ? <SuperAdminUserActions targetUserId={user.id} initialUid={user.uid} nickname={nickname} /> : null}
+    {currentUser.role === 'SUPER_ADMIN' ? <SuperAdminUserActions targetUserId={user.id} initialUid={user.uid} initialAccount={user.username} nickname={nickname} /> : null}
   </main></>
 }

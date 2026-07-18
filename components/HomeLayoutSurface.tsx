@@ -36,7 +36,7 @@ type Post = {
 }
 type DailyMessage = {
   id: string
-  mood: string
+  mood: string | null
   content: string
   user: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null }
 }
@@ -176,7 +176,7 @@ export function HomeLayoutSurface({
               const name = message.user.profile?.displayName || message.user.nickname
               return (
                 <article key={message.id} className="rounded-2xl bg-sky-50/80 p-4">
-                  <p className="font-black text-brand-950">{mood?.icon || '*'} {name} Lv.{message.user.level}</p>
+                  <p className="font-black text-brand-950">{mood ? `${mood.icon} ` : ''}{name} Lv.{message.user.level}</p>
                   <p className="mt-2 line-clamp-2 leading-7 text-slate-600">{message.content}</p>
                 </article>
               )

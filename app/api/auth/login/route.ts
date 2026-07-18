@@ -30,7 +30,7 @@ function databaseUnavailableResponse() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => null)
-    const identifierType = body?.identifierType === 'email' ? 'email' : 'phone'
+    const identifierType = body?.identifierType === 'email' ? 'email' : body?.identifierType === 'account' ? 'account' : 'phone'
     const identifier = identifierType === 'email'
       ? normalizeText(body?.identifier).toLowerCase()
       : normalizeText(body?.identifier)
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     )
 
     if (!user) {
-      const message = identifierType === 'email' ? '邮箱未注册' : '手机号未注册'
+      const message = identifierType === 'email' ? '邮箱未注册' : identifierType === 'account' ? '登录账号不存在' : '手机号未注册'
       return NextResponse.json(
         { message, errors: { identifier: message } },
         { status: 401, headers: noStoreHeaders },

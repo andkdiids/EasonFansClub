@@ -234,7 +234,7 @@ export function CheckInMessagesPanel({
               <div className={isMinimal ? 'flex gap-2' : 'flex gap-3'}>
                 {anonymous ? (
                   <div className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
-                    {mood?.icon || '🎵'}
+                    {mood?.icon || 'E'}
                   </div>
                 ) : fullIdentity ? (
                   <a href={`/user/${formatUid(fullIdentity.uid)}`} className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
@@ -249,7 +249,7 @@ export function CheckInMessagesPanel({
                       fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>{name}</a> : null
                     )}
                     {!anonymous && !isMinimal && fullIdentity ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(fullIdentity.uid)}</span> : null}
-                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood?.icon} {mood?.label}</span> : <span className="text-xs">{mood?.icon}</span>}
+                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood ? `${mood.icon} ${mood.label}` : '未填写心情'}</span> : mood ? <span className="text-xs">{mood.icon}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
                   </div>

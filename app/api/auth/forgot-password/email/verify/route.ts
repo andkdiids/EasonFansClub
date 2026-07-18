@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
+import { normalizeLoginAccount } from '@/lib/login-account'
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
   const code = normalizeText(body?.code)
   if (!identifier || !/^\d{6}$/.test(code)) return NextResponse.json({ message: '验证码无效或已过期' }, { status: 400 })
   const user = await prisma.user.findFirst({ where: { isDeleted: false, status: 'ACTIVE', emailVerifiedAt: { not: null }, OR: [
-    { username: { equals: identifier, mode: 'insensitive' } }, { email: { equals: identifier, mode: 'insensitive' } }, { phone: identifier },
+    { usernameNormalized: normalizeLoginAccount(identifier) }, { email: { equals: identifier, mode: 'insensitive' } }, { phone: identifier },
   ] }, select: { id: true } })
   if (!user) return NextResponse.json({ message: '验证码无效或已过期' }, { status: 400 })
   const record = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, type: 'EMAIL', stage: 'RESET_CODE', consumedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' }, select: { id: true, codeHash: true, attemptCount: true } })

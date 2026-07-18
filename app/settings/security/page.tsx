@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { SiteHeader } from '@/components/SiteHeader'
+import { PasswordManagement } from '@/components/PasswordManagement'
 import { getAccountSecuritySettings } from '@/lib/account-security'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
@@ -31,6 +32,8 @@ export default async function SecurityPage() {
         email: true,
         emailVerifiedAt: true,
         securityQuestionRecoveryEnabled: true,
+        mustSetupSecurity: true,
+        securityQuestions: { orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }], take: 1, select: { question: true } },
         _count: { select: { securityQuestions: true } },
       },
     }),
@@ -39,6 +42,8 @@ export default async function SecurityPage() {
   if (!user) redirect('/login')
 
   const questionsSet = user._count.securityQuestions >= 1
+  const securityResetAvailable = settings.enableSecurityQuestionRecovery && questionsSet && user.securityQuestionRecoveryEnabled && !user.mustSetupSecurity
+  const emailResetConfigured = Boolean(settings.enableEmailPasswordReset && process.env.RESEND_API_KEY && user.email && user.emailVerifiedAt)
   const recoveryReason = !settings.enableSecurityQuestionRecovery
     ? '系统功能已关闭'
     : !questionsSet
@@ -90,6 +95,7 @@ export default async function SecurityPage() {
             <p>账号恢复方式由系统统一管理。</p>
             <p>如需调整密保找回方式，请联系管理员。</p>
           </div>
+          <PasswordManagement question={user.securityQuestions[0]?.question || null} securityResetAvailable={securityResetAvailable} emailResetConfigured={emailResetConfigured} />
         </section>
       </main>
     </>

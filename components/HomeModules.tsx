@@ -21,7 +21,7 @@ type Post = {
 }
 type DailyMessage = {
   id: string
-  mood: string
+  mood: string | null
   content: string
   user: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null }
 }
@@ -109,7 +109,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
               const name = item.user.profile?.displayName || item.user.nickname
               return (
                 <article key={item.id} className="rounded-3xl bg-sky-50/80 p-5">
-                  <p className="font-black text-brand-950">{mood?.icon || '🎵'} {name} · Lv.{item.user.level}</p>
+                  <p className="font-black text-brand-950">{mood ? `${mood.icon} ` : ''}{name} · Lv.{item.user.level}</p>
                   <p className="mt-2 line-clamp-2 leading-7 text-slate-600">{item.content}</p>
                 </article>
               )

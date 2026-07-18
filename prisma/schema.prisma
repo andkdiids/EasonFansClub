@@ -282,6 +282,7 @@ model User {
   id                              String             @id @default(cuid())
   uid                             Int                @unique @default(autoincrement())
   username                        String
+  usernameNormalized              String             @unique
   email                           String?
   phone                           String?
   passwordHash                    String
@@ -308,6 +309,7 @@ model User {
   deletedAt                       DateTime?
   securityQuestionRecoveryEnabled Boolean            @default(false)
   mustSetupSecurity               Boolean            @default(false)
+  checkinMoodEnabled              Boolean            @default(true)
   registrationIdempotencyKeyHash  String?            @unique
   createdAt                       DateTime           @default(now())
   updatedAt                       DateTime           @updatedAt
@@ -727,7 +729,7 @@ model CheckIn {
 model DailyMessage {
   id            String    @id @default(cuid())
   date          DateTime
-  mood          String
+  mood          String?
   content       String
   likeCount     Int       @default(0)
   commentCount  Int       @default(0)

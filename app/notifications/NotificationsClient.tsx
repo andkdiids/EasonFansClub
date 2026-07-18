@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { getNotificationTarget } from '@/lib/notification-target'
 import type { UnifiedNotification } from '@/lib/notifications'
+import { UserPersonalizationSettings } from '@/components/UserPersonalizationSettings'
 
 type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'feedback' | 'system'
 
@@ -43,9 +44,11 @@ function getInitial(name?: string | null) {
 export function NotificationsClient({
   initialNotifications,
   initialUnreadCount,
+  initialCheckinMoodEnabled,
 }: {
   initialNotifications: UnifiedNotification[]
   initialUnreadCount: number
+  initialCheckinMoodEnabled: boolean
 }) {
   const router = useRouter()
   const [notifications, setNotifications] = useState(initialNotifications)
@@ -184,6 +187,7 @@ export function NotificationsClient({
 
   return (
     <section className="space-y-5">
+      <UserPersonalizationSettings initialCheckinMoodEnabled={initialCheckinMoodEnabled} />
       <div className="rounded-[28px] border border-sky-100 bg-white/78 p-5 shadow-sm shadow-sky-900/5 backdrop-blur-xl sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

@@ -8,7 +8,7 @@ export type CheckInMessageItem = CheckInMessagesResult[number]
 export type AnonymousCheckInMessageItem = {
   id: string
   date: string
-  mood: string
+  mood: string | null
   content: string
   isPinned: boolean
   isFeatured: boolean

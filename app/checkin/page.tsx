@@ -44,7 +44,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       'User.findUnique checkin.user',
       prisma.user.findUnique({
         where: { id: sessionUser.id },
-        select: { points: true, exp: true, level: true, consecutiveDays: true },
+        select: { points: true, exp: true, level: true, consecutiveDays: true, checkinMoodEnabled: true },
       }),
     ),
     safeDb(
@@ -140,6 +140,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
             exp: user.exp,
             consecutiveDays: streaks.currentStreak,
           }}
+          checkinMoodEnabled={user.checkinMoodEnabled}
         />
       </main>
     </>

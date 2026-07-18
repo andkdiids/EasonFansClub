@@ -24,7 +24,7 @@ export async function GET() {
       'User.findUnique checkinApi.profile',
       prisma.user.findUnique({
         where: { id: user.id },
-        select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true },
+        select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true, checkinMoodEnabled: true },
       }),
       null,
     ),
@@ -66,6 +66,7 @@ export async function GET() {
     level: profile.level,
     todayCount,
     moodStats,
+    checkinMoodEnabled: profile.checkinMoodEnabled,
     todayValue: formatBeijingDate(today),
   })
 }
@@ -78,14 +79,17 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null)
   const moodKey = sanitizeText(body?.mood, 40)
-  const mood = getMood(moodKey)
+  const requestedMood = getMood(moodKey)
+  const preference = await prisma.user.findUnique({ where: { id: user.id }, select: { checkinMoodEnabled: true } })
+  if (!preference) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+  const mood = preference.checkinMoodEnabled ? requestedMood : null
   const rawMessage = sanitizeText(body?.message, 300)
   if (await containsSensitiveContent(rawMessage)) {
     return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
   }
   const message = rawMessage
 
-  if (!mood) {
+  if (preference.checkinMoodEnabled && !mood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
   }
 
@@ -160,7 +164,7 @@ const nextStreak = yesterdayCheckIn
         points: gainedPoints,
         exp: 0,
         streakDay: nextStreak,
-        mood: mood.key,
+        mood: mood?.key ?? null,
         message: message || null,
       },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
@@ -187,7 +191,7 @@ const nextStreak = yesterdayCheckIn
           userId: user.id,
           checkInId: checkIn.id,
           date: today,
-          mood: mood.key,
+          mood: mood?.key ?? null,
           content: message,
         },
         select: { id: true },
@@ -200,7 +204,7 @@ const nextStreak = yesterdayCheckIn
         actorId: user.id,
         checkInId: checkIn.id,
         dailyMessageId,
-        mood: mood.key,
+        mood: mood?.key ?? null,
         content: message || null,
       },
     })

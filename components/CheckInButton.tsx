@@ -52,6 +52,7 @@ export function CheckInButton({
   compact = false,
   density,
   previewMode = false,
+  checkinMoodEnabled = true,
   onStateChange,
 }: Readonly<{
   initialCheckIn: TodayCheckIn
@@ -59,6 +60,7 @@ export function CheckInButton({
   compact?: boolean
   density?: PageLayoutModuleDensity
   previewMode?: boolean
+  checkinMoodEnabled?: boolean
   onStateChange?: (state: CheckInStateChange) => void
 }>) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -162,7 +164,7 @@ export function CheckInButton({
     setMessage('')
     setError('')
 
-    if (!mood) {
+    if (checkinMoodEnabled && !mood) {
       setError('请选择今日心情')
       return
     }
@@ -173,7 +175,7 @@ export function CheckInButton({
       const response = await fetch('/api/checkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mood, message: note }),
+        body: JSON.stringify({ mood: checkinMoodEnabled ? mood : null, message: note }),
       })
       const data = await response.json().catch(() => ({}))
 
@@ -246,9 +248,9 @@ onStateChange?.({
       return (
         <div className={`flex flex-col justify-between gap-1 ${previewMode ? 'pointer-events-none select-none' : 'h-full min-h-0'}`}>
           <div className="flex min-w-0 items-center gap-2">
-            <span className="text-2xl leading-none">{selectedMood?.icon || '♪'}</span>
+            {selectedMood ? <span className="text-2xl leading-none">{selectedMood.icon}</span> : null}
             <div className="min-w-0">
-              <p className="truncate text-sm font-black text-brand-950">{selectedMood?.label || '已挂号'}</p>
+              <p className="truncate text-sm font-black text-brand-950">{selectedMood?.label || '未填写心情'}</p>
               <p className="truncate text-[11px] font-bold text-slate-500">{formatBeijingTime(todayCheckIn.createdAt)}</p>
             </div>
           </div>
@@ -271,9 +273,9 @@ onStateChange?.({
           <p className="text-xs font-black tracking-[0.14em] text-brand-700 sm:text-sm">今日心情</p>
           <h3 className={isCompact ? 'mt-1 text-xl font-black text-brand-950' : 'mt-2 text-3xl font-black text-brand-950'}>今日心情</h3>
           <div className={isCompact ? 'mt-2 flex items-center gap-2' : 'mt-4 flex items-center gap-3'}>
-            <span className={isCompact ? 'text-3xl' : 'text-4xl'}>{selectedMood?.icon || '♪'}</span>
+            {selectedMood ? <span className={isCompact ? 'text-3xl' : 'text-4xl'}>{selectedMood.icon}</span> : null}
             <div>
-              <p className="font-black text-brand-950">{selectedMood?.label || '已挂号'}</p>
+              <p className="font-black text-brand-950">{selectedMood?.label || '未填写心情'}</p>
               <p className="text-xs font-bold text-slate-500">挂号时间：{formatBeijingTime(todayCheckIn.createdAt)}</p>
             </div>
           </div>
@@ -291,7 +293,7 @@ onStateChange?.({
 
   return (
     <div className={`${isMinimal ? 'space-y-2' : isCompact ? 'space-y-3' : 'space-y-5'} ${previewMode ? 'pointer-events-none select-none' : ''}`}>
-      <div>
+      {checkinMoodEnabled ? <div>
         <p className="text-sm font-black text-slate-700">今日心情</p>
         <div data-checkin-mood-grid="true" className={isMinimal || isPreviewCompact ? 'mt-1 grid grid-cols-5 gap-1' : isCompact ? 'mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5' : 'mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5'}>
           {DAILY_MOODS.map((item) => (
@@ -311,7 +313,7 @@ onStateChange?.({
             </button>
           ))}
         </div>
-      </div>
+      </div> : null}
 
       <label className="block">
         <span className="text-sm font-black text-slate-700">今日留言</span>

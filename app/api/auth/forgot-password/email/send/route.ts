@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
+import { normalizeLoginAccount } from '@/lib/login-account'
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
   const identifier = normalizeText(body?.identifier)
   if (!identifier) return NextResponse.json({ message: '请输入账号标识' }, { status: 400 })
   const user = await prisma.user.findFirst({ where: { isDeleted: false, status: 'ACTIVE', emailVerifiedAt: { not: null }, OR: [
-    { username: { equals: identifier, mode: 'insensitive' } }, { email: { equals: identifier, mode: 'insensitive' } }, { phone: identifier },
+    { usernameNormalized: normalizeLoginAccount(identifier) }, { email: { equals: identifier, mode: 'insensitive' } }, { phone: identifier },
   ] }, select: { id: true, email: true } })
   const genericMessage = '如果账号存在且邮箱已验证，验证码将发送到绑定邮箱。'
   if (!user?.email) return NextResponse.json({ message: genericMessage })

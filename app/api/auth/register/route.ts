@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import {
   canSendEmailVerification,
@@ -12,11 +13,12 @@ import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy, type RegistrationType } from '@/lib/registration'
 import { checkRateLimit, consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
-import { findActiveConflict } from '@/lib/users'
+import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
 import { normalizeText } from '@/lib/validators'
 import { hashSecurityQuestions, parseSecurityQuestions } from '@/lib/account-security'
 import { hashToken } from '@/lib/tokens'
+import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 const registerRequestLimit = {
@@ -127,8 +129,10 @@ console.timeEnd('register:requestRateLimit')
       })
     }
 
-    const nickname = normalizeText(body?.nickname || body?.username)
-    const username = nickname
+    const username = getLoginAccountDisplay(body?.nickname || body?.username)
+    const accountValidation = validateLoginAccountValue(username)
+    const usernameNormalized = accountValidation.usernameNormalized
+    const nickname = username
     const email = registrationType === 'EMAIL' ? normalizeEmail(body?.email) : ''
     const phone = registrationType === 'PHONE' ? normalizeText(body?.phone).replace(/\s+/g, '') : ''
     const password = normalizeText(body?.password)
@@ -138,9 +142,7 @@ console.timeEnd('register:requestRateLimit')
 
     const errors: Record<string, string> = {}
     if (!nickname) errors.nickname = '请填写用户名/昵称'
-    if (nickname && (unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16)) {
-      errors.nickname = '用户名长度需要 2-16 个字符'
-    }
+    if (nickname && (unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error)) errors.nickname = '用户名长度需要 2-16 个字符'
     if (registrationType === 'PHONE') {
       if (!phone) errors.phone = '请填写手机号'
       if (phone && !/^1\d{10}$/.test(phone)) errors.phone = '请输入 11 位中国大陆手机号'
@@ -182,11 +184,13 @@ console.timeEnd('register:turnstile')
 
     console.time('register:duplicateCheck')
 
-const duplicate = await findActiveConflict({
-  phone: registrationType === 'PHONE' ? phone : null,
-  email: registrationType === 'EMAIL' ? email : null,
-  username,
-})
+const [duplicate, accountDuplicate] = await Promise.all([
+  findActiveConflict({
+    phone: registrationType === 'PHONE' ? phone : null,
+    email: registrationType === 'EMAIL' ? email : null,
+  }),
+  findLoginAccountConflict(usernameNormalized),
+])
 
 console.timeEnd('register:duplicateCheck')
     if (duplicate) {
@@ -196,10 +200,8 @@ console.timeEnd('register:duplicateCheck')
       if (registrationType === 'EMAIL' && duplicate.email === email) {
         return jsonError('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
       }
-      if (duplicate.username === username) {
-        return jsonError('该昵称已被使用', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该昵称已被使用' })
-      }
     }
+    if (accountDuplicate) return jsonError('该登录账号已被使用，账号不区分大小写。', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写。' })
 
     if (registrationType === 'EMAIL' && !(await canSendEmailVerification(email))) {
       return jsonError('验证邮件发送过于频繁，请 10 分钟后再试', 429, 'EMAIL_VERIFICATION_COOLDOWN', {
@@ -253,6 +255,7 @@ console.timeEnd('register:hashSecurityQuestions')
       const created = await tx.user.create({
         data: {
           username,
+          usernameNormalized,
           nickname,
           email: registrationType === 'EMAIL' ? email : null,
           phone: registrationType === 'PHONE' ? phone : null,
@@ -356,6 +359,9 @@ console.timeEnd('register:transaction')
     console.error('[auth.register]', error)
     if (error instanceof Error && error.message === 'UID_LIMIT_REACHED') {
       return jsonError('成员 UID 已达到 5 位上限', 409, 'UID_LIMIT_REACHED', { form: '成员 UID 已达到 5 位上限' })
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && String(error.meta?.target || '').includes('usernameNormalized')) {
+      return jsonError('该登录账号已被使用，账号不区分大小写。', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写。' })
     }
 
     return jsonError('注册失败，请稍后再试', 500, 'REGISTER_FAILED', { form: '注册失败，请稍后再试' })

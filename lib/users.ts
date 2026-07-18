@@ -1,5 +1,6 @@
 import type { Prisma, User } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { normalizeLoginAccount } from '@/lib/login-account'
 
 export const inactiveUserStatuses = ['BANNED', 'DELETED', 'MERGED', 'DISABLED'] as const
 
@@ -38,12 +39,13 @@ export function isCompleteActiveUser(
 export async function findCompleteActiveUserByIdentifier(identifier: string) {
   const normalized = identifier.trim()
   const lower = normalized.toLowerCase()
+  const normalizedAccount = normalizeLoginAccount(identifier)
 
   const user = await prisma.user.findFirst({
     where: {
       status: 'ACTIVE',
       isDeleted: false,
-      OR: [{ phone: normalized }, { email: lower }, { username: normalized }],
+      OR: [{ phone: normalized }, { email: lower }, { usernameNormalized: normalizedAccount }],
     },
     select: {
       id: true,
@@ -62,14 +64,14 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
   return user
 }
 
-export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email', identifier: string) {
+export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email' | 'account', identifier: string) {
   const normalized = identifier.trim()
-  const lookup = identifierType === 'email' ? normalized.toLowerCase() : normalized
+  const lookup = identifierType === 'email' ? normalized.toLowerCase() : identifierType === 'account' ? normalizeLoginAccount(identifier) : normalized
 
   const user = await prisma.user.findFirst({
     where: {
       isDeleted: false,
-      ...(identifierType === 'email' ? { email: lookup } : { phone: lookup }),
+      ...(identifierType === 'email' ? { email: lookup } : identifierType === 'phone' ? { phone: lookup } : { usernameNormalized: lookup }),
     },
     select: {
       id: true,
@@ -91,7 +93,7 @@ export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' 
   return user
 }
 
-export async function findActiveConflict(input: { phone?: string | null; email?: string | null; username?: string | null }) {
+export async function findActiveConflict(input: { phone?: string | null; email?: string | null }) {
   return prisma.user.findFirst({
     where: {
       status: 'ACTIVE',
@@ -99,9 +101,16 @@ export async function findActiveConflict(input: { phone?: string | null; email?:
       OR: [
         ...(input.phone ? [{ phone: input.phone }] : []),
         ...(input.email ? [{ email: input.email.toLowerCase() }] : []),
-        ...(input.username ? [{ username: input.username }] : []),
       ],
     },
     select: { id: true, phone: true, email: true, username: true },
+  })
+}
+
+export async function findLoginAccountConflict(usernameNormalized: string) {
+  if (!usernameNormalized) return null
+  return prisma.user.findUnique({
+    where: { usernameNormalized },
+    select: { id: true },
   })
 }
