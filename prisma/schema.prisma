@@ -1298,6 +1298,8 @@ model MusicAlbum {
   coverUrl    String?
   description String?
   language    String   @default("粤语")
+  era         String?
+  albumType   String?
   createdAt   DateTime @default(now())
 
   songs MusicSong[]
@@ -1307,27 +1309,36 @@ model MusicAlbum {
 }
 
 model MusicSong {
-  id          String   @id @default(cuid())
-  title       String
-  artist      String   @default("陈奕迅")
-  albumId     String
-  trackNumber Int
-  releaseYear Int
-  duration    Int?
-  coverUrl    String?
-  composer    String?
-  lyricist    String?
-  arranger    String?
-  producer    String?
-  story       String?
-  lyrics      String?
-  sourceType  String?
-  sourceUrl   String?
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  title          String
+  artist         String   @default("陈奕迅")
+  albumId        String
+  trackNumber    Int
+  releaseYear    Int
+  duration       Int?
+  coverUrl       String?
+  composer       String?
+  lyricist       String?
+  arranger       String?
+  producer       String?
+  story          String?
+  lyrics         String?
+  sourceType     String?
+  sourceUrl      String?
+  language       String?
+  tags           String?
+  era            String?
+  trackType      String?
+  concertVersion String?
+  mood           String?
+  scene          String?
+  recommendLevel String?
+  createdAt      DateTime @default(now())
 
   album MusicAlbum @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, trackNumber])
+  @@unique([albumId, title])
   @@index([albumId, trackNumber])
   @@index([title, artist])
 }

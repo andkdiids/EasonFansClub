@@ -36,6 +36,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/achievements': 'achievement_manage',
   '/admin/culture': 'culture_manage',
   '/admin/music': 'music_manage',
+  '/admin/music/import': 'music_manage',
   '/admin/feedback': 'feedback_manage',
   '/admin/changelog': 'changelog_manage',
   '/admin/notifications': 'notification_manage',

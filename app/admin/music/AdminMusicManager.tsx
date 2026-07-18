@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
 type MusicSongItem = {
@@ -170,6 +171,7 @@ export function AdminMusicManager() {
         <p className="text-sm font-black tracking-[0.18em] text-brand-700">EasMusic 管理</p>
         <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">陈奕迅音乐资料库</h1>
         <p className="mt-3 text-sm font-bold leading-7 text-slate-600">维护专辑与歌曲资料。本阶段不上传音乐文件，也不启用在线播放。</p>
+        <Link href="/admin/music/import" className="mt-5 inline-flex rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">批量导入 Excel / CSV →</Link>
       </section>
 
       {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
