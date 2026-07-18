@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import sharp from 'sharp'
 import { convertMusicCoverToWebp, MUSIC_COVER_MAX_WIDTH, MUSIC_COVER_QUALITY } from '../lib/music-cover'
+import { formatTrackCount } from '../lib/music-display'
+import { isMusicRoute } from '../lib/navigation'
 
 test('EasMusic CMS schema 补齐发布、故事、排序和歌曲介绍字段', () => {
   const schema = readFileSync('prisma/schema.prisma', 'utf8')
@@ -100,10 +102,10 @@ test('沉浸式专辑墙支持 Framer Motion、拖动、滚轮、触摸和详情
   assert.match(carousel, /touch-pan-y/)
   assert.match(carousel, /router\.push\(`\/music\/album\/\$\{album\.id\}`\)/)
   assert.doesNotMatch(card, /rotateY|perspective/)
-  assert.match(card, /scale: selected \? 1\.06 : 0\.92/)
+  assert.match(card, /scale: selected \? 1 : 0\.88/)
   assert.match(card, /opacity:/)
   assert.match(card, /260px/)
-  assert.match(card, /Tracks/)
+  assert.match(card, /formatTrackCount/)
   assert.match(hero, /variant="glass"/)
   assert.match(search, /backdrop-blur/)
   assert.match(carousel, /Math\.abs\(offsets\[index\]\) <= 1/)
@@ -114,20 +116,74 @@ test('沉浸式专辑墙支持 Framer Motion、拖动、滚轮、触摸和详情
   assert.doesNotMatch(card, /translateZ|rotate:/)
 })
 
-test('EasMusic 移动端封面缩小且桌面切换按钮位于舞台两侧', () => {
+test('EasMusic 移动端封面缩小、重叠且桌面切换按钮位于舞台两侧', () => {
   const carousel = readFileSync('components/music/MusicAlbumCarousel.tsx', 'utf8')
   const card = readFileSync('components/music/MusicAlbum3DCard.tsx', 'utf8')
   const navigation = readFileSync('components/SiteNavigation.tsx', 'utf8')
-  assert.match(card, /w-\[62vw\]/)
-  assert.match(card, /max-w-\[238px\]/)
-  assert.match(carousel, /h-\[300px\]/)
+  assert.match(card, /w-\[clamp\(210px,58vw,238px\)\]/)
+  assert.match(card, /selected \? 30/)
+  assert.match(card, /distance === 1 \? 10 : 0/)
+  assert.match(carousel, /cardWidth \* 0\.64/)
+  assert.match(carousel, /h-\[250px\]/)
   assert.match(carousel, /absolute left-0/)
   assert.match(carousel, /absolute right-0/)
   assert.match(carousel, /hidden size-\[52px\][\s\S]*md:grid/)
   assert.equal((carousel.match(/查看当前专辑/g) || []).length, 1)
   assert.match(navigation, /usePathname/)
   assert.match(navigation, /aria-current=\{active \? 'page'/)
-  assert.match(navigation, /pathname\.startsWith\(`\$\{target\}\//)
+  assert.match(navigation, /isMusicRoute\(pathname\)/)
+})
+
+test('歌曲数量统一中文格式且异常输入安全归零', () => {
+  assert.equal(formatTrackCount(10), '10 首')
+  assert.equal(formatTrackCount(0), '0 首')
+  assert.equal(formatTrackCount(undefined), '0 首')
+  assert.equal(formatTrackCount(null), '0 首')
+  assert.equal(formatTrackCount(Number.NaN), '0 首')
+  assert.equal(formatTrackCount(Number.POSITIVE_INFINITY), '0 首')
+  assert.equal(formatTrackCount(-3), '0 首')
+  const sources = [
+    'app/music/page.tsx',
+    'app/music/albums/page.tsx',
+    'app/music/album/[id]/page.tsx',
+    'app/music/song/[id]/page.tsx',
+    'components/music/MusicAlbumCard.tsx',
+    'components/music/MusicAlbum3DCard.tsx',
+  ].map((file) => readFileSync(file, 'utf8')).join('\n')
+  assert.doesNotMatch(sources, /\bTracks?\b/)
+})
+
+test('音乐路由主题覆盖所有子路由且不误判相似路径', () => {
+  assert.equal(isMusicRoute('/music'), true)
+  assert.equal(isMusicRoute('/music/albums'), true)
+  assert.equal(isMusicRoute('/music/album/abc'), true)
+  assert.equal(isMusicRoute('/music/song/abc'), true)
+  assert.equal(isMusicRoute('/musical'), false)
+  assert.equal(isMusicRoute('/musicology'), false)
+  assert.equal(isMusicRoute('/forum'), false)
+  const frame = readFileSync('components/SiteHeaderFrame.tsx', 'utf8')
+  const navigation = readFileSync('components/SiteNavigation.tsx', 'utf8')
+  assert.match(frame, /isMusicRoute\(pathname\)/)
+  assert.match(navigation, /isMusicRoute\(pathname\)/)
+})
+
+test('专辑墙、移动端精选卡片与轻量背景动效统一为音乐档案馆视觉', () => {
+  const albums = readFileSync('app/music/albums/page.tsx', 'utf8')
+  const home = readFileSync('app/music/page.tsx', 'utf8')
+  const card = readFileSync('components/music/MusicAlbumCard.tsx', 'utf8')
+  const shell = readFileSync('components/music/MusicArchiveShell.tsx', 'utf8')
+  const globalCss = readFileSync('app/globals.css', 'utf8')
+  assert.match(albums, /MusicArchiveShell/)
+  assert.match(albums, /grid-cols-2[\s\S]*sm:grid-cols-3[\s\S]*lg:grid-cols-4[\s\S]*xl:grid-cols-5/)
+  assert.match(albums, /theme="dark"/)
+  assert.match(home, /grid-cols-2[\s\S]*gap-x-3[\s\S]*gap-y-5/)
+  assert.match(card, /max-w-\[175px\]/)
+  assert.match(card, /text-sm[\s\S]*sm:text-lg/)
+  assert.match(shell, /matchMedia\('\(hover: hover\) and \(pointer: fine\) and \(min-width: 768px\)'\)/)
+  assert.match(shell, /requestAnimationFrame/)
+  assert.match(shell, /removeEventListener\('pointermove'/)
+  assert.match(shell, /useReducedMotion/)
+  assert.match(globalCss, /prefers-reduced-motion: reduce/)
 })
 
 test('音乐搜索弹窗使用 body portal、最高层级并锁定底层交互', () => {

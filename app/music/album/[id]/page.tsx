@@ -5,7 +5,7 @@ import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { SiteHeader } from '@/components/SiteHeader'
 import { formatTrackNumber } from '@/lib/music'
-import { formatMusicReleaseDate } from '@/lib/music-display'
+import { formatMusicReleaseDate, formatTrackCount } from '@/lib/music-display'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +27,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
     ['语言', album.language],
     ['唱片公司', album.company || '待补充'],
     ['专辑类型', album.albumType || '待补充'],
-    ['歌曲数量', `${album.songs.length} Tracks`],
+    ['歌曲数量', formatTrackCount(album.songs.length)],
     ['馆藏排序', String(album.displayOrder)],
   ]
 
@@ -43,7 +43,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
         <h1 className="mt-4 text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{album.name}</h1>
         <p className="mt-5 text-xl font-black text-slate-200">{album.artist}</p>
         <div className="mt-4 flex flex-wrap gap-x-3 gap-y-2 text-sm font-bold text-slate-300/65">
-          <span>{releaseLabel}</span><span aria-hidden="true">·</span><span>{album.company || '唱片公司待补充'}</span><span aria-hidden="true">·</span><span>{album.songs.length} Tracks</span>
+          <span>{releaseLabel}</span><span aria-hidden="true">·</span><span>{album.company || '唱片公司待补充'}</span><span aria-hidden="true">·</span><span>{formatTrackCount(album.songs.length)}</span>
         </div>
         {album.description ? <p className="mt-7 max-w-2xl whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{album.description}</p> : null}
       </MusicDetailReveal>

@@ -135,23 +135,23 @@ export function HomeLayoutSurface({
           {posts.failed ? <ModuleFallback /> : null}
           {posts.loading ? <ModuleFallback title="正在加载帖子..." /> : null}
           {!posts.loading && !posts.failed ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-3.5 md:grid-cols-2 md:gap-4">
               {posts.data.slice(0, 4).map((post) => {
                 const authorName = post.author.profile?.displayName || post.author.nickname
                 return (
-                  <article key={post.id} className="relative flex min-h-52 min-w-0 flex-col rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                    <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-20 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
-                    <div className="relative z-30 mb-2 flex w-fit flex-wrap gap-2">
+                  <article data-featured-post-card key={post.id} className="relative min-w-0 cursor-pointer rounded-2xl border border-sky-100 bg-white/88 px-4 py-4 shadow-sm transition duration-200 hover:-translate-y-px hover:border-sky-200 hover:shadow-md active:scale-[0.99] sm:p-5">
+                    <Link data-post-card-link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-[1] rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2" />
+                    <div className="pointer-events-none relative z-[2] mb-2 flex w-fit flex-wrap gap-2">
                       {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Pinned</span> : null}
                       {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">Featured</span> : null}
-                      <Link href={`/forum?board=${encodeURIComponent(post.board.slug)}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
+                      <Link href={`/forum?board=${encodeURIComponent(post.board.slug)}`} className="pointer-events-auto relative z-[3] rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
                     </div>
-                    <h3 className="pointer-events-none relative z-10 line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
-                    <p className="pointer-events-none relative z-10 mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-                    <div className="relative z-30 mt-auto flex flex-wrap items-center gap-3 pt-4 text-xs font-bold text-slate-500">
-                      <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950">{authorName}</Link>
-                      <span>回复 {post.replyCount}</span><span>浏览 {post.viewCount}</span>
-                      <LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} />
+                    <h3 className="pointer-events-none relative z-[2] line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
+                    {post.content.trim() ? <p className="pointer-events-none relative z-[2] mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p> : null}
+                    <div className="pointer-events-none relative z-[2] mt-4 flex min-w-0 items-center gap-2 text-xs font-bold text-slate-500">
+                      <Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3] max-w-[32%] truncate text-brand-950">{authorName}</Link>
+                      <span className="shrink-0">回复 {post.replyCount}</span><span className="shrink-0">浏览 {post.viewCount}</span>
+                      <div data-post-like-control className="pointer-events-auto relative z-[3] ml-auto shrink-0 [&_button]:px-3 [&_button]:py-1.5"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /></div>
                     </div>
                   </article>
                 )

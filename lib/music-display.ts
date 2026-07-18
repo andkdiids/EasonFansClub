@@ -9,3 +9,9 @@ export function formatMusicReleaseDate(releaseDate: Date | null | undefined, rel
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]))
   return `${value.year}/${value.month}/${value.day}`
 }
+
+export function formatTrackCount(count: unknown) {
+  const numeric = typeof count === 'number' ? count : Number(count)
+  const safeCount = Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0
+  return `${safeCount} 首`
+}
