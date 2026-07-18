@@ -18,9 +18,9 @@ test('管理员用户级接口要求 account_security_manage 权限', () => {
   assert.match(route, /requireAdmin\('account_security_manage'\)/)
 })
 
-test('管理员启用前校验三题完整并保护超级管理员和系统账号', () => {
+test('管理员启用前校验单题已设置并保护超级管理员和系统账号', () => {
   const route = source('app/api/admin/users/[userId]/security-recovery/route.ts')
-  assert.match(route, /target\._count\.securityQuestions !== 3/)
+  assert.match(route, /target\._count\.securityQuestions < 1/)
   assert.match(route, /target\.uid <= 0 \|\| target\.role === 'SUPER_ADMIN'/)
   assert.match(route, /该用户尚未完整设置密保问题，无法启用密保找回/)
 })

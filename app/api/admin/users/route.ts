@@ -103,7 +103,7 @@ export async function GET(request: Request) {
         ...user,
         nickname: profile?.displayName || user.nickname,
         avatarUrl: profile?.avatarUrl || user.avatarUrl,
-        securityQuestionsSet: _count.securityQuestions === 3,
+        securityQuestionsSet: _count.securityQuestions >= 1,
         lastPasswordResetAt: securityLogs[0]?.createdAt || null,
         securityQuestionFailureCount: failures?.count || 0,
         securityQuestionLastFailedAt: failures?.lastFailedAt || null,

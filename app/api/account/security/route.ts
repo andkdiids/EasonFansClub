@@ -25,7 +25,7 @@ export async function GET() {
     questionCount: user._count.securityQuestions,
   })
   return NextResponse.json({
-    securityQuestionsSet: user._count.securityQuestions === 3,
+    securityQuestionsSet: user._count.securityQuestions >= 1,
     securityQuestionRecoveryEnabled: user.securityQuestionRecoveryEnabled,
     emailBound: Boolean(user.email),
     emailVerified: Boolean(user.emailVerifiedAt),

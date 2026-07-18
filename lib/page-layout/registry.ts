@@ -201,6 +201,14 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     minH: 3,
     layoutBehavior: 'auto',
   }),
+  defineLayoutModule('profile', 'profile.posts', '发帖与个人记录', '发帖、回复、成就、收藏等个人记录', 50, {
+    desktop: grid(0, 12, 12, 7),
+    tablet: grid(0, 18, 8, 7),
+    mobile: grid(0, 18, 4, 7),
+    minW: 3,
+    minH: 3,
+    layoutBehavior: 'auto',
+  }),
   defineLayoutModule('admin-home', 'admin.header', '后台页头', '管理后台欢迎与说明', 10, {
     desktop: grid(0, 0, 12, 3),
     mobile: grid(0, 0, 4, 3),

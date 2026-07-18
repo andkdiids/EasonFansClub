@@ -5,6 +5,17 @@ export type CheckInMessageSort = 'latest' | 'hot'
 type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncached>>
 export type CheckInMessageItem = CheckInMessagesResult[number]
 
+export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): CheckInMessageItem[] {
+  return messages.map((item) => ({
+    ...item,
+    user: { ...item.user, uid: 0, nickname: '匿名E友', avatarUrl: null, level: 0, profile: { displayName: '匿名E友', avatarUrl: null } },
+    comments: item.comments.map((comment) => ({
+      ...comment,
+      author: { ...comment.author, uid: 0, nickname: '匿名E友', avatarUrl: null, level: 0, profile: { displayName: '匿名E友', avatarUrl: null } },
+    })),
+  }))
+}
+
 const checkInMessagesCacheTtlMs = Number(process.env.CHECKIN_MESSAGES_CACHE_TTL_MS || 10000)
 const checkInMessagesCache = new Map<string, { expiresAt: number; promise: Promise<CheckInMessagesResult> }>()
 

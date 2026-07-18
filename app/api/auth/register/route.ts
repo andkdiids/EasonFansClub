@@ -15,7 +15,7 @@ import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict } from '@/lib/users'
 import { MAX_UID } from '@/lib/uid'
 import { normalizeText } from '@/lib/validators'
-import { hashSecurityQuestions, parseSecurityQuestions, validateSecurityQuestions } from '@/lib/account-security'
+import { hashSecurityQuestions, parseSecurityQuestions } from '@/lib/account-security'
 import { hashToken } from '@/lib/tokens'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }

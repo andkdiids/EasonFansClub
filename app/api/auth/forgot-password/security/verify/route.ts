@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   }
   const record = await prisma.passwordResetToken.findFirst({
     where: { tokenHash: hashToken(challenge), type: 'SECURITY_QUESTION', stage: 'CHALLENGE', consumedAt: null, expiresAt: { gt: new Date() } },
-    select: { id: true, userId: true, attemptCount: true, user: { select: { securityQuestionRecoveryEnabled: true, securityQuestions: { select: { sortOrder: true, answerHash: true } } } } },
+    select: { id: true, userId: true, attemptCount: true, user: { select: { securityQuestionRecoveryEnabled: true, securityQuestions: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], take: 1, select: { sortOrder: true, answerHash: true } } } } },
   })
   const availability = getSecurityQuestionRecoveryAvailability({
     globalEnabled: settings.enableSecurityQuestionRecovery,

@@ -5,7 +5,7 @@ import { useState } from 'react'
 type Question = { question: string; answer: string }
 
 export function SecurityQuestionsForm() {
-  const [questions, setQuestions] = useState<Question[]>(Array.from({ length: 3 }, () => ({ question: '', answer: '' })))
+  const [questions, setQuestions] = useState<Question[]>([{ question: '', answer: '' }])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -42,7 +42,7 @@ export function SecurityQuestionsForm() {
       </div>
       {questions.map((item, index) => (
         <section key={index} className="space-y-3 rounded-2xl bg-sky-50/60 p-4">
-          <label className="block text-sm font-black text-brand-950">密保问题 {index + 1}</label>
+          <label className="block text-sm font-black text-brand-950">密保问题</label>
           <input value={item.question} onChange={(event) => update(index, 'question', event.target.value)} required maxLength={120} className="w-full rounded-xl border border-sky-100 bg-white px-4 py-2 font-bold outline-none focus:border-brand-500" placeholder="请自行填写问题内容" />
           <input value={item.answer} onChange={(event) => update(index, 'answer', event.target.value)} required maxLength={200} autoComplete="off" className="w-full rounded-xl border border-sky-100 bg-white px-4 py-2 font-bold outline-none focus:border-brand-500" placeholder="填写答案" />
         </section>

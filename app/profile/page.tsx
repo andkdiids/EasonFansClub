@@ -126,6 +126,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           modules={{
             'profile.calendar': <ProfileCheckInCalendar />,
             'profile.recentMessages': <ProfileRecentMessages />,
+            'profile.posts': <PublicUserModules uid={formatUid(profile.uid)} isSelf />,
             'profile.main': (
               <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/88 shadow-sm">
                   <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center sm:px-5">
@@ -151,7 +152,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
             ),
           }}
         />
-        <PublicUserModules uid={formatUid(profile.uid)} isSelf />
       </main>
     </>
   )

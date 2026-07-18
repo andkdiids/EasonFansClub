@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { BackButton } from '@/components/BackButton'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FeedbackImageUploader, type UploadedFeedbackAttachment } from '@/components/FeedbackImageUploader'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH } from '@/lib/feedback'
@@ -209,6 +210,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
+      {initialFeedbackId ? <BackButton fallbackHref="/feedback" /> : null}
       <section className="rounded-[28px] border border-sky-100 bg-white/85 p-5 shadow-sm sm:p-7">
         <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Feedback</p>
         <h1 className="mt-2 text-3xl font-black text-brand-950">反馈与更新</h1>

@@ -153,6 +153,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     })),
     'profile.calendar': { ok: true, data: {} },
     'profile.recentMessages': { ok: true, data: {} },
+    'profile.posts': { ok: true, data: {} },
   }),
   'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { anonymizeCheckInMessages, getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
 
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     )
 
     return NextResponse.json(
-      { date: formatBeijingDate(selectedDate), sort, scope, messages },
+      { date: formatBeijingDate(selectedDate), sort, scope, messages: scope === 'public' ? anonymizeCheckInMessages(messages) : messages },
       { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } },
     )
   } catch (error) {

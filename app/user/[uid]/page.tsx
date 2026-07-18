@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
+import { BackButton } from '@/components/BackButton'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { SiteHeader } from '@/components/SiteHeader'
@@ -115,6 +116,7 @@ export default async function PublicUserPage({ params }: PageProps) {
     <>
       <SiteHeader user={viewer} />
       <main className="mx-auto max-w-[1200px] space-y-5 px-4 py-6 sm:px-5 sm:py-7">
+        <BackButton />
         <ProfileHeader
           displayName={name}
           uid={user.uid}

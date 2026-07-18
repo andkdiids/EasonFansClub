@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { AccountSecuritySettings } from '@/lib/account-security'
 
 const labels: Record<keyof AccountSecuritySettings, { title: string; description: string }> = {
-  requireSecurityQuestionsForNewUsers: { title: '新用户必须设置密保问题', description: '开启后注册必须完整填写三题。' },
+  requireSecurityQuestionsForNewUsers: { title: '新用户必须设置密保问题', description: '开启后注册必须完整填写一个密保问题和答案。' },
   notifyLegacyUsersToSetSecurityQuestions: { title: '通知历史用户补充密保', description: '登录成功后仅创建一条未完成通知。' },
   enableSecurityQuestionRecovery: { title: '启用密保问题找回', description: '控制忘记密码页面和接口是否提供密保方式。' },
   enableEmailPasswordReset: { title: '启用邮箱验证码重置密码', description: '默认关闭；开启后仍需邮件服务配置才能发送。' },

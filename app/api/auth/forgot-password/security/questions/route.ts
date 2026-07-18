@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       { email: { equals: identifier, mode: 'insensitive' } },
       { phone: identifier },
     ] },
-    select: { id: true, securityQuestionRecoveryEnabled: true, securityQuestions: { orderBy: { sortOrder: 'asc' }, select: { question: true, sortOrder: true } } },
+    select: { id: true, securityQuestionRecoveryEnabled: true, securityQuestions: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], take: 1, select: { question: true, sortOrder: true } } },
   })
   const availability = getSecurityQuestionRecoveryAvailability({
     globalEnabled: settings.enableSecurityQuestionRecovery,

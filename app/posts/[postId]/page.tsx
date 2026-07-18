@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
+import { BackButton } from '@/components/BackButton'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { SiteHeader } from '@/components/SiteHeader'
@@ -113,6 +114,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
     <>
       <SiteHeader user={user} />
       <main className="mx-auto max-w-4xl space-y-6 px-5 py-8">
+        <BackButton fallbackHref="/forum" />
         <article className="rounded-2xl border border-sky-100 bg-white/85 p-7 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}

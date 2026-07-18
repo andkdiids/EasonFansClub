@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ProfileWall } from '@/components/ProfileWall'
+import { BackButton } from '@/components/BackButton'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
@@ -26,6 +27,7 @@ export default async function ProfileWallPage({ params }: { params: Promise<{ ui
     <>
       <SiteHeader user={viewer} />
       <main className="mx-auto max-w-4xl space-y-4 px-4 py-6 sm:px-5">
+        <BackButton fallbackHref={viewer?.uid === target.uid ? '/profile' : `/user/${formatUid(target.uid)}`} />
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-sky-100 bg-white/85 p-5 shadow-sm">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Profile Wall</p>

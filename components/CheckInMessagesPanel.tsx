@@ -283,7 +283,7 @@ export function CheckInMessagesPanel({
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
                   </div>
                   <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
-                  {rootComments.length && !anonymous && !isMinimal ? (
+                  {rootComments.length && !isMinimal ? (
                     <div className="mt-2 space-y-2 rounded-2xl bg-sky-50/70 p-2">
                       {rootComments.map((comment) => {
                         const commentName = comment.author.profile?.displayName || comment.author.nickname
@@ -294,13 +294,11 @@ export function CheckInMessagesPanel({
                         return (
                           <div key={comment.id} className="rounded-xl bg-white/70 p-2 text-sm leading-6 text-slate-600">
                             <div className="flex items-start gap-2">
-                              <a href={`/user/${formatUid(comment.author.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
-                                <SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" />
-                              </a>
+                              {anonymous ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(comment.author.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" /></a>}
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <a href={`/user/${formatUid(comment.author.uid)}`} className="font-black text-brand-950">{commentName}</a>
-                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(comment.author.uid)}</span>
+                                  {anonymous ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(comment.author.uid)}`} className="font-black text-brand-950">{commentName}</a>}
+                                  {!anonymous ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(comment.author.uid)}</span> : null}
                                   <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
                                 </div>
                                 <p className="mt-1 whitespace-pre-wrap">{comment.content}</p>
@@ -325,14 +323,12 @@ export function CheckInMessagesPanel({
                                       return (
                                         <div key={child.id} className="min-w-0 py-2">
                                           <div className="flex min-w-0 items-start gap-2">
-                                            <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
-                                              <SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" />
-                                            </a>
+                                            {anonymous ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" /></a>}
                                             <div className="min-w-0 flex-1">
                                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                                                <a href={`/user/${formatUid(child.author.uid)}`} className="font-black text-brand-950">{childName}</a>
-                                                <span className="font-bold text-slate-400">UID {formatUid(child.author.uid)}</span>
-                                                <span className="font-bold text-slate-400">Lv.{child.author.level}</span>
+                                                {anonymous ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(child.author.uid)}`} className="font-black text-brand-950">{childName}</a>}
+                                                {!anonymous ? <span className="font-bold text-slate-400">UID {formatUid(child.author.uid)}</span> : null}
+                                                {!anonymous ? <span className="font-bold text-slate-400">Lv.{child.author.level}</span> : null}
                                                 <span className="font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
                                               </div>
                                               <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6">
@@ -374,7 +370,7 @@ export function CheckInMessagesPanel({
                       })}
                     </div>
                   ) : null}
-                  {!anonymous && !isMinimal ? <DailyMessageActions
+                  {!isMinimal ? <DailyMessageActions
                     messageId={item.id}
                     likeCount={item.likeCount}
                     favoriteCount={item.favoriteCount}

@@ -38,7 +38,7 @@ export default async function SecurityPage() {
   ])
   if (!user) redirect('/login')
 
-  const questionsSet = user._count.securityQuestions === 3
+  const questionsSet = user._count.securityQuestions >= 1
   const recoveryReason = !settings.enableSecurityQuestionRecovery
     ? '系统功能已关闭'
     : !questionsSet

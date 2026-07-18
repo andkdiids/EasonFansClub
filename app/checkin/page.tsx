@@ -3,7 +3,7 @@ import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, isSameLocalDay, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { anonymizeCheckInMessages, getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
@@ -131,7 +131,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           totalCheckIns={streaks.totalDays}
           moodIndex={moodIndex}
           todayCheckIn={todayCheckInPayload}
-          selectedMessages={selectedMessages}
+          selectedMessages={anonymizeCheckInMessages(selectedMessages)}
           friendMessages={friendMessages}
           selectedDateValue={selectedDateValue}
           todayValue={todayValue}

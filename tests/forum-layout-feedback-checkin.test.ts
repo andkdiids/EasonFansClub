@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { calculateCheckinStreaks, getShanghaiDateKey } from '../lib/checkin'
+import { anonymizeCheckInMessages } from '../lib/checkin-messages'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '../lib/feedback'
 import { buildForumHref, clampForumPage, excerptForumPost, getForumOffset, getForumPageWindow, getForumTotalPages, parseForumSort } from '../lib/forum'
 import { getNotificationTarget } from '../lib/notification-target'
@@ -13,6 +14,34 @@ test('旧好友动态与论坛碎片模块会被过滤', () => {
   assert.equal(isDeprecatedLayoutModule('forum', 'forum.main'), false)
   assert.equal(isDeprecatedLayoutModule('profile', 'profile.wall'), true)
   assert.equal(isDeprecatedLayoutModule('home', 'home.checkinSummary'), true)
+})
+
+test('公开 E友留言隐藏身份，好友留言保留原始身份', () => {
+  const message = {
+    id: 'm1', userId: 'u1', date: '', mood: 'HAPPY', content: 'hello', isPinned: false, isFeatured: false, likeCount: 0, favoriteCount: 0, commentCount: 0, isDeleted: false, deletedAt: null, createdAt: '', updatedAt: '',
+    user: { uid: 12, nickname: 'Eason', avatarUrl: '/avatar.webp', level: 2, profile: { displayName: '陈生', avatarUrl: '/avatar.webp' } }, likes: [], favorites: [], comments: [],
+  }
+  const anonymous = anonymizeCheckInMessages([message] as unknown as Parameters<typeof anonymizeCheckInMessages>[0])
+  assert.equal(anonymous[0].user.nickname, '匿名E友')
+  assert.equal(anonymous[0].user.uid, 0)
+  assert.equal(anonymous[0].user.avatarUrl, null)
+  assert.equal(message.user.nickname, 'Eason')
+})
+
+test('profile.posts 注册到布局并且真实前台不再布局外渲染', () => {
+  const registry = readFileSync('lib/page-layout/registry.ts', 'utf8')
+  const profile = readFileSync('app/profile/page.tsx', 'utf8')
+  assert.match(registry, /'profile\.posts'/)
+  assert.match(profile, /'profile\.posts': <PublicUserModules/)
+  assert.equal((profile.match(/<PublicUserModules/g) || []).length, 1)
+})
+
+test('统一返回按钮优先返回历史，无历史时回首页或业务列表', () => {
+  const button = readFileSync('components/BackButton.tsx', 'utf8')
+  const detail = readFileSync('app/posts/[postId]/page.tsx', 'utf8')
+  assert.match(button, /window\.history\.length > 1/)
+  assert.match(button, /router\.push\(fallbackHref\)/)
+  assert.match(detail, /<BackButton fallbackHref="\/forum"/)
 })
 
 test('验收修复保持签到兜底、整卡点击、申请过滤与通知清除', () => {
@@ -145,6 +174,6 @@ test('好友入口、申请锚点和个人资料卡结构保持统一', () => {
   assert.match(menu, />我的好友<Badge/)
   assert.match(friendsPage, /id="received-requests"/)
   assert.match(profile, /admissionInfo\.date/)
-  assert.match(profile, /已住院 \{admissionInfo\.days\} 天/)
+  assert.match(profile, /已入院 \{admissionInfo\.days\} 天/)
   assert.match(profile, /w-56 max-w-full/)
 })

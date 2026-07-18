@@ -21,9 +21,8 @@ export async function POST(request: Request) {
   try {
     await prisma.$transaction(async (tx) => {
       const count = await tx.userSecurityQuestion.count({ where: { userId: guard.user.id } })
-      if (count >= 3) throw new Error('SECURITY_QUESTIONS_ALREADY_SET')
-      if (count > 0) await tx.userSecurityQuestion.deleteMany({ where: { userId: guard.user.id } })
-      await tx.userSecurityQuestion.createMany({ data: hashed.map((item) => ({ ...item, userId: guard.user.id })) })
+      if (count >= 1) throw new Error('SECURITY_QUESTIONS_ALREADY_SET')
+      await tx.userSecurityQuestion.create({ data: { ...hashed[0], userId: guard.user.id } })
       await tx.user.update({ where: { id: guard.user.id }, data: { securityQuestionRecoveryEnabled: true } })
       await tx.notification.updateMany({
         where: { recipientId: guard.user.id, key: securityQuestionNotificationKey, completedAt: null },

@@ -1389,10 +1389,9 @@ model UserSecurityQuestion {
   sortOrder  Int
   createdAt  DateTime @default(now())
 
-  userId String
+  userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, sortOrder])
   @@index([userId])
 }
 

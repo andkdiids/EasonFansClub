@@ -202,16 +202,19 @@ const allowedOrigins = [
 export function hasValidRequestOrigin(request: Request) {
   const fetchSite = request.headers.get('sec-fetch-site')
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'same-site' && fetchSite !== 'none') return false
+  if (fetchSite === 'same-origin') return true
   const source = request.headers.get('origin') || request.headers.get('referer')
   if (!source) return process.env.NODE_ENV !== 'production'
   try {
     const sourceOrigin = new URL(source).origin
 const requestOrigin = new URL(request.url).origin
-const host = request.headers.get('host')
+const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
+const forwardedProtocol = request.headers.get('x-forwarded-proto')
 
 return (
   allowedOrigins.includes(sourceOrigin) ||
   sourceOrigin === requestOrigin ||
+  Boolean(host && forwardedProtocol && sourceOrigin === `${forwardedProtocol}://${host}`) ||
   sourceOrigin === `http://${host}` ||
   sourceOrigin === `https://${host}`
 )
