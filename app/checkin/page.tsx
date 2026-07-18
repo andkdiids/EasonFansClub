@@ -68,6 +68,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
         nextDate,
         sort,
         viewerId: sessionUser.id,
+        viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
       }),
       [],
       8000,
@@ -91,6 +92,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       nextDate,
       sort,
       viewerId: sessionUser.id,
+      viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
       userIds: friendIds,
     }),
     [],
@@ -136,8 +138,6 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           selectedDateValue={selectedDateValue}
           todayValue={todayValue}
           sort={sort}
-          sessionUserId={sessionUser.id}
-          sessionUserRole={sessionUser.role}
           stats={{
             level: user.level,
             points: user.points,

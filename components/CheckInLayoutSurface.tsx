@@ -9,7 +9,7 @@ import type {
   PageLayoutModuleDensity,
   PageLayoutModuleRenderer,
 } from '@/components/page-layout/PageLayoutRenderer'
-import type { CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
+import type { CheckInDisplayMessageItem, CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
 import type { PageLayoutConfig } from '@/lib/page-layout/types'
 
 export type TodayCheckInPayload = TodayCheckIn
@@ -23,13 +23,13 @@ export type CheckInLayoutModuleProps = {
   totalCheckIns: number
   moodIndex: number
   todayCheckIn: TodayCheckInPayload
-  selectedMessages: CheckInMessageItem[]
+  selectedMessages: CheckInDisplayMessageItem[]
   friendMessages: CheckInMessageItem[]
   selectedDateValue: string
   todayValue: string
   sort: CheckInMessageSort
-  sessionUserId: string
-  sessionUserRole: string
+  sessionUserId?: string
+  sessionUserRole?: string
   stats: {
     level: number
     points: number
@@ -165,8 +165,6 @@ export function createCheckInLayoutModules({
   selectedDateValue,
   todayValue,
   sort,
-  sessionUserId,
-  sessionUserRole,
   stats,
   previewMode = false,
 }: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
@@ -193,8 +191,6 @@ export function createCheckInLayoutModules({
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}
-            sessionUserId={sessionUserId}
-            sessionUserRole={sessionUserRole}
             previewMode={previewMode}
           />
         ),
@@ -207,8 +203,6 @@ export function createCheckInLayoutModules({
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}
-            sessionUserId={sessionUserId}
-            sessionUserRole={sessionUserRole}
             previewMode={previewMode}
             emptyText="暂无好友挂号留言"
           />

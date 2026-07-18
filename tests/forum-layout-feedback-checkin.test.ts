@@ -19,13 +19,33 @@ test('旧好友动态与论坛碎片模块会被过滤', () => {
 test('公开 E友留言隐藏身份，好友留言保留原始身份', () => {
   const message = {
     id: 'm1', userId: 'u1', date: '', mood: 'HAPPY', content: 'hello', isPinned: false, isFeatured: false, likeCount: 0, favoriteCount: 0, commentCount: 0, isDeleted: false, deletedAt: null, createdAt: '', updatedAt: '',
-    user: { uid: 12, nickname: 'Eason', avatarUrl: '/avatar.webp', level: 2, profile: { displayName: '陈生', avatarUrl: '/avatar.webp' } }, likes: [], favorites: [], comments: [],
+    canDelete: true,
+    user: { uid: 12, nickname: 'Eason', avatarUrl: '/avatar.webp', level: 2, profile: { displayName: '陈生', avatarUrl: '/avatar.webp' } },
+    likes: [],
+    favorites: [],
+    comments: [{ id: 'c1', messageId: 'm1', authorId: 'u1', parentId: null, content: 'reply', isDeleted: false, deletedAt: null, createdAt: '', updatedAt: '', canDelete: true, author: { id: 'u1', uid: 12, nickname: 'Eason', avatarUrl: '/avatar.webp', level: 2, profile: { displayName: '陈生', avatarUrl: '/avatar.webp' } } }],
   }
   const anonymous = anonymizeCheckInMessages([message] as unknown as Parameters<typeof anonymizeCheckInMessages>[0])
-  assert.equal(anonymous[0].user.nickname, '匿名E友')
-  assert.equal(anonymous[0].user.uid, 0)
-  assert.equal(anonymous[0].user.avatarUrl, null)
+  assert.deepEqual(anonymous[0].author, { type: 'anonymous', name: '匿名E友' })
+  assert.equal('userId' in anonymous[0], false)
+  assert.equal('user' in anonymous[0], false)
+  assert.equal(anonymous[0].canDelete, true)
+  assert.equal('id' in anonymous[0].comments[0].author, false)
+  assert.equal(anonymous[0].comments[0].canDelete, true)
+  assert.equal(JSON.stringify(anonymous).includes('profile'), false)
+  assert.equal(JSON.stringify(anonymous).includes('avatarUrl'), false)
   assert.equal(message.user.nickname, 'Eason')
+})
+
+test('单密保迁移先备份和统计，再在同一事务中清理', () => {
+  const migration = readFileSync('prisma/migrations/20260718090000_single_security_question/migration.sql', 'utf8')
+  assert.match(migration, /^BEGIN;/)
+  assert.match(migration, /LOCK TABLE "UserSecurityQuestion"/)
+  assert.match(migration, /CREATE TABLE "UserSecurityQuestion_backup_20260718"/)
+  assert.match(migration, /multi_question_user_count/)
+  assert.match(migration, /delete_question_count/)
+  assert.match(migration, /COMMIT;\s*$/)
+  assert.ok(migration.indexOf('CREATE TABLE "UserSecurityQuestion_backup_20260718"') < migration.indexOf('DELETE FROM "UserSecurityQuestion"'))
 })
 
 test('profile.posts 注册到布局并且真实前台不再布局外渲染', () => {

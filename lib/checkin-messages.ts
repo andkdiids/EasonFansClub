@@ -5,13 +5,56 @@ export type CheckInMessageSort = 'latest' | 'hot'
 type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncached>>
 export type CheckInMessageItem = CheckInMessagesResult[number]
 
-export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): CheckInMessageItem[] {
+export type AnonymousCheckInMessageItem = {
+  id: string
+  date: string
+  mood: string
+  content: string
+  isPinned: boolean
+  isFeatured: boolean
+  likeCount: number
+  favoriteCount: number
+  commentCount: number
+  createdAt: string
+  liked: boolean
+  favorited: boolean
+  canDelete: boolean
+  author: { type: 'anonymous'; name: '匿名E友' }
+  comments: Array<{
+    id: string
+    parentId: string | null
+    content: string
+    createdAt: string
+    canDelete: boolean
+    author: { type: 'anonymous'; name: '匿名E友' }
+  }>
+}
+
+export type CheckInDisplayMessageItem = CheckInMessageItem | AnonymousCheckInMessageItem
+
+export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): AnonymousCheckInMessageItem[] {
   return messages.map((item) => ({
-    ...item,
-    user: { ...item.user, uid: 0, nickname: '匿名E友', avatarUrl: null, level: 0, profile: { displayName: '匿名E友', avatarUrl: null } },
+    id: item.id,
+    date: item.date,
+    mood: item.mood,
+    content: item.content,
+    isPinned: item.isPinned,
+    isFeatured: item.isFeatured,
+    likeCount: item.likeCount,
+    favoriteCount: item.favoriteCount,
+    commentCount: item.commentCount,
+    createdAt: item.createdAt,
+    liked: item.likes.length > 0,
+    favorited: item.favorites.length > 0,
+    canDelete: item.canDelete,
+    author: { type: 'anonymous', name: '匿名E友' },
     comments: item.comments.map((comment) => ({
-      ...comment,
-      author: { ...comment.author, uid: 0, nickname: '匿名E友', avatarUrl: null, level: 0, profile: { displayName: '匿名E友', avatarUrl: null } },
+      id: comment.id,
+      parentId: comment.parentId,
+      content: comment.content,
+      createdAt: comment.createdAt,
+      canDelete: comment.canDelete,
+      author: { type: 'anonymous', name: '匿名E友' },
     })),
   }))
 }
@@ -24,12 +67,14 @@ export async function getCheckInMessages({
   nextDate,
   sort,
   viewerId,
+  viewerCanModerate = false,
   userIds,
 }: {
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
   viewerId: string
+  viewerCanModerate?: boolean
   userIds?: string[]
 }): Promise<CheckInMessagesResult> {
   const userScope = userIds === undefined
@@ -40,13 +85,14 @@ export async function getCheckInMessages({
     nextDate.toISOString(),
     sort,
     viewerId,
+    viewerCanModerate ? 'moderator' : 'member',
     userScope,
   ].join(':')
   const now = Date.now()
   const cached = checkInMessagesCache.get(cacheKey)
   if (cached && cached.expiresAt > now) return cached.promise
 
-  const promise = getCheckInMessagesUncached({ selectedDate, nextDate, sort, viewerId, userIds }).catch((error) => {
+  const promise = getCheckInMessagesUncached({ selectedDate, nextDate, sort, viewerId, viewerCanModerate, userIds }).catch((error) => {
     checkInMessagesCache.delete(cacheKey)
     throw error
   })
@@ -59,12 +105,14 @@ async function getCheckInMessagesUncached({
   nextDate,
   sort,
   viewerId,
+  viewerCanModerate,
   userIds,
 }: {
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
   viewerId: string
+  viewerCanModerate: boolean
   userIds?: string[]
 }) {
   if (userIds && userIds.length === 0) return []
@@ -114,12 +162,14 @@ async function getCheckInMessagesUncached({
 
   return rows.map((item) => ({
     ...item,
+    canDelete: viewerCanModerate || item.userId === viewerId,
     date: item.date.toISOString(),
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
     deletedAt: item.deletedAt?.toISOString() || null,
     comments: item.comments.map((comment) => ({
       ...comment,
+      canDelete: viewerCanModerate || comment.author.id === viewerId,
       createdAt: comment.createdAt.toISOString(),
       updatedAt: comment.updatedAt.toISOString(),
       deletedAt: comment.deletedAt?.toISOString() || null,

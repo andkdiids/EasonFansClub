@@ -42,6 +42,7 @@ export async function GET(request: Request) {
         nextDate,
         sort,
         viewerId: user.id,
+        viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
         userIds: friendIds,
       }),
     )

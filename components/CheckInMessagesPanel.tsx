@@ -5,21 +5,17 @@ import { DailyMessageActions } from '@/components/DailyMessageActions'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
-import type { CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
+import type { CheckInDisplayMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { getMood } from '@/lib/daily'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
-type DailyComment = CheckInMessageItem['comments'][number]
+type DailyComment = CheckInDisplayMessageItem['comments'][number]
 const messagesPerPage = 5
 
 function beijingDateTime(value: string) {
   return formatBeijingDateTime(value)
-}
-
-function isAdminRole(role: string) {
-  return role === 'ADMIN' || role === 'SUPER_ADMIN'
 }
 
 function updateUrl(date: string, sort: CheckInMessageSort) {
@@ -42,6 +38,10 @@ function buildCommentMap(comments: DailyComment[]) {
   return new Map(comments.map((comment) => [comment.id, comment]))
 }
 
+function getCommentAuthorName(author: DailyComment['author']) {
+  return 'uid' in author ? author.profile?.displayName || author.nickname : author.name
+}
+
 export function CheckInMessagesPanel({
   title,
   density = 'normal',
@@ -52,8 +52,6 @@ export function CheckInMessagesPanel({
   initialDate,
   maxDate,
   initialSort,
-  sessionUserId,
-  sessionUserRole,
   previewMode = false,
 }: Readonly<{
   title?: string
@@ -61,12 +59,10 @@ export function CheckInMessagesPanel({
   anonymous?: boolean
   scope?: 'public' | 'friends'
   emptyText?: string
-  initialMessages: CheckInMessageItem[]
+  initialMessages: CheckInDisplayMessageItem[]
   initialDate: string
   maxDate: string
   initialSort: CheckInMessageSort
-  sessionUserId: string
-  sessionUserRole: string
   previewMode?: boolean
 }>) {
   const [date, setDate] = useState(initialDate)
@@ -92,32 +88,6 @@ export function CheckInMessagesPanel({
     const end = Math.min(totalPages, start + maxVisible - 1)
     return Array.from({ length: end - start + 1 }, (_, index) => start + index)
   }, [page, totalPages])
-
-  function addComment(messageId: string, comment: unknown) {
-    if (!comment || typeof comment !== 'object') return
-    setMessages((current) => current.map((message) => (
-      message.id === messageId
-        ? { ...message, commentCount: message.commentCount + 1, comments: [...message.comments, comment as DailyComment] }
-        : message
-    )))
-  }
-
-  function removeComment(messageId: string, commentId: string) {
-    setMessages((current) => current.map((message) => (
-      message.id === messageId
-        ? (() => {
-            const tree = buildCommentTree(message.comments)
-            const collectIds = (parentId: string): string[] => (tree.get(parentId) || []).flatMap((comment) => [comment.id, ...collectIds(comment.id)])
-            const removeIds = new Set([commentId, ...collectIds(commentId)])
-            return {
-              ...message,
-              commentCount: Math.max(message.commentCount - removeIds.size, 0),
-              comments: message.comments.filter((comment) => !removeIds.has(comment.id)),
-            }
-          })()
-        : message
-    )))
-  }
 
   const loadMessages = useCallback(async (nextDate = date, nextSort = sort) => {
     if (isLoading) return
@@ -239,8 +209,9 @@ export function CheckInMessagesPanel({
       <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} flex-1 ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMood(item.mood)
-          const name = item.user.profile?.displayName || item.user.nickname
-          const avatar = publicImageUrl(item.user.profile?.avatarUrl || item.user.avatarUrl)
+          const fullIdentity = 'user' in item ? item.user : null
+          const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item ? item.author.name : '')
+          const avatar = publicImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
           const commentMap = buildCommentMap(item.comments)
           const rootComments = commentTree.get(null) || []
@@ -249,7 +220,7 @@ export function CheckInMessagesPanel({
             const result: Array<{ comment: DailyComment; replyToName: string }> = []
             const visit = (parentId: string) => {
               const parent = commentMap.get(parentId)
-              const parentName = parent ? parent.author.profile?.displayName || parent.author.nickname : ''
+              const parentName = parent ? getCommentAuthorName(parent.author) : ''
               ;(commentTree.get(parentId) || []).forEach((child) => {
                 result.push({ comment: child, replyToName: parentName })
                 visit(child.id)
@@ -265,19 +236,19 @@ export function CheckInMessagesPanel({
                   <div className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
                     {mood?.icon || '🎵'}
                   </div>
-                ) : (
-                  <a href={`/user/${formatUid(item.user.uid)}`} className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
+                ) : fullIdentity ? (
+                  <a href={`/user/${formatUid(fullIdentity.uid)}`} className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
                     {avatar ? <SafeAvatar src={avatar} name={name} className="h-full w-full" /> : mood?.icon || '🎵'}
                   </a>
-                )}
+                ) : null}
                 <div className="min-w-0 flex-1">
                   <div className={isMinimal ? 'flex min-w-0 items-center gap-1.5' : 'flex flex-wrap items-center gap-2'}>
                     {anonymous ? (
                       <span className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>E院病友</span>
                     ) : (
-                      <a href={`/user/${formatUid(item.user.uid)}`} className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>{name}</a>
+                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>{name}</a> : null
                     )}
-                    {!anonymous && !isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(item.user.uid)}</span> : null}
+                    {!anonymous && !isMinimal && fullIdentity ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(fullIdentity.uid)}</span> : null}
                     {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood?.icon} {mood?.label}</span> : <span className="text-xs">{mood?.icon}</span>}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
@@ -286,19 +257,20 @@ export function CheckInMessagesPanel({
                   {rootComments.length && !isMinimal ? (
                     <div className="mt-2 space-y-2 rounded-2xl bg-sky-50/70 p-2">
                       {rootComments.map((comment) => {
-                        const commentName = comment.author.profile?.displayName || comment.author.nickname
-                        const commentAvatar = publicImageUrl(comment.author.profile?.avatarUrl || comment.author.avatarUrl)
+                        const commentIdentity = 'uid' in comment.author ? comment.author : null
+                        const commentName = getCommentAuthorName(comment.author)
+                        const commentAvatar = publicImageUrl(commentIdentity?.profile?.avatarUrl || commentIdentity?.avatarUrl)
                         const children = collectThreadComments(comment.id)
                         const showAll = Boolean(expandedReplies[comment.id])
                         const visibleChildren = showAll ? children : children.slice(0, 3)
                         return (
                           <div key={comment.id} className="rounded-xl bg-white/70 p-2 text-sm leading-6 text-slate-600">
                             <div className="flex items-start gap-2">
-                              {anonymous ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(comment.author.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" /></a>}
+                              {anonymous || !commentIdentity ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" /></a>}
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  {anonymous ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(comment.author.uid)}`} className="font-black text-brand-950">{commentName}</a>}
-                                  {!anonymous ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(comment.author.uid)}</span> : null}
+                                  {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950">{commentName}</a>}
+                                  {!anonymous && commentIdentity ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(commentIdentity.uid)}</span> : null}
                                   <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
                                 </div>
                                 <p className="mt-1 whitespace-pre-wrap">{comment.content}</p>
@@ -310,25 +282,26 @@ export function CheckInMessagesPanel({
                                   >
                                     回复
                                   </button>
-                                  {sessionUserId === comment.author.id || isAdminRole(sessionUserRole) ? (
-                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} onDeleted={() => removeComment(item.id, comment.id)} />
+                                  {comment.canDelete ? (
+                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} onDeleted={() => loadMessages(date, sort)} />
                                   ) : null}
                                 </div>
 
                                 {visibleChildren.length ? (
                                   <div className="mt-2 space-y-1 border-l-2 border-sky-100 pl-3 sm:pl-4">
                                     {visibleChildren.map(({ comment: child, replyToName }) => {
-                                      const childName = child.author.profile?.displayName || child.author.nickname
-                                      const childAvatar = publicImageUrl(child.author.profile?.avatarUrl || child.author.avatarUrl)
+                                      const childIdentity = 'uid' in child.author ? child.author : null
+                                      const childName = getCommentAuthorName(child.author)
+                                      const childAvatar = publicImageUrl(childIdentity?.profile?.avatarUrl || childIdentity?.avatarUrl)
                                       return (
                                         <div key={child.id} className="min-w-0 py-2">
                                           <div className="flex min-w-0 items-start gap-2">
-                                            {anonymous ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(child.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" /></a>}
+                                            {anonymous || !childIdentity ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" /></a>}
                                             <div className="min-w-0 flex-1">
                                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                                                {anonymous ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(child.author.uid)}`} className="font-black text-brand-950">{childName}</a>}
-                                                {!anonymous ? <span className="font-bold text-slate-400">UID {formatUid(child.author.uid)}</span> : null}
-                                                {!anonymous ? <span className="font-bold text-slate-400">Lv.{child.author.level}</span> : null}
+                                                {anonymous || !childIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="font-black text-brand-950">{childName}</a>}
+                                                {!anonymous && childIdentity ? <span className="font-bold text-slate-400">UID {formatUid(childIdentity.uid)}</span> : null}
+                                                {!anonymous && childIdentity ? <span className="font-bold text-slate-400">Lv.{childIdentity.level}</span> : null}
                                                 <span className="font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
                                               </div>
                                               <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6">
@@ -343,8 +316,8 @@ export function CheckInMessagesPanel({
                                                 >
                                                   回复
                                                 </button>
-                                                {sessionUserId === child.author.id || isAdminRole(sessionUserRole) ? (
-                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} variant="text" onDeleted={() => removeComment(item.id, child.id)} />
+                                                {child.canDelete ? (
+                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} variant="text" onDeleted={() => loadMessages(date, sort)} />
                                                 ) : null}
                                               </div>
                                             </div>
@@ -375,11 +348,11 @@ export function CheckInMessagesPanel({
                     likeCount={item.likeCount}
                     favoriteCount={item.favoriteCount}
                     commentCount={item.commentCount}
-                    initialLiked={item.likes.length > 0}
-                    initialFavorited={item.favorites.length > 0}
+                    initialLiked={'liked' in item ? item.liked : item.likes.length > 0}
+                    initialFavorited={'favorited' in item ? item.favorited : item.favorites.length > 0}
                     replyTo={replyTarget}
                     onReplyCancel={() => setReplyTargets((current) => ({ ...current, [item.id]: null }))}
-                    onCommentCreated={(comment) => addComment(item.id, comment)}
+                    onCommentCreated={() => loadMessages(date, sort)}
                   /> : null}
                 </div>
               </div>
