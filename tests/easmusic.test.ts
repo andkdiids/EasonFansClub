@@ -33,7 +33,7 @@ test('后台专辑和歌曲创建 API 均受 music_manage 权限保护', () => {
   assert.match(song, /requireAdmin\('music_manage'\)/)
   assert.match(song, /musicSong\.create/)
   assert.match(song, /description: optionalMusicText/)
-  assert.doesNotMatch(song, /coverUrl:/)
+  assert.match(song, /coverUrl: optionalMusicText\(body\?\.coverUrl, 1000\) \|\| album\.coverUrl/)
 })
 
 test('发布专辑必须有封面且可取消发布', () => {

@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   const albumId = sanitizeText(body?.albumId, 100)
   const title = sanitizeText(body?.songName ?? body?.title, 160)
   const trackNumber = parseTrackNumber(body?.trackNumber)
-  const album = albumId ? await prisma.musicAlbum.findUnique({ where: { id: albumId }, select: { artist: true, releaseYear: true } }) : null
+  const album = albumId ? await prisma.musicAlbum.findUnique({ where: { id: albumId }, select: { artist: true, releaseYear: true, language: true, coverUrl: true } }) : null
   if (!album) return NextResponse.json({ message: '请选择有效专辑' }, { status: 400 })
   if (!title) return NextResponse.json({ message: '请填写歌曲名称' }, { status: 400 })
   if (!trackNumber) return NextResponse.json({ message: '请填写有效曲序' }, { status: 400 })
@@ -27,7 +27,8 @@ export async function POST(request: Request) {
         artist: sanitizeText(body?.artist, 100) || album.artist,
         releaseYear: parseMusicYear(body?.releaseYear) || album.releaseYear,
         duration: parseOptionalDuration(body?.duration),
-        language: optionalMusicText(body?.language, 40),
+        language: optionalMusicText(body?.language, 40) || album.language,
+        coverUrl: optionalMusicText(body?.coverUrl, 1000) || album.coverUrl,
         composer: optionalMusicText(body?.composer, 200),
         lyricist: optionalMusicText(body?.lyricist, 200),
         arranger: optionalMusicText(body?.arranger, 200),
