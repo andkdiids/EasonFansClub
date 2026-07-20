@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MusicAlbum3DCard, type MusicCarouselAlbum } from '@/components/music/MusicAlbum3DCard'
+import { getWrappedOffset, normalizeIndex, normalizePosition } from '@/lib/music-carousel'
 import { formatTrackCount } from '@/lib/music-display'
 
 const TRANSITION_MS = 320
@@ -61,23 +62,20 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
   const dragRef = useRef<{ pointerId: number; startX: number; startPos: number; moved: boolean; samples: { x: number; t: number }[] } | null>(null)
   const suppressClickRef = useRef(false)
 
-  // 每一帧只写 transform/opacity/zIndex,不经过 React render
+  // 每一帧只写 transform/opacity/zIndex,不经过 React render;offset 一律走循环最短距离
   const paint = useCallback((position: number) => {
     const count = albums.length
     if (count === 0) return
     const { spacing, visibleRange } = layoutRef.current
     cardRefs.current.forEach((element, index) => {
-      let offset = index - position
-      if (count > 1) {
-        if (offset > count / 2) offset -= count
-        if (offset < -count / 2) offset += count
-      }
+      const offset = getWrappedOffset(index, position, count)
       const distance = Math.abs(offset)
       const blend = Math.min(distance, 1)
       const scale = 1 - 0.12 * blend
       let opacity = 1 - 0.48 * blend
       if (distance > visibleRange) opacity *= Math.max(0, 1 - (distance - visibleRange))
-      element.style.transform = `translate3d(calc(-50% + ${offset * spacing}px), ${-3 + 6 * blend}px, 0) scale(${scale})`
+      // 两段 translate3d 叠加实现 -50% 居中 + 位移,避免 calc() 负数在 WebKit 下失效
+      element.style.transform = `translate3d(${offset * spacing}px, ${-3 + 6 * blend}px, 0) translate3d(-50%, 0, 0) scale(${scale})`
       element.style.opacity = String(opacity)
       element.style.zIndex = String(distance < 0.5 ? 30 : Math.max(1, Math.round(12 - distance)))
       element.style.pointerEvents = opacity < 0.05 ? 'none' : ''
@@ -102,29 +100,36 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
 
   const animateTo = useCallback((target: number) => {
     const count = albums.length
-    if (count === 0) return
-    const normalized = ((target % count) + count) % count
+    if (count < 2) return
+    // 所有入口(按钮/滚轮/键盘/拖动结束)统一走这套索引归一化
+    const normalized = normalizeIndex(target, count)
     targetRef.current = normalized
     setSelected(normalized)
+    // 动画目标使用连续位置并走最短路径:最后一张->第一张继续向右滑一张,不横跨数组
     let destination = target
-    if (count > 1) {
-      while (destination - positionRef.current > count / 2) destination -= count
-      while (destination - positionRef.current < -count / 2) destination += count
-    }
+    while (destination - positionRef.current > count / 2) destination -= count
+    while (destination - positionRef.current < -count / 2) destination += count
     cancelFrame()
     const from = positionRef.current
     const distance = destination - from
     if (Math.abs(distance) < 0.001) {
-      positionRef.current = destination
-      paintRef.current(destination)
+      positionRef.current = normalizePosition(destination, count)
+      paintRef.current(positionRef.current)
       return
     }
     const startedAt = performance.now()
     const step = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / TRANSITION_MS)
       positionRef.current = from + distance * ease(progress)
+      if (progress < 1) {
+        paintRef.current(positionRef.current)
+        frameRef.current = requestAnimationFrame(step)
+        return
+      }
+      frameRef.current = 0
+      // 动画完成后才归一化 positionRef;wrapped offset 不变,无视觉跳变
+      positionRef.current = normalizePosition(destination, count)
       paintRef.current(positionRef.current)
-      frameRef.current = progress < 1 ? requestAnimationFrame(step) : 0
     }
     frameRef.current = requestAnimationFrame(step)
   }, [albums.length, cancelFrame])
@@ -231,11 +236,11 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
 
   return <section aria-label="精选专辑轮播" tabIndex={interactionPaused ? -1 : 0} onKeyDown={(event) => { if (event.key === 'ArrowLeft') move(-1); if (event.key === 'ArrowRight') move(1) }} onWheel={onWheel} className="relative isolate z-0 mx-auto flex w-full max-w-7xl flex-col items-center outline-none focus-visible:ring-4 focus-visible:ring-sky-300/50">
     <div className="relative flex w-full justify-center">
-      <button type="button" disabled={interactionPaused} onClick={() => move(-1)} aria-label="上一张专辑" className="absolute left-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">‹</button>
+      <button type="button" disabled={interactionPaused || albums.length < 2} onClick={() => move(-1)} aria-label="上一张专辑" className="absolute left-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">‹</button>
       <div ref={stageRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={(event) => finishDrag(event, false)} onPointerCancel={(event) => finishDrag(event, true)} onClickCapture={onClickCapture} onDragStart={(event) => event.preventDefault()} className={`relative isolate h-[250px] w-full touch-pan-y select-none sm:h-[280px] md:h-[330px] md:w-[calc(100%-144px)] lg:h-[340px] xl:w-[calc(100%-160px)] ${interactionPaused ? 'pointer-events-none' : 'cursor-grab active:cursor-grabbing'}`}>
         {albums.map((album, index) => Math.abs(offsets[index]) <= layout.visibleRange + 1 ? <MusicAlbum3DCard key={album.id} album={album} offset={offsets[index]} spacing={layout.spacing} cardWidth={layout.cardWidth} selected={index === selected} disabled={interactionPaused} onActivate={() => index === selected ? router.push(`/music/album/${album.id}`) : animateTo(index)} cardRef={(element) => { if (element) cardRefs.current.set(index, element); else cardRefs.current.delete(index) }} /> : null)}
       </div>
-      <button type="button" disabled={interactionPaused} onClick={() => move(1)} aria-label="下一张专辑" className="absolute right-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">›</button>
+      <button type="button" disabled={interactionPaused || albums.length < 2} onClick={() => move(1)} aria-label="下一张专辑" className="absolute right-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">›</button>
     </div>
     <div className="mb-4 text-center text-white md:hidden"><p className="line-clamp-1 text-base font-black">《{current.name}》</p><p className="mt-1 text-xs font-bold text-slate-300/65">{current.releaseLabel} · {current.language} · {formatTrackCount(current.songCount)}</p></div>
     <div className="relative z-20 mt-1 flex items-center justify-center">
