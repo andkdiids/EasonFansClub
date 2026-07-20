@@ -1,3 +1,4 @@
+import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 
 export type AchievementSyncCategory =
@@ -34,6 +35,7 @@ export async function getUserAchievementStats(userId: string) {
     where: { id: userId },
     include: {
       profile: true,
+      checkIns: { select: { checkinDateKey: true } },
       _count: {
         select: {
           posts: { where: { isDeleted: false } },
@@ -52,12 +54,14 @@ export async function getUserAchievementStats(userId: string) {
     _sum: { durationSeconds: true },
   })
   const activeDays = Math.max(0, Math.floor((Date.now() - user.createdAt.getTime()) / 86400000))
+  // 连续挂号成就按签到记录重算,不读用户表上的连续天数快照
+  const checkinStreaks = calculateCheckinStreaks(user.checkIns.map((item) => item.checkinDateKey))
 
   return {
     registered: 1,
     profileCompleted: user.profile?.bio || user.profile?.avatarUrl || user.email || user.phone ? 1 : 0,
     uidAssigned: user.uid ? 1 : 0,
-    checkinStreak: user.consecutiveDays,
+    checkinStreak: checkinStreaks.currentStreak,
     checkinTotal: user._count.checkIns,
     postTotal: user._count.posts,
     listenHours: Math.floor((listen._sum.durationSeconds || 0) / 3600),

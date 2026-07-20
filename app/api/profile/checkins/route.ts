@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { calculateCheckinStreaks } from '@/lib/checkin'
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 
@@ -11,25 +12,30 @@ export async function GET() {
   monthStart.setDate(1)
   monthStart.setHours(0, 0, 0, 0)
 
-  const checkIns = await safeDb(
-    'profile.checkins',
-    prisma.checkIn.findMany({
-      where: { userId: user.id, checkDate: { gte: monthStart } },
-      orderBy: { checkDate: 'asc' },
-      select: { id: true, checkDate: true, mood: true, points: true, exp: true, streakDay: true },
-    }),
-    [],
-  )
+  const [checkIns, history] = await Promise.all([
+    safeDb(
+      'profile.checkins',
+      prisma.checkIn.findMany({
+        where: { userId: user.id, checkDate: { gte: monthStart } },
+        orderBy: { checkDate: 'asc' },
+        select: { id: true, checkDate: true, mood: true, points: true, exp: true, streakDay: true },
+      }),
+      [],
+    ),
+    safeDb(
+      'profile.checkinDateKeys',
+      prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
+      [],
+    ),
+  ])
 
-  const longest = await safeDb(
-    'profile.longestCheckin',
-    prisma.checkIn.findFirst({
-      where: { userId: user.id },
-      orderBy: { streakDay: 'desc' },
-      select: { streakDay: true },
-    }),
-    null,
-  )
+  // 连续与最长连续只按签到记录重算,不再使用 max(CheckIn.streakDay)
+  const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
 
-  return NextResponse.json({ checkIns, longestStreak: longest?.streakDay || 0 })
+  return NextResponse.json({
+    checkIns,
+    currentStreak: streaks.currentStreak,
+    longestStreak: streaks.longestStreak,
+    totalCheckIns: streaks.totalDays,
+  })
 }

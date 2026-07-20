@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay, shiftShanghaiDateKey } from '@/lib/checkin'
+import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
@@ -105,16 +105,23 @@ export async function POST(request: Request) {
   logPerf('checkin.existing.ms', existingStart, { userId: user.id })
 
   if (existing) {
-    const profile = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true },
-    })
+    const [profile, history] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: { points: true, exp: true, experience: true, level: true },
+      }),
+      prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
+    ])
+    // 与 GET 同一口径:连续天数只按签到记录重算,不读 User.consecutiveDays / CheckIn.streakDay 快照
+    const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
     return NextResponse.json({
       message: '今天已经挂号过了',
       checkedToday: true,
       checkDate: formatBeijingDate(today),
       todayCheckIn: existing,
-      consecutiveDays: profile?.consecutiveDays ?? existing.streakDay,
+      consecutiveDays: streaks.currentStreak,
+      currentStreak: streaks.currentStreak,
+      longestStreak: streaks.longestStreak,
       points: profile?.points ?? 0,
       exp: profile?.exp ?? 0,
       experience: profile?.experience ?? 0,
@@ -133,23 +140,13 @@ export async function POST(request: Request) {
       where: { id: user.id },
       select: { points: true },
     })
-    const yesterdayKey = shiftShanghaiDateKey(todayKey, -1)
-
-const yesterdayCheckIn = await tx.checkIn.findUnique({
-  where: {
-    userId_checkinDateKey: {
-      userId: user.id,
-      checkinDateKey: yesterdayKey,
-    },
-  },
-  select: {
-    streakDay: true,
-  },
-})
-
-const nextStreak = yesterdayCheckIn
-  ? yesterdayCheckIn.streakDay + 1
-  : 1
+    // 不再链式读取昨日记录的连签数加一;按全部签到记录(含今日)统一重算
+    const existingKeys = await tx.checkIn.findMany({
+      where: { userId: user.id },
+      select: { checkinDateKey: true },
+    })
+    const streaks = calculateCheckinStreaks([...existingKeys.map((item) => item.checkinDateKey), todayKey], checkedAt)
+    const nextStreak = streaks.currentStreak
     const bonus = getStreakBonus(nextStreak)
     const gainedPoints = CHECK_IN_POINTS + (bonus?.points || 0)
     const requestedExp = getRandomCheckInExperience()
@@ -231,17 +228,22 @@ const nextStreak = yesterdayCheckIn
       },
     })
 
-    return { user: updatedUser, checkIn, gainedPoints, gainedExp, requestedExp, bonus, dailyMessageId }
+    return { user: updatedUser, checkIn, gainedPoints, gainedExp, requestedExp, bonus, dailyMessageId, streaks }
     })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const [todayCheckIn, profile] = await Promise.all([
+      const [todayCheckIn, profile, history] = await Promise.all([
         prisma.checkIn.findUnique({ where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } } }),
-        prisma.user.findUnique({ where: { id: user.id }, select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true } }),
+        prisma.user.findUnique({ where: { id: user.id }, select: { points: true, exp: true, experience: true, level: true } }),
+        prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
       ])
+      // 并发冲突时同样按签到记录重算,保证与其它分支同一口径
+      const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
       return NextResponse.json({
         message: '今日已挂号', checkedToday: true, checkDate: todayKey, todayCheckIn,
-        consecutiveDays: profile?.consecutiveDays ?? todayCheckIn?.streakDay ?? 0,
+        consecutiveDays: streaks.currentStreak,
+        currentStreak: streaks.currentStreak,
+        longestStreak: streaks.longestStreak,
         points: profile?.points ?? 0, exp: profile?.exp ?? 0, experience: profile?.experience ?? 0,
         level: profile?.level ?? 1, gainedPoints: 0, gainedExp: 0, created: false,
       })
@@ -368,7 +370,9 @@ return NextResponse.json({
     gainedExp: result.gainedExp,
     bonus: result.bonus,
     dailyMessageId: result.dailyMessageId,
-    consecutiveDays: verifyUser?.consecutiveDays ?? result.user.consecutiveDays,
+    consecutiveDays: result.streaks.currentStreak,
+    currentStreak: result.streaks.currentStreak,
+    longestStreak: result.streaks.longestStreak,
 points: verifyUser?.points ?? result.user.points,
 exp: verifyUser?.exp ?? result.user.exp,
 experience: verifyUser?.experience ?? result.user.experience,

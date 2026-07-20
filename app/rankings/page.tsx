@@ -1,14 +1,33 @@
 import { SiteHeader } from '@/components/SiteHeader'
+import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
 export default async function RankingsPage() {
-  const [points, streaks, posts] = await Promise.all([
+  // 签到榜:一次性取出未删除用户的全部签到日期键(仅两个小字段),内存分组重算,避免 N+1,不读用户表上的连续天数快照
+  const [points, checkInKeys, posts] = await Promise.all([
     prisma.user.findMany({ where: { isDeleted: false }, orderBy: { points: 'desc' }, take: 10, select: { id: true, nickname: true, points: true, level: true } }),
-    prisma.user.findMany({ where: { isDeleted: false }, orderBy: { consecutiveDays: 'desc' }, take: 10, select: { id: true, nickname: true, consecutiveDays: true, level: true } }),
+    prisma.checkIn.findMany({ where: { user: { isDeleted: false } }, select: { userId: true, checkinDateKey: true } }),
     prisma.post.findMany({ where: { isDeleted: false }, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, replyCount: true, likeCount: true } }),
   ])
+
+  const keysByUser = new Map<string, string[]>()
+  for (const row of checkInKeys) {
+    const keys = keysByUser.get(row.userId)
+    if (keys) keys.push(row.checkinDateKey)
+    else keysByUser.set(row.userId, [row.checkinDateKey])
+  }
+  const streakTop = [...keysByUser.entries()]
+    .map(([userId, keys]) => ({ userId, currentStreak: calculateCheckinStreaks(keys).currentStreak }))
+    .filter((item) => item.currentStreak > 0)
+    .sort((a, b) => b.currentStreak - a.currentStreak)
+    .slice(0, 10)
+  const streakUsers = await prisma.user.findMany({
+    where: { id: { in: streakTop.map((item) => item.userId) } },
+    select: { id: true, nickname: true, level: true },
+  })
+  const userById = new Map(streakUsers.map((item) => [item.id, item]))
 
   return (
     <>
@@ -21,7 +40,7 @@ export default async function RankingsPage() {
         <section className="grid gap-6 lg:grid-cols-3">
           {[
             ['积分榜', points.map((u) => `${u.nickname} · Lv.${u.level} · ${u.points}分`)],
-            ['签到榜', streaks.map((u) => `${u.nickname} · 连续${u.consecutiveDays}天`)],
+            ['签到榜', streakTop.map((item) => { const u = userById.get(item.userId); return u ? `${u.nickname} · 连续${item.currentStreak}天` : null }).filter((row): row is string => Boolean(row))],
             ['热帖榜', posts.map((p) => `${p.title} · ${p.replyCount}回复 · ${p.likeCount}赞`)],
           ].map(([title, rows]) => (
             <div key={title as string} className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
