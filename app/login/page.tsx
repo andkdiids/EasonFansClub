@@ -17,13 +17,24 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       siteName={config.text.siteName}
       backgroundUrl={config.images.loginBackgroundUrl}
       footer={
-        <>
-          还没有账号？{' '}
-          <Link href="/register" className="font-black text-brand-700">
-            去注册
-          </Link>
-        </>
-      }
+  <div className="space-y-3 text-center">
+    <div>
+      还没有账号？{' '}
+      <Link href="/register" className="font-black text-brand-700">
+        去注册
+      </Link>
+    </div>
+
+    <a
+      href="https://beian.miit.gov.cn"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-block text-xs text-white/70 transition-colors hover:text-white"
+    >
+      粤ICP备2026099247号-1
+    </a>
+  </div>
+}
     >
       <LoginForm redirectTo={params.redirect} initialAccount={params.account} />
     </AuthFormShell>

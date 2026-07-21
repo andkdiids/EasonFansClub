@@ -215,8 +215,23 @@ export function HomeLayoutSurface({
       )
     }
 
-    if (item.key === 'home.footer') {
-      return <footer className="pb-8 text-center text-sm font-bold text-slate-500">{item.title || siteConfig.text.footerText}</footer>
+      if (item.key === 'home.footer') {
+      return (
+        <footer className="pb-8 text-center text-sm text-slate-500">
+          <div className="font-bold">
+            {item.title || siteConfig.text.footerText}
+          </div>
+
+          <a
+            href="https://beian.miit.gov.cn"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-block transition-colors hover:text-sky-500"
+          >
+            粤ICP备2026099247号-1
+          </a>
+        </footer>
+      )
     }
 
     return null
