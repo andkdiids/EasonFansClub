@@ -19,7 +19,7 @@ const previewData: ForumFeedResponse = {
   boards: [
     { id: 'all-preview', name: '公告区', slug: 'announcements', description: null, postCount: 8, isAnnouncement: true },
     { id: 'chat-preview', name: '每日水楼', slug: 'daily-chat', description: null, postCount: 36, isAnnouncement: false },
-    { id: 'concert-preview', name: '演唱会讨论', slug: 'concert', description: null, postCount: 18, isAnnouncement: false },
+    { id: 'concert-preview', name: '演唱会', slug: 'concert', description: null, postCount: 18, isAnnouncement: false },
   ],
   selectedBoard: null,
   posts: [],
@@ -115,10 +115,10 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         </label>
       </header>
 
-      <nav aria-label="论坛分区" className="flex flex-wrap gap-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-[22px] border border-sky-100 bg-white/82 p-3 shadow-sm">
-        <button type="button" onClick={() => updateQuery({ board: null, page: null })} className={`shrink-0 rounded-full px-4 py-2 text-sm font-black ${!board ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>全部</button>
+      <nav aria-label="论坛分区" className="flex grid grid-cols-3 gap-2 lg:flex lg:flex-nowrap lg:justify-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-[22px] border border-sky-100 bg-white/82 p-3 shadow-sm">
+        <button type="button" onClick={() => updateQuery({ board: null, page: null })} className={`w-full rounded-full px-4 py-2 text-sm font-black ${!board ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>全部</button>
         {(data?.boards || []).map((item) => (
-          <button key={item.id} type="button" onClick={() => updateQuery({ board: item.slug, page: null })} className={`shrink-0 rounded-full px-4 py-2 text-sm font-black ${board === item.slug ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>
+          <button key={item.id} type="button" onClick={() => updateQuery({ board: item.slug, page: null })} className={`w-full rounded-full px-4 py-2 text-sm font-black ${board === item.slug ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>
             {item.name}<span className="ml-1 opacity-70">{item.postCount}</span>
           </button>
         ))}

@@ -12,15 +12,15 @@ export const defaultBoards = [
     sortOrder: 2,
   },
   {
-    name: '演唱会讨论',
+    name: '演唱会',
     slug: 'concerts',
-    description: '巡演、票务、场馆、歌单、repo',
+    description: '巡演、场馆、歌单、repo',
     sortOrder: 3,
   },
   {
     name: '物料交换',
     slug: 'merch-exchange',
-    description: '周边、票根、灯牌、应援物料交换',
+    description: '周边、应援物料交换',
     sortOrder: 4,
   },
   {
