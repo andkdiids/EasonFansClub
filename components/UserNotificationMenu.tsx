@@ -21,6 +21,28 @@ export function UserNotificationMenu({
   initialSummary: UnreadSummary
 }) {
   const [summary, setSummary] = useState(initialSummary)
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  async function handleLogout() {
+      if (loggingOut) return
+
+  setLoggingOut(true)
+
+  try {
+        const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      cache: 'no-store',
+    })
+        if (!response.ok) {
+      throw new Error('退出登录失败')
+    }
+
+    window.location.replace('/login')
+      } catch {
+    setLoggingOut(false)
+    window.alert('退出登录失败，请稍后重试')
+  }
+}
 
   useEffect(() => {
     const controller = new AbortController()
@@ -53,7 +75,13 @@ export function UserNotificationMenu({
       <Link href="/notifications?category=message" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
       <Link href="/settings/security" className={itemClass}>账号安全</Link>
       {isAdmin ? <Link href="/admin" className={`${itemClass} text-brand-700`}>后台管理</Link> : null}
-      <form action="/api/auth/logout" method="post"><button className="w-full rounded-xl px-4 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50">退出登录</button></form>
-    </div>
+<button
+  type="button"
+  onClick={handleLogout}
+  disabled={loggingOut}
+  className="w-full rounded-xl px-4 py-2 text-left text-sm font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+>
+  {loggingOut ? '退出中…' : '退出登录'}
+</button>    </div>
   </details>
 }
