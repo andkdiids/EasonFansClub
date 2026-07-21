@@ -115,7 +115,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         </label>
       </header>
 
-      <nav aria-label="论坛分区" className="flex gap-2 overflow-x-auto rounded-[22px] border border-sky-100 bg-white/82 p-3 shadow-sm">
+      <nav aria-label="论坛分区" className="flex flex-wrap gap-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-[22px] border border-sky-100 bg-white/82 p-3 shadow-sm">
         <button type="button" onClick={() => updateQuery({ board: null, page: null })} className={`shrink-0 rounded-full px-4 py-2 text-sm font-black ${!board ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>全部</button>
         {(data?.boards || []).map((item) => (
           <button key={item.id} type="button" onClick={() => updateQuery({ board: item.slug, page: null })} className={`shrink-0 rounded-full px-4 py-2 text-sm font-black ${board === item.slug ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>
@@ -125,8 +125,8 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
       </nav>
 
       <div ref={contentRef} className="scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/72 p-3 shadow-sm sm:p-5">
-        <div className="mb-4 flex gap-2 overflow-x-auto">
-          {sortOptions.map(([value, label]) => <button key={value} type="button" onClick={() => updateQuery({ sort: value === 'latest' ? null : value, page: null })} className={`shrink-0 rounded-full px-4 py-2 text-xs font-black ${sort === value ? 'bg-sky-600 text-white' : 'bg-white text-slate-600'}`}>{label}</button>)}
+        <div className="mb-4 grid grid-cols-5 gap-2">
+          {sortOptions.map(([value, label]) => <button key={value} type="button" onClick={() => updateQuery({ sort: value === 'latest' ? null : value, page: null })} className={`min-w-0 rounded-full px-1 py-2 text-xs font-black ${sort === value ? 'bg-sky-600 text-white' : 'bg-white text-slate-600'}`}>{label}</button>)}
         </div>
         {loading && !data ? <div className="space-y-3" aria-label="正在加载"><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /></div> : null}
         {error ? <div className="rounded-2xl bg-red-50 p-4 text-sm font-black text-red-600">{error}</div> : null}

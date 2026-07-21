@@ -21,7 +21,7 @@ export function DesktopSiteNavigation({ items, isAdmin }: Readonly<{ items: Site
 export function MobileSiteNavigation({ items }: Readonly<{ items: SiteNavigationItem[] }>) {
   const pathname = usePathname()
   const musicTheme = isMusicRoute(pathname)
-  return <nav data-mobile-main-nav className={`fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 gap-1 rounded-[24px] border p-2 shadow-2xl backdrop-blur-xl transition duration-500 md:hidden ${musicTheme ? 'border-white/10 bg-[#041222]/90 shadow-black/30' : 'border-sky-100 bg-white/92 shadow-sky-900/10'}`}>
+  return <nav data-mobile-main-nav className={`fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 gap-1 rounded-[24px] border p-2 shadow-2xl backdrop-blur-xl transition duration-500 md:hidden ${musicTheme ? 'border-white/10 bg-[#041222]/90 shadow-black/30' : 'border-sky-100 bg-white/95 shadow-sky-900/10'}`}>
     {items.map((item) => {
       const active = isNavigationItemActive(pathname, item.href)
       return <Link key={item.href} href={item.href} title={item.title || item.label} aria-current={active ? 'page' : undefined} className={`flex min-h-12 flex-col items-center justify-center rounded-2xl transition duration-500 ${active ? (musicTheme ? 'bg-white/[0.12] text-white shadow-md shadow-black/25' : 'bg-brand-700 text-white shadow-md shadow-brand-950/15') : (musicTheme ? 'text-slate-200/50 hover:bg-white/[0.07] hover:text-white' : 'text-brand-950/45 hover:bg-sky-50 hover:text-brand-950')}`}><span className="text-lg" aria-hidden>{item.icon}</span><span className="mt-0.5 max-w-full truncate text-[10px] font-black">{item.label}</span></Link>
