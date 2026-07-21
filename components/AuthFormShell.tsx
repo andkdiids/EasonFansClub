@@ -20,29 +20,39 @@ export function AuthFormShell({
 
   return (
     <main
-      className="grid min-h-screen place-items-center bg-cover bg-center px-4 py-6 sm:px-5"
+      className="grid min-h-screen place-items-center bg-cover bg-center px-5 py-10 sm:px-5 sm:py-6"
       style={
-  background
-    ? {
-        backgroundImage: `url(${background})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
+        background
+          ? {
+              backgroundImage: `url(${background})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+            }
+          : undefined
       }
-    : undefined
-}
     >
-      <section className="w-full max-w-md rounded-2xl border border-white/40 bg-white/20 p-4 shadow-2xl backdrop-blur-2xl sm:p-7">
+      <section className="w-full max-w-xs rounded-3xl border border-white/40 bg-white/20 p-5 shadow-2xl backdrop-blur-2xl sm:max-w-md sm:rounded-2xl sm:p-7">
         <Link
-  href="/"
-  className="mb-8 inline-block text-xl font-black text-white drop-shadow-md"
->
-  {siteName}
-</Link>
-        <h1 className="text-3xl font-black text-white drop-shadow-lg">{title}</h1>
-        <p className="mt-3 text-sm leading-6 text-white/90 drop-shadow">{subtitle}</p>
-        <div className="mt-8">{children}</div>
-        <div className="mt-7 border-t border-white/20 pt-5 text-sm text-white/80">
+          href="/"
+          className="mb-4 inline-block text-base font-black text-white drop-shadow-md sm:text-lg"
+        >
+          {siteName}
+        </Link>
+
+        <h1 className="text-xl font-black text-white drop-shadow-lg sm:text-3xl">
+          {title}
+        </h1>
+
+        <p className="mt-2 text-sm leading-5 text-white/90 drop-shadow">
+          {subtitle}
+        </p>
+
+        <div className="mt-5">
+          {children}
+        </div>
+
+        <div className="mt-5 border-t border-white/20 pt-4 text-sm text-white/80">
           {footer}
         </div>
       </section>

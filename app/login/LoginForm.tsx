@@ -10,12 +10,12 @@ type LoginErrors = Partial<{
   form: string
 }>
 
-type IdentifierType = 'account' | 'phone' | 'email'
+type IdentifierType = 'phone' | 'email'
 
 function inferIdentifierType(value: string): IdentifierType {
   if (value.includes('@')) return 'email'
   if (/^\+?\d{7,}$/.test(value)) return 'phone'
-  return 'account'
+ return 'phone'
 }
 
 function safeRedirectPath(path?: string) {
@@ -38,7 +38,12 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
       return
     }
     const saved = window.localStorage.getItem('ecfc-login-type')
-    if (saved === 'account' || saved === 'phone' || saved === 'email') setIdentifierType(saved)
+
+if (saved === 'phone' || saved === 'email') {
+  setIdentifierType(saved)
+} else {
+  setIdentifierType('phone')
+}
   }, [normalizedInitialAccount])
 
   function chooseType(type: IdentifierType) {
@@ -97,12 +102,10 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
   }
 
   return (
-    <form className="space-y-5" onSubmit={handleSubmit} autoComplete="on" noValidate>
-      <FormError message={errors.form} />
+    <form className="space-y-43 sm:space-y-5" onSubmit={handleSubmit} autoComplete="on" noValidate>
 
-      <div className="grid grid-cols-3 gap-2 rounded-xl bg-sky-50 p-1">
+      <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
         {[
-          ['account', '账号登录'],
           ['phone', '手机号登录'],
           ['email', '邮箱登录'],
         ].map(([type, label]) => (
@@ -132,7 +135,7 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
           enterKeyHint="next"
           required
           defaultValue={normalizedInitialAccount}
-          className="mt-2 min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+          className="mt-2 min-h-11 sm:min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
           placeholder={identifierType === 'email' ? '请输入已验证邮箱' : identifierType === 'phone' ? '请输入已绑定手机号' : '请输入登录账号'}
         />
         <FormError message={errors.identifier} />
@@ -149,7 +152,7 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
           autoComplete="current-password"
           enterKeyHint="go"
           required
-          className="mt-2 min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+          className="mt-2 min-h-11 sm:min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
           placeholder="请输入密码"
         />
         <FormError message={errors.password} />
@@ -158,7 +161,7 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
       <button
         type="submit"
         disabled={isSubmitting}
-        className="relative z-10 min-h-12 w-full touch-manipulation rounded-lg bg-brand-700 px-4 py-2 font-black text-white shadow-lg shadow-sky-900/10 disabled:cursor-not-allowed disabled:opacity-60"
+        className="relative z-10 min-h-11 sm:min-h-12 w-full touch-manipulation rounded-lg bg-brand-700 px-4 py-2 font-black text-white shadow-lg shadow-sky-900/10 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSubmitting ? '登录中...' : '登录'}
       </button>
