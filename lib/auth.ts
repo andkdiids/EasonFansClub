@@ -14,6 +14,8 @@ export type SessionUser = {
   username: string
   nickname: string
   avatarUrl?: string | null
+  level?: number
+  experience?: number
   role: UserRole
 }
 
@@ -92,6 +94,8 @@ export async function getCurrentUser() {
             username: true,
             nickname: true,
             avatarUrl: true,
+            level: true,
+            experience: true,
             role: true,
             status: true,
             isDeleted: true,
@@ -109,6 +113,8 @@ export async function getCurrentUser() {
         username: user.username,
         nickname: user.nickname,
         avatarUrl: user.profile?.avatarUrl || user.avatarUrl || null,
+        level: user.level,
+        experience: user.experience,
         role: user.role,
       }
     })

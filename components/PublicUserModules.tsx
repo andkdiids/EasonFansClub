@@ -47,6 +47,12 @@ export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolea
   const state = cache[active]
 
   useEffect(() => {
+    if (!isSelf) return
+    const requested = new URLSearchParams(window.location.search).get('module')
+    if (tabs.some((tab) => tab.key === requested)) setActive(requested as ModuleKey)
+  }, [isSelf])
+
+  useEffect(() => {
     if (cache[active]) return
     const key = active
     let cancelled = false
@@ -72,7 +78,7 @@ export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolea
   }, [active, uid])
 
   return (
-    <section className="space-y-4">
+    <section id="profile-modules" className="space-y-4">
       <div className="flex gap-2 overflow-x-auto rounded-2xl border border-sky-100 bg-white/80 p-2">
         {visibleTabs.map((tab) => (
           <button

@@ -47,7 +47,7 @@ export function ProfileCheckInCalendar() {
   }, [])
 
   return (
-    <div className="h-full rounded-[22px] border border-sky-100 bg-white/85 p-3 pb-4 shadow-sm sm:p-4">
+    <div id="checkin-records" className="h-full scroll-mt-20 rounded-[22px] border border-sky-100 bg-white/85 p-3 pb-4 shadow-sm sm:p-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[22px] font-black leading-tight text-brand-950">本月挂号日历</h2>
         <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700">

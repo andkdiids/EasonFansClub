@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
+import { IcpRecord } from '@/components/IcpRecord'
 import { getSiteAppearance } from '@/lib/site-config'
 import { LoginForm } from './LoginForm'
 
@@ -27,14 +28,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       </Link>
     </div>
 
-    <a
-      href="https://beian.miit.gov.cn"
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-block text-xs text-white/70 transition-colors hover:text-white"
-    >
-      ICP备案号：粤ICP备2026099247号-1
-    </a>
+    <IcpRecord inverse />
   </div>
 }
     >

@@ -3,7 +3,8 @@ import { AppShell } from '@/components/layout/AppShell'
 import { NotificationToast } from '@/components/NotificationToast'
 import { VirtualKeyboardManager } from '@/components/VirtualKeyboardManager'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { getSessionUserFromCookie } from '@/lib/auth'
+import { getCurrentUser, getSessionUserFromCookie } from '@/lib/auth'
+import { calculateGrowthSummary, defaultGrowthLevels, getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { getUnreadSummary } from '@/lib/notifications'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -15,12 +16,16 @@ export const metadata: Metadata = {
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const sessionUser = await getSessionUserFromCookie()
-  const [appearance, unreadSummary, canManageLayout] = sessionUser ? await Promise.all([
+  const cookieUser = await getSessionUserFromCookie()
+  const sessionUser = cookieUser ? await getCurrentUser().catch(() => cookieUser) : null
+  const fallbackGrowth = calculateGrowthSummary(sessionUser?.experience || 0, [...defaultGrowthLevels])
+  const [appearance, unreadSummary, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([
     getSiteAppearance().catch(() => null),
     getUnreadSummary(sessionUser.id).catch(() => ({ total: 0 })),
     hasAdminPermission(sessionUser, 'layout.manage').catch(() => false),
-  ]) : [null, { total: 0 }, false]
+    hasAdminPermission(sessionUser).catch(() => false),
+    getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
+  ]) : [null, { total: 0 }, false, false, fallbackGrowth]
   const logoUrl = publicImageUrl(appearance?.images.navLogoUrl || appearance?.images.logoUrl)
   return (
     <html lang="zh-CN" suppressHydrationWarning>
@@ -29,7 +34,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body>
         <VirtualKeyboardManager />
-        <AppShell user={sessionUser} logoUrl={logoUrl} unreadCount={unreadSummary.total} canManageLayout={canManageLayout}>
+        <AppShell user={sessionUser} growth={growth} logoUrl={logoUrl} unreadCount={unreadSummary.total} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
           {children}
         </AppShell>
         <NotificationToast enabled={Boolean(sessionUser)} />
