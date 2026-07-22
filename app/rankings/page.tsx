@@ -1,4 +1,3 @@
-import { SiteHeader } from '@/components/SiteHeader'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 
@@ -31,8 +30,7 @@ export default async function RankingsPage() {
 
   return (
     <>
-      <SiteHeader />
-      <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-7 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.22em] text-brand-700">Rankings</p>
           <h1 className="mt-3 text-4xl font-black text-brand-950">排行榜</h1>

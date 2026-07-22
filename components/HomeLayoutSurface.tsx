@@ -1,255 +1,83 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { HomeHero } from '@/components/HomeHero'
-import { HomeSystemAnnouncement } from '@/components/HomeSystemAnnouncement'
-import { ModuleFallback } from '@/components/ModuleFallback'
+import { useEffect, useMemo, useState } from 'react'
 import { LikeButton } from '@/components/PostActions'
-import { PageLayoutRenderer, type PageLayoutRendererModules } from '@/components/page-layout/PageLayoutRenderer'
-import { getMood } from '@/lib/daily'
-import type { PageLayoutConfig, PageLayoutModuleConfig } from '@/lib/page-layout/types'
+import { HeroBackground } from '@/components/HeroBackground'
+import { getPageLayoutModules } from '@/components/page-layout/PageLayoutRenderer'
+import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { formatUid } from '@/lib/uid'
 
-type LoadState<T> = { loading: boolean; failed: boolean; data: T }
-type Announcement = {
-  id: string
-  title: string
-  content: string
-  type: string
-  link: string | null
-  buttonUrl: string | null
-}
-type Post = {
-  id: string
-  title: string
-  content: string
-  likeCount: number
-  replyCount: number
-  viewCount: number
-  isPinned: boolean
-  isFeatured: boolean
-  likedByMe: boolean
-  board: { name: string; slug: string }
-  author: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null }
-}
-type DailyMessage = {
-  id: string
-  mood: string | null
-  content: string
-  user: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null }
-}
-type Activity = { id: string; title: string; description: string | null }
-type Track = { id: string; title: string; artist: string }
+type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
+type Post = { id: string; title: string; content: string; likeCount: number; likedByMe: boolean; replyCount: number; viewCount: number; isPinned: boolean; createdAt: string; board: { name: string }; author: { uid: number; nickname: string; profile?: { displayName: string | null } | null } }
+type Activity = { id: string; title: string; description: string | null; startsAt: string | null; endsAt: string | null }
+type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null }
+type Stats = { level: number; experience: number; points: number; consecutiveDays: number; checkIns: { id: string }[]; _count: { checkIns: number } }
+type Payload = { posts: Post[]; activities: Activity[]; albums: Album[]; stats: Stats | null }
 
-function initial<T>(data: T): LoadState<T> {
-  return { loading: true, failed: false, data }
+const growthThresholds = [0, 1000, 3000, 7000, 12000, 18000, 25000]
+
+function growthSummary(experience: number) {
+  const safe = Math.max(0, Math.floor(experience || 0))
+  const index = Math.max(0, growthThresholds.findLastIndex((value) => safe >= value))
+  const current = growthThresholds[index]
+  const next = growthThresholds[index + 1] ?? null
+  return { experience: safe, nextRequiredExp: next, progressPercent: next ? Math.min(100, Math.round(((safe - current) / (next - current)) * 100)) : 100 }
 }
 
-async function loadJson<T>(url: string) {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(url)
-  return (await response.json()) as T
+function useDevice(): PageLayoutDevice {
+  const [device, setDevice] = useState<PageLayoutDevice>('desktop')
+  useEffect(() => {
+    const mobile = matchMedia('(max-width:767px)'); const tablet = matchMedia('(max-width:1100px)')
+    const update = () => setDevice(mobile.matches ? 'mobile' : tablet.matches ? 'tablet' : 'desktop')
+    update(); mobile.addEventListener('change', update); tablet.addEventListener('change', update)
+    return () => { mobile.removeEventListener('change', update); tablet.removeEventListener('change', update) }
+  }, [])
+  return device
 }
 
-function ModuleHeading({ item, fallbackTitle, fallbackSubtitle }: { item: PageLayoutModuleConfig; fallbackTitle: string; fallbackSubtitle?: string }) {
-  const title = item.title || fallbackTitle
-  const subtitle = item.subtitle || fallbackSubtitle
-  return (
-    <div className="mb-4">
-      <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">{item.key}</p>
-      <h2 className="mt-1 text-2xl font-black text-brand-950 sm:text-3xl">{title}</h2>
-      {subtitle ? <p className="mt-2 text-sm font-bold leading-6 text-slate-600">{subtitle}</p> : null}
-    </div>
-  )
-}
-
-export function HomeLayoutSurface({
-  layoutConfig,
-  siteConfig,
-  slides,
-  announcement,
-}: {
-  layoutConfig: PageLayoutConfig
-  siteConfig: SiteAppearanceConfig
-  slides: SiteHeroSlide[]
-  announcement: Announcement | null
-}) {
-  const [posts, setPosts] = useState<LoadState<Post[]>>(initial([]))
-  const [messages, setMessages] = useState<LoadState<DailyMessage[]>>(initial([]))
-  const [activities, setActivities] = useState<LoadState<Activity[]>>(initial([]))
-  const [tracks, setTracks] = useState<LoadState<Track[]>>(initial([]))
-  const [dailyMessagesHidden, setDailyMessagesHidden] = useState(false)
+export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announcement }: { layoutConfig: PageLayoutConfig; siteConfig: SiteAppearanceConfig; slides: SiteHeroSlide[]; announcement: Announcement | null }) {
+  const device = useDevice()
+  const items = useMemo(() => getPageLayoutModules(layoutConfig, device, 'home'), [layoutConfig, device])
+  const layoutModule = (key: string) => items.find((item) => item.key === key)
+  const visible = (key: string) => Boolean(layoutModule(key))
+  const [data, setData] = useState<Payload>({ posts: [], activities: [], albums: [], stats: null })
+  const [failed, setFailed] = useState(false)
+  const hero = slides.filter((item) => item.isVisible).sort((a,b) => a.sortOrder-b.sortOrder)[0]
+  const growth = growthSummary(data.stats?.experience || 0)
+  const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
+  const activityStatus = (item: Activity) => item.endsAt && new Date(item.endsAt) < new Date() ? '已结束' : item.startsAt && new Date(item.startsAt) <= new Date() ? '进行中' : '未开始'
 
   useEffect(() => {
-    loadJson<{ posts: Post[]; messages: DailyMessage[]; activities: Activity[]; tracks: Track[] }>('/api/home')
-      .then((data) => {
-        setPosts({ loading: false, failed: false, data: data.posts })
-        setMessages({ loading: false, failed: false, data: data.messages })
-        setActivities({ loading: false, failed: false, data: data.activities })
-        setTracks({ loading: false, failed: false, data: data.tracks })
-      })
-      .catch(() => {
-        setPosts({ loading: false, failed: true, data: [] })
-        setMessages({ loading: false, failed: true, data: [] })
-        setActivities({ loading: false, failed: true, data: [] })
-        setTracks({ loading: false, failed: true, data: [] })
-      })
+    const controller = new AbortController()
+    fetch('/api/home', { cache: 'no-store', signal: controller.signal }).then((response) => { if (!response.ok) throw new Error(); return response.json() }).then(setData).catch((error) => { if (error.name !== 'AbortError') setFailed(true) })
+    return () => controller.abort()
   }, [])
 
-  useEffect(() => setDailyMessagesHidden(window.localStorage.getItem('home:dailyMessages:hidden') === '1'), [])
-
-  function renderModule(item: PageLayoutModuleConfig) {
-    if (item.key === 'home.hero') {
-      const heroSlides = item.title || item.subtitle
-        ? slides.map((slide, index) => (index === 0 ? { ...slide, title: item.title || slide.title, subtitle: item.subtitle || slide.subtitle } : slide))
-        : slides
-      return <HomeHero slides={heroSlides} siteName={siteConfig.text.siteName} buttonColor={siteConfig.colors.button} styleConfig={siteConfig.heroStyle} />
-    }
-
-    if (item.key === 'home.announcement') return <HomeSystemAnnouncement announcement={announcement} />
-
-    const quickEntries: Record<string, [string, string, string]> = {
-      'home.checkinEntry': [siteConfig.text.homePrimaryButton || '今日挂号', siteConfig.text.checkinCopy || '留下今天的心情', '/checkin'],
-      'home.forumEntry': [siteConfig.text.homeSecondaryButton || '去E院广场看看', siteConfig.text.forumCopy || '帖子、留言、慢慢说。', '/forum'],
-      'home.musicEntry': ['EasMusic', siteConfig.text.musicCopy || '一首歌，也是一段故事。', '/music'],
-    }
-    if (quickEntries[item.key]) {
-      const [title, copy, href] = quickEntries[item.key]
-      return (
-        <Link href={href} className="flex min-h-28 flex-col justify-between rounded-2xl border border-sky-100 bg-white/86 p-4 shadow-sm transition hover:-translate-y-1">
-          <div><h2 className="text-lg font-black text-brand-950">{item.title || title}</h2><p className="mt-1 line-clamp-2 text-sm font-bold leading-6 text-slate-600">{item.subtitle || copy}</p></div>
-          <span className="mt-3 w-fit rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black text-brand-700">打开</span>
-        </Link>
-      )
-    }
-
-    if (item.key === 'home.featuredPosts' || item.key === 'home.latestPosts') {
-      return (
-        <div>
-          <div className="flex items-end justify-between gap-4">
-            <ModuleHeading item={item} fallbackTitle={item.key === 'home.latestPosts' ? '最新动态' : 'E院广场精选'} />
-            <Link href="/posts/new" className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">发布帖子</Link>
-          </div>
-          {posts.failed ? <ModuleFallback /> : null}
-          {posts.loading ? <ModuleFallback title="正在加载帖子..." /> : null}
-          {!posts.loading && !posts.failed ? (
-            <div className="grid grid-cols-1 items-start gap-3.5 md:grid-cols-2 md:gap-4">
-              {posts.data.slice(0, 4).map((post) => {
-                const authorName = post.author.profile?.displayName || post.author.nickname
-                return (
-                  <article data-featured-post-card key={post.id} className="relative min-w-0 cursor-pointer rounded-2xl border border-sky-100 bg-white/88 px-4 py-4 shadow-sm transition duration-200 hover:-translate-y-px hover:border-sky-200 hover:shadow-md active:scale-[0.99] sm:p-5">
-                    <Link data-post-card-link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-[1] rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2" />
-                    <div className="pointer-events-none relative z-[2] mb-2 flex w-fit flex-wrap gap-2">
-                      {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">Pinned</span> : null}
-                      {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">Featured</span> : null}
-                      <Link href={`/forum?board=${encodeURIComponent(post.board.slug)}`} className="pointer-events-auto relative z-[3] rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
-                    </div>
-                    <h3 className="pointer-events-none relative z-[2] line-clamp-2 text-lg font-black text-brand-950 sm:text-xl">{post.title}</h3>
-                    {post.content.trim() ? <p className="pointer-events-none relative z-[2] mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p> : null}
-                    <div className="pointer-events-none relative z-[2] mt-4 flex min-w-0 items-center gap-2 text-xs font-bold text-slate-500">
-                      <Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3] max-w-[32%] truncate text-brand-950">{authorName}</Link>
-                      <span className="shrink-0">回复 {post.replyCount}</span><span className="shrink-0">浏览 {post.viewCount}</span>
-                      <div data-post-like-control className="pointer-events-auto relative z-[3] ml-auto shrink-0 [&_button]:px-3 [&_button]:py-1.5"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /></div>
-                    </div>
-                  </article>
-                )
-              })}
-              {!posts.data.length ? <ModuleFallback title={siteConfig.text.emptyText} /> : null}
-            </div>
-          ) : null}
-        </div>
-      )
-    }
-
-    if (item.key === 'home.dailyMessages') {
-      if (dailyMessagesHidden) return null
-      return (
-        <div className="layout-card rounded-[24px] bg-white/78 shadow-xl shadow-sky-900/5 backdrop-blur">
-          <div className="flex items-start justify-between gap-3"><ModuleHeading item={item} fallbackTitle="E友留言精选" fallbackSubtitle="今天大家留下的声音。" /><button type="button" onClick={() => { window.localStorage.setItem('home:dailyMessages:hidden', '1'); setDailyMessagesHidden(true) }} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-slate-500">关闭</button></div>
-          <div className="layout-stack grid">
-            {messages.failed ? <ModuleFallback /> : null}
-            {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
-            {!messages.loading && !messages.failed && messages.data.map((message) => {
-              const mood = getMood(message.mood)
-              const name = message.user.profile?.displayName || message.user.nickname
-              return (
-                <article key={message.id} className="rounded-2xl bg-sky-50/80 p-4">
-                  <p className="font-black text-brand-950">{mood ? `${mood.icon} ` : ''}{name} Lv.{message.user.level}</p>
-                  <p className="mt-2 line-clamp-2 leading-7 text-slate-600">{message.content}</p>
-                </article>
-              )
-            })}
-            {!messages.loading && !messages.failed && !messages.data.length ? <ModuleFallback title={siteConfig.text.emptyText} /> : null}
+  return <div className="community-home">
+      <section className="community-hero">
+        <HeroBackground visual={siteConfig.heroVisuals.home} fallbackImageUrl={hero?.imageUrl} priority />{!siteConfig.heroVisuals.home.enabled || (!siteConfig.heroVisuals.home.imageUrl && !hero?.imageUrl) ? <div className="community-hero-fallback"/> : null}<div className="community-hero-overlay"/>
+        <div className="community-hero-copy"><p>WELCOME BACK</p><h1>EASON<span>FANS CLUB</span></h1><h2>全球陈奕迅粉丝社区 · 私家E院</h2><em>C’mon in~</em><a href="#community-content" className="hero-primary-button">浏览今日内容 <span aria-hidden>›</span></a></div>
+      </section>
+      <div id="community-content" className="community-content">
+        {announcement&&visible('home.announcement')?<Link href={announcement.link||announcement.buttonUrl||'/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link>:null}
+        {visible('home.checkinEntry')?<section className="community-stats" aria-label="用户数据">
+          <Link href="/checkin" className="stat-checkin"><span>今日挂号</span><strong>{data.stats?.checkIns.length?'已签到':'去签到'}</strong><small>{data.stats?`连续签到 ${data.stats.consecutiveDays} 天 · 累计 ${data.stats._count.checkIns} 天`:'正在读取签到数据'}</small>{data.stats?.checkIns.length?<i>✓</i>:null}</Link>
+          <div><span>等级</span><strong>Lv.{data.stats?.level??'—'}</strong><div className="stat-progress"><i style={{width:`${growth.progressPercent}%`}}/></div><small>{growth.nextRequiredExp?`${fmt(growth.experience)} / ${fmt(growth.nextRequiredExp)}`:fmt(growth.experience)}</small></div>
+          <div><span>经验值</span><strong>{data.stats?fmt(data.stats.experience):'—'}</strong></div>
+          <div><span>E积分</span><strong>{data.stats?fmt(data.stats.points):'—'}</strong></div>
+          <div className="stat-total"><span>累计签到</span><strong>{data.stats?`${fmt(data.stats._count.checkIns)} 天`:'—'}</strong><Link href="/checkin">查看签到记录 ›</Link></div>
+        </section>:null}
+        {failed?<p className="community-error">部分社区内容暂时无法载入，请稍后刷新。</p>:null}
+        <div className="community-columns">
+          {visible('home.featuredPosts')||visible('home.latestPosts')?<section className="community-panel posts-panel"><header><h2>{layoutModule('home.featuredPosts')?.title||'精选帖子'}</h2><Link href="/forum">更多 ›</Link></header><div className="post-list">{data.posts.slice(0,4).map((post)=><article data-featured-post-card key={post.id}><Link data-post-card-link href={`/posts/${post.id}`} className="post-row-link absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2" aria-label={`查看帖子：${post.title}`}/><span className="post-thumb pointer-events-none relative z-[2]">{post.title[0]}</span><div className="post-copy pointer-events-none relative z-[2]"><h3>{post.isPinned?<b>置顶</b>:null}<span>[{post.board.name}]</span> {post.title}</h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]">{post.author.profile?.displayName||post.author.nickname}</Link> · {new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]"><span>▢ {post.replyCount}</span><span>◇ {fmt(post.viewCount)}</span><div data-post-like-control className="pointer-events-auto relative z-[3]"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount}/></div></div></article>)}{!data.posts.length&&!failed?<p className="community-empty">{siteConfig.text.emptyText}</p>:null}</div></section>:null}
+          <div className="community-right-column">
+            {visible('home.music')||visible('home.musicEntry')?<section className="community-panel music-panel"><header><h2>{layoutModule('home.music')?.title||'EasMusic 精选'}</h2><Link href="/music/albums">更多 ›</Link></header><div className="album-strip">{data.albums.map((album)=><Link key={album.id} href={`/music/album/${album.id}`}><span>{album.coverUrl?<Image src={album.coverUrl} alt={`${album.name}专辑封面`} fill sizes="(max-width:767px) 35vw, 130px" className="object-cover"/>:'♪'}</span><strong>{album.name}</strong><small>{album.releaseYear}</small></Link>)}{!data.albums.length&&!failed?<p className="community-empty">暂无已发布专辑。</p>:null}</div></section>:null}
+            {visible('home.culture')?<section className="community-panel concert-panel"><header><h2>{layoutModule('home.culture')?.title||'近期演唱会'}</h2><Link href="/activities">更多 ›</Link></header><div>{data.activities.map((activity)=><Link key={activity.id} href="/activities"><time>{activity.startsAt?new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit'}).format(new Date(activity.startsAt)):'待定'}</time><span><strong>{activity.title}</strong><small>{activity.description||'详情请见活动页面'}</small></span><b>{activityStatus(activity)}</b></Link>)}{!data.activities.length&&!failed?<p className="community-empty">暂无已发布活动。</p>:null}</div></section>:null}
           </div>
         </div>
-      )
-    }
-
-    if (item.key === 'home.music') {
-      return (
-        <div className="layout-card rounded-[24px] bg-white/78 shadow-xl shadow-sky-900/5 backdrop-blur">
-          <ModuleHeading item={item} fallbackTitle="EasMusic" fallbackSubtitle="一首歌，也是一段故事。" />
-          <div className="layout-stack grid">
-            {tracks.failed ? <ModuleFallback /> : null}
-            {tracks.loading ? <ModuleFallback title="正在加载音乐..." /> : null}
-            {!tracks.loading && !tracks.failed && tracks.data.map((track) => (
-              <Link key={track.id} href="/music" className="rounded-2xl bg-sky-50/80 p-4 font-black text-slate-700">{track.title}</Link>
-            ))}
-          </div>
-        </div>
-      )
-    }
-
-    if (item.key === 'home.culture') {
-      return (
-        <div className="layout-card rounded-[24px] bg-white/78 shadow-xl shadow-sky-900/5 backdrop-blur">
-          <ModuleHeading item={item} fallbackTitle="活动与文化" fallbackSubtitle="下一场活动和新的文化内容。" />
-          {activities.failed ? <ModuleFallback /> : null}
-          {activities.loading ? <p className="mt-4 text-base font-bold leading-7 text-slate-600">正在加载活动...</p> : null}
-          {!activities.loading && !activities.failed ? (
-            <p className="mt-4 text-base font-bold leading-7 text-slate-600">{activities.data[0]?.title || '下一场活动，正在准备。'}</p>
-          ) : null}
-        </div>
-      )
-    }
-
-      if (item.key === 'home.footer') {
-      return (
-        <footer className="pb-8 text-center text-sm text-slate-500">
-          <div className="font-bold">
-            {item.title || siteConfig.text.footerText}
-          </div>
-
-          <a
-            href="https://beian.miit.gov.cn"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-block transition-colors hover:text-sky-500"
-          >
-            ICP备案号：粤ICP备2026099247号-1
-          </a>
-        </footer>
-      )
-    }
-
-    return null
-  }
-
-  const rendererModules: PageLayoutRendererModules = {
-    'home.hero': renderModule,
-    'home.announcement': renderModule,
-    'home.checkinEntry': renderModule,
-    'home.forumEntry': renderModule,
-    'home.musicEntry': renderModule,
-    'home.featuredPosts': renderModule,
-    'home.latestPosts': renderModule,
-    'home.dailyMessages': renderModule,
-    'home.music': renderModule,
-    'home.culture': renderModule,
-    'home.footer': renderModule,
-  }
-
-  return <PageLayoutRenderer pageKey="home" config={layoutConfig} modules={rendererModules} className="mx-auto max-w-7xl" />
+      </div>
+  </div>
 }

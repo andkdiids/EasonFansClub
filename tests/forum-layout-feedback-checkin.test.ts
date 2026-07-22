@@ -200,7 +200,7 @@ test('论坛分页窗口始终显示连续页码并在边界正确收缩', () =>
   assert.equal(buildForumHref('/forum', 'board=concert&page=2', { sort: 'latest', page: null }), '/forum?board=concert&sort=latest')
 })
 
-test('论坛翻页同步 URL、重新请求并用新 props 刷新双列列表', () => {
+test('论坛翻页同步 URL、重新请求并用新 props 刷新扁平单列列表', () => {
   const forumHome = readFileSync('components/ForumHome.tsx', 'utf8')
   const postList = readFileSync('components/PostList.tsx', 'utf8')
   assert.match(forumHome, /page: String\(page\)/)
@@ -208,7 +208,8 @@ test('论坛翻页同步 URL、重新请求并用新 props 刷新双列列表', 
   assert.match(forumHome, /label="下一页" page=\{page \+ 1\}/)
   assert.match(forumHome, /responsiveColumns/)
   assert.match(postList, /useEffect\(\(\) => setVisiblePosts\(posts\), \[posts\]\)/)
-  assert.match(postList, /md:grid-cols-2/)
+  assert.match(postList, /className="post-list-flat"/)
+  assert.doesNotMatch(postList, /md:grid-cols-2/)
 })
 
 test('好友挂号留言只查询当前用户好友且空好友缓存不与公开缓存碰撞', () => {

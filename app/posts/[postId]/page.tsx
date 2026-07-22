@@ -4,7 +4,6 @@ import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '
 import { BackButton } from '@/components/BackButton'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
-import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
@@ -19,8 +18,7 @@ const POST_DETAIL_REPLY_LIMIT = 50
 function PostLoadFallback() {
   return (
     <>
-      <SiteHeader />
-      <main className="mx-auto max-w-4xl px-5 py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
         <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post</p>
           <h1 className="mt-3 text-3xl font-black text-brand-950">帖子暂时无法加载，请稍后重试</h1>
@@ -112,10 +110,9 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
 
   return (
     <>
-      <SiteHeader user={user} />
-      <main className="mx-auto max-w-4xl space-y-6 px-5 py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         <BackButton fallbackHref="/forum" />
-        <article className="rounded-2xl border border-sky-100 bg-white/85 p-7 shadow-sm">
+        <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
             {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}

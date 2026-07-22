@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
-import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
@@ -89,8 +88,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <SiteHeader user={user} />
-      <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-7 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.22em] text-brand-700">Friends</p>
           <h1 className="mt-3 text-4xl font-black text-brand-950">我的好友</h1>

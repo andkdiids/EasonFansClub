@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { SiteHeader } from '@/components/SiteHeader'
 import { PasswordManagement } from '@/components/PasswordManagement'
 import { getAccountSecuritySettings } from '@/lib/account-security'
 import { getCurrentUser } from '@/lib/auth'
@@ -62,8 +61,7 @@ export default async function SecurityPage() {
 
   return (
     <>
-      <SiteHeader user={session} />
-      <main className="mx-auto max-w-3xl px-5 py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
         <section className="rounded-[32px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
           <p className="text-sm font-black tracking-[0.18em] text-brand-700">账户恢复</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950">账号恢复方式</h1>

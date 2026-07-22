@@ -4,15 +4,18 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicPlayer } from '@/components/music/MusicPlayer'
-import { SiteHeader } from '@/components/SiteHeader'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { prisma } from '@/lib/prisma'
+import { getSiteAppearance } from '@/lib/site-config'
 
 export const dynamic = 'force-dynamic'
 
 export default async function MusicSongPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const song = await prisma.musicSong.findFirst({ where: { id, album: { status: 'PUBLISHED' } }, include: { album: true } })
+  const [song, config] = await Promise.all([
+    prisma.musicSong.findFirst({ where: { id, album: { status: 'PUBLISHED' } }, include: { album: true } }),
+    getSiteAppearance(),
+  ])
   if (!song) notFound()
 
   const coverUrl = song.album.coverUrl
@@ -21,7 +24,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
   const credits = [['作词', song.lyricist], ['作曲', song.composer], ['编曲', song.arranger]]
   const songStory = song.description || song.story
 
-  return <><SiteHeader /><MusicArchiveShell maxWidth="max-w-5xl">
+  return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>
     <Link href={`/music/album/${song.albumId}`} className="inline-flex items-center gap-2 text-sm font-black text-sky-300/80 transition hover:text-white">← 返回《{song.album.name}》</Link>
 
     <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
@@ -51,5 +54,5 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
     </MusicDetailReveal>
 
     {songStory ? <MusicDetailReveal delay={0.2} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SONG STORY</p><h2 className="mt-2 text-3xl font-black text-white">歌曲故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{songStory}</p></MusicDetailReveal> : null}
-  </MusicArchiveShell></>
+  </MusicArchiveShell>
 }

@@ -56,9 +56,9 @@ export function UserNotificationMenu({
     return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('unread-summary:refresh', listener) }
   }, [])
 
-  const itemClass = 'flex min-h-11 items-center rounded-xl px-4 py-2 text-sm font-bold text-slate-700 hover:bg-sky-50'
+  const itemClass = 'flex min-h-10 items-center rounded-sm px-3 py-2 text-sm font-bold text-slate-700 hover:bg-sky-50'
   return <details data-user-menu className="relative z-[200] shrink-0">
-    <summary className="site-user-menu-trigger flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full bg-sky-50 px-2 py-1 pr-3 transition-colors duration-500">
+    <summary className="site-user-menu-trigger flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-sm border border-sky-100 bg-white px-1.5 py-1 pr-3">
       <span className="relative">
         <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
           {avatarUrl ? <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" /> : displayName.slice(0, 1).toUpperCase()}
@@ -67,7 +67,7 @@ export function UserNotificationMenu({
       </span>
       <span className="site-user-menu-name hidden max-w-28 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block">{displayName}</span>
     </summary>
-    <div data-user-menu-panel className="pointer-events-auto absolute right-0 z-[200] mt-3 w-60 rounded-2xl border border-sky-100 bg-white p-2 shadow-2xl shadow-sky-950/20">
+    <div data-user-menu-panel className="pointer-events-auto absolute right-0 z-[200] mt-2 w-60 rounded-sm border border-sky-100 bg-white p-2 shadow-sm">
       <Link href="/profile" className={itemClass}>个人主页</Link>
       <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} /></Link>
       <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} /></Link>

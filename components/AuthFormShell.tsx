@@ -1,11 +1,17 @@
 import Link from 'next/link'
 import { publicImageUrl } from '@/lib/images'
+import { BrandMark } from '@/components/BrandMark'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { HeroBackground } from '@/components/HeroBackground'
+import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
 export function AuthFormShell({
   title,
   subtitle,
   siteName = '私家E院',
   backgroundUrl,
+  heroVisual,
+  logoUrl,
   children,
   footer,
 }: Readonly<{
@@ -13,49 +19,24 @@ export function AuthFormShell({
   subtitle: string
   siteName?: string
   backgroundUrl?: string | null
+  heroVisual?: SiteHeroVisualConfig | null
+  logoUrl?: string | null
   children: React.ReactNode
   footer: React.ReactNode
 }>) {
-  const background = publicImageUrl(backgroundUrl)
-
   return (
-    <main
-      className="grid min-h-screen place-items-center bg-cover bg-center px-5 py-10 sm:px-5 sm:py-6"
-      style={
-        background
-          ? {
-              backgroundImage: `url(${background})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundRepeat: 'no-repeat',
-            }
-          : undefined
-      }
-    >
-      <section className="w-full max-w-xs rounded-3xl border border-white/40 bg-white/20 p-5 shadow-2xl backdrop-blur-2xl sm:max-w-md sm:rounded-2xl sm:p-7">
-        <Link
-          href="/"
-          className="mb-4 inline-block text-base font-black text-white drop-shadow-md sm:text-lg"
-        >
-          {siteName}
-        </Link>
-
-        <h1 className="text-xl font-black text-white drop-shadow-lg sm:text-3xl">
-          {title}
-        </h1>
-
-        <p className="mt-2 text-sm leading-5 text-white/90 drop-shadow">
-          {subtitle}
-        </p>
-
-        <div className="mt-5">
-          {children}
-        </div>
-
-        <div className="mt-5 border-t border-white/20 pt-4 text-sm text-white/80">
-          {footer}
-        </div>
-      </section>
+    <main className="auth-page">
+      <HeroBackground visual={heroVisual} fallbackImageUrl={backgroundUrl} priority />
+      <div className="auth-page-overlay" />
+      <header className="auth-page-header"><Link href="/" aria-label={siteName}><BrandMark logoUrl={publicImageUrl(logoUrl)} inverse compact /></Link><ThemeToggle className="hero-icon-button" /></header>
+      <div className="auth-page-layout">
+        <section className="auth-brand-copy" aria-label="网站介绍"><p>EASON FANS CLUB</p><h2>听见 Eason，<br/>也听见自己。</h2><span>全球陈奕迅粉丝社区 · 私家E院</span></section>
+        <section className="auth-form-panel">
+          <div className="auth-form-heading"><p>MEMBER ACCESS</p><h1>{title}</h1><span>{subtitle}</span></div>
+          <div className="auth-form-content">{children}</div>
+          <div className="auth-form-footer">{footer}</div>
+        </section>
+      </div>
     </main>
   )
 }

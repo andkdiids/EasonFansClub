@@ -86,13 +86,13 @@ export function ProfileHeader({
   const admissionInfo = formatAdmissionInfo(createdAt)
 
   return (
-    <section className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/88 shadow-sm">
+    <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
       <div
         className="relative isolate h-[240px] overflow-hidden bg-slate-900 sm:h-[280px]"
         style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
       >
         {!backgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
-        <div className="absolute bottom-4 left-4 w-fit min-w-[190px] max-w-[calc(100%_-_2rem)] rounded-[20px] border border-white/12 bg-black/35 p-3 text-white shadow-md shadow-slate-950/20 backdrop-blur-md sm:bottom-5 sm:left-5 sm:max-w-[380px]">
+        <div className="absolute bottom-4 left-4 w-fit min-w-[190px] max-w-[calc(100%_-_2rem)] rounded-sm border border-white/20 bg-black/60 p-3 text-white sm:bottom-5 sm:left-5 sm:max-w-[380px]">
           <div className="flex min-w-0 items-center gap-3">
             {avatarUrl ? (
               <img src={avatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
@@ -131,7 +131,7 @@ export function ProfileStatsGrid({ items, compact = false }: ProfileStatsGridPro
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {items.map(([label, value]) => (
-        <div key={label} className={`rounded-2xl border border-sky-100 bg-sky-50/70 text-center ${compact ? 'p-3' : 'p-4'}`}>
+        <div key={label} className={`rounded-sm border border-sky-100 bg-sky-50/70 text-center ${compact ? 'p-3' : 'p-4'}`}>
           <p className={`${compact ? 'text-lg' : 'text-xl sm:text-2xl'} font-black text-brand-950`}>{value}</p>
           <p className="mt-1 text-[11px] font-black text-slate-500 sm:text-xs">{label}</p>
         </div>

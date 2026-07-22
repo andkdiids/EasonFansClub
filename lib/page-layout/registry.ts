@@ -20,7 +20,7 @@ const fullGrid = grid(0, 0, 12, 3)
 const mobileGrid = grid(0, 0, 4, 2)
 
 export const pageLayoutPages: Record<PageLayoutPageKey, { name: string; description: string; path: string }> = {
-  home: { name: '首页', description: '前台首页模块编排', path: '/' },
+  home: { name: '社区首页', description: '社区首页业务模块编排', path: '/community' },
   checkin: { name: '每日挂号', description: '每日挂号页面模块编排', path: '/checkin' },
   forum: { name: 'E院广场', description: '单页论坛首页布局', path: '/forum' },
   announcement: { name: '公告', description: '公告板块页面基础布局', path: '/boards/announcements' },

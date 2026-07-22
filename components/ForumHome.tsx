@@ -99,38 +99,40 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   const emptyText = sort === 'featured' ? '当前筛选下暂无精华帖子' : sort === 'pinned' ? '当前筛选下暂无置顶帖子' : '当前筛选下暂无帖子'
 
   return (
-    <section className="space-y-4" data-forum-main>
-      <header className="rounded-[28px] border border-sky-100 bg-white/88 p-5 shadow-sm sm:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <section className="forum-page" data-forum-main>
+      <header className="forum-hero">
+        <div className="forum-hero-inner">
+        <div className="flex flex-wrap items-end justify-between gap-5">
           <div className="min-w-0">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">EASON FANS CLUB</p>
-            <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">E院广场{data?.selectedBoard ? ` / ${data.selectedBoard.name}` : ''}</h1>
-            <p className="mt-2 text-sm font-bold leading-6 text-slate-500">浏览全部公开分区，筛选、搜索并参与讨论。</p>
+            <p className="forum-hero-kicker">EASON FANS CLUB</p>
+            <h1>E院广场{data?.selectedBoard ? ` / ${data.selectedBoard.name}` : ''}</h1>
+            <p>浏览公开分区，筛选、搜索并参与讨论。</p>
           </div>
-          {data?.permissions.canCreatePost ? <Link href={createHref} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">发布帖子</Link> : null}
+          {data?.permissions.canCreatePost ? <Link href={createHref} className="flat-button-primary">发布帖子</Link> : null}
         </div>
-        <label className="mt-5 block">
+        <label className="forum-search">
           <span className="sr-only">搜索帖子</span>
-          <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="搜索标题和摘要" className="h-11 w-full rounded-2xl border border-sky-100 bg-sky-50/60 px-4 text-sm font-bold outline-none focus:border-sky-300" />
+          <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="搜索标题和摘要" />
         </label>
+        </div>
       </header>
 
-      <nav aria-label="论坛分区" className="flex grid grid-cols-3 gap-2 lg:flex lg:flex-nowrap lg:justify-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-[22px] border border-sky-100 bg-white/82 p-3 shadow-sm">
-        <button type="button" onClick={() => updateQuery({ board: null, page: null })} className={`w-full rounded-full px-4 py-2 text-sm font-black ${!board ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>全部</button>
+      <nav aria-label="论坛分区" className="forum-board-nav">
+        <button type="button" onClick={() => updateQuery({ board: null, page: null })} aria-current={!board ? 'page' : undefined}>全部</button>
         {(data?.boards || []).map((item) => (
-          <button key={item.id} type="button" onClick={() => updateQuery({ board: item.slug, page: null })} className={`w-full rounded-full px-4 py-2 text-sm font-black ${board === item.slug ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>
+          <button key={item.id} type="button" onClick={() => updateQuery({ board: item.slug, page: null })} aria-current={board === item.slug ? 'page' : undefined}>
             {item.name}<span className="ml-1 opacity-70">{item.postCount}</span>
           </button>
         ))}
       </nav>
 
-      <div ref={contentRef} className="scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/72 p-3 shadow-sm sm:p-5">
-        <div className="mb-4 grid grid-cols-5 gap-2">
-          {sortOptions.map(([value, label]) => <button key={value} type="button" onClick={() => updateQuery({ sort: value === 'latest' ? null : value, page: null })} className={`min-w-0 rounded-full px-1 py-2 text-xs font-black ${sort === value ? 'bg-sky-600 text-white' : 'bg-white text-slate-600'}`}>{label}</button>)}
+      <div ref={contentRef} className="forum-content scroll-mt-24">
+        <div className="forum-sort-tabs">
+          {sortOptions.map(([value, label]) => <button key={value} type="button" onClick={() => updateQuery({ sort: value === 'latest' ? null : value, page: null })} aria-current={sort === value ? 'page' : undefined}>{label}</button>)}
         </div>
-        {loading && !data ? <div className="space-y-3" aria-label="正在加载"><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /><div className="h-36 animate-pulse rounded-2xl bg-sky-50" /></div> : null}
-        {error ? <div className="rounded-2xl bg-red-50 p-4 text-sm font-black text-red-600">{error}</div> : null}
-        {loading && data ? <p aria-live="polite" className="mb-3 rounded-xl bg-sky-50 px-3 py-2 text-center text-xs font-black text-brand-700">正在加载第 {page} 页…</p> : null}
+        {loading && !data ? <div className="forum-loading" aria-label="正在加载"><div /><div /><div /></div> : null}
+        {error ? <div className="flat-error-state">{error}</div> : null}
+        {loading && data ? <p aria-live="polite" className="forum-loading-note">正在加载第 {page} 页…</p> : null}
         {!error && data ? <PostList posts={data.posts} total={data.total} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
         {data && data.totalPages > 1 ? (
           <nav aria-label="论坛分页" className="mt-5 flex flex-wrap items-center justify-center gap-1.5">

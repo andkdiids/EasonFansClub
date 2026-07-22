@@ -16,6 +16,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       subtitle={config.text.loginHint}
       siteName={config.text.siteName}
       backgroundUrl={config.images.loginBackgroundUrl}
+      heroVisual={config.heroVisuals.login}
+      logoUrl={config.images.navLogoUrl || config.images.logoUrl}
       footer={
   <div className="space-y-3 text-center">
     <div>

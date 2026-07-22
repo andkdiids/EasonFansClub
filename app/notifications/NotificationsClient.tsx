@@ -143,7 +143,7 @@ export function NotificationsClient({
     const target = getNotificationTarget(item)
     const content = (
       <article
-        className={`group relative overflow-hidden rounded-[24px] border p-4 shadow-sm transition sm:p-5 ${
+        className={`notification-list-item group relative overflow-hidden rounded-sm border p-4 transition sm:p-5 ${
           item.isRead
             ? `border-sky-100 bg-white/82 ${target ? 'hover:bg-white' : 'opacity-80'}`
             : 'border-sky-200 bg-sky-50/88 shadow-sky-900/5'
@@ -180,13 +180,13 @@ export function NotificationsClient({
         ) : (
           <div className="min-h-12 w-full cursor-default text-left" aria-disabled="true">{content}</div>
         )}
-        <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-full bg-white/90 px-3 py-1.5 text-xs font-black text-slate-500 shadow-sm hover:text-red-600">清除</button>
+        <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600">清除</button>
       </div>
     )
   }
 
   return (
-    <section className="space-y-5">
+    <section className="notification-center space-y-5">
       <UserPersonalizationSettings initialCheckinMoodEnabled={initialCheckinMoodEnabled} />
       <div className="rounded-[28px] border border-sky-100 bg-white/78 p-5 shadow-sm shadow-sky-900/5 backdrop-blur-xl sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -206,16 +206,16 @@ export function NotificationsClient({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flat-tabs flex overflow-x-auto border-b border-sky-100">
         {(Object.keys(categoryLabels) as NotificationCategory[]).map((category) => (
           <button
             key={category}
             type="button"
             onClick={() => setActiveCategory(category)}
-            className={`rounded-full px-4 py-2 text-sm font-black transition ${
+            className={`rounded-none border-b-2 px-4 py-2 text-sm font-black transition ${
               activeCategory === category
-                ? 'bg-brand-950 text-white shadow-sm'
-                : 'border border-sky-100 bg-white/82 text-brand-700 hover:bg-sky-50'
+                ? 'border-brand-700 text-brand-700'
+                : 'border-transparent text-slate-500 hover:bg-sky-50'
             }`}
           >
             {categoryLabels[category]} {categoryCounts[category]}

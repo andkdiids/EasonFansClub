@@ -44,6 +44,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/changelog': 'changelog_manage',
   '/admin/notifications': 'notification_manage',
   '/admin/appearance': 'site_config_manage',
+  '/admin/visuals': 'site_config_manage',
   '/admin/layout-editor': 'layout.manage',
   '/admin/admins': 'admin_manage',
   '/admin/growth': 'growth_manage',

@@ -4,7 +4,6 @@ import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { ProfileCheckInCalendar, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
-import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { withDbTimeout } from '@/lib/db-timeout'
@@ -77,7 +76,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
   ])
   const streaks = calculateCheckinStreaks(checkInHistory.map((item) => item.checkinDateKey))
-  const headerUser = { ...user, avatarUrl: avatar || user.avatarUrl || null, nickname: displayName }
   const profileEditorInitialProfile = {
     nickname: displayName,
     avatarUrl: avatar || '',
@@ -105,9 +103,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
   return (
     <>
-      <SiteHeader user={headerUser} />
       <ProfileEditorDrawer initialOpen={query?.edit === '1'} initialProfile={profileEditorInitialProfile} hideTrigger />
-      <main className="mx-auto max-w-[1200px] space-y-4 px-4 py-5 sm:px-5 sm:py-6">
+      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-5 sm:py-6">
         <ProfileHeader
           displayName={displayName}
           uid={profile.uid}

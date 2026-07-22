@@ -13,9 +13,9 @@ function withNoStoreHeaders(response: NextResponse) {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (pathname === '/' && !request.cookies.has(authCookieName)) {
+  if ((pathname === '/' || pathname === '/welcome' || pathname === '/community') && !request.cookies.has(authCookieName)) {
     const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirect', '/')
+    loginUrl.searchParams.set('redirect', '/welcome')
     return withNoStoreHeaders(NextResponse.redirect(loginUrl))
   }
 
@@ -23,5 +23,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/login', '/register', '/api/auth/:path*'],
+  matcher: ['/', '/welcome', '/community', '/login', '/register', '/api/auth/:path*'],
 }

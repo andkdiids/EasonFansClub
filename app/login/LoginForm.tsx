@@ -19,9 +19,8 @@ function inferIdentifierType(value: string): IdentifierType {
 }
 
 function safeRedirectPath(path?: string) {
-  if (!path || !path.startsWith('/') || path.startsWith('//')) return '/'
-  if (path === '/login' || path.startsWith('/login?') || path === '/register' || path.startsWith('/register?')) return '/'
-  return path
+  if (path === '/welcome') return path
+  return '/welcome'
 }
 
 export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redirectTo?: string; initialAccount?: string }>) {
@@ -102,9 +101,9 @@ if (saved === 'phone' || saved === 'email') {
   }
 
   return (
-    <form className="space-y-43 sm:space-y-5" onSubmit={handleSubmit} autoComplete="on" noValidate>
+    <form className="auth-form-stack" onSubmit={handleSubmit} autoComplete="on" noValidate>
 
-      <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
+      <div className="auth-method-tabs" role="tablist" aria-label="登录方式">
         {[
           ['phone', '手机号登录'],
           ['email', '邮箱登录'],
@@ -112,10 +111,9 @@ if (saved === 'phone' || saved === 'email') {
           <button
             key={type}
             type="button"
+            role="tab"
             onClick={() => chooseType(type as IdentifierType)}
-            className={`rounded-lg px-3 py-2 text-sm font-black transition ${
-              identifierType === type ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500 hover:text-brand-700'
-            }`}
+            aria-selected={identifierType === type}
           >
             {label}
           </button>
@@ -135,7 +133,7 @@ if (saved === 'phone' || saved === 'email') {
           enterKeyHint="next"
           required
           defaultValue={normalizedInitialAccount}
-          className="mt-2 min-h-11 sm:min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+          className="auth-input mt-2 w-full"
           placeholder={identifierType === 'email' ? '请输入已验证邮箱' : identifierType === 'phone' ? '请输入已绑定手机号' : '请输入登录账号'}
         />
         <FormError message={errors.identifier} />
@@ -152,7 +150,7 @@ if (saved === 'phone' || saved === 'email') {
           autoComplete="current-password"
           enterKeyHint="go"
           required
-          className="mt-2 min-h-11 sm:min-h-12 w-full rounded-lg border border-sky-100 bg-white px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
+          className="auth-input mt-2 w-full"
           placeholder="请输入密码"
         />
         <FormError message={errors.password} />
@@ -161,7 +159,7 @@ if (saved === 'phone' || saved === 'email') {
       <button
         type="submit"
         disabled={isSubmitting}
-        className="relative z-10 min-h-11 sm:min-h-12 w-full touch-manipulation rounded-lg bg-brand-700 px-4 py-2 font-black text-white shadow-lg shadow-sky-900/10 disabled:cursor-not-allowed disabled:opacity-60"
+        className="auth-submit-button relative z-10 w-full disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSubmitting ? '登录中...' : '登录'}
       </button>

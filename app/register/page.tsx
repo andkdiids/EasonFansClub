@@ -16,6 +16,7 @@ export default async function RegisterPage() {
       subtitle={config.text.registerHint}
       siteName={config.text.siteName}
       backgroundUrl={config.images.registerBackgroundUrl}
+      logoUrl={config.images.navLogoUrl || config.images.logoUrl}
       footer={
         <>
           已经有账号？{' '}

@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
-import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { anonymizeCheckInMessages, getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
@@ -118,8 +117,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <SiteHeader user={sessionUser} />
-      <main className="mx-auto max-w-[1500px] px-4 py-5 sm:px-5">
+      <main className="site-page-main flat-page mx-auto max-w-7xl px-4 py-5 sm:px-5">
         <CheckInLayoutSurface
           layoutConfig={layoutConfig}
           dailyQuote={getDailyQuote(today)}

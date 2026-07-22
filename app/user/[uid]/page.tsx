@@ -4,7 +4,6 @@ import { AddFriendButton } from '@/components/FriendRequestActions'
 import { BackButton } from '@/components/BackButton'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
-import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { normalizeFriendPair } from '@/lib/friends'
@@ -114,8 +113,7 @@ export default async function PublicUserPage({ params }: PageProps) {
 
   return (
     <>
-      <SiteHeader user={viewer} />
-      <main className="mx-auto max-w-[1200px] space-y-5 px-4 py-6 sm:px-5 sm:py-7">
+      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-5 sm:py-7">
         <BackButton />
         <ProfileHeader
           displayName={name}

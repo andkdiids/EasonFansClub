@@ -325,19 +325,21 @@ try {
       </div>
 
       {showTabs ? (
-        <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
+        <div className="auth-method-tabs" role="tablist" aria-label="注册方式">
           <button
             type="button"
+            role="tab"
             onClick={() => switchType('EMAIL')}
             data-register-field="registrationType"
-            className={`rounded-lg px-3 py-2 text-sm font-black transition ${registrationType === 'EMAIL' ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
+            aria-selected={registrationType === 'EMAIL'}
           >
             邮箱注册
           </button>
           <button
             type="button"
+            role="tab"
             onClick={() => switchType('PHONE')}
-            className={`rounded-lg px-3 py-2 text-sm font-black transition ${registrationType === 'PHONE' ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
+            aria-selected={registrationType === 'PHONE'}
           >
             手机号注册
           </button>
@@ -495,7 +497,7 @@ try {
 
       <button
         disabled={isSubmitting}
-       className="w-full rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 px-4 py-3 font-black text-white shadow-lg shadow-sky-900/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:from-sky-500 hover:to-blue-600 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+       className="auth-submit-button w-full disabled:cursor-not-allowed disabled:opacity-60"
        >
         {isSubmitting ? '注册中...' : registrationType === 'PHONE' ? '手机号注册' : '注册并发送验证邮件'}
       </button>

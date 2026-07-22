@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { SiteHeader } from '@/components/SiteHeader'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -47,8 +46,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   return (
     <>
-      <SiteHeader />
-      <main className="mx-auto max-w-6xl space-y-6 px-5 py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         <section className="rounded-2xl border border-sky-100 bg-white/80 p-7 shadow-sm">
           <p className="text-sm font-black uppercase text-brand-700">Search</p>
           <h1 className="mt-2 text-4xl font-black text-brand-950">搜索</h1>

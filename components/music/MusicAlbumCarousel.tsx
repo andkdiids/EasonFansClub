@@ -59,7 +59,7 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
   const targetRef = useRef(0)
   const layoutRef = useRef(layout)
   const pausedRef = useRef(interactionPaused)
-  const dragRef = useRef<{ pointerId: number; startX: number; startPos: number; moved: boolean; samples: { x: number; t: number }[] } | null>(null)
+  const dragRef = useRef<{ pointerId: number; startX: number; startPos: number; moved: boolean; clickedIndex: number | null; samples: { x: number; t: number }[] } | null>(null)
   const suppressClickRef = useRef(false)
 
   // 每一帧只写 transform/opacity/zIndex,不经过 React render;offset 一律走循环最短距离
@@ -71,8 +71,8 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
       const offset = getWrappedOffset(index, position, count)
       const distance = Math.abs(offset)
       const blend = Math.min(distance, 1)
-      const scale = 1 - 0.12 * blend
-      let opacity = 1 - 0.48 * blend
+      const scale = 1 - 0.1 * blend
+      let opacity = 1 - 0.24 * blend
       if (distance > visibleRange) opacity *= Math.max(0, 1 - (distance - visibleRange))
       // 两段 translate3d 叠加实现 -50% 居中 + 位移,避免 calc() 负数在 WebKit 下失效
       element.style.transform = `translate3d(${offset * spacing}px, ${-3 + 6 * blend}px, 0) translate3d(-50%, 0, 0) scale(${scale})`
@@ -187,7 +187,8 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
     if (pausedRef.current || albums.length < 2) return
     if (event.pointerType === 'mouse' && event.button !== 0) return
     cancelFrame()
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startPos: positionRef.current, moved: false, samples: [{ x: event.clientX, t: performance.now() }] }
+    const card = (event.target as HTMLElement).closest<HTMLElement>('[data-carousel-index]')
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startPos: positionRef.current, moved: false, clickedIndex: card ? Number(card.dataset.carouselIndex) : null, samples: [{ x: event.clientX, t: performance.now() }] }
     stageRef.current?.setPointerCapture(event.pointerId)
   }
 
@@ -212,6 +213,12 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
     if (!drag || event.pointerId !== drag.pointerId) return
     dragRef.current = null
     if (albums.length === 0) return
+    if (!cancelled && !drag.moved && drag.clickedIndex !== null) {
+      suppressClickRef.current = true
+      if (drag.clickedIndex === selected) router.push(`/music/album/${albums[drag.clickedIndex].id}`)
+      else animateTo(drag.clickedIndex)
+      return
+    }
     if (drag.moved) suppressClickRef.current = true
     const deltaX = event.clientX - drag.startX
     const samples = drag.samples
@@ -238,13 +245,10 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
     <div className="relative flex w-full justify-center">
       <button type="button" disabled={interactionPaused || albums.length < 2} onClick={() => move(-1)} aria-label="上一张专辑" className="absolute left-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">‹</button>
       <div ref={stageRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={(event) => finishDrag(event, false)} onPointerCancel={(event) => finishDrag(event, true)} onClickCapture={onClickCapture} onDragStart={(event) => event.preventDefault()} className={`relative isolate h-[250px] w-full touch-pan-y select-none sm:h-[280px] md:h-[330px] md:w-[calc(100%-144px)] lg:h-[340px] xl:w-[calc(100%-160px)] ${interactionPaused ? 'pointer-events-none' : 'cursor-grab active:cursor-grabbing'}`}>
-        {albums.map((album, index) => Math.abs(offsets[index]) <= layout.visibleRange + 1 ? <MusicAlbum3DCard key={album.id} album={album} offset={offsets[index]} spacing={layout.spacing} cardWidth={layout.cardWidth} selected={index === selected} disabled={interactionPaused} onActivate={() => index === selected ? router.push(`/music/album/${album.id}`) : animateTo(index)} cardRef={(element) => { if (element) cardRefs.current.set(index, element); else cardRefs.current.delete(index) }} /> : null)}
+        {albums.map((album, index) => Math.abs(offsets[index]) <= layout.visibleRange + 1 ? <MusicAlbum3DCard key={album.id} album={album} carouselIndex={index} offset={offsets[index]} spacing={layout.spacing} cardWidth={layout.cardWidth} selected={index === selected} disabled={interactionPaused} onActivate={() => index === selected ? router.push(`/music/album/${album.id}`) : animateTo(index)} cardRef={(element) => { if (element) cardRefs.current.set(index, element); else cardRefs.current.delete(index) }} /> : null)}
       </div>
       <button type="button" disabled={interactionPaused || albums.length < 2} onClick={() => move(1)} aria-label="下一张专辑" className="absolute right-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">›</button>
     </div>
     <div className="mb-4 text-center text-white md:hidden"><p className="line-clamp-1 text-base font-black">《{current.name}》</p><p className="mt-1 text-xs font-bold text-slate-300/65">{current.releaseLabel} · {current.language} · {formatTrackCount(current.songCount)}</p></div>
-    <div className="relative z-20 mt-1 flex items-center justify-center">
-      <button type="button" disabled={interactionPaused} onClick={() => router.push(`/music/album/${current.id}`)} className="rounded-full border border-white/[0.12] bg-white/[0.08] px-5 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/[0.12] disabled:pointer-events-none sm:px-6">查看当前专辑</button>
-    </div>
   </section>
 }

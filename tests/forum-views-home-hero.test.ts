@@ -46,26 +46,25 @@ test('详情真实挂载调用计数接口且列表、首页、详情统一读�
   assert.match(home, /viewCount: true/)
 })
 
-test('首页精选限制四篇并固定为响应式两列 Grid', () => {
+test('社区首页精选限制四篇并使用扁平单列列表', () => {
   const data = readFileSync('lib/home-data.ts', 'utf8')
   const surface = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
   assert.match(data, /selected\.size < 4/)
   assert.match(data, /slice\(0, 4\)/)
-  assert.match(surface, /posts\.data\.slice\(0, 4\)/)
-  assert.match(surface, /grid grid-cols-1 items-start gap-3\.5 md:grid-cols-2/)
+  assert.match(surface, /data\.posts\.slice\(0,\s*4\)/)
+  assert.match(surface, /className="post-list"/)
+  assert.doesNotMatch(surface, /md:grid-cols-2/)
 })
 
 test('首页精选卡片自然高度、整卡可点击且独立点赞不会触发跳转', () => {
   const surface = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
   const actions = readFileSync('components/PostActions.tsx', 'utf8')
-  const cardSection = surface.slice(surface.indexOf("item.key === 'home.featuredPosts'"), surface.indexOf("item.key === 'home.dailyMessages'"))
-  const article = cardSection.slice(cardSection.indexOf('<article data-featured-post-card'), cardSection.indexOf('</article>'))
-  assert.match(cardSection, /data-featured-post-card/)
-  assert.match(cardSection, /data-post-card-link[\s\S]*absolute inset-0 z-\[1\]/)
-  assert.match(cardSection, /focus-visible:ring-2/)
-  assert.match(cardSection, /post\.content\.trim\(\) \? <p/)
-  assert.match(cardSection, /pointer-events-none relative z-\[2\]/)
-  assert.match(cardSection, /data-post-like-control[\s\S]*pointer-events-auto relative z-\[3\]/)
+  const article = surface.slice(surface.indexOf('<article data-featured-post-card'), surface.indexOf('</article>'))
+  assert.match(surface, /data-featured-post-card/)
+  assert.match(surface, /data-post-card-link[\s\S]*absolute inset-0 z-\[1\]/)
+  assert.match(surface, /focus-visible:ring-2/)
+  assert.match(surface, /pointer-events-none relative z-\[2\]/)
+  assert.match(surface, /data-post-like-control[\s\S]*pointer-events-auto relative z-\[3\]/)
   assert.doesNotMatch(article, /min-h-(?:52|\[)|mt-auto|h-full|justify-between/)
   assert.match(actions, /event\.preventDefault\(\)/)
   assert.match(actions, /event\.stopPropagation\(\)/)
@@ -102,4 +101,28 @@ test('Hero 默认样式美观且合法后台枚举映射到前台', () => {
 test('非法 Hero 样式配置回退默认值，不能注入任意 CSS', () => {
   const config = mergeSiteAppearanceConfig({ heroStyle: { titleSize: 'fixed;inset:0', descriptionSize: 'huge', buttonSize: 'raw-css', height: '1px', radius: '0' } })
   assert.deepEqual(config.heroStyle, defaultSiteAppearance.heroStyle)
+})
+
+test('登录后前台由根布局统一渲染 AppShell 且首页不再复制外壳', () => {
+  const rootLayout = readFileSync('app/layout.tsx', 'utf8')
+  const appShell = readFileSync('components/layout/AppShell.tsx', 'utf8')
+  const home = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
+  const forum = readFileSync('app/forum/page.tsx', 'utf8')
+  const music = readFileSync('app/music/page.tsx', 'utf8')
+  assert.match(rootLayout, /<AppShell[\s\S]*\{children\}[\s\S]*<\/AppShell>/)
+  assert.match(appShell, /<Sidebar[\s\S]*<Topbar[\s\S]*app-page-content[\s\S]*<MobileNavigation/)
+  assert.doesNotMatch(home, /community-sidebar|community-mobile-nav|community-hero-actions/)
+  assert.doesNotMatch(forum, /SiteHeader/)
+  assert.doesNotMatch(music, /SiteHeader/)
+})
+
+test('统一侧栏对子路由和详情页保持父菜单高亮', async () => {
+  const { isAppNavigationActive, primaryNavigation } = await import('../components/layout/navigation')
+  const forum = primaryNavigation.find((item) => item.href === '/forum')!
+  const music = primaryNavigation.find((item) => item.href === '/music')!
+  const profile = primaryNavigation.find((item) => item.href === '/profile')!
+  assert.equal(isAppNavigationActive('/posts/post-1', forum), true)
+  assert.equal(isAppNavigationActive('/music/album/album-1', music), true)
+  assert.equal(isAppNavigationActive('/user/00001', profile), true)
+  assert.equal(isAppNavigationActive('/forum', music), false)
 })

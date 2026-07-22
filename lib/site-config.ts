@@ -1,5 +1,9 @@
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
+import { defaultHeroVisuals, type HeroVisualKey, type SiteHeroVisualConfig } from '@/lib/hero-visuals'
+
+export { heroVisualKeys } from '@/lib/hero-visuals'
+export type { HeroVisualKey, SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
 export type SiteNavItem = {
   label: string
@@ -72,6 +76,7 @@ export type SiteAppearanceConfig = {
   nav: SiteNavItem[]
   heroSlides: SiteHeroSlide[]
   heroStyle: SiteHeroStyle
+  heroVisuals: Record<HeroVisualKey, SiteHeroVisualConfig>
 }
 
 export const defaultSiteAppearance: SiteAppearanceConfig = {
@@ -111,7 +116,7 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
     activityCoverUrl: '',
   },
   nav: [
-    { label: '首页', href: '/', icon: '⌂', title: '首页', isVisible: true, sortOrder: 1 },
+    { label: '首页', href: '/community', icon: '⌂', title: '首页', isVisible: true, sortOrder: 1 },
     { label: '每日挂号', href: '/checkin', icon: '+', title: '每日挂号', isVisible: true, sortOrder: 2 },
     { label: 'E院广场', href: '/forum', icon: '□', title: 'E院广场', isVisible: true, sortOrder: 3 },
     { label: 'EasMusic', href: '/music', icon: '♪', title: 'EasMusic', isVisible: true, sortOrder: 4 },
@@ -147,31 +152,70 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
     height: 'standard',
     radius: 'large',
   },
+  heroVisuals: defaultHeroVisuals,
 }
 
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && allowed.includes(value as T) ? value as T : fallback
 }
 
+function percentage(value: unknown, fallback = 50) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : fallback
+}
+
+function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUrl: string): SiteHeroVisualConfig {
+  const fallback = defaultSiteAppearance.heroVisuals[key]
+  const partial = value && typeof value === 'object' ? value as Partial<SiteHeroVisualConfig> : {}
+  const focusPoint = partial.focusPoint && typeof partial.focusPoint === 'object'
+    ? { x: percentage(partial.focusPoint.x), y: percentage(partial.focusPoint.y) }
+    : null
+  return {
+    key,
+    title: typeof partial.title === 'string' && partial.title.trim() ? partial.title.trim().slice(0, 80) : fallback.title,
+    imageUrl: typeof partial.imageUrl === 'string' && partial.imageUrl.trim() ? partial.imageUrl.trim() : fallbackImageUrl,
+    desktopPositionX: percentage(partial.desktopPositionX, fallback.desktopPositionX),
+    desktopPositionY: percentage(partial.desktopPositionY, fallback.desktopPositionY),
+    mobilePositionX: percentage(partial.mobilePositionX, fallback.mobilePositionX),
+    mobilePositionY: percentage(partial.mobilePositionY, fallback.mobilePositionY),
+    enabled: typeof partial.enabled === 'boolean' ? partial.enabled : fallback.enabled,
+    focusPoint,
+    updatedAt: typeof partial.updatedAt === 'string' ? partial.updatedAt : '',
+  }
+}
+
 export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig {
   if (!value || typeof value !== 'object') return defaultSiteAppearance
   const partial = value as Partial<SiteAppearanceConfig>
+  const images = { ...defaultSiteAppearance.images, ...(partial.images || {}) }
+  const heroSlides = (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => (
+    item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
+  ))
+  const firstHeroImage = heroSlides.filter((item) => item.isVisible && item.imageUrl).sort((a, b) => a.sortOrder - b.sortOrder)[0]?.imageUrl || images.checkinBackgroundUrl || images.loginBackgroundUrl
+  const visualInput = partial.heroVisuals as Partial<Record<HeroVisualKey, Partial<SiteHeroVisualConfig>>> | undefined
   return {
     text: { ...defaultSiteAppearance.text, ...(partial.text || {}) },
     colors: { ...defaultSiteAppearance.colors, ...(partial.colors || {}) },
-    images: { ...defaultSiteAppearance.images, ...(partial.images || {}) },
-    nav: (partial.nav?.length ? partial.nav : defaultSiteAppearance.nav).map((item) => (
-      item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
-    )),
-    heroSlides: (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => (
-      item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
-    )),
+    images,
+    nav: (partial.nav?.length ? partial.nav : defaultSiteAppearance.nav).map((item) => {
+      if (item.href === '/') return { ...item, href: '/community' }
+      if (item.href === '/boards/announcements' || item.href === '/boards/daily-chat') return { ...item, href: '/forum' }
+      return item
+    }),
+    heroSlides,
     heroStyle: {
       titleSize: enumValue(partial.heroStyle?.titleSize, heroTitleSizes, defaultSiteAppearance.heroStyle.titleSize),
       descriptionSize: enumValue(partial.heroStyle?.descriptionSize, heroDescriptionSizes, defaultSiteAppearance.heroStyle.descriptionSize),
       buttonSize: enumValue(partial.heroStyle?.buttonSize, heroButtonSizes, defaultSiteAppearance.heroStyle.buttonSize),
       height: enumValue(partial.heroStyle?.height, heroHeightSizes, defaultSiteAppearance.heroStyle.height),
       radius: enumValue(partial.heroStyle?.radius, heroRadiusSizes, defaultSiteAppearance.heroStyle.radius),
+    },
+    heroVisuals: {
+      login: normalizeHeroVisual('login', visualInput?.login, images.loginBackgroundUrl),
+      home: normalizeHeroVisual('home', visualInput?.home, firstHeroImage),
+      activities: normalizeHeroVisual('activities', visualInput?.activities, images.activityCoverUrl),
+      birthday: normalizeHeroVisual('birthday', visualInput?.birthday, images.activityCoverUrl),
+      music: normalizeHeroVisual('music', visualInput?.music, ''),
     },
   }
 }

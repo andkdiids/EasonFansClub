@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
-import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
 import { getUnreadNotificationCount, listUnifiedNotifications } from '@/lib/notifications'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
@@ -22,8 +21,7 @@ export default async function NotificationsPage() {
 
   return (
     <>
-      <SiteHeader user={user} />
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-5 sm:py-8">
+      <main className="site-page-main flat-page mx-auto max-w-7xl px-4 py-6 sm:px-5 sm:py-8">
         <PageLayoutRenderer
           pageKey="message"
           config={layoutConfig}

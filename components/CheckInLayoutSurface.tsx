@@ -41,9 +41,9 @@ export type CheckInLayoutModuleProps = {
 }
 
 function densityCardClass(density: PageLayoutModuleDensity) {
-  if (density === 'minimal') return 'checkin-layout-card rounded-[18px] border border-sky-100 bg-white/85 shadow-sm'
-  if (density === 'compact') return 'checkin-layout-card rounded-[22px] border border-sky-100 bg-white/85 shadow-sm'
-  return 'checkin-layout-card rounded-[24px] border border-sky-100 bg-white/85 shadow-sm'
+  if (density === 'minimal') return 'checkin-layout-card rounded-sm border border-sky-100 bg-white/85'
+  if (density === 'compact') return 'checkin-layout-card rounded-sm border border-sky-100 bg-white/85'
+  return 'checkin-layout-card rounded-sm border border-sky-100 bg-white/85'
 }
 
 function CheckInStatsCard({
@@ -68,7 +68,7 @@ function CheckInStatsCard({
   return (
     <div data-checkin-stats-grid="true" className={`grid gap-2 ${density === 'minimal' ? 'grid-cols-4' : 'grid-cols-2 sm:grid-cols-4'}`}>
       {items.map(([label, value]) => (
-        <div key={label} className="rounded-2xl bg-sky-50/75 p-2.5 text-center">
+        <div key={label} className="rounded-sm border border-sky-100 bg-sky-50/75 p-2.5 text-center">
           <p className="truncate text-[11px] font-black text-slate-500">{label}</p>
           <p className="mt-0.5 text-lg font-black leading-tight text-brand-950">{value}</p>
         </div>

@@ -3,19 +3,19 @@ import { notFound } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
-import { SiteHeader } from '@/components/SiteHeader'
 import { formatTrackNumber } from '@/lib/music'
 import { formatMusicReleaseDate, formatTrackCount } from '@/lib/music-display'
 import { prisma } from '@/lib/prisma'
+import { getSiteAppearance } from '@/lib/site-config'
 
 export const dynamic = 'force-dynamic'
 
 export default async function MusicAlbumPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const album = await prisma.musicAlbum.findFirst({
-    where: { id, status: 'PUBLISHED' },
-    include: { songs: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } },
-  })
+  const [album, config] = await Promise.all([
+    prisma.musicAlbum.findFirst({ where: { id, status: 'PUBLISHED' }, include: { songs: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } } }),
+    getSiteAppearance(),
+  ])
   if (!album) notFound()
 
   const releaseLabel = formatMusicReleaseDate(album.releaseDate, album.releaseYear)
@@ -31,7 +31,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
     ['馆藏排序', String(album.displayOrder)],
   ]
 
-  return <><SiteHeader /><MusicArchiveShell maxWidth="max-w-6xl">
+  return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music" className="inline-flex items-center gap-2 text-sm font-black text-sky-300/80 transition hover:text-white">← 返回 EasMusic</Link>
 
     <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
@@ -68,5 +68,5 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
         <span className="col-start-2 truncate text-xs font-bold text-slate-300/55 sm:col-start-auto">编曲：{song.arranger || '待补充'}</span>
       </Link>)}</div> : <p className="mt-7 rounded-[24px] border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300/65">歌曲资料正在整理中。</p>}
     </section>
-  </MusicArchiveShell></>
+  </MusicArchiveShell>
 }

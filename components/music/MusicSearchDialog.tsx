@@ -11,7 +11,7 @@ type Result = {
 }
 type MusicSearchDialogProps = { variant?: 'default' | 'glass'; label?: string }
 
-export function MusicSearchDialog({ variant = 'default', label = '搜索音乐资料' }: Readonly<MusicSearchDialogProps>) {
+export function MusicSearchDialog({ variant = 'default', label = '搜索专辑、歌曲、歌词' }: Readonly<MusicSearchDialogProps>) {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -49,7 +49,7 @@ export function MusicSearchDialog({ variant = 'default', label = '搜索音乐�
   }
 
   const triggerClassName = variant === 'glass'
-    ? 'inline-flex items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-xl transition hover:bg-white/[0.12]'
+    ? 'inline-flex items-center gap-2 rounded-[10px] border border-white/[0.16] bg-slate-950/25 px-5 py-3 text-sm font-bold text-white/90 backdrop-blur-xl transition hover:border-sky-200/25 hover:bg-white/[0.1] hover:text-white'
     : 'inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white px-6 py-3 text-sm font-black text-brand-950 shadow-lg shadow-sky-950/10 transition hover:-translate-y-0.5 hover:shadow-xl'
 
   const dialog = mounted && open ? createPortal(<div role="dialog" aria-modal="true" aria-label="搜索音乐资料" className="fixed inset-0 z-[10000] grid place-items-center bg-[rgba(3,10,20,.72)] p-4 backdrop-blur-[18px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}>
@@ -61,5 +61,5 @@ export function MusicSearchDialog({ variant = 'default', label = '搜索音乐�
     </div>
   </div>, document.body) : null
 
-  return <><button type="button" onClick={() => setOpen(true)} className={triggerClassName}><span aria-hidden="true">⌕</span>{label}</button>{dialog}</>
+  return <><button type="button" onClick={() => setOpen(true)} className={triggerClassName}><span aria-hidden="true" className="text-lg font-normal text-sky-200/75">⌕</span>{label}</button>{dialog}</>
 }

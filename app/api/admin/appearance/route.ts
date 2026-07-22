@@ -20,6 +20,8 @@ const revalidateTargets = [
   '/search',
   '/admin',
   '/admin/appearance',
+  '/admin/visuals',
+  '/birthday',
 ]
 
 export async function GET() {

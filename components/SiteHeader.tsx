@@ -10,6 +10,7 @@ import { UserNotificationMenu } from '@/components/UserNotificationMenu'
 import { SiteHeaderFrame } from '@/components/SiteHeaderFrame'
 import { getSiteAppearance, type SiteAppearanceConfig } from '@/lib/site-config'
 import { DesktopSiteNavigation, MobileSiteNavigation } from '@/components/SiteNavigation'
+import { BrandMark } from '@/components/BrandMark'
 
 type SiteHeaderProps = {
   user?: SessionUser | null
@@ -36,10 +37,9 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
   return (
     <>
       <SiteHeaderFrame>
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2 sm:px-5 sm:py-4">
-          <Link href="/" className="site-header-brand flex min-w-0 shrink-0 items-center gap-3 text-lg font-black text-brand-950 transition-colors duration-500 sm:text-xl" title={config.text.siteName}>
-            {navLogo ? <img src={navLogo} alt={config.text.siteName} className="h-9 w-9 rounded-2xl object-cover sm:h-10 sm:w-10" /> : null}
-            <span className="truncate">{config.text.siteName}</span>
+        <div className="site-header-inner mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+          <Link href="/community" className="site-header-brand min-w-0 shrink-0" title={config.text.siteName}>
+            <BrandMark logoUrl={navLogo} compact />
           </Link>
 
           <DesktopSiteNavigation items={navItems} isAdmin={isAdmin} />
@@ -48,8 +48,8 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             <UserNotificationMenu displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={isAdmin} initialSummary={unreadSummary!} />
           ) : (
             <div className="flex shrink-0 items-center gap-2">
-              <Link href="/login" className="site-header-auth-link rounded-full px-3 py-2 text-sm font-black text-slate-700 transition-colors hover:bg-sky-50">登录</Link>
-              <Link href="/register" className="rounded-full bg-brand-700 px-4 py-2 text-sm font-black text-white">注册</Link>
+              <Link href="/login" className="site-header-auth-link flat-button-secondary">登录</Link>
+              <Link href="/register" className="flat-button-primary">注册</Link>
             </div>
           )}
         </div>

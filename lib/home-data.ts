@@ -1,4 +1,4 @@
-import { startOfLocalDay } from '@/lib/checkin'
+import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 
@@ -140,7 +140,7 @@ export async function getHomeActivities() {
       where: { status: 'PUBLISHED' },
       orderBy: { createdAt: 'desc' },
       take: 3,
-      select: { id: true, title: true, description: true, coverUrl: true, startsAt: true },
+      select: { id: true, title: true, description: true, coverUrl: true, startsAt: true, endsAt: true },
     }),
     [],
     5000,
@@ -159,4 +159,39 @@ export async function getHomeTracks() {
     [],
     5000,
   ))
+}
+
+export async function getHomeAlbums() {
+  return cachedHomeData('home.albums', () => safeDb(
+    'MusicAlbum.findMany home.albums',
+    prisma.musicAlbum.findMany({
+      where: { status: 'PUBLISHED', coverUrl: { not: null } },
+      orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }],
+      take: 5,
+      select: { id: true, name: true, releaseYear: true, coverUrl: true },
+    }),
+    [],
+    5000,
+  ))
+}
+
+export async function getHomeUserStats(userId?: string) {
+  if (!userId) return null
+  const todayKey = getShanghaiDateKey(startOfLocalDay())
+  return safeDb(
+    'User.findUnique home.stats',
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        level: true,
+        experience: true,
+        points: true,
+        consecutiveDays: true,
+        checkIns: { where: { checkinDateKey: todayKey }, take: 1, select: { id: true } },
+        _count: { select: { checkIns: true } },
+      },
+    }),
+    null,
+    5000,
+  )
 }

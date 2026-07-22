@@ -94,6 +94,15 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
   const selected = useMemo(() => feedbacks.find((item) => item.id === selectedId), [feedbacks, selectedId])
 
   useEffect(() => {
+    const syncHash = () => {
+      if (window.location.hash === '#updates') setTab('changelog')
+    }
+    syncHash()
+    window.addEventListener('hashchange', syncHash)
+    return () => window.removeEventListener('hashchange', syncHash)
+  }, [])
+
+  useEffect(() => {
     loadFeedbacks()
     loadChangelogs()
   }, [])
@@ -209,15 +218,15 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
   }
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
+    <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
       {initialFeedbackId ? <BackButton fallbackHref="/feedback" /> : null}
       <section className="rounded-[28px] border border-sky-100 bg-white/85 p-5 shadow-sm sm:p-7">
         <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Feedback</p>
         <h1 className="mt-2 text-3xl font-black text-brand-950">反馈与更新</h1>
         <div className="mt-5 flex gap-2">
-          <button onClick={() => setTab('feedback')} className={`rounded-full px-4 py-2 text-sm font-black ${tab === 'feedback' ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>我的反馈</button>
-          <button onClick={() => setTab('changelog')} className={`rounded-full px-4 py-2 text-sm font-black ${tab === 'changelog' ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>更新日志</button>
-          <button onClick={() => document.getElementById('feedback-create-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-full bg-brand-700 px-4 py-2 text-sm font-black text-white">提交反馈</button>
+          <button onClick={() => setTab('feedback')} className={`rounded-none border-b-2 px-4 py-2 text-sm font-black ${tab === 'feedback' ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-500'}`}>我的反馈</button>
+          <button onClick={() => setTab('changelog')} className={`rounded-none border-b-2 px-4 py-2 text-sm font-black ${tab === 'changelog' ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-500'}`}>更新日志</button>
+          <button onClick={() => document.getElementById('feedback-create-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-sm bg-brand-700 px-4 py-2 text-sm font-black text-white">提交反馈</button>
         </div>
       </section>
 
