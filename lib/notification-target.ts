@@ -11,5 +11,6 @@ export function getNotificationTarget(notification: NotificationTargetInput) {
   if (explicit?.startsWith('/')) return explicit
   if (notification.type === 'FRIEND_REQUEST' || notification.type === 'FOLLOW') return '/friends#received-requests'
   if (notification.type === 'ACTIVITY') return '/activities'
+  if (notification.source === 'system') return `/notifications#notification-${notification.id}`
   return null
 }

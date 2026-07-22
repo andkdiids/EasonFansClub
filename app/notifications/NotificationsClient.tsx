@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { getNotificationTarget } from '@/lib/notification-target'
 import type { UnifiedNotification } from '@/lib/notifications'
-import { UserPersonalizationSettings } from '@/components/UserPersonalizationSettings'
 
 type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'feedback' | 'system'
 
@@ -44,11 +43,9 @@ function getInitial(name?: string | null) {
 export function NotificationsClient({
   initialNotifications,
   initialUnreadCount,
-  initialCheckinMoodEnabled,
 }: {
   initialNotifications: UnifiedNotification[]
   initialUnreadCount: number
-  initialCheckinMoodEnabled: boolean
 }) {
   const router = useRouter()
   const [notifications, setNotifications] = useState(initialNotifications)
@@ -58,7 +55,20 @@ export function NotificationsClient({
 
   useEffect(() => {
     const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
-    if (dismissed.size) setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
+    if (!dismissed.size) return
+    const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !item.isRead)
+    setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
+    if (!hiddenUnread.length) return
+    setUnreadCount((count) => Math.max(0, count - hiddenUnread.length))
+    void fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: hiddenUnread.map((item) => ({ id: item.id, source: 'system' })) }),
+    }).then((response) => {
+      if (response.ok) window.dispatchEvent(new Event('unread-summary:refresh'))
+    })
+    // The initial server list is the only input needed to reconcile legacy local dismissals.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const categoryCounts = useMemo(() => {
@@ -128,6 +138,12 @@ export function NotificationsClient({
     }
     const systemIds = items.filter((item) => item.source === 'system').map((item) => item.id)
     if (systemIds.length) {
+      const response = await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: systemIds.map((id) => ({ id, source: 'system' })) }),
+      })
+      if (!response.ok) return
       const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
       systemIds.forEach((id) => dismissed.add(id))
       window.localStorage.setItem('notifications:dismissed-system', JSON.stringify(Array.from(dismissed).slice(-500)))
@@ -168,13 +184,14 @@ export function NotificationsClient({
             </div>
             <h2 className="mt-2 break-words text-base font-black text-slate-950 sm:text-lg">{item.title}</h2>
             {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
+            {target ? <span className="mt-3 inline-flex text-xs font-black text-brand-700">{category === 'reply' ? '查看并回复' : '查看详情'} →</span> : null}
           </div>
         </div>
       </article>
     )
 
     return (
-      <div key={`${item.source}:${item.id}`} className="relative">
+      <div key={`${item.source}:${item.id}`} id={`notification-${item.id}`} className="relative scroll-mt-20">
         {target ? (
           <Link href={target} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
         ) : (
@@ -187,7 +204,6 @@ export function NotificationsClient({
 
   return (
     <section className="notification-center space-y-5">
-      <UserPersonalizationSettings initialCheckinMoodEnabled={initialCheckinMoodEnabled} />
       <div className="rounded-[28px] border border-sky-100 bg-white/78 p-5 shadow-sm shadow-sky-900/5 backdrop-blur-xl sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

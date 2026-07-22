@@ -4,6 +4,7 @@ import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { ProfileCheckInCalendar, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
 import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
+import { UserPersonalizationSettings } from '@/components/UserPersonalizationSettings'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { withDbTimeout } from '@/lib/db-timeout'
@@ -46,6 +47,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           experience: true,
           points: true,
           consecutiveDays: true,
+          checkinMoodEnabled: true,
           createdAt: true,
           profile: true,
           _count: { select: { checkIns: true } },
@@ -149,6 +151,13 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
             ),
           }}
         />
+        <section aria-labelledby="personalization-heading" className="border border-sky-100 bg-white/88 p-4 sm:p-5">
+          <div className="mb-4 border-b border-sky-100 pb-3">
+            <h2 id="personalization-heading" className="text-lg font-black text-slate-950">个性化设置</h2>
+            <p className="mt-1 text-sm font-bold text-slate-500">管理仅与你的账号和使用习惯有关的选项。</p>
+          </div>
+          <UserPersonalizationSettings initialCheckinMoodEnabled={profile.checkinMoodEnabled} />
+        </section>
       </main>
     </>
   )

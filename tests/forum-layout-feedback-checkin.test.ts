@@ -155,7 +155,7 @@ test('通知目标支持显式链接、好友、活动和无目标通知', () =>
   assert.equal(getNotificationTarget({ ...base, type: 'FRIEND_REQUEST' }), '/friends#received-requests')
   assert.equal(getNotificationTarget({ ...base, type: 'ACTIVITY' }), '/activities')
   assert.equal(getNotificationTarget({ ...base, type: 'MESSAGE' }), null)
-  assert.equal(getNotificationTarget({ ...base, type: 'SYSTEM' }), null)
+  assert.equal(getNotificationTarget({ ...base, source: 'system', type: 'SYSTEM' }), '/notifications#notification-n1')
   assert.equal(getNotificationTarget({ ...base, type: 'REPLY', link: '/posts/p1' }), '/posts/p1')
 })
 

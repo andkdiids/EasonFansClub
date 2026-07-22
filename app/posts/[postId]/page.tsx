@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
+import { ImageViewer } from '@/components/ImageViewer'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
@@ -140,7 +141,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
             <span>回复 {post.replyCount}</span>
           </div>
           <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{post.content}</div>
-          {post.media.length ? <div className="mt-6 grid gap-3 sm:grid-cols-2">{post.media.map((item) => <img key={item.id} src={item.url} alt="帖子图片" className="max-h-[32rem] w-full rounded-2xl object-cover" />)}</div> : null}
+          {post.media.length ? <div className="mt-6 grid gap-3 sm:grid-cols-2">{post.media.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} imageClassName="h-auto max-h-[32rem] w-full object-contain" />)}</div> : null}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
               <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />

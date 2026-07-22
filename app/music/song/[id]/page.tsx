@@ -50,7 +50,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
 
     <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">LYRICS ARCHIVE</p><h2 className="mt-2 text-3xl font-black text-white">歌词</h2>
-      <div className="mt-7 max-h-[680px] overflow-y-auto pr-3 [scrollbar-color:rgba(125,211,252,.35)_transparent]"><p className="whitespace-pre-wrap text-sm font-medium leading-9 text-slate-200/80 sm:text-base">{song.lyrics || '歌词内容暂未收录。'}</p></div>
+      <div className="mt-7 pr-3"><p className="whitespace-pre-wrap text-sm font-medium leading-9 text-slate-200/80 sm:text-base">{song.lyrics || '歌词内容暂未收录。'}</p></div>
     </MusicDetailReveal>
 
     {songStory ? <MusicDetailReveal delay={0.2} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SONG STORY</p><h2 className="mt-2 text-3xl font-black text-white">歌曲故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{songStory}</p></MusicDetailReveal> : null}

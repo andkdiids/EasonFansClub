@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
+import { ImageViewer } from '@/components/ImageViewer'
 import { ReplyForm } from '@/components/ReplyForm'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
@@ -97,7 +98,7 @@ export function PostRepliesSection({
     const replyBody = splitContentImages(reply.content)
 
     return (
-      <div key={reply.id} className="min-w-0 py-2">
+      <div key={reply.id} id={`reply-${reply.id}`} className="min-w-0 scroll-mt-20 py-2">
         <div className="flex min-w-0 items-start gap-2">
           <Link href={`/user/${formatUid(reply.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
             {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
@@ -113,7 +114,7 @@ export function PostRepliesSection({
               {replyToName ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}
               {replyBody.text}
             </p>
-            {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url) => <img key={url} src={url} alt="回复图片" className="max-h-48 w-full rounded-xl object-cover" />)}</div> : null}
+            {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               {currentUserId ? (
                 <button
@@ -144,7 +145,7 @@ export function PostRepliesSection({
     const replyBody = splitContentImages(reply.content)
 
     return (
-      <article key={reply.id}>
+      <article key={reply.id} id={`reply-${reply.id}`} className="scroll-mt-20">
         <div className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3 text-sm font-bold text-slate-500">
             <Link href={`/user/${formatUid(reply.author.uid)}`} className="flex items-center gap-2 text-brand-950">
@@ -158,7 +159,7 @@ export function PostRepliesSection({
           <p className="whitespace-pre-wrap leading-7 text-slate-700">
             {replyBody.text}
           </p>
-          {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url) => <img key={url} src={url} alt="回复图片" className="max-h-72 w-full rounded-xl object-cover" />)}</div> : null}
+          {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {currentUserId ? (
               <button

@@ -240,7 +240,8 @@ test('音乐首页、专辑详情和歌曲详情统一使用沉浸式档案馆�
   assert.match(album, /song\.arranger/)
   assert.match(song, /song\.album\.coverUrl/)
   assert.match(song, /whitespace-pre-wrap/)
-  assert.match(song, /max-h-\[680px\]/)
+  assert.doesNotMatch(song, /max-h-\[680px\]|overflow-y-auto/)
+  assert.match(shell, /\[overflow-x:clip\]/)
 })
 
 test('音乐搜索覆盖歌曲、专辑、年份、作词和作曲', () => {
