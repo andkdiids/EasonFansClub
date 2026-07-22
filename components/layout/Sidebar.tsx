@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '@/components/BrandMark'
 import { IcpRecord } from '@/components/IcpRecord'
-import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
 import type { SessionUser } from '@/lib/auth'
@@ -12,6 +12,26 @@ import { isAppNavigationActive, primaryNavigation, quickNavigation } from './nav
 
 export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: Readonly<{ user: SessionUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => setMenuOpen(false), [pathname])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRootRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [menuOpen])
 
   async function logout() {
     if ((await fetch('/api/auth/logout', { method: 'POST' })).ok) location.replace('/login')
@@ -36,13 +56,17 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
       {navigation(quickNavigation, '快捷入口')}
       {canAccessAdmin ? <nav className="sidebar-nav sidebar-admin-nav" aria-label="管理入口"><Link href="/admin" aria-current={pathname.startsWith('/admin') ? 'page' : undefined}><UiIcon name="settings" /><span>后台管理</span></Link></nav> : null}
     </div>
-    <div className="sidebar-user">
-      <UserProfileSummary user={user} growth={growth} />
-      <div className="sidebar-actions">
-        <Link href="/profile" aria-label="设置"><UiIcon name="settings" /></Link>
-        <ThemeToggle />
-        <button type="button" onClick={logout} aria-label="退出登录"><UiIcon name="logout" /></button>
-      </div>
+    <div ref={menuRootRef} className="sidebar-user">
+      {menuOpen ? <div className="sidebar-user-menu" role="menu">
+        <Link href="/profile" role="menuitem">我的主页</Link>
+        <Link href="/notifications" role="menuitem">消息中心</Link>
+        <Link href="/profile?module=favorites#profile-modules" role="menuitem">我的收藏</Link>
+        <Link href="/profile#checkin-records" role="menuitem">签到记录</Link>
+        <Link href="/settings/security" role="menuitem">账号安全</Link>
+        {canAccessAdmin ? <Link href="/admin" role="menuitem" className="sidebar-user-admin">后台管理</Link> : null}
+        <button type="button" role="menuitem" onClick={logout}>退出登录</button>
+      </div> : null}
+      <UserProfileSummary user={user} growth={growth} onActivate={() => setMenuOpen((value) => !value)} />
       <IcpRecord />
     </div>
   </aside>

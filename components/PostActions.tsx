@@ -48,7 +48,7 @@ export function LikeButton({
         type="button"
         onClick={(event) => { event.preventDefault(); event.stopPropagation(); void toggleLike() }}
         disabled={isSubmitting}
-        className={`rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
+        className={`interaction-button rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
           liked ? 'bg-red-50 text-red-600' : 'bg-sky-50 text-brand-700'
         }`}
       >
@@ -93,7 +93,7 @@ export function FavoriteButton({
       <button
         onClick={toggleFavorite}
         disabled={isSubmitting}
-        className={`rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
+        className={`interaction-button rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
           favorited ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-brand-700'
         }`}
       >

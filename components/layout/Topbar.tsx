@@ -51,7 +51,7 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
       {canManageLayout ? <Link href="/admin/layout-editor" aria-label="布局编辑器"><UiIcon name="edit" /></Link> : null}
       <Link href="/notifications" aria-label={`通知，${unreadCount}条未读`} className="app-topbar-notification"><UiIcon name="bell" />{unreadCount > 0 ? <b>{unreadCount}</b> : null}</Link>
       <ThemeToggle />
-      <button type="button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label="用户菜单">
+      <button type="button" className="app-topbar-user-trigger" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label="用户菜单">
         <span className="app-topbar-avatar"><UserAvatar user={user} /></span>
         <UiIcon name="menu" />
       </button>

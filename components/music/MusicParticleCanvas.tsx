@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 
-type Particle = { x: number; y: number; vx: number; vy: number; size: number }
+type Particle = { x: number; y: number; vx: number; vy: number; driftX: number; driftY: number; size: number }
 type Ripple = { x: number; y: number; radius: number; alpha: number }
 
 export function MusicParticleCanvas() {
@@ -27,13 +27,11 @@ export function MusicParticleCanvas() {
     const seedParticles = () => {
       const count = interactive ? Math.min(48, Math.max(30, Math.round(width / 34))) : Math.min(26, Math.max(18, Math.round(width / 22)))
       while (particles.length > count) particles.pop()
-      while (particles.length < count) particles.push({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: (Math.random() - 0.5) * 0.09,
-        vy: (Math.random() - 0.5) * 0.09,
-        size: 0.7 + Math.random() * 1.4,
-      })
+      while (particles.length < count) {
+        const driftX = (Math.random() - 0.5) * 0.075
+        const driftY = (Math.random() - 0.5) * 0.075
+        particles.push({ x: Math.random() * width, y: Math.random() * height, vx: driftX, vy: driftY, driftX, driftY, size: 0.7 + Math.random() * 1.4 })
+      }
     }
 
     const resize = () => {
@@ -80,8 +78,13 @@ export function MusicParticleCanvas() {
               particle.vy += dy * force
             }
           }
-          particle.vx *= 0.992
-          particle.vy *= 0.992
+          particle.vx += (particle.driftX - particle.vx) * Math.min(0.12, delta * 0.003)
+          particle.vy += (particle.driftY - particle.vy) * Math.min(0.12, delta * 0.003)
+          const speed = Math.hypot(particle.vx, particle.vy)
+          if (speed > 0.28) {
+            particle.vx = particle.vx / speed * 0.28
+            particle.vy = particle.vy / speed * 0.28
+          }
           particle.x += particle.vx * delta
           particle.y += particle.vy * delta
           if (particle.x < -8) particle.x = width + 8
@@ -91,7 +94,7 @@ export function MusicParticleCanvas() {
         }
         context.beginPath()
         context.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2)
-        context.fillStyle = 'rgba(186, 230, 253, .5)'
+        context.fillStyle = 'rgba(186, 230, 253, .62)'
         context.fill()
       }
 
@@ -131,12 +134,21 @@ export function MusicParticleCanvas() {
     window.addEventListener('pointerleave', clearPointer)
     window.addEventListener('click', addRipple, { passive: true })
     frame = window.requestAnimationFrame(draw)
+    const handleVisibility = () => {
+      window.cancelAnimationFrame(frame)
+      if (!document.hidden) {
+        lastTime = performance.now()
+        frame = window.requestAnimationFrame(draw)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
     return () => {
       observer.disconnect()
       window.cancelAnimationFrame(frame)
       window.removeEventListener('pointermove', updatePointer)
       window.removeEventListener('pointerleave', clearPointer)
       window.removeEventListener('click', addRipple)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [])
 

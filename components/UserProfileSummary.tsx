@@ -12,16 +12,20 @@ export type AppShellGrowth = {
   progressPercent: number
 }
 
-export function UserProfileSummary({ user, growth }: Readonly<{ user: SessionUser; growth: AppShellGrowth }>) {
+export function UserProfileSummary({ user, growth, onActivate }: Readonly<{ user: SessionUser; growth: AppShellGrowth; onActivate?: () => void }>) {
   const name = getUserDisplayName(user)
   const targetExperience = growth.nextRequiredExp ?? growth.experience
   const format = new Intl.NumberFormat('zh-CN')
 
-  return <>
-    <Link href={`/user/${formatUid(user.uid)}`} className="sidebar-user-row">
+  const summary = <>
       <span className="sidebar-avatar"><UserAvatar user={user} /></span>
       <span><strong>{name}</strong><small>等级 {growth.level}</small></span>
-    </Link>
+    </>
+
+  return <>
+    {onActivate
+      ? <button type="button" className="sidebar-user-row" onClick={onActivate} aria-haspopup="menu">{summary}</button>
+      : <Link href={`/user/${formatUid(user.uid)}`} className="sidebar-user-row">{summary}</Link>}
     <div className="sidebar-growth" aria-label="成长经验">
       <div className="sidebar-progress" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, growth.progressPercent))}%` }} /></div>
       <small>{format.format(growth.experience)} / {format.format(targetExperience)} EXP</small>

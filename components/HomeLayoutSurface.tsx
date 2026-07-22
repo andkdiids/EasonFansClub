@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { LikeButton } from '@/components/PostActions'
 import { HeroBackground } from '@/components/HeroBackground'
+import { PageContainer } from '@/components/PageContainer'
 import { getPageLayoutModules } from '@/components/page-layout/PageLayoutRenderer'
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
@@ -61,11 +62,11 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         <HeroBackground visual={siteConfig.heroVisuals.home} fallbackImageUrl={hero?.imageUrl} priority />{!siteConfig.heroVisuals.home.enabled || (!siteConfig.heroVisuals.home.imageUrl && !hero?.imageUrl) ? <div className="community-hero-fallback"/> : null}<div className="community-hero-overlay"/>
         <div className="community-hero-copy"><p>WELCOME BACK</p><h1>EASON<span>FANS CLUB</span></h1><h2>全球陈奕迅粉丝社区 · 私家E院</h2><em>C’mon in~</em><a href="#community-content" className="hero-primary-button">浏览今日内容 <span aria-hidden>›</span></a></div>
       </section>
-      <div id="community-content" className="community-content">
+      <PageContainer as="div" id="community-content" className="community-content">
         {announcement&&visible('home.announcement')?<Link href={announcement.link||announcement.buttonUrl||'/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link>:null}
         {visible('home.checkinEntry')?<section className="community-stats" aria-label="用户数据">
           <Link href="/checkin" className="stat-checkin"><span>今日挂号</span><strong>{data.stats?.checkIns.length?'已签到':'去签到'}</strong><small>{data.stats?`连续签到 ${data.stats.consecutiveDays} 天 · 累计 ${data.stats._count.checkIns} 天`:'正在读取签到数据'}</small>{data.stats?.checkIns.length?<i>✓</i>:null}</Link>
-          <div><span>等级</span><strong>Lv.{data.stats?.level??'—'}</strong><div className="stat-progress"><i style={{width:`${growth.progressPercent}%`}}/></div><small>{growth.nextRequiredExp?`${fmt(growth.experience)} / ${fmt(growth.nextRequiredExp)}`:fmt(growth.experience)}</small></div>
+          <div><span>成长等级</span><strong>等级 {data.stats?.level??'—'}</strong><div className="stat-progress"><i style={{width:`${growth.progressPercent}%`}}/></div><small>{growth.nextRequiredExp?`${fmt(growth.experience)} / ${fmt(growth.nextRequiredExp)} EXP`: `${fmt(growth.experience)} EXP`}</small></div>
           <div><span>经验值</span><strong>{data.stats?fmt(data.stats.experience):'—'}</strong></div>
           <div><span>E积分</span><strong>{data.stats?fmt(data.stats.points):'—'}</strong></div>
           <div className="stat-total"><span>累计签到</span><strong>{data.stats?`${fmt(data.stats._count.checkIns)} 天`:'—'}</strong><Link href="/checkin">查看签到记录 ›</Link></div>
@@ -78,6 +79,6 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
             {visible('home.culture')?<section className="community-panel concert-panel"><header><h2>{layoutModule('home.culture')?.title||'近期演唱会'}</h2><Link href="/activities">更多 ›</Link></header><div>{data.activities.map((activity)=><Link key={activity.id} href="/activities"><time>{activity.startsAt?new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit'}).format(new Date(activity.startsAt)):'待定'}</time><span><strong>{activity.title}</strong><small>{activity.description||'详情请见活动页面'}</small></span><b>{activityStatus(activity)}</b></Link>)}{!data.activities.length&&!failed?<p className="community-empty">暂无已发布活动。</p>:null}</div></section>:null}
           </div>
         </div>
-      </div>
+      </PageContainer>
   </div>
 }

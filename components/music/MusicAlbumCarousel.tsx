@@ -98,6 +98,10 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
   }, [])
   useEffect(() => cancelFrame, [cancelFrame])
 
+  const openAlbum = useCallback((album: MusicCarouselAlbum) => {
+    router.push(`/music/album/${album.id}`)
+  }, [router])
+
   const animateTo = useCallback((target: number) => {
     const count = albums.length
     if (count < 2) return
@@ -189,14 +193,16 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
     cancelFrame()
     const card = (event.target as HTMLElement).closest<HTMLElement>('[data-carousel-index]')
     dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startPos: positionRef.current, moved: false, clickedIndex: card ? Number(card.dataset.carouselIndex) : null, samples: [{ x: event.clientX, t: performance.now() }] }
-    stageRef.current?.setPointerCapture(event.pointerId)
   }
 
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointerId) return
     const deltaX = event.clientX - drag.startX
-    if (Math.abs(deltaX) > 6) drag.moved = true
+    if (Math.abs(deltaX) > 6 && !drag.moved) {
+      drag.moved = true
+      stageRef.current?.setPointerCapture(event.pointerId)
+    }
     // 拖动过程卡片跟手:位置 = 起始位置 - 拖动距离 / 间距,按 rAF 节拍写入
     positionRef.current = drag.startPos - deltaX / layoutRef.current.spacing
     if (!frameRef.current) frameRef.current = requestAnimationFrame(() => {
@@ -214,9 +220,13 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
     dragRef.current = null
     if (albums.length === 0) return
     if (!cancelled && !drag.moved && drag.clickedIndex !== null) {
+      if (drag.clickedIndex === selected) {
+        openAlbum(albums[drag.clickedIndex])
+        return
+      }
       suppressClickRef.current = true
-      if (drag.clickedIndex === selected) router.push(`/music/album/${albums[drag.clickedIndex].id}`)
-      else animateTo(drag.clickedIndex)
+      window.requestAnimationFrame(() => { suppressClickRef.current = false })
+      animateTo(drag.clickedIndex)
       return
     }
     if (drag.moved) suppressClickRef.current = true
@@ -245,7 +255,7 @@ export function MusicAlbumCarousel({ albums }: Readonly<{ albums: MusicCarouselA
     <div className="relative flex w-full justify-center">
       <button type="button" disabled={interactionPaused || albums.length < 2} onClick={() => move(-1)} aria-label="上一张专辑" className="absolute left-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">‹</button>
       <div ref={stageRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={(event) => finishDrag(event, false)} onPointerCancel={(event) => finishDrag(event, true)} onClickCapture={onClickCapture} onDragStart={(event) => event.preventDefault()} className={`relative isolate h-[250px] w-full touch-pan-y select-none sm:h-[280px] md:h-[330px] md:w-[calc(100%-144px)] lg:h-[340px] xl:w-[calc(100%-160px)] ${interactionPaused ? 'pointer-events-none' : 'cursor-grab active:cursor-grabbing'}`}>
-        {albums.map((album, index) => Math.abs(offsets[index]) <= layout.visibleRange + 1 ? <MusicAlbum3DCard key={album.id} album={album} carouselIndex={index} offset={offsets[index]} spacing={layout.spacing} cardWidth={layout.cardWidth} selected={index === selected} disabled={interactionPaused} onActivate={() => index === selected ? router.push(`/music/album/${album.id}`) : animateTo(index)} cardRef={(element) => { if (element) cardRefs.current.set(index, element); else cardRefs.current.delete(index) }} /> : null)}
+        {albums.map((album, index) => Math.abs(offsets[index]) <= layout.visibleRange + 1 ? <MusicAlbum3DCard key={album.id} album={album} carouselIndex={index} offset={offsets[index]} spacing={layout.spacing} cardWidth={layout.cardWidth} selected={index === selected} disabled={interactionPaused} onActivate={() => animateTo(index)} cardRef={(element) => { if (element) cardRefs.current.set(index, element); else cardRefs.current.delete(index) }} /> : null)}
       </div>
       <button type="button" disabled={interactionPaused || albums.length < 2} onClick={() => move(1)} aria-label="下一张专辑" className="absolute right-0 top-[112px] z-20 hidden size-[52px] -translate-y-1/2 place-items-center rounded-full border border-white/[0.12] bg-white/[0.08] text-2xl text-white shadow-lg shadow-transparent backdrop-blur-md transition duration-200 hover:scale-105 hover:bg-white/[0.12] hover:shadow-sky-950/25 disabled:pointer-events-none md:grid lg:top-[132px]">›</button>
     </div>

@@ -14,8 +14,7 @@ export const primaryNavigation: AppNavigationItem[] = [
   { href: '/activities', label: '演唱会', icon: 'calendar', activePrefixes: ['/activities'] },
   { href: '/achievements', label: '动态', icon: 'activity', activePrefixes: ['/achievements'] },
   { href: '/notifications', label: '消息', icon: 'bell', activePrefixes: ['/notifications'], mobile: true, showsUnread: true },
-  { href: '/profile', label: '收藏', icon: 'star', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },
-  { href: '/checkin', label: '签到', icon: 'check', activePrefixes: ['/checkin'] },
+  { href: '/profile', label: '我的', icon: 'user', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },
   { href: '/rankings', label: '排行榜', icon: 'chart', activePrefixes: ['/rankings'] },
 ]
 
