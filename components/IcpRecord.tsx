@@ -10,6 +10,6 @@ export function IcpRecord({ inverse = false }: Readonly<{ inverse?: boolean }>) 
     rel="noopener noreferrer"
     className={inverse ? 'icp-record icp-record-inverse' : 'icp-record'}
   >
-    ICP备案号：{icpRecord.number}
+    {icpRecord.number}
   </a>
 }

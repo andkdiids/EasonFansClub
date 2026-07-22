@@ -32,9 +32,10 @@ test('用户菜单、后台入口与布局编辑入口沿用权限结果', () =>
   const shell = read('components/layout/AppShell.tsx')
   const topbar = read('components/layout/Topbar.tsx')
   const sidebar = read('components/layout/Sidebar.tsx')
-  for (const label of ['我的主页', '消息中心', '我的收藏', '签到记录', '账号安全', '退出登录']) {
+  for (const label of ['我的主页', '消息中心', '我的收藏', '账号安全', '退出登录']) {
     assert.match(topbar, new RegExp(label))
   }
+  assert.doesNotMatch(topbar + sidebar, /签到记录/)
   assert.match(layout, /hasAdminPermission\(sessionUser, 'layout\.manage'\)/)
   assert.match(layout, /hasAdminPermission\(sessionUser\)/)
   assert.match(shell, /canManageLayout=\{canManageLayout\}/)
@@ -43,10 +44,11 @@ test('用户菜单、后台入口与布局编辑入口沿用权限结果', () =>
   assert.match(sidebar, /canAccessAdmin \? <nav[\s\S]*href="\/admin"/)
 })
 
-test('ICP备案在登录页和 Sidebar 复用同一组件', () => {
+test('ICP备案在登录页和 AppShell Footer 复用同一组件', () => {
   const record = read('components/IcpRecord.tsx')
   assert.match(record, /粤ICP备2026099247号-1/)
   assert.match(record, /https:\/\/beian\.miit\.gov\.cn/)
   assert.match(read('app/login/page.tsx'), /<IcpRecord inverse/)
-  assert.match(read('components/layout/Sidebar.tsx'), /<IcpRecord \/>/)
+  assert.doesNotMatch(read('components/layout/Sidebar.tsx'), /IcpRecord/)
+  assert.match(read('components/layout/AppShell.tsx'), /<footer className="site-footer-info"><IcpRecord \/><\/footer>/)
 })

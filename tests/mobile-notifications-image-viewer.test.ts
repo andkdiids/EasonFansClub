@@ -29,9 +29,7 @@ test('AppShell 与消息中心共用真实统一未读计数', () => {
 
 test('个性化签到设置只出现在个人资料相关页面', () => {
   const profile = read('app/profile/page.tsx')
-  assert.match(profile, /UserPersonalizationSettings/)
-  assert.match(profile, /checkinMoodEnabled/)
-  assert.match(profile, /个性化设置/)
+  assert.doesNotMatch(profile, /UserPersonalizationSettings|ProfileStatsGrid|ProfileCheckInCalendar|checkinMoodEnabled/)
 })
 
 test('统一图片查看器支持原图、滚轮、触摸缩放、长图滚动和退出清理', () => {

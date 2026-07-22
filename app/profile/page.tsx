@@ -1,14 +1,11 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
-import { ProfileCheckInCalendar, ProfileRecentMessages } from '@/components/ProfileDeferredModules'
-import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
+import { ProfileRecentMessages } from '@/components/ProfileDeferredModules'
+import { ProfileHeader } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
-import { UserPersonalizationSettings } from '@/components/UserPersonalizationSettings'
 import { getCurrentUser } from '@/lib/auth'
-import { calculateCheckinStreaks } from '@/lib/checkin'
 import { withDbTimeout } from '@/lib/db-timeout'
-import { getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
@@ -43,14 +40,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           emailVerifiedAt: true,
           phoneVerifiedAt: true,
           level: true,
-          exp: true,
-          experience: true,
-          points: true,
-          consecutiveDays: true,
-          checkinMoodEnabled: true,
           createdAt: true,
           profile: true,
-          _count: { select: { checkIns: true } },
         },
       }),
       3000,
@@ -61,7 +52,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       query: 'findFirst',
       feature: 'profile.user',
       where: ['id=sessionUser.id', 'isDeleted=false', 'status=ACTIVE', 'profile is not null'],
-      includeCounts: ['checkIns'],
     }, error)
     throw error
   }
@@ -72,12 +62,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = publicImageUrl(profile.profile.avatarUrl || profile.avatarUrl)
   const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.profile.bio || profile.bio || ''
-  const [layoutConfig, growth, checkInHistory] = await Promise.all([
-    getPublishedPageLayoutConfig('profile'),
-    getGrowthSummary(profile.experience || profile.exp || 0),
-    prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
-  ])
-  const streaks = calculateCheckinStreaks(checkInHistory.map((item) => item.checkinDateKey))
+  const layoutConfig = await getPublishedPageLayoutConfig('profile')
   const profileEditorInitialProfile = {
     nickname: displayName,
     avatarUrl: avatar || '',
@@ -111,19 +96,15 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           displayName={displayName}
           uid={profile.uid}
           level={profile.level}
-          levelName={growth.levelName}
-          experience={growth.experience}
-          nextRequiredExp={growth.nextRequiredExp}
-          progressPercent={growth.progressPercent}
           createdAt={profile.createdAt}
           avatarUrl={avatar}
           backgroundUrl={background}
+          showGrowth={false}
         />
         <PageLayoutRenderer
           pageKey="profile"
           config={layoutConfig}
           modules={{
-            'profile.calendar': <ProfileCheckInCalendar />,
             'profile.recentMessages': <ProfileRecentMessages />,
             'profile.posts': <PublicUserModules uid={formatUid(profile.uid)} isSelf />,
             'profile.main': (
@@ -135,29 +116,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
                     </div>
                     {renderProfileActions()}
                   </div>
-                  <div className="px-4 pb-4 sm:px-5">
-                    <ProfileStatsGrid
-                      compact
-                      items={[
-                        ['等级', `Lv.${profile.level}`],
-                        ['积分', profile.points],
-                        ['经验', `${growth.experience} XP`],
-                        ['连续挂号', `${streaks.currentStreak} 天`],
-                        ['累计挂号', `${streaks.totalDays} 天`],
-                      ]}
-                    />
-                  </div>
               </section>
             ),
           }}
         />
-        <section aria-labelledby="personalization-heading" className="border border-sky-100 bg-white/88 p-4 sm:p-5">
-          <div className="mb-4 border-b border-sky-100 pb-3">
-            <h2 id="personalization-heading" className="text-lg font-black text-slate-950">个性化设置</h2>
-            <p className="mt-1 text-sm font-bold text-slate-500">管理仅与你的账号和使用习惯有关的选项。</p>
-          </div>
-          <UserPersonalizationSettings initialCheckinMoodEnabled={profile.checkinMoodEnabled} />
-        </section>
       </main>
     </>
   )

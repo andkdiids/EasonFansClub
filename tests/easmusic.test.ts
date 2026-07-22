@@ -256,14 +256,15 @@ test('音乐搜索覆盖歌曲、专辑、年份、作词和作曲', () => {
   assert.match(dialog, /\/music\/song\/\$\{song\.id\}/)
 })
 
-test('音乐封面统一使用 next/image 并保持懒加载', () => {
+test('音乐封面保持懒加载且轮播卡片使用隔离的原生图片层', () => {
   const cover = readFileSync('components/music/MusicCover.tsx', 'utf8')
   const card = readFileSync('components/music/MusicAlbum3DCard.tsx', 'utf8')
   assert.match(cover, /import Image from 'next\/image'/)
   assert.match(cover, /loading="lazy"/)
-  assert.match(card, /import Image from 'next\/image'/)
+  assert.doesNotMatch(card, /import Image from 'next\/image'/)
   assert.match(card, /loading="lazy"/)
-  assert.doesNotMatch(`${cover}\n${card}`, /<img/)
+  assert.match(card, /<img/)
+  assert.doesNotMatch(card, /filter|mix-blend-mode|mask/)
 })
 
 test('Excel 导入功能与 xlsx 依赖已移除', () => {

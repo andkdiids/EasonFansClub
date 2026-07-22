@@ -267,6 +267,108 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
   box-shadow: none !important;
 }
 
+/* Full-width home surface: the application shell already provides the outer edge. */
+.community-content {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding: 40px;
+}
+.community-stats,
+.community-columns { width: 100%; }
+
+/* Semantic dark-mode tokens and utility compatibility for legacy screens. */
+:root {
+  --text-primary: var(--foreground);
+  --text-secondary: #475467;
+  --text-muted: var(--foreground-muted);
+  --page-bg: var(--background);
+  --card-bg: var(--surface);
+  --input-bg: var(--surface-elevated);
+  --ui-border: var(--border);
+  --control-hover: var(--surface-subtle);
+  --control-active: var(--navigation-active);
+}
+:root[data-theme='midnight'] {
+  --text-primary: #f7f9fc;
+  --text-secondary: #c7d0dc;
+  --text-muted: #98a6b8;
+  --page-bg: #080b10;
+  --card-bg: #10161e;
+  --input-bg: #151d27;
+  --ui-border: rgba(255, 255, 255, .11);
+  --control-hover: #18222e;
+  --control-active: #18304f;
+}
+:root[data-theme='midnight'] body,
+:root[data-theme='midnight'] .app-shell,
+:root[data-theme='midnight'] .app-page-content { color: var(--text-primary); background-color: var(--page-bg); }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.text-black, .text-gray-950, .text-gray-900, .text-slate-950, .text-slate-900, .text-slate-800, .text-brand-950) { color: var(--text-primary) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.text-gray-800, .text-gray-700, .text-gray-600, .text-slate-700, .text-slate-600) { color: var(--text-secondary) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.text-gray-500, .text-gray-400, .text-slate-500, .text-slate-400) { color: var(--text-muted) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.text-brand-700, .text-brand-600, .text-sky-700, .text-sky-600) { color: var(--primary) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.bg-white, [class*='bg-white/'], .bg-slate-50, [class*='bg-slate-50/']) { background-color: var(--card-bg) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.bg-sky-50, [class*='bg-sky-50/'], .bg-blue-50, .bg-amber-50, .bg-emerald-50, .bg-red-50) { background-color: var(--control-active) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(.border-white, [class*='border-white/'], .border-gray-100, .border-gray-200, .border-slate-100, .border-slate-200, .border-slate-300, .border-sky-100, .border-sky-200) { border-color: var(--ui-border) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(input, textarea, select) { color: var(--text-primary) !important; border-color: var(--ui-border) !important; background-color: var(--input-bg) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(input, textarea)::placeholder { color: var(--text-muted) !important; }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(button, [role='button']):not([class*='bg-brand']):not([class*='bg-red']):not([class*='bg-emerald']):hover { border-color: var(--border-strong); background-color: var(--control-hover); }
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(button, [role='button'])[aria-current='page'],
+:root[data-theme='midnight'] main:not([data-music-archive]) :where(button, [role='button'])[aria-pressed='true'] { color: var(--text-primary); background-color: var(--control-active); }
+:root[data-theme='midnight'] .notification-center :where(h1, h2, h3) { color: var(--text-primary) !important; }
+:root[data-theme='midnight'] .notification-center :where(p, time) { color: var(--text-secondary) !important; }
+:root[data-theme='midnight'] .notification-center .notification-list-item { color: var(--text-primary); border-color: var(--ui-border); background: var(--card-bg) !important; }
+
+@media (max-width: 767px) {
+  .community-content { padding: 24px 16px calc(86px + env(safe-area-inset-bottom)); }
+}
+
+.app-main-area { display: flex; min-height: 100dvh; flex-direction: column; }
+.app-page-content { flex: 1 0 auto; }
+.site-footer-info {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  border-top: 1px solid var(--border);
+  padding: 18px 24px 22px;
+  background: var(--background);
+}
+.site-footer-info .icp-record { margin: 0; font-size: 10px; text-align: center; }
+.sidebar-actions { justify-content: space-between; }
+.sidebar-actions > a,
+.sidebar-actions > button { position: relative; }
+.sidebar-notification-action b {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 15px;
+  border-radius: 8px;
+  padding: 1px 4px;
+  color: #fff;
+  background: var(--primary);
+  font-size: 8px;
+  line-height: 13px;
+  text-align: center;
+}
+.profile-hero,
+.flat-page [data-layout-content-key='profile.main'] > section {
+  border-color: var(--ui-border);
+  background-color: var(--card-bg);
+}
+
+@media (min-width: 1024px) {
+  .app-topbar-home .app-topbar-actions { display: none; }
+  .app-topbar-home .app-topbar-search {
+    width: min(440px, 38vw);
+    margin-right: clamp(44px, 9vw, 150px);
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 1023px) {
+  .site-footer-info { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+}
+
 @media (max-width:1023px) {
   .app-sidebar { display:none; }.app-main-area { width:100%; margin-left:0; }.app-page-content { padding-bottom:calc(70px + env(safe-area-inset-bottom)); }
   .app-topbar { height:56px; padding:0 14px; }.app-topbar-brand { display:flex; min-width:0; margin-right:auto; }.app-topbar-search { display:none; }.app-topbar-actions { margin-left:auto; }.app-topbar-actions>a,.app-topbar-actions>button { width:34px; height:34px; border-color:transparent; background:transparent; }.app-topbar-actions>button:last-of-type>span { display:none; }.app-topbar-actions>button:last-of-type>svg { display:block; }.app-topbar-actions>button:last-of-type { width:34px; min-width:34px; padding:0; }

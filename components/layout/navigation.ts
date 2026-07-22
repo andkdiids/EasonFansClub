@@ -9,7 +9,7 @@ export type AppNavigationItem = {
 
 export const primaryNavigation: AppNavigationItem[] = [
   { href: '/community', label: '首页', icon: 'home', mobile: true },
-  { href: '/forum', label: '论坛', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
+  { href: '/forum', label: 'E院广场', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
   { href: '/music', label: 'EasMusic', icon: 'music', activePrefixes: ['/music'] },
   { href: '/activities', label: '演唱会', icon: 'calendar', activePrefixes: ['/activities'] },
   { href: '/achievements', label: '动态', icon: 'activity', activePrefixes: ['/achievements'] },

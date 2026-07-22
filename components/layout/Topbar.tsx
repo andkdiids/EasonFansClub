@@ -59,7 +59,6 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
         <Link href="/profile" onClick={() => setMenuOpen(false)}>我的主页</Link>
         <Link href="/notifications" onClick={() => setMenuOpen(false)}>消息中心</Link>
         <Link href="/profile?module=favorites#profile-modules" onClick={() => setMenuOpen(false)}>我的收藏</Link>
-        <Link href="/profile#checkin-records" onClick={() => setMenuOpen(false)}>签到记录</Link>
         <Link href="/settings/security" onClick={() => setMenuOpen(false)}>账号安全</Link>
         {canAccessAdmin ? <Link href="/admin" onClick={() => setMenuOpen(false)} className="app-topbar-admin-link">后台管理</Link> : null}
         <button type="button" onClick={logout}>退出登录</button>

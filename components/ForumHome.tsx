@@ -15,6 +15,10 @@ const sortOptions: Array<[ForumSort, string]> = [
   ['most-replies', '最多回复'],
 ]
 
+function boardDisplayName(name: string, slug: string) {
+  return slug === 'checkin' || name === '签到区' ? '专辑鉴赏' : name
+}
+
 const previewData: ForumFeedResponse = {
   boards: [
     { id: 'all-preview', name: '公告区', slug: 'announcements', description: null, postCount: 8, isAnnouncement: true },
@@ -105,7 +109,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         <div className="flex flex-wrap items-end justify-between gap-5">
           <div className="min-w-0">
             <p className="forum-hero-kicker">EASON FANS CLUB</p>
-            <h1>E院广场{data?.selectedBoard ? ` / ${data.selectedBoard.name}` : ''}</h1>
+            <h1>E院广场{data?.selectedBoard ? ` / ${boardDisplayName(data.selectedBoard.name, data.selectedBoard.slug)}` : ''}</h1>
             <p>浏览公开分区，筛选、搜索并参与讨论。</p>
           </div>
           {data?.permissions.canCreatePost ? <Link href={createHref} className="flat-button-primary">发布帖子</Link> : null}
@@ -121,7 +125,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         <button type="button" onClick={() => updateQuery({ board: null, page: null })} aria-current={!board ? 'page' : undefined}>全部</button>
         {(data?.boards || []).map((item) => (
           <button key={item.id} type="button" onClick={() => updateQuery({ board: item.slug, page: null })} aria-current={board === item.slug ? 'page' : undefined}>
-            {item.name}<span className="ml-1 opacity-70">{item.postCount}</span>
+            {boardDisplayName(item.name, item.slug)}<span className="ml-1 opacity-70">{item.postCount}</span>
           </button>
         ))}
       </nav>

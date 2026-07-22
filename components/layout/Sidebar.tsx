@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '@/components/BrandMark'
-import { IcpRecord } from '@/components/IcpRecord'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
 import type { SessionUser } from '@/lib/auth'
@@ -61,13 +61,19 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
         <Link href="/profile" role="menuitem">我的主页</Link>
         <Link href="/notifications" role="menuitem">消息中心</Link>
         <Link href="/profile?module=favorites#profile-modules" role="menuitem">我的收藏</Link>
-        <Link href="/profile#checkin-records" role="menuitem">签到记录</Link>
         <Link href="/settings/security" role="menuitem">账号安全</Link>
         {canAccessAdmin ? <Link href="/admin" role="menuitem" className="sidebar-user-admin">后台管理</Link> : null}
         <button type="button" role="menuitem" onClick={logout}>退出登录</button>
       </div> : null}
       <UserProfileSummary user={user} growth={growth} onActivate={() => setMenuOpen((value) => !value)} />
-      <IcpRecord />
+      <div className="sidebar-actions" aria-label="用户快捷操作">
+        <Link href="/notifications" aria-label={`消息通知，${unreadCount}条未读`} className="sidebar-notification-action">
+          <UiIcon name="bell" />
+          {unreadCount > 0 ? <b>{unreadCount}</b> : null}
+        </Link>
+        <ThemeToggle />
+        <button type="button" onClick={logout} aria-label="退出登录"><UiIcon name="logout" /></button>
+      </div>
     </div>
   </aside>
 }

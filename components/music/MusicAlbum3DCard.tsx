@@ -1,6 +1,5 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
 import { useState, type CSSProperties } from 'react'
 import { formatTrackCount } from '@/lib/music-display'
@@ -25,7 +24,8 @@ export function MusicAlbum3DCard({ album, carouselIndex, offset, spacing, cardWi
   const className = `block w-full text-left outline-none transition-transform duration-300 disabled:pointer-events-none focus-visible:rounded-[24px] focus-visible:ring-4 focus-visible:ring-sky-300/60 ${selected ? 'hover:-translate-y-1 hover:scale-[1.03]' : 'hover:-translate-y-2.5 hover:scale-[1.023]'}`
   const content = <>
       <span className={`relative block aspect-square overflow-hidden rounded-[24px] border bg-[#071523] transition-shadow duration-300 ${selected ? 'border-sky-200/20 shadow-[0_16px_42px_rgba(35,145,230,.24)]' : 'border-white/[0.12] shadow-[0_10px_28px_rgba(2,12,27,.2)]'}`}>
-        <Image src={album.coverUrl} alt={`${album.name}专辑封面`} fill sizes="(max-width:767px) 62vw, 220px" loading="lazy" draggable={false} className="object-cover [backface-visibility:hidden]" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={album.coverUrl} alt={`${album.name}专辑封面`} loading="lazy" decoding="async" draggable={false} className="absolute inset-0 block h-full w-full object-cover" />
       </span>
       <span className="mt-3 hidden px-1 text-white md:block"><span className="block truncate text-base font-black tracking-tight xl:text-lg">《{album.name}》</span><span className="mt-1 flex items-center gap-1.5 truncate text-[11px] font-bold text-slate-300/70 xl:text-xs"><span>{album.releaseLabel}</span><span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-sky-300/45" /><span>{formatTrackCount(album.songCount)}</span></span></span>
     </>
