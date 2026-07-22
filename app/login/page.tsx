@@ -31,7 +31,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       rel="noopener noreferrer"
       className="inline-block text-xs text-white/70 transition-colors hover:text-white"
     >
-      粤ICP备2026099247号-1
+      ICP备案号：粤ICP备2026099247号-1
     </a>
   </div>
 }

@@ -228,7 +228,7 @@ export function HomeLayoutSurface({
             rel="noopener noreferrer"
             className="mt-2 inline-block transition-colors hover:text-sky-500"
           >
-            粤ICP备2026099247号-1
+            ICP备案号：粤ICP备2026099247号-1
           </a>
         </footer>
       )
