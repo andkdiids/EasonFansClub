@@ -78,9 +78,9 @@ export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolea
   }, [active, uid])
 
   return (
-    <section id="profile-modules" className="space-y-4">
-      <div className="flex gap-2 overflow-x-auto rounded-2xl border border-sky-100 bg-white/80 p-2">
-        {visibleTabs.map((tab) => (
+<section id="profile-modules" className="h-full">
+<div className="flex gap-2 overflow-x-auto border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
+          {visibleTabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActive(tab.key)}
@@ -91,8 +91,8 @@ export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolea
         ))}
       </div>
 
-      <div className="rounded-2xl border border-sky-100 bg-white/82 p-5 shadow-sm">
-        {state?.failed ? <ModuleFallback /> : null}
+<div className="border-x border-bborder-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+      {state?.failed ? <ModuleFallback /> : null}
         {state?.loading || !state ? <ModuleFallback title="正在加载..." /> : null}
         {state && !state.loading && !state.failed ? <ModuleContent moduleKey={active} items={state.items} /> : null}
       </div>
@@ -108,8 +108,11 @@ function ModuleContent({ moduleKey, items }: { moduleKey: ModuleKey; items: Modu
     return (
       <div className="space-y-3">
         {posts.map((post) => (
-          <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl bg-sky-50 p-4">
-            <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
+<Link
+  key={post.id}
+  href={`/posts/${post.id}`}
+  className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
+>            <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
             <h3 className="mt-2 text-lg font-black text-brand-950">{post.title}</h3>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
             <p className="mt-2 text-xs font-bold text-slate-500">回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</p>
@@ -124,8 +127,11 @@ function ModuleContent({ moduleKey, items }: { moduleKey: ModuleKey; items: Modu
     return (
       <div className="space-y-3">
         {replies.map((reply) => (
-          <Link key={reply.id} href={`/posts/${reply.post.id}`} className="block rounded-2xl bg-sky-50 p-4">
-            <p className="font-black text-brand-950">{reply.post.title}</p>
+<Link
+  key={reply.id}
+  href={`/posts/${reply.post.id}`}
+  className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
+>            <p className="font-black text-brand-950">{reply.post.title}</p>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{reply.content}</p>
           </Link>
         ))}
@@ -138,7 +144,7 @@ function ModuleContent({ moduleKey, items }: { moduleKey: ModuleKey; items: Modu
     return (
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {achievements.map((item) => (
-          <div key={item.id} className="rounded-2xl bg-sky-50/80 p-4">
+          <div key={item.id} className="border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
             <p className="text-3xl">{item.achievement.icon || '🏆'}</p>
             <h3 className="mt-2 font-black text-brand-950">{item.achievement.title}</h3>
             <p className="mt-1 text-xs font-bold text-slate-500">{item.achievement.rarity}</p>
@@ -183,8 +189,11 @@ function ModuleContent({ moduleKey, items }: { moduleKey: ModuleKey; items: Modu
         const author = item.post.author
         const authorName = author.profile?.displayName || author.nickname
         return (
-          <Link key={item.id} href={`/posts/${item.post.id}`} className="block rounded-2xl bg-sky-50 p-4">
-            <h3 className="text-lg font-black text-brand-950">{item.post.title}</h3>
+<Link
+  key={item.id}
+  href={`/posts/${item.post.id}`}
+  className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
+>            <h3 className="text-lg font-black text-brand-950">{item.post.title}</h3>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{item.post.content}</p>
             <p className="mt-2 text-xs font-bold text-slate-500">作者 {authorName} · UID {formatUid(author.uid)}</p>
           </Link>

@@ -144,8 +144,8 @@ export function CheckInButton({
     window.addEventListener('focus', refresh)
     window.addEventListener('storage', onStorage)
     return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', onStorage) }
-  }, [onStateChange, previewMode, stats.exp, stats.level, stats.points, stats.consecutiveDays])
-
+  }, [onStateChange, previewMode])
+  
   function insertEmoji(emoji: string) {
     const input = textareaRef.current
     const start = input?.selectionStart ?? note.length

@@ -105,8 +105,17 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           pageKey="profile"
           config={layoutConfig}
           modules={{
-            'profile.recentMessages': <ProfileRecentMessages />,
-            'profile.posts': <PublicUserModules uid={formatUid(profile.uid)} isSelf />,
+            'profile.recentMessages': (
+  <section className="rounded-sm border border-sky-100 bg-white/88">
+    <ProfileRecentMessages />
+  </section>
+),
+
+'profile.posts': (
+  <section className="rounded-sm border border-sky-100 bg-white/88">
+    <PublicUserModules uid={formatUid(profile.uid)} isSelf />
+  </section>
+),
             'profile.main': (
               <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/88 shadow-sm">
                   <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center sm:px-5">

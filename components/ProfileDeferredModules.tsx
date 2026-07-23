@@ -47,7 +47,7 @@ export function ProfileCheckInCalendar() {
   }, [])
 
   return (
-    <div id="checkin-records" className="h-full scroll-mt-20 rounded-[22px] border border-sky-100 bg-white/85 p-3 pb-4 shadow-sm sm:p-4">
+    <div id="checkin-records" className="h-full scroll-mt-20 rounded-[22px] border border-[var(--border)] bg-[var(--surface)] p-3 pb-4 shadow-sm sm:p-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[22px] font-black leading-tight text-brand-950">本月挂号日历</h2>
         <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700">
@@ -87,16 +87,18 @@ export function ProfileRecentMessages() {
   }, [])
 
   return (
-    <div className="h-full rounded-[24px] border border-sky-100 bg-white/85 p-5 shadow-sm">
-      <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
+<div className="h-full  border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+        <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
       <div className="mt-5 space-y-3">
         {messages.failed ? <ModuleFallback /> : null}
         {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
         {!messages.loading && !messages.failed && messages.data.length ? messages.data.map((item) => {
           const mood = getMood(item.mood)
           return (
-            <article key={item.id} className="rounded-2xl bg-sky-50/75 p-4">
-              <p className="font-black text-brand-950">{mood?.icon || '🎵'} {new Date(item.createdAt).toLocaleString('zh-CN')}</p>
+<article
+  key={item.id}
+  className=" border border-[var(--border)] bg-[var(--surface-subtle)] p-4"
+>              <p className="font-black text-brand-950">{mood?.icon || '🎵'} {new Date(item.createdAt).toLocaleString('zh-CN')}</p>
               <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{item.content}</p>
             </article>
           )

@@ -11,8 +11,7 @@ export function SiteHeaderFrame({ children }: Readonly<{ children: ReactNode }>)
   return (
     <header
       data-music-theme={musicTheme ? 'true' : 'false'}
-      className={`site-header-frame sticky top-0 z-[100] overflow-x-clip border-b ${musicTheme ? 'site-header-frame-music' : ''}`}
-    >
+className={`site-header-frame sticky top-0 z-[100] overflow-x-clip ${musicTheme ? 'site-header-frame-music' : ''}`}    >
       <div className="relative z-10">{children}</div>
     </header>
   )
