@@ -10,6 +10,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
+import { getGrowthSummary } from '@/lib/growth'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +40,7 @@ export default async function PublicUserPage({ params }: PageProps) {
         id: true,
         uid: true,
         nickname: true,
+        experience: true,
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
@@ -109,6 +111,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   const name = user.profile.displayName || user.nickname
   const bio = user.profile.bio || user.bio || '这个成员还没有填写个人简介。'
   const friendCount = user._count.friendshipsA + user._count.friendshipsB
+  const growth = await getGrowthSummary(user.experience)
   const friendStatus = friendship ? 'FRIEND' : pendingRequest?.senderId === viewer?.id ? 'PENDING' : pendingRequest ? 'RECEIVED' : 'NONE'
 
   return (
@@ -118,8 +121,9 @@ export default async function PublicUserPage({ params }: PageProps) {
         <ProfileHeader
           displayName={name}
           uid={user.uid}
-          level={1}
-          showGrowth={false}
+          level={growth.level}
+          levelName={growth.levelName}
+          showGrowth={true}
           createdAt={user.createdAt}
           avatarUrl={avatar}
           backgroundUrl={background}

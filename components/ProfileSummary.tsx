@@ -107,7 +107,9 @@ export function ProfileHeader({
           </div>
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
-            {showGrowth ? <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">Lv.{level}{levelName ? ` ${levelName}` : ''}</span> : null}
+            {showGrowth ? <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">
+  {levelName || `Lv.${level}`}
+</span> : null}
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">
             {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天
