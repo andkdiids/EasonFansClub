@@ -40,7 +40,7 @@ export function MusicParticleCanvas() {
       y: Math.random() * height,
       speed: (mobile ? 0.012 : 0.018) + Math.random() * (mobile ? 0.022 : 0.045),
       verticalDrift: (Math.random() - 0.5) * 0.005,
-      size: 0.45 + Math.random() * 1.75,
+      size: 0.35 + Math.random() * 0.85,
       alpha: 0.2 + Math.random() * 0.7,
       phase: Math.random() * Math.PI * 2,
       offsetX: 0,
@@ -108,7 +108,7 @@ export function MusicParticleCanvas() {
           const dy = renderY - pointer.y
           const distance = Math.hypot(dx, dy)
           if (distance > 1 && distance < 145) {
-            const force = (1 - distance / 145) * 16
+ const force = (1 - distance / 145) * 6
             targetOffsetX = dx / distance * force
             targetOffsetY = dy / distance * force
           }
@@ -120,10 +120,10 @@ export function MusicParticleCanvas() {
         const alpha = star.alpha * twinkle
         const x = star.x + star.offsetX
         const y = star.y + star.offsetY
-        if (star.size > 1.25) {
+        if (star.size > 0.9) {
           context.beginPath()
-          context.arc(x, y, star.size * 2.8, 0, Math.PI * 2)
-          context.fillStyle = `rgba(86, 166, 232, ${alpha * 0.08})`
+          context.arc(x, y, star.size * 1.8, 0, Math.PI * 2)
+          context.fillStyle = `rgba(86, 166, 232, ${alpha * 0.04})`
           context.fill()
         }
         context.beginPath()
