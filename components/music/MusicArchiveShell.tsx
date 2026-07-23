@@ -36,7 +36,7 @@ export function MusicArchiveShell({ children, maxWidth = 'max-w-7xl', variant = 
   return <main ref={shellRef} data-music-archive="true" className="relative isolate min-h-screen [overflow-x:clip] bg-[#06101d] text-white">
     <HeroBackground visual={backgroundVisual} className="opacity-25 saturate-50" />
     <div className={`pointer-events-none absolute inset-0 ${isHome ? 'bg-[radial-gradient(circle_at_50%_35%,rgba(45,110,185,.20),transparent_45%),linear-gradient(180deg,#06101d_0%,#07192d_55%,#071523_100%)]' : 'bg-[linear-gradient(145deg,#050914_0%,#07182d_50%,#0b2038_100%)]'}`} />
-    <div className={`pointer-events-none absolute inset-0 [background-image:radial-gradient(circle_at_center,rgba(186,230,253,.65)_0,rgba(186,230,253,.65)_1px,transparent_1.5px)] [mask-image:linear-gradient(to_bottom,black,transparent_82%)] ${isHome ? 'opacity-[0.12] [background-size:118px_118px]' : 'opacity-30 [background-size:72px_72px]'}`} />
+    {/* <div className={`pointer-events-none absolute inset-0 [background-image:radial-gradient(circle_at_center,rgba(186,230,253,.65)_0,rgba(186,230,253,.65)_1px,transparent_1.5px)] [mask-image:linear-gradient(to_bottom,black,transparent_82%)] ${isHome ? 'opacity-[0.12] [background-size:118px_118px]' : 'opacity-30 [background-size:72px_72px]'}`} />*/}
     {isHome ? <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-sky-100/[0.06] to-transparent" /> : null}
     <MusicParticleCanvas />
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 hidden md:block" style={{ background: 'radial-gradient(340px circle at var(--music-pointer-x, 50%) var(--music-pointer-y, 18%), rgba(78, 169, 235, 0.12), transparent 72%)' }} />
