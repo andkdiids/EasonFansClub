@@ -48,21 +48,48 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
       <input name="q" aria-label="搜索帖子、歌曲、专辑和用户" placeholder="搜索帖子、歌曲、专辑、用户…" />
     </form>
     <div ref={menuRootRef} className="app-topbar-actions">
-      {canManageLayout ? <Link href="/admin/layout-editor" aria-label="布局编辑器"><UiIcon name="edit" /></Link> : null}
-      <Link href="/notifications" aria-label={`通知，${unreadCount}条未读`} className="app-topbar-notification"><UiIcon name="bell" />{unreadCount > 0 ? <b>{unreadCount}</b> : null}</Link>
-      <ThemeToggle />
-      <button type="button" className="app-topbar-user-trigger" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label="用户菜单">
-        <span className="app-topbar-avatar"><UserAvatar user={user} /></span>
-        <UiIcon name="menu" />
+  <button
+    type="button"
+    className="app-topbar-user-trigger"
+    onClick={() => setMenuOpen((value) => !value)}
+    aria-expanded={menuOpen}
+    aria-label="用户菜单"
+  >
+    <span className="app-topbar-avatar">
+      <UserAvatar user={user} />
+    </span>
+    <UiIcon name="menu" />
+  </button>
+
+  {menuOpen ? (
+    <div className="app-topbar-menu" data-user-menu-panel>
+      <Link href="/profile" onClick={() => setMenuOpen(false)}>
+        我的主页
+      </Link>
+
+      <Link href="/notifications" onClick={() => setMenuOpen(false)}>
+        消息中心
+      </Link>
+
+      <Link href="/profile?module=favorites#profile-modules" onClick={() => setMenuOpen(false)}>
+        我的收藏
+      </Link>
+
+      <Link href="/settings/security" onClick={() => setMenuOpen(false)}>
+        账号安全
+      </Link>
+
+      {canAccessAdmin ? (
+        <Link href="/admin" onClick={() => setMenuOpen(false)} className="app-topbar-admin-link">
+          后台管理
+        </Link>
+      ) : null}
+
+      <button type="button" onClick={logout}>
+        退出登录
       </button>
-      {menuOpen ? <div className="app-topbar-menu" data-user-menu-panel>
-        <Link href="/profile" onClick={() => setMenuOpen(false)}>我的主页</Link>
-        <Link href="/notifications" onClick={() => setMenuOpen(false)}>消息中心</Link>
-        <Link href="/profile?module=favorites#profile-modules" onClick={() => setMenuOpen(false)}>我的收藏</Link>
-        <Link href="/settings/security" onClick={() => setMenuOpen(false)}>账号安全</Link>
-        {canAccessAdmin ? <Link href="/admin" onClick={() => setMenuOpen(false)} className="app-topbar-admin-link">后台管理</Link> : null}
-        <button type="button" onClick={logout}>退出登录</button>
-      </div> : null}
     </div>
+  ) : null}
+</div>
   </header>
 }
