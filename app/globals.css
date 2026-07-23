@@ -78,6 +78,18 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
 .welcome-copy h1,.community-hero-copy h1 { margin:0; font:400 clamp(58px,7.2vw,112px)/.86 Georgia,'Times New Roman',serif; letter-spacing:-.045em; }
 .welcome-copy h1 span,.community-hero-copy h1 span { display:block; white-space:nowrap; }
 .hero-community,.community-hero-copy h2 { margin:24px 0 0; font-size:clamp(13px,1.3vw,18px); font-weight:400; letter-spacing:.2em; }
+.hero-community span {
+  color:rgba(255,255,255,.78);
+  font-weight:500;
+}
+
+.hero-slogan {
+  margin-top:14px;
+  color:rgba(255,255,255,.65);
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.35em;
+}
 .hero-script,.community-hero-copy em { margin:12px 0 20px; color:#79aaff; font:italic 25px/1.2 'Segoe Script',cursive; }
 .hero-primary-button { display:inline-flex; min-height:44px; align-items:center; gap:28px; border:1px solid rgba(255,255,255,.24); border-radius:2px; padding:0 22px; color:#fff; background:rgba(23,105,223,.9); font-size:14px; font-style:normal; text-decoration:none; }
 .hero-primary-button:hover { background:#0f5fcf; }
