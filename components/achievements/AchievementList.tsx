@@ -1,9 +1,24 @@
 import { categoryText, rarityText } from '@/lib/achievements'
 
+type AchievementRecord = {
+  id: string
+  unlocked: boolean
+  progress: number
+  unlockedAt?: Date | null
+  achievement: {
+    title: string
+    description?: string | null
+    category: string
+    rarity: string
+    icon?: string | null
+    conditionValue?: number | null
+  }
+}
+
 export default function AchievementList({
   records,
 }: {
-  records: any[]
+  records: AchievementRecord[]
 }) {
 
   const grouped = records.reduce<Record<string, typeof records>>((acc, item) => {

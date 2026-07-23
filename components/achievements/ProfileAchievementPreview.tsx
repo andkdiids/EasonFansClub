@@ -1,9 +1,21 @@
 import Link from 'next/link'
-
+  type AchievementRecord = {
+  id: string
+  unlocked: boolean
+  unlockedAt?: Date | null
+  progress: number
+  achievement: {
+    title: string
+    description?: string | null
+    category: string
+    rarity: string
+    icon?: string | null
+  }
+}
 export default function ProfileAchievementPreview({
   records,
 }: {
-  records: any[]
+records: AchievementRecord[]
 }) {
 
   const unlocked = records
