@@ -80,7 +80,11 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         </section>:null}
         {failed?<p className="community-error">部分社区内容暂时无法载入，请稍后刷新。</p>:null}
         <div className="community-columns">
-          {visible('home.featuredPosts')||visible('home.latestPosts')?<section className="community-panel posts-panel"><header><h2>{layoutModule('home.featuredPosts')?.title||'精选帖子'}</h2><Link href="/forum">更多 ›</Link></header><div className="post-list">{data.posts.slice(0,4).map((post)=><article data-featured-post-card key={post.id}><Link data-post-card-link href={`/posts/${post.id}`} className="post-row-link absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2" aria-label={`查看帖子：${post.title}`}/><div className="post-copy pointer-events-none relative z-[2]"><h3>{post.isPinned?<b>置顶</b>:null}<span>[{post.board.name}]</span> {post.title}</h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]">{post.author.profile?.displayName||post.author.nickname}</Link> · {new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]">
+          {visible('home.featuredPosts')||visible('home.latestPosts')?<section className="community-panel posts-panel"><header><h2>{layoutModule('home.featuredPosts')?.title||'精选帖子'}</h2><Link href="/forum">更多 ›</Link></header><div className="post-list">{data.posts.slice(0,4).map((post)=><article data-featured-post-card key={post.id}><Link data-post-card-link href={`/posts/${post.id}`} className="post-row-link absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2" aria-label={`查看帖子：${post.title}`}/><div className="post-copy pointer-events-none relative z-[2]"><h3>
+  {post.isPinned ? <b>置顶</b> : null}
+  <span className="post-board-name">[{post.board.name}]</span>
+  {post.title}
+</h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]">{post.author.profile?.displayName||post.author.nickname}</Link> · {new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]">
   <span>回复 {post.replyCount}</span>
   <span>浏览 {fmt(post.viewCount)}</span>
   <div data-post-like-control className="pointer-events-auto relative z-[3]">
