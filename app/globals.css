@@ -1027,3 +1027,6 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
   .site-page-main { padding-inline: 16px; }
   .auth-page-layout { width: calc(100% - 32px); }
 }
+.home-feature-posts .post-thumb {
+  display:none;
+}
