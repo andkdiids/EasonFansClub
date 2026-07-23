@@ -59,7 +59,15 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   return <div className="community-home">
       <section className="community-hero">
         <HeroBackground visual={siteConfig.heroVisuals.home} fallbackImageUrl={hero?.imageUrl} priority />{!siteConfig.heroVisuals.home.enabled || (!siteConfig.heroVisuals.home.imageUrl && !hero?.imageUrl) ? <div className="community-hero-fallback"/> : null}<div className="community-hero-overlay"/>
-        <div className="community-hero-copy"><p>WELCOME BACK</p><h1>EASON<span>FANS CLUB</span></h1><h2>听见Eason，也听见自己 Now is the only reality.</h2><em>C’mon in~</em><a href="#community-content" className="hero-primary-button">浏览今日内容 <span aria-hidden>›</span></a></div>
+        <div className="community-hero-copy"><p>WELCOME HOME</p><h1>
+  私家E院
+</h1><h2>
+  听见 Eason，也听见自己
+</h2>
+<p className="hero-slogan">
+  NOW IS THE ONLY REALITY.
+</p>
+<em>C’mon in~</em><a href="#community-content" className="hero-primary-button">浏览今日内容 <span aria-hidden>›</span></a></div>
       </section>
       <div id="community-content" className="community-content">
         {announcement&&visible('home.announcement')?<Link href={announcement.link||announcement.buttonUrl||'/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link>:null}

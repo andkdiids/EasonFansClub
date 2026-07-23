@@ -26,7 +26,9 @@ export default async function WelcomePage() {
       </header>
       <section className="welcome-copy" aria-labelledby="welcome-title">
         <p className="hero-kicker">WELCOME TO</p>
-        <h1 id="welcome-title">EASON<span>FANS CLUB</span></h1>
+        <h1>
+  私家E院
+</h1>
         <p className="hero-community">
   听见 <span>Eason</span>，也听见自己
 </p>
