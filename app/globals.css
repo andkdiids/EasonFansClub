@@ -463,29 +463,27 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
   letter-spacing:.35em;
 }
 .auth-brand-copy h2 {
-  margin:0 0 32px;
+  margin:0 0 28px;
   color:#fff;
   font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif;
-  font-size:clamp(42px,4vw,64px);
-  font-weight:350;
+  font-size:clamp(56px,5.8vw,88px);
+  font-weight:300;
   line-height:1;
-  letter-spacing:.05em;
+  letter-spacing:.06em;
 }
 .auth-brand-copy span {
-  display:block;
-  margin-bottom:28px;
-  color:rgba(255,255,255,.78);
-  font-size:14px;
-  line-height:1.8;
+  color:rgba(255,255,255,.75);
+  font-size:16px;
   letter-spacing:.16em;
 }
 .auth-brand-copy em {
   display:block;
+  margin-top:22px;
   color:rgba(255,255,255,.65);
-  font-size:12px;
+  font-size:13px;
   font-style:normal;
   font-weight:600;
-  letter-spacing:.35em;
+  letter-spacing:.28em;
 }
 .auth-form-panel { border:1px solid rgba(255,255,255,.16); border-radius:2px; padding:clamp(24px,3.2vw,42px); background:rgba(6,15,25,.86); box-shadow:0 1px 2px rgba(0,0,0,.25); }
 .auth-form-heading { border-bottom:1px solid rgba(255,255,255,.14); padding-bottom:20px; }.auth-form-heading h1 { margin:7px 0 0; color:#fff; font-size:30px; line-height:1.15; }.auth-form-heading>span { display:block; margin-top:8px; color:rgba(255,255,255,.62); font-size:12px; line-height:1.7; }.auth-form-content { margin-top:22px; }.auth-form-footer { margin-top:22px; border-top:1px solid rgba(255,255,255,.14); padding-top:17px; color:rgba(255,255,255,.68); font-size:12px; text-align:center; }
