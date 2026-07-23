@@ -61,7 +61,10 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
  color:#fff;
  background:#050a11;
 }
-.welcome-hero-image { object-fit:cover; object-position:68% center; }
+.welcome-hero-image { 
+  object-fit:cover; 
+  object-position:68% 25%; 
+}
 .welcome-hero-fallback,.community-hero-fallback { position:absolute; inset:0; background:radial-gradient(circle at 75% 32%,#26435d 0,transparent 25%),linear-gradient(120deg,#03070c,#102335 70%,#07101a); }
 .welcome-overlay {
   position:absolute;
