@@ -11,6 +11,7 @@ import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
+import AchievementList from '@/components/achievements/AchievementList'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,9 +61,26 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
   const displayName = profile.profile.displayName || profile.nickname
   const avatar = publicImageUrl(profile.profile.avatarUrl || profile.avatarUrl)
+  
   const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.profile.bio || profile.bio || ''
   const layoutConfig = await getPublishedPageLayoutConfig('profile')
+  const achievements = await prisma.userAchievement.findMany({
+  where: {
+    userId: user.id,
+    achievement: {
+      isVisible: true,
+    },
+  },
+  include: {
+    achievement: true,
+  },
+  orderBy: [
+    { unlockedAt: 'desc' },
+    { createdAt: 'desc' },
+  ],
+  take: 200,
+})
   const profileEditorInitialProfile = {
     nickname: displayName,
     avatarUrl: avatar || '',
@@ -105,6 +123,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           pageKey="profile"
           config={layoutConfig}
           modules={{
+            'profile.achievements': (
+  <section className="rounded-sm border border-sky-100 bg-white/88">
+    <AchievementList records={achievements} />
+  </section>
+),
             'profile.recentMessages': (
   <section className="rounded-sm border border-sky-100 bg-white/88">
     <ProfileRecentMessages />
