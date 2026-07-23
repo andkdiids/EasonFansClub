@@ -32,7 +32,7 @@ export default async function WelcomePage() {
 </p>
 
 <p className="hero-slogan">
-  SHALL WE DANCE · SHALL WE TALK
+  NOW IS THE ONLY REALITY.
 </p>
 
 <p className="hero-script">C’mon in~</p>
