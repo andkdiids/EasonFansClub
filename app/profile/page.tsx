@@ -11,7 +11,7 @@ import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
-import AchievementList from '@/components/achievements/AchievementList'
+import ProfileAchievementPreview from '@/components/achievements/ProfileAchievementPreview'
 
 export const dynamic = 'force-dynamic'
 
@@ -123,10 +123,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           pageKey="profile"
           config={layoutConfig}
           modules={{
-            'profile.achievements': (
-  <section className="rounded-sm border border-sky-100 bg-white/88">
-    <AchievementList records={achievements} />
-  </section>
+           'profile.achievements': (
+  <ProfileAchievementPreview records={achievements} />
 ),
             'profile.recentMessages': (
   <section className="rounded-sm border border-sky-100 bg-white/88">

@@ -30,7 +30,7 @@ export function AuthFormShell({
       <div className="auth-page-overlay" />
       <header className="auth-page-header"><Link href="/" aria-label={siteName}><BrandMark logoUrl={publicImageUrl(logoUrl)} inverse compact /></Link><ThemeToggle className="hero-icon-button" /></header>
       <div className="auth-page-layout">
-        <section className="auth-brand-copy" aria-label="网站介绍"><p>EASON FANS CLUB</p><h2>听见 Eason，<br/>也听见自己。</h2><span>全球陈奕迅粉丝社区 · 私家E院</span></section>
+        <section className="auth-brand-copy" aria-label="网站介绍"><p>EASON FANS CLUB</p><h2>私家E院</h2><span>听见Eason，也听见自己 Shall we dance,Shall we talk.</span></section>
         <section className="auth-form-panel">
           <div className="auth-form-heading"><p>MEMBER ACCESS</p><h1>{title}</h1><span>{subtitle}</span></div>
           <div className="auth-form-content">{children}</div>

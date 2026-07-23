@@ -27,7 +27,7 @@ export default async function WelcomePage() {
       <section className="welcome-copy" aria-labelledby="welcome-title">
         <p className="hero-kicker">WELCOME TO</p>
         <h1 id="welcome-title">EASON<span>FANS CLUB</span></h1>
-        <p className="hero-community">全球陈奕迅粉丝社区 · 私家E院</p>
+        <p className="hero-community">听见Eason，也听见自己 Shall we dance,Shall we talk.</p>
         <p className="hero-script">C’mon in~</p>
         <Link href="/community" className="hero-primary-button" aria-label="进入社区首页">进入社区 <span aria-hidden>›</span></Link>
       </section>
