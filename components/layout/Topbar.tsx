@@ -48,27 +48,27 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
       <input name="q" aria-label="搜索帖子、歌曲、专辑和用户" placeholder="搜索帖子、歌曲、专辑、用户…" />
     </form>
     <div ref={menuRootRef} className="app-topbar-actions">
+      <div className="app-topbar-theme-toggle">
+  <ThemeToggle />
+</div>
   <button
-    type="button"
-    className="app-topbar-user-trigger"
-    onClick={() => setMenuOpen((value) => !value)}
-    aria-expanded={menuOpen}
-    aria-label="用户菜单"
-  >
-    <span className="app-topbar-avatar">
-      <UserAvatar user={user} />
-    </span>
-    <UiIcon name="menu" />
-  </button>
+  type="button"
+  className="app-topbar-user-trigger"
+  onClick={() => setMenuOpen((value) => !value)}
+  aria-expanded={menuOpen}
+  aria-label="用户菜单"
+>
+  <span className="app-topbar-avatar">
+    <UserAvatar user={user} />
+  </span>
+</button>
 
   {menuOpen ? (
     <div className="app-topbar-menu" data-user-menu-panel>
       <Link href="/profile" onClick={() => setMenuOpen(false)}>
         我的主页
       </Link>
-      <div className="app-topbar-theme">
-  <ThemeToggle />
-</div>
+      
 
       <Link href="/notifications" onClick={() => setMenuOpen(false)}>
         消息中心

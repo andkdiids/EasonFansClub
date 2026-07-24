@@ -512,7 +512,32 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
 
 @media (max-width:1023px) {
   .app-sidebar { display:none; }.app-main-area { width:100%; margin-left:0; }.app-page-content { padding-bottom:calc(70px + env(safe-area-inset-bottom)); }
-  .app-topbar { height:56px; padding:0 14px; }.app-topbar-brand { display:flex; min-width:0; margin-right:auto; }.app-topbar-search { display:none; }.app-topbar-actions { margin-left:auto; }.app-topbar-actions>a,.app-topbar-actions>button { width:34px; height:34px; border-color:transparent; background:transparent; }.app-topbar-actions>button:last-of-type>span { display:none; }.app-topbar-actions>button:last-of-type>svg { display:block; }.app-topbar-actions>button:last-of-type { width:34px; min-width:34px; padding:0; }
+  .app-topbar { height:56px; padding:0 14px; }.app-topbar-brand { display:flex; min-width:0; margin-right:auto; }.app-topbar-search { display:none; }.app-topbar-actions { margin-left:auto; }.app-topbar-actions>a,
+.app-topbar-actions>button {
+  display:flex;
+  width:34px;
+  height:34px;
+  align-items:center;
+  justify-content:center;
+  border-color:transparent;
+  background:transparent;
+}
+
+.app-topbar-actions>button:last-of-type>span {
+  display:none;
+}
+
+.app-topbar-actions>button:last-of-type>svg {
+  display:block;
+  width:20px;
+  height:20px;
+}
+
+.app-topbar-actions>button:last-of-type {
+  width:34px;
+  min-width:34px;
+  padding:0;
+}
   .app-mobile-nav { position:fixed; z-index:70; inset:auto 0 0; display:grid; height:calc(62px + env(safe-area-inset-bottom)); grid-template-columns:repeat(5,1fr); align-items:start; border-top:1px solid var(--border); padding:7px 8px env(safe-area-inset-bottom); background:color-mix(in srgb,var(--surface),transparent 4%); backdrop-filter:blur(16px); }.app-mobile-nav>a { position:relative; display:flex; height:48px; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:var(--foreground-muted); font-size:9px; text-decoration:none; }.app-mobile-nav svg { width:20px; height:20px; }.app-mobile-nav a[aria-current='page'] { color:var(--primary); }.app-mobile-nav .mobile-publish { justify-self:center; width:44px; height:44px; border-radius:50%; color:#fff; background:var(--primary); }.app-mobile-nav .mobile-notifications b { right:20%; }
   .app-layout-tools { right:8px; bottom:calc(70px + env(safe-area-inset-bottom)); }
 }
