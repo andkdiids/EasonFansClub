@@ -171,6 +171,7 @@ export function CheckInButton({
 
     submittingRef.current = true
     setIsSubmitting(true)
+    const submittingStartTime = Date.now()
     try {
       const response = await fetch('/api/checkin', {
         method: 'POST',
@@ -196,6 +197,12 @@ if (!verifyResponse.ok || !verifyData) {
   return
 }
 
+const elapsed = Date.now() - submittingStartTime
+const remaining = 1000 - elapsed
+
+if (remaining > 0) {
+  await new Promise((resolve) => setTimeout(resolve, remaining))
+}
 const nextCheckIn = verifyData.todayCheckIn || null
 
 setTodayCheckIn(nextCheckIn)
@@ -337,7 +344,7 @@ onStateChange?.({
         disabled={previewMode || isSubmitting}
         className={isMinimal ? 'relative w-full overflow-hidden rounded-xl bg-brand-700 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60' : isCompact ? 'relative w-full overflow-hidden rounded-2xl bg-brand-700 px-4 py-2 text-sm font-black text-white shadow-lg shadow-sky-900/10 transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60' : 'relative w-full overflow-hidden rounded-2xl bg-brand-700 px-6 py-4 text-lg font-black text-white shadow-xl shadow-sky-900/10 transition hover:bg-brand-800 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60'}
       >
-        {!isSubmitting ? <span className="absolute inset-0 animate-pulse bg-white/10" /> : null}
+        
         <span className="relative">{isSubmitting ? '挂号中...' : '完成今日挂号'}</span>
       </button>
 

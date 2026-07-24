@@ -1132,3 +1132,16 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
 .home-feature-posts .post-thumb {
   display:none;
 }
+@keyframes checkin-shine {
+  0%, 100% {
+    opacity: 0.1;
+  }
+
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.animate-checkin-shine {
+  animation: checkin-shine 2s ease-in-out infinite;
+}

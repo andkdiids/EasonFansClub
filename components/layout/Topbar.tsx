@@ -66,6 +66,9 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
       <Link href="/profile" onClick={() => setMenuOpen(false)}>
         我的主页
       </Link>
+      <div className="app-topbar-theme">
+  <ThemeToggle />
+</div>
 
       <Link href="/notifications" onClick={() => setMenuOpen(false)}>
         消息中心
