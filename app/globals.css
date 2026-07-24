@@ -115,7 +115,7 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
 .app-topbar-brand { display:none; color:inherit; text-decoration:none; }
 .app-topbar-search { display:flex; width:min(430px,42vw); height:38px; align-items:center; gap:10px; margin:0 auto; border:1px solid var(--border); border-radius:2px; padding:0 12px; color:var(--foreground-muted); background:var(--surface); }.app-topbar-search svg { width:17px; }.app-topbar-search input { min-width:0; flex:1; border:0; outline:0; color:var(--foreground); background:transparent; font-size:12px; }
 .app-topbar-inverse .app-topbar-search { border-color:rgba(255,255,255,.2); color:rgba(255,255,255,.7); background:rgba(2,8,14,.42); }.app-topbar-inverse .app-topbar-search input { color:#fff; }.app-topbar-inverse .app-topbar-search input::placeholder { color:rgba(255,255,255,.6); }
-.app-topbar-actions { position:relative; display:flex; flex:none; align-items:center; gap:7px; }.app-topbar-actions>a,.app-topbar-actions>button { display:grid; width:36px; height:36px; place-items:center; border:1px solid var(--border); border-radius:2px; color:inherit; background:var(--surface); }.app-topbar-inverse .app-topbar-actions>a,.app-topbar-inverse .app-topbar-actions>button { border-color:rgba(255,255,255,.18); background:rgba(2,8,14,.38); }.app-topbar-actions svg { width:18px; }.app-topbar-actions>button:last-of-type { display:flex; width:auto; min-width:38px; gap:6px; padding:0 2px; }.app-topbar-actions>button:last-of-type>svg { display:none; }
+.app-topbar-actions { position:relative; display:flex; flex:none; align-items:center; gap:12px; }.app-topbar-actions>a,.app-topbar-actions>button { display:grid; width:36px; height:36px; place-items:center; border:1px solid var(--border); border-radius:2px; color:inherit; background:var(--surface); }.app-topbar-inverse .app-topbar-actions>a,.app-topbar-inverse .app-topbar-actions>button { border-color:rgba(255,255,255,.18); background:rgba(2,8,14,.38); }.app-topbar-actions svg { width:18px; }.app-topbar-actions>button:last-of-type { display:flex; width:auto; min-width:38px; gap:6px; padding:0 2px; }.app-topbar-actions>button:last-of-type>svg { display:none; }
 .app-topbar-notification { position:relative; }.app-topbar-notification b { position:absolute; top:-5px; right:-5px; min-width:16px; border-radius:9px; padding:2px 4px; color:#fff; background:#1769df; font-size:9px; text-align:center; }
 .app-topbar-avatar { position:relative; display:grid; width:30px; height:30px; place-items:center; overflow:hidden; border-radius:50%; color:#fff; background:var(--primary); font-size:11px; }
 .app-topbar-menu { position:absolute; top:44px; right:0; display:flex; width:168px; flex-direction:column; border:1px solid var(--border); border-radius:2px; padding:5px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 8px 24px rgba(0,0,0,.12); }.app-topbar-menu a,.app-topbar-menu button { min-height:36px; border:0; padding:0 10px; color:inherit; background:transparent; font-size:12px; text-align:left; text-decoration:none; line-height:36px; }.app-topbar-menu a:hover,.app-topbar-menu button:hover { background:var(--surface-subtle); }.app-topbar-menu .app-topbar-admin-link { color:var(--primary); font-weight:800; }
@@ -1155,4 +1155,21 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
 
 .animate-checkin-shine {
   animation: checkin-shine 2s ease-in-out infinite;
+}
+/* topbar avatar remove square wrapper */
+.app-topbar-actions .app-topbar-user-trigger {
+  width:36px;
+  height:36px;
+  padding:0;
+  border:0;
+  background:transparent;
+}
+
+.app-topbar-actions .app-topbar-user-trigger:hover {
+  background:transparent;
+}
+
+.app-topbar-user-trigger .app-topbar-avatar {
+  width:32px;
+  height:32px;
 }
