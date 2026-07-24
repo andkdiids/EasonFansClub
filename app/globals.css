@@ -1184,4 +1184,8 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
     gap:18px;
     margin-right:0;
   }
+
+  .app-topbar-theme-toggle {
+    transform: translateX(-12px);
+  }
 }
