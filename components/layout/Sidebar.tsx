@@ -61,6 +61,7 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
         <Link href="/profile" role="menuitem">我的主页</Link>
         <Link href="/notifications" role="menuitem">消息中心</Link>
         <Link href="/profile?module=favorites#profile-modules" role="menuitem">我的收藏</Link>
+        <Link href="/entertainment" role="menuitem">娱乐中心</Link>
         <Link href="/settings/security" role="menuitem">账号安全</Link>
         {canAccessAdmin ? <Link href="/admin" role="menuitem" className="sidebar-user-admin">后台管理</Link> : null}
         <button type="button" role="menuitem" onClick={logout}>退出登录</button>

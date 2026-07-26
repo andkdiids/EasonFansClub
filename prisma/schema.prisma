@@ -64,6 +64,7 @@ enum PointActionType {
   POST_CREATE
   REPLY_CREATE
   DAILY_CHECK_IN
+  ENTERTAINMENT_DAILY_DRAW
   CONTINUOUS_CHECK_IN_BONUS
   POST_LIKE_RECEIVED
   FEATURED_POST
@@ -378,6 +379,7 @@ model User {
   friendActivities            FriendActivity[]          @relation("FriendActivityActor")
   experienceLogs              ExperienceLog[]
   dailyExperienceRecords      DailyExperienceRecord[]
+  entertainmentDailyDraws     EntertainmentDailyDraw[]
 
   @@index([role])
   @@index([status])
@@ -938,11 +940,13 @@ model PointLog {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  postId     String?
-  replyId    String?
-  checkInId  String?
-  activityId String?
-  badgeId    String?
+  postId      String?
+  replyId     String?
+  checkInId   String?
+  activityId  String?
+  badgeId     String?
+  dailyDrawId String?                 @unique
+  dailyDraw   EntertainmentDailyDraw? @relation(fields: [dailyDrawId], references: [id], onDelete: SetNull)
 
   @@unique([action, checkInId])
   @@index([userId, createdAt])
@@ -951,6 +955,47 @@ model PointLog {
   @@index([replyId])
   @@index([checkInId])
   @@index([activityId])
+}
+
+model LyricPrescription {
+  id           String   @id @default(cuid())
+  text         String
+  songTitle    String
+  albumTitle   String?
+  enabled      Boolean  @default(true)
+  displayCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  dailyDraws EntertainmentDailyDraw[]
+
+  @@index([enabled, createdAt])
+  @@index([displayCount])
+}
+
+model EntertainmentDailyDraw {
+  id               String   @id @default(cuid())
+  dateKey          String
+  points           Int
+  prescriptionCode String   @unique
+  lyricText        String?
+  songTitle        String?
+  albumTitle       String?
+  createdAt        DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lyricPrescriptionId String?
+  lyricPrescription   LyricPrescription? @relation(fields: [lyricPrescriptionId], references: [id], onDelete: Restrict)
+
+  pointLog PointLog?
+
+  @@unique([userId, dateKey])
+  @@index([userId])
+  @@index([dateKey])
+  @@index([lyricPrescriptionId])
+  @@index([userId, createdAt])
 }
 
 model Badge {

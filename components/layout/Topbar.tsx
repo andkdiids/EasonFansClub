@@ -78,6 +78,10 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
         我的收藏
       </Link>
 
+      <Link href="/entertainment" onClick={() => setMenuOpen(false)}>
+        娱乐中心
+      </Link>
+
       <Link href="/settings/security" onClick={() => setMenuOpen(false)}>
         账号安全
       </Link>
