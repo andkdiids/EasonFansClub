@@ -1,0 +1,2147 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("MIGRATION_POSTGRES_URL")
+}
+model accountsecuritylog {
+  id        String   @id
+  action    String
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  userId    String
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "AccountSecurityLog_userId_fkey")
+
+  @@index([action, createdAt], map: "AccountSecurityLog_action_createdAt_idx")
+  @@index([userId, createdAt], map: "AccountSecurityLog_userId_createdAt_idx")
+}
+
+model achievement {
+  id              String               @id
+  title           String
+  slug            String               @unique(map: "Achievement_slug_key")
+  description     String?
+  icon            String?
+  imageUrl        String?
+  color           String?
+  category        achievement_category
+  rarity          achievement_rarity   @default(NORMAL)
+  conditionKey    String?
+  conditionValue  Int?
+  isAutoGrant     Boolean              @default(true)
+  isVisible       Boolean              @default(true)
+  sortOrder       Int                  @default(0)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime
+  userachievement userachievement[]
+
+  @@index([category, sortOrder], map: "Achievement_category_sortOrder_idx")
+  @@index([isVisible], map: "Achievement_isVisible_idx")
+  @@index([rarity], map: "Achievement_rarity_idx")
+}
+
+model activity {
+  id                   String                 @id
+  title                String
+  description          String
+  type                 activity_type          @default(OTHER)
+  status               activity_status        @default(DRAFT)
+  coverUrl             String?
+  pointsReward         Int?
+  signupLimit          Int?
+  signupCount          Int                    @default(0)
+  startsAt             DateTime?
+  endsAt               DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime
+  activityfavorite     activityfavorite[]
+  activityregistration activityregistration[]
+  lottery              lottery[]
+
+  @@index([status, createdAt], map: "Activity_status_createdAt_idx")
+  @@index([status, startsAt], map: "Activity_status_startsAt_idx")
+  @@index([type], map: "Activity_type_idx")
+}
+
+model activityfavorite {
+  id         String   @id
+  createdAt  DateTime @default(now())
+  activityId String
+  userId     String
+  activity   activity @relation(fields: [activityId], references: [id], onDelete: Cascade, map: "ActivityFavorite_activityId_fkey")
+  user       user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ActivityFavorite_userId_fkey")
+
+  @@unique([activityId, userId], map: "ActivityFavorite_activityId_userId_key")
+  @@index([userId], map: "ActivityFavorite_userId_fkey")
+}
+
+model activityregistration {
+  id          String    @id
+  note        String?
+  checkedInAt DateTime?
+  createdAt   DateTime  @default(now())
+  activityId  String
+  userId      String
+  activity    activity  @relation(fields: [activityId], references: [id], onDelete: Cascade, map: "ActivityRegistration_activityId_fkey")
+  user        user      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ActivityRegistration_userId_fkey")
+
+  @@unique([activityId, userId], map: "ActivityRegistration_activityId_userId_key")
+  @@index([userId, createdAt], map: "ActivityRegistration_userId_createdAt_idx")
+}
+
+model adminaction {
+  id                                  String             @id
+  action                              adminaction_action
+  reason                              String?
+  metadata                            Json?
+  createdAt                           DateTime           @default(now())
+  adminId                             String
+  targetUserId                        String?
+  postId                              String?
+  replyId                             String?
+  boardId                             String?
+  user_adminaction_adminIdTouser      user               @relation("adminaction_adminIdTouser", fields: [adminId], references: [id], onDelete: Cascade, map: "AdminAction_adminId_fkey")
+  board                               board?             @relation(fields: [boardId], references: [id], map: "AdminAction_boardId_fkey")
+  post                                post?              @relation(fields: [postId], references: [id], map: "AdminAction_postId_fkey")
+  reply                               reply?             @relation(fields: [replyId], references: [id], map: "AdminAction_replyId_fkey")
+  user_adminaction_targetUserIdTouser user?              @relation("adminaction_targetUserIdTouser", fields: [targetUserId], references: [id], map: "AdminAction_targetUserId_fkey")
+
+  @@index([action], map: "AdminAction_action_idx")
+  @@index([adminId, createdAt], map: "AdminAction_adminId_createdAt_idx")
+  @@index([boardId], map: "AdminAction_boardId_idx")
+  @@index([postId], map: "AdminAction_postId_idx")
+  @@index([replyId], map: "AdminAction_replyId_idx")
+  @@index([targetUserId], map: "AdminAction_targetUserId_idx")
+}
+
+model adminactionlog {
+  id                                     String   @id
+  adminId                                String
+  action                                 String
+  targetUserId                           String
+  detail                                 Json?
+  createdAt                              DateTime @default(now())
+  user_adminactionlog_adminIdTouser      user     @relation("adminactionlog_adminIdTouser", fields: [adminId], references: [id], onDelete: Cascade, map: "AdminActionLog_adminId_fkey")
+  user_adminactionlog_targetUserIdTouser user     @relation("adminactionlog_targetUserIdTouser", fields: [targetUserId], references: [id], onDelete: Cascade, map: "AdminActionLog_targetUserId_fkey")
+
+  @@index([action, createdAt], map: "AdminActionLog_action_createdAt_idx")
+  @@index([adminId, createdAt], map: "AdminActionLog_adminId_createdAt_idx")
+  @@index([targetUserId, createdAt], map: "AdminActionLog_targetUserId_createdAt_idx")
+}
+
+model adminpermission {
+  id            String   @id
+  permissionKey String
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  userId        String
+  user          user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "AdminPermission_userId_fkey")
+
+  @@unique([userId, permissionKey], map: "AdminPermission_userId_permissionKey_key")
+  @@index([permissionKey, enabled], map: "AdminPermission_permissionKey_enabled_idx")
+  @@index([userId, enabled], map: "AdminPermission_userId_enabled_idx")
+}
+
+model announcement {
+  id          String   @id
+  title       String
+  content     String
+  isPinned    Boolean  @default(false)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@index([isPublished, isPinned], map: "Announcement_isPublished_isPinned_idx")
+}
+
+model badge {
+  id          String      @id
+  name        String      @unique(map: "Badge_name_key")
+  slug        String      @unique(map: "Badge_slug_key")
+  description String?
+  iconUrl     String?
+  pointsCost  Int?
+  isAutoGrant Boolean     @default(false)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime
+  userbadge   userbadge[]
+
+  @@index([isActive], map: "Badge_isActive_idx")
+}
+
+model banner {
+  id        String   @id
+  title     String
+  imageUrl  String
+  link      String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([isActive, sortOrder], map: "Banner_isActive_sortOrder_idx")
+}
+
+model block {
+  id                         String   @id
+  reason                     String?
+  createdAt                  DateTime @default(now())
+  blockerId                  String
+  blockedId                  String
+  user_block_blockedIdTouser user     @relation("block_blockedIdTouser", fields: [blockedId], references: [id], onDelete: Cascade, map: "Block_blockedId_fkey")
+  user_block_blockerIdTouser user     @relation("block_blockerIdTouser", fields: [blockerId], references: [id], onDelete: Cascade, map: "Block_blockerId_fkey")
+
+  @@unique([blockerId, blockedId], map: "Block_blockerId_blockedId_key")
+  @@index([blockedId], map: "Block_blockedId_fkey")
+}
+
+model board {
+  id            String          @id
+  name          String          @unique(map: "Board_name_key")
+  slug          String          @unique(map: "Board_slug_key")
+  description   String?
+  sortOrder     Int             @default(0)
+  postCount     Int             @default(0)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  categoryId    String?
+  coverUrl      String?
+  followerCount Int             @default(0)
+  isHot         Boolean         @default(false)
+  isRecommended Boolean         @default(false)
+  parentId      String?
+  adminaction   adminaction[]
+  boardcategory boardcategory?  @relation(fields: [categoryId], references: [id], map: "Board_categoryId_fkey")
+  board         board?          @relation("boardToboard", fields: [parentId], references: [id], map: "Board_parentId_fkey")
+  other_board   board[]         @relation("boardToboard")
+  boardfavorite boardfavorite[]
+  post          post[]
+
+  @@index([categoryId], map: "Board_categoryId_idx")
+  @@index([isActive], map: "Board_isActive_idx")
+  @@index([isHot], map: "Board_isHot_idx")
+  @@index([isRecommended], map: "Board_isRecommended_idx")
+  @@index([parentId], map: "Board_parentId_idx")
+  @@index([sortOrder], map: "Board_sortOrder_idx")
+}
+
+model boardcategory {
+  id          String   @id
+  name        String   @unique(map: "BoardCategory_name_key")
+  slug        String   @unique(map: "BoardCategory_slug_key")
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  board       board[]
+
+  @@index([sortOrder], map: "BoardCategory_sortOrder_idx")
+}
+
+model boardfavorite {
+  id        String   @id
+  createdAt DateTime @default(now())
+  boardId   String
+  userId    String
+  board     board    @relation(fields: [boardId], references: [id], onDelete: Cascade, map: "BoardFavorite_boardId_fkey")
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "BoardFavorite_userId_fkey")
+
+  @@unique([boardId, userId], map: "BoardFavorite_boardId_userId_key")
+  @@index([userId, createdAt], map: "BoardFavorite_userId_createdAt_idx")
+}
+
+model changelog {
+  id          String           @id
+  version     String           @unique(map: "Changelog_version_key")
+  major       Int
+  minor       Int
+  patch       Int
+  title       String
+  content     String
+  type        changelog_type
+  isMajor     Boolean          @default(false)
+  status      changelog_status @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime
+  createdById String
+  user        user             @relation(fields: [createdById], references: [id], onDelete: Cascade, map: "Changelog_createdById_fkey")
+
+  @@index([createdById, createdAt], map: "Changelog_createdById_createdAt_idx")
+  @@index([major, minor, patch], map: "Changelog_major_minor_patch_idx")
+  @@index([status, publishedAt], map: "Changelog_status_publishedAt_idx")
+}
+
+model checkin {
+  id             String           @id
+  checkDate      DateTime
+  points         Int              @default(10)
+  streakDay      Int              @default(1)
+  createdAt      DateTime         @default(now())
+  userId         String
+  isMakeUp       Boolean          @default(false)
+  exp            Int              @default(0)
+  message        String?          @db.Text
+  mood           String?
+  checkinDateKey String
+  user           user             @relation(fields: [userId], references: [id], onDelete: Cascade, map: "CheckIn_userId_fkey")
+  dailymessage   dailymessage?
+  friendactivity friendactivity[]
+
+  @@unique([userId, checkDate], map: "CheckIn_userId_checkDate_key")
+  @@unique([userId, checkinDateKey], map: "CheckIn_userId_checkinDateKey_key")
+  @@index([checkDate], map: "CheckIn_checkDate_idx")
+  @@index([userId, createdAt], map: "CheckIn_userId_createdAt_idx")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model checkin_backup_timezone_fix {
+  id             String?
+  checkDate      DateTime?
+  points         Int?
+  streakDay      Int?
+  createdAt      DateTime?
+  userId         String?
+  isMakeUp       Boolean?
+  exp            Int?
+  message        String?
+  mood           String?
+  checkinDateKey String?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model checkin_before_duplicate_fix {
+  id             String?
+  checkDate      DateTime?
+  points         Int?
+  streakDay      Int?
+  createdAt      DateTime?
+  userId         String?
+  isMakeUp       Boolean?
+  exp            Int?
+  message        String?
+  mood           String?
+  checkinDateKey String?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model checkin_before_streak_fix {
+  id             String?
+  checkDate      DateTime?
+  points         Int?
+  streakDay      Int?
+  createdAt      DateTime?
+  userId         String?
+  isMakeUp       Boolean?
+  exp            Int?
+  message        String?
+  mood           String?
+  checkinDateKey String?
+
+  @@ignore
+}
+
+model conversation {
+  id                      String                    @id
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime
+  lastMessageAt           DateTime?
+  pairKey                 String?                   @unique(map: "Conversation_pairKey_key")
+  conversationparticipant conversationparticipant[]
+  directmessage           directmessage[]
+
+  @@index([lastMessageAt], map: "Conversation_lastMessageAt_idx")
+}
+
+model conversationparticipant {
+  id             String       @id
+  lastReadAt     DateTime?
+  isDeleted      Boolean      @default(false)
+  isMuted        Boolean      @default(false)
+  joinedAt       DateTime     @default(now())
+  conversationId String
+  userId         String
+  conversation   conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, map: "ConversationParticipant_conversationId_fkey")
+  user           user         @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ConversationParticipant_userId_fkey")
+
+  @@unique([conversationId, userId], map: "ConversationParticipant_conversationId_userId_key")
+  @@index([userId, isDeleted], map: "ConversationParticipant_userId_isDeleted_idx")
+}
+
+model culturecomment {
+  id          String      @id
+  content     String
+  isDeleted   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime
+  itemId      String
+  userId      String
+  cultureitem cultureitem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "CultureComment_itemId_fkey")
+  user        user        @relation(fields: [userId], references: [id], onDelete: Cascade, map: "CultureComment_userId_fkey")
+
+  @@index([itemId, createdAt], map: "CultureComment_itemId_createdAt_idx")
+  @@index([userId, createdAt], map: "CultureComment_userId_createdAt_idx")
+}
+
+model culturefavorite {
+  id          String      @id
+  createdAt   DateTime    @default(now())
+  itemId      String
+  userId      String
+  cultureitem cultureitem @relation(fields: [itemId], references: [id], onDelete: Cascade, map: "CultureFavorite_itemId_fkey")
+  user        user        @relation(fields: [userId], references: [id], onDelete: Cascade, map: "CultureFavorite_userId_fkey")
+
+  @@unique([itemId, userId], map: "CultureFavorite_itemId_userId_key")
+  @@index([userId, createdAt], map: "CultureFavorite_userId_createdAt_idx")
+}
+
+model cultureitem {
+  id                  String                @id
+  type                cultureitem_type
+  title               String
+  slug                String                @unique(map: "CultureItem_slug_key")
+  subtitle            String?
+  coverUrl            String?
+  releaseDate         DateTime?
+  lyricist            String?
+  composer            String?
+  arranger            String?
+  albumName           String?
+  roleName            String?
+  city                String?
+  summary             String?
+  background          String?
+  legalExcerpt        String?
+  mvUrl               String?
+  liveUrl             String?
+  trailerUrl          String?
+  rating              Float?
+  favoriteCount       Int                   @default(0)
+  commentCount        Int                   @default(0)
+  isVisible           Boolean               @default(true)
+  sortOrder           Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime
+  culturecomment      culturecomment[]
+  culturefavorite     culturefavorite[]
+  lyriccard           lyriccard[]
+  useralbumcollection useralbumcollection[]
+
+  @@index([releaseDate], map: "CultureItem_releaseDate_idx")
+  @@index([type, isVisible, sortOrder], map: "CultureItem_type_isVisible_sortOrder_idx")
+}
+
+model dailyexperiencerecord {
+  id        String   @id
+  date      DateTime
+  amount    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  userId    String
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "DailyExperienceRecord_userId_fkey")
+
+  @@unique([userId, date], map: "DailyExperienceRecord_userId_date_key")
+  @@index([date], map: "DailyExperienceRecord_date_idx")
+}
+
+model dailymessage {
+  id                   String                 @id
+  date                 DateTime
+  mood                 String?
+  content              String
+  likeCount            Int                    @default(0)
+  commentCount         Int                    @default(0)
+  favoriteCount        Int                    @default(0)
+  shareCount           Int                    @default(0)
+  isPinned             Boolean                @default(false)
+  isFeatured           Boolean                @default(false)
+  isDeleted            Boolean                @default(false)
+  deletedAt            DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime
+  userId               String
+  checkInId            String?                @unique(map: "DailyMessage_checkInId_key")
+  checkin              checkin?               @relation(fields: [checkInId], references: [id], map: "DailyMessage_checkInId_fkey")
+  user                 user                   @relation(fields: [userId], references: [id], onDelete: Cascade, map: "DailyMessage_userId_fkey")
+  dailymessagecomment  dailymessagecomment[]
+  dailymessagefavorite dailymessagefavorite[]
+  dailymessagelike     dailymessagelike[]
+  friendactivity       friendactivity[]
+  report               report[]
+
+  @@index([date, createdAt], map: "DailyMessage_date_createdAt_idx")
+  @@index([date, likeCount], map: "DailyMessage_date_likeCount_idx")
+  @@index([date, isDeleted, isPinned, isFeatured, likeCount, commentCount, createdAt], map: "DailyMessage_hot_idx")
+  @@index([isDeleted], map: "DailyMessage_isDeleted_idx")
+  @@index([isPinned, isFeatured], map: "DailyMessage_isPinned_isFeatured_idx")
+  @@index([date, isDeleted, isPinned, isFeatured, createdAt], map: "DailyMessage_latest_idx")
+  @@index([userId, createdAt], map: "DailyMessage_userId_createdAt_idx")
+}
+
+model dailymessagecomment {
+  id                        String                @id
+  content                   String
+  isDeleted                 Boolean               @default(false)
+  deletedAt                 DateTime?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime
+  messageId                 String
+  authorId                  String
+  parentId                  String?
+  user                      user                  @relation(fields: [authorId], references: [id], onDelete: Cascade, map: "DailyMessageComment_authorId_fkey")
+  dailymessage              dailymessage          @relation(fields: [messageId], references: [id], onDelete: Cascade, map: "DailyMessageComment_messageId_fkey")
+  dailymessagecomment       dailymessagecomment?  @relation("dailymessagecommentTodailymessagecomment", fields: [parentId], references: [id], onDelete: NoAction, map: "DailyMessageComment_parentId_fkey")
+  other_dailymessagecomment dailymessagecomment[] @relation("dailymessagecommentTodailymessagecomment")
+
+  @@index([authorId, createdAt], map: "DailyMessageComment_authorId_createdAt_idx")
+  @@index([messageId, createdAt], map: "DailyMessageComment_messageId_createdAt_idx")
+  @@index([parentId], map: "DailyMessageComment_parentId_idx")
+}
+
+model dailymessagefavorite {
+  id           String       @id
+  createdAt    DateTime     @default(now())
+  messageId    String
+  userId       String
+  dailymessage dailymessage @relation(fields: [messageId], references: [id], onDelete: Cascade, map: "DailyMessageFavorite_messageId_fkey")
+  user         user         @relation(fields: [userId], references: [id], onDelete: Cascade, map: "DailyMessageFavorite_userId_fkey")
+
+  @@unique([messageId, userId], map: "DailyMessageFavorite_messageId_userId_key")
+  @@index([userId, createdAt], map: "DailyMessageFavorite_userId_createdAt_idx")
+}
+
+model dailymessagelike {
+  id           String       @id
+  createdAt    DateTime     @default(now())
+  messageId    String
+  userId       String
+  dailymessage dailymessage @relation(fields: [messageId], references: [id], onDelete: Cascade, map: "DailyMessageLike_messageId_fkey")
+  user         user         @relation(fields: [userId], references: [id], onDelete: Cascade, map: "DailyMessageLike_userId_fkey")
+
+  @@unique([messageId, userId], map: "DailyMessageLike_messageId_userId_key")
+  @@index([userId, createdAt], map: "DailyMessageLike_userId_createdAt_idx")
+}
+
+model dailyquote {
+  id        String   @id
+  content   String
+  source    String?
+  songTitle String?
+  isPinned  Boolean  @default(false)
+  isVisible Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([isPinned, isVisible], map: "DailyQuote_isPinned_isVisible_idx")
+  @@index([sortOrder], map: "DailyQuote_sortOrder_idx")
+}
+
+model dailytaskprogress {
+  id                String            @id
+  taskDate          DateTime
+  progress          Int               @default(0)
+  isCompleted       Boolean           @default(false)
+  completedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime
+  userId            String
+  templateId        String
+  dailytasktemplate dailytasktemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, map: "DailyTaskProgress_templateId_fkey")
+  user              user              @relation(fields: [userId], references: [id], onDelete: Cascade, map: "DailyTaskProgress_userId_fkey")
+
+  @@unique([userId, templateId, taskDate], map: "DailyTaskProgress_userId_templateId_taskDate_key")
+  @@index([taskDate, isCompleted], map: "DailyTaskProgress_taskDate_isCompleted_idx")
+  @@index([templateId], map: "DailyTaskProgress_templateId_fkey")
+}
+
+model dailytasktemplate {
+  id                String              @id
+  key               String              @unique(map: "DailyTaskTemplate_key_key")
+  title             String
+  description       String?
+  target            Int                 @default(1)
+  points            Int                 @default(0)
+  exp               Int                 @default(0)
+  sortOrder         Int                 @default(0)
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime
+  dailytaskprogress dailytaskprogress[]
+
+  @@index([isActive, sortOrder], map: "DailyTaskTemplate_isActive_sortOrder_idx")
+}
+
+model directmessage {
+  id             String             @id
+  type           directmessage_type @default(TEXT)
+  content        String
+  imageUrl       String?
+  isDeleted      Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  conversationId String
+  senderId       String
+  conversation   conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade, map: "DirectMessage_conversationId_fkey")
+  user           user               @relation(fields: [senderId], references: [id], onDelete: Cascade, map: "DirectMessage_senderId_fkey")
+
+  @@index([conversationId, createdAt], map: "DirectMessage_conversationId_createdAt_idx")
+  @@index([senderId, createdAt], map: "DirectMessage_senderId_createdAt_idx")
+}
+
+model emailverification {
+  id        String    @id
+  tokenHash String    @unique(map: "EmailVerification_tokenHash_key")
+  email     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  userId    String
+  user      user      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "EmailVerification_userId_fkey")
+
+  @@index([email], map: "EmailVerification_email_idx")
+  @@index([expiresAt], map: "EmailVerification_expiresAt_idx")
+  @@index([userId], map: "EmailVerification_userId_fkey")
+}
+
+model entertainmentdailydraw {
+  id                  String             @id
+  dateKey             String
+  points              Int
+  prescriptionCode    String             @unique(map: "EntertainmentDailyDraw_prescriptionCode_key")
+  lyricText           String?
+  songTitle           String?
+  albumTitle          String?
+  createdAt           DateTime           @default(now())
+  userId              String
+  lyricPrescriptionId String?
+  lyricprescription   lyricprescription? @relation(fields: [lyricPrescriptionId], references: [id], onDelete: Restrict, map: "EntertainmentDailyDraw_lyricPrescriptionId_fkey")
+  user                user               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "EntertainmentDailyDraw_userId_fkey")
+  pointlog            pointlog?
+
+  @@unique([userId, dateKey], map: "EntertainmentDailyDraw_userId_dateKey_key")
+  @@index([dateKey], map: "EntertainmentDailyDraw_dateKey_idx")
+  @@index([lyricPrescriptionId], map: "EntertainmentDailyDraw_lyricPrescriptionId_idx")
+  @@index([userId, createdAt], map: "EntertainmentDailyDraw_userId_createdAt_idx")
+  @@index([userId], map: "EntertainmentDailyDraw_userId_idx")
+}
+
+model experiencelog {
+  id          String             @id
+  amount      Int
+  type        experiencelog_type
+  description String
+  createdAt   DateTime           @default(now())
+  userId      String
+  sourceType  String?
+  sourceId    String?
+  user        user               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ExperienceLog_userId_fkey")
+
+  @@unique([sourceType, sourceId], map: "ExperienceLog_sourceType_sourceId_key")
+  @@index([type, createdAt], map: "ExperienceLog_type_createdAt_idx")
+  @@index([userId, createdAt], map: "ExperienceLog_userId_createdAt_idx")
+}
+
+model feedback {
+  id                 String               @id
+  type               feedback_type
+  title              String
+  content            String
+  imageUrl           String?
+  status             feedback_status      @default(OPEN)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  userId             String
+  contact            String?
+  adminUnread        Boolean              @default(true)
+  userUnread         Boolean              @default(false)
+  lastReplyAt        DateTime?
+  lastUserReplyAt    DateTime?
+  lastAdminReplyAt   DateTime?
+  closedAt           DateTime?
+  idempotencyKeyHash String?              @unique(map: "Feedback_idempotencyKeyHash_key")
+  user               user                 @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Feedback_userId_fkey")
+  feedbackattachment feedbackattachment[]
+  feedbackreply      feedbackreply[]
+
+  @@index([adminUnread, updatedAt], map: "Feedback_adminUnread_updatedAt_idx")
+  @@index([lastReplyAt], map: "Feedback_lastReplyAt_idx")
+  @@index([status, createdAt], map: "Feedback_status_createdAt_idx")
+  @@index([userId, createdAt], map: "Feedback_userId_createdAt_idx")
+}
+
+model feedbackattachment {
+  id            String         @id
+  url           String
+  mimeType      String?
+  createdAt     DateTime       @default(now())
+  feedbackId    String
+  replyId       String?
+  feedback      feedback       @relation(fields: [feedbackId], references: [id], onDelete: Cascade, map: "FeedbackAttachment_feedbackId_fkey")
+  feedbackreply feedbackreply? @relation(fields: [replyId], references: [id], onDelete: Cascade, map: "FeedbackAttachment_replyId_fkey")
+
+  @@index([feedbackId], map: "FeedbackAttachment_feedbackId_idx")
+  @@index([replyId], map: "FeedbackAttachment_replyId_idx")
+}
+
+model feedbackreply {
+  id                 String               @id
+  content            String
+  createdAt          DateTime             @default(now())
+  feedbackId         String
+  adminId            String
+  authorRole         String               @default("ADMIN")
+  isReadByUser       Boolean              @default(false)
+  isReadByAdmin      Boolean              @default(true)
+  feedbackattachment feedbackattachment[]
+  user               user                 @relation(fields: [adminId], references: [id], onDelete: Cascade, map: "FeedbackReply_adminId_fkey")
+  feedback           feedback             @relation(fields: [feedbackId], references: [id], onDelete: Cascade, map: "FeedbackReply_feedbackId_fkey")
+
+  @@index([adminId, createdAt], map: "FeedbackReply_adminId_createdAt_idx")
+  @@index([feedbackId, createdAt], map: "FeedbackReply_feedbackId_createdAt_idx")
+}
+
+model follow {
+  id                            String   @id
+  createdAt                     DateTime @default(now())
+  followerId                    String
+  followingId                   String
+  user_follow_followerIdTouser  user     @relation("follow_followerIdTouser", fields: [followerId], references: [id], onDelete: Cascade, map: "Follow_followerId_fkey")
+  user_follow_followingIdTouser user     @relation("follow_followingIdTouser", fields: [followingId], references: [id], onDelete: Cascade, map: "Follow_followingId_fkey")
+
+  @@unique([followerId, followingId], map: "Follow_followerId_followingId_key")
+  @@index([followingId, createdAt], map: "Follow_followingId_createdAt_idx")
+}
+
+model friendactivity {
+  id             String        @id
+  mood           String?
+  content        String?
+  createdAt      DateTime      @default(now())
+  actorId        String
+  checkInId      String?
+  dailyMessageId String?
+  type           String        @default("CHECKIN")
+  targetUrl      String?
+  user           user          @relation(fields: [actorId], references: [id], onDelete: Cascade, map: "FriendActivity_actorId_fkey")
+  checkin        checkin?      @relation(fields: [checkInId], references: [id], map: "FriendActivity_checkInId_fkey")
+  dailymessage   dailymessage? @relation(fields: [dailyMessageId], references: [id], map: "FriendActivity_dailyMessageId_fkey")
+
+  @@index([actorId, createdAt], map: "FriendActivity_actorId_createdAt_idx")
+  @@index([checkInId], map: "FriendActivity_checkInId_idx")
+  @@index([dailyMessageId], map: "FriendActivity_dailyMessageId_idx")
+}
+
+model friendrequest {
+  id                                  String               @id
+  message                             String?
+  status                              friendrequest_status @default(PENDING)
+  createdAt                           DateTime             @default(now())
+  updatedAt                           DateTime
+  senderId                            String
+  receiverId                          String
+  user_friendrequest_receiverIdTouser user                 @relation("friendrequest_receiverIdTouser", fields: [receiverId], references: [id], onDelete: Cascade, map: "FriendRequest_receiverId_fkey")
+  user_friendrequest_senderIdTouser   user                 @relation("friendrequest_senderIdTouser", fields: [senderId], references: [id], onDelete: Cascade, map: "FriendRequest_senderId_fkey")
+
+  @@unique([senderId, receiverId, status], map: "FriendRequest_senderId_receiverId_status_key")
+  @@index([receiverId, status, createdAt], map: "FriendRequest_receiverId_status_createdAt_idx")
+  @@index([senderId, status, createdAt], map: "FriendRequest_senderId_status_createdAt_idx")
+}
+
+model friendship {
+  id                            String   @id
+  createdAt                     DateTime @default(now())
+  userAId                       String
+  userBId                       String
+  user_friendship_userAIdTouser user     @relation("friendship_userAIdTouser", fields: [userAId], references: [id], onDelete: Cascade, map: "Friendship_userAId_fkey")
+  user_friendship_userBIdTouser user     @relation("friendship_userBIdTouser", fields: [userBId], references: [id], onDelete: Cascade, map: "Friendship_userBId_fkey")
+
+  @@unique([userAId, userBId], map: "Friendship_userAId_userBId_key")
+  @@index([userBId, createdAt], map: "Friendship_userBId_createdAt_idx")
+}
+
+model growthlevelconfig {
+  id          String   @id
+  level       Int      @unique(map: "GrowthLevelConfig_level_key")
+  name        String
+  requiredExp Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@index([requiredExp], map: "GrowthLevelConfig_requiredExp_idx")
+}
+
+model guesssongaudiovariant {
+  id                   String                 @id
+  durationSeconds      Int
+  storagePath          String
+  fileSize             Int
+  createdAt            DateTime               @default(now())
+  questionId           String
+  guesssongquestion    guesssongquestion      @relation(fields: [questionId], references: [id], onDelete: Cascade, map: "GuessSongAudioVariant_questionId_fkey")
+  guesssongplayrequest guesssongplayrequest[]
+
+  @@unique([questionId, durationSeconds], map: "GuessSongAudioVariant_questionId_durationSeconds_key")
+  @@index([questionId], map: "GuessSongAudioVariant_questionId_idx")
+}
+
+model guesssongleaderboardentry {
+  id               String                               @id
+  mode             guesssongleaderboardentry_mode
+  periodType       guesssongleaderboardentry_periodType
+  periodKey        String
+  score            Int
+  correctCount     Int
+  maxStreak        Int
+  totalPlayCount   Int
+  achievedAt       DateTime
+  createdAt        DateTime                             @default(now())
+  updatedAt        DateTime
+  userId           String
+  sessionId        String
+  guesssongsession guesssongsession                     @relation(fields: [sessionId], references: [id], map: "GuessSongLeaderboardEntry_sessionId_fkey")
+  user             user                                 @relation(fields: [userId], references: [id], onDelete: Cascade, map: "GuessSongLeaderboardEntry_userId_fkey")
+
+  @@unique([userId, mode, periodType, periodKey], map: "GuessSongLeaderboardEntry_userId_mode_periodType_periodKey_key")
+  @@index([periodType, periodKey, mode, score], map: "GuessSongLeaderboardEntry_periodType_periodKey_mode_score_idx")
+  @@index([sessionId], map: "GuessSongLeaderboardEntry_sessionId_idx")
+  @@index([userId, periodType, periodKey], map: "GuessSongLeaderboardEntry_userId_periodType_periodKey_idx")
+}
+
+model guesssongplayrequest {
+  id                       String                   @id
+  requestKey               String
+  playCountAfter           Int
+  createdAt                DateTime                 @default(now())
+  sessionQuestionId        String
+  audioVariantId           String
+  guesssongaudiovariant    guesssongaudiovariant    @relation(fields: [audioVariantId], references: [id], map: "GuessSongPlayRequest_audioVariantId_fkey")
+  guesssongsessionquestion guesssongsessionquestion @relation(fields: [sessionQuestionId], references: [id], onDelete: Cascade, map: "GuessSongPlayRequest_sessionQuestionId_fkey")
+
+  @@unique([sessionQuestionId, requestKey], map: "GuessSongPlayRequest_sessionQuestionId_requestKey_key")
+  @@index([audioVariantId], map: "GuessSongPlayRequest_audioVariantId_fkey")
+  @@index([sessionQuestionId, createdAt], map: "GuessSongPlayRequest_sessionQuestionId_createdAt_idx")
+}
+
+model guesssongquestion {
+  id                       String                             @id
+  songTitle                String
+  albumTitle               String?
+  difficulty               guesssongquestion_difficulty
+  enabled                  Boolean                            @default(false)
+  allowEndless             Boolean                            @default(true)
+  correctAnswer            String
+  wrongOption1             String
+  wrongOption2             String
+  wrongOption3             String
+  sourceAudioPath          String?
+  audioDurationMs          Int?
+  processingStatus         guesssongquestion_processingStatus @default(PENDING)
+  processingError          String?
+  playCount                Int                                @default(0)
+  answerCount              Int                                @default(0)
+  correctCount             Int                                @default(0)
+  createdAt                DateTime                           @default(now())
+  updatedAt                DateTime
+  musicSongId              String?
+  guesssongaudiovariant    guesssongaudiovariant[]
+  musicsong                musicsong?                         @relation(fields: [musicSongId], references: [id], map: "GuessSongQuestion_musicSongId_fkey")
+  guesssongsessionquestion guesssongsessionquestion[]
+
+  @@index([allowEndless, enabled], map: "GuessSongQuestion_allowEndless_enabled_idx")
+  @@index([createdAt], map: "GuessSongQuestion_createdAt_idx")
+  @@index([difficulty, enabled], map: "GuessSongQuestion_difficulty_enabled_idx")
+  @@index([musicSongId], map: "GuessSongQuestion_musicSongId_idx")
+  @@index([processingStatus], map: "GuessSongQuestion_processingStatus_idx")
+  @@index([songTitle], map: "GuessSongQuestion_songTitle_idx")
+}
+
+model guesssongsession {
+  id                        String                      @id
+  activeKey                 String?                     @unique(map: "GuessSongSession_activeKey_key")
+  mode                      guesssongsession_mode
+  status                    guesssongsession_status     @default(IN_PROGRESS)
+  score                     Int                         @default(0)
+  correctCount              Int                         @default(0)
+  wrongCount                Int                         @default(0)
+  currentStreak             Int                         @default(0)
+  maxStreak                 Int                         @default(0)
+  livesRemaining            Int                         @default(0)
+  totalPlayCount            Int                         @default(0)
+  currentPosition           Int                         @default(1)
+  startedAt                 DateTime                    @default(now())
+  completedAt               DateTime?
+  expiresAt                 DateTime
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime
+  userId                    String
+  guesssongleaderboardentry guesssongleaderboardentry[]
+  user                      user                        @relation(fields: [userId], references: [id], onDelete: Cascade, map: "GuessSongSession_userId_fkey")
+  guesssongsessionquestion  guesssongsessionquestion[]
+
+  @@index([createdAt], map: "GuessSongSession_createdAt_idx")
+  @@index([status, expiresAt], map: "GuessSongSession_status_expiresAt_idx")
+  @@index([userId, completedAt], map: "GuessSongSession_userId_completedAt_idx")
+  @@index([userId, mode, status], map: "GuessSongSession_userId_mode_status_idx")
+}
+
+model guesssongsessionquestion {
+  id                      String                 @id
+  publicId                String                 @unique(map: "GuessSongSessionQuestion_publicId_key")
+  position                Int
+  playbackDurationSeconds Int
+  maxPlayCount            Int
+  playCount               Int                    @default(0)
+  optionsSnapshot         Json
+  correctOptionKey        String
+  selectedOptionKey       String?
+  isCorrect               Boolean?
+  awardedScore            Int                    @default(0)
+  answerDeadlineAt        DateTime?
+  answeredAt              DateTime?
+  createdAt               DateTime               @default(now())
+  sessionId               String
+  questionId              String
+  guesssongplayrequest    guesssongplayrequest[]
+  guesssongquestion       guesssongquestion      @relation(fields: [questionId], references: [id], map: "GuessSongSessionQuestion_questionId_fkey")
+  guesssongsession        guesssongsession       @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "GuessSongSessionQuestion_sessionId_fkey")
+
+  @@unique([sessionId, position], map: "GuessSongSessionQuestion_sessionId_position_key")
+  @@index([publicId], map: "GuessSongSessionQuestion_publicId_idx")
+  @@index([questionId], map: "GuessSongSessionQuestion_questionId_idx")
+  @@index([sessionId, answeredAt], map: "GuessSongSessionQuestion_sessionId_answeredAt_idx")
+}
+
+model like {
+  id        String   @id
+  createdAt DateTime @default(now())
+  postId    String
+  userId    String
+  post      post     @relation(fields: [postId], references: [id], onDelete: Cascade, map: "Like_postId_fkey")
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Like_userId_fkey")
+
+  @@unique([postId, userId], map: "Like_postId_userId_key")
+  @@index([postId, createdAt], map: "Like_postId_createdAt_idx")
+  @@index([userId, createdAt], map: "Like_userId_createdAt_idx")
+}
+
+model logindevice {
+  id          String                 @id
+  deviceType  logindevice_deviceType @default(WEB)
+  deviceName  String?
+  ipAddress   String?
+  userAgent   String?
+  lastLoginAt DateTime               @default(now())
+  createdAt   DateTime               @default(now())
+  userId      String
+  user        user                   @relation(fields: [userId], references: [id], onDelete: Cascade, map: "LoginDevice_userId_fkey")
+
+  @@index([userId, lastLoginAt], map: "LoginDevice_userId_lastLoginAt_idx")
+}
+
+model lottery {
+  id           String         @id
+  title        String
+  pointsCost   Int            @default(0)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  createdAt    DateTime       @default(now())
+  activityId   String?
+  activity     activity?      @relation(fields: [activityId], references: [id], map: "Lottery_activityId_fkey")
+  lotteryentry lotteryentry[]
+  lotteryprize lotteryprize[]
+
+  @@index([activityId], map: "Lottery_activityId_idx")
+}
+
+model lotteryentry {
+  id           String        @id
+  createdAt    DateTime      @default(now())
+  lotteryId    String
+  prizeId      String?
+  userId       String
+  lottery      lottery       @relation(fields: [lotteryId], references: [id], onDelete: Cascade, map: "LotteryEntry_lotteryId_fkey")
+  lotteryprize lotteryprize? @relation(fields: [prizeId], references: [id], map: "LotteryEntry_prizeId_fkey")
+  user         user          @relation(fields: [userId], references: [id], onDelete: Cascade, map: "LotteryEntry_userId_fkey")
+
+  @@index([lotteryId, createdAt], map: "LotteryEntry_lotteryId_createdAt_idx")
+  @@index([prizeId], map: "LotteryEntry_prizeId_fkey")
+  @@index([userId, createdAt], map: "LotteryEntry_userId_createdAt_idx")
+}
+
+model lotteryprize {
+  id           String            @id
+  name         String
+  type         lotteryprize_type
+  quantity     Int               @default(1)
+  remaining    Int               @default(1)
+  pointsValue  Int?
+  metadata     Json?
+  lotteryId    String
+  lotteryentry lotteryentry[]
+  lottery      lottery           @relation(fields: [lotteryId], references: [id], onDelete: Cascade, map: "LotteryPrize_lotteryId_fkey")
+
+  @@index([lotteryId], map: "LotteryPrize_lotteryId_fkey")
+}
+
+model lyriccard {
+  id                String             @id
+  lyric             String
+  imageUrl          String?
+  isFavorite        Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  userId            String
+  songId            String?
+  templateId        String?
+  cultureitem       cultureitem?       @relation(fields: [songId], references: [id], map: "LyricCard_songId_fkey")
+  lyriccardtemplate lyriccardtemplate? @relation(fields: [templateId], references: [id], map: "LyricCard_templateId_fkey")
+  user              user               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "LyricCard_userId_fkey")
+
+  @@index([songId], map: "LyricCard_songId_idx")
+  @@index([templateId], map: "LyricCard_templateId_fkey")
+  @@index([userId, createdAt], map: "LyricCard_userId_createdAt_idx")
+}
+
+model lyriccardtemplate {
+  id            String      @id
+  name          String
+  backgroundUrl String?
+  textColor     String      @default("#071722")
+  accentColor   String      @default("#1985c2")
+  isVisible     Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime
+  lyriccard     lyriccard[]
+
+  @@index([isVisible, sortOrder], map: "LyricCardTemplate_isVisible_sortOrder_idx")
+}
+
+model lyricprescription {
+  id                     String                   @id
+  text                   String
+  songTitle              String
+  albumTitle             String?
+  enabled                Boolean                  @default(true)
+  displayCount           Int                      @default(0)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  entertainmentdailydraw entertainmentdailydraw[]
+
+  @@index([displayCount], map: "LyricPrescription_displayCount_idx")
+  @@index([enabled, createdAt], map: "LyricPrescription_enabled_createdAt_idx")
+}
+
+model musicalbum {
+  id           String            @id
+  name         String
+  artist       String            @default("陈奕迅")
+  releaseYear  Int
+  coverUrl     String?
+  description  String?
+  language     String            @default("粤语")
+  createdAt    DateTime          @default(now())
+  era          String?
+  albumType    String?
+  releaseDate  DateTime?
+  company      String?
+  story        String?
+  status       musicalbum_status @default(DRAFT)
+  displayOrder Int               @default(0)
+  musicsong    musicsong[]
+
+  @@unique([name, artist, releaseYear], map: "MusicAlbum_name_artist_releaseYear_key")
+  @@index([releaseYear, createdAt], map: "MusicAlbum_releaseYear_createdAt_idx")
+  @@index([status, displayOrder, releaseYear], map: "MusicAlbum_status_displayOrder_releaseYear_idx")
+}
+
+model musicfavorite {
+  id         String     @id
+  createdAt  DateTime   @default(now())
+  trackId    String
+  userId     String
+  musictrack musictrack @relation(fields: [trackId], references: [id], onDelete: Cascade, map: "MusicFavorite_trackId_fkey")
+  user       user       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "MusicFavorite_userId_fkey")
+
+  @@unique([trackId, userId], map: "MusicFavorite_trackId_userId_key")
+  @@index([userId, createdAt], map: "MusicFavorite_userId_createdAt_idx")
+}
+
+model musicplayrecord {
+  id              String     @id
+  durationSeconds Int        @default(0)
+  playedAt        DateTime   @default(now())
+  trackId         String
+  userId          String
+  musictrack      musictrack @relation(fields: [trackId], references: [id], onDelete: Cascade, map: "MusicPlayRecord_trackId_fkey")
+  user            user       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "MusicPlayRecord_userId_fkey")
+
+  @@index([trackId, playedAt], map: "MusicPlayRecord_trackId_playedAt_idx")
+  @@index([userId, playedAt], map: "MusicPlayRecord_userId_playedAt_idx")
+}
+
+model musicsong {
+  id                String              @id
+  title             String
+  artist            String              @default("陈奕迅")
+  albumId           String
+  trackNumber       Int
+  releaseYear       Int
+  duration          Int?
+  coverUrl          String?
+  composer          String?
+  lyricist          String?
+  arranger          String?
+  producer          String?
+  story             String?
+  lyrics            String?
+  sourceType        String?
+  sourceUrl         String?
+  createdAt         DateTime            @default(now())
+  language          String?
+  tags              String?
+  era               String?
+  trackType         String?
+  concertVersion    String?
+  mood              String?
+  scene             String?
+  recommendLevel    String?
+  description       String?
+  guesssongquestion guesssongquestion[]
+  musicalbum        musicalbum          @relation(fields: [albumId], references: [id], onDelete: Cascade, map: "MusicSong_albumId_fkey")
+
+  @@unique([albumId, title], map: "MusicSong_albumId_title_key")
+  @@unique([albumId, trackNumber], map: "MusicSong_albumId_trackNumber_key")
+  @@index([albumId, trackNumber], map: "MusicSong_albumId_trackNumber_idx")
+  @@index([title, artist], map: "MusicSong_title_artist_idx")
+}
+
+model musictrack {
+  id              String            @id
+  title           String
+  artist          String            @default("Eason Chan")
+  source          String?
+  sourceUrl       String?
+  isPlayable      Boolean           @default(false)
+  sortOrder       Int               @default(0)
+  isVisible       Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime
+  musicfavorite   musicfavorite[]
+  musicplayrecord musicplayrecord[]
+
+  @@unique([title, artist], map: "MusicTrack_title_artist_key")
+  @@index([isVisible, sortOrder], map: "MusicTrack_isVisible_sortOrder_idx")
+  @@index([isVisible, sortOrder, createdAt], map: "MusicTrack_visible_sort_createdAt_idx")
+}
+
+model notification {
+  id                                  String            @id
+  type                                notification_type
+  title                               String            @db.Text
+  content                             String?           @db.Text
+  link                                String?           @db.Text
+  isRead                              Boolean           @default(false)
+  createdAt                           DateTime          @default(now())
+  readAt                              DateTime?
+  recipientId                         String
+  actorId                             String?
+  key                                 String?
+  completedAt                         DateTime?
+  user_notification_actorIdTouser     user?             @relation("notification_actorIdTouser", fields: [actorId], references: [id], map: "Notification_actorId_fkey")
+  user_notification_recipientIdTouser user              @relation("notification_recipientIdTouser", fields: [recipientId], references: [id], onDelete: Cascade, map: "Notification_recipientId_fkey")
+
+  @@unique([recipientId, key], map: "Notification_recipientId_key_key")
+  @@index([actorId], map: "Notification_actorId_fkey")
+  @@index([recipientId, isRead, createdAt], map: "Notification_recipientId_isRead_createdAt_idx")
+  @@index([type], map: "Notification_type_idx")
+}
+
+model onlinesession {
+  id        String   @id
+  tokenId   String?
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "OnlineSession_userId_fkey")
+
+  @@index([userId, expiresAt], map: "OnlineSession_userId_expiresAt_idx")
+}
+
+model pagelayout {
+  id                                  String               @id
+  pageKey                             String               @unique(map: "PageLayout_pageKey_key")
+  draftConfig                         Json
+  publishedConfig                     Json
+  previousPublishedConfig             Json?
+  version                             Int                  @default(1)
+  publishedAt                         DateTime?
+  createdAt                           DateTime             @default(now())
+  updatedAt                           DateTime
+  updatedById                         String?
+  publishedById                       String?
+  user_pagelayout_publishedByIdTouser user?                @relation("pagelayout_publishedByIdTouser", fields: [publishedById], references: [id], map: "PageLayout_publishedById_fkey")
+  user_pagelayout_updatedByIdTouser   user?                @relation("pagelayout_updatedByIdTouser", fields: [updatedById], references: [id], map: "PageLayout_updatedById_fkey")
+  pagelayoutrevision                  pagelayoutrevision[]
+
+  @@index([pageKey], map: "PageLayout_pageKey_idx")
+  @@index([publishedById], map: "PageLayout_publishedById_idx")
+  @@index([updatedById], map: "PageLayout_updatedById_idx")
+}
+
+model pagelayoutrevision {
+  id            String                    @id
+  pageLayoutId  String
+  version       Int
+  config        Json
+  note          String?
+  source        pagelayoutrevision_source @default(MANUAL)
+  createdAt     DateTime                  @default(now())
+  publishedById String?
+  pagelayout    pagelayout                @relation(fields: [pageLayoutId], references: [id], onDelete: Cascade, map: "PageLayoutRevision_pageLayoutId_fkey")
+  user          user?                     @relation(fields: [publishedById], references: [id], map: "PageLayoutRevision_publishedById_fkey")
+
+  @@unique([pageLayoutId, version], map: "PageLayoutRevision_pageLayoutId_version_key")
+  @@index([pageLayoutId, createdAt], map: "PageLayoutRevision_pageLayoutId_createdAt_idx")
+  @@index([publishedById], map: "PageLayoutRevision_publishedById_idx")
+  @@index([source], map: "PageLayoutRevision_source_idx")
+}
+
+model passwordresettoken {
+  id           String                   @id
+  tokenHash    String                   @unique(map: "PasswordResetToken_tokenHash_key")
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime                 @default(now())
+  userId       String
+  type         passwordresettoken_type  @default(EMAIL)
+  stage        passwordresettoken_stage @default(RESET_TOKEN)
+  codeHash     String?
+  attemptCount Int                      @default(0)
+  user         user                     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "PasswordResetToken_userId_fkey")
+
+  @@index([codeHash], map: "PasswordResetToken_codeHash_idx")
+  @@index([expiresAt], map: "PasswordResetToken_expiresAt_idx")
+  @@index([userId, type, stage, createdAt], map: "PasswordResetToken_userId_type_stage_createdAt_idx")
+}
+
+model pointlog {
+  id                     String                  @id
+  action                 pointlog_action
+  points                 Int
+  before                 Int
+  after                  Int
+  reason                 String?
+  createdAt              DateTime                @default(now())
+  userId                 String
+  postId                 String?
+  replyId                String?
+  checkInId              String?
+  activityId             String?
+  badgeId                String?
+  dailyDrawId            String?                 @unique(map: "PointLog_dailyDrawId_key")
+  dateKey                String?
+  businessKey            String?                 @unique(map: "PointLog_businessKey_key")
+  entertainmentdailydraw entertainmentdailydraw? @relation(fields: [dailyDrawId], references: [id], map: "PointLog_dailyDrawId_fkey")
+  user                   user                    @relation(fields: [userId], references: [id], onDelete: Cascade, map: "PointLog_userId_fkey")
+
+  @@unique([action, checkInId], map: "PointLog_action_checkInId_key")
+  @@index([action], map: "PointLog_action_idx")
+  @@index([activityId], map: "PointLog_activityId_idx")
+  @@index([checkInId], map: "PointLog_checkInId_idx")
+  @@index([postId], map: "PointLog_postId_idx")
+  @@index([replyId], map: "PointLog_replyId_idx")
+  @@index([userId, createdAt], map: "PointLog_userId_createdAt_idx")
+}
+
+model poll {
+  id         String       @id
+  question   String
+  allowMulti Boolean      @default(false)
+  expiresAt  DateTime?
+  createdAt  DateTime     @default(now())
+  postId     String       @unique(map: "Poll_postId_key")
+  post       post         @relation(fields: [postId], references: [id], onDelete: Cascade, map: "Poll_postId_fkey")
+  polloption polloption[]
+  pollvote   pollvote[]
+}
+
+model polloption {
+  id        String     @id
+  title     String
+  voteCount Int        @default(0)
+  sortOrder Int        @default(0)
+  pollId    String
+  poll      poll       @relation(fields: [pollId], references: [id], onDelete: Cascade, map: "PollOption_pollId_fkey")
+  pollvote  pollvote[]
+
+  @@index([pollId, sortOrder], map: "PollOption_pollId_sortOrder_idx")
+}
+
+model pollvote {
+  id         String     @id
+  createdAt  DateTime   @default(now())
+  pollId     String
+  optionId   String
+  userId     String
+  polloption polloption @relation(fields: [optionId], references: [id], onDelete: Cascade, map: "PollVote_optionId_fkey")
+  poll       poll       @relation(fields: [pollId], references: [id], onDelete: Cascade, map: "PollVote_pollId_fkey")
+
+  @@unique([optionId, userId], map: "PollVote_optionId_userId_key")
+  @@index([pollId, userId], map: "PollVote_pollId_userId_idx")
+}
+
+model post {
+  id            String           @id
+  title         String
+  content       String           @db.LongText
+  viewCount     Int              @default(0)
+  likeCount     Int              @default(0)
+  replyCount    Int              @default(0)
+  isPinned      Boolean          @default(false)
+  isFeatured    Boolean          @default(false)
+  isDeleted     Boolean          @default(false)
+  deletedAt     DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime
+  authorId      String
+  boardId       String
+  contentType   post_contentType @default(NORMAL)
+  favoriteCount Int              @default(0)
+  isLocked      Boolean          @default(false)
+  isRecommended Boolean          @default(false)
+  publishedAt   DateTime         @default(now())
+  readUserCount Int              @default(0)
+  shareCount    Int              @default(0)
+  status        post_status      @default(PUBLISHED)
+  summary       String?
+  adminaction   adminaction[]
+  like          like[]
+  poll          poll?
+  user          user             @relation(fields: [authorId], references: [id], onDelete: Cascade, map: "Post_authorId_fkey")
+  board         board            @relation(fields: [boardId], references: [id], map: "Post_boardId_fkey")
+  postfavorite  postfavorite[]
+  postmedia     postmedia[]
+  posttag       posttag[]
+  reply         reply[]
+  report        report[]
+
+  @@index([authorId, createdAt], map: "Post_authorId_createdAt_idx")
+  @@index([boardId, createdAt], map: "Post_boardId_createdAt_idx")
+  @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_board_feed_idx")
+  @@index([contentType], map: "Post_contentType_idx")
+  @@index([status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_global_feed_idx")
+  @@index([status, isDeleted, isPinned, isFeatured, likeCount, replyCount], map: "Post_hot_feed_idx")
+  @@index([isDeleted], map: "Post_isDeleted_idx")
+  @@index([isFeatured, createdAt], map: "Post_isFeatured_createdAt_idx")
+  @@index([isPinned, createdAt], map: "Post_isPinned_createdAt_idx")
+  @@index([isRecommended, createdAt], map: "Post_isRecommended_createdAt_idx")
+  @@index([likeCount], map: "Post_likeCount_idx")
+  @@index([replyCount], map: "Post_replyCount_idx")
+  @@index([status], map: "Post_status_idx")
+}
+
+model postfavorite {
+  id        String   @id
+  createdAt DateTime @default(now())
+  postId    String
+  userId    String
+  post      post     @relation(fields: [postId], references: [id], onDelete: Cascade, map: "PostFavorite_postId_fkey")
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "PostFavorite_userId_fkey")
+
+  @@unique([postId, userId], map: "PostFavorite_postId_userId_key")
+  @@index([userId, createdAt], map: "PostFavorite_userId_createdAt_idx")
+}
+
+model postmedia {
+  id        String         @id
+  type      postmedia_type
+  url       String         @db.Text
+  thumbnail String?        @db.Text
+  width     Int?
+  height    Int?
+  size      Int?
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
+  postId    String
+  post      post           @relation(fields: [postId], references: [id], onDelete: Cascade, map: "PostMedia_postId_fkey")
+
+  @@index([postId, sortOrder], map: "PostMedia_postId_sortOrder_idx")
+}
+
+model posttag {
+  postId String
+  tagId  String
+  post   post   @relation(fields: [postId], references: [id], onDelete: Cascade, map: "PostTag_postId_fkey")
+  tag    tag    @relation(fields: [tagId], references: [id], onDelete: Cascade, map: "PostTag_tagId_fkey")
+
+  @@id([postId, tagId])
+  @@index([tagId], map: "PostTag_tagId_fkey")
+}
+
+model profile {
+  id             String                 @id
+  displayName    String
+  avatarUrl      String?
+  backgroundUrl  String?
+  bio            String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime
+  userId         String                 @unique(map: "Profile_userId_key")
+  wallVisibility profile_wallVisibility @default(PUBLIC)
+  user           user                   @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Profile_userId_fkey")
+
+  @@index([displayName], map: "Profile_displayName_idx")
+  @@index([wallVisibility], map: "Profile_wallVisibility_idx")
+}
+
+model profilewalllike {
+  id                 String             @id
+  createdAt          DateTime           @default(now())
+  messageId          String
+  userId             String
+  profilewallmessage profilewallmessage @relation(fields: [messageId], references: [id], onDelete: Cascade, map: "ProfileWallLike_messageId_fkey")
+  user               user               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ProfileWallLike_userId_fkey")
+
+  @@unique([messageId, userId], map: "ProfileWallLike_messageId_userId_key")
+  @@index([userId, createdAt], map: "ProfileWallLike_userId_createdAt_idx")
+}
+
+model profilewallmessage {
+  id                                       String               @id
+  content                                  String
+  createdAt                                DateTime             @default(now())
+  updatedAt                                DateTime
+  deletedAt                                DateTime?
+  senderId                                 String
+  receiverId                               String
+  parentId                                 String?
+  likeCount                                Int                  @default(0)
+  profilewalllike                          profilewalllike[]
+  profilewallmessage                       profilewallmessage?  @relation("profilewallmessageToprofilewallmessage", fields: [parentId], references: [id], onDelete: NoAction, map: "ProfileWallMessage_parentId_fkey")
+  other_profilewallmessage                 profilewallmessage[] @relation("profilewallmessageToprofilewallmessage")
+  user_profilewallmessage_receiverIdTouser user                 @relation("profilewallmessage_receiverIdTouser", fields: [receiverId], references: [id], onDelete: Cascade, map: "ProfileWallMessage_receiverId_fkey")
+  user_profilewallmessage_senderIdTouser   user                 @relation("profilewallmessage_senderIdTouser", fields: [senderId], references: [id], onDelete: Cascade, map: "ProfileWallMessage_senderId_fkey")
+
+  @@index([deletedAt], map: "ProfileWallMessage_deletedAt_idx")
+  @@index([parentId], map: "ProfileWallMessage_parentId_idx")
+  @@index([receiverId, createdAt], map: "ProfileWallMessage_receiverId_createdAt_idx")
+  @@index([senderId, createdAt], map: "ProfileWallMessage_senderId_createdAt_idx")
+}
+
+model ratelimitlog {
+  id        String   @id
+  key       String
+  action    String
+  count     Int      @default(1)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt], map: "RateLimitLog_expiresAt_idx")
+  @@index([key, action], map: "RateLimitLog_key_action_idx")
+}
+
+model reply {
+  id          String        @id
+  content     String        @db.LongText
+  isDeleted   Boolean       @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime
+  postId      String
+  authorId    String
+  parentId    String?
+  likeCount   Int           @default(0)
+  adminaction adminaction[]
+  user        user          @relation(fields: [authorId], references: [id], onDelete: Cascade, map: "Reply_authorId_fkey")
+  reply       reply?        @relation("replyToreply", fields: [parentId], references: [id], onDelete: NoAction, map: "Reply_parentId_fkey")
+  other_reply reply[]       @relation("replyToreply")
+  post        post          @relation(fields: [postId], references: [id], onDelete: Cascade, map: "Reply_postId_fkey")
+  replylike   replylike[]
+  report      report[]
+
+  @@index([authorId, createdAt], map: "Reply_authorId_createdAt_idx")
+  @@index([isDeleted], map: "Reply_isDeleted_idx")
+  @@index([parentId], map: "Reply_parentId_idx")
+  @@index([postId, createdAt], map: "Reply_postId_createdAt_idx")
+}
+
+model replylike {
+  id        String   @id
+  createdAt DateTime @default(now())
+  replyId   String
+  userId    String
+  reply     reply    @relation(fields: [replyId], references: [id], onDelete: Cascade, map: "ReplyLike_replyId_fkey")
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ReplyLike_userId_fkey")
+
+  @@unique([replyId, userId], map: "ReplyLike_replyId_userId_key")
+  @@index([replyId, createdAt], map: "ReplyLike_replyId_createdAt_idx")
+  @@index([userId, createdAt], map: "ReplyLike_userId_createdAt_idx")
+}
+
+model report {
+  id                             String            @id
+  targetType                     report_targetType
+  reason                         String
+  description                    String?
+  status                         report_status     @default(PENDING)
+  createdAt                      DateTime          @default(now())
+  resolvedAt                     DateTime?
+  reporterId                     String
+  targetUserId                   String?
+  postId                         String?
+  replyId                        String?
+  dailyMessageId                 String?
+  dailymessage                   dailymessage?     @relation(fields: [dailyMessageId], references: [id], map: "Report_dailyMessageId_fkey")
+  post                           post?             @relation(fields: [postId], references: [id], map: "Report_postId_fkey")
+  reply                          reply?            @relation(fields: [replyId], references: [id], map: "Report_replyId_fkey")
+  user_report_reporterIdTouser   user              @relation("report_reporterIdTouser", fields: [reporterId], references: [id], onDelete: Cascade, map: "Report_reporterId_fkey")
+  user_report_targetUserIdTouser user?             @relation("report_targetUserIdTouser", fields: [targetUserId], references: [id], map: "Report_targetUserId_fkey")
+
+  @@index([dailyMessageId], map: "Report_dailyMessageId_idx")
+  @@index([postId], map: "Report_postId_fkey")
+  @@index([replyId], map: "Report_replyId_fkey")
+  @@index([reporterId], map: "Report_reporterId_fkey")
+  @@index([status, createdAt], map: "Report_status_createdAt_idx")
+  @@index([targetType], map: "Report_targetType_idx")
+  @@index([targetUserId], map: "Report_targetUserId_fkey")
+}
+
+model searchhistory {
+  id        String   @id
+  keyword   String
+  createdAt DateTime @default(now())
+  userId    String
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "SearchHistory_userId_fkey")
+
+  @@index([userId, createdAt], map: "SearchHistory_userId_createdAt_idx")
+}
+
+model searchkeyword {
+  id         String   @id
+  keyword    String   @unique(map: "SearchKeyword_keyword_key")
+  count      Int      @default(1)
+  lastUsedAt DateTime @default(now())
+
+  @@index([count], map: "SearchKeyword_count_idx")
+}
+
+model sensitiveword {
+  id        String   @id
+  word      String   @unique(map: "SensitiveWord_word_key")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([isActive], map: "SensitiveWord_isActive_idx")
+}
+
+model sitesetting {
+  id        String                @id
+  key       String                @unique(map: "SiteSetting_key_key")
+  value     String
+  valueType sitesetting_valueType @default(TEXT)
+  group     String                @default("general")
+  label     String?
+  updatedAt DateTime
+  createdAt DateTime              @default(now())
+
+  @@index([group], map: "SiteSetting_group_idx")
+}
+
+model smscode {
+  id        String    @id
+  phone     String
+  codeHash  String
+  scene     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([expiresAt], map: "SmsCode_expiresAt_idx")
+  @@index([phone, scene], map: "SmsCode_phone_scene_idx")
+}
+
+model systemnotification {
+  id                     String                   @id
+  title                  String
+  content                String?                  @db.LongText
+  link                   String?
+  type                   systemnotification_type  @default(SYSTEM)
+  isPublished            Boolean                  @default(true)
+  publishedAt            DateTime                 @default(now())
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  createdById            String
+  cover                  String?
+  priority               Int                      @default(0)
+  popup                  Boolean                  @default(false)
+  sticky                 Boolean                  @default(false)
+  publishAt              DateTime                 @default(now())
+  expireAt               DateTime?
+  published              Boolean                  @default(true)
+  buttonText             String?
+  buttonUrl              String?
+  version                String?
+  user                   user                     @relation(fields: [createdById], references: [id], onDelete: Cascade, map: "SystemNotification_createdById_fkey")
+  systemnotificationread systemnotificationread[]
+
+  @@index([createdById, createdAt], map: "SystemNotification_createdById_createdAt_idx")
+  @@index([expireAt], map: "SystemNotification_expireAt_idx")
+  @@index([isPublished, publishedAt], map: "SystemNotification_isPublished_publishedAt_idx")
+  @@index([priority], map: "SystemNotification_priority_idx")
+  @@index([published, publishAt], map: "SystemNotification_published_publishAt_idx")
+  @@index([sticky, priority, publishAt], map: "SystemNotification_sticky_priority_publishAt_idx")
+  @@index([type], map: "SystemNotification_type_idx")
+}
+
+model systemnotificationread {
+  id                 String             @id
+  readAt             DateTime           @default(now())
+  notificationId     String
+  userId             String
+  systemnotification systemnotification @relation(fields: [notificationId], references: [id], onDelete: Cascade, map: "SystemNotificationRead_notificationId_fkey")
+  user               user               @relation(fields: [userId], references: [id], onDelete: Cascade, map: "SystemNotificationRead_userId_fkey")
+
+  @@unique([notificationId, userId], map: "SystemNotificationRead_notificationId_userId_key")
+  @@index([notificationId], map: "SystemNotificationRead_notificationId_idx")
+  @@index([userId, readAt], map: "SystemNotificationRead_userId_readAt_idx")
+}
+
+model tag {
+  id         String    @id
+  name       String    @unique(map: "Tag_name_key")
+  slug       String    @unique(map: "Tag_slug_key")
+  usageCount Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime
+  posttag    posttag[]
+
+  @@index([usageCount], map: "Tag_usageCount_idx")
+}
+
+model task {
+  id          String   @id
+  name        String
+  description String?
+  expReward   Int
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@index([createdAt], map: "Task_createdAt_idx")
+  @@index([enabled], map: "Task_enabled_idx")
+}
+
+model user {
+  id                                                     String                      @id
+  username                                               String
+  email                                                  String?
+  phone                                                  String?
+  passwordHash                                           String
+  nickname                                               String
+  avatarUrl                                              String?
+  bio                                                    String?
+  role                                                   user_role                   @default(USER)
+  level                                                  Int                         @default(1)
+  points                                                 Int                         @default(0)
+  consecutiveDays                                        Int                         @default(0)
+  lastCheckInDate                                        DateTime?
+  isDeleted                                              Boolean                     @default(false)
+  deletedAt                                              DateTime?
+  createdAt                                              DateTime                    @default(now())
+  updatedAt                                              DateTime
+  backgroundUrl                                          String?
+  emailVerifiedAt                                        DateTime?
+  exp                                                    Int                         @default(0)
+  isOnline                                               Boolean                     @default(false)
+  lastActiveAt                                           DateTime?
+  lastLoginAt                                            DateTime?
+  phoneVerifiedAt                                        DateTime?
+  status                                                 user_status                 @default(ACTIVE)
+  verificationStatus                                     user_verificationStatus     @default(NONE)
+  nicknameChangedAt                                      DateTime?
+  uid                                                    Int                         @unique(map: "User_uid_key") @default(autoincrement())
+  experience                                             Int                         @default(0)
+  securityQuestionRecoveryEnabled                        Boolean                     @default(false)
+  registrationIdempotencyKeyHash                         String?                     @unique(map: "User_registrationIdempotencyKeyHash_key")
+  mustSetupSecurity                                      Boolean                     @default(false)
+  usernameNormalized                                     String                      @unique(map: "User_usernameNormalized_key")
+  checkinMoodEnabled                                     Boolean                     @default(true)
+  accountsecuritylog                                     accountsecuritylog[]
+  activityfavorite                                       activityfavorite[]
+  activityregistration                                   activityregistration[]
+  adminaction_adminaction_adminIdTouser                  adminaction[]               @relation("adminaction_adminIdTouser")
+  adminaction_adminaction_targetUserIdTouser             adminaction[]               @relation("adminaction_targetUserIdTouser")
+  adminactionlog_adminactionlog_adminIdTouser            adminactionlog[]            @relation("adminactionlog_adminIdTouser")
+  adminactionlog_adminactionlog_targetUserIdTouser       adminactionlog[]            @relation("adminactionlog_targetUserIdTouser")
+  adminpermission                                        adminpermission[]
+  block_block_blockedIdTouser                            block[]                     @relation("block_blockedIdTouser")
+  block_block_blockerIdTouser                            block[]                     @relation("block_blockerIdTouser")
+  boardfavorite                                          boardfavorite[]
+  changelog                                              changelog[]
+  checkin                                                checkin[]
+  conversationparticipant                                conversationparticipant[]
+  culturecomment                                         culturecomment[]
+  culturefavorite                                        culturefavorite[]
+  dailyexperiencerecord                                  dailyexperiencerecord[]
+  dailymessage                                           dailymessage[]
+  dailymessagecomment                                    dailymessagecomment[]
+  dailymessagefavorite                                   dailymessagefavorite[]
+  dailymessagelike                                       dailymessagelike[]
+  dailytaskprogress                                      dailytaskprogress[]
+  directmessage                                          directmessage[]
+  emailverification                                      emailverification[]
+  entertainmentdailydraw                                 entertainmentdailydraw[]
+  experiencelog                                          experiencelog[]
+  feedback                                               feedback[]
+  feedbackreply                                          feedbackreply[]
+  follow_follow_followerIdTouser                         follow[]                    @relation("follow_followerIdTouser")
+  follow_follow_followingIdTouser                        follow[]                    @relation("follow_followingIdTouser")
+  friendactivity                                         friendactivity[]
+  friendrequest_friendrequest_receiverIdTouser           friendrequest[]             @relation("friendrequest_receiverIdTouser")
+  friendrequest_friendrequest_senderIdTouser             friendrequest[]             @relation("friendrequest_senderIdTouser")
+  friendship_friendship_userAIdTouser                    friendship[]                @relation("friendship_userAIdTouser")
+  friendship_friendship_userBIdTouser                    friendship[]                @relation("friendship_userBIdTouser")
+  guesssongleaderboardentry                              guesssongleaderboardentry[]
+  guesssongsession                                       guesssongsession[]
+  like                                                   like[]
+  logindevice                                            logindevice[]
+  lotteryentry                                           lotteryentry[]
+  lyriccard                                              lyriccard[]
+  musicfavorite                                          musicfavorite[]
+  musicplayrecord                                        musicplayrecord[]
+  notification_notification_actorIdTouser                notification[]              @relation("notification_actorIdTouser")
+  notification_notification_recipientIdTouser            notification[]              @relation("notification_recipientIdTouser")
+  onlinesession                                          onlinesession[]
+  pagelayout_pagelayout_publishedByIdTouser              pagelayout[]                @relation("pagelayout_publishedByIdTouser")
+  pagelayout_pagelayout_updatedByIdTouser                pagelayout[]                @relation("pagelayout_updatedByIdTouser")
+  pagelayoutrevision                                     pagelayoutrevision[]
+  passwordresettoken                                     passwordresettoken[]
+  pointlog                                               pointlog[]
+  post                                                   post[]
+  postfavorite                                           postfavorite[]
+  profile                                                profile?
+  profilewalllike                                        profilewalllike[]
+  profilewallmessage_profilewallmessage_receiverIdTouser profilewallmessage[]        @relation("profilewallmessage_receiverIdTouser")
+  profilewallmessage_profilewallmessage_senderIdTouser   profilewallmessage[]        @relation("profilewallmessage_senderIdTouser")
+  reply                                                  reply[]
+  replylike                                              replylike[]
+  report_report_reporterIdTouser                         report[]                    @relation("report_reporterIdTouser")
+  report_report_targetUserIdTouser                       report[]                    @relation("report_targetUserIdTouser")
+  searchhistory                                          searchhistory[]
+  systemnotification                                     systemnotification[]
+  systemnotificationread                                 systemnotificationread[]
+  userachievement                                        userachievement[]
+  useralbumcollection                                    useralbumcollection[]
+  userbadge                                              userbadge[]
+  usersecurityquestion                                   usersecurityquestion?
+
+  @@index([createdAt], map: "User_createdAt_idx")
+  @@index([email], map: "User_email_idx")
+  @@index([experience], map: "User_experience_idx")
+  @@index([isDeleted], map: "User_isDeleted_idx")
+  @@index([lastActiveAt], map: "User_lastActiveAt_idx")
+  @@index([level], map: "User_level_idx")
+  @@index([phone], map: "User_phone_idx")
+  @@index([points], map: "User_points_idx")
+  @@index([role], map: "User_role_idx")
+  @@index([status], map: "User_status_idx")
+  @@index([uid], map: "User_uid_idx")
+  @@index([username], map: "User_username_idx")
+}
+
+model userachievement {
+  id            String      @id
+  progress      Int         @default(0)
+  unlocked      Boolean     @default(false)
+  unlockedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime
+  userId        String
+  achievementId String
+  achievement   achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade, map: "UserAchievement_achievementId_fkey")
+  user          user        @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserAchievement_userId_fkey")
+
+  @@unique([userId, achievementId], map: "UserAchievement_userId_achievementId_key")
+  @@index([achievementId], map: "UserAchievement_achievementId_idx")
+  @@index([userId, unlocked], map: "UserAchievement_userId_unlocked_idx")
+}
+
+model useralbumcollection {
+  id          String      @id
+  owned       Boolean     @default(true)
+  note        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime
+  userId      String
+  albumId     String
+  cultureitem cultureitem @relation(fields: [albumId], references: [id], onDelete: Cascade, map: "UserAlbumCollection_albumId_fkey")
+  user        user        @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserAlbumCollection_userId_fkey")
+
+  @@unique([userId, albumId], map: "UserAlbumCollection_userId_albumId_key")
+  @@index([albumId], map: "UserAlbumCollection_albumId_fkey")
+  @@index([userId, owned], map: "UserAlbumCollection_userId_owned_idx")
+}
+
+model userbadge {
+  id           String   @id
+  isHidden     Boolean  @default(false)
+  displayOrder Int      @default(0)
+  grantedAt    DateTime @default(now())
+  userId       String
+  badgeId      String
+  badge        badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade, map: "UserBadge_badgeId_fkey")
+  user         user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserBadge_userId_fkey")
+
+  @@unique([userId, badgeId], map: "UserBadge_userId_badgeId_key")
+  @@index([badgeId], map: "UserBadge_badgeId_fkey")
+  @@index([userId, displayOrder], map: "UserBadge_userId_displayOrder_idx")
+}
+
+model usersecurityquestion {
+  id         String   @id
+  question   String
+  answerHash String
+  sortOrder  Int
+  createdAt  DateTime @default(now())
+  userId     String   @unique(map: "UserSecurityQuestion_userId_key")
+  user       user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserSecurityQuestion_userId_fkey")
+
+  @@index([userId], map: "UserSecurityQuestion_userId_idx")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model usersecurityquestion_backup_20260718 {
+  id         String?
+  question   String?
+  answerHash String?
+  sortOrder  Int?
+  createdAt  DateTime?
+  userId     String?
+
+  @@ignore
+}
+
+enum adminaction_action {
+  DELETE_POST
+  RESTORE_POST
+  PIN_POST
+  UNPIN_POST
+  FEATURE_POST
+  UNFEATURE_POST
+  DELETE_REPLY
+  RESTORE_REPLY
+  ADJUST_POINTS
+  UPDATE_BOARD
+  UPDATE_USER_ROLE
+  DELETE_USER
+  RESTORE_USER
+  BAN_USER
+  UNBAN_USER
+  UPDATE_USER_POINTS
+  RECOMMEND_POST
+  UNRECOMMEND_POST
+  LOCK_POST
+  UNLOCK_POST
+  CREATE_BOARD
+  DELETE_BOARD
+  CREATE_BADGE
+  GRANT_BADGE
+  CREATE_ACTIVITY
+  UPDATE_SETTING
+}
+
+enum cultureitem_type {
+  SONG
+  ALBUM
+  FILM
+  LIVE
+}
+
+enum directmessage_type {
+  TEXT
+  IMAGE
+  EMOJI
+  SYSTEM
+}
+
+enum feedback_type {
+  BUG
+  SUGGESTION
+  CONTENT
+  ACCOUNT
+  OTHER
+  EXPERIENCE
+}
+
+enum guesssongleaderboardentry_mode {
+  EASY
+  ADVANCED
+  HARD
+  ENDLESS
+}
+
+enum logindevice_deviceType {
+  WEB
+  MOBILE
+  TABLET
+  API
+}
+
+enum notification_type {
+  REPLY
+  LIKE
+  SYSTEM
+  MESSAGE
+  ACTIVITY
+  ADMIN
+  FOLLOW
+  BADGE
+  FRIEND_REQUEST
+}
+
+enum pointlog_action {
+  POST_CREATE
+  REPLY_CREATE
+  DAILY_CHECK_IN
+  POST_LIKE_RECEIVED
+  ADMIN_ADJUST
+  REGISTER
+  LOGIN
+  CONTINUOUS_CHECK_IN_BONUS
+  FEATURED_POST
+  ACTIVITY_REWARD
+  BADGE_EXCHANGE
+  ENTERTAINMENT_DAILY_DRAW
+  POST_DAILY_FIRST
+  POST_COMMENT_DAILY
+}
+
+enum postmedia_type {
+  IMAGE
+  VIDEO
+}
+
+enum report_targetType {
+  POST
+  REPLY
+  USER
+  MESSAGE
+  DAILY_MESSAGE
+  DAILY_MESSAGE_COMMENT
+}
+
+enum experiencelog_type {
+  CHECKIN
+  TASK
+  POST
+  COMMENT
+  LIKE
+  ACTIVITY
+  ADMIN
+  OTHER
+}
+
+enum friendrequest_status {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum guesssongleaderboardentry_periodType {
+  WEEK
+  MONTH
+}
+
+enum guesssongsession_mode {
+  EASY
+  ADVANCED
+  HARD
+  ENDLESS
+}
+
+enum lotteryprize_type {
+  BADGE
+  PHYSICAL
+  COUPON
+  POINTS
+}
+
+enum activity_type {
+  CONCERT_SIGNUP
+  GATHERING
+  ONLINE
+  LOTTERY
+  OTHER
+}
+
+enum guesssongquestion_difficulty {
+  EASY
+  ADVANCED
+  HARD
+}
+
+enum guesssongsession_status {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+  EXPIRED
+}
+
+enum sitesetting_valueType {
+  TEXT
+  IMAGE
+  JSON
+  BOOLEAN
+  NUMBER
+}
+
+enum activity_status {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  FINISHED
+  CANCELLED
+}
+
+enum report_status {
+  PENDING
+  RESOLVED
+  REJECTED
+}
+
+enum systemnotification_type {
+  SYSTEM
+  UPDATE
+  ANNOUNCEMENT
+  ACTIVITY
+  MAINTENANCE
+  SECURITY
+}
+
+enum feedback_status {
+  OPEN
+  REPLIED
+  CLOSED
+  PROCESSING
+  RESOLVED
+}
+
+enum pagelayoutrevision_source {
+  MANUAL
+  ROLLBACK
+  DEFAULT
+}
+
+enum passwordresettoken_type {
+  SECURITY_QUESTION
+  EMAIL
+}
+
+enum achievement_category {
+  REGISTER
+  CHECKIN_STREAK
+  CHECKIN_TOTAL
+  POST
+  MUSIC
+  FRIEND
+  ACTIVE
+  SPECIAL
+}
+
+enum changelog_type {
+  FEATURE
+  IMPROVEMENT
+  FIX
+  SECURITY
+  CONTENT
+}
+
+enum passwordresettoken_stage {
+  CHALLENGE
+  RESET_CODE
+  RESET_TOKEN
+}
+
+enum achievement_rarity {
+  NORMAL
+  RARE
+  EPIC
+  LEGENDARY
+  LIMITED
+}
+
+enum profile_wallVisibility {
+  PUBLIC
+  FRIENDS
+  CLOSED
+}
+
+enum user_role {
+  USER
+  ADMIN
+  MODERATOR
+  SUPER_ADMIN
+}
+
+enum changelog_status {
+  DRAFT
+  PUBLISHED
+  UNPUBLISHED
+}
+
+enum guesssongquestion_processingStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum musicalbum_status {
+  DRAFT
+  PUBLISHED
+}
+
+enum post_contentType {
+  NORMAL
+  IMAGE
+  VIDEO
+  POLL
+  ARTICLE
+}
+
+enum post_status {
+  DRAFT
+  PUBLISHED
+  LOCKED
+  DELETED
+}
+
+enum user_status {
+  ACTIVE
+  BANNED
+  MUTED
+  DELETED
+  MERGED
+  DISABLED
+}
+
+enum user_verificationStatus {
+  NONE
+  PENDING
+  VERIFIED
+}

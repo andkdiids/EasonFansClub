@@ -4,112 +4,1819 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  USER
-  MODERATOR
-  ADMIN
-  SUPER_ADMIN
+model AccountSecurityLog {
+  id        String   @id
+  action    String
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  userId    String
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([action, createdAt])
+  @@index([userId, createdAt])
 }
 
-enum UserStatus {
-  ACTIVE
-  BANNED
-  MUTED
-  DELETED
-  MERGED
-  DISABLED
+model Achievement {
+  id              String              @id
+  title           String
+  slug            String              @unique
+  description     String?
+  icon            String?
+  imageUrl        String?
+  color           String?
+  category        AchievementCategory
+  rarity          AchievementRarity   @default(NORMAL)
+  conditionKey    String?
+  conditionValue  Int?
+  isAutoGrant     Boolean             @default(true)
+  isVisible       Boolean             @default(true)
+  sortOrder       Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime
+  UserAchievement UserAchievement[]
+
+  @@index([category, sortOrder])
+  @@index([isVisible])
+  @@index([rarity])
 }
 
-enum VerificationStatus {
-  NONE
-  PENDING
-  VERIFIED
+model Activity {
+  id                   String                 @id
+  title                String
+  description          String
+  type                 ActivityType           @default(OTHER)
+  status               ActivityStatus         @default(DRAFT)
+  coverUrl             String?
+  pointsReward         Int?
+  signupLimit          Int?
+  signupCount          Int                    @default(0)
+  startsAt             DateTime?
+  endsAt               DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime
+  ActivityFavorite     ActivityFavorite[]
+  ActivityRegistration ActivityRegistration[]
+  Lottery              Lottery[]
+
+  @@index([status, createdAt])
+  @@index([status, startsAt])
+  @@index([type])
 }
 
-enum DeviceType {
-  WEB
-  MOBILE
-  TABLET
-  API
+model ActivityFavorite {
+  id         String   @id
+  createdAt  DateTime @default(now())
+  activityId String
+  userId     String
+  Activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, userId])
 }
 
-enum PostStatus {
-  DRAFT
-  PUBLISHED
-  LOCKED
-  DELETED
+model ActivityRegistration {
+  id          String    @id
+  note        String?
+  checkedInAt DateTime?
+  createdAt   DateTime  @default(now())
+  activityId  String
+  userId      String
+  Activity    Activity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, userId])
+  @@index([userId, createdAt])
 }
 
-enum PostContentType {
-  NORMAL
-  IMAGE
-  VIDEO
-  POLL
-  ARTICLE
+model AdminAction {
+  id                                  String          @id
+  action                              AdminActionType
+  reason                              String?
+  metadata                            Json?
+  createdAt                           DateTime        @default(now())
+  adminId                             String
+  targetUserId                        String?
+  postId                              String?
+  replyId                             String?
+  boardId                             String?
+  User_AdminAction_adminIdToUser      User            @relation("AdminAction_adminIdToUser", fields: [adminId], references: [id], onDelete: Cascade)
+  Board                               Board?          @relation(fields: [boardId], references: [id])
+  Post                                Post?           @relation(fields: [postId], references: [id])
+  Reply                               Reply?          @relation(fields: [replyId], references: [id])
+  User_AdminAction_targetUserIdToUser User?           @relation("AdminAction_targetUserIdToUser", fields: [targetUserId], references: [id])
+
+  @@index([action])
+  @@index([adminId, createdAt])
+  @@index([boardId])
+  @@index([postId])
+  @@index([replyId])
+  @@index([targetUserId])
 }
 
-enum MediaType {
-  IMAGE
-  VIDEO
+model AdminActionLog {
+  id                                     String   @id
+  adminId                                String
+  action                                 String
+  targetUserId                           String
+  detail                                 Json?
+  createdAt                              DateTime @default(now())
+  User_AdminActionLog_adminIdToUser      User     @relation("AdminActionLog_adminIdToUser", fields: [adminId], references: [id], onDelete: Cascade)
+  User_AdminActionLog_targetUserIdToUser User     @relation("AdminActionLog_targetUserIdToUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([action, createdAt])
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
 }
 
-enum PointActionType {
-  REGISTER
-  LOGIN
-  POST_CREATE
-  REPLY_CREATE
-  DAILY_CHECK_IN
-  ENTERTAINMENT_DAILY_DRAW
-  CONTINUOUS_CHECK_IN_BONUS
-  POST_LIKE_RECEIVED
-  FEATURED_POST
-  ACTIVITY_REWARD
-  BADGE_EXCHANGE
-  ADMIN_ADJUST
-  POST_DAILY_FIRST
-  POST_COMMENT_DAILY
+model AdminPermission {
+  id            String   @id
+  permissionKey String
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  userId        String
+  User          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionKey])
+  @@index([permissionKey, enabled])
+  @@index([userId, enabled])
 }
 
-enum AdminActionType {
-  DELETE_USER
-  RESTORE_USER
-  BAN_USER
-  UNBAN_USER
-  UPDATE_USER_ROLE
-  UPDATE_USER_POINTS
-  DELETE_POST
-  RESTORE_POST
-  PIN_POST
-  UNPIN_POST
-  FEATURE_POST
-  UNFEATURE_POST
-  RECOMMEND_POST
-  UNRECOMMEND_POST
-  LOCK_POST
-  UNLOCK_POST
-  DELETE_REPLY
-  RESTORE_REPLY
-  ADJUST_POINTS
-  UPDATE_BOARD
-  CREATE_BOARD
-  DELETE_BOARD
-  CREATE_BADGE
-  GRANT_BADGE
-  CREATE_ACTIVITY
-  UPDATE_SETTING
+model Announcement {
+  id          String   @id
+  title       String
+  content     String
+  isPinned    Boolean  @default(false)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@index([isPublished, isPinned])
 }
 
-enum AchievementRarity {
-  NORMAL
-  RARE
-  EPIC
-  LEGENDARY
-  LIMITED
+model Badge {
+  id          String      @id
+  name        String      @unique
+  slug        String      @unique
+  description String?
+  iconUrl     String?
+  pointsCost  Int?
+  isAutoGrant Boolean     @default(false)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime
+  UserBadge   UserBadge[]
+
+  @@index([isActive])
+}
+
+model Banner {
+  id        String   @id
+  title     String
+  imageUrl  String
+  link      String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([isActive, sortOrder])
+}
+
+model Block {
+  id                         String   @id
+  reason                     String?
+  createdAt                  DateTime @default(now())
+  blockerId                  String
+  blockedId                  String
+  User_Block_blockedIdToUser User     @relation("Block_blockedIdToUser", fields: [blockedId], references: [id], onDelete: Cascade)
+  User_Block_blockerIdToUser User     @relation("Block_blockerIdToUser", fields: [blockerId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+}
+
+model Board {
+  id            String          @id
+  name          String          @unique
+  slug          String          @unique
+  description   String?
+  sortOrder     Int             @default(0)
+  postCount     Int             @default(0)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  categoryId    String?
+  coverUrl      String?
+  followerCount Int             @default(0)
+  isHot         Boolean         @default(false)
+  isRecommended Boolean         @default(false)
+  parentId      String?
+  AdminAction   AdminAction[]
+  BoardCategory BoardCategory?  @relation(fields: [categoryId], references: [id])
+  Board         Board?          @relation("BoardToBoard", fields: [parentId], references: [id])
+  other_Board   Board[]         @relation("BoardToBoard")
+  BoardFavorite BoardFavorite[]
+  Post          Post[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([isHot])
+  @@index([isRecommended])
+  @@index([parentId])
+  @@index([sortOrder])
+}
+
+model BoardCategory {
+  id          String   @id
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  Board       Board[]
+
+  @@index([sortOrder])
+}
+
+model BoardFavorite {
+  id        String   @id
+  createdAt DateTime @default(now())
+  boardId   String
+  userId    String
+  Board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, userId])
+  @@index([userId, createdAt])
+}
+
+model Changelog {
+  id          String          @id
+  version     String          @unique
+  major       Int
+  minor       Int
+  patch       Int
+  title       String
+  content     String
+  type        ChangelogType
+  isMajor     Boolean         @default(false)
+  status      ChangelogStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime
+  createdById String
+  User        User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, createdAt])
+  @@index([major, minor, patch])
+  @@index([status, publishedAt])
+}
+
+model CheckIn {
+  id             String           @id
+  checkDate      DateTime
+  points         Int              @default(10)
+  streakDay      Int              @default(1)
+  createdAt      DateTime         @default(now())
+  userId         String
+  isMakeUp       Boolean          @default(false)
+  exp            Int              @default(0)
+  message        String?
+  mood           String?
+  checkinDateKey String
+  User           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  DailyMessage   DailyMessage?
+  FriendActivity FriendActivity[]
+
+  @@unique([userId, checkDate])
+  @@unique([userId, checkinDateKey])
+  @@index([checkDate])
+  @@index([userId, createdAt])
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model CheckIn_backup_timezone_fix {
+  id             String?
+  checkDate      DateTime?
+  points         Int?
+  streakDay      Int?
+  createdAt      DateTime?
+  userId         String?
+  isMakeUp       Boolean?
+  exp            Int?
+  message        String?
+  mood           String?
+  checkinDateKey String?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model CheckIn_before_duplicate_fix {
+  id             String?
+  checkDate      DateTime?
+  points         Int?
+  streakDay      Int?
+  createdAt      DateTime?
+  userId         String?
+  isMakeUp       Boolean?
+  exp            Int?
+  message        String?
+  mood           String?
+  checkinDateKey String?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model CheckIn_before_streak_fix {
+  id             String?
+  checkDate      DateTime?
+  points         Int?
+  streakDay      Int?
+  createdAt      DateTime?
+  userId         String?
+  isMakeUp       Boolean?
+  exp            Int?
+  message        String?
+  mood           String?
+  checkinDateKey String?
+
+  @@ignore
+}
+
+model Conversation {
+  id                      String                    @id
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime
+  lastMessageAt           DateTime?
+  pairKey                 String?                   @unique
+  ConversationParticipant ConversationParticipant[]
+  DirectMessage           DirectMessage[]
+
+  @@index([lastMessageAt])
+}
+
+model ConversationParticipant {
+  id             String       @id
+  lastReadAt     DateTime?
+  isDeleted      Boolean      @default(false)
+  isMuted        Boolean      @default(false)
+  joinedAt       DateTime     @default(now())
+  conversationId String
+  userId         String
+  Conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  User           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId, isDeleted])
+}
+
+model CultureComment {
+  id          String      @id
+  content     String
+  isDeleted   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime
+  itemId      String
+  userId      String
+  CultureItem CultureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model CultureFavorite {
+  id          String      @id
+  createdAt   DateTime    @default(now())
+  itemId      String
+  userId      String
+  CultureItem CultureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, userId])
+  @@index([userId, createdAt])
+}
+
+model CultureItem {
+  id                  String                @id
+  type                CultureContentType
+  title               String
+  slug                String                @unique
+  subtitle            String?
+  coverUrl            String?
+  releaseDate         DateTime?
+  lyricist            String?
+  composer            String?
+  arranger            String?
+  albumName           String?
+  roleName            String?
+  city                String?
+  summary             String?
+  background          String?
+  legalExcerpt        String?
+  mvUrl               String?
+  liveUrl             String?
+  trailerUrl          String?
+  rating              Float?
+  favoriteCount       Int                   @default(0)
+  commentCount        Int                   @default(0)
+  isVisible           Boolean               @default(true)
+  sortOrder           Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime
+  CultureComment      CultureComment[]
+  CultureFavorite     CultureFavorite[]
+  LyricCard           LyricCard[]
+  UserAlbumCollection UserAlbumCollection[]
+
+  @@index([releaseDate])
+  @@index([type, isVisible, sortOrder])
+}
+
+model DailyExperienceRecord {
+  id        String   @id
+  date      DateTime
+  amount    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  userId    String
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model DailyMessage {
+  id                   String                 @id
+  date                 DateTime
+  mood                 String?
+  content              String
+  likeCount            Int                    @default(0)
+  commentCount         Int                    @default(0)
+  favoriteCount        Int                    @default(0)
+  shareCount           Int                    @default(0)
+  isPinned             Boolean                @default(false)
+  isFeatured           Boolean                @default(false)
+  isDeleted            Boolean                @default(false)
+  deletedAt            DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime
+  userId               String
+  checkInId            String?                @unique
+  CheckIn              CheckIn?               @relation(fields: [checkInId], references: [id])
+  User                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  DailyMessageComment  DailyMessageComment[]
+  DailyMessageFavorite DailyMessageFavorite[]
+  DailyMessageLike     DailyMessageLike[]
+  FriendActivity       FriendActivity[]
+  Report               Report[]
+
+  @@index([date, createdAt])
+  @@index([date, likeCount])
+  @@index([date, isDeleted, isPinned, isFeatured, likeCount, commentCount, createdAt], map: "DailyMessage_hot_idx")
+  @@index([isDeleted])
+  @@index([isPinned, isFeatured])
+  @@index([date, isDeleted, isPinned, isFeatured, createdAt], map: "DailyMessage_latest_idx")
+  @@index([userId, createdAt])
+}
+
+model DailyMessageComment {
+  id                        String                @id
+  content                   String
+  isDeleted                 Boolean               @default(false)
+  deletedAt                 DateTime?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime
+  messageId                 String
+  authorId                  String
+  parentId                  String?
+  User                      User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  DailyMessage              DailyMessage          @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  DailyMessageComment       DailyMessageComment?  @relation("DailyMessageCommentToDailyMessageComment", fields: [parentId], references: [id], onDelete: NoAction)
+  other_DailyMessageComment DailyMessageComment[] @relation("DailyMessageCommentToDailyMessageComment")
+
+  @@index([authorId, createdAt])
+  @@index([messageId, createdAt])
+  @@index([parentId])
+}
+
+model DailyMessageFavorite {
+  id           String       @id
+  createdAt    DateTime     @default(now())
+  messageId    String
+  userId       String
+  DailyMessage DailyMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, createdAt])
+}
+
+model DailyMessageLike {
+  id           String       @id
+  createdAt    DateTime     @default(now())
+  messageId    String
+  userId       String
+  DailyMessage DailyMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, createdAt])
+}
+
+model DailyQuote {
+  id        String   @id
+  content   String
+  source    String?
+  songTitle String?
+  isPinned  Boolean  @default(false)
+  isVisible Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([isPinned, isVisible])
+  @@index([sortOrder])
+}
+
+model DailyTaskProgress {
+  id                String            @id
+  taskDate          DateTime
+  progress          Int               @default(0)
+  isCompleted       Boolean           @default(false)
+  completedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime
+  userId            String
+  templateId        String
+  DailyTaskTemplate DailyTaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  User              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, templateId, taskDate])
+  @@index([taskDate, isCompleted])
+}
+
+model DailyTaskTemplate {
+  id                String              @id
+  key               String              @unique
+  title             String
+  description       String?
+  target            Int                 @default(1)
+  points            Int                 @default(0)
+  exp               Int                 @default(0)
+  sortOrder         Int                 @default(0)
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime
+  DailyTaskProgress DailyTaskProgress[]
+
+  @@index([isActive, sortOrder])
+}
+
+model DirectMessage {
+  id             String       @id
+  type           MessageType  @default(TEXT)
+  content        String
+  imageUrl       String?
+  isDeleted      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  conversationId String
+  senderId       String
+  Conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  User           User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model EmailVerification {
+  id        String    @id
+  tokenHash String    @unique
+  email     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  userId    String
+  User      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model EntertainmentDailyDraw {
+  id                  String             @id
+  dateKey             String
+  points              Int
+  prescriptionCode    String             @unique
+  lyricText           String?
+  songTitle           String?
+  albumTitle          String?
+  createdAt           DateTime           @default(now())
+  userId              String
+  lyricPrescriptionId String?
+  LyricPrescription   LyricPrescription? @relation(fields: [lyricPrescriptionId], references: [id], onDelete: Restrict)
+  User                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  PointLog            PointLog?
+
+  @@unique([userId, dateKey])
+  @@index([dateKey])
+  @@index([lyricPrescriptionId])
+  @@index([userId, createdAt])
+  @@index([userId])
+}
+
+model ExperienceLog {
+  id          String            @id
+  amount      Int
+  type        ExperienceLogType
+  description String
+  createdAt   DateTime          @default(now())
+  userId      String
+  sourceType  String?
+  sourceId    String?
+  User        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceType, sourceId])
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Feedback {
+  id                 String               @id
+  type               FeedbackType
+  title              String
+  content            String
+  imageUrl           String?
+  status             FeedbackStatus       @default(OPEN)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  userId             String
+  contact            String?
+  adminUnread        Boolean              @default(true)
+  userUnread         Boolean              @default(false)
+  lastReplyAt        DateTime?
+  lastUserReplyAt    DateTime?
+  lastAdminReplyAt   DateTime?
+  closedAt           DateTime?
+  idempotencyKeyHash String?              @unique
+  User               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  FeedbackAttachment FeedbackAttachment[]
+  FeedbackReply      FeedbackReply[]
+
+  @@index([adminUnread, updatedAt])
+  @@index([lastReplyAt])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model FeedbackAttachment {
+  id            String         @id
+  url           String
+  mimeType      String?
+  createdAt     DateTime       @default(now())
+  feedbackId    String
+  replyId       String?
+  Feedback      Feedback       @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  FeedbackReply FeedbackReply? @relation(fields: [replyId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId])
+  @@index([replyId])
+}
+
+model FeedbackReply {
+  id                 String               @id
+  content            String
+  createdAt          DateTime             @default(now())
+  feedbackId         String
+  adminId            String
+  authorRole         String               @default("ADMIN")
+  isReadByUser       Boolean              @default(false)
+  isReadByAdmin      Boolean              @default(true)
+  FeedbackAttachment FeedbackAttachment[]
+  User               User                 @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  Feedback           Feedback             @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, createdAt])
+  @@index([feedbackId, createdAt])
+}
+
+model Follow {
+  id                            String   @id
+  createdAt                     DateTime @default(now())
+  followerId                    String
+  followingId                   String
+  User_Follow_followerIdToUser  User     @relation("Follow_followerIdToUser", fields: [followerId], references: [id], onDelete: Cascade)
+  User_Follow_followingIdToUser User     @relation("Follow_followingIdToUser", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followingId, createdAt])
+}
+
+model FriendActivity {
+  id             String        @id
+  mood           String?
+  content        String?
+  createdAt      DateTime      @default(now())
+  actorId        String
+  checkInId      String?
+  dailyMessageId String?
+  type           String        @default("CHECKIN")
+  targetUrl      String?
+  User           User          @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  CheckIn        CheckIn?      @relation(fields: [checkInId], references: [id])
+  DailyMessage   DailyMessage? @relation(fields: [dailyMessageId], references: [id])
+
+  @@index([actorId, createdAt])
+  @@index([checkInId])
+  @@index([dailyMessageId])
+}
+
+model FriendRequest {
+  id                                  String              @id
+  message                             String?
+  status                              FriendRequestStatus @default(PENDING)
+  createdAt                           DateTime            @default(now())
+  updatedAt                           DateTime
+  senderId                            String
+  receiverId                          String
+  User_FriendRequest_receiverIdToUser User                @relation("FriendRequest_receiverIdToUser", fields: [receiverId], references: [id], onDelete: Cascade)
+  User_FriendRequest_senderIdToUser   User                @relation("FriendRequest_senderIdToUser", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId, status])
+  @@index([receiverId, status, createdAt])
+  @@index([senderId, status, createdAt])
+}
+
+model Friendship {
+  id                            String   @id
+  createdAt                     DateTime @default(now())
+  userAId                       String
+  userBId                       String
+  User_Friendship_userAIdToUser User     @relation("Friendship_userAIdToUser", fields: [userAId], references: [id], onDelete: Cascade)
+  User_Friendship_userBIdToUser User     @relation("Friendship_userBIdToUser", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userBId, createdAt])
+}
+
+model GrowthLevelConfig {
+  id          String   @id
+  level       Int      @unique
+  name        String
+  requiredExp Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@index([requiredExp])
+}
+
+model GuessSongAudioVariant {
+  id                   String                 @id
+  durationSeconds      Int
+  storagePath          String
+  fileSize             Int
+  createdAt            DateTime               @default(now())
+  questionId           String
+  GuessSongQuestion    GuessSongQuestion      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  GuessSongPlayRequest GuessSongPlayRequest[]
+
+  @@unique([questionId, durationSeconds])
+  @@index([questionId])
+}
+
+model GuessSongLeaderboardEntry {
+  id               String              @id
+  mode             GuessSongMode
+  periodType       GuessSongPeriodType
+  periodKey        String
+  score            Int
+  correctCount     Int
+  maxStreak        Int
+  totalPlayCount   Int
+  achievedAt       DateTime
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime
+  userId           String
+  sessionId        String
+  GuessSongSession GuessSongSession    @relation(fields: [sessionId], references: [id])
+  User             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mode, periodType, periodKey])
+  @@index([periodType, periodKey, mode, score])
+  @@index([sessionId])
+  @@index([userId, periodType, periodKey])
+}
+
+model GuessSongPlayRequest {
+  id                       String                   @id
+  requestKey               String
+  playCountAfter           Int
+  createdAt                DateTime                 @default(now())
+  sessionQuestionId        String
+  audioVariantId           String
+  GuessSongAudioVariant    GuessSongAudioVariant    @relation(fields: [audioVariantId], references: [id])
+  GuessSongSessionQuestion GuessSongSessionQuestion @relation(fields: [sessionQuestionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionQuestionId, requestKey])
+  @@index([sessionQuestionId, createdAt])
+}
+
+model GuessSongQuestion {
+  id                       String                     @id
+  songTitle                String
+  albumTitle               String?
+  difficulty               GuessSongDifficulty
+  enabled                  Boolean                    @default(false)
+  allowEndless             Boolean                    @default(true)
+  correctAnswer            String
+  wrongOption1             String
+  wrongOption2             String
+  wrongOption3             String
+  sourceAudioPath          String?
+  audioDurationMs          Int?
+  processingStatus         GuessSongProcessingStatus  @default(PENDING)
+  processingError          String?
+  playCount                Int                        @default(0)
+  answerCount              Int                        @default(0)
+  correctCount             Int                        @default(0)
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime
+  musicSongId              String?
+  GuessSongAudioVariant    GuessSongAudioVariant[]
+  MusicSong                MusicSong?                 @relation(fields: [musicSongId], references: [id])
+  GuessSongSessionQuestion GuessSongSessionQuestion[]
+
+  @@index([allowEndless, enabled])
+  @@index([createdAt])
+  @@index([difficulty, enabled])
+  @@index([musicSongId])
+  @@index([processingStatus])
+  @@index([songTitle])
+}
+
+model GuessSongSession {
+  id                        String                      @id
+  activeKey                 String?                     @unique
+  mode                      GuessSongMode
+  status                    GuessSongSessionStatus      @default(IN_PROGRESS)
+  score                     Int                         @default(0)
+  correctCount              Int                         @default(0)
+  wrongCount                Int                         @default(0)
+  currentStreak             Int                         @default(0)
+  maxStreak                 Int                         @default(0)
+  livesRemaining            Int                         @default(0)
+  totalPlayCount            Int                         @default(0)
+  currentPosition           Int                         @default(1)
+  startedAt                 DateTime                    @default(now())
+  completedAt               DateTime?
+  expiresAt                 DateTime
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime
+  userId                    String
+  GuessSongLeaderboardEntry GuessSongLeaderboardEntry[]
+  User                      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  GuessSongSessionQuestion  GuessSongSessionQuestion[]
+
+  @@index([createdAt])
+  @@index([status, expiresAt])
+  @@index([userId, completedAt])
+  @@index([userId, mode, status])
+}
+
+model GuessSongSessionQuestion {
+  id                      String                 @id
+  publicId                String                 @unique
+  position                Int
+  playbackDurationSeconds Int
+  maxPlayCount            Int
+  playCount               Int                    @default(0)
+  optionsSnapshot         Json
+  correctOptionKey        String
+  selectedOptionKey       String?
+  isCorrect               Boolean?
+  awardedScore            Int                    @default(0)
+  answerDeadlineAt        DateTime?
+  answeredAt              DateTime?
+  createdAt               DateTime               @default(now())
+  sessionId               String
+  questionId              String
+  GuessSongPlayRequest    GuessSongPlayRequest[]
+  GuessSongQuestion       GuessSongQuestion      @relation(fields: [questionId], references: [id])
+  GuessSongSession        GuessSongSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, position])
+  @@index([publicId])
+  @@index([questionId])
+  @@index([sessionId, answeredAt])
+}
+
+model Like {
+  id        String   @id
+  createdAt DateTime @default(now())
+  postId    String
+  userId    String
+  Post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model LoginDevice {
+  id          String     @id
+  deviceType  DeviceType @default(WEB)
+  deviceName  String?
+  ipAddress   String?
+  userAgent   String?
+  lastLoginAt DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  userId      String
+  User        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lastLoginAt])
+}
+
+model Lottery {
+  id           String         @id
+  title        String
+  pointsCost   Int            @default(0)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  createdAt    DateTime       @default(now())
+  activityId   String?
+  Activity     Activity?      @relation(fields: [activityId], references: [id])
+  LotteryEntry LotteryEntry[]
+  LotteryPrize LotteryPrize[]
+
+  @@index([activityId])
+}
+
+model LotteryEntry {
+  id           String        @id
+  createdAt    DateTime      @default(now())
+  lotteryId    String
+  prizeId      String?
+  userId       String
+  Lottery      Lottery       @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+  LotteryPrize LotteryPrize? @relation(fields: [prizeId], references: [id])
+  User         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lotteryId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model LotteryPrize {
+  id           String         @id
+  name         String
+  type         RewardType
+  quantity     Int            @default(1)
+  remaining    Int            @default(1)
+  pointsValue  Int?
+  metadata     Json?
+  lotteryId    String
+  LotteryEntry LotteryEntry[]
+  Lottery      Lottery        @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+}
+
+model LyricCard {
+  id                String             @id
+  lyric             String
+  imageUrl          String?
+  isFavorite        Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  userId            String
+  songId            String?
+  templateId        String?
+  CultureItem       CultureItem?       @relation(fields: [songId], references: [id])
+  LyricCardTemplate LyricCardTemplate? @relation(fields: [templateId], references: [id])
+  User              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([songId])
+  @@index([userId, createdAt])
+}
+
+model LyricCardTemplate {
+  id            String      @id
+  name          String
+  backgroundUrl String?
+  textColor     String      @default("#071722")
+  accentColor   String      @default("#1985c2")
+  isVisible     Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime
+  LyricCard     LyricCard[]
+
+  @@index([isVisible, sortOrder])
+}
+
+model LyricPrescription {
+  id                     String                   @id
+  text                   String
+  songTitle              String
+  albumTitle             String?
+  enabled                Boolean                  @default(true)
+  displayCount           Int                      @default(0)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  EntertainmentDailyDraw EntertainmentDailyDraw[]
+
+  @@index([displayCount])
+  @@index([enabled, createdAt])
+}
+
+model MusicAlbum {
+  id           String                 @id
+  name         String
+  artist       String                 @default("陈奕迅")
+  releaseYear  Int
+  coverUrl     String?
+  description  String?
+  language     String                 @default("粤语")
+  createdAt    DateTime               @default(now())
+  era          String?
+  albumType    String?
+  releaseDate  DateTime?
+  company      String?
+  story        String?
+  status       MusicPublicationStatus @default(DRAFT)
+  displayOrder Int                    @default(0)
+  MusicSong    MusicSong[]
+
+  @@unique([name, artist, releaseYear])
+  @@index([releaseYear, createdAt])
+  @@index([status, displayOrder, releaseYear])
+}
+
+model MusicFavorite {
+  id         String     @id
+  createdAt  DateTime   @default(now())
+  trackId    String
+  userId     String
+  MusicTrack MusicTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  User       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([trackId, userId])
+  @@index([userId, createdAt])
+}
+
+model MusicPlayRecord {
+  id              String     @id
+  durationSeconds Int        @default(0)
+  playedAt        DateTime   @default(now())
+  trackId         String
+  userId          String
+  MusicTrack      MusicTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  User            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([trackId, playedAt])
+  @@index([userId, playedAt])
+}
+
+model MusicSong {
+  id                String              @id
+  title             String
+  artist            String              @default("陈奕迅")
+  albumId           String
+  trackNumber       Int
+  releaseYear       Int
+  duration          Int?
+  coverUrl          String?
+  composer          String?
+  lyricist          String?
+  arranger          String?
+  producer          String?
+  story             String?
+  lyrics            String?
+  sourceType        String?
+  sourceUrl         String?
+  createdAt         DateTime            @default(now())
+  language          String?
+  tags              String?
+  era               String?
+  trackType         String?
+  concertVersion    String?
+  mood              String?
+  scene             String?
+  recommendLevel    String?
+  description       String?
+  GuessSongQuestion GuessSongQuestion[]
+  MusicAlbum        MusicAlbum          @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([albumId, title])
+  @@unique([albumId, trackNumber])
+  @@index([albumId, trackNumber])
+  @@index([title, artist])
+}
+
+model MusicTrack {
+  id              String            @id
+  title           String
+  artist          String            @default("Eason Chan")
+  source          String?
+  sourceUrl       String?
+  isPlayable      Boolean           @default(false)
+  sortOrder       Int               @default(0)
+  isVisible       Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime
+  MusicFavorite   MusicFavorite[]
+  MusicPlayRecord MusicPlayRecord[]
+
+  @@unique([title, artist])
+  @@index([isVisible, sortOrder])
+  @@index([isVisible, sortOrder, createdAt], map: "MusicTrack_visible_sort_createdAt_idx")
+}
+
+model Notification {
+  id                                  String           @id
+  type                                NotificationType
+  title                               String
+  content                             String?
+  link                                String?
+  isRead                              Boolean          @default(false)
+  createdAt                           DateTime         @default(now())
+  readAt                              DateTime?
+  recipientId                         String
+  actorId                             String?
+  key                                 String?
+  completedAt                         DateTime?
+  User_Notification_actorIdToUser     User?            @relation("Notification_actorIdToUser", fields: [actorId], references: [id])
+  User_Notification_recipientIdToUser User             @relation("Notification_recipientIdToUser", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, key])
+  @@index([recipientId, isRead, createdAt])
+  @@index([type])
+}
+
+model OnlineSession {
+  id        String   @id
+  tokenId   String?
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model PageLayout {
+  id                                  String               @id
+  pageKey                             String               @unique
+  draftConfig                         Json
+  publishedConfig                     Json
+  previousPublishedConfig             Json?
+  version                             Int                  @default(1)
+  publishedAt                         DateTime?
+  createdAt                           DateTime             @default(now())
+  updatedAt                           DateTime
+  updatedById                         String?
+  publishedById                       String?
+  User_PageLayout_publishedByIdToUser User?                @relation("PageLayout_publishedByIdToUser", fields: [publishedById], references: [id])
+  User_PageLayout_updatedByIdToUser   User?                @relation("PageLayout_updatedByIdToUser", fields: [updatedById], references: [id])
+  PageLayoutRevision                  PageLayoutRevision[]
+
+  @@index([pageKey])
+  @@index([publishedById])
+  @@index([updatedById])
+}
+
+model PageLayoutRevision {
+  id            String                   @id
+  pageLayoutId  String
+  version       Int
+  config        Json
+  note          String?
+  source        PageLayoutRevisionSource @default(MANUAL)
+  createdAt     DateTime                 @default(now())
+  publishedById String?
+  PageLayout    PageLayout               @relation(fields: [pageLayoutId], references: [id], onDelete: Cascade)
+  User          User?                    @relation(fields: [publishedById], references: [id])
+
+  @@unique([pageLayoutId, version])
+  @@index([pageLayoutId, createdAt])
+  @@index([publishedById])
+  @@index([source])
+}
+
+model PasswordResetToken {
+  id           String             @id
+  tokenHash    String             @unique
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime           @default(now())
+  userId       String
+  type         PasswordResetType  @default(EMAIL)
+  stage        PasswordResetStage @default(RESET_TOKEN)
+  codeHash     String?
+  attemptCount Int                @default(0)
+  User         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([codeHash])
+  @@index([expiresAt])
+  @@index([userId, type, stage, createdAt])
+}
+
+model PointLog {
+  id                     String                  @id
+  action                 PointActionType
+  points                 Int
+  before                 Int
+  after                  Int
+  reason                 String?
+  createdAt              DateTime                @default(now())
+  userId                 String
+  postId                 String?
+  replyId                String?
+  checkInId              String?
+  activityId             String?
+  badgeId                String?
+  dailyDrawId            String?                 @unique
+  dateKey                String?
+  businessKey            String?                 @unique
+  EntertainmentDailyDraw EntertainmentDailyDraw? @relation(fields: [dailyDrawId], references: [id])
+  User                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([action, checkInId])
+  @@index([action])
+  @@index([activityId])
+  @@index([checkInId])
+  @@index([postId])
+  @@index([replyId])
+  @@index([userId, createdAt])
+}
+
+model Poll {
+  id         String       @id
+  question   String
+  allowMulti Boolean      @default(false)
+  expiresAt  DateTime?
+  createdAt  DateTime     @default(now())
+  postId     String       @unique
+  Post       Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  PollOption PollOption[]
+  PollVote   PollVote[]
+}
+
+model PollOption {
+  id        String     @id
+  title     String
+  voteCount Int        @default(0)
+  sortOrder Int        @default(0)
+  pollId    String
+  Poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  PollVote  PollVote[]
+
+  @@index([pollId, sortOrder])
+}
+
+model PollVote {
+  id         String     @id
+  createdAt  DateTime   @default(now())
+  pollId     String
+  optionId   String
+  userId     String
+  PollOption PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  Poll       Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, userId])
+  @@index([pollId, userId])
+}
+
+model Post {
+  id            String          @id
+  title         String
+  content       String
+  viewCount     Int             @default(0)
+  likeCount     Int             @default(0)
+  replyCount    Int             @default(0)
+  isPinned      Boolean         @default(false)
+  isFeatured    Boolean         @default(false)
+  isDeleted     Boolean         @default(false)
+  deletedAt     DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  authorId      String
+  boardId       String
+  contentType   PostContentType @default(NORMAL)
+  favoriteCount Int             @default(0)
+  isLocked      Boolean         @default(false)
+  isRecommended Boolean         @default(false)
+  publishedAt   DateTime        @default(now())
+  readUserCount Int             @default(0)
+  shareCount    Int             @default(0)
+  status        PostStatus      @default(PUBLISHED)
+  summary       String?
+  AdminAction   AdminAction[]
+  Like          Like[]
+  Poll          Poll?
+  User          User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Board         Board           @relation(fields: [boardId], references: [id])
+  PostFavorite  PostFavorite[]
+  PostMedia     PostMedia[]
+  PostTag       PostTag[]
+  Reply         Reply[]
+  Report        Report[]
+
+  @@index([authorId, createdAt])
+  @@index([boardId, createdAt])
+  @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_board_feed_idx")
+  @@index([contentType])
+  @@index([status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_global_feed_idx")
+  @@index([status, isDeleted, isPinned, isFeatured, likeCount, replyCount], map: "Post_hot_feed_idx")
+  @@index([isDeleted])
+  @@index([isFeatured, createdAt])
+  @@index([isPinned, createdAt])
+  @@index([isRecommended, createdAt])
+  @@index([likeCount])
+  @@index([replyCount])
+  @@index([status])
+}
+
+model PostFavorite {
+  id        String   @id
+  createdAt DateTime @default(now())
+  postId    String
+  userId    String
+  Post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model PostMedia {
+  id        String    @id
+  type      MediaType
+  url       String
+  thumbnail String?
+  width     Int?
+  height    Int?
+  size      Int?
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  postId    String
+  Post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, sortOrder])
+}
+
+model PostTag {
+  postId String
+  tagId  String
+  Post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  Tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+}
+
+model Profile {
+  id             String                @id
+  displayName    String
+  avatarUrl      String?
+  backgroundUrl  String?
+  bio            String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime
+  userId         String                @unique
+  wallVisibility ProfileWallVisibility @default(PUBLIC)
+  User           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([displayName])
+  @@index([wallVisibility])
+}
+
+model ProfileWallLike {
+  id                 String             @id
+  createdAt          DateTime           @default(now())
+  messageId          String
+  userId             String
+  ProfileWallMessage ProfileWallMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  User               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, createdAt])
+}
+
+model ProfileWallMessage {
+  id                                       String               @id
+  content                                  String
+  createdAt                                DateTime             @default(now())
+  updatedAt                                DateTime
+  deletedAt                                DateTime?
+  senderId                                 String
+  receiverId                               String
+  parentId                                 String?
+  likeCount                                Int                  @default(0)
+  ProfileWallLike                          ProfileWallLike[]
+  ProfileWallMessage                       ProfileWallMessage?  @relation("ProfileWallMessageToProfileWallMessage", fields: [parentId], references: [id], onDelete: NoAction)
+  other_ProfileWallMessage                 ProfileWallMessage[] @relation("ProfileWallMessageToProfileWallMessage")
+  User_ProfileWallMessage_receiverIdToUser User                 @relation("ProfileWallMessage_receiverIdToUser", fields: [receiverId], references: [id], onDelete: Cascade)
+  User_ProfileWallMessage_senderIdToUser   User                 @relation("ProfileWallMessage_senderIdToUser", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([deletedAt])
+  @@index([parentId])
+  @@index([receiverId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model RateLimitLog {
+  id        String   @id
+  key       String
+  action    String
+  count     Int      @default(1)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([key, action])
+}
+
+model Reply {
+  id          String        @id
+  content     String
+  isDeleted   Boolean       @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime
+  postId      String
+  authorId    String
+  parentId    String?
+  likeCount   Int           @default(0)
+  AdminAction AdminAction[]
+  User        User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Reply       Reply?        @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
+  other_Reply Reply[]       @relation("ReplyToReply")
+  Post        Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  ReplyLike   ReplyLike[]
+  Report      Report[]
+
+  @@index([authorId, createdAt])
+  @@index([isDeleted])
+  @@index([parentId])
+  @@index([postId, createdAt])
+}
+
+model ReplyLike {
+  id        String   @id
+  createdAt DateTime @default(now())
+  replyId   String
+  userId    String
+  Reply     Reply    @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([replyId, userId])
+  @@index([replyId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Report {
+  id                             String           @id
+  targetType                     ReportTargetType
+  reason                         String
+  description                    String?
+  status                         ReportStatus     @default(PENDING)
+  createdAt                      DateTime         @default(now())
+  resolvedAt                     DateTime?
+  reporterId                     String
+  targetUserId                   String?
+  postId                         String?
+  replyId                        String?
+  dailyMessageId                 String?
+  DailyMessage                   DailyMessage?    @relation(fields: [dailyMessageId], references: [id])
+  Post                           Post?            @relation(fields: [postId], references: [id])
+  Reply                          Reply?           @relation(fields: [replyId], references: [id])
+  User_Report_reporterIdToUser   User             @relation("Report_reporterIdToUser", fields: [reporterId], references: [id], onDelete: Cascade)
+  User_Report_targetUserIdToUser User?            @relation("Report_targetUserIdToUser", fields: [targetUserId], references: [id])
+
+  @@index([dailyMessageId])
+  @@index([status, createdAt])
+  @@index([targetType])
+}
+
+model SearchHistory {
+  id        String   @id
+  keyword   String
+  createdAt DateTime @default(now())
+  userId    String
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model SearchKeyword {
+  id         String   @id
+  keyword    String   @unique
+  count      Int      @default(1)
+  lastUsedAt DateTime @default(now())
+
+  @@index([count])
+}
+
+model SensitiveWord {
+  id        String   @id
+  word      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([isActive])
+}
+
+model SiteSetting {
+  id        String               @id
+  key       String               @unique
+  value     String
+  valueType SiteSettingValueType @default(TEXT)
+  group     String               @default("general")
+  label     String?
+  updatedAt DateTime
+  createdAt DateTime             @default(now())
+
+  @@index([group])
+}
+
+model SmsCode {
+  id        String    @id
+  phone     String
+  codeHash  String
+  scene     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@index([phone, scene])
+}
+
+model SystemNotification {
+  id                     String                   @id
+  title                  String
+  content                String
+  link                   String?
+  type                   SystemNotificationType   @default(SYSTEM)
+  isPublished            Boolean                  @default(true)
+  publishedAt            DateTime                 @default(now())
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  createdById            String
+  cover                  String?
+  priority               Int                      @default(0)
+  popup                  Boolean                  @default(false)
+  sticky                 Boolean                  @default(false)
+  publishAt              DateTime                 @default(now())
+  expireAt               DateTime?
+  published              Boolean                  @default(true)
+  buttonText             String?
+  buttonUrl              String?
+  version                String?
+  User                   User                     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  SystemNotificationRead SystemNotificationRead[]
+
+  @@index([createdById, createdAt])
+  @@index([expireAt])
+  @@index([isPublished, publishedAt])
+  @@index([priority])
+  @@index([published, publishAt])
+  @@index([sticky, priority, publishAt])
+  @@index([type])
+}
+
+model SystemNotificationRead {
+  id                 String             @id
+  readAt             DateTime           @default(now())
+  notificationId     String
+  userId             String
+  SystemNotification SystemNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  User               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([notificationId])
+  @@index([userId, readAt])
+}
+
+model Tag {
+  id         String    @id
+  name       String    @unique
+  slug       String    @unique
+  usageCount Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime
+  PostTag    PostTag[]
+
+  @@index([usageCount])
+}
+
+model Task {
+  id          String   @id
+  name        String
+  description String?
+  expReward   Int
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@index([createdAt])
+  @@index([enabled])
+}
+
+model User {
+  id                                                     String                      @id
+  username                                               String
+  email                                                  String?
+  phone                                                  String?
+  passwordHash                                           String
+  nickname                                               String
+  avatarUrl                                              String?
+  bio                                                    String?
+  role                                                   UserRole                    @default(USER)
+  level                                                  Int                         @default(1)
+  points                                                 Int                         @default(0)
+  consecutiveDays                                        Int                         @default(0)
+  lastCheckInDate                                        DateTime?
+  isDeleted                                              Boolean                     @default(false)
+  deletedAt                                              DateTime?
+  createdAt                                              DateTime                    @default(now())
+  updatedAt                                              DateTime
+  backgroundUrl                                          String?
+  emailVerifiedAt                                        DateTime?
+  exp                                                    Int                         @default(0)
+  isOnline                                               Boolean                     @default(false)
+  lastActiveAt                                           DateTime?
+  lastLoginAt                                            DateTime?
+  phoneVerifiedAt                                        DateTime?
+  status                                                 UserStatus                  @default(ACTIVE)
+  verificationStatus                                     VerificationStatus          @default(NONE)
+  nicknameChangedAt                                      DateTime?
+  uid                                                    Int                         @unique @default(autoincrement())
+  experience                                             Int                         @default(0)
+  securityQuestionRecoveryEnabled                        Boolean                     @default(false)
+  registrationIdempotencyKeyHash                         String?                     @unique
+  mustSetupSecurity                                      Boolean                     @default(false)
+  usernameNormalized                                     String                      @unique
+  checkinMoodEnabled                                     Boolean                     @default(true)
+  AccountSecurityLog                                     AccountSecurityLog[]
+  ActivityFavorite                                       ActivityFavorite[]
+  ActivityRegistration                                   ActivityRegistration[]
+  AdminAction_AdminAction_adminIdToUser                  AdminAction[]               @relation("AdminAction_adminIdToUser")
+  AdminAction_AdminAction_targetUserIdToUser             AdminAction[]               @relation("AdminAction_targetUserIdToUser")
+  AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]            @relation("AdminActionLog_adminIdToUser")
+  AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]            @relation("AdminActionLog_targetUserIdToUser")
+  AdminPermission                                        AdminPermission[]
+  Block_Block_blockedIdToUser                            Block[]                     @relation("Block_blockedIdToUser")
+  Block_Block_blockerIdToUser                            Block[]                     @relation("Block_blockerIdToUser")
+  BoardFavorite                                          BoardFavorite[]
+  Changelog                                              Changelog[]
+  CheckIn                                                CheckIn[]
+  ConversationParticipant                                ConversationParticipant[]
+  CultureComment                                         CultureComment[]
+  CultureFavorite                                        CultureFavorite[]
+  DailyExperienceRecord                                  DailyExperienceRecord[]
+  DailyMessage                                           DailyMessage[]
+  DailyMessageComment                                    DailyMessageComment[]
+  DailyMessageFavorite                                   DailyMessageFavorite[]
+  DailyMessageLike                                       DailyMessageLike[]
+  DailyTaskProgress                                      DailyTaskProgress[]
+  DirectMessage                                          DirectMessage[]
+  EmailVerification                                      EmailVerification[]
+  EntertainmentDailyDraw                                 EntertainmentDailyDraw[]
+  ExperienceLog                                          ExperienceLog[]
+  Feedback                                               Feedback[]
+  FeedbackReply                                          FeedbackReply[]
+  Follow_Follow_followerIdToUser                         Follow[]                    @relation("Follow_followerIdToUser")
+  Follow_Follow_followingIdToUser                        Follow[]                    @relation("Follow_followingIdToUser")
+  FriendActivity                                         FriendActivity[]
+  FriendRequest_FriendRequest_receiverIdToUser           FriendRequest[]             @relation("FriendRequest_receiverIdToUser")
+  FriendRequest_FriendRequest_senderIdToUser             FriendRequest[]             @relation("FriendRequest_senderIdToUser")
+  Friendship_Friendship_userAIdToUser                    Friendship[]                @relation("Friendship_userAIdToUser")
+  Friendship_Friendship_userBIdToUser                    Friendship[]                @relation("Friendship_userBIdToUser")
+  GuessSongLeaderboardEntry                              GuessSongLeaderboardEntry[]
+  GuessSongSession                                       GuessSongSession[]
+  Like                                                   Like[]
+  LoginDevice                                            LoginDevice[]
+  LotteryEntry                                           LotteryEntry[]
+  LyricCard                                              LyricCard[]
+  MusicFavorite                                          MusicFavorite[]
+  MusicPlayRecord                                        MusicPlayRecord[]
+  Notification_Notification_actorIdToUser                Notification[]              @relation("Notification_actorIdToUser")
+  Notification_Notification_recipientIdToUser            Notification[]              @relation("Notification_recipientIdToUser")
+  OnlineSession                                          OnlineSession[]
+  PageLayout_PageLayout_publishedByIdToUser              PageLayout[]                @relation("PageLayout_publishedByIdToUser")
+  PageLayout_PageLayout_updatedByIdToUser                PageLayout[]                @relation("PageLayout_updatedByIdToUser")
+  PageLayoutRevision                                     PageLayoutRevision[]
+  PasswordResetToken                                     PasswordResetToken[]
+  PointLog                                               PointLog[]
+  Post                                                   Post[]
+  PostFavorite                                           PostFavorite[]
+  Profile                                                Profile?
+  ProfileWallLike                                        ProfileWallLike[]
+  ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]        @relation("ProfileWallMessage_receiverIdToUser")
+  ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]        @relation("ProfileWallMessage_senderIdToUser")
+  Reply                                                  Reply[]
+  ReplyLike                                              ReplyLike[]
+  Report_Report_reporterIdToUser                         Report[]                    @relation("Report_reporterIdToUser")
+  Report_Report_targetUserIdToUser                       Report[]                    @relation("Report_targetUserIdToUser")
+  SearchHistory                                          SearchHistory[]
+  SystemNotification                                     SystemNotification[]
+  SystemNotificationRead                                 SystemNotificationRead[]
+  UserAchievement                                        UserAchievement[]
+  UserAlbumCollection                                    UserAlbumCollection[]
+  UserBadge                                              UserBadge[]
+  UserSecurityQuestion                                   UserSecurityQuestion?
+
+  @@index([createdAt])
+  @@index([email])
+  @@index([experience])
+  @@index([isDeleted])
+  @@index([lastActiveAt])
+  @@index([level])
+  @@index([phone])
+  @@index([points])
+  @@index([role])
+  @@index([status])
+  @@index([uid])
+  @@index([username])
+}
+
+model UserAchievement {
+  id            String      @id
+  progress      Int         @default(0)
+  unlocked      Boolean     @default(false)
+  unlockedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime
+  userId        String
+  achievementId String
+  Achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  User          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([achievementId])
+  @@index([userId, unlocked])
+}
+
+model UserAlbumCollection {
+  id          String      @id
+  owned       Boolean     @default(true)
+  note        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime
+  userId      String
+  albumId     String
+  CultureItem CultureItem @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, albumId])
+  @@index([userId, owned])
+}
+
+model UserBadge {
+  id           String   @id
+  isHidden     Boolean  @default(false)
+  displayOrder Int      @default(0)
+  grantedAt    DateTime @default(now())
+  userId       String
+  badgeId      String
+  Badge        Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId, displayOrder])
+}
+
+model UserSecurityQuestion {
+  id         String   @id
+  question   String
+  answerHash String
+  sortOrder  Int
+  createdAt  DateTime @default(now())
+  userId     String   @unique
+  User       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model UserSecurityQuestion_backup_20260718 {
+  id         String?
+  question   String?
+  answerHash String?
+  sortOrder  Int?
+  createdAt  DateTime?
+  userId     String?
+
+  @@ignore
 }
 
 enum AchievementCategory {
@@ -123,54 +1830,20 @@ enum AchievementCategory {
   SPECIAL
 }
 
-enum CultureContentType {
-  SONG
-  ALBUM
-  FILM
-  LIVE
+enum AchievementRarity {
+  NORMAL
+  RARE
+  EPIC
+  LEGENDARY
+  LIMITED
 }
 
-enum ReportTargetType {
-  POST
-  REPLY
-  USER
-  MESSAGE
-  DAILY_MESSAGE
-  DAILY_MESSAGE_COMMENT
-}
-
-enum ReportStatus {
-  PENDING
-  RESOLVED
-  REJECTED
-}
-
-enum NotificationType {
-  REPLY
-  LIKE
-  FRIEND_REQUEST
-  SYSTEM
-  MESSAGE
-  ACTIVITY
-  ADMIN
-  FOLLOW
-  BADGE
-}
-
-enum SystemNotificationType {
-  SYSTEM
-  UPDATE
-  ANNOUNCEMENT
-  ACTIVITY
-  MAINTENANCE
-  SECURITY
-}
-
-enum MessageType {
-  TEXT
-  IMAGE
-  EMOJI
-  SYSTEM
+enum ActivityStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  FINISHED
+  CANCELLED
 }
 
 enum ActivityType {
@@ -181,12 +1854,227 @@ enum ActivityType {
   OTHER
 }
 
-enum ActivityStatus {
+enum AdminActionType {
+  DELETE_POST
+  RESTORE_POST
+  PIN_POST
+  UNPIN_POST
+  FEATURE_POST
+  UNFEATURE_POST
+  DELETE_REPLY
+  RESTORE_REPLY
+  ADJUST_POINTS
+  UPDATE_BOARD
+  UPDATE_USER_ROLE
+  DELETE_USER
+  RESTORE_USER
+  BAN_USER
+  UNBAN_USER
+  UPDATE_USER_POINTS
+  RECOMMEND_POST
+  UNRECOMMEND_POST
+  LOCK_POST
+  UNLOCK_POST
+  CREATE_BOARD
+  DELETE_BOARD
+  CREATE_BADGE
+  GRANT_BADGE
+  CREATE_ACTIVITY
+  UPDATE_SETTING
+}
+
+enum ChangelogStatus {
   DRAFT
   PUBLISHED
+  UNPUBLISHED
+}
+
+enum ChangelogType {
+  FEATURE
+  IMPROVEMENT
+  FIX
+  SECURITY
+  CONTENT
+}
+
+enum CultureContentType {
+  SONG
+  ALBUM
+  FILM
+  LIVE
+}
+
+enum DeviceType {
+  WEB
+  MOBILE
+  TABLET
+  API
+}
+
+enum ExperienceLogType {
+  CHECKIN
+  TASK
+  POST
+  COMMENT
+  LIKE
+  ACTIVITY
+  ADMIN
+  OTHER
+}
+
+enum FeedbackStatus {
+  OPEN
+  REPLIED
   CLOSED
-  FINISHED
+  PROCESSING
+  RESOLVED
+}
+
+enum FeedbackType {
+  BUG
+  SUGGESTION
+  CONTENT
+  ACCOUNT
+  OTHER
+  EXPERIENCE
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
   CANCELLED
+}
+
+enum GuessSongDifficulty {
+  EASY
+  ADVANCED
+  HARD
+}
+
+enum GuessSongMode {
+  EASY
+  ADVANCED
+  HARD
+  ENDLESS
+}
+
+enum GuessSongPeriodType {
+  WEEK
+  MONTH
+}
+
+enum GuessSongProcessingStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum GuessSongSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+  EXPIRED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  EMOJI
+  SYSTEM
+}
+
+enum MusicPublicationStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum NotificationType {
+  REPLY
+  LIKE
+  SYSTEM
+  MESSAGE
+  ACTIVITY
+  ADMIN
+  FOLLOW
+  BADGE
+  FRIEND_REQUEST
+}
+
+enum PageLayoutRevisionSource {
+  MANUAL
+  ROLLBACK
+  DEFAULT
+}
+
+enum PasswordResetStage {
+  CHALLENGE
+  RESET_CODE
+  RESET_TOKEN
+}
+
+enum PasswordResetType {
+  SECURITY_QUESTION
+  EMAIL
+}
+
+enum PointActionType {
+  POST_CREATE
+  REPLY_CREATE
+  DAILY_CHECK_IN
+  POST_LIKE_RECEIVED
+  ADMIN_ADJUST
+  REGISTER
+  LOGIN
+  CONTINUOUS_CHECK_IN_BONUS
+  FEATURED_POST
+  ACTIVITY_REWARD
+  BADGE_EXCHANGE
+  ENTERTAINMENT_DAILY_DRAW
+  POST_DAILY_FIRST
+  POST_COMMENT_DAILY
+}
+
+enum PostContentType {
+  NORMAL
+  IMAGE
+  VIDEO
+  POLL
+  ARTICLE
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  LOCKED
+  DELETED
+}
+
+enum ProfileWallVisibility {
+  PUBLIC
+  FRIENDS
+  CLOSED
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  REJECTED
+}
+
+enum ReportTargetType {
+  POST
+  REPLY
+  USER
+  MESSAGE
+  DAILY_MESSAGE
+  DAILY_MESSAGE_COMMENT
 }
 
 enum RewardType {
@@ -204,2019 +2092,33 @@ enum SiteSettingValueType {
   NUMBER
 }
 
-enum FriendRequestStatus {
-  PENDING
-  ACCEPTED
-  REJECTED
-  CANCELLED
-}
-
-enum PasswordResetType {
-  SECURITY_QUESTION
-  EMAIL
-}
-
-enum PasswordResetStage {
-  CHALLENGE
-  RESET_CODE
-  RESET_TOKEN
-}
-
-enum ProfileWallVisibility {
-  PUBLIC
-  FRIENDS
-  CLOSED
-}
-
-enum FeedbackStatus {
-  OPEN
-  PROCESSING
-  REPLIED
-  RESOLVED
-  CLOSED
-}
-
-enum FeedbackType {
-  BUG
-  EXPERIENCE
-  SUGGESTION
-  CONTENT
-  ACCOUNT
-  OTHER
-}
-
-enum ChangelogType {
-  FEATURE
-  IMPROVEMENT
-  FIX
-  SECURITY
-  CONTENT
-}
-
-enum ChangelogStatus {
-  DRAFT
-  PUBLISHED
-  UNPUBLISHED
-}
-
-enum MusicPublicationStatus {
-  DRAFT
-  PUBLISHED
-}
-
-enum PageLayoutRevisionSource {
-  MANUAL
-  ROLLBACK
-  DEFAULT
-}
-
-enum ExperienceLogType {
-  CHECKIN
-  TASK
-  POST
-  COMMENT
-  LIKE
+enum SystemNotificationType {
+  SYSTEM
+  UPDATE
+  ANNOUNCEMENT
   ACTIVITY
+  MAINTENANCE
+  SECURITY
+}
+
+enum UserRole {
+  USER
   ADMIN
-  OTHER
+  MODERATOR
+  SUPER_ADMIN
 }
 
-enum GuessSongDifficulty {
-  EASY
-  ADVANCED
-  HARD
+enum UserStatus {
+  ACTIVE
+  BANNED
+  MUTED
+  DELETED
+  MERGED
+  DISABLED
 }
 
-enum GuessSongMode {
-  EASY
-  ADVANCED
-  HARD
-  ENDLESS
-}
-
-enum GuessSongProcessingStatus {
+enum VerificationStatus {
+  NONE
   PENDING
-  PROCESSING
-  READY
-  FAILED
-}
-
-enum GuessSongSessionStatus {
-  IN_PROGRESS
-  COMPLETED
-  ABANDONED
-  EXPIRED
-}
-
-enum GuessSongPeriodType {
-  WEEK
-  MONTH
-}
-
-model User {
-  id                              String             @id @default(cuid())
-  uid                             Int                @unique @default(autoincrement())
-  username                        String
-  usernameNormalized              String             @unique
-  email                           String?
-  phone                           String?
-  passwordHash                    String
-  nickname                        String
-  avatarUrl                       String?
-  backgroundUrl                   String?
-  bio                             String?
-  role                            UserRole           @default(USER)
-  status                          UserStatus         @default(ACTIVE)
-  verificationStatus              VerificationStatus @default(NONE)
-  level                           Int                @default(1)
-  exp                             Int                @default(0)
-  experience                      Int                @default(0)
-  points                          Int                @default(0)
-  consecutiveDays                 Int                @default(0)
-  lastCheckInDate                 DateTime?
-  emailVerifiedAt                 DateTime?
-  phoneVerifiedAt                 DateTime?
-  lastLoginAt                     DateTime?
-  lastActiveAt                    DateTime?
-  nicknameChangedAt               DateTime?
-  isOnline                        Boolean            @default(false)
-  isDeleted                       Boolean            @default(false)
-  deletedAt                       DateTime?
-  securityQuestionRecoveryEnabled Boolean            @default(false)
-  mustSetupSecurity               Boolean            @default(false)
-  checkinMoodEnabled              Boolean            @default(true)
-  registrationIdempotencyKeyHash  String?            @unique
-  createdAt                       DateTime           @default(now())
-  updatedAt                       DateTime           @updatedAt
-
-  profile                     Profile?
-  posts                       Post[]
-  replies                     Reply[]
-  likes                       Like[]
-  replyLikes                  ReplyLike[]
-  favorites                   PostFavorite[]
-  boardFavorites              BoardFavorite[]
-  activityFavorites           ActivityFavorite[]
-  checkIns                    CheckIn[]
-  dailyMessages               DailyMessage[]
-  dailyMessageLikes           DailyMessageLike[]
-  dailyMessageFavorites       DailyMessageFavorite[]
-  dailyMessageComments        DailyMessageComment[]
-  dailyTaskProgress           DailyTaskProgress[]
-  pointLogs                   PointLog[]
-  badges                      UserBadge[]
-  devices                     LoginDevice[]
-  onlineSessions              OnlineSession[]
-  emailVerifications          EmailVerification[]
-  passwordResets              PasswordResetToken[]
-  securityQuestions           UserSecurityQuestion[]
-  securityLogs                AccountSecurityLog[]
-  sentNotifications           Notification[]              @relation("NotificationActor")
-  notifications               Notification[]              @relation("NotificationRecipient")
-  createdSystemNotifications  SystemNotification[]        @relation("SystemNotificationCreator")
-  systemNotificationReads     SystemNotificationRead[]
-  following                   Follow[]                    @relation("FollowFollower")
-  followers                   Follow[]                    @relation("FollowFollowing")
-  sentFriendRequests          FriendRequest[]             @relation("FriendRequestSender")
-  receivedFriendRequests      FriendRequest[]             @relation("FriendRequestReceiver")
-  friendshipsA                Friendship[]                @relation("FriendshipUserA")
-  friendshipsB                Friendship[]                @relation("FriendshipUserB")
-  blocksMade                  Block[]                     @relation("Blocker")
-  blockedBy                   Block[]                     @relation("Blocked")
-  conversations               ConversationParticipant[]
-  messages                    DirectMessage[]
-  reports                     Report[]                    @relation("Reporter")
-  reportedReports             Report[]                    @relation("ReportedUser")
-  activityRegistrations       ActivityRegistration[]
-  lotteryEntries              LotteryEntry[]
-  searchHistory               SearchHistory[]
-  feedbacks                   Feedback[]
-  feedbackReplies             FeedbackReply[]
-  createdChangelogs           Changelog[]                 @relation("ChangelogCreator")
-  musicFavorites              MusicFavorite[]
-  musicPlayRecords            MusicPlayRecord[]
-  achievements                UserAchievement[]
-  albumCollections            UserAlbumCollection[]
-  cultureFavorites            CultureFavorite[]
-  cultureComments             CultureComment[]
-  lyricCards                  LyricCard[]
-  adminActions                AdminAction[]               @relation("AdminOperator")
-  targetAdminActions          AdminAction[]               @relation("AdminTargetUser")
-  administeredActionLogs      AdminActionLog[]            @relation("AdminActionLogAdmin")
-  targetedActionLogs          AdminActionLog[]            @relation("AdminActionLogTarget")
-  adminPermissions            AdminPermission[]
-  updatedPageLayouts          PageLayout[]                @relation("PageLayoutUpdatedBy")
-  publishedPageLayouts        PageLayout[]                @relation("PageLayoutPublishedBy")
-  pageLayoutRevisions         PageLayoutRevision[]        @relation("PageLayoutRevisionPublisher")
-  profileWallMessagesSent     ProfileWallMessage[]        @relation("ProfileWallSender")
-  profileWallMessagesReceived ProfileWallMessage[]        @relation("ProfileWallReceiver")
-  profileWallLikes            ProfileWallLike[]
-  friendActivities            FriendActivity[]            @relation("FriendActivityActor")
-  experienceLogs              ExperienceLog[]
-  dailyExperienceRecords      DailyExperienceRecord[]
-  entertainmentDailyDraws     EntertainmentDailyDraw[]
-  guessSongSessions           GuessSongSession[]
-  guessSongLeaderboardEntries GuessSongLeaderboardEntry[]
-
-  @@index([role])
-  @@index([status])
-  @@index([isDeleted])
-  @@index([uid])
-  @@index([username])
-  @@index([phone])
-  @@index([email])
-  @@index([points])
-  @@index([level])
-  @@index([experience])
-  @@index([lastActiveAt])
-  @@index([createdAt])
-}
-
-model Profile {
-  id             String                @id @default(cuid())
-  displayName    String
-  avatarUrl      String?
-  backgroundUrl  String?
-  bio            String?
-  wallVisibility ProfileWallVisibility @default(PUBLIC)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([displayName])
-  @@index([wallVisibility])
-}
-
-model ProfileWallMessage {
-  id        String    @id @default(cuid())
-  content   String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-  likeCount Int       @default(0)
-
-  senderId String
-  sender   User   @relation("ProfileWallSender", fields: [senderId], references: [id], onDelete: Cascade)
-
-  receiverId String
-  receiver   User   @relation("ProfileWallReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-
-  parentId String?
-  parent   ProfileWallMessage?  @relation("ProfileWallThread", fields: [parentId], references: [id], onDelete: NoAction)
-  children ProfileWallMessage[] @relation("ProfileWallThread")
-  likes    ProfileWallLike[]
-
-  @@index([receiverId, createdAt])
-  @@index([senderId, createdAt])
-  @@index([parentId])
-  @@index([deletedAt])
-}
-
-model ProfileWallLike {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  messageId String
-  message   ProfileWallMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([messageId, userId])
-  @@index([userId, createdAt])
-}
-
-model BoardCategory {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  slug        String   @unique
-  description String?
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  boards Board[]
-
-  @@index([sortOrder])
-}
-
-model Board {
-  id            String   @id @default(cuid())
-  name          String   @unique
-  slug          String   @unique
-  description   String?
-  coverUrl      String?
-  sortOrder     Int      @default(0)
-  postCount     Int      @default(0)
-  followerCount Int      @default(0)
-  isActive      Boolean  @default(true)
-  isHot         Boolean  @default(false)
-  isRecommended Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  categoryId String?
-  category   BoardCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-
-  parentId String?
-  parent   Board?  @relation("BoardTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children Board[] @relation("BoardTree")
-
-  posts        Post[]
-  favorites    BoardFavorite[]
-  adminActions AdminAction[]
-
-  @@index([categoryId])
-  @@index([parentId])
-  @@index([sortOrder])
-  @@index([isActive])
-  @@index([isHot])
-  @@index([isRecommended])
-}
-
-model Post {
-  id            String          @id @default(cuid())
-  title         String
-  content       String
-  summary       String?
-  status        PostStatus      @default(PUBLISHED)
-  contentType   PostContentType @default(NORMAL)
-  viewCount     Int             @default(0)
-  readUserCount Int             @default(0)
-  likeCount     Int             @default(0)
-  replyCount    Int             @default(0)
-  favoriteCount Int             @default(0)
-  shareCount    Int             @default(0)
-  isPinned      Boolean         @default(false)
-  isFeatured    Boolean         @default(false)
-  isRecommended Boolean         @default(false)
-  isLocked      Boolean         @default(false)
-  isDeleted     Boolean         @default(false)
-  deletedAt     DateTime?
-  publishedAt   DateTime        @default(now())
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-
-  authorId String
-  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  boardId String
-  board   Board  @relation(fields: [boardId], references: [id], onDelete: Restrict)
-
-  replies      Reply[]
-  likes        Like[]
-  favorites    PostFavorite[]
-  media        PostMedia[]
-  tags         PostTag[]
-  poll         Poll?
-  reports      Report[]
-  adminActions AdminAction[]
-
-  @@index([boardId, createdAt])
-  @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt])
-  @@index([authorId, createdAt])
-  @@index([status])
-  @@index([status, isDeleted, isPinned, isFeatured, createdAt])
-  @@index([status, isDeleted, isPinned, isFeatured, likeCount, replyCount])
-  @@index([contentType])
-  @@index([isPinned, createdAt])
-  @@index([isFeatured, createdAt])
-  @@index([isRecommended, createdAt])
-  @@index([isDeleted])
-  @@index([likeCount])
-  @@index([replyCount])
-}
-
-model Reply {
-  id        String    @id @default(cuid())
-  content   String
-  likeCount Int       @default(0)
-  isDeleted Boolean   @default(false)
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  postId String
-  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  authorId String
-  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  parentId String?
-  parent   Reply?  @relation("ReplyThread", fields: [parentId], references: [id], onDelete: NoAction)
-  children Reply[] @relation("ReplyThread")
-
-  likes        ReplyLike[]
-  reports      Report[]
-  adminActions AdminAction[]
-
-  @@index([postId, createdAt])
-  @@index([authorId, createdAt])
-  @@index([parentId])
-  @@index([isDeleted])
-}
-
-model Like {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  postId String
-  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([postId, userId])
-  @@index([userId, createdAt])
-  @@index([postId, createdAt])
-}
-
-model ReplyLike {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  replyId String
-  reply   Reply  @relation(fields: [replyId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([replyId, userId])
-  @@index([userId, createdAt])
-  @@index([replyId, createdAt])
-}
-
-model PostFavorite {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  postId String
-  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([postId, userId])
-  @@index([userId, createdAt])
-}
-
-model BoardFavorite {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  boardId String
-  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([boardId, userId])
-  @@index([userId, createdAt])
-}
-
-model Tag {
-  id         String   @id @default(cuid())
-  name       String   @unique
-  slug       String   @unique
-  usageCount Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  posts PostTag[]
-
-  @@index([usageCount])
-}
-
-model PostTag {
-  postId String
-  tagId  String
-
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
-
-  @@id([postId, tagId])
-}
-
-model PostMedia {
-  id        String    @id @default(cuid())
-  type      MediaType
-  url       String
-  thumbnail String?
-  width     Int?
-  height    Int?
-  size      Int?
-  sortOrder Int       @default(0)
-  createdAt DateTime  @default(now())
-
-  postId String
-  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@index([postId, sortOrder])
-}
-
-model Poll {
-  id         String    @id @default(cuid())
-  question   String
-  allowMulti Boolean   @default(false)
-  expiresAt  DateTime?
-  createdAt  DateTime  @default(now())
-
-  postId  String       @unique
-  post    Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
-  options PollOption[]
-  votes   PollVote[]
-}
-
-model PollOption {
-  id        String @id @default(cuid())
-  title     String
-  voteCount Int    @default(0)
-  sortOrder Int    @default(0)
-
-  pollId String
-  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  votes  PollVote[]
-
-  @@index([pollId, sortOrder])
-}
-
-model PollVote {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  pollId String
-  poll   Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
-
-  optionId String
-  option   PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
-
-  userId String
-
-  @@unique([optionId, userId])
-  @@index([pollId, userId])
-}
-
-model CheckIn {
-  id             String   @id @default(cuid())
-  checkDate      DateTime
-  checkinDateKey String
-  points         Int      @default(10)
-  exp            Int      @default(0)
-  streakDay      Int      @default(1)
-  isMakeUp       Boolean  @default(false)
-  mood           String?
-  message        String?
-  createdAt      DateTime @default(now())
-
-  userId           String
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  dailyMessage     DailyMessage?
-  friendActivities FriendActivity[]
-
-  @@unique([userId, checkDate])
-  @@unique([userId, checkinDateKey])
-  @@index([checkDate])
-  @@index([userId, createdAt])
-}
-
-model DailyMessage {
-  id            String    @id @default(cuid())
-  date          DateTime
-  mood          String?
-  content       String
-  likeCount     Int       @default(0)
-  commentCount  Int       @default(0)
-  favoriteCount Int       @default(0)
-  shareCount    Int       @default(0)
-  isPinned      Boolean   @default(false)
-  isFeatured    Boolean   @default(false)
-  isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  checkInId String?  @unique
-  checkIn   CheckIn? @relation(fields: [checkInId], references: [id], onDelete: SetNull)
-
-  likes            DailyMessageLike[]
-  favorites        DailyMessageFavorite[]
-  comments         DailyMessageComment[]
-  reports          Report[]
-  friendActivities FriendActivity[]
-
-  @@index([date, createdAt])
-  @@index([date, likeCount])
-  @@index([date, isDeleted, isPinned, isFeatured, createdAt])
-  @@index([date, isDeleted, isPinned, isFeatured, likeCount, commentCount, createdAt])
-  @@index([userId, createdAt])
-  @@index([isPinned, isFeatured])
-  @@index([isDeleted])
-}
-
-model FriendActivity {
-  id        String   @id @default(cuid())
-  mood      String?
-  content   String?
-  createdAt DateTime @default(now())
-  type      String   @default("CHECKIN")
-  targetUrl String?
-
-  actorId String
-  actor   User   @relation("FriendActivityActor", fields: [actorId], references: [id], onDelete: Cascade)
-
-  checkInId String?
-  checkIn   CheckIn? @relation(fields: [checkInId], references: [id], onDelete: SetNull)
-
-  dailyMessageId String?
-  dailyMessage   DailyMessage? @relation(fields: [dailyMessageId], references: [id], onDelete: SetNull)
-
-  @@index([actorId, createdAt])
-  @@index([checkInId])
-  @@index([dailyMessageId])
-}
-
-model GrowthLevelConfig {
-  id          String   @id @default(cuid())
-  level       Int      @unique
-  name        String
-  requiredExp Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([requiredExp])
-}
-
-model ExperienceLog {
-  id          String            @id @default(cuid())
-  amount      Int
-  type        ExperienceLogType
-  description String
-  createdAt   DateTime          @default(now())
-  sourceType  String?
-  sourceId    String?
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([sourceType, sourceId])
-  @@index([userId, createdAt])
-  @@index([type, createdAt])
-}
-
-model DailyExperienceRecord {
-  id        String   @id @default(cuid())
-  date      DateTime
-  amount    Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, date])
-  @@index([date])
-}
-
-model Task {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  expReward   Int
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([enabled])
-  @@index([createdAt])
-}
-
-model DailyMessageLike {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  messageId String
-  message   DailyMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([messageId, userId])
-  @@index([userId, createdAt])
-}
-
-model DailyMessageFavorite {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  messageId String
-  message   DailyMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([messageId, userId])
-  @@index([userId, createdAt])
-}
-
-model DailyMessageComment {
-  id        String    @id @default(cuid())
-  content   String
-  isDeleted Boolean   @default(false)
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  messageId String
-  message   DailyMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-
-  authorId String
-  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  parentId String?
-  parent   DailyMessageComment?  @relation("DailyMessageCommentThread", fields: [parentId], references: [id], onDelete: NoAction)
-  children DailyMessageComment[] @relation("DailyMessageCommentThread")
-
-  @@index([messageId, createdAt])
-  @@index([authorId, createdAt])
-  @@index([parentId])
-}
-
-model DailyTaskTemplate {
-  id          String   @id @default(cuid())
-  key         String   @unique
-  title       String
-  description String?
-  target      Int      @default(1)
-  points      Int      @default(0)
-  exp         Int      @default(0)
-  sortOrder   Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  progress DailyTaskProgress[]
-
-  @@index([isActive, sortOrder])
-}
-
-model DailyTaskProgress {
-  id          String    @id @default(cuid())
-  taskDate    DateTime
-  progress    Int       @default(0)
-  isCompleted Boolean   @default(false)
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  templateId String
-  template   DailyTaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, templateId, taskDate])
-  @@index([taskDate, isCompleted])
-}
-
-model PointLog {
-  id          String          @id @default(cuid())
-  action      PointActionType
-  points      Int
-  before      Int
-  after       Int
-  reason      String?
-  createdAt   DateTime        @default(now())
-  dateKey     String?
-  businessKey String?         @unique
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  postId      String?
-  replyId     String?
-  checkInId   String?
-  activityId  String?
-  badgeId     String?
-  dailyDrawId String?                 @unique
-  dailyDraw   EntertainmentDailyDraw? @relation(fields: [dailyDrawId], references: [id], onDelete: SetNull)
-
-  @@unique([action, checkInId])
-  @@index([userId, createdAt])
-  @@index([action])
-  @@index([postId])
-  @@index([replyId])
-  @@index([checkInId])
-  @@index([activityId])
-}
-
-model LyricPrescription {
-  id           String   @id @default(cuid())
-  text         String
-  songTitle    String
-  albumTitle   String?
-  enabled      Boolean  @default(true)
-  displayCount Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  dailyDraws EntertainmentDailyDraw[]
-
-  @@index([enabled, createdAt])
-  @@index([displayCount])
-}
-
-model EntertainmentDailyDraw {
-  id               String   @id @default(cuid())
-  dateKey          String
-  points           Int
-  prescriptionCode String   @unique
-  lyricText        String?
-  songTitle        String?
-  albumTitle       String?
-  createdAt        DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  lyricPrescriptionId String?
-  lyricPrescription   LyricPrescription? @relation(fields: [lyricPrescriptionId], references: [id], onDelete: Restrict)
-
-  pointLog PointLog?
-
-  @@unique([userId, dateKey])
-  @@index([userId])
-  @@index([dateKey])
-  @@index([lyricPrescriptionId])
-  @@index([userId, createdAt])
-}
-
-model GuessSongQuestion {
-  id               String                    @id @default(cuid())
-  songTitle        String
-  albumTitle       String?
-  difficulty       GuessSongDifficulty
-  enabled          Boolean                   @default(false)
-  allowEndless     Boolean                   @default(true)
-  correctAnswer    String
-  wrongOption1     String
-  wrongOption2     String
-  wrongOption3     String
-  sourceAudioPath  String?
-  audioDurationMs  Int?
-  processingStatus GuessSongProcessingStatus @default(PENDING)
-  processingError  String?
-  playCount        Int                       @default(0)
-  answerCount      Int                       @default(0)
-  correctCount     Int                       @default(0)
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
-
-  musicSongId String?
-  musicSong   MusicSong? @relation(fields: [musicSongId], references: [id], onDelete: SetNull)
-
-  audioVariants    GuessSongAudioVariant[]
-  sessionQuestions GuessSongSessionQuestion[]
-
-  @@index([difficulty, enabled])
-  @@index([allowEndless, enabled])
-  @@index([processingStatus])
-  @@index([songTitle])
-  @@index([musicSongId])
-  @@index([createdAt])
-}
-
-model GuessSongAudioVariant {
-  id              String   @id @default(cuid())
-  durationSeconds Int
-  storagePath     String
-  fileSize        Int
-  createdAt       DateTime @default(now())
-
-  questionId String
-  question   GuessSongQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-
-  playRequests GuessSongPlayRequest[]
-
-  @@unique([questionId, durationSeconds])
-  @@index([questionId])
-}
-
-model GuessSongSession {
-  id              String                 @id @default(cuid())
-  activeKey       String?                @unique
-  mode            GuessSongMode
-  status          GuessSongSessionStatus @default(IN_PROGRESS)
-  score           Int                    @default(0)
-  correctCount    Int                    @default(0)
-  wrongCount      Int                    @default(0)
-  currentStreak   Int                    @default(0)
-  maxStreak       Int                    @default(0)
-  livesRemaining  Int                    @default(0)
-  totalPlayCount  Int                    @default(0)
-  currentPosition Int                    @default(1)
-  startedAt       DateTime               @default(now())
-  completedAt     DateTime?
-  expiresAt       DateTime
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  questions          GuessSongSessionQuestion[]
-  leaderboardEntries GuessSongLeaderboardEntry[]
-
-  @@index([userId, mode, status])
-  @@index([userId, completedAt])
-  @@index([status, expiresAt])
-  @@index([createdAt])
-}
-
-model GuessSongSessionQuestion {
-  id                      String    @id @default(cuid())
-  publicId                String    @unique
-  position                Int
-  playbackDurationSeconds Int
-  maxPlayCount            Int
-  playCount               Int       @default(0)
-  optionsSnapshot         Json
-  correctOptionKey        String
-  selectedOptionKey       String?
-  isCorrect               Boolean?
-  awardedScore            Int       @default(0)
-  answerDeadlineAt        DateTime?
-  answeredAt              DateTime?
-  createdAt               DateTime  @default(now())
-
-  sessionId String
-  session   GuessSongSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  questionId String
-  question   GuessSongQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
-
-  playRequests GuessSongPlayRequest[]
-
-  @@unique([sessionId, position])
-  @@index([sessionId, answeredAt])
-  @@index([questionId])
-  @@index([publicId])
-}
-
-model GuessSongPlayRequest {
-  id             String   @id @default(cuid())
-  requestKey     String
-  playCountAfter Int
-  createdAt      DateTime @default(now())
-
-  sessionQuestionId String
-  sessionQuestion   GuessSongSessionQuestion @relation(fields: [sessionQuestionId], references: [id], onDelete: Cascade)
-
-  audioVariantId String
-  audioVariant   GuessSongAudioVariant @relation(fields: [audioVariantId], references: [id], onDelete: Restrict)
-
-  @@unique([sessionQuestionId, requestKey])
-  @@index([sessionQuestionId, createdAt])
-}
-
-model GuessSongLeaderboardEntry {
-  id             String              @id @default(cuid())
-  mode           GuessSongMode
-  periodType     GuessSongPeriodType
-  periodKey      String
-  score          Int
-  correctCount   Int
-  maxStreak      Int
-  totalPlayCount Int
-  achievedAt     DateTime
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  sessionId String
-  session   GuessSongSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-
-  @@unique([userId, mode, periodType, periodKey])
-  @@index([periodType, periodKey, mode, score])
-  @@index([userId, periodType, periodKey])
-  @@index([sessionId])
-}
-
-model Badge {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  slug        String   @unique
-  description String?
-  iconUrl     String?
-  pointsCost  Int?
-  isAutoGrant Boolean  @default(false)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  users UserBadge[]
-
-  @@index([isActive])
-}
-
-model UserBadge {
-  id           String   @id @default(cuid())
-  isHidden     Boolean  @default(false)
-  displayOrder Int      @default(0)
-  grantedAt    DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  badgeId String
-  badge   Badge  @relation(fields: [badgeId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, badgeId])
-  @@index([userId, displayOrder])
-}
-
-model Notification {
-  id          String           @id @default(cuid())
-  type        NotificationType
-  title       String
-  content     String?
-  link        String?
-  isRead      Boolean          @default(false)
-  createdAt   DateTime         @default(now())
-  readAt      DateTime?
-  key         String?
-  completedAt DateTime?
-
-  recipientId String
-  recipient   User   @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-
-  actorId String?
-  actor   User?   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
-
-  @@unique([recipientId, key])
-  @@index([recipientId, isRead, createdAt])
-  @@index([type])
-}
-
-model SystemNotification {
-  id          String                 @id @default(cuid())
-  title       String
-  content     String
-  link        String?
-  type        SystemNotificationType @default(SYSTEM)
-  isPublished Boolean                @default(true)
-  publishedAt DateTime               @default(now())
-  cover       String?
-  priority    Int                    @default(0)
-  popup       Boolean                @default(false)
-  sticky      Boolean                @default(false)
-  publishAt   DateTime               @default(now())
-  expireAt    DateTime?
-  published   Boolean                @default(true)
-  buttonText  String?
-  buttonUrl   String?
-  version     String?
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
-
-  createdById String
-  createdBy   User   @relation("SystemNotificationCreator", fields: [createdById], references: [id], onDelete: Cascade)
-
-  reads SystemNotificationRead[]
-
-  @@index([isPublished, publishedAt])
-  @@index([published, publishAt])
-  @@index([expireAt])
-  @@index([priority])
-  @@index([type])
-  @@index([sticky, priority, publishAt])
-  @@index([createdById, createdAt])
-}
-
-model SystemNotificationRead {
-  id     String   @id @default(cuid())
-  readAt DateTime @default(now())
-
-  notificationId String
-  notification   SystemNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([notificationId, userId])
-  @@index([userId, readAt])
-  @@index([notificationId])
-}
-
-model Conversation {
-  id            String    @id @default(cuid())
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  lastMessageAt DateTime?
-  pairKey       String?   @unique
-
-  participants ConversationParticipant[]
-  messages     DirectMessage[]
-
-  @@index([lastMessageAt])
-}
-
-model ConversationParticipant {
-  id         String    @id @default(cuid())
-  lastReadAt DateTime?
-  isDeleted  Boolean   @default(false)
-  isMuted    Boolean   @default(false)
-  joinedAt   DateTime  @default(now())
-
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([conversationId, userId])
-  @@index([userId, isDeleted])
-}
-
-model DirectMessage {
-  id        String      @id @default(cuid())
-  type      MessageType @default(TEXT)
-  content   String
-  imageUrl  String?
-  isDeleted Boolean     @default(false)
-  createdAt DateTime    @default(now())
-
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  senderId String
-  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId, createdAt])
-  @@index([senderId, createdAt])
-}
-
-model Follow {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  followerId String
-  follower   User   @relation("FollowFollower", fields: [followerId], references: [id], onDelete: Cascade)
-
-  followingId String
-  following   User   @relation("FollowFollowing", fields: [followingId], references: [id], onDelete: Cascade)
-
-  @@unique([followerId, followingId])
-  @@index([followingId, createdAt])
-}
-
-model Block {
-  id        String   @id @default(cuid())
-  reason    String?
-  createdAt DateTime @default(now())
-
-  blockerId String
-  blocker   User   @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
-
-  blockedId String
-  blocked   User   @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
-
-  @@unique([blockerId, blockedId])
-}
-
-model FriendRequest {
-  id        String              @id @default(cuid())
-  message   String?
-  status    FriendRequestStatus @default(PENDING)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-
-  senderId String
-  sender   User   @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
-
-  receiverId String
-  receiver   User   @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-
-  @@unique([senderId, receiverId, status])
-  @@index([receiverId, status, createdAt])
-  @@index([senderId, status, createdAt])
-}
-
-model Friendship {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  userAId String
-  userA   User   @relation("FriendshipUserA", fields: [userAId], references: [id], onDelete: Cascade)
-
-  userBId String
-  userB   User   @relation("FriendshipUserB", fields: [userBId], references: [id], onDelete: Cascade)
-
-  @@unique([userAId, userBId])
-  @@index([userBId, createdAt])
-}
-
-model Report {
-  id          String           @id @default(cuid())
-  targetType  ReportTargetType
-  reason      String
-  description String?
-  status      ReportStatus     @default(PENDING)
-  createdAt   DateTime         @default(now())
-  resolvedAt  DateTime?
-
-  reporterId String
-  reporter   User   @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
-
-  targetUserId String?
-  targetUser   User?   @relation("ReportedUser", fields: [targetUserId], references: [id], onDelete: SetNull)
-
-  postId String?
-  post   Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
-
-  replyId String?
-  reply   Reply?  @relation(fields: [replyId], references: [id], onDelete: SetNull)
-
-  dailyMessageId String?
-  dailyMessage   DailyMessage? @relation(fields: [dailyMessageId], references: [id], onDelete: SetNull)
-
-  @@index([status, createdAt])
-  @@index([targetType])
-  @@index([dailyMessageId])
-}
-
-model Feedback {
-  id                 String         @id @default(cuid())
-  type               FeedbackType
-  title              String
-  content            String
-  imageUrl           String?
-  contact            String?
-  status             FeedbackStatus @default(OPEN)
-  adminUnread        Boolean        @default(true)
-  userUnread         Boolean        @default(false)
-  lastReplyAt        DateTime?
-  lastUserReplyAt    DateTime?
-  lastAdminReplyAt   DateTime?
-  closedAt           DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  idempotencyKeyHash String?        @unique
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  replies     FeedbackReply[]
-  attachments FeedbackAttachment[]
-
-  @@index([userId, createdAt])
-  @@index([status, createdAt])
-  @@index([lastReplyAt])
-  @@index([adminUnread, updatedAt])
-}
-
-model FeedbackReply {
-  id            String   @id @default(cuid())
-  content       String
-  authorRole    String   @default("ADMIN")
-  isReadByUser  Boolean  @default(false)
-  isReadByAdmin Boolean  @default(false)
-  createdAt     DateTime @default(now())
-
-  feedbackId String
-  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-
-  adminId String
-  admin   User   @relation(fields: [adminId], references: [id], onDelete: Cascade)
-
-  attachments FeedbackAttachment[]
-
-  @@index([feedbackId, createdAt])
-  @@index([adminId, createdAt])
-}
-
-model FeedbackAttachment {
-  id        String   @id @default(cuid())
-  url       String
-  mimeType  String?
-  createdAt DateTime @default(now())
-
-  feedbackId String
-  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-
-  replyId String?
-  reply   FeedbackReply? @relation(fields: [replyId], references: [id], onDelete: Cascade)
-
-  @@index([feedbackId])
-  @@index([replyId])
-}
-
-model Changelog {
-  id          String          @id @default(cuid())
-  version     String          @unique
-  major       Int
-  minor       Int
-  patch       Int
-  title       String
-  content     String
-  type        ChangelogType
-  isMajor     Boolean         @default(false)
-  status      ChangelogStatus @default(DRAFT)
-  publishedAt DateTime?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-
-  createdById String
-  createdBy   User   @relation("ChangelogCreator", fields: [createdById], references: [id], onDelete: Cascade)
-
-  @@index([status, publishedAt])
-  @@index([major, minor, patch])
-  @@index([createdById, createdAt])
-}
-
-model MusicTrack {
-  id         String   @id @default(cuid())
-  title      String
-  artist     String   @default("Eason Chan")
-  source     String?
-  sourceUrl  String?
-  isPlayable Boolean  @default(false)
-  sortOrder  Int      @default(0)
-  isVisible  Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  favorites   MusicFavorite[]
-  playRecords MusicPlayRecord[]
-
-  @@unique([title, artist])
-  @@index([isVisible, sortOrder])
-}
-
-model MusicAlbum {
-  id           String                 @id @default(cuid())
-  name         String
-  artist       String                 @default("陈奕迅")
-  releaseDate  DateTime?
-  releaseYear  Int
-  coverUrl     String?
-  company      String?
-  description  String?
-  story        String?
-  language     String                 @default("粤语")
-  era          String?
-  albumType    String?
-  status       MusicPublicationStatus @default(DRAFT)
-  displayOrder Int                    @default(0)
-  createdAt    DateTime               @default(now())
-
-  songs MusicSong[]
-
-  @@unique([name, artist, releaseYear])
-  @@index([status, displayOrder, releaseYear])
-  @@index([releaseYear, createdAt])
-}
-
-model MusicSong {
-  id             String   @id @default(cuid())
-  title          String
-  artist         String   @default("陈奕迅")
-  albumId        String
-  trackNumber    Int
-  releaseYear    Int
-  duration       Int?
-  coverUrl       String?
-  composer       String?
-  lyricist       String?
-  arranger       String?
-  producer       String?
-  story          String?
-  description    String?
-  lyrics         String?
-  sourceType     String?
-  sourceUrl      String?
-  language       String?
-  tags           String?
-  era            String?
-  trackType      String?
-  concertVersion String?
-  mood           String?
-  scene          String?
-  recommendLevel String?
-  createdAt      DateTime @default(now())
-
-  album              MusicAlbum          @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  guessSongQuestions GuessSongQuestion[]
-
-  @@unique([albumId, trackNumber])
-  @@unique([albumId, title])
-  @@index([albumId, trackNumber])
-  @@index([title, artist])
-}
-
-model MusicFavorite {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  trackId String
-  track   MusicTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([trackId, userId])
-  @@index([userId, createdAt])
-}
-
-model MusicPlayRecord {
-  id              String   @id @default(cuid())
-  durationSeconds Int      @default(0)
-  playedAt        DateTime @default(now())
-
-  trackId String
-  track   MusicTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, playedAt])
-  @@index([trackId, playedAt])
-}
-
-model LoginDevice {
-  id          String     @id @default(cuid())
-  deviceType  DeviceType @default(WEB)
-  deviceName  String?
-  ipAddress   String?
-  userAgent   String?
-  lastLoginAt DateTime   @default(now())
-  createdAt   DateTime   @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, lastLoginAt])
-}
-
-model OnlineSession {
-  id        String   @id @default(cuid())
-  tokenId   String?
-  ipAddress String?
-  userAgent String?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, expiresAt])
-}
-
-model EmailVerification {
-  id        String    @id @default(cuid())
-  tokenHash String    @unique
-  email     String
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([email])
-  @@index([expiresAt])
-}
-
-model PasswordResetToken {
-  id           String             @id @default(cuid())
-  tokenHash    String             @unique
-  type         PasswordResetType
-  stage        PasswordResetStage
-  codeHash     String?
-  expiresAt    DateTime
-  consumedAt   DateTime?
-  attemptCount Int                @default(0)
-  createdAt    DateTime           @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([expiresAt])
-  @@index([userId, type, stage, createdAt])
-  @@index([codeHash])
-}
-
-model UserSecurityQuestion {
-  id         String   @id @default(cuid())
-  question   String
-  answerHash String
-  sortOrder  Int
-  createdAt  DateTime @default(now())
-
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-model AccountSecurityLog {
-  id        String   @id @default(cuid())
-  action    String
-  ipAddress String?
-  userAgent String?
-  metadata  Json?
-  createdAt DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@index([action, createdAt])
-}
-
-model SmsCode {
-  id        String    @id @default(cuid())
-  phone     String
-  codeHash  String
-  scene     String
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-
-  @@index([phone, scene])
-  @@index([expiresAt])
-}
-
-model SearchKeyword {
-  id         String   @id @default(cuid())
-  keyword    String   @unique
-  count      Int      @default(1)
-  lastUsedAt DateTime @default(now())
-
-  @@index([count])
-}
-
-model SearchHistory {
-  id        String   @id @default(cuid())
-  keyword   String
-  createdAt DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-}
-
-model Activity {
-  id           String         @id @default(cuid())
-  title        String
-  description  String
-  type         ActivityType   @default(OTHER)
-  status       ActivityStatus @default(DRAFT)
-  coverUrl     String?
-  pointsReward Int?
-  signupLimit  Int?
-  signupCount  Int            @default(0)
-  startsAt     DateTime?
-  endsAt       DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-
-  registrations ActivityRegistration[]
-  favorites     ActivityFavorite[]
-  lotteries     Lottery[]
-
-  @@index([status, startsAt])
-  @@index([status, createdAt])
-  @@index([type])
-}
-
-model ActivityRegistration {
-  id          String    @id @default(cuid())
-  note        String?
-  checkedInAt DateTime?
-  createdAt   DateTime  @default(now())
-
-  activityId String
-  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([activityId, userId])
-  @@index([userId, createdAt])
-}
-
-model ActivityFavorite {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  activityId String
-  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([activityId, userId])
-}
-
-model Lottery {
-  id         String    @id @default(cuid())
-  title      String
-  pointsCost Int       @default(0)
-  startsAt   DateTime?
-  endsAt     DateTime?
-  createdAt  DateTime  @default(now())
-
-  activityId String?
-  activity   Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
-
-  prizes  LotteryPrize[]
-  entries LotteryEntry[]
-
-  @@index([activityId])
-}
-
-model LotteryPrize {
-  id          String     @id @default(cuid())
-  name        String
-  type        RewardType
-  quantity    Int        @default(1)
-  remaining   Int        @default(1)
-  pointsValue Int?
-  metadata    Json?
-
-  lotteryId String
-  lottery   Lottery @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
-
-  entries LotteryEntry[]
-}
-
-model LotteryEntry {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  lotteryId String
-  lottery   Lottery @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
-
-  prizeId String?
-  prize   LotteryPrize? @relation(fields: [prizeId], references: [id], onDelete: SetNull)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([lotteryId, createdAt])
-  @@index([userId, createdAt])
-}
-
-model Announcement {
-  id          String   @id @default(cuid())
-  title       String
-  content     String
-  isPinned    Boolean  @default(false)
-  isPublished Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([isPublished, isPinned])
-}
-
-model SiteSetting {
-  id        String               @id @default(cuid())
-  key       String               @unique
-  value     String
-  valueType SiteSettingValueType @default(TEXT)
-  group     String               @default("general")
-  label     String?
-  updatedAt DateTime             @updatedAt
-  createdAt DateTime             @default(now())
-
-  @@index([group])
-}
-
-model PageLayout {
-  id                      String    @id @default(cuid())
-  pageKey                 String    @unique
-  draftConfig             Json
-  publishedConfig         Json
-  previousPublishedConfig Json?
-  version                 Int       @default(1)
-  publishedAt             DateTime?
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
-
-  updatedById String?
-  updatedBy   User?   @relation("PageLayoutUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-
-  publishedById String?
-  publishedBy   User?   @relation("PageLayoutPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
-
-  revisions PageLayoutRevision[]
-
-  @@index([pageKey])
-  @@index([updatedById])
-  @@index([publishedById])
-}
-
-model PageLayoutRevision {
-  id           String                   @id @default(cuid())
-  pageLayoutId String
-  version      Int
-  config       Json
-  note         String?
-  source       PageLayoutRevisionSource @default(MANUAL)
-  createdAt    DateTime                 @default(now())
-
-  pageLayout PageLayout @relation(fields: [pageLayoutId], references: [id], onDelete: Cascade)
-
-  publishedById String?
-  publishedBy   User?   @relation("PageLayoutRevisionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
-
-  @@unique([pageLayoutId, version])
-  @@index([pageLayoutId, createdAt])
-  @@index([publishedById])
-  @@index([source])
-}
-
-model Banner {
-  id        String   @id @default(cuid())
-  title     String
-  imageUrl  String
-  link      String?
-  sortOrder Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([isActive, sortOrder])
-}
-
-model SensitiveWord {
-  id        String   @id @default(cuid())
-  word      String   @unique
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  @@index([isActive])
-}
-
-model RateLimitLog {
-  id        String   @id @default(cuid())
-  key       String
-  action    String
-  count     Int      @default(1)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([key, action])
-  @@index([expiresAt])
-}
-
-model AdminAction {
-  id        String          @id @default(cuid())
-  action    AdminActionType
-  reason    String?
-  metadata  Json?
-  createdAt DateTime        @default(now())
-
-  adminId String
-  admin   User   @relation("AdminOperator", fields: [adminId], references: [id], onDelete: Cascade)
-
-  targetUserId String?
-  targetUser   User?   @relation("AdminTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
-
-  postId String?
-  post   Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
-
-  replyId String?
-  reply   Reply?  @relation(fields: [replyId], references: [id], onDelete: SetNull)
-
-  boardId String?
-  board   Board?  @relation(fields: [boardId], references: [id], onDelete: SetNull)
-
-  @@index([adminId, createdAt])
-  @@index([action])
-  @@index([targetUserId])
-  @@index([postId])
-  @@index([replyId])
-  @@index([boardId])
-}
-
-model AdminActionLog {
-  id        String   @id @default(cuid())
-  action    String
-  detail    Json?
-  createdAt DateTime @default(now())
-
-  adminId String
-  admin   User   @relation("AdminActionLogAdmin", fields: [adminId], references: [id], onDelete: Cascade)
-
-  targetUserId String
-  targetUser   User   @relation("AdminActionLogTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
-
-  @@index([adminId, createdAt])
-  @@index([targetUserId, createdAt])
-  @@index([action, createdAt])
-}
-
-model AdminPermission {
-  id            String   @id @default(cuid())
-  permissionKey String
-  enabled       Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, permissionKey])
-  @@index([permissionKey, enabled])
-  @@index([userId, enabled])
-}
-
-model Achievement {
-  id             String              @id @default(cuid())
-  title          String
-  slug           String              @unique
-  description    String?
-  icon           String?
-  imageUrl       String?
-  color          String?
-  category       AchievementCategory
-  rarity         AchievementRarity   @default(NORMAL)
-  conditionKey   String?
-  conditionValue Int?
-  isAutoGrant    Boolean             @default(true)
-  isVisible      Boolean             @default(true)
-  sortOrder      Int                 @default(0)
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-
-  users UserAchievement[]
-
-  @@index([category, sortOrder])
-  @@index([isVisible])
-  @@index([rarity])
-}
-
-model UserAchievement {
-  id         String    @id @default(cuid())
-  progress   Int       @default(0)
-  unlocked   Boolean   @default(false)
-  unlockedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  achievementId String
-  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, achievementId])
-  @@index([userId, unlocked])
-  @@index([achievementId])
-}
-
-model DailyQuote {
-  id        String   @id @default(cuid())
-  content   String
-  source    String?
-  songTitle String?
-  isPinned  Boolean  @default(false)
-  isVisible Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([isPinned, isVisible])
-  @@index([sortOrder])
-}
-
-model CultureItem {
-  id            String             @id @default(cuid())
-  type          CultureContentType
-  title         String
-  slug          String             @unique
-  subtitle      String?
-  coverUrl      String?
-  releaseDate   DateTime?
-  lyricist      String?
-  composer      String?
-  arranger      String?
-  albumName     String?
-  roleName      String?
-  city          String?
-  summary       String?
-  background    String?
-  legalExcerpt  String?
-  mvUrl         String?
-  liveUrl       String?
-  trailerUrl    String?
-  rating        Float?
-  favoriteCount Int                @default(0)
-  commentCount  Int                @default(0)
-  isVisible     Boolean            @default(true)
-  sortOrder     Int                @default(0)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-
-  comments         CultureComment[]
-  favorites        CultureFavorite[]
-  albumCollections UserAlbumCollection[] @relation("AlbumCollectionItem")
-  lyricCards       LyricCard[]
-
-  @@index([type, isVisible, sortOrder])
-  @@index([releaseDate])
-}
-
-model CultureComment {
-  id        String   @id @default(cuid())
-  content   String
-  isDeleted Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  itemId String
-  item   CultureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([itemId, createdAt])
-  @@index([userId, createdAt])
-}
-
-model CultureFavorite {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  itemId String
-  item   CultureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([itemId, userId])
-  @@index([userId, createdAt])
-}
-
-model UserAlbumCollection {
-  id        String   @id @default(cuid())
-  owned     Boolean  @default(true)
-  note      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  albumId String
-  album   CultureItem @relation("AlbumCollectionItem", fields: [albumId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, albumId])
-  @@index([userId, owned])
-}
-
-model LyricCardTemplate {
-  id            String   @id @default(cuid())
-  name          String
-  backgroundUrl String?
-  textColor     String   @default("#071722")
-  accentColor   String   @default("#1985c2")
-  isVisible     Boolean  @default(true)
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  cards LyricCard[]
-
-  @@index([isVisible, sortOrder])
-  @@index([isVisible, sortOrder, createdAt])
-}
-
-model LyricCard {
-  id         String   @id @default(cuid())
-  lyric      String
-  imageUrl   String?
-  isFavorite Boolean  @default(false)
-  createdAt  DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  songId String?
-  song   CultureItem? @relation(fields: [songId], references: [id], onDelete: SetNull)
-
-  templateId String?
-  template   LyricCardTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-
-  @@index([userId, createdAt])
-  @@index([songId])
+  VERIFIED
 }
