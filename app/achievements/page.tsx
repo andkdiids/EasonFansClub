@@ -13,8 +13,14 @@ export default async function AchievementsPage() {
   const records = await safeDb(
     'achievements.read',
     prisma.userAchievement.findMany({
-      where: { userId: user.id, achievement: { isVisible: true } },
-      include: { achievement: true },
+where: {
+  userId: user.id,
+  Achievement: {
+    isVisible: true
+  }
+}      include: {
+  Achievement: true
+},
       orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
       take: 200,
     }),
