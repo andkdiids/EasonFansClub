@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { UiIcon } from '@/components/UiIcon'
 
 type DrawResult = {
@@ -119,11 +120,11 @@ export function EntertainmentCenter() {
           </span>
           <b>本期正式开放</b>
         </button>
-        <div className="entertainment-entry is-coming">
+        <Link href="/entertainment/guess-song" className="entertainment-entry is-active">
           <UiIcon name="music" />
-          <span><strong>猜歌挑战</strong><small>更多音乐互动正在准备</small></span>
-          <b>即将开放</b>
-        </div>
+          <span><strong>听听</strong><small>听短音频，猜出正确歌曲</small></span>
+          <b>立即挑战</b>
+        </Link>
         <div className="entertainment-entry is-coming">
           <UiIcon name="archive" />
           <span><strong>E院成就</strong><small>收藏属于你的E院时刻</small></span>

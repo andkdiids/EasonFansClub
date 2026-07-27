@@ -279,6 +279,38 @@ enum ExperienceLogType {
   OTHER
 }
 
+enum GuessSongDifficulty {
+  EASY
+  ADVANCED
+  HARD
+}
+
+enum GuessSongMode {
+  EASY
+  ADVANCED
+  HARD
+  ENDLESS
+}
+
+enum GuessSongProcessingStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum GuessSongSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+  EXPIRED
+}
+
+enum GuessSongPeriodType {
+  WEEK
+  MONTH
+}
+
 model User {
   id                              String             @id @default(cuid())
   uid                             Int                @unique @default(autoincrement())
@@ -337,28 +369,28 @@ model User {
   passwordResets              PasswordResetToken[]
   securityQuestions           UserSecurityQuestion[]
   securityLogs                AccountSecurityLog[]
-  sentNotifications           Notification[]            @relation("NotificationActor")
-  notifications               Notification[]            @relation("NotificationRecipient")
-  createdSystemNotifications  SystemNotification[]      @relation("SystemNotificationCreator")
+  sentNotifications           Notification[]              @relation("NotificationActor")
+  notifications               Notification[]              @relation("NotificationRecipient")
+  createdSystemNotifications  SystemNotification[]        @relation("SystemNotificationCreator")
   systemNotificationReads     SystemNotificationRead[]
-  following                   Follow[]                  @relation("FollowFollower")
-  followers                   Follow[]                  @relation("FollowFollowing")
-  sentFriendRequests          FriendRequest[]           @relation("FriendRequestSender")
-  receivedFriendRequests      FriendRequest[]           @relation("FriendRequestReceiver")
-  friendshipsA                Friendship[]              @relation("FriendshipUserA")
-  friendshipsB                Friendship[]              @relation("FriendshipUserB")
-  blocksMade                  Block[]                   @relation("Blocker")
-  blockedBy                   Block[]                   @relation("Blocked")
+  following                   Follow[]                    @relation("FollowFollower")
+  followers                   Follow[]                    @relation("FollowFollowing")
+  sentFriendRequests          FriendRequest[]             @relation("FriendRequestSender")
+  receivedFriendRequests      FriendRequest[]             @relation("FriendRequestReceiver")
+  friendshipsA                Friendship[]                @relation("FriendshipUserA")
+  friendshipsB                Friendship[]                @relation("FriendshipUserB")
+  blocksMade                  Block[]                     @relation("Blocker")
+  blockedBy                   Block[]                     @relation("Blocked")
   conversations               ConversationParticipant[]
   messages                    DirectMessage[]
-  reports                     Report[]                  @relation("Reporter")
-  reportedReports             Report[]                  @relation("ReportedUser")
+  reports                     Report[]                    @relation("Reporter")
+  reportedReports             Report[]                    @relation("ReportedUser")
   activityRegistrations       ActivityRegistration[]
   lotteryEntries              LotteryEntry[]
   searchHistory               SearchHistory[]
   feedbacks                   Feedback[]
   feedbackReplies             FeedbackReply[]
-  createdChangelogs           Changelog[]               @relation("ChangelogCreator")
+  createdChangelogs           Changelog[]                 @relation("ChangelogCreator")
   musicFavorites              MusicFavorite[]
   musicPlayRecords            MusicPlayRecord[]
   achievements                UserAchievement[]
@@ -366,20 +398,22 @@ model User {
   cultureFavorites            CultureFavorite[]
   cultureComments             CultureComment[]
   lyricCards                  LyricCard[]
-  adminActions                AdminAction[]             @relation("AdminOperator")
-  targetAdminActions          AdminAction[]             @relation("AdminTargetUser")
-  administeredActionLogs      AdminActionLog[]          @relation("AdminActionLogAdmin")
-  targetedActionLogs          AdminActionLog[]          @relation("AdminActionLogTarget")
+  adminActions                AdminAction[]               @relation("AdminOperator")
+  targetAdminActions          AdminAction[]               @relation("AdminTargetUser")
+  administeredActionLogs      AdminActionLog[]            @relation("AdminActionLogAdmin")
+  targetedActionLogs          AdminActionLog[]            @relation("AdminActionLogTarget")
   adminPermissions            AdminPermission[]
-  updatedPageLayouts          PageLayout[]              @relation("PageLayoutUpdatedBy")
-  publishedPageLayouts        PageLayout[]              @relation("PageLayoutPublishedBy")
-  pageLayoutRevisions         PageLayoutRevision[]      @relation("PageLayoutRevisionPublisher")
-  profileWallMessagesSent     ProfileWallMessage[]      @relation("ProfileWallSender")
-  profileWallMessagesReceived ProfileWallMessage[]      @relation("ProfileWallReceiver")
-  friendActivities            FriendActivity[]          @relation("FriendActivityActor")
+  updatedPageLayouts          PageLayout[]                @relation("PageLayoutUpdatedBy")
+  publishedPageLayouts        PageLayout[]                @relation("PageLayoutPublishedBy")
+  pageLayoutRevisions         PageLayoutRevision[]        @relation("PageLayoutRevisionPublisher")
+  profileWallMessagesSent     ProfileWallMessage[]        @relation("ProfileWallSender")
+  profileWallMessagesReceived ProfileWallMessage[]        @relation("ProfileWallReceiver")
+  friendActivities            FriendActivity[]            @relation("FriendActivityActor")
   experienceLogs              ExperienceLog[]
   dailyExperienceRecords      DailyExperienceRecord[]
   entertainmentDailyDraws     EntertainmentDailyDraw[]
+  guessSongSessions           GuessSongSession[]
+  guessSongLeaderboardEntries GuessSongLeaderboardEntry[]
 
   @@index([role])
   @@index([status])
@@ -998,6 +1032,159 @@ model EntertainmentDailyDraw {
   @@index([userId, createdAt])
 }
 
+model GuessSongQuestion {
+  id               String                    @id @default(cuid())
+  songTitle        String
+  albumTitle       String?
+  difficulty       GuessSongDifficulty
+  enabled          Boolean                   @default(false)
+  allowEndless     Boolean                   @default(true)
+  correctAnswer    String
+  wrongOption1     String
+  wrongOption2     String
+  wrongOption3     String
+  sourceAudioPath  String?
+  audioDurationMs  Int?
+  processingStatus GuessSongProcessingStatus @default(PENDING)
+  processingError  String?
+  playCount        Int                       @default(0)
+  answerCount      Int                       @default(0)
+  correctCount     Int                       @default(0)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  musicSongId String?
+  musicSong   MusicSong? @relation(fields: [musicSongId], references: [id], onDelete: SetNull)
+
+  audioVariants    GuessSongAudioVariant[]
+  sessionQuestions GuessSongSessionQuestion[]
+
+  @@index([difficulty, enabled])
+  @@index([allowEndless, enabled])
+  @@index([processingStatus])
+  @@index([songTitle])
+  @@index([musicSongId])
+  @@index([createdAt])
+}
+
+model GuessSongAudioVariant {
+  id              String   @id @default(cuid())
+  durationSeconds Int
+  storagePath     String
+  fileSize        Int
+  createdAt       DateTime @default(now())
+
+  questionId String
+  question   GuessSongQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  playRequests GuessSongPlayRequest[]
+
+  @@unique([questionId, durationSeconds])
+  @@index([questionId])
+}
+
+model GuessSongSession {
+  id              String                 @id @default(cuid())
+  activeKey       String?                @unique
+  mode            GuessSongMode
+  status          GuessSongSessionStatus @default(IN_PROGRESS)
+  score           Int                    @default(0)
+  correctCount    Int                    @default(0)
+  wrongCount      Int                    @default(0)
+  currentStreak   Int                    @default(0)
+  maxStreak       Int                    @default(0)
+  livesRemaining  Int                    @default(0)
+  totalPlayCount  Int                    @default(0)
+  currentPosition Int                    @default(1)
+  startedAt       DateTime               @default(now())
+  completedAt     DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  questions          GuessSongSessionQuestion[]
+  leaderboardEntries GuessSongLeaderboardEntry[]
+
+  @@index([userId, mode, status])
+  @@index([userId, completedAt])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+}
+
+model GuessSongSessionQuestion {
+  id                      String    @id @default(cuid())
+  publicId                String    @unique
+  position                Int
+  playbackDurationSeconds Int
+  maxPlayCount            Int
+  playCount               Int       @default(0)
+  optionsSnapshot         Json
+  correctOptionKey        String
+  selectedOptionKey       String?
+  isCorrect               Boolean?
+  awardedScore            Int       @default(0)
+  answerDeadlineAt        DateTime?
+  answeredAt              DateTime?
+  createdAt               DateTime  @default(now())
+
+  sessionId String
+  session   GuessSongSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  questionId String
+  question   GuessSongQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  playRequests GuessSongPlayRequest[]
+
+  @@unique([sessionId, position])
+  @@index([sessionId, answeredAt])
+  @@index([questionId])
+  @@index([publicId])
+}
+
+model GuessSongPlayRequest {
+  id             String   @id @default(cuid())
+  requestKey     String
+  playCountAfter Int
+  createdAt      DateTime @default(now())
+
+  sessionQuestionId String
+  sessionQuestion   GuessSongSessionQuestion @relation(fields: [sessionQuestionId], references: [id], onDelete: Cascade)
+
+  audioVariantId String
+  audioVariant   GuessSongAudioVariant @relation(fields: [audioVariantId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionQuestionId, requestKey])
+  @@index([sessionQuestionId, createdAt])
+}
+
+model GuessSongLeaderboardEntry {
+  id             String              @id @default(cuid())
+  mode           GuessSongMode
+  periodType     GuessSongPeriodType
+  periodKey      String
+  score          Int
+  correctCount   Int
+  maxStreak      Int
+  totalPlayCount Int
+  achievedAt     DateTime
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sessionId String
+  session   GuessSongSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, mode, periodType, periodKey])
+  @@index([periodType, periodKey, mode, score])
+  @@index([userId, periodType, periodKey])
+  @@index([sessionId])
+}
+
 model Badge {
   id          String   @id @default(cuid())
   name        String   @unique
@@ -1397,7 +1584,8 @@ model MusicSong {
   recommendLevel String?
   createdAt      DateTime @default(now())
 
-  album MusicAlbum @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  album              MusicAlbum          @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  guessSongQuestions GuessSongQuestion[]
 
   @@unique([albumId, trackNumber])
   @@unique([albumId, title])
