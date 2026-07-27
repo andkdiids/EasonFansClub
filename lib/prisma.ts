@@ -1,73 +1,40 @@
 import { PrismaClient, type Prisma } from '@prisma/client'
-import { PrismaPg } from '@prisma/adapter-pg'
 
 const prismaLog: Prisma.PrismaClientOptions['log'] =
   process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error']
 
-const isVercelRuntime = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL)
 const wantsDriverAdapter = process.env.PRISMA_USE_DRIVER_ADAPTER === 'true'
-const useDriverAdapter = wantsDriverAdapter && !isVercelRuntime
-
-function numberFromEnv(name: string, fallback: number) {
-  const value = Number(process.env[name])
-  return Number.isFinite(value) && value > 0 ? value : fallback
-}
 
 function databaseUrlForPrismaClient() {
   const value = process.env.DATABASE_URL
-  if (!value) return undefined
+  if (!value) {
+    console.warn('[prisma] 当前进程未设置 DATABASE_URL；首次数据库查询将失败。')
+    return undefined
+  }
 
   try {
     const url = new URL(value)
-    const isSupabasePooler = url.hostname.endsWith('.pooler.supabase.com') || url.port === '6543'
-    if (!isSupabasePooler) return value
-
-    if (!url.searchParams.has('pgbouncer')) {
-      url.searchParams.set('pgbouncer', 'true')
+    if (url.protocol !== 'mysql:') {
+      throw new Error(`[prisma] DATABASE_URL 必须指向 MySQL，当前协议为 ${url.protocol}`)
     }
-
-    const connectionLimit = Number(url.searchParams.get('connection_limit'))
-    if (!Number.isFinite(connectionLimit) || connectionLimit < 5) {
-      url.searchParams.set('connection_limit', '5')
+    console.info('[prisma.database]', {
+      protocol: url.protocol.replace(':', ''),
+      host: url.hostname,
+      port: url.port || '3306',
+      database: url.pathname.replace(/^\/+/, ''),
+      source: 'DATABASE_URL',
+    })
+    if (wantsDriverAdapter) {
+      console.warn('[prisma] 已忽略 PostgreSQL driver adapter 配置；当前应用使用 MySQL DATABASE_URL。')
     }
-    return url.toString()
-  } catch {
     return value
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('[prisma]')) throw error
+    throw new Error('[prisma] DATABASE_URL 格式无效')
   }
 }
 
 const createPrismaClient = () => {
-  if (wantsDriverAdapter && isVercelRuntime) {
-    console.warn('[prisma] Ignoring PRISMA_USE_DRIVER_ADAPTER on Vercel; using standard PrismaClient.')
-  }
-
-  if (useDriverAdapter) {
-    const connectionString = process.env.HYPERDRIVE_DATABASE_URL || process.env.DATABASE_URL || ''
-    const adapter = new PrismaPg({
-      connectionString,
-      max: numberFromEnv('PRISMA_POOL_MAX', 1),
-      maxUses: numberFromEnv('PRISMA_POOL_MAX_USES', 1),
-      idleTimeoutMillis: numberFromEnv('PRISMA_POOL_IDLE_TIMEOUT_MS', 1000),
-      connectionTimeoutMillis: numberFromEnv('PRISMA_POOL_CONNECTION_TIMEOUT_MS', 2500),
-      query_timeout: numberFromEnv('PRISMA_QUERY_TIMEOUT_MS', 3500),
-      statement_timeout: numberFromEnv('PRISMA_STATEMENT_TIMEOUT_MS', 3500),
-      idle_in_transaction_session_timeout: numberFromEnv('PRISMA_IDLE_TRANSACTION_TIMEOUT_MS', 3500),
-      allowExitOnIdle: true,
-    }, {
-      onPoolError(error) {
-        console.error('[prisma.pool]', error)
-      },
-      onConnectionError(error) {
-        console.error('[prisma.connection]', error)
-      },
-    })
-
-    return new PrismaClient({
-      adapter,
-      log: prismaLog,
-    })
-  }
-
   const databaseUrl = databaseUrlForPrismaClient()
   return new PrismaClient({
     log: prismaLog,

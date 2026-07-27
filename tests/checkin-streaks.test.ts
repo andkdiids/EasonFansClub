@@ -52,6 +52,28 @@ test('POST 已签到与 P2002 分支与事务内同为重算口径', () => {
   assert.doesNotMatch(post, /profile\?\.consecutiveDays|verifyUser\?\.consecutiveDays|result\.user\.consecutiveDays/)
 })
 
+test('签到成功响应严格使用事务后查询到的 CheckIn 奖励值', () => {
+  const route = readFileSync('app/api/checkin/route.ts', 'utf8')
+  const button = readFileSync('components/CheckInButton.tsx', 'utf8')
+  assert.match(route, /gainedPoints: verifyCheckIn\.points/)
+  assert.match(route, /gainedExp: verifyCheckIn\.exp/)
+  assert.match(route, /\[checkin\.create\.before\]/)
+  assert.match(route, /\[checkin\.create\.after\]/)
+  assert.match(route, /\[checkin\.verify\.result\]/)
+  assert.match(route, /\[checkin\.verify\.mismatch\]/)
+  assert.match(button, /verifyData\?\.checkedToday/)
+  assert.match(button, /\+\$\{nextCheckIn\.points\} 积分、\+\$\{nextCheckIn\.exp\} 经验/)
+})
+
+test('应用运行时只接受 DATABASE_URL 中的 MySQL 连接', () => {
+  const prisma = readFileSync('lib/prisma.ts', 'utf8')
+  assert.match(prisma, /process\.env\.DATABASE_URL/)
+  assert.match(prisma, /url\.protocol !== 'mysql:'/)
+  assert.match(prisma, /\[prisma\.database\]/)
+  assert.doesNotMatch(prisma, /process\.env\.(?:MYSQL_TEST_URL|MIGRATION_MYSQL_URL|HYPERDRIVE_DATABASE_URL)/)
+  assert.doesNotMatch(prisma, /new PrismaPg/)
+})
+
 test('Asia/Shanghai 跨 UTC 日期边界连续天数不错位', () => {
   // UTC 7-19 17:30 即北京 7-20 01:30:今天应算 7-20,三天连续
   assert.deepEqual(calculateCheckinStreaks(['2026-07-18', '2026-07-19', '2026-07-20'], new Date('2026-07-19T17:30:00Z')), { currentStreak: 3, longestStreak: 3, totalDays: 3 })

@@ -152,6 +152,13 @@ export async function POST(request: Request) {
     const requestedExp = getRandomCheckInExperience()
     const nextPoints = currentUser.points + gainedPoints
 
+    console.info('[checkin.create.before]', {
+      userId: user.id,
+      todayKey,
+      gainedPoints,
+      gainedExp: null,
+      requestedExp,
+    })
     const createdCheckIn = await tx.checkIn.create({
       data: {
         userId: user.id,
@@ -166,6 +173,13 @@ export async function POST(request: Request) {
       },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
     })
+    console.info('[checkin.create.after]', {
+      id: createdCheckIn.id,
+      userId: user.id,
+      todayKey,
+      points: createdCheckIn.points,
+      exp: createdCheckIn.exp,
+    })
     const expAward = await awardExperience(tx, {
       userId: user.id,
       amount: requestedExp,
@@ -175,10 +189,23 @@ export async function POST(request: Request) {
       sourceId: createdCheckIn.id,
     })
     const gainedExp = expAward.amount
+    console.info('[checkin.update.before]', {
+      id: createdCheckIn.id,
+      userId: user.id,
+      gainedPoints,
+      gainedExp,
+    })
     const checkIn = await tx.checkIn.update({
       where: { id: createdCheckIn.id },
       data: { exp: gainedExp },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+    })
+    console.info('[checkin.update.after]', {
+      id: checkIn.id,
+      userId: user.id,
+      todayKey,
+      points: checkIn.points,
+      exp: checkIn.exp,
     })
 
     let dailyMessageId: string | null = null
@@ -228,7 +255,15 @@ export async function POST(request: Request) {
       },
     })
 
-    return { user: updatedUser, checkIn, gainedPoints, gainedExp, requestedExp, bonus, dailyMessageId, streaks }
+    return {
+      user: updatedUser,
+      checkIn,
+      gainedPoints: checkIn.points,
+      gainedExp: checkIn.exp,
+      bonus,
+      dailyMessageId,
+      streaks,
+    }
     })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -292,6 +327,21 @@ const [verifyCheckIn, verifyUser] = await Promise.all([
 ])
 
 logPerf('checkin.verify.ms', verifyStart, { userId: user.id })
+console.info('[checkin.verify.result]', verifyCheckIn
+  ? {
+      id: verifyCheckIn.id,
+      userId: user.id,
+      todayKey,
+      points: verifyCheckIn.points,
+      exp: verifyCheckIn.exp,
+    }
+  : {
+      id: null,
+      userId: user.id,
+      todayKey,
+      points: null,
+      exp: null,
+    })
 
 if (!verifyCheckIn) {
   console.error('[checkin.verify.failed]', {
@@ -307,6 +357,31 @@ if (!verifyCheckIn) {
     {
       status: 500,
     },
+  )
+}
+
+if (
+  verifyCheckIn.id !== result.checkIn.id
+  || verifyCheckIn.points !== result.checkIn.points
+  || verifyCheckIn.exp !== result.checkIn.exp
+) {
+  console.error('[checkin.verify.mismatch]', {
+    userId: user.id,
+    todayKey,
+    transaction: {
+      id: result.checkIn.id,
+      points: result.checkIn.points,
+      exp: result.checkIn.exp,
+    },
+    verified: {
+      id: verifyCheckIn.id,
+      points: verifyCheckIn.points,
+      exp: verifyCheckIn.exp,
+    },
+  })
+  return NextResponse.json(
+    { message: '签到数据校验不一致，请刷新后重试', checkedToday: false },
+    { status: 500 },
   )
 }
 
@@ -366,8 +441,8 @@ return NextResponse.json({
     checkDate: formatBeijingDate(today),
     todayCheckIn: verifyCheckIn,
     mood,
-    gainedPoints: result.gainedPoints,
-    gainedExp: result.gainedExp,
+    gainedPoints: verifyCheckIn.points,
+    gainedExp: verifyCheckIn.exp,
     bonus: result.bonus,
     dailyMessageId: result.dailyMessageId,
     consecutiveDays: result.streaks.currentStreak,

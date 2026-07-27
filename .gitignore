@@ -14,3 +14,4 @@ tsconfig.tsbuildinfo
 public/uploads/
 supabase/.temp/
 .codex-start-8000.cmd
+.env.supabase.backup

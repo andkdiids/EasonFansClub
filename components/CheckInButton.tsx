@@ -192,7 +192,7 @@ const verifyResponse = await fetch('/api/checkin', {
 
 const verifyData = await verifyResponse.json().catch(() => null)
 
-if (!verifyResponse.ok || !verifyData) {
+if (!verifyResponse.ok || !verifyData?.checkedToday || !verifyData.todayCheckIn) {
   setError('签到成功，但状态同步失败，请刷新页面')
   return
 }
@@ -231,7 +231,7 @@ onStateChange?.({
       : undefined,
 })
       
-      setMessage(`今日挂号成功，获得 +${data.gainedPoints || 0} 积分、+${data.gainedExp || 0} 经验`)
+      setMessage(`今日挂号成功，获得 +${nextCheckIn.points} 积分、+${nextCheckIn.exp} 经验`)
       window.dispatchEvent(
         new CustomEvent('checkin:completed', {
           detail: {

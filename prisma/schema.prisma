@@ -280,7 +280,7 @@ model Changelog {
 }
 
 model CheckIn {
-  id             String           @id
+  id             String           @id @default(cuid())
   checkDate      DateTime
   points         Int              @default(10)
   streakDay      Int              @default(1)
@@ -443,11 +443,11 @@ model CultureItem {
 }
 
 model DailyExperienceRecord {
-  id        String   @id
+  id        String   @id @default(cuid())
   date      DateTime
   amount    Int      @default(0)
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
   userId    String
   User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -456,7 +456,7 @@ model DailyExperienceRecord {
 }
 
 model DailyMessage {
-  id                   String                 @id
+  id                   String                 @id @default(cuid())
   date                 DateTime
   mood                 String?
   content              String
@@ -469,7 +469,7 @@ model DailyMessage {
   isDeleted            Boolean                @default(false)
   deletedAt            DateTime?
   createdAt            DateTime               @default(now())
-  updatedAt            DateTime
+  updatedAt            DateTime               @updatedAt
   userId               String
   checkInId            String?                @unique
   CheckIn              CheckIn?               @relation(fields: [checkInId], references: [id])
@@ -549,13 +549,13 @@ model DailyQuote {
 }
 
 model DailyTaskProgress {
-  id                String            @id
+  id                String            @id @default(cuid())
   taskDate          DateTime
   progress          Int               @default(0)
   isCompleted       Boolean           @default(false)
   completedAt       DateTime?
   createdAt         DateTime          @default(now())
-  updatedAt         DateTime
+  updatedAt         DateTime          @updatedAt
   userId            String
   templateId        String
   DailyTaskTemplate DailyTaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -635,7 +635,7 @@ model EntertainmentDailyDraw {
 }
 
 model ExperienceLog {
-  id          String            @id
+  id          String            @id @default(cuid())
   amount      Int
   type        ExperienceLogType
   description String
@@ -722,7 +722,7 @@ model Follow {
 }
 
 model FriendActivity {
-  id             String        @id
+  id             String        @id @default(cuid())
   mood           String?
   content        String?
   createdAt      DateTime      @default(now())
@@ -1230,7 +1230,7 @@ model PasswordResetToken {
 }
 
 model PointLog {
-  id                     String                  @id
+  id                     String                  @id @default(cuid())
   action                 PointActionType
   points                 Int
   before                 Int
