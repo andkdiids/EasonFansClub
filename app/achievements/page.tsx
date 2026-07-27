@@ -11,21 +11,25 @@ export default async function AchievementsPage() {
   if (!user) redirect('/login?redirect=%2Fachievements')
 
   const records = await safeDb(
-    'achievements.read',
-    prisma.userAchievement.findMany({
-where: {
-  userId: user.id,
-  Achievement: {
-    isVisible: true
-  }
-}      include: {
-  Achievement: true
-},
-      orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
-      take: 200,
-    }),
-    [],
-  )
+  'achievements.read',
+  prisma.userAchievement.findMany({
+    where: {
+      userId: user.id,
+      Achievement: {
+        isVisible: true,
+      },
+    },
+    include: {
+      Achievement: true,
+    },
+    orderBy: [
+      { unlockedAt: 'desc' },
+      { createdAt: 'desc' },
+    ],
+    take: 200,
+  }),
+  [],
+)
 
   return (
     <AchievementList records={records} />
