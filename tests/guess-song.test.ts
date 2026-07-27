@@ -299,6 +299,34 @@ test('后台试听仅签名数据库所属题目的变体且不增加播放次�
   assert.doesNotMatch(preview, /playCount.*increment|guessSongPlayRequest/)
 })
 
+test('后台题库采用创建后上传的两步流程并复用现有音频接口', () => {
+  const admin = source('app/admin/entertainment/guess-song/AdminGuessSongManager.tsx')
+  assert.match(admin, /题目已创建，请上传至少7秒的音频片段/)
+  assert.match(admin, /setActiveUploadId\(data\.question\.id\)/)
+  assert.match(admin, /scrollIntoView/)
+  assert.match(admin, /上传并生成音频片段/)
+  assert.match(admin, /questions\/\$\{question\.id\}\/audio/)
+  assert.match(admin, /questions\/\$\{question\.id\}\/regenerate/)
+})
+
+test('后台上传前校验格式、20MB与至少7秒时长', () => {
+  const admin = source('app/admin/entertainment/guess-song/AdminGuessSongManager.tsx')
+  assert.match(admin, /mp3\|m4a\|wav\|aac/)
+  assert.match(admin, /20 \* 1024 \* 1024/)
+  assert.match(admin, /duration < 7/)
+  assert.match(admin, /正在生成 2～7 秒片段/)
+  assert.match(admin, /正在上传腾讯云 COS/)
+})
+
+test('后台试听单实例播放且启用按钮展示具体缺失原因', () => {
+  const admin = source('app/admin/entertainment/guess-song/AdminGuessSongManager.tsx')
+  assert.match(admin, /previewAudioRef\.current\?\.pause\(\)/)
+  assert.match(admin, /playingKey === key/)
+  assert.match(admin, /audio\.onended = stopPreview/)
+  assert.match(admin, /缺少 \$\{missing\.join\('、'\)\} 秒音频变体/)
+  assert.match(admin, /暂不能启用：\{enableBlockReason\}/)
+})
+
 test('上传部分失败会清理本次已上传的COS对象', () => {
   const audio = source('lib/guess-song-admin-audio.ts')
   assert.match(audio, /uploadedPaths\.push/)

@@ -52,6 +52,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       return
     }
     console.info('[post:create:navigate]', { postId, detailUrl })
+    if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
     router.push(detailUrl)
     router.refresh()
   }

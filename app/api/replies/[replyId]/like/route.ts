@@ -32,7 +32,7 @@ export async function POST(_request: Request, context: RouteContext) {
             type: 'LIKE',
             title: '你的回复收到点赞',
             content: `${guard.user.nickname} 点赞了你的回复`,
-            link: `/posts/${reply.postId}`,
+            link: `/posts/${reply.postId}?focus=${reply.id}`,
           },
         })
       }

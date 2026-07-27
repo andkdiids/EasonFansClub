@@ -5,6 +5,7 @@ import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
+import { getShanghaiDateKey } from '@/lib/checkin'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -49,12 +50,11 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const reply = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR UPDATE`
     const currentUser = await tx.user.findFirstOrThrow({
       where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
       select: { points: true },
     })
-    const nextPoints = currentUser.points + POINTS.replyCreate
-
     const createdReply = await tx.reply.create({
       data: {
         postId,
@@ -80,31 +80,33 @@ export async function POST(request: Request, { params }: Params) {
       where: { id: postId },
       data: { replyCount: { increment: 1 } },
     })
-
-    await tx.user.update({
-      where: { id: user.id },
-      data: { points: nextPoints },
-    })
+    await tx.friendActivity.create({ data: { actorId: user.id, type: 'COMMENT', content: textContent, targetUrl: `/posts/${postId}?focus=${createdReply.id}` } })
 
     await awardExperience(tx, {
       userId: user.id,
-      amount: POINTS.replyCreate,
+      amount: POINTS.replyCreateExperience,
       type: 'COMMENT',
       description: '回复帖子',
     })
 
-    await tx.pointLog.create({
-      data: {
+    const dateKey = getShanghaiDateKey(new Date())
+    const rewardedToday = await tx.pointLog.count({ where: { userId: user.id, action: 'POST_COMMENT_DAILY', dateKey } })
+    const rewardPoints = rewardedToday < POINTS.dailyPostCommentLimit ? POINTS.dailyPostComment : 0
+    if (rewardPoints) {
+      await tx.pointLog.create({ data: {
         userId: user.id,
-        action: 'REPLY_CREATE',
-        points: POINTS.replyCreate,
+        action: 'POST_COMMENT_DAILY',
+        points: rewardPoints,
         before: currentUser.points,
-        after: nextPoints,
+        after: currentUser.points + rewardPoints,
         postId,
         replyId: createdReply.id,
-        reason: '回复帖子',
-      },
-    })
+        dateKey,
+        businessKey: `post-comment:${createdReply.id}`,
+        reason: '每日评论奖励',
+      } })
+      await tx.user.update({ where: { id: user.id }, data: { points: { increment: rewardPoints } } })
+    }
 
     const recipientId = parentReply?.authorId || post.authorId
     if (recipientId !== user.id) {
@@ -122,8 +124,8 @@ export async function POST(request: Request, { params }: Params) {
       })
     }
 
-    return createdReply
+    return { createdReply, rewardPoints }
   })
 
-  return NextResponse.json({ reply }, { status: 201 })
+  return NextResponse.json({ reply: reply.createdReply, rewardPoints: reply.rewardPoints }, { status: 201 })
 }

@@ -34,6 +34,8 @@ export async function GET() {
       id: item.id,
       mood: item.mood,
       content: item.content,
+      type: item.type,
+      targetUrl: item.targetUrl,
       createdAt: item.createdAt.toISOString(),
       actor: item.actor,
     })),

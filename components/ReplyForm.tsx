@@ -21,6 +21,7 @@ export function ReplyForm({
   const [content, setContent] = useState('')
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   function insertEmoji(emoji: string) {
@@ -39,6 +40,7 @@ export function ReplyForm({
     event?.preventDefault()
     if (isSubmitting) return
     setError('')
+    setSuccess('')
     setIsSubmitting(true)
     const response = await fetch(`/api/posts/${postId}/replies`, {
       method: 'POST',
@@ -55,6 +57,8 @@ export function ReplyForm({
     setImageUrls([])
     onReplyCancel?.()
     onReplyCreated?.(data.reply)
+    setSuccess(data.rewardPoints === 3 ? '评论成功，获得 +3 积分' : '评论成功')
+    if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
     if (!onReplyCreated) router.refresh()
   }
 
@@ -91,6 +95,7 @@ export function ReplyForm({
         </button>
       </div>
       {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
+      {success ? <p className="mt-2 text-sm font-black text-emerald-600">{success}</p> : null}
     </form>
   )
 }

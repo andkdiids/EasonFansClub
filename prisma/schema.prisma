@@ -71,6 +71,8 @@ enum PointActionType {
   ACTIVITY_REWARD
   BADGE_EXCHANGE
   ADMIN_ADJUST
+  POST_DAILY_FIRST
+  POST_COMMENT_DAILY
 }
 
 enum AdminActionType {
@@ -408,6 +410,7 @@ model User {
   pageLayoutRevisions         PageLayoutRevision[]        @relation("PageLayoutRevisionPublisher")
   profileWallMessagesSent     ProfileWallMessage[]        @relation("ProfileWallSender")
   profileWallMessagesReceived ProfileWallMessage[]        @relation("ProfileWallReceiver")
+  profileWallLikes            ProfileWallLike[]
   friendActivities            FriendActivity[]            @relation("FriendActivityActor")
   experienceLogs              ExperienceLog[]
   dailyExperienceRecords      DailyExperienceRecord[]
@@ -452,6 +455,7 @@ model ProfileWallMessage {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+  likeCount Int       @default(0)
 
   senderId String
   sender   User   @relation("ProfileWallSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -462,11 +466,26 @@ model ProfileWallMessage {
   parentId String?
   parent   ProfileWallMessage?  @relation("ProfileWallThread", fields: [parentId], references: [id], onDelete: NoAction)
   children ProfileWallMessage[] @relation("ProfileWallThread")
+  likes    ProfileWallLike[]
 
   @@index([receiverId, createdAt])
   @@index([senderId, createdAt])
   @@index([parentId])
   @@index([deletedAt])
+}
+
+model ProfileWallLike {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  messageId String
+  message   ProfileWallMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, createdAt])
 }
 
 model BoardCategory {
@@ -804,6 +823,8 @@ model FriendActivity {
   mood      String?
   content   String?
   createdAt DateTime @default(now())
+  type      String   @default("CHECKIN")
+  targetUrl String?
 
   actorId String
   actor   User   @relation("FriendActivityActor", fields: [actorId], references: [id], onDelete: Cascade)
@@ -963,13 +984,15 @@ model DailyTaskProgress {
 }
 
 model PointLog {
-  id        String          @id @default(cuid())
-  action    PointActionType
-  points    Int
-  before    Int
-  after     Int
-  reason    String?
-  createdAt DateTime        @default(now())
+  id          String          @id @default(cuid())
+  action      PointActionType
+  points      Int
+  before      Int
+  after       Int
+  reason      String?
+  createdAt   DateTime        @default(now())
+  dateKey     String?
+  businessKey String?         @unique
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1292,12 +1315,16 @@ model SystemNotificationRead {
 }
 
 model Conversation {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastMessageAt DateTime?
+  pairKey       String?   @unique
 
   participants ConversationParticipant[]
   messages     DirectMessage[]
+
+  @@index([lastMessageAt])
 }
 
 model ConversationParticipant {

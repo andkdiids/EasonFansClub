@@ -14,10 +14,12 @@ export function ImageViewer({
   src,
   alt,
   imageClassName = 'h-auto max-h-[32rem] w-full object-contain',
+  buttonClassName = 'block w-full cursor-zoom-in overflow-hidden bg-slate-100 text-left',
 }: Readonly<{
   src: string
   alt: string
   imageClassName?: string
+  buttonClassName?: string
 }>) {
   const [open, setOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
@@ -112,7 +114,7 @@ export function ImageViewer({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="block w-full cursor-zoom-in overflow-hidden bg-slate-100 text-left" aria-label={`查看大图：${alt}`}>
+      <button type="button" onClick={() => setOpen(true)} className={buttonClassName} aria-label={`查看大图：${alt}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt={alt} className={imageClassName} />
       </button>

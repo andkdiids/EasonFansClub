@@ -60,6 +60,8 @@ function loadPost(postId: string, userId?: string) {
           id: true,
           content: true,
           parentId: true,
+          likeCount: true,
+          likes: userId ? { where: { userId }, select: { id: true } } : false,
           createdAt: true,
           author: {
             select: {
@@ -84,6 +86,7 @@ type FocusedReply = {
     id: string
     content: string
     parentId: string | null
+    likeCount: number
     createdAt: Date
     author: {
       id: string
@@ -96,7 +99,7 @@ type FocusedReply = {
 }
 
 async function loadFocusedReplyChain(postId: string, focusId: string) {
-  const chain: FocusedReply[] = []
+  const chain: Array<FocusedReply & { likes: [] }> = []
   let currentId: string | null = focusId
   for (let depth = 0; currentId && depth < 12; depth += 1) {
     const reply: FocusedReply | null = await prisma.reply.findFirst({
@@ -105,6 +108,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
         id: true,
         content: true,
         parentId: true,
+        likeCount: true,
         createdAt: true,
         author: {
           select: {
@@ -119,15 +123,17 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
       },
     })
     if (!reply) break
-    chain.unshift(reply)
+    chain.unshift({ ...reply, likes: [] })
     currentId = reply.parentId
   }
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; reward?: string }> }>) {
   const { postId } = await params
-  const focusId = (await searchParams).focus?.slice(0, 80)
+  const query = await searchParams
+  const focusId = query.focus?.slice(0, 80)
+  const rewardPoints = query.reward === '7' ? 7 : 0
   const user = await getCurrentUser()
 
   let post: Awaited<ReturnType<typeof loadPost>>
@@ -160,11 +166,29 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const isArchivedAuthor = post.author.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))
   const canDeletePost = Boolean(user && (user.id === post.author.id || isAdminRole(user.role)))
+  const replyRows = post.replies.map(({ likes, ...reply }) => ({ ...reply, liked: Array.isArray(likes) && likes.length > 0 }))
+  const directReplyCount = new Map<string, number>()
+  replyRows.forEach((reply) => {
+    if (reply.parentId) directReplyCount.set(reply.parentId, (directReplyCount.get(reply.parentId) || 0) + 1)
+  })
+  const hotReplyIds = replyRows
+    .filter((reply) => !reply.parentId && (reply.likeCount >= 3 || (directReplyCount.get(reply.id) || 0) >= 2))
+    .sort((a, b) => {
+      const aReplies = directReplyCount.get(a.id) || 0
+      const bReplies = directReplyCount.get(b.id) || 0
+      return (b.likeCount * 2 + bReplies * 3) - (a.likeCount * 2 + aReplies * 3)
+        || b.likeCount - a.likeCount
+        || bReplies - aReplies
+        || a.createdAt.getTime() - b.createdAt.getTime()
+    })
+    .slice(0, 3)
+    .map((reply) => reply.id)
 
   return (
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         <BackButton fallbackHref="/forum" />
+        {rewardPoints ? <p className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">发布成功，今日首次发帖获得 +7 积分</p> : null}
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
@@ -193,7 +217,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <span>回复 {post.replyCount}</span>
           </div>
           <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{post.content}</div>
-          {post.media.length ? <div className="mt-6 grid gap-3 sm:grid-cols-2">{post.media.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} imageClassName="h-auto max-h-[32rem] w-full object-contain" />)}</div> : null}
+          {post.media.length ? <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">{post.media.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />)}</div> : null}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
               <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />
@@ -209,11 +233,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
         <PostRepliesSection
           postId={post.id}
-          initialReplies={post.replies}
+          initialReplies={replyRows}
           initialReplyCount={post.replyCount}
           currentUserId={user?.id}
           currentUserRole={user?.role}
           focusId={focusId}
+          hotReplyIds={hotReplyIds}
         />
       </main>
     </>

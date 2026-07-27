@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
+import { FriendActivityPanel } from '@/components/FriendActivityPanel'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
@@ -11,15 +12,17 @@ import { formatUid } from '@/lib/uid'
 
 export const dynamic = 'force-dynamic'
 
-const FRIEND_LIST_LIMIT = 50
-const FRIEND_REQUEST_LIMIT = 50
+const FRIEND_LIST_LIMIT = 10
+const FRIEND_REQUEST_LIMIT = 10
 
-export default async function FriendsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function FriendsPage({ searchParams }: { searchParams: Promise<{ q?: string; friendPage?: string; requestPage?: string }> }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
   const params = await searchParams
   const q = (params.q || '').trim()
+  const friendPage = Math.max(1, Number(params.friendPage) || 1)
+  const requestPage = Math.max(1, Number(params.requestPage) || 1)
   const numericUid = Number(q)
 
   const activeUserFilter = { uid: { gt: 0 }, status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } }
@@ -32,7 +35,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
         userB: { include: { profile: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: FRIEND_LIST_LIMIT,
+      skip: (friendPage - 1) * FRIEND_LIST_LIMIT,
+      take: FRIEND_LIST_LIMIT + 1,
     }),
     [],
   )
@@ -42,7 +46,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
       where: { receiverId: user.id, status: 'PENDING', sender: activeUserFilter },
       include: { sender: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
-      take: FRIEND_REQUEST_LIMIT,
+      skip: (requestPage - 1) * FRIEND_REQUEST_LIMIT,
+      take: FRIEND_REQUEST_LIMIT + 1,
     }),
     [],
   )
@@ -52,7 +57,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
       where: { senderId: user.id, status: 'PENDING', receiver: activeUserFilter },
       include: { receiver: { include: { profile: true } } },
       orderBy: { createdAt: 'desc' },
-      take: FRIEND_REQUEST_LIMIT,
+      skip: (requestPage - 1) * FRIEND_REQUEST_LIMIT,
+      take: FRIEND_REQUEST_LIMIT + 1,
     }),
     [],
   )
@@ -78,7 +84,9 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
     [],
   )
 
-  const friends = friendships
+  const hasMoreFriends = friendships.length > FRIEND_LIST_LIMIT
+  const hasMoreRequests = received.length > FRIEND_REQUEST_LIMIT || sent.length > FRIEND_REQUEST_LIMIT
+  const friends = friendships.slice(0, FRIEND_LIST_LIMIT)
     .map((item) => (item.userAId === user.id ? item.userB : item.userA))
     .filter((item) => item.status === 'ACTIVE' && !item.isDeleted && item.profile)
 
@@ -128,25 +136,18 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
         <section className="grid gap-6 lg:grid-cols-3">
           <Panel id="friend-list" title="好友列表">
             {friends.length ? friends.map((item) => <UserCard key={item.id} user={item} status="已是好友" />) : <Empty />}
+            <Pagination previous={friendPage > 1 ? `/friends?friendPage=${friendPage - 1}` : null} next={hasMoreFriends ? `/friends?friendPage=${friendPage + 1}` : null} />
           </Panel>
-          <Panel id="received-requests" title="收到的申请">
-            {received.length ? (
-              received.map((item) => (
-                <RequestCard key={item.id} user={item.sender} createdAt={item.createdAt} status="等待处理">
-                  <FriendRequestDecision requestId={item.id} />
-                </RequestCard>
-              ))
-            ) : (
-              <Empty />
-            )}
-          </Panel>
-          <Panel id="sent-requests" title="发出的申请">
-            {sent.length ? (
-              sent.map((item) => <RequestCard key={item.id} user={item.receiver} createdAt={item.createdAt} status={statusText(item.status)} />)
-            ) : (
-              <Empty />
-            )}
-          </Panel>
+          <div className="space-y-6">
+            <Panel id="received-requests" title="收到的申请">
+              {received.length ? received.slice(0, FRIEND_REQUEST_LIMIT).map((item) => <RequestCard key={item.id} user={item.sender} createdAt={item.createdAt} status="等待处理"><FriendRequestDecision requestId={item.id} /></RequestCard>) : <Empty />}
+            </Panel>
+            <Panel id="sent-requests" title="发出的申请">
+              {sent.length ? sent.slice(0, FRIEND_REQUEST_LIMIT).map((item) => <RequestCard key={item.id} user={item.receiver} createdAt={item.createdAt} status={statusText(item.status)} />) : <Empty />}
+            </Panel>
+            <Pagination previous={requestPage > 1 ? `/friends?requestPage=${requestPage - 1}` : null} next={hasMoreRequests ? `/friends?requestPage=${requestPage + 1}` : null} />
+          </div>
+          <FriendActivityPanel />
         </section>
       </main>
     </>
@@ -215,4 +216,9 @@ function RequestCard({ user, createdAt, status, children }: { user: FriendUser; 
 
 function Empty() {
   return <p className="rounded-2xl bg-sky-50 p-5 text-sm font-bold text-slate-500">暂无数据</p>
+}
+
+function Pagination({ previous, next }: { previous: string | null; next: string | null }) {
+  if (!previous && !next) return null
+  return <nav className="mt-3 flex justify-between gap-2 text-xs font-black">{previous ? <Link href={previous}>上一页</Link> : <span />}{next ? <Link href={next}>下一页</Link> : null}</nav>
 }

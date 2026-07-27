@@ -17,6 +17,9 @@ type WallMessage = {
   content: string
   createdAt: string
   canDelete: boolean
+  liked: boolean
+  likeCount: number
+  commentCount: number
   sender: WallSender
   children?: WallMessage[]
 }
@@ -24,7 +27,8 @@ type WallMessage = {
 export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; focusId?: string }) {
   const [messages, setMessages] = useState<WallMessage[]>([])
   const [content, setContent] = useState('')
-  const [replyTo, setReplyTo] = useState<string | null>(null)
+  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [canPost, setCanPost] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -77,7 +81,7 @@ export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; foc
       const response = await fetch('/api/profile-wall', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiverUid, content, parentId: replyTo }),
+        body: JSON.stringify({ receiverUid, content, parentId: replyTo?.id }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || '留言发布失败')
@@ -96,6 +100,19 @@ export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; foc
     if (response.ok) await load()
   }
 
+  async function toggleLike(messageId: string) {
+    const response = await fetch(`/api/profile-wall/${messageId}/like`, { method: 'POST' })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      setError(data.message || '点赞失败')
+      return
+    }
+    const update = (items: WallMessage[]): WallMessage[] => items.map((item) => item.id === messageId
+      ? { ...item, liked: Boolean(data.liked), likeCount: Number(data.likeCount) || 0 }
+      : { ...item, children: update(item.children || []) })
+    setMessages(update)
+  }
+
   return (
     <section className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-5">
       <div className="flex items-center justify-between gap-3">
@@ -109,7 +126,7 @@ export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; foc
         <div className="mt-4 rounded-2xl bg-sky-50/75 p-3">
           {replyTo ? (
             <p className="mb-2 text-xs font-black text-brand-700">
-              正在回复一条留言
+              回复 @{replyTo.name}
               <button className="ml-2 underline" onClick={() => setReplyTo(null)} type="button">
                 取消
               </button>
@@ -135,13 +152,13 @@ export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; foc
       {!loading && !messages.length ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">暂无留言</p> : null}
 
       <div className="mt-4 space-y-3">
-        {messages.map((message) => <WallMessageCard key={message.id} message={message} onReply={setReplyTo} onDelete={remove} />)}
+        {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={setReplyTo} onDelete={remove} />)}
       </div>
     </section>
   )
 }
 
-function WallMessageCard({ message, onReply, onDelete }: { message: WallMessage; onReply: (id: string) => void; onDelete: (id: string) => void }) {
+function WallMessageCard({ message, expanded, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
   const name = message.sender.profile?.displayName || message.sender.nickname
   const avatar = publicImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   const children = message.children || []
@@ -160,12 +177,14 @@ function WallMessageCard({ message, onReply, onDelete }: { message: WallMessage;
           </div>
           <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-700">{message.content}</p>
           <div className="mt-2 flex gap-3">
-            <button onClick={() => onReply(message.id)} className="text-xs font-black text-brand-700" type="button">回复</button>
+            <button onClick={() => void onLike(message.id)} className="text-xs font-black text-brand-700" type="button">{message.liked ? '取消点赞' : '点赞'} {message.likeCount}</button>
+            <button onClick={() => onToggleComments(message.id)} className="text-xs font-black text-brand-700" type="button">评论 {message.commentCount || children.length}</button>
+            <button onClick={() => onReply({ id: message.id, name })} className="text-xs font-black text-brand-700" type="button">回复</button>
             {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
           </div>
-          {children.length ? (
+          {children.length && expanded[message.id] ? (
             <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
-              {children.map((child) => <WallMessageCard key={child.id} message={child} onReply={onReply} onDelete={onDelete} />)}
+              {children.map((child) => <WallMessageCard key={child.id} message={child} expanded={{ ...expanded, [child.id]: true }} onToggleComments={onToggleComments} onLike={onLike} onReply={onReply} onDelete={onDelete} />)}
             </div>
           ) : null}
         </div>

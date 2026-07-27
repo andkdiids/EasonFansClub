@@ -10,6 +10,8 @@ type FriendActivity = {
   id: string
   mood: string | null
   content: string | null
+  type: string
+  targetUrl: string | null
   createdAt: string
   actor: {
     uid: number
@@ -71,6 +73,7 @@ export function FriendActivityPanel() {
                     <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">{mood?.icon || '*'} {mood?.label || '挂号'}</span>
                   </div>
                   {item.content ? <p className="mt-2 line-clamp-2 text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
+                  {item.targetUrl ? <a href={item.targetUrl} className="mt-2 inline-block text-xs font-black text-brand-700">查看动态</a> : null}
                   <p className="mt-2 text-xs font-bold text-slate-400">{new Date(item.createdAt).toLocaleString('zh-CN')}</p>
                 </div>
               </div>

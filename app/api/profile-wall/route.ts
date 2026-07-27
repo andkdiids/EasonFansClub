@@ -67,6 +67,7 @@ export async function GET(request: Request) {
         orderBy: { createdAt: 'asc' },
         take: 20,
         include: {
+          likes: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
           sender: {
             select: {
               id: true,
@@ -79,6 +80,7 @@ export async function GET(request: Request) {
           },
         },
       },
+      likes: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
     },
   })
 
@@ -90,12 +92,16 @@ export async function GET(request: Request) {
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
       canDelete: canManageWallMessage(viewer, item.senderId, item.receiverId),
+      liked: Array.isArray(item.likes) && item.likes.length > 0,
+      commentCount: item.children.length,
       children: item.children.map((child) => ({
         ...child,
         children: [],
         createdAt: child.createdAt.toISOString(),
         updatedAt: child.updatedAt.toISOString(),
         canDelete: canManageWallMessage(viewer, child.senderId, child.receiverId),
+        liked: Array.isArray(child.likes) && child.likes.length > 0,
+        commentCount: 0,
       })),
     })),
   })
@@ -142,6 +148,7 @@ export async function POST(request: Request) {
       data: { senderId: viewer.id, receiverId: receiver.id, parentId: threadParentId, content },
       select: { id: true },
     })
+    await tx.friendActivity.create({ data: { actorId: viewer.id, type: 'PROFILE_WALL', content, targetUrl: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}` } })
     const recipientId = parentMessage?.senderId || receiver.id
     if (recipientId !== viewer.id) {
       await tx.notification.create({

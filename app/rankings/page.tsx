@@ -1,14 +1,16 @@
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
+import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 
 export const dynamic = 'force-dynamic'
 
 export default async function RankingsPage() {
   // 签到榜:一次性取出未删除用户的全部签到日期键(仅两个小字段),内存分组重算,避免 N+1,不读用户表上的连续天数快照
-  const [points, checkInKeys, posts] = await Promise.all([
-    prisma.user.findMany({ where: { isDeleted: false }, orderBy: { points: 'desc' }, take: 10, select: { id: true, nickname: true, points: true, level: true } }),
+  const [points, checkInKeys, posts, growthLevels] = await Promise.all([
+    prisma.user.findMany({ where: { isDeleted: false }, orderBy: { points: 'desc' }, take: 10, select: { id: true, nickname: true, points: true, experience: true } }),
     prisma.checkIn.findMany({ where: { user: { isDeleted: false } }, select: { userId: true, checkinDateKey: true } }),
     prisma.post.findMany({ where: { isDeleted: false }, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, replyCount: true, likeCount: true } }),
+    listGrowthLevels(),
   ])
 
   const keysByUser = new Map<string, string[]>()
@@ -37,7 +39,7 @@ export default async function RankingsPage() {
         </section>
         <section className="grid gap-6 lg:grid-cols-3">
           {[
-            ['积分榜', points.map((u) => `${u.nickname} · Lv.${u.level} · ${u.points}分`)],
+            ['积分榜', points.map((u) => { const growth = calculateGrowthSummary(u.experience, growthLevels); return `${u.nickname} · ${growth.levelName} · Lv.${growth.level} · ${u.points}分` })],
             ['签到榜', streakTop.map((item) => { const u = userById.get(item.userId); return u ? `${u.nickname} · 连续${item.currentStreak}天` : null }).filter((row): row is string => Boolean(row))],
             ['热帖榜', posts.map((p) => `${p.title} · ${p.replyCount}回复 · ${p.likeCount}赞`)],
           ].map(([title, rows]) => (

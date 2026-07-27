@@ -6,6 +6,7 @@ import { sanitizeText } from '@/lib/security'
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const keyword = sanitizeText(searchParams.get('q'), 60)
+  const numericUid = /^\d+$/.test(keyword) ? Number(keyword) : null
 
   if (!keyword) {
     const hotKeywords = await prisma.searchKeyword.findMany({
@@ -31,12 +32,21 @@ export async function GET(request: Request) {
       where: {
         uid: { gt: 0 },
         isDeleted: false,
+        status: 'ACTIVE',
+        profile: { isNot: null },
         OR: [
+          ...(Number.isSafeInteger(numericUid) && Number(numericUid) > 0 ? [{ uid: Number(numericUid) }] : []),
           { nickname: { contains: keyword, mode: 'insensitive' } },
           { username: { contains: keyword, mode: 'insensitive' } },
+          { profile: { displayName: { contains: keyword, mode: 'insensitive' } } },
         ],
       },
-      select: { id: true, nickname: true, username: true, avatarUrl: true, level: true },
+      select: {
+        id: true, uid: true, nickname: true, username: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+        profile: { select: { displayName: true, avatarUrl: true, bio: true } },
+        _count: { select: { posts: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
+        posts: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },
+      },
       take: 10,
     }),
     prisma.post.findMany({

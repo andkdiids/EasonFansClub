@@ -64,9 +64,9 @@ function formatTime(value?: string | null) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
-export function FeedbackCenter({ initialFeedbackId, initialFocusId }: { initialFeedbackId?: string; initialFocusId?: string }) {
+export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab = 'feedback' }: { initialFeedbackId?: string; initialFocusId?: string; initialTab?: 'feedback' | 'changelog' }) {
   const router = useRouter()
-  const [tab, setTab] = useState<'feedback' | 'changelog'>('feedback')
+  const [tab, setTab] = useState<'feedback' | 'changelog'>(initialTab)
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([])
   const [selectedId, setSelectedId] = useState(initialFeedbackId || '')
   const [detail, setDetail] = useState<FeedbackItem | null>(null)
@@ -224,8 +224,8 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId }: { initialF
         <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Feedback</p>
         <h1 className="mt-2 text-3xl font-black text-brand-950">反馈与更新</h1>
         <div className="mt-5 flex gap-2">
-          <button onClick={() => setTab('feedback')} className={`rounded-none border-b-2 px-4 py-2 text-sm font-black ${tab === 'feedback' ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-500'}`}>我的反馈</button>
-          <button onClick={() => setTab('changelog')} className={`rounded-none border-b-2 px-4 py-2 text-sm font-black ${tab === 'changelog' ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-500'}`}>更新日志</button>
+          <button onClick={() => { setTab('feedback'); router.replace('/feedback') }} className={`rounded-none border-b-2 px-4 py-2 text-sm font-black ${tab === 'feedback' ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-500'}`}>意见反馈</button>
+          <button onClick={() => { setTab('changelog'); router.replace('/feedback?tab=updates') }} className={`rounded-none border-b-2 px-4 py-2 text-sm font-black ${tab === 'changelog' ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-500'}`}>更新日志</button>
           <button onClick={() => document.getElementById('feedback-create-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-sm bg-brand-700 px-4 py-2 text-sm font-black text-white">提交反馈</button>
         </div>
       </section>

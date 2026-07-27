@@ -21,8 +21,7 @@ export const primaryNavigation: AppNavigationItem[] = [
 export const quickNavigation: AppNavigationItem[] = [
   { href: '/checkin', label: '每日挂号', icon: 'check', activePrefixes: [] },
   { href: '/friends', label: '好友动态', icon: 'friends', activePrefixes: ['/friends'] },
-  { href: '/feedback#updates', label: '更新日志', icon: 'log', activePrefixes: [] },
-  { href: '/feedback', label: '反馈中心', icon: 'feedback', activePrefixes: ['/feedback'] },
+  { href: '/feedback', label: '反馈与更新', icon: 'feedback', activePrefixes: ['/feedback'] },
 ]
 
 export function isAppNavigationActive(pathname: string, item: AppNavigationItem) {

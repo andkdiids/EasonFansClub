@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
 import { BackToTopButton } from '@/components/BackToTopButton'
+import { FriendDock } from '@/components/FriendDock'
 import { IcpRecord } from '@/components/IcpRecord'
 import type { SessionUser } from '@/lib/auth'
 import type { AppShellGrowth } from '@/components/UserProfileSummary'
@@ -53,5 +54,6 @@ export function AppShell({ children, user, growth, logoUrl, unreadCount, canMana
     </div>
     <MobileNavigation unreadCount={currentUnreadCount} />
     <BackToTopButton />
+    <FriendDock currentUserId={user.id} />
   </div>
 }

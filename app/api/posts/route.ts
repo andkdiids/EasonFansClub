@@ -7,6 +7,7 @@ import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { parseContentImageUrls } from '@/lib/content-images'
+import { getShanghaiDateKey } from '@/lib/checkin'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -124,12 +125,11 @@ export async function POST(request: Request) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR UPDATE`
       const currentUser = await tx.user.findFirstOrThrow({
         where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
         select: { points: true },
       })
-      const nextPoints = currentUser.points + POINTS.postCreate
-
       const post = await tx.post.create({
         data: {
           boardId: input.boardId,
@@ -144,49 +144,48 @@ export async function POST(request: Request) {
       if (imageUrls.length) {
         await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => ({ postId: post.id, type: 'IMAGE', url, sortOrder })) })
       }
+      await tx.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${post.id}` } })
 
       await tx.board.update({
         where: { id: input.boardId },
         data: { postCount: { increment: 1 } },
       })
 
-      await tx.user.update({
-        where: { id: user.id },
-        data: {
-          points: nextPoints,
-        },
-      })
-
       await awardExperience(tx, {
         userId: user.id,
-        amount: POINTS.postCreate,
+        amount: POINTS.postCreateExperience,
         type: 'POST',
         description: '发布帖子',
       })
 
-      await tx.pointLog.create({
-        data: {
+      const dateKey = getShanghaiDateKey(new Date())
+      const reward = await tx.pointLog.createMany({
+        data: [{
           userId: user.id,
-          action: 'POST_CREATE',
-          points: POINTS.postCreate,
+          action: 'POST_DAILY_FIRST',
+          points: POINTS.dailyFirstPost,
           before: currentUser.points,
-          after: nextPoints,
+          after: currentUser.points + POINTS.dailyFirstPost,
           postId: post.id,
-          reason: '发布帖子',
-        },
+          dateKey,
+          businessKey: `post-daily:${user.id}:${dateKey}`,
+          reason: '每日首次发帖',
+        }],
+        skipDuplicates: true,
       })
+      if (reward.count) await tx.user.update({ where: { id: user.id }, data: { points: { increment: POINTS.dailyFirstPost } } })
 
-      return post
+      return { post, rewardPoints: reward.count ? POINTS.dailyFirstPost : 0 }
     })
 
-    const detailUrl = `/posts/${result.id}`
-    console.info('[post:create:success]', { postId: result.id, detailUrl, userId: user.id, boardId: input.boardId })
+    const detailUrl = `/posts/${result.post.id}${result.rewardPoints ? `?reward=${result.rewardPoints}` : ''}`
+    console.info('[post:create:success]', { postId: result.post.id, detailUrl, userId: user.id, boardId: input.boardId })
 
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)
     })
 
-    return NextResponse.json({ post: { ...result, detailUrl }, detailUrl }, { status: 201 })
+    return NextResponse.json({ post: { ...result.post, detailUrl }, detailUrl, rewardPoints: result.rewardPoints }, { status: 201 })
   } catch (error) {
     console.error('[post:create:error]', { userId: user.id, boardId: input.boardId, error })
     return NextResponse.json({ message: '发布帖子暂时失败，请稍后重试' }, { status: 503 })

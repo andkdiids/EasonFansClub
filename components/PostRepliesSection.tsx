@@ -14,6 +14,8 @@ type ReplyItem = {
   id: string
   content: string
   parentId: string | null
+  likeCount: number
+  liked: boolean
   createdAt: Date | string
   author: {
     id: string
@@ -49,6 +51,7 @@ export function PostRepliesSection({
   currentUserId,
   currentUserRole,
   focusId,
+  hotReplyIds,
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
@@ -56,6 +59,7 @@ export function PostRepliesSection({
   currentUserId?: string
   currentUserRole?: string
   focusId?: string
+  hotReplyIds?: string[]
 }>) {
   const [replies, setReplies] = useState(initialReplies)
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
@@ -63,6 +67,27 @@ export function PostRepliesSection({
   const tree = useMemo(() => buildReplyTree(replies), [replies])
   const replyMap = useMemo(() => buildReplyMap(replies), [replies])
   const rootReplies = tree.get(null) || []
+
+  async function toggleLike(replyId: string) {
+    const response = await fetch(`/api/replies/${replyId}/like`, { method: 'POST' })
+    if (response.status === 401) {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
+      return
+    }
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) return
+    setReplies((current) => current.map((reply) => reply.id === replyId
+      ? { ...reply, liked: Boolean(data.isLiked), likeCount: Number(data.likeCount) || 0 }
+      : reply))
+  }
+
+  function replyLikeButton(reply: ReplyItem) {
+    return (
+      <button type="button" onClick={() => void toggleLike(reply.id)} className="text-xs font-black text-brand-700">
+        {reply.liked ? '取消点赞' : '点赞'} {reply.likeCount}
+      </button>
+    )
+  }
 
   useEffect(() => {
     if (!focusId) return
@@ -86,7 +111,8 @@ export function PostRepliesSection({
 
   function addReply(reply: unknown) {
     if (!reply || typeof reply !== 'object') return
-    setReplies((current) => [...current, reply as ReplyItem])
+    const created = reply as Partial<ReplyItem> & Omit<ReplyItem, 'likeCount' | 'liked'>
+    setReplies((current) => [...current, { ...created, likeCount: Number(created.likeCount) || 0, liked: Boolean(created.liked) }])
   }
 
   function removeReply(replyId: string) {
@@ -138,6 +164,7 @@ export function PostRepliesSection({
             </p>
             {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
+              {replyLikeButton(reply)}
               {currentUserId ? (
                 <button
                   type="button"
@@ -183,6 +210,7 @@ export function PostRepliesSection({
           </p>
           {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            {replyLikeButton(reply)}
             {currentUserId ? (
               <button
                 type="button"
@@ -218,6 +246,19 @@ export function PostRepliesSection({
   return (
     <section className="space-y-3">
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
+      {hotReplyIds?.length ? (
+        <div className="border border-sky-100 bg-sky-50/75 p-4">
+          <h3 className="font-black text-brand-950">热门评论</h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {hotReplyIds.map((id, index) => {
+              const reply = replyMap.get(id)
+              if (!reply) return null
+              const name = reply.author.profile?.displayName || reply.author.nickname
+              return <a key={id} href={`#reply-${id}`} className="border border-sky-100 bg-white px-3 py-2 text-xs font-black text-brand-700">热度最高 #{index + 1} · {name} · {reply.likeCount} 赞</a>
+            })}
+          </div>
+        </div>
+      ) : null}
       {focusId && !replyMap.has(focusId) ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
       {rootReplies.length === 0 ? (
         <div className="rounded-xl border border-dashed border-sky-200 bg-white/65 p-8 text-center text-slate-500">还没有回复。</div>
