@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { ImageViewer } from '@/components/ImageViewer'
 import { ReplyForm } from '@/components/ReplyForm'
@@ -48,19 +48,41 @@ export function PostRepliesSection({
   initialReplyCount,
   currentUserId,
   currentUserRole,
+  focusId,
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
   initialReplyCount: number
   currentUserId?: string
   currentUserRole?: string
+  focusId?: string
 }>) {
   const [replies, setReplies] = useState(initialReplies)
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
-  const tree = buildReplyTree(replies)
-  const replyMap = buildReplyMap(replies)
+  const tree = useMemo(() => buildReplyTree(replies), [replies])
+  const replyMap = useMemo(() => buildReplyMap(replies), [replies])
   const rootReplies = tree.get(null) || []
+
+  useEffect(() => {
+    if (!focusId) return
+    let current = replyMap.get(focusId)
+    if (!current) return
+    while (current.parentId && replyMap.has(current.parentId)) current = replyMap.get(current.parentId)!
+    if (current.id !== focusId) setExpandedReplies((value) => ({ ...value, [current.id]: true }))
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`reply-${focusId}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target?.classList.add('notification-focus-target')
+    })
+    const timer = window.setTimeout(() => {
+      document.getElementById(`reply-${focusId}`)?.classList.remove('notification-focus-target')
+    }, 2600)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+  }, [focusId, replies, replyMap])
 
   function addReply(reply: unknown) {
     if (!reply || typeof reply !== 'object') return
@@ -196,6 +218,7 @@ export function PostRepliesSection({
   return (
     <section className="space-y-3">
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
+      {focusId && !replyMap.has(focusId) ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
       {rootReplies.length === 0 ? (
         <div className="rounded-xl border border-dashed border-sky-200 bg-white/65 p-8 text-center text-slate-500">还没有回复。</div>
       ) : (

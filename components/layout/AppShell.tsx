@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
+import { BackToTopButton } from '@/components/BackToTopButton'
 import { IcpRecord } from '@/components/IcpRecord'
 import type { SessionUser } from '@/lib/auth'
 import type { AppShellGrowth } from '@/components/UserProfileSummary'
@@ -48,8 +49,9 @@ export function AppShell({ children, user, growth, logoUrl, unreadCount, canMana
       <Topbar user={user} logoUrl={logoUrl} unreadCount={currentUnreadCount} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin} />
       <div className="app-page-content">{children}</div>
       <footer className="site-footer-info"><IcpRecord /></footer>
-      <MobileNavigation unreadCount={currentUnreadCount} />
       <AdminLayoutQuickLink enabled={canManageLayout} />
     </div>
+    <MobileNavigation unreadCount={currentUnreadCount} />
+    <BackToTopButton />
   </div>
 }

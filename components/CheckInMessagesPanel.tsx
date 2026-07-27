@@ -53,6 +53,8 @@ export function CheckInMessagesPanel({
   maxDate,
   initialSort,
   previewMode = false,
+  focusMessageId,
+  focusCommentId,
 }: Readonly<{
   title?: string
   density?: PageLayoutModuleDensity
@@ -64,6 +66,8 @@ export function CheckInMessagesPanel({
   maxDate: string
   initialSort: CheckInMessageSort
   previewMode?: boolean
+  focusMessageId?: string
+  focusCommentId?: string
 }>) {
   const [date, setDate] = useState(initialDate)
   const [sort, setSort] = useState<CheckInMessageSort>(initialSort)
@@ -73,6 +77,7 @@ export function CheckInMessagesPanel({
   const [replyTargets, setReplyTargets] = useState<Record<string, { id: string; name: string } | null>>({})
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const [page, setPage] = useState(1)
+  const [focusError, setFocusError] = useState('')
   const isCompact = density !== 'normal'
   const isMinimal = density === 'minimal'
   const previewPageSize = previewMode ? (isMinimal ? 1 : isCompact ? 2 : messagesPerPage) : messagesPerPage
@@ -134,6 +139,40 @@ export function CheckInMessagesPanel({
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
+
+  useEffect(() => {
+    if (previewMode || (!focusMessageId && !focusCommentId)) return
+    const messageIndex = messages.findIndex((item) =>
+      item.id === focusMessageId || item.comments.some((comment) => comment.id === focusCommentId),
+    )
+    if (messageIndex < 0) {
+      setFocusError('该内容已被删除或无法查看')
+      return
+    }
+    setFocusError('')
+    setPage(Math.floor(messageIndex / previewPageSize) + 1)
+    const message = messages[messageIndex]
+    if (focusCommentId) {
+      const commentMap = buildCommentMap(message.comments)
+      let current = commentMap.get(focusCommentId)
+      if (current) {
+        while (current.parentId && commentMap.has(current.parentId)) current = commentMap.get(current.parentId)!
+        setExpandedReplies((value) => ({ ...value, [current!.id]: true }))
+      }
+    }
+    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const target = document.getElementById(focusCommentId ? `comment-${focusCommentId}` : `message-${message.id}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target?.classList.add('notification-focus-target')
+    }))
+    const timer = window.setTimeout(() => {
+      document.getElementById(focusCommentId ? `comment-${focusCommentId}` : `message-${message.id}`)?.classList.remove('notification-focus-target')
+    }, 2600)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+  }, [focusCommentId, focusMessageId, messages, previewMode, previewPageSize])
 
   useEffect(() => {
     if (previewMode) return
@@ -205,6 +244,7 @@ export function CheckInMessagesPanel({
       </div>
 
       {error ? <p className="mt-3 shrink-0 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
+      {focusError ? <p className="mt-3 shrink-0 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">{focusError}</p> : null}
 
       <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} flex-1 ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
@@ -230,7 +270,7 @@ export function CheckInMessagesPanel({
             return result
           }
           return (
-            <article key={item.id} className={`${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border border-sky-100 bg-white shadow-sm`}>
+            <article key={item.id} id={`message-${item.id}`} className={`${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border border-sky-100 bg-white shadow-sm`}>
               <div className={isMinimal ? 'flex gap-2' : 'flex gap-3'}>
                 {anonymous ? (
                   <div className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
@@ -264,7 +304,7 @@ export function CheckInMessagesPanel({
                         const showAll = Boolean(expandedReplies[comment.id])
                         const visibleChildren = showAll ? children : children.slice(0, 3)
                         return (
-                          <div key={comment.id} className="rounded-xl bg-white/70 p-2 text-sm leading-6 text-slate-600">
+                          <div key={comment.id} id={`comment-${comment.id}`} className="rounded-xl bg-white/70 p-2 text-sm leading-6 text-slate-600">
                             <div className="flex items-start gap-2">
                               {anonymous || !commentIdentity ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" /></a>}
                               <div className="min-w-0 flex-1">
@@ -294,7 +334,7 @@ export function CheckInMessagesPanel({
                                       const childName = getCommentAuthorName(child.author)
                                       const childAvatar = publicImageUrl(childIdentity?.profile?.avatarUrl || childIdentity?.avatarUrl)
                                       return (
-                                        <div key={child.id} className="min-w-0 py-2">
+                                        <div key={child.id} id={`comment-${child.id}`} className="min-w-0 py-2">
                                           <div className="flex min-w-0 items-start gap-2">
                                             {anonymous || !childIdentity ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" /></a>}
                                             <div className="min-w-0 flex-1">

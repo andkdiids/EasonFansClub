@@ -1,4 +1,4 @@
-type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'menu' | 'user'
+type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'menu' | 'user' | 'arrow-up'
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></>,
@@ -21,6 +21,7 @@ const paths: Record<IconName, React.ReactNode> = {
   edit: <><path d="M4 20h4L20 8l-4-4L4 16z"/><path d="m14 6 4 4"/></>,
   menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
   user: <><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 3-8 8-8s8 3 8 8"/></>,
+  'arrow-up': <><path d="m6 10 6-6 6 6"/><path d="M12 4v16"/></>,
 }
 
 export function UiIcon({ name, className = '' }: { name: IconName; className?: string }) {

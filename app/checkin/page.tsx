@@ -23,7 +23,7 @@ function parseDate(value?: string) {
   return date
 }
 
-export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string }> }) {
+export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string; message?: string; focus?: string }> }) {
   const pageStart = Date.now()
   const sessionUser = await getCurrentUser()
   if (!sessionUser) redirect('/login')
@@ -139,6 +139,8 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
             consecutiveDays: streaks.currentStreak,
           }}
           checkinMoodEnabled={user.checkinMoodEnabled}
+          focusMessageId={params.message?.slice(0, 80)}
+          focusCommentId={params.focus?.slice(0, 80)}
         />
       </main>
     </>

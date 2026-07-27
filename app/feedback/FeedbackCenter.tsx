@@ -64,7 +64,7 @@ function formatTime(value?: string | null) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
-export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: string }) {
+export function FeedbackCenter({ initialFeedbackId, initialFocusId }: { initialFeedbackId?: string; initialFocusId?: string }) {
   const router = useRouter()
   const [tab, setTab] = useState<'feedback' | 'changelog'>('feedback')
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([])
@@ -278,7 +278,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
 
           <div className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
             {detail || selected ? (
-              <FeedbackThread detail={detail || selected!} reply={reply} setReply={setReply} setReplyAttachments={setReplyAttachments} setUploadingReply={setUploadingReply} uploadReset={uploadReset} submitReply={submitReply} replying={replying} uploadingReply={uploadingReply} />
+              <FeedbackThread detail={detail || selected!} focusId={initialFocusId} reply={reply} setReply={setReply} setReplyAttachments={setReplyAttachments} setUploadingReply={setUploadingReply} uploadReset={uploadReset} submitReply={submitReply} replying={replying} uploadingReply={uploadingReply} />
             ) : (
               <div className="grid min-h-80 place-items-center text-sm font-bold text-slate-500">选择一条反馈查看详情</div>
             )}
@@ -307,6 +307,7 @@ export function FeedbackCenter({ initialFeedbackId }: { initialFeedbackId?: stri
 
 function FeedbackThread({
   detail,
+  focusId,
   reply,
   setReply,
   setReplyAttachments,
@@ -317,6 +318,7 @@ function FeedbackThread({
   uploadingReply,
 }: {
   detail: FeedbackItem
+  focusId?: string
   reply: string
   setReply: (value: string) => void
   setReplyAttachments: (attachments: UploadedFeedbackAttachment[]) => void
@@ -327,6 +329,20 @@ function FeedbackThread({
   uploadingReply: boolean
 }) {
   const isClosed = detail.status === 'RESOLVED' || detail.status === 'CLOSED'
+  const focusMissing = Boolean(focusId && !(detail.replies || []).some((item) => item.id === focusId))
+  useEffect(() => {
+    if (!focusId || focusMissing) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`feedback-reply-${focusId}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target?.classList.add('notification-focus-target')
+    })
+    const timer = window.setTimeout(() => document.getElementById(`feedback-reply-${focusId}`)?.classList.remove('notification-focus-target'), 2600)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+  }, [focusId, focusMissing])
   return (
     <div className="space-y-5">
       <div className="border-b border-sky-100 pb-4">
@@ -340,8 +356,9 @@ function FeedbackThread({
       </div>
 
       <div className="space-y-3">
+        {focusMissing ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
         {(detail.replies || []).map((item) => (
-          <div key={item.id} className={`rounded-2xl p-4 ${item.authorRole === 'ADMIN' ? 'bg-brand-50' : 'bg-sky-50/70'}`}>
+          <div key={item.id} id={`feedback-reply-${item.id}`} className={`scroll-mt-20 rounded-2xl p-4 ${item.authorRole === 'ADMIN' ? 'bg-brand-50' : 'bg-sky-50/70'}`}>
             <div className="flex items-center gap-2 text-xs font-black text-slate-500">
               <Avatar user={item.author} />
               <span>{item.author.nickname}</span>

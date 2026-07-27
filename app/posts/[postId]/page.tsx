@@ -80,8 +80,54 @@ function loadPost(postId: string, userId?: string) {
   })
 }
 
-export default async function PostDetailPage({ params }: Readonly<{ params: Promise<{ postId: string }> }>) {
+type FocusedReply = {
+    id: string
+    content: string
+    parentId: string | null
+    createdAt: Date
+    author: {
+      id: string
+      uid: number
+      nickname: string
+      level: number
+      avatarUrl: string | null
+      profile: { displayName: string; avatarUrl: string | null } | null
+    }
+}
+
+async function loadFocusedReplyChain(postId: string, focusId: string) {
+  const chain: FocusedReply[] = []
+  let currentId: string | null = focusId
+  for (let depth = 0; currentId && depth < 12; depth += 1) {
+    const reply: FocusedReply | null = await prisma.reply.findFirst({
+      where: { id: currentId, postId, isDeleted: false, author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
+      select: {
+        id: true,
+        content: true,
+        parentId: true,
+        createdAt: true,
+        author: {
+          select: {
+            id: true,
+            uid: true,
+            nickname: true,
+            level: true,
+            avatarUrl: true,
+            profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
+    })
+    if (!reply) break
+    chain.unshift(reply)
+    currentId = reply.parentId
+  }
+  return chain
+}
+
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string }> }>) {
   const { postId } = await params
+  const focusId = (await searchParams).focus?.slice(0, 80)
   const user = await getCurrentUser()
 
   let post: Awaited<ReturnType<typeof loadPost>>
@@ -94,6 +140,12 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
 
   if (post === null) {
     notFound()
+  }
+
+  if (focusId && !post.replies.some((reply) => reply.id === focusId)) {
+    const focusedReplies = await loadFocusedReplyChain(postId, focusId)
+    const existingIds = new Set(post.replies.map((reply) => reply.id))
+    post.replies.push(...focusedReplies.filter((reply) => !existingIds.has(reply.id)))
   }
 
   if (post.isDeleted || post.status !== 'PUBLISHED' || post.author.isDeleted || post.author.status !== 'ACTIVE' || !post.author.profile) {
@@ -161,6 +213,7 @@ export default async function PostDetailPage({ params }: Readonly<{ params: Prom
           initialReplyCount={post.replyCount}
           currentUserId={user?.id}
           currentUserRole={user?.role}
+          focusId={focusId}
         />
       </main>
     </>

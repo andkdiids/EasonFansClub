@@ -8,9 +8,10 @@ import { formatUid, parseUidParam } from '@/lib/uid'
 
 export const dynamic = 'force-dynamic'
 
-export default async function ProfileWallPage({ params }: { params: Promise<{ uid: string }> }) {
+export default async function ProfileWallPage({ params, searchParams }: { params: Promise<{ uid: string }>; searchParams: Promise<{ focus?: string }> }) {
   const { uid } = await params
   const numericUid = parseUidParam(uid)
+  const focusId = (await searchParams).focus?.slice(0, 80)
   if (!numericUid || numericUid <= 0) notFound()
   const [viewer, target] = await Promise.all([
     getCurrentUser(),
@@ -33,7 +34,7 @@ export default async function ProfileWallPage({ params }: { params: Promise<{ ui
           </div>
           <Link href={viewer?.uid === target.uid ? '/profile' : `/user/${formatUid(target.uid)}`} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">返回主页</Link>
         </div>
-        <ProfileWall receiverUid={target.uid} />
+        <ProfileWall receiverUid={target.uid} focusId={focusId} />
       </main>
     </>
   )

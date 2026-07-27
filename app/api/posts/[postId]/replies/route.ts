@@ -117,7 +117,7 @@ export async function POST(request: Request, { params }: Params) {
           content: parentReply
             ? `${user.nickname} 回复了你的评论`
             : `${user.nickname} 回复了你的帖子`,
-          link: `/posts/${postId}#reply-${createdReply.id}`,
+          link: `/posts/${postId}?focus=${createdReply.id}`,
         },
       })
     }

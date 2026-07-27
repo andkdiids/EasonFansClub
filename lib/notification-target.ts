@@ -6,6 +6,32 @@ export type NotificationTargetInput = {
   targetUrl: string | null
 }
 
+export type NotificationReplyTarget =
+  | { kind: 'post'; resourceId: string; parentId: string }
+  | { kind: 'daily-message'; resourceId: string; parentId: string }
+  | { kind: 'feedback'; resourceId: string; parentId: string }
+  | { kind: 'profile-wall'; resourceId: string; parentId: string }
+
+export function parseNotificationReplyTarget(input: NotificationTargetInput): NotificationReplyTarget | null {
+  const target = getNotificationTarget(input)
+  if (!target?.startsWith('/')) return null
+  const url = new URL(target, 'https://local.invalid')
+  const focus = url.searchParams.get('focus')
+  if (!focus) return null
+
+  const post = url.pathname.match(/^\/posts\/([^/]+)$/)
+  if (post) return { kind: 'post', resourceId: post[1], parentId: focus }
+  if (url.pathname === '/checkin') {
+    const messageId = url.searchParams.get('message')
+    if (messageId) return { kind: 'daily-message', resourceId: messageId, parentId: focus }
+  }
+  const feedback = url.pathname.match(/^\/feedback\/([^/]+)$/)
+  if (feedback) return { kind: 'feedback', resourceId: feedback[1], parentId: focus }
+  const wall = url.pathname.match(/^\/user\/(\d+)\/wall$/)
+  if (wall) return { kind: 'profile-wall', resourceId: wall[1], parentId: focus }
+  return null
+}
+
 export function getNotificationTarget(notification: NotificationTargetInput) {
   const explicit = notification.targetUrl || notification.link
   if (explicit?.startsWith('/')) return explicit

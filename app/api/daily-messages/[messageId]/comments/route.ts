@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
+import { formatBeijingDate } from '@/lib/checkin'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -50,7 +51,7 @@ export async function POST(request: Request, context: RouteContext) {
   const comment = await prisma.$transaction(async (tx) => {
     const dailyMessage = await tx.dailyMessage.findUnique({
       where: { id: messageId },
-      select: { userId: true },
+      select: { userId: true, date: true },
     })
     if (!dailyMessage) throw new Error('message not found')
 
@@ -80,7 +81,7 @@ export async function POST(request: Request, context: RouteContext) {
           content: parentComment
             ? `${guard.user.nickname} 回复了你的评论`
             : `${guard.user.nickname} 评论了你的挂号留言`,
-          link: '/checkin',
+          link: `/checkin?date=${formatBeijingDate(dailyMessage.date)}&message=${messageId}&focus=${created.id}`,
         },
       })
     }

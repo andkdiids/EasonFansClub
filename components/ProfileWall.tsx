@@ -21,7 +21,7 @@ type WallMessage = {
   children?: WallMessage[]
 }
 
-export function ProfileWall({ receiverUid }: { receiverUid: number }) {
+export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; focusId?: string }) {
   const [messages, setMessages] = useState<WallMessage[]>([])
   const [content, setContent] = useState('')
   const [replyTo, setReplyTo] = useState<string | null>(null)
@@ -49,6 +49,25 @@ export function ProfileWall({ receiverUid }: { receiverUid: number }) {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    if (!focusId || loading) return
+    const hasTarget = messages.some((message) => message.id === focusId || message.children?.some((child) => child.id === focusId))
+    if (!hasTarget) {
+      setError('该内容已被删除或无法查看')
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`wall-message-${focusId}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target?.classList.add('notification-focus-target')
+    })
+    const timer = window.setTimeout(() => document.getElementById(`wall-message-${focusId}`)?.classList.remove('notification-focus-target'), 2600)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+  }, [focusId, loading, messages])
 
   async function submit() {
     if (submitting || !content.trim()) return
@@ -128,7 +147,7 @@ function WallMessageCard({ message, onReply, onDelete }: { message: WallMessage;
   const children = message.children || []
 
   return (
-    <article className="rounded-2xl border border-sky-100 bg-white p-3 shadow-sm">
+    <article id={`wall-message-${message.id}`} className="scroll-mt-20 rounded-2xl border border-sky-100 bg-white p-3 shadow-sm">
       <div className="flex gap-3">
         <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl bg-sky-50">
           <SafeAvatar src={avatar} name={name} className="h-full w-full" />

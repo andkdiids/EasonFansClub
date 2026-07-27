@@ -37,6 +37,8 @@ export type CheckInLayoutModuleProps = {
     consecutiveDays: number
   }
   checkinMoodEnabled?: boolean
+  focusMessageId?: string
+  focusCommentId?: string
   previewMode?: boolean
 }
 
@@ -172,6 +174,8 @@ export function createCheckInLayoutModules({
   stats,
   checkinMoodEnabled = true,
   previewMode = false,
+  focusMessageId,
+  focusCommentId,
 }: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
   return {
         'checkin.header': (layoutItem, { density }) => (
@@ -198,6 +202,8 @@ export function createCheckInLayoutModules({
             maxDate={todayValue}
             initialSort={sort}
             previewMode={previewMode}
+            focusMessageId={focusMessageId}
+            focusCommentId={focusCommentId}
           />
         ),
         'checkin.friendMessages': (layoutItem, { density }) => (

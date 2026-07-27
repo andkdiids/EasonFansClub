@@ -52,6 +52,23 @@ export function NotificationsClient({
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount)
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all')
   const [isUpdating, setIsUpdating] = useState(false)
+  const [replyingKey, setReplyingKey] = useState<string | null>(null)
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  const [replyStatus, setReplyStatus] = useState<Record<string, string>>({})
+  const [sendingReply, setSendingReply] = useState<string | null>(null)
+
+  useEffect(() => {
+    const saved = window.sessionStorage.getItem('notifications:return-state')
+    if (!saved) return
+    window.sessionStorage.removeItem('notifications:return-state')
+    try {
+      const state = JSON.parse(saved) as { category?: NotificationCategory; scrollY?: number }
+      if (state.category && state.category in categoryLabels) setActiveCategory(state.category)
+      window.requestAnimationFrame(() => window.scrollTo({ top: Number(state.scrollY) || 0, behavior: 'auto' }))
+    } catch {
+      // Ignore stale navigation state.
+    }
+  }, [])
 
   useEffect(() => {
     const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
@@ -111,7 +128,49 @@ export function NotificationsClient({
     } catch (reason) {
       if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
     } finally {
+      window.sessionStorage.setItem('notifications:return-state', JSON.stringify({
+        category: activeCategory,
+        scrollY: window.scrollY,
+      }))
       router.push(target)
+    }
+  }
+
+  async function sendDirectReply(item: UnifiedNotification) {
+    const key = `${item.source}:${item.id}`
+    const target = item.replyTarget
+    const content = (replyDrafts[key] || '').trim()
+    if (!target || !content || sendingReply) return
+
+    const request = target.kind === 'post'
+      ? { url: `/api/posts/${target.resourceId}/replies`, body: { content, parentId: target.parentId } }
+      : target.kind === 'daily-message'
+        ? { url: `/api/daily-messages/${target.resourceId}/comments`, body: { content, parentId: target.parentId } }
+        : target.kind === 'feedback'
+          ? { url: `/api/feedback/${target.resourceId}/replies`, body: { content, attachments: [] } }
+          : { url: '/api/profile-wall', body: { receiverUid: Number(target.resourceId), content, parentId: target.parentId } }
+
+    setSendingReply(key)
+    setReplyStatus((current) => ({ ...current, [key]: '' }))
+    try {
+      const response = await fetch(request.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request.body),
+      })
+      const data = await response.json().catch(() => ({})) as { message?: string }
+      if (!response.ok) throw new Error(data.message || '回复失败，请稍后重试')
+      await markRead(item)
+      setReplyDrafts((current) => ({ ...current, [key]: '' }))
+      setReplyingKey(null)
+      setReplyStatus((current) => ({ ...current, [key]: '回复成功' }))
+    } catch (error) {
+      setReplyStatus((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : '回复失败，请稍后重试',
+      }))
+    } finally {
+      setSendingReply(null)
     }
   }
 
@@ -155,6 +214,7 @@ export function NotificationsClient({
   }
 
   function renderNotification(item: UnifiedNotification) {
+    const itemKey = `${item.source}:${item.id}`
     const category = (item.category || 'system') as NotificationCategory
     const target = getNotificationTarget(item)
     const content = (
@@ -184,20 +244,56 @@ export function NotificationsClient({
             </div>
             <h2 className="mt-2 break-words text-base font-black text-slate-950 sm:text-lg">{item.title}</h2>
             {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
-            {target ? <span className="mt-3 inline-flex text-xs font-black text-brand-700">{category === 'reply' ? '查看并回复' : '查看详情'} →</span> : null}
+            {target ? <span className="mt-3 inline-flex text-xs font-black text-brand-700">查看详情 →</span> : null}
           </div>
         </div>
       </article>
     )
 
     return (
-      <div key={`${item.source}:${item.id}`} id={`notification-${item.id}`} className="relative scroll-mt-20">
+      <div key={itemKey} id={`notification-${item.id}`} className="relative scroll-mt-20">
         {target ? (
           <Link href={target} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
         ) : (
           <div className="min-h-12 w-full cursor-default text-left" aria-disabled="true">{content}</div>
         )}
         <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600">清除</button>
+        {item.replyTarget && !item.replyDisabledReason ? (
+          <button
+            type="button"
+            onClick={() => setReplyingKey((current) => current === itemKey ? null : itemKey)}
+            className="absolute right-3 top-12 z-10 min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700"
+          >
+            直接回复
+          </button>
+        ) : null}
+        {item.replyDisabledReason ? <p className="border border-t-0 border-sky-100 bg-white px-4 py-3 text-sm font-black text-slate-500">{item.replyDisabledReason}</p> : null}
+        {replyingKey === itemKey && item.replyTarget ? (
+          <div className="border border-t-0 border-sky-100 bg-white p-4">
+            <label htmlFor={`notification-reply-${item.id}`} className="text-xs font-black text-brand-700">
+              回复 @{item.actorName || '对方'}
+            </label>
+            <textarea
+              id={`notification-reply-${item.id}`}
+              value={replyDrafts[itemKey] || ''}
+              maxLength={item.replyTarget.kind === 'daily-message' ? 300 : item.replyTarget.kind === 'profile-wall' ? 500 : 2000}
+              onChange={(event) => setReplyDrafts((current) => ({ ...current, [itemKey]: event.target.value }))}
+              className="mt-2 min-h-20 w-full resize-y rounded-sm border border-sky-100 bg-white px-3 py-2 text-sm font-bold outline-none"
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setReplyingKey(null)} className="min-h-10 rounded-sm border border-sky-100 px-4 text-sm font-black text-slate-600">取消</button>
+              <button
+                type="button"
+                disabled={sendingReply === itemKey || !(replyDrafts[itemKey] || '').trim()}
+                onClick={() => void sendDirectReply(item)}
+                className="min-h-10 rounded-sm bg-brand-950 px-4 text-sm font-black text-white disabled:opacity-50"
+              >
+                {sendingReply === itemKey ? '发送中…' : '发送'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {replyStatus[itemKey] ? <p className={`px-4 py-2 text-sm font-black ${replyStatus[itemKey] === '回复成功' ? 'text-emerald-600' : 'text-red-600'}`}>{replyStatus[itemKey]}</p> : null}
       </div>
     )
   }

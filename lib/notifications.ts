@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 import type { SystemNotificationType } from '@prisma/client'
+import { parseNotificationReplyTarget, type NotificationReplyTarget } from '@/lib/notification-target'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
@@ -59,6 +60,8 @@ export type UnifiedNotification = {
   read: boolean
   createdAt: Date
   readAt: Date | null
+  replyTarget: NotificationReplyTarget | null
+  replyDisabledReason: string | null
 }
 
 export type UnreadSummary = {
@@ -180,6 +183,14 @@ export async function listUnifiedNotifications(userId: string, options: { unread
       read: item.isRead,
       createdAt: item.createdAt,
       readAt: item.readAt,
+      replyTarget: parseNotificationReplyTarget({
+        id: item.id,
+        source: 'personal',
+        type: item.type,
+        link: item.link,
+        targetUrl: item.link,
+      }),
+      replyDisabledReason: null,
     })),
     ...system.map((item) => {
       const targetUrl = item.buttonUrl || item.link
@@ -202,13 +213,61 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         read: isRead,
         createdAt: item.publishAt || item.createdAt,
         readAt: item.reads[0]?.readAt || null,
+        replyTarget: null,
+        replyDisabledReason: null,
       }
     }),
   ]
 
-  return merged
+  const visible = merged
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .slice(0, limit)
+
+  const targets = visible.flatMap((item) => item.replyTarget ? [item.replyTarget] : [])
+  const postTargets = targets.filter((target) => target.kind === 'post')
+  const dailyTargets = targets.filter((target) => target.kind === 'daily-message')
+  const feedbackTargets = targets.filter((target) => target.kind === 'feedback')
+  const wallTargets = targets.filter((target) => target.kind === 'profile-wall')
+  const [postReplies, dailyComments, feedbacks, wallMessages] = await Promise.all([
+    postTargets.length ? prisma.reply.findMany({
+      where: { id: { in: postTargets.map((target) => target.parentId) }, isDeleted: false },
+      select: { id: true, postId: true },
+    }) : [],
+    dailyTargets.length ? prisma.dailyMessageComment.findMany({
+      where: { id: { in: dailyTargets.map((target) => target.parentId) }, isDeleted: false, message: { isDeleted: false } },
+      select: { id: true, messageId: true },
+    }) : [],
+    feedbackTargets.length ? prisma.feedback.findMany({
+      where: { id: { in: feedbackTargets.map((target) => target.resourceId) }, userId },
+      select: { id: true, status: true },
+    }) : [],
+    wallTargets.length ? prisma.profileWallMessage.findMany({
+      where: { id: { in: wallTargets.map((target) => target.parentId) }, deletedAt: null },
+      select: { id: true, receiver: { select: { uid: true } } },
+    }) : [],
+  ])
+
+  return visible.map((item) => {
+    const target = item.replyTarget
+    if (!target) return item
+    if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) {
+      return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
+    }
+    if (target.kind === 'daily-message' && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId)) {
+      return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
+    }
+    if (target.kind === 'feedback') {
+      const feedback = feedbacks.find((row) => row.id === target.resourceId)
+      if (!feedback) return { ...item, replyDisabledReason: '该内容已被删除或无法查看，或你没有查看权限' }
+      if (feedback.status === 'RESOLVED' || feedback.status === 'CLOSED') {
+        return { ...item, replyDisabledReason: '该反馈已关闭，无法回复' }
+      }
+    }
+    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.receiver.uid) === target.resourceId)) {
+      return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
+    }
+    return item
+  })
 }
 
 export async function listPopupSystemNotifications(userId: string, limit = 5) {
@@ -256,6 +315,8 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       read: false,
       createdAt: item.publishAt || item.createdAt,
       readAt: null,
+      replyTarget: null,
+      replyDisabledReason: null,
     } satisfies UnifiedNotification
   })
 }

@@ -44,11 +44,7 @@ export async function GET(request: Request) {
 
   const canView = await canViewWall(viewer?.id || null, receiver)
   if (!canView) {
-    return NextResponse.json({
-      messages: [],
-      visibility: receiver.profile?.wallVisibility || 'PUBLIC',
-      canPost: false,
-    })
+    return NextResponse.json({ message: '你没有权限查看该留言墙' }, { status: 403 })
   }
 
   const rows = await prisma.profileWallMessage.findMany({
@@ -131,28 +127,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '留言墙暂未开放' }, { status: 403 })
   }
 
+  let parentMessage: { id: string; senderId: string; parentId: string | null } | null = null
   if (parentId) {
-    const parent = await prisma.profileWallMessage.findFirst({
+    parentMessage = await prisma.profileWallMessage.findFirst({
       where: { id: parentId, receiverId: receiver.id, deletedAt: null },
-      select: { id: true },
+      select: { id: true, senderId: true, parentId: true },
     })
-    if (!parent) return NextResponse.json({ message: '要回复的留言不存在' }, { status: 404 })
+    if (!parentMessage) return NextResponse.json({ message: '要回复的留言不存在' }, { status: 404 })
   }
 
   const message = await prisma.$transaction(async (tx) => {
+    const threadParentId = parentMessage?.parentId || parentMessage?.id || null
     const created = await tx.profileWallMessage.create({
-      data: { senderId: viewer.id, receiverId: receiver.id, parentId, content },
+      data: { senderId: viewer.id, receiverId: receiver.id, parentId: threadParentId, content },
       select: { id: true },
     })
-    if (receiver.id !== viewer.id) {
+    const recipientId = parentMessage?.senderId || receiver.id
+    if (recipientId !== viewer.id) {
       await tx.notification.create({
         data: {
-          recipientId: receiver.id,
+          recipientId,
           actorId: viewer.id,
           type: 'MESSAGE',
-          title: '你的留言墙有新留言',
-          content: `${viewer.nickname} 给你留言了`,
-          link: `/user/${String(receiver.uid).padStart(5, '0')}/wall`,
+          title: parentMessage ? '有人回复了你的留言' : '你的留言墙有新留言',
+          content: parentMessage ? `${viewer.nickname} 回复了你的留言` : `${viewer.nickname} 给你留言了`,
+          link: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}`,
         },
       })
     }

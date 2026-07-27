@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
         type: 'ADMIN',
         title: '你的反馈收到回复',
         content: '管理员回复了你的反馈。',
-        link: `/feedback/${feedback.id}`,
+        link: `/feedback/${feedback.id}?focus=${reply.id}`,
         recipientId: feedback.userId,
         actorId: guard.user.id,
       },
