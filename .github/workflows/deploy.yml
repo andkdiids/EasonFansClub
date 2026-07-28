@@ -15,12 +15,22 @@ jobs:
   deploy:
     name: Deploy production
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
 
       - name: Checkout source
         uses: actions/checkout@v4
+
+
+      - name: Prepare deploy package
+        run: |
+          tar \
+          --exclude=node_modules \
+          --exclude=.next \
+          --exclude=.git \
+          --exclude=*.log \
+          -czf deploy.tar.gz .
 
 
       - name: Upload project
@@ -30,13 +40,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "."
+          source: "deploy.tar.gz"
           target: "/home/ubuntu/EasonFansClub"
-          exclude: |
-            node_modules
-            .next
-            .git
-            *.log
 
 
       - name: Build and restart
@@ -59,11 +64,12 @@ jobs:
 
             cd /home/ubuntu/EasonFansClub
 
+            tar -xzf deploy.tar.gz
+            rm deploy.tar.gz
 
             node -v
             pnpm -v
             pm2 -v
-
 
             pnpm install --frozen-lockfile
 
