@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR UPDATE`
+      await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
       const currentUser = await tx.user.findFirstOrThrow({
         where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         select: { points: true },
