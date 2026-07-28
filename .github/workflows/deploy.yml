@@ -26,11 +26,16 @@ jobs:
       - name: Prepare deploy package
         run: |
           tar \
-          --exclude=node_modules \
-          --exclude=.next \
-          --exclude=.git \
-          --exclude=*.log \
-          -czf deploy.tar.gz .
+            --warning=no-file-changed \
+            --ignore-failed-read \
+            --exclude=node_modules \
+            --exclude=.next \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude=deploy.tar.gz \
+            --exclude=*.log \
+            --exclude=*.tmp \
+            -czf deploy.tar.gz .
 
 
       - name: Upload project
@@ -63,6 +68,8 @@ jobs:
             export PATH="/home/ubuntu/.nvm/versions/node/v22.23.1/bin:$PATH"
 
             cd /home/ubuntu/EasonFansClub
+
+            find . -maxdepth 1 -type f ! -name ".env" -delete
 
             tar -xzf deploy.tar.gz
             rm deploy.tar.gz
