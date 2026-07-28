@@ -35,6 +35,26 @@ function PostLoadFallback() {
   )
 }
 
+function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR' }>) {
+  const title = reason === 'POST' ? '该帖子已被删除或无法查看' : '该帖子作者资料暂时无法查看'
+  const description = reason === 'POST'
+    ? '帖子可能已被删除、撤回或尚未公开。'
+    : '作者账号或公开资料当前不可用。'
+
+  return (
+    <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
+      <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post</p>
+        <h1 className="mt-3 text-3xl font-black text-brand-950">{title}</h1>
+        <p className="mt-3 text-sm font-bold leading-7 text-slate-500">{description}</p>
+        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+          返回 E院广场
+        </Link>
+      </section>
+    </main>
+  )
+}
+
 function loadPost(postId: string, userId?: string) {
   return prisma.post.findUnique({
     where: { id: postId },
@@ -150,6 +170,31 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     notFound()
   }
 
+  if (post.isDeleted || post.status !== 'PUBLISHED') {
+    console.info('[post:detail:unavailable]', {
+      postId,
+      reason: post.isDeleted ? 'POST_DELETED' : 'POST_NOT_PUBLISHED',
+      postStatus: post.status,
+      postIsDeleted: post.isDeleted,
+    })
+    return <PostUnavailableFallback reason="POST" />
+  }
+
+  if (post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile) {
+    console.warn('[post:detail:unavailable]', {
+      postId,
+      reason: post.User.isDeleted
+        ? 'AUTHOR_DELETED'
+        : post.User.status !== 'ACTIVE'
+          ? 'AUTHOR_INACTIVE'
+          : 'AUTHOR_PROFILE_MISSING',
+      authorStatus: post.User.status,
+      authorIsDeleted: post.User.isDeleted,
+      authorHasProfile: Boolean(post.User.Profile),
+    })
+    return <PostUnavailableFallback reason="AUTHOR" />
+  }
+
   if (focusId && !post.Reply.some((reply) => reply.id === focusId)) {
     const focusedReplies = await loadFocusedReplyChain(postId, focusId)
     const existingIds = new Set(post.Reply.map((reply) => reply.id))
@@ -162,11 +207,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       User: { ...reply.author, Profile: reply.author.profile },
       ReplyLike: [],
     })))
-  }
-
-  if (post.isDeleted || post.status !== 'PUBLISHED' || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile) {
-    console.warn('[post:detail:unavailable]', { postId, postStatus: post.status, authorStatus: post.User.status })
-    return <PostLoadFallback />
   }
 
   const liked = Array.isArray(post.Like) && post.Like.length > 0
