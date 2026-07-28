@@ -74,6 +74,27 @@ jobs:
 
             sudo install -d -m 755 /var/www/letsencrypt
 
+            active_config="/etc/nginx/sites-available/${PRODUCTION_DOMAIN}"
+            backup_dir="/etc/nginx/sites-disabled-by-production-entry"
+            sudo install -d -m 755 "${backup_dir}"
+
+            shopt -s nullglob
+            for enabled_config in /etc/nginx/sites-enabled/*; do
+              resolved_config="$(readlink -f "${enabled_config}")"
+              if [ "${resolved_config}" = "${active_config}" ]; then
+                continue
+              fi
+
+              if sudo grep -Eq \
+                "server_name[^;]*((^|[[:space:]])${PRODUCTION_DOMAIN}|www\\.${PRODUCTION_DOMAIN})([[:space:]]|;)" \
+                "${resolved_config}"; then
+                backup_name="$(basename "${enabled_config}").$(date +%Y%m%d%H%M%S)"
+                echo "Disabling duplicate domain config: ${enabled_config}"
+                sudo mv "${enabled_config}" "${backup_dir}/${backup_name}"
+              fi
+            done
+            shopt -u nullglob
+
             sudo tee "/etc/nginx/sites-available/${PRODUCTION_DOMAIN}" > /dev/null <<NGINX_HTTP
             server {
                 listen 80;
