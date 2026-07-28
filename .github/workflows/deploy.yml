@@ -31,7 +31,12 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "."
-          target: "/home/ubuntu/EasonFansClub"
+target: "/home/ubuntu/EasonFansClub"
+exclude: |
+  node_modules
+  .next
+  .git
+  *.log
 
 
       - name: Build and restart
@@ -41,7 +46,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          command_timeout: 30m
+          command_timeout: 60m
           script_stop: true
 
           script: |
