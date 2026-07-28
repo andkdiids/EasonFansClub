@@ -28,15 +28,15 @@ jobs:
           tar \
             --warning=no-file-changed \
             --ignore-failed-read \
-            --exclude=node_modules \
-            --exclude=.next \
-            --exclude=.git \
-            --exclude=.github \
-            --exclude=deploy.tar.gz \
-            --exclude=*.log \
-            --exclude=*.tmp \
-            --exclude=.env* \
-            --exclude=public/uploads \
+            --exclude='./node_modules' \
+            --exclude='./.next' \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./deploy.tar.gz' \
+            --exclude='./*.log' \
+            --exclude='./*.tmp' \
+            --exclude='./.env*' \
+            --exclude='./public/uploads' \
             -czf deploy.tar.gz .
 
 
