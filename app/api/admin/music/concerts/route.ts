@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   const concerts = await prisma.musicConcert.findMany({
     where,
     orderBy: [{ concertDate: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
-    include: { MusicTour: { select: { id: true, name: true } }, _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } } },
+    include: { MusicTour: { select: { id: true, name: true } }, _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true, UserMusicConcert: true } } },
     take: 200,
   })
   return NextResponse.json({
@@ -35,6 +35,7 @@ export async function GET(request: Request) {
       tour: MusicTour,
       setlistCount: _count.MusicConcertSetlistItem,
       highlightCount: _count.MusicConcertHighlight,
+      attendanceCount: _count.UserMusicConcert,
     })),
   })
 }

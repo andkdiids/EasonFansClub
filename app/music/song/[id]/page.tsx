@@ -4,6 +4,7 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicPlayer } from '@/components/music/MusicPlayer'
+import { PersonalSongHistory } from '@/components/music/live/PersonalSongHistory'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -47,6 +48,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
     </MusicDetailReveal>
 
     <div className="mt-8"><MusicPlayer title={song.title} artist={song.artist} coverUrl={coverUrl} sourceType={song.sourceType} /></div>
+    <PersonalSongHistory songId={song.id} />
 
     <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">LYRICS ARCHIVE</p><h2 className="mt-2 text-3xl font-black text-white">歌词</h2>

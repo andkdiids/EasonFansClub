@@ -49,6 +49,12 @@ export default async function PublicUserPage({ params }: PageProps) {
             Reply: true,
             Friendship_Friendship_userAIdToUser: true,
             Friendship_Friendship_userBIdToUser: true,
+            UserMusicConcert: {
+              where: {
+                isPublic: true,
+                MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
+              },
+            },
           },
         },
       },
@@ -134,6 +140,7 @@ export default async function PublicUserPage({ params }: PageProps) {
                 </div>
                 <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
                   {viewer ? <Link href={`/user/${formatUid(user.uid)}/wall`} className="rounded-xl border border-sky-100 bg-brand-700 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">去留言</Link> : null}
+                  {user._count.UserMusicConcert > 0 ? <Link href={`/user/${formatUid(user.uid)}/live`} className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">查看TA公开的现场记录</Link> : null}
                   {isSelf ? (
                     <Link href="/profile?edit=1" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
                       编辑个人资料

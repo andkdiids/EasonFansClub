@@ -103,6 +103,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       <Link href={`/user/${formatUid(profile.uid)}/wall`} className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-brand-800 shadow-sm transition hover:bg-sky-50">
         去留言
       </Link>
+      <Link href="/music/live/me" className="inline-flex h-11 items-center justify-center rounded-xl border border-brand-900 bg-brand-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
+        我的现场
+      </Link>
     </div>
   )
 

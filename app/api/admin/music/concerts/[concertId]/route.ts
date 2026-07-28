@@ -13,6 +13,7 @@ const concertInclude = {
     include: { MusicSong: { select: { id: true, title: true, releaseYear: true, MusicAlbum: { select: { name: true } } } } },
   },
   MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }] },
+  _count: { select: { UserMusicConcert: true } },
 }
 
 export async function GET(_request: Request, { params }: Context) {
@@ -83,6 +84,17 @@ export async function DELETE(_request: Request, { params }: Context) {
   const guard = await requireAdmin('music_manage')
   if (!guard.user) return guard.response
   const { concertId } = await params
+  const concert = await prisma.musicConcert.findUnique({
+    where: { id: concertId },
+    select: { _count: { select: { UserMusicConcert: true } } },
+  })
+  if (!concert) return NextResponse.json({ message: '演唱会场次不存在' }, { status: 404 })
+  if (concert._count.UserMusicConcert > 0) {
+    return NextResponse.json({
+      message: `该场次已有 ${concert._count.UserMusicConcert} 条用户观演记录，不能直接删除。请先确认是否仅转为草稿。`,
+      attendanceCount: concert._count.UserMusicConcert,
+    }, { status: 409 })
+  }
   try {
     await prisma.musicConcert.delete({ where: { id: concertId } })
     return NextResponse.json({ ok: true, message: '场次及其歌单、特别时刻已删除' })

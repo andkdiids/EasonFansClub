@@ -1161,6 +1161,7 @@ model MusicConcert {
   MusicTour               MusicTour                 @relation(fields: [tourId], references: [id], onDelete: Restrict)
   MusicConcertSetlistItem MusicConcertSetlistItem[]
   MusicConcertHighlight   MusicConcertHighlight[]
+  UserMusicConcert        UserMusicConcert[]
 
   @@index([tourId])
   @@index([concertDate])
@@ -1168,6 +1169,26 @@ model MusicConcert {
   @@index([status])
   @@index([tourId, concertDate])
   @@index([status, concertDate, createdAt])
+}
+
+model UserMusicConcert {
+  id           String       @id @default(cuid())
+  userId       String
+  concertId    String
+  seatInfo     String?
+  mood         String?
+  note         String?      @db.Text
+  isPublic     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicConcert MusicConcert @relation(fields: [concertId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, concertId])
+  @@index([userId])
+  @@index([concertId])
+  @@index([userId, createdAt])
+  @@index([concertId, isPublic])
 }
 
 model MusicConcertSetlistItem {
@@ -1825,6 +1846,7 @@ model User {
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
   UserSecurityQuestion                                   UserSecurityQuestion?
+  UserMusicConcert                                       UserMusicConcert[]
 
   @@index([createdAt])
   @@index([email])
