@@ -87,18 +87,44 @@ jobs:
             stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
             df -h "${APP_DIR}"
 
+      - name: Configure deployment SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${SERVER_SSH_KEY}" \
+            | tr -d '\r' \
+            > "${RUNNER_TEMP}/easonfansclub_deploy_key"
+          chmod 600 "${RUNNER_TEMP}/easonfansclub_deploy_key"
+
+          ssh-keyscan \
+            -p "${SERVER_PORT}" \
+            -H "${SERVER_HOST}" \
+            >> "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/known_hosts"
+
       - name: Upload deploy package
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          source: ".deploy/${{ env.PACKAGE_NAME }},.deploy/${{ env.PACKAGE_NAME }}.sha256"
-          target: "${{ env.APP_DIR }}/.deploy-incoming"
-          strip_components: 1
-          overwrite: true
-          command_timeout: 5m
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -euo pipefail
+
+          scp \
+            -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
+            -P "${SERVER_PORT}" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            ".deploy/${PACKAGE_NAME}" \
+            ".deploy/${PACKAGE_NAME}.sha256" \
+            "${SERVER_USER}@${SERVER_HOST}:${APP_DIR}/.deploy-incoming/"
 
       - name: Install, migrate, build, and restart
         uses: appleboy/ssh-action@v1
