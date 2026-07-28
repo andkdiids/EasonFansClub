@@ -20,7 +20,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
 
       <div className={`border-t border-sky-100 ${compact ? 'p-3' : 'p-4 sm:p-5'}`}>
         <h2 className="text-lg font-black text-brand-950 sm:text-xl">🚑 E院成长体系</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
           <section className="rounded-2xl border border-sky-100 bg-white/85 p-4">
             <h3 className="font-black text-brand-800">【经验值 EXP】</h3>
             <p className="mt-2 text-sm font-bold leading-6 text-slate-700">
@@ -52,7 +52,11 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
               <li>周边活动</li>
             </ul>
             <p className="mt-2 text-sm font-bold leading-6 text-slate-700">部分活动可能需要消耗一定积分。</p>
-            <p className="mt-3 text-xs font-black text-slate-500">积分获取方式</p>
+          </section>
+
+          <section className="rounded-2xl border border-sky-100 bg-white/85 p-4">
+            <h3 className="font-black text-brand-800">【积分获取方式】</h3>
+            <p className="mt-2 text-xs font-black text-slate-500">积分获取方式</p>
             <ul className="mt-1 list-disc space-y-1 pl-5 text-sm font-bold leading-6 text-slate-700">
               <li>每日挂号</li>
               <li>社区互动</li>

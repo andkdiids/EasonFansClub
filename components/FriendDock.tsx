@@ -81,7 +81,7 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
   return (
     <div className="friend-dock">
       {open ? (
-        <section className="friend-dock-panel" aria-label="好友与私信">
+        <section className={`friend-dock-panel ${chatFriend ? 'is-chat' : 'is-list'}`} aria-label="好友与私信">
           <header className="flex min-h-12 items-center justify-between border-b border-sky-100 px-3">
             <strong>{chatFriend ? `与 ${chatFriend.profile?.displayName || chatFriend.nickname} 私信` : '好友'}</strong>
             <div className="flex gap-2">
@@ -103,13 +103,13 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
           ) : (
             <>
               <div className="p-3"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索好友" className="h-10 w-full border border-sky-100 px-3 text-sm outline-none" /></div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+              <div className="friend-dock-list min-h-0 px-3 pb-3">
                 {friends.map((friend) => {
                   const name = friend.profile?.displayName || friend.nickname
                   const avatar = publicImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
                   return <button key={friend.id} type="button" onClick={() => void openChat(friend)} className="flex min-h-14 w-full items-center gap-3 border-b border-sky-100 text-left">
                     <span className="grid h-9 w-9 place-items-center overflow-hidden bg-sky-50"><SafeAvatar src={avatar} name={name} className="h-full w-full" /></span>
-                    <span><strong className="block text-sm">{name}</strong><small className="text-slate-500">UID {formatUid(friend.uid)} · Lv.{friend.level} · {friend.isOnline ? '在线' : '离线'}</small></span>
+                    <span className="min-w-0"><strong className="block truncate text-sm">{name}</strong><small className="block truncate text-slate-500">UID {formatUid(friend.uid)} · Lv.{friend.level}</small></span>
                   </button>
                 })}
                 {!friends.length ? <p className="p-4 text-center text-sm font-bold text-slate-500">暂无好友</p> : null}
