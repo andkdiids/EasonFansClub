@@ -68,7 +68,8 @@ test('PNG 封面自动转换为 WebP 且不放大小图', async () => {
 test('封面 API 使用 music-cover Bucket、固定 WebP 路径和 Supabase Storage', () => {
   const route = readFileSync('app/api/admin/music/covers/route.ts', 'utf8')
   assert.match(route, /SUPABASE_MUSIC_BUCKET \|\| 'music-cover'/)
-  assert.match(route, /music-cover\/\$\{entityType === 'album' \? 'albums' : 'songs'\}\/\$\{entityId\}\/cover\.webp/)
+  assert.match(route, /const folder = entityType === 'album' \? 'albums'[\s\S]*'tours' : 'concerts'/)
+  assert.match(route, /music-cover\/\$\{folder\}\/\$\{entityId\}\/cover\.webp/)
   assert.match(route, /'Content-Type': 'image\/webp'/)
   assert.match(route, /'x-upsert': 'true'/)
   assert.match(route, /musicAlbum\.update/)

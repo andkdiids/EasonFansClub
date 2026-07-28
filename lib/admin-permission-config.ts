@@ -41,6 +41,8 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/music/songs': 'music_manage',
   '/admin/music/singles': 'music_manage',
   '/admin/music/live': 'music_manage',
+  '/admin/music/tours': 'music_manage',
+  '/admin/music/concerts': 'music_manage',
   '/admin/entertainment/lyrics': 'entertainment_manage',
   '/admin/entertainment/guess-song': 'entertainment_manage',
   '/admin/feedback': 'feedback_manage',

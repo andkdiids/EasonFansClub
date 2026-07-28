@@ -5,10 +5,10 @@ import { sanitizeText } from '@/lib/security'
 
 export async function GET(request: Request) {
   const query = sanitizeText(new URL(request.url).searchParams.get('q'), 100)
-  if (!query) return NextResponse.json({ albums: [], songs: [] })
+  if (!query) return NextResponse.json({ albums: [], songs: [], tours: [], concerts: [] })
   const year = Number(query)
   const yearFilter = Number.isInteger(year) && year >= 1900 && year <= 2100 ? { releaseYear: year } : null
-  const [albums, songs] = await Promise.all([
+  const [albums, songs, tours, concerts] = await Promise.all([
     prisma.musicAlbum.findMany({
       where: { status: 'PUBLISHED', OR: [{ name: { contains: query } }, { artist: { contains: query } }, { description: { contains: query } }, { story: { contains: query } }, ...(yearFilter ? [yearFilter] : [])] },
       orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }],
@@ -36,6 +36,22 @@ export async function GET(request: Request) {
       take: 30,
       select: { id: true, title: true, artist: true, releaseYear: true, lyricist: true, composer: true, arranger: true, lyrics: true, MusicAlbum: { select: { name: true, artist: true } } },
     }),
+    prisma.musicTour.findMany({
+      where: { status: 'PUBLISHED', OR: [{ name: { contains: query } }, { subtitle: { contains: query } }, { description: { contains: query } }] },
+      orderBy: [{ sortOrder: 'asc' }, { startDate: 'desc' }, { createdAt: 'asc' }],
+      take: 12,
+      select: { id: true, name: true, subtitle: true, startDate: true, endDate: true, _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } } },
+    }),
+    prisma.musicConcert.findMany({
+      where: {
+        status: 'PUBLISHED',
+        MusicTour: { status: 'PUBLISHED' },
+        OR: [{ title: { contains: query } }, { city: { contains: query } }, { countryOrRegion: { contains: query } }, { venue: { contains: query } }, { sessionNumber: { contains: query } }, { description: { contains: query } }, { MusicTour: { name: { contains: query } } }],
+      },
+      orderBy: [{ concertDate: 'desc' }, { createdAt: 'desc' }],
+      take: 20,
+      select: { id: true, title: true, concertDate: true, city: true, venue: true, MusicTour: { select: { id: true, name: true } } },
+    }),
   ])
   return NextResponse.json({
     query,
@@ -46,5 +62,7 @@ export async function GET(request: Request) {
       album: MusicAlbum,
       lyricSnippet: buildMusicLyricSnippet(lyrics, query),
     })),
+    tours: tours.map(({ _count, ...tour }) => ({ ...tour, type: 'tour' as const, concertCount: _count.MusicConcert })),
+    concerts: concerts.map(({ MusicTour, ...concert }) => ({ ...concert, type: 'concert' as const, tour: MusicTour })),
   })
 }
