@@ -52,7 +52,10 @@ jobs:
           git archive \
             --format=tar.gz \
             --output=".deploy/${PACKAGE_NAME}" \
-            "${GITHUB_SHA}"
+            "${GITHUB_SHA}" \
+            -- \
+            . \
+            ":(exclude)scripts/database-migration/.generated"
           test -s ".deploy/${PACKAGE_NAME}"
           tar -tzf ".deploy/${PACKAGE_NAME}" > /dev/null
           (
