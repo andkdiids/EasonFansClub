@@ -31,12 +31,12 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "."
-target: "/home/ubuntu/EasonFansClub"
-exclude: |
-  node_modules
-  .next
-  .git
-  *.log
+          target: "/home/ubuntu/EasonFansClub"
+          exclude: |
+            node_modules
+            .next
+            .git
+            *.log
 
 
       - name: Build and restart
