@@ -6,66 +6,196 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: production-deploy
   cancel-in-progress: true
 
+env:
+  APP_DIR: /home/${{ secrets.SERVER_USER }}/EasonFansClub
+  APP_PORT: "3000"
+  PACKAGE_NAME: easonfansclub-${{ github.sha }}.tar.gz
 
 jobs:
   deploy:
     name: Deploy production
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
+      - name: Validate deployment secrets
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          for secret_name in SERVER_HOST SERVER_USER SERVER_PORT SERVER_SSH_KEY; do
+            if [ -z "${!secret_name:-}" ]; then
+              echo "::error::Required repository secret ${secret_name} is missing or empty."
+              exit 1
+            fi
+          done
 
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Prepare deploy package
+        run: |
+          set -euo pipefail
 
-      - name: Upload project
-        uses: appleboy/scp-action@v0.1.7
+          mkdir -p .deploy
+          git archive \
+            --format=tar.gz \
+            --output=".deploy/${PACKAGE_NAME}" \
+            "${GITHUB_SHA}"
+          test -s ".deploy/${PACKAGE_NAME}"
+          tar -tzf ".deploy/${PACKAGE_NAME}" > /dev/null
+          (
+            cd .deploy
+            sha256sum "${PACKAGE_NAME}" > "${PACKAGE_NAME}.sha256"
+          )
+
+          echo "Package size:"
+          du -h ".deploy/${PACKAGE_NAME}"
+
+      - name: Check server connection and directory permissions
+        uses: appleboy/ssh-action@v1
+        env:
+          APP_DIR: ${{ env.APP_DIR }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "."
-          target: "/home/ubuntu/EasonFansClub"
-
-
-      - name: Build and restart
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          command_timeout: 30m
-          script_stop: true
-
+          envs: APP_DIR
+          command_timeout: 2m
           script: |
             set -euo pipefail
 
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            mkdir -p "${APP_DIR}/.deploy-incoming"
+            test -d "${APP_DIR}"
+            test -w "${APP_DIR}"
+            test -w "${APP_DIR}/.deploy-incoming"
 
-            export PATH="/home/ubuntu/.nvm/versions/node/v22.23.1/bin:$PATH"
+            echo "Deploy user: $(id -un)"
+            echo "Application directory: ${APP_DIR}"
+            stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
+            df -h "${APP_DIR}"
 
-            cd /home/ubuntu/EasonFansClub
+      - name: Upload deploy package
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: ".deploy/${{ env.PACKAGE_NAME }},.deploy/${{ env.PACKAGE_NAME }}.sha256"
+          target: "${{ env.APP_DIR }}/.deploy-incoming"
+          strip_components: 1
+          overwrite: true
+          command_timeout: 5m
 
+      - name: Install, migrate, build, and restart
+        uses: appleboy/ssh-action@v1
+        env:
+          APP_DIR: ${{ env.APP_DIR }}
+          APP_PORT: ${{ env.APP_PORT }}
+          PACKAGE_NAME: ${{ env.PACKAGE_NAME }}
+          DEPLOY_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: APP_DIR,APP_PORT,PACKAGE_NAME,DEPLOY_SHA
+          command_timeout: 35m
+          script: |
+            set -euo pipefail
+
+            export NVM_DIR="${HOME}/.nvm"
+            if [ -s "${NVM_DIR}/nvm.sh" ]; then
+              . "${NVM_DIR}/nvm.sh"
+            fi
+
+            command -v node
+            command -v pnpm
+            command -v pm2
+
+            incoming_dir="${APP_DIR}/.deploy-incoming"
+            cd "${incoming_dir}"
+            sha256sum -c "${PACKAGE_NAME}.sha256"
+
+            cd "${APP_DIR}"
+            tar -xzf "${incoming_dir}/${PACKAGE_NAME}"
+            printf '%s\n' "${DEPLOY_SHA}" > .deployed-sha
+
+            test -f .env
+            test -f package.json
+            test -f pnpm-lock.yaml
 
             node -v
             pnpm -v
             pm2 -v
 
-
             pnpm install --frozen-lockfile
-
+            test -d node_modules
             pnpm prisma generate
-
             pnpm prisma migrate deploy
-
             pnpm build
-
             pm2 restart easonfansclub --update-env
+
+            rm -f "${incoming_dir:?}/${PACKAGE_NAME}" \
+              "${incoming_dir:?}/${PACKAGE_NAME}.sha256"
+
+            for attempt in $(seq 1 10); do
+              if curl --fail --silent --show-error \
+                --max-time 10 \
+                "http://127.0.0.1:${APP_PORT}/login" > /dev/null; then
+                break
+              fi
+
+              if [ "${attempt}" -eq 10 ]; then
+                echo "Application health check failed after ${attempt} attempts."
+                pm2 logs easonfansclub --lines 80 --nostream
+                exit 1
+              fi
+
+              sleep 3
+            done
+
+            test "$(cat .deployed-sha)" = "${DEPLOY_SHA}"
+            pm2 describe easonfansclub
+            ss -ltn | grep -E ":${APP_PORT}[[:space:]]"
+            echo "Deployment health check passed for ${DEPLOY_SHA}."
+
+      - name: Verify public website
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          set -euo pipefail
+
+          for public_url in \
+            "https://${SERVER_HOST}/login" \
+            "http://${SERVER_HOST}/login"; do
+            if curl --insecure \
+              --fail \
+              --location \
+              --silent \
+              --show-error \
+              --retry 5 \
+              --retry-delay 3 \
+              --connect-timeout 10 \
+              --max-time 20 \
+              "${public_url}" > /dev/null; then
+              echo "Public website health check passed: ${public_url}"
+              exit 0
+            fi
+          done
+
+          echo "::error::The public website did not respond successfully over HTTPS or HTTP."
+          exit 1
