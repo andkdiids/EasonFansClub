@@ -23,17 +23,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare deploy package
-        run: |
-          tar -czf deploy.tar.gz \
-            --exclude=node_modules \
-            --exclude=.next \
-            --exclude=.git \
-            --exclude=.github \
-            --exclude=public/uploads \
-            --exclude="*.log" \
-            --exclude="*.tmp" \
-            --exclude="*.env*" \
-            .
+       run: |
+          tar \
+            --warning=no-file-changed \
+            --ignore-failed-read \
+            --exclude='./node_modules' \
+            --exclude='./.next' \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./deploy.tar.gz' \
+            --exclude='./*.log' \
+            --exclude='./*.tmp' \
+            --exclude='./.env*' \
+            --exclude='./public/uploads' \
+            -czf /tmp/deploy.tar.gz .
+
+          cp /tmp/deploy.tar.gz deploy.tar.gz
+
           ls -lh deploy.tar.gz
 
       - name: Upload project
