@@ -1051,11 +1051,14 @@ model MusicAlbum {
   story        String?
   status       MusicPublicationStatus @default(DRAFT)
   displayOrder Int                    @default(0)
+  isFeatured   Boolean                @default(false)
+  featuredOrder Int?
   MusicSong    MusicSong[]
 
   @@unique([name, artist, releaseYear])
   @@index([releaseYear, createdAt])
   @@index([status, displayOrder, releaseYear])
+  @@index([status, isFeatured, featuredOrder, createdAt])
 }
 
 model MusicFavorite {

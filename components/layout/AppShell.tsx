@@ -16,6 +16,7 @@ const shelllessPrefixes = ['/login', '/register', '/forgot-password', '/welcome'
 
 export function AppShell({ children, user, growth, logoUrl, unreadCount, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionUser | null; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canManageLayout: boolean; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
+  const isMusicRoute = pathname === '/music' || pathname.startsWith('/music/')
   const [currentUnreadCount, setCurrentUnreadCount] = useState(unreadCount)
 
   useEffect(() => setCurrentUnreadCount(unreadCount), [unreadCount])
@@ -44,7 +45,7 @@ export function AppShell({ children, user, growth, logoUrl, unreadCount, canMana
 
   if (!user || shelllessPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return children
 
-  return <div className="app-shell">
+  return <div className="app-shell" data-music-route={isMusicRoute || undefined}>
     <Sidebar user={user} growth={growth} logoUrl={logoUrl} unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} />
     <div className="app-main-area">
       <Topbar user={user} logoUrl={logoUrl} unreadCount={currentUnreadCount} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin} />
@@ -52,7 +53,7 @@ export function AppShell({ children, user, growth, logoUrl, unreadCount, canMana
       <footer className="site-footer-info"><IcpRecord /></footer>
       <AdminLayoutQuickLink enabled={canManageLayout} />
     </div>
-    <MobileNavigation unreadCount={currentUnreadCount} />
+    <MobileNavigation unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} />
     <BackToTopButton />
     <FriendDock currentUserId={user.id} />
   </div>

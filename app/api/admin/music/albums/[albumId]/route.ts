@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { optionalMusicText, parseMusicYear } from '@/lib/music'
+import { optionalMusicText, parseMusicFeatured, parseMusicFeaturedOrder, parseMusicYear } from '@/lib/music'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -40,6 +40,8 @@ export async function PATCH(request: Request, { params }: Context) {
   const releaseDate = parseReleaseDate(body?.releaseDate)
   const requestedStatus = body?.status === 'PUBLISHED' || body?.status === 'published' ? 'PUBLISHED' : 'DRAFT'
   const displayOrder = Number.isInteger(Number(body?.displayOrder)) ? Math.max(0, Number(body.displayOrder)) : 0
+  const isFeatured = parseMusicFeatured(body?.isFeatured)
+  const featuredOrder = parseMusicFeaturedOrder(body?.featuredOrder, isFeatured)
   if (!name) return NextResponse.json({ message: '请填写专辑名称' }, { status: 400 })
   if (!releaseYear) return NextResponse.json({ message: '请填写有效发行年份' }, { status: 400 })
   if (releaseDate === undefined) return NextResponse.json({ message: '请填写有效发行日期' }, { status: 400 })
@@ -58,6 +60,8 @@ export async function PATCH(request: Request, { params }: Context) {
         description: optionalMusicText(body?.description, 10000),
         story: optionalMusicText(body?.story, 20000),
         displayOrder,
+        isFeatured,
+        featuredOrder,
         status: requestedStatus,
       },
       include: { MusicSong: { orderBy: { trackNumber: 'asc' } } },
