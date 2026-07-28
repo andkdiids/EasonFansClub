@@ -181,8 +181,6 @@ export async function POST(request: Request) {
     })
 
     const detailUrl = `/posts/${result.post.id}${result.rewardPoints ? `?reward=${result.rewardPoints}` : ''}`
-    console.info('[post:create:success]', { postId: result.post.id, detailUrl, userId: user.id, boardId: input.boardId })
-
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)
     })

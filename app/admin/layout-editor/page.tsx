@@ -22,8 +22,7 @@ function HeaderFallback() {
   )
 }
 
-async function optionalBootstrap<T>(label: string, task: () => Promise<T>, fallback: T, timeoutMs = 1200): Promise<T> {
-  const startedAt = Date.now()
+async function optionalBootstrap<T>(_label: string, task: () => Promise<T>, fallback: T, timeoutMs = 1200): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -34,7 +33,6 @@ async function optionalBootstrap<T>(label: string, task: () => Promise<T>, fallb
     ])
   } finally {
     if (timer) clearTimeout(timer)
-    console.info(`[bootstrap] ${label} ${Date.now() - startedAt}ms`)
   }
 }
 

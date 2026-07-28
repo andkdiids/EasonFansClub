@@ -17,13 +17,6 @@ function databaseUrlForPrismaClient() {
     if (url.protocol !== 'mysql:') {
       throw new Error(`[prisma] DATABASE_URL 必须指向 MySQL，当前协议为 ${url.protocol}`)
     }
-    console.info('[prisma.database]', {
-      protocol: url.protocol.replace(':', ''),
-      host: url.hostname,
-      port: url.port || '3306',
-      database: url.pathname.replace(/^\/+/, ''),
-      source: 'DATABASE_URL',
-    })
     if (wantsDriverAdapter) {
       console.warn('[prisma] 已忽略 PostgreSQL driver adapter 配置；当前应用使用 MySQL DATABASE_URL。')
     }

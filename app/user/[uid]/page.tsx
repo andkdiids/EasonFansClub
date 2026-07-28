@@ -18,15 +18,12 @@ type PageProps = { params: Promise<{ uid: string }> }
 
 export default async function PublicUserPage({ params }: PageProps) {
   const { uid } = await params
-  console.log('[public-user:ssr] start', uid)
   const numericUid = parseUidParam(uid)
   if (numericUid === null) notFound()
   if (numericUid <= 0) notFound()
 
   const viewer = await getCurrentUser()
   if (viewer?.uid === numericUid) redirect('/profile')
-  console.log('[public-user:ssr] viewer', viewer ? 'session' : 'anonymous')
-  console.log('[public-user:ssr] user-query:start')
   let user
   try {
     user = await withDbTimeout('User.findFirst publicUser.profile', prisma.user.findFirst({
@@ -67,8 +64,6 @@ export default async function PublicUserPage({ params }: PageProps) {
     }, error)
     throw error
   }
-  console.log('[public-user:ssr] user-query:done')
-
   if (!user || !user.Profile) notFound()
 
   const isSelf = false
@@ -77,7 +72,6 @@ export default async function PublicUserPage({ params }: PageProps) {
 
   if (viewer && !isSelf) {
     try {
-      console.log('[public-user:ssr] relationship-query:start')
       const [userAId, userBId] = normalizeFriendPair(viewer.id, user.id)
       friendship = await withDbTimeout('Friendship.findUnique publicUser.friendship', prisma.friendship.findUnique({
         where: { userAId_userBId: { userAId, userBId } },
@@ -93,7 +87,6 @@ export default async function PublicUserPage({ params }: PageProps) {
         },
         select: { senderId: true, receiverId: true },
       }), 2500)
-      console.log('[public-user:ssr] relationship-query:done')
     } catch (error) {
       console.error('[public-user:ssr] relationship-query:failed', {
         queries: [

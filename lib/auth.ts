@@ -69,8 +69,6 @@ export async function getSessionUserFromCookie() {
 export async function getCurrentUser() {
   const sessionUser = await getSessionUserFromCookie()
 
-  console.log('[DEBUG sessionUser]', sessionUser)
-
   if (!sessionUser) return null
 
   const now = Date.now()
@@ -108,9 +106,7 @@ export async function getCurrentUser() {
         8000,
       ),
     ).then((user) => {
-  console.log('[DEBUG prisma user]', user)
-
-  if (!user || !isCompleteActiveUser(user)) return null
+      if (!user || !isCompleteActiveUser(user)) return null
 
       return {
         id: user.id,

@@ -171,12 +171,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   }
 
   if (post.isDeleted || post.status !== 'PUBLISHED') {
-    console.info('[post:detail:unavailable]', {
-      postId,
-      reason: post.isDeleted ? 'POST_DELETED' : 'POST_NOT_PUBLISHED',
-      postStatus: post.status,
-      postIsDeleted: post.isDeleted,
-    })
     return <PostUnavailableFallback reason="POST" />
   }
 

@@ -33,8 +33,6 @@ export function ownerPrivateUserSelect() {
 export function isCompleteActiveUser(
   user: Pick<User, 'uid' | 'status' | 'isDeleted'> & { Profile?: unknown | null },
 ) {
-  console.log('[DEBUG isCompleteActiveUser input]', user)
-
   return Boolean(user.uid && user.status === 'ACTIVE' && !user.isDeleted && user.Profile)
 }
 
