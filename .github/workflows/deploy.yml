@@ -35,6 +35,8 @@ jobs:
             --exclude=deploy.tar.gz \
             --exclude=*.log \
             --exclude=*.tmp \
+            --exclude=.env* \
+            --exclude=public/uploads \
             -czf deploy.tar.gz .
 
 
