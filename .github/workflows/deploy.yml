@@ -23,22 +23,22 @@ jobs:
         uses: actions/checkout@v4
 
 
-      - name: Prepare deploy package
-        run: |
-          tar \
-            --warning=no-file-changed \
-            --ignore-failed-read \
-            --exclude='./node_modules' \
-            --exclude='./.next' \
-            --exclude='./.git' \
-            --exclude='./.github' \
-            --exclude='./deploy.tar.gz' \
-            --exclude='./*.log' \
-            --exclude='./*.tmp' \
-            --exclude='./.env*' \
-            --exclude='./public/uploads' \
-            -czf deploy.tar.gz .
-
+- name: Prepare deploy package
+  run: |
+    tar \
+      --warning=no-file-changed \
+      --ignore-failed-read \
+      --exclude=node_modules \
+      --exclude=.next \
+      --exclude=.git \
+      --exclude=.github \
+      --exclude=deploy.tar.gz \
+      --exclude=*.log \
+      --exclude=*.tmp \
+      --exclude=*.env* \
+      --exclude=public/uploads \
+      -czf deploy.tar.gz .
+    ls -lh deploy.tar.gz
 
       - name: Upload project
         uses: appleboy/scp-action@v0.1.7
@@ -48,7 +48,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "deploy.tar.gz"
-          target: "/home/ubuntu/EasonFansClub"
+          target: "/home/ubuntu/"
 
 
       - name: Build and restart
