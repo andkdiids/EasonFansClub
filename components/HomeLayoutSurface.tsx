@@ -21,7 +21,13 @@ const growthThresholds = [0, 1000, 3000, 7000, 12000, 18000, 25000]
 
 function growthSummary(experience: number) {
   const safe = Math.max(0, Math.floor(experience || 0))
-  const index = Math.max(0, growthThresholds.findLastIndex((value) => safe >= value))
+  const index = Math.max(
+  0,
+  growthThresholds.reduce(
+    (lastIndex, value, index) => (safe >= value ? index : lastIndex),
+    -1
+  )
+)
   const current = growthThresholds[index]
   const next = growthThresholds[index + 1] ?? null
   return { experience: safe, nextRequiredExp: next, progressPercent: next ? Math.min(100, Math.round(((safe - current) / (next - current)) * 100)) : 100 }
