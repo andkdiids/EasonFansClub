@@ -46,8 +46,8 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .prescription-points strong { color:var(--primary); font-size:30px; }
 .prescription-points small { color:var(--foreground-muted); font-size:10px; }
 .prescription-lyric { padding:26px 18px; }
-.prescription-lyric blockquote { margin:17px 0 0; color:var(--foreground); font-family:var(--font-serif,serif); font-size:20px; font-weight:700; line-height:1.75; }
-.prescription-lyric cite { display:block; margin-top:12px; color:var(--foreground-muted); font-size:12px; font-style:normal; }
+.prescription-lyric blockquote { max-width:720px; margin:17px auto 0; color:var(--foreground); font-family:var(--font-serif,serif); font-size:20px; font-weight:700; line-height:1.75; text-align:center; }
+.prescription-lyric cite { display:block; max-width:720px; margin:12px auto 0; color:var(--foreground-muted); font-size:12px; font-style:normal; text-align:right; }
 .prescription-lyric p { margin:16px 0 0; color:var(--foreground-muted); font-size:13px; }
 .prescription-card>footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 20px; border-top:1px solid var(--border); padding:13px 18px; color:var(--foreground-muted); font-size:10px; }
 :root[data-theme='midnight'] .prescription-card { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
@@ -185,7 +185,12 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
 .back-to-top-button svg { width:20px; height:20px; }
 .friend-dock { position:fixed; z-index:68; right:76px; bottom:24px; }
 .friend-dock-toggle { min-width:52px; height:44px; border:1px solid var(--border-strong); border-radius:2px; color:var(--foreground); background:var(--surface-elevated); font-size:12px; font-weight:900; }
-.friend-dock-panel { position:absolute; right:0; bottom:52px; display:flex; width:min(360px,calc(100vw - 24px)); height:min(560px,calc(100dvh - 100px)); flex-direction:column; overflow:hidden; border:1px solid var(--border-strong); border-radius:2px; color:var(--foreground); background:var(--surface-elevated); }
+.friend-dock-panel { position:absolute; right:0; bottom:52px; display:flex; width:min(360px,calc(100vw - 24px)); max-width:calc(100vw - 24px); flex-direction:column; overflow:hidden; border:1px solid var(--border-strong); border-radius:2px; color:var(--foreground); background:var(--surface-elevated); }
+.friend-dock-panel.is-chat { height:min(560px,calc(100dvh - 100px)); }
+.friend-dock-list { max-height:min(400px,calc(100dvh - 188px)); overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-color:var(--border-strong) transparent; scrollbar-width:thin; }
+.friend-dock-list::-webkit-scrollbar { width:7px; }
+.friend-dock-list::-webkit-scrollbar-track { background:transparent; }
+.friend-dock-list::-webkit-scrollbar-thumb { border:2px solid transparent; border-radius:999px; background:var(--border-strong); background-clip:padding-box; }
 .notification-focus-target { animation:notification-focus-pulse 2.6s ease-out; outline:2px solid var(--primary); outline-offset:2px; background-color:color-mix(in srgb,var(--primary),transparent 88%) !important; }
 @keyframes notification-focus-pulse { 0%,65% { outline-color:var(--primary); } 100% { outline-color:transparent; background-color:transparent; } }
 @media (prefers-reduced-motion:reduce) { .notification-focus-target { animation:none; } }
@@ -599,7 +604,9 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
   .app-layout-tools { right:8px; bottom:calc(var(--mobile-nav-offset) + 8px); }
   .back-to-top-button { right:12px; bottom:calc(var(--mobile-nav-offset) + 12px); }
   .friend-dock { right:68px; bottom:calc(var(--mobile-nav-offset) + 12px); }
-  .friend-dock-panel { position:fixed; right:0; bottom:var(--mobile-nav-offset); width:min(92vw,380px); height:calc(100dvh - var(--mobile-nav-offset) - 16px); }
+  .friend-dock-panel { position:fixed; right:8px; bottom:calc(var(--mobile-nav-offset) + 8px); width:min(92vw,380px); max-width:calc(100vw - 16px); }
+  .friend-dock-panel.is-chat { height:calc(100dvh - var(--mobile-nav-offset) - 24px); }
+  .friend-dock-list { max-height:min(400px,calc(100dvh - var(--mobile-nav-offset) - 152px)); }
 }
 
 @media (min-width:1024px) and (max-width:1180px) { .app-sidebar { width:184px; }.app-main-area { width:calc(100% - 184px); margin-left:184px; }.community-columns { grid-template-columns:1fr; }.community-right-column { grid-template-columns:1fr 1fr; } }
