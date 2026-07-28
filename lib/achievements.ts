@@ -34,15 +34,15 @@ export async function getUserAchievementStats(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
-      profile: true,
-      checkIns: { select: { checkinDateKey: true } },
+      Profile: true,
+      CheckIn: { select: { checkinDateKey: true } },
       _count: {
         select: {
-          posts: { where: { isDeleted: false } },
-          checkIns: true,
-          musicPlayRecords: true,
-          friendshipsA: true,
-          friendshipsB: true,
+          Post: { where: { isDeleted: false } },
+          CheckIn: true,
+          MusicPlayRecord: true,
+          Friendship_Friendship_userAIdToUser: true,
+          Friendship_Friendship_userBIdToUser: true,
         },
       },
     },
@@ -55,18 +55,18 @@ export async function getUserAchievementStats(userId: string) {
   })
   const activeDays = Math.max(0, Math.floor((Date.now() - user.createdAt.getTime()) / 86400000))
   // 连续挂号成就按签到记录重算,不读用户表上的连续天数快照
-  const checkinStreaks = calculateCheckinStreaks(user.checkIns.map((item) => item.checkinDateKey))
+  const checkinStreaks = calculateCheckinStreaks(user.CheckIn.map((item) => item.checkinDateKey))
 
   return {
     registered: 1,
-    profileCompleted: user.profile?.bio || user.profile?.avatarUrl || user.email || user.phone ? 1 : 0,
+    profileCompleted: user.Profile?.bio || user.Profile?.avatarUrl || user.email || user.phone ? 1 : 0,
     uidAssigned: user.uid ? 1 : 0,
     checkinStreak: checkinStreaks.currentStreak,
-    checkinTotal: user._count.checkIns,
-    postTotal: user._count.posts,
+    checkinTotal: user._count.CheckIn,
+    postTotal: user._count.Post,
     listenHours: Math.floor((listen._sum.durationSeconds || 0) / 3600),
-    playTotal: user._count.musicPlayRecords,
-    friendTotal: user._count.friendshipsA + user._count.friendshipsB,
+    playTotal: user._count.MusicPlayRecord,
+    friendTotal: user._count.Friendship_Friendship_userAIdToUser + user._count.Friendship_Friendship_userBIdToUser,
     activeDays,
   }
 }
@@ -133,8 +133,8 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
   }
 
   return prisma.userAchievement.findMany({
-    where: { userId, achievement: { isVisible: true } },
-    include: { achievement: true },
+    where: { userId, Achievement: { isVisible: true } },
+    include: { Achievement: true },
     orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
     take: 200,
   })

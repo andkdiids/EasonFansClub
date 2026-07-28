@@ -22,24 +22,30 @@ export async function GET(request: Request) {
     const [questions, musicSongs] = await Promise.all([
       prisma.guessSongQuestion.findMany({
         where: {
-          ...(query ? { songTitle: { contains: query, mode: 'insensitive' } } : {}),
+          ...(query ? { songTitle: { contains: query } } : {}),
           ...(difficulty ? { difficulty } : {}),
           ...(enabled === 'true' ? { enabled: true } : enabled === 'false' ? { enabled: false } : {}),
         },
         include: {
-          musicSong: { select: { id: true, title: true, album: { select: { name: true } } } },
-          audioVariants: { orderBy: { durationSeconds: 'asc' } },
+          MusicSong: { select: { id: true, title: true, MusicAlbum: { select: { name: true } } } },
+          GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } },
         },
         orderBy: { createdAt: 'desc' },
         take: 500,
       }),
       prisma.musicSong.findMany({
-        select: { id: true, title: true, album: { select: { name: true } } },
+        select: { id: true, title: true, MusicAlbum: { select: { name: true } } },
         orderBy: [{ title: 'asc' }],
         take: 1000,
       }),
     ])
-    return guessSongOk({ questions, musicSongs })
+    return guessSongOk({
+      questions: questions.map(({ GuessSongAudioVariant, ...question }) => ({
+        ...question,
+        audioVariants: GuessSongAudioVariant,
+      })),
+      musicSongs: musicSongs.map(({ MusicAlbum, ...song }) => ({ ...song, album: MusicAlbum })),
+    })
   } catch (error) {
     return handleGuessSongError(error, 'admin.questions.list')
   }
@@ -60,9 +66,10 @@ export async function POST(request: Request) {
     }
     const question = await prisma.guessSongQuestion.create({
       data: parsed.data,
-      include: { audioVariants: true, musicSong: true },
+      include: { GuessSongAudioVariant: true, MusicSong: true },
     })
-    return guessSongOk({ question }, 201)
+    const { GuessSongAudioVariant, ...questionData } = question
+    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } }, 201)
   } catch (error) {
     return handleGuessSongError(error, 'admin.questions.create')
   }

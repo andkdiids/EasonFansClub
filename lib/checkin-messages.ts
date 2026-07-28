@@ -122,37 +122,37 @@ async function getCheckInMessagesUncached({
       date: { gte: selectedDate, lt: nextDate },
       isDeleted: false,
       ...(userIds ? { userId: { in: userIds } } : {}),
-      user: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     orderBy: sort === 'hot'
       ? [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { likeCount: 'desc' }, { commentCount: 'desc' }, { createdAt: 'desc' }]
       : [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
     take: 30,
     include: {
-      user: {
+      User: {
         select: {
           uid: true,
           nickname: true,
           avatarUrl: true,
           level: true,
-          profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-      likes: { where: { userId: viewerId }, select: { id: true } },
-      favorites: { where: { userId: viewerId }, select: { id: true } },
-      comments: {
+      DailyMessageLike: { where: { userId: viewerId }, select: { id: true } },
+      DailyMessageFavorite: { where: { userId: viewerId }, select: { id: true } },
+      DailyMessageComment: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'asc' },
         take: 50,
         include: {
-          author: {
+          User: {
             select: {
               id: true,
               uid: true,
               nickname: true,
               avatarUrl: true,
               level: true,
-              profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, avatarUrl: true } },
             },
           },
         },
@@ -162,14 +162,24 @@ async function getCheckInMessagesUncached({
 
   return rows.map((item) => ({
     ...item,
+    author: {
+      ...item.User,
+      profile: item.User.Profile,
+    },
+    likes: item.DailyMessageLike,
+    favorites: item.DailyMessageFavorite,
     canDelete: viewerCanModerate || item.userId === viewerId,
     date: item.date.toISOString(),
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
     deletedAt: item.deletedAt?.toISOString() || null,
-    comments: item.comments.map((comment) => ({
+    comments: item.DailyMessageComment.map((comment) => ({
       ...comment,
-      canDelete: viewerCanModerate || comment.author.id === viewerId,
+      author: {
+        ...comment.User,
+        profile: comment.User.Profile,
+      },
+      canDelete: viewerCanModerate || comment.User.id === viewerId,
       createdAt: comment.createdAt.toISOString(),
       updatedAt: comment.updatedAt.toISOString(),
       deletedAt: comment.deletedAt?.toISOString() || null,

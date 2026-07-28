@@ -6,8 +6,8 @@ import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 async function getConversation(userId: string, conversationId: string) {
   return prisma.conversation.findFirst({
-    where: { id: conversationId, participants: { some: { userId, isDeleted: false } } },
-    select: { id: true, participants: { select: { userId: true } } },
+    where: { id: conversationId, ConversationParticipant: { some: { userId, isDeleted: false } } },
+    select: { id: true, ConversationParticipant: { select: { userId: true } } },
   })
 }
 
@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
   if (await containsSensitiveContent(content)) return NextResponse.json({ message: '消息包含违禁内容' }, { status: 400 })
   const conversation = await getConversation(user.id, conversationId)
   if (!conversation) return NextResponse.json({ message: '会话不存在或无权发送' }, { status: 404 })
-  const otherUserId = conversation.participants.find((participant) => participant.userId !== user.id)?.userId
+  const otherUserId = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)?.userId
   if (!otherUserId) return NextResponse.json({ message: '会话成员无效' }, { status: 400 })
   const [userAId, userBId] = normalizeFriendPair(user.id, otherUserId)
   const friendship = await prisma.friendship.findUnique({ where: { userAId_userBId: { userAId, userBId } }, select: { id: true } })

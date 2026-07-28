@@ -31,7 +31,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
       }),
     ])
     feedback.userUnread = false
-    feedback.replies = feedback.replies.map((reply) =>
+    feedback.FeedbackReply = feedback.FeedbackReply.map((reply) =>
       reply.authorRole === 'ADMIN' ? { ...reply, isReadByUser: true } : reply,
     )
   }

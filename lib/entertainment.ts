@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma'
 export const EMPTY_LYRIC_MESSAGE = '今日处方暂未开具，请等待管理员补充歌词库'
 
 const dailyDrawInclude = {
-  lyricPrescription: {
+  LyricPrescription: {
     select: {
       id: true,
       text: true,
@@ -51,7 +51,7 @@ function serializeDailyDraw(draw: DailyDrawWithLyric, totalPoints: number) {
         songTitle: draw.songTitle,
         albumTitle: draw.albumTitle,
       }
-    : draw.lyricPrescription
+    : draw.LyricPrescription
 
   return {
     id: draw.id,

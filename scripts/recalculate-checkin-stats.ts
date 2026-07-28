@@ -12,11 +12,11 @@ if (!all && !userId) throw new Error('请使用 --user-id <id> 或 --all 指定�
 async function main() {
   const users = await prisma.user.findMany({
     where: userId ? { id: userId } : { isDeleted: false },
-    select: { id: true, consecutiveDays: true, lastCheckInDate: true, checkIns: { select: { checkinDateKey: true }, orderBy: { checkinDateKey: 'asc' } } },
+    select: { id: true, consecutiveDays: true, lastCheckInDate: true, CheckIn: { select: { checkinDateKey: true }, orderBy: { checkinDateKey: 'asc' } } },
   })
   const changes = users.flatMap((user) => {
-    const stats = calculateCheckinStreaks(user.checkIns.map((item) => item.checkinDateKey))
-    const lastKey = user.checkIns.at(-1)?.checkinDateKey
+    const stats = calculateCheckinStreaks(user.CheckIn.map((item) => item.checkinDateKey))
+    const lastKey = user.CheckIn.at(-1)?.checkinDateKey
     const lastCheckInDate = lastKey ? parseBeijingDate(lastKey) : null
     if (stats.currentStreak === user.consecutiveDays && lastCheckInDate?.getTime() === user.lastCheckInDate?.getTime()) return []
     return [{ userId: user.id, before: user.consecutiveDays, after: stats.currentStreak, longestStreak: stats.longestStreak, totalDays: stats.totalDays, lastCheckInDate }]

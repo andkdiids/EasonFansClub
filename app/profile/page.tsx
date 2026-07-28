@@ -29,7 +29,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     profile = await withDbTimeout(
       'User.findFirst profile.user',
       prisma.user.findFirst({
-        where: { id: user.id, isDeleted: false, status: 'ACTIVE', profile: { isNot: null } },
+        where: { id: user.id, isDeleted: false, status: 'ACTIVE', Profile: { isNot: null } },
         select: {
           uid: true,
           nickname: true,
@@ -42,7 +42,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           phoneVerifiedAt: true,
           level: true,
           createdAt: true,
-          profile: true,
+          Profile: true,
         },
       }),
       3000,
@@ -57,23 +57,23 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     throw error
   }
 
-  if (!profile || !profile.profile) redirect('/login')
+  if (!profile || !profile.Profile) redirect('/login')
 
-  const displayName = profile.profile.displayName || profile.nickname
-  const avatar = publicImageUrl(profile.profile.avatarUrl || profile.avatarUrl)
+  const displayName = profile.Profile.displayName || profile.nickname
+  const avatar = publicImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   
-  const background = publicImageUrl(profile.profile.backgroundUrl || profile.backgroundUrl)
-  const bio = profile.profile.bio || profile.bio || ''
+  const background = publicImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
+  const bio = profile.Profile.bio || profile.bio || ''
   const layoutConfig = await getPublishedPageLayoutConfig('profile')
   const achievements = await prisma.userAchievement.findMany({
   where: {
     userId: user.id,
-    achievement: {
+    Achievement: {
       isVisible: true,
     },
   },
   include: {
-    achievement: true,
+    Achievement: true,
   },
   orderBy: [
     { unlockedAt: 'desc' },
@@ -90,7 +90,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     phone: profile.phone || '',
     emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
     phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
-    wallVisibility: profile.profile.wallVisibility || 'PUBLIC',
+    wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
   }
   const renderProfileActions = () => (
     <div className="flex flex-wrap items-center gap-3 md:justify-end">
@@ -124,7 +124,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           config={layoutConfig}
           modules={{
            'profile.achievements': (
-  <ProfileAchievementPreview records={achievements} />
+  <ProfileAchievementPreview records={achievements.map(({ Achievement, ...record }) => ({ ...record, achievement: Achievement }))} />
 ),
             'profile.recentMessages': (
   <section className="rounded-sm border border-sky-100 bg-white/88">

@@ -10,7 +10,7 @@ async function findPublicUserId(uidParam: string) {
   const uid = parseUidParam(uidParam)
   if (uid === null) return null
   return prisma.user.findFirst({
-    where: { uid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+    where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     select: { id: true },
   })
 }
@@ -39,44 +39,44 @@ export async function GET(request: Request, context: RouteContext) {
           likeCount: true,
           viewCount: true,
           createdAt: true,
-          board: { select: { name: true, slug: true } },
+          Board: { select: { name: true, slug: true } },
         },
       }),
       [],
     )
-    return NextResponse.json({ items: posts })
+    return NextResponse.json({ items: posts.map(({ Board, ...post }) => ({ ...post, board: Board })) })
   }
 
   if (moduleKey === 'replies') {
     const replies = await safeDb(
       'userModules.replies',
       prisma.reply.findMany({
-        where: { authorId: target.id, isDeleted: false, post: { isDeleted: false, status: 'PUBLISHED' } },
+        where: { authorId: target.id, isDeleted: false, Post: { isDeleted: false, status: 'PUBLISHED' } },
         orderBy: { createdAt: 'desc' },
         take: 10,
-        select: { id: true, content: true, createdAt: true, post: { select: { id: true, title: true } } },
+        select: { id: true, content: true, createdAt: true, Post: { select: { id: true, title: true } } },
       }),
       [],
     )
-    return NextResponse.json({ items: replies })
+    return NextResponse.json({ items: replies.map(({ Post, ...reply }) => ({ ...reply, post: Post })) })
   }
 
   if (moduleKey === 'achievements') {
     const achievements = await safeDb(
       'userModules.achievements',
       prisma.userAchievement.findMany({
-        where: { userId: target.id, unlocked: true, achievement: { isVisible: true } },
+        where: { userId: target.id, unlocked: true, Achievement: { isVisible: true } },
         orderBy: [{ unlockedAt: 'desc' }, { createdAt: 'desc' }],
         take: 12,
         select: {
           id: true,
           unlockedAt: true,
-          achievement: { select: { title: true, icon: true, rarity: true, category: true, description: true } },
+          Achievement: { select: { title: true, icon: true, rarity: true, category: true, description: true } },
         },
       }),
       [],
     )
-    return NextResponse.json({ items: achievements })
+    return NextResponse.json({ items: achievements.map(({ Achievement, ...item }) => ({ ...item, achievement: Achievement })) })
   }
 
   if (moduleKey === 'badges') {
@@ -86,24 +86,24 @@ export async function GET(request: Request, context: RouteContext) {
         where: { userId: target.id, isHidden: false },
         orderBy: { grantedAt: 'desc' },
         take: 12,
-        select: { id: true, grantedAt: true, badge: { select: { name: true, description: true, iconUrl: true } } },
+        select: { id: true, grantedAt: true, Badge: { select: { name: true, description: true, iconUrl: true } } },
       }),
       [],
     )
-    return NextResponse.json({ items: badges })
+    return NextResponse.json({ items: badges.map(({ Badge, ...item }) => ({ ...item, badge: Badge })) })
   }
 
   if (moduleKey === 'albums') {
     const albums = await safeDb(
       'userModules.albums',
       prisma.userAlbumCollection.findMany({
-        where: { userId: target.id, owned: true, album: { isVisible: true, type: 'ALBUM' } },
+        where: { userId: target.id, owned: true, CultureItem: { isVisible: true, type: 'ALBUM' } },
         take: 12,
-        select: { id: true, note: true, album: { select: { title: true, slug: true } } },
+        select: { id: true, note: true, CultureItem: { select: { title: true, slug: true } } },
       }),
       [],
     )
-    return NextResponse.json({ items: albums })
+    return NextResponse.json({ items: albums.map(({ CultureItem, ...item }) => ({ ...item, album: CultureItem })) })
   }
 
   if (moduleKey === 'favorites') {
@@ -113,26 +113,37 @@ export async function GET(request: Request, context: RouteContext) {
       prisma.postFavorite.findMany({
         where: {
           userId: target.id,
-          post: { isDeleted: false, status: 'PUBLISHED', author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
+          Post: { isDeleted: false, status: 'PUBLISHED', User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
         select: {
           id: true,
           createdAt: true,
-          post: {
+          Post: {
             select: {
               id: true,
               title: true,
               content: true,
-              author: { select: { uid: true, nickname: true, profile: { select: { displayName: true } } } },
+              User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
             },
           },
         },
       }),
       [],
     )
-    return NextResponse.json({ items: favorites })
+    return NextResponse.json({
+      items: favorites.map(({ Post, ...favorite }) => ({
+        ...favorite,
+        post: {
+          ...Post,
+          author: {
+            ...Post.User,
+            profile: Post.User.Profile,
+          },
+        },
+      })),
+    })
   }
 
   return NextResponse.json({ message: '模块不存在' }, { status: 404 })

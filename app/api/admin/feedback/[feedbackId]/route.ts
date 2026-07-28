@@ -26,7 +26,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
       }),
     ])
     feedback.adminUnread = false
-    feedback.replies = feedback.replies.map((reply) =>
+    feedback.FeedbackReply = feedback.FeedbackReply.map((reply) =>
       reply.authorRole === 'USER' ? { ...reply, isReadByAdmin: true } : reply,
     )
   }

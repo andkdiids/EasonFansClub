@@ -147,7 +147,7 @@ export async function POST(request: Request) {
     select: {
       avatarUrl: true,
       backgroundUrl: true,
-      profile: { select: { avatarUrl: true, backgroundUrl: true } },
+      Profile: { select: { avatarUrl: true, backgroundUrl: true } },
     },
   })
 
@@ -183,7 +183,7 @@ export async function POST(request: Request) {
   invalidateCurrentUserCache(guard.user.id)
 
   if (kind === 'avatar') {
-    const oldPath = storagePathFromPublicUrl(current?.profile?.avatarUrl || current?.avatarUrl)
+    const oldPath = storagePathFromPublicUrl(current?.Profile?.avatarUrl || current?.avatarUrl)
     const newPath = storagePathFromPublicUrl(safeUrl)
     if (oldPath && oldPath !== newPath) {
       void removeStorageObject(oldPath)

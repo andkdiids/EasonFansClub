@@ -19,7 +19,7 @@ export async function GET(request: Request) {
       email: true,
       expiresAt: true,
       usedAt: true,
-      user: { select: { email: true, emailVerifiedAt: true } },
+      User: { select: { email: true, emailVerifiedAt: true } },
     },
   })
 
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL('/login?emailVerified=invalid', origin))
   }
 
-  if (verification.usedAt || verification.user.emailVerifiedAt) {
+  if (verification.usedAt || verification.User.emailVerifiedAt) {
     return NextResponse.redirect(new URL('/login?emailVerified=used', origin))
   }
 
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL('/login?emailVerified=expired', origin))
   }
 
-  if (verification.user.email !== verification.email) {
+  if (verification.User.email !== verification.email) {
     return NextResponse.redirect(new URL('/login?emailVerified=changed', origin))
   }
 

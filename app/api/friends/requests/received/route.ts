@@ -13,14 +13,22 @@ export async function GET() {
     where: {
       receiverId: guard.user.id,
       status: 'PENDING',
-      sender: activeUserWhere,
+      User_FriendRequest_senderIdToUser: activeUserWhere,
     },
     orderBy: { createdAt: 'desc' },
     take: REQUEST_LIST_LIMIT,
     include: {
-      sender: { select: friendUserSelect },
+      User_FriendRequest_senderIdToUser: { select: friendUserSelect },
     },
   })
 
-  return NextResponse.json({ requests })
+  return NextResponse.json({
+    requests: requests.map(({ User_FriendRequest_senderIdToUser, ...request }) => ({
+      ...request,
+      sender: {
+        ...User_FriendRequest_senderIdToUser,
+        profile: User_FriendRequest_senderIdToUser.Profile,
+      },
+    })),
+  })
 }

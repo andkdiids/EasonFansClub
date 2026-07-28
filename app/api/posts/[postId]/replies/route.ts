@@ -35,15 +35,24 @@ export async function POST(request: Request, { params }: Params) {
 
   let parentReply: { id: string; authorId: string; parentId: string | null; author: { nickname: string; profile: { displayName: string | null } | null } } | null = null
   if (parentId) {
-    parentReply = await prisma.reply.findFirst({
+    const parentRow = await prisma.reply.findFirst({
       where: { id: parentId, postId, isDeleted: false },
       select: {
         id: true,
         authorId: true,
         parentId: true,
-        author: { select: { nickname: true, profile: { select: { displayName: true } } } },
+        User: { select: { nickname: true, Profile: { select: { displayName: true } } } },
       },
     })
+    parentReply = parentRow ? {
+      id: parentRow.id,
+      authorId: parentRow.authorId,
+      parentId: parentRow.parentId,
+      author: {
+        nickname: parentRow.User.nickname,
+        profile: parentRow.User.Profile,
+      },
+    } : null
     if (!parentReply) {
       return NextResponse.json({ message: '不能回复不存在或已删除的评论' }, { status: 400 })
     }
@@ -52,7 +61,7 @@ export async function POST(request: Request, { params }: Params) {
   const reply = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR UPDATE`
     const currentUser = await tx.user.findFirstOrThrow({
-      where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+      where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       select: { points: true },
     })
     const createdReply = await tx.reply.create({
@@ -63,14 +72,14 @@ export async function POST(request: Request, { params }: Params) {
         parentId: parentId || null,
       },
       include: {
-        author: {
+        User: {
           select: {
             id: true,
             uid: true,
             nickname: true,
             level: true,
             avatarUrl: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
       },

@@ -7,23 +7,23 @@ export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
   const conversations = await prisma.conversation.findMany({
-    where: { participants: { some: { userId: user.id, isDeleted: false } } },
+    where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
     orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
     take: 30,
     include: {
-      participants: { select: { userId: true, lastReadAt: true, user: { select: { uid: true, nickname: true, avatarUrl: true, profile: { select: { displayName: true, avatarUrl: true } } } } } },
-      messages: { where: { isDeleted: false }, orderBy: { createdAt: 'desc' }, take: 100, select: { id: true, content: true, createdAt: true, senderId: true } },
+      ConversationParticipant: { select: { userId: true, lastReadAt: true, User: { select: { uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } } } },
+      DirectMessage: { where: { isDeleted: false }, orderBy: { createdAt: 'desc' }, take: 100, select: { id: true, content: true, createdAt: true, senderId: true } },
     },
   })
   return NextResponse.json({ conversations: conversations.map((row) => {
-    const mine = row.participants.find((participant) => participant.userId === user.id)
-    const other = row.participants.find((participant) => participant.userId !== user.id)
+    const mine = row.ConversationParticipant.find((participant) => participant.userId === user.id)
+    const other = row.ConversationParticipant.find((participant) => participant.userId !== user.id)
     return {
       id: row.id,
       lastMessageAt: row.lastMessageAt,
-      otherUser: other?.user || null,
-      latestMessage: row.messages[0] || null,
-      unreadCount: row.messages.filter((message) => message.senderId !== user.id && (!mine?.lastReadAt || message.createdAt > mine.lastReadAt)).length,
+      otherUser: other?.User || null,
+      latestMessage: row.DirectMessage[0] || null,
+      unreadCount: row.DirectMessage.filter((message) => message.senderId !== user.id && (!mine?.lastReadAt || message.createdAt > mine.lastReadAt)).length,
     }
   }) })
 }
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   const conversation = await prisma.conversation.upsert({
     where: { pairKey },
     update: {},
-    create: { pairKey, participants: { create: [{ userId: userAId }, { userId: userBId }] } },
+    create: { pairKey, ConversationParticipant: { create: [{ userId: userAId }, { userId: userBId }] } },
     select: { id: true },
   })
   return NextResponse.json({ conversation })

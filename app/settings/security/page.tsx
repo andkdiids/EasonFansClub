@@ -32,15 +32,14 @@ export default async function SecurityPage() {
         emailVerifiedAt: true,
         securityQuestionRecoveryEnabled: true,
         mustSetupSecurity: true,
-        securityQuestions: { orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }], take: 1, select: { question: true } },
-        _count: { select: { securityQuestions: true } },
+        UserSecurityQuestion: { select: { question: true } },
       },
     }),
     getAccountSecuritySettings(),
   ])
   if (!user) redirect('/login')
 
-  const questionsSet = user._count.securityQuestions >= 1
+  const questionsSet = Boolean(user.UserSecurityQuestion)
   const securityResetAvailable = settings.enableSecurityQuestionRecovery && questionsSet && user.securityQuestionRecoveryEnabled && !user.mustSetupSecurity
   const emailResetConfigured = Boolean(settings.enableEmailPasswordReset && process.env.RESEND_API_KEY && user.email && user.emailVerifiedAt)
   const recoveryReason = !settings.enableSecurityQuestionRecovery
@@ -93,7 +92,7 @@ export default async function SecurityPage() {
             <p>账号恢复方式由系统统一管理。</p>
             <p>如需调整密保找回方式，请联系管理员。</p>
           </div>
-          <PasswordManagement question={user.securityQuestions[0]?.question || null} securityResetAvailable={securityResetAvailable} emailResetConfigured={emailResetConfigured} />
+          <PasswordManagement question={user.UserSecurityQuestion?.question || null} securityResetAvailable={securityResetAvailable} emailResetConfigured={emailResetConfigured} />
         </section>
       </main>
     </>

@@ -13,47 +13,72 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
   const numericUid = Number(q)
 
   const [admins, searchUsers, logs] = await Promise.all([
-    prisma.user.findMany({
-      where: {
-        isDeleted: false,
-        status: 'ACTIVE',
-        role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-        profile: { isNot: null },
+  prisma.user.findMany({
+    where: {
+      isDeleted: false,
+      status: 'ACTIVE',
+      role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+      Profile: { isNot: null },
+    },
+    orderBy: [{ role: 'desc' }, { createdAt: 'asc' }],
+    include: {
+      Profile: true,
+      AdminPermission: {
+        where: { enabled: true },
+        select: { permissionKey: true },
       },
-      orderBy: [{ role: 'desc' }, { createdAt: 'asc' }],
-      include: {
-        profile: true,
-        adminPermissions: { where: { enabled: true }, select: { permissionKey: true } },
+    },
+  }),
+
+  q
+    ? prisma.user.findMany({
+        where: {
+          isDeleted: false,
+          status: 'ACTIVE',
+          Profile: { isNot: null },
+          OR: [
+            ...(Number.isInteger(numericUid) ? [{ uid: numericUid }] : []),
+            { nickname: { contains: q } },
+            { Profile: { displayName: { contains: q } } },
+            { phone: q },
+            { email: { contains: q } },
+          ],
+        },
+        take: 12,
+        include: {
+          Profile: true,
+        },
+      })
+    : Promise.resolve([]),
+
+  prisma.adminAction.findMany({
+    where: { action: 'UPDATE_USER_ROLE' },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    include: {
+  User_AdminAction_adminIdToUser: {
+    select: {
+      nickname: true,
+      Profile: {
+        select: {
+          displayName: true,
+        },
       },
-    }),
-    q
-      ? prisma.user.findMany({
-          where: {
-            isDeleted: false,
-            status: 'ACTIVE',
-            profile: { isNot: null },
-            OR: [
-              ...(Number.isInteger(numericUid) ? [{ uid: numericUid }] : []),
-              { nickname: { contains: q, mode: 'insensitive' } },
-              { profile: { displayName: { contains: q, mode: 'insensitive' } } },
-              { phone: q },
-              { email: { contains: q, mode: 'insensitive' } },
-            ],
-          },
-          take: 12,
-          include: { profile: true },
-        })
-      : Promise.resolve([]),
-    prisma.adminAction.findMany({
-      where: { action: 'UPDATE_USER_ROLE' },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      include: {
-        admin: { select: { nickname: true, profile: { select: { displayName: true } } } },
-        targetUser: { select: { nickname: true, profile: { select: { displayName: true } } } },
+    },
+  },
+  User_AdminAction_targetUserIdToUser: {
+    select: {
+      nickname: true,
+      Profile: {
+        select: {
+          displayName: true,
+        },
       },
-    }),
-  ])
+    },
+  },
+},
+  }),
+])
 
   return (
     <>
@@ -64,12 +89,12 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
           admins={admins.map((user) => ({
             id: user.id,
             uid: user.uid,
-            nickname: user.profile?.displayName || user.nickname,
+            nickname: user.Profile?.displayName || user.nickname,
             email: user.email,
             phone: user.phone,
             role: user.role,
             createdAt: user.createdAt,
-            permissions: user.adminPermissions.map((item) => item.permissionKey),
+            permissions: user.AdminPermission.map((item) => item.permissionKey),
           }))}
           searchUsers={searchUsers.map((user) => ({
             id: user.id,
@@ -79,15 +104,22 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
             phone: user.phone,
             role: user.role,
             status: user.status,
-            profile: user.profile ? { displayName: user.profile.displayName, avatarUrl: user.profile.avatarUrl } : null,
+            profile: user.Profile ? { displayName: user.Profile.displayName, avatarUrl: user.Profile.avatarUrl } : null,
           }))}
           logs={logs.map((log) => ({
             id: log.id,
             action: log.action,
             reason: log.reason,
             createdAt: log.createdAt,
-            adminName: log.admin.profile?.displayName || log.admin.nickname,
-            targetName: log.targetUser ? log.targetUser.profile?.displayName || log.targetUser.nickname : null,
+            adminName:
+  log.User_AdminAction_adminIdToUser.Profile?.displayName ||
+  log.User_AdminAction_adminIdToUser.nickname,
+
+targetName:
+  log.User_AdminAction_targetUserIdToUser
+    ? log.User_AdminAction_targetUserIdToUser.Profile?.displayName ||
+      log.User_AdminAction_targetUserIdToUser.nickname
+    : null,
           }))}
         />
       </main>

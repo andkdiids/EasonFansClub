@@ -48,7 +48,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     ),
     safeDb(
       'User.count checkin.activeUsers',
-      prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
+      prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } }),
       0,
     ),
     safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),

@@ -21,18 +21,18 @@ export async function GET(request: Request) {
   const searchFilters: Prisma.UserWhereInput[] = keyword
     ? [
         ...(Number.isFinite(uidKeyword) ? [{ uid: uidKeyword }] : []),
-        { username: { contains: keyword, mode: 'insensitive' } },
-        { nickname: { contains: keyword, mode: 'insensitive' } },
-        { email: { contains: keyword, mode: 'insensitive' } },
-        { phone: { contains: keyword, mode: 'insensitive' } },
-        { profile: { displayName: { contains: keyword, mode: 'insensitive' } } },
+        { username: { contains: keyword } },
+        { nickname: { contains: keyword } },
+        { email: { contains: keyword } },
+        { phone: { contains: keyword } },
+        { Profile: { displayName: { contains: keyword } } },
       ]
     : []
 
   const users = await prisma.user.findMany({
     where: {
       uid: { gt: 0 },
-      profile: { isNot: null },
+      Profile: { isNot: null },
       ...(keyword
         ? {
             OR: searchFilters,
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
       emailVerifiedAt: true,
       phoneVerifiedAt: true,
       avatarUrl: true,
-      profile: {
+      Profile: {
         select: {
           displayName: true,
           avatarUrl: true,
@@ -67,8 +67,8 @@ export async function GET(request: Request) {
       lastLoginAt: true,
       createdAt: true,
       securityQuestionRecoveryEnabled: true,
-      _count: { select: { securityQuestions: true } },
-      securityLogs: {
+      UserSecurityQuestion: { select: { id: true } },
+      AccountSecurityLog: {
         where: { action: 'PASSWORD_RESET_SUCCEEDED' },
         orderBy: { createdAt: 'desc' },
         take: 1,
@@ -97,14 +97,14 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    users: pageUsers.map(({ profile, _count, securityLogs, ...user }) => {
+    users: pageUsers.map(({ Profile, UserSecurityQuestion, AccountSecurityLog, ...user }) => {
       const failures = failureState.get(`account:${hashToken(user.id)}`)
       return {
         ...user,
-        nickname: profile?.displayName || user.nickname,
-        avatarUrl: profile?.avatarUrl || user.avatarUrl,
-        securityQuestionsSet: _count.securityQuestions >= 1,
-        lastPasswordResetAt: securityLogs[0]?.createdAt || null,
+        nickname: Profile?.displayName || user.nickname,
+        avatarUrl: Profile?.avatarUrl || user.avatarUrl,
+        securityQuestionsSet: Boolean(UserSecurityQuestion),
+        lastPasswordResetAt: AccountSecurityLog[0]?.createdAt || null,
         securityQuestionFailureCount: failures?.count || 0,
         securityQuestionLastFailedAt: failures?.lastFailedAt || null,
         securityQuestionLockedUntil: failures && failures.count >= 5 ? failures.lockedUntil : null,

@@ -42,9 +42,10 @@ export async function PATCH(request: Request, { params }: Context) {
         scene: optionalMusicText(body?.scene, 200),
         concertVersion: optionalMusicText(body?.concertVersion, 200),
       },
-      include: { album: true },
+      include: { MusicAlbum: true },
     })
-    return NextResponse.json({ song, message: '歌曲已保存' })
+    const { MusicAlbum, ...songData } = song
+    return NextResponse.json({ song: { ...songData, album: MusicAlbum }, message: '歌曲已保存' })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return NextResponse.json({ message: '歌曲不存在' }, { status: 404 })
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ message: '该专辑中已存在相同曲序或歌曲名称' }, { status: 409 })

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
   isDeleted: false,
-  profile: { isNot: null },
+  Profile: { isNot: null },
 }
 
 export function normalizeFriendPair(userId: string, otherUserId: string) {
@@ -15,8 +15,8 @@ export async function getFriendIds(userId: string) {
     where: {
       AND: [
         { OR: [{ userAId: userId }, { userBId: userId }] },
-        { userA: activeUserWhere },
-        { userB: activeUserWhere },
+        { User_Friendship_userAIdToUser: activeUserWhere },
+        { User_Friendship_userBIdToUser: activeUserWhere },
       ],
     },
     select: { userAId: true, userBId: true },
@@ -32,7 +32,7 @@ export const friendUserSelect = {
   bio: true,
   status: true,
   isDeleted: true,
-  profile: {
+  Profile: {
     select: {
       displayName: true,
       avatarUrl: true,
@@ -48,7 +48,7 @@ export async function createFriendRequest(
 ) {
   const receiver = await prisma.user.findFirst({
     where: { uid: receiverUid, ...activeUserWhere },
-    select: { id: true, uid: true, nickname: true, profile: true },
+    select: { id: true, uid: true, nickname: true, Profile: true },
   })
 
   if (!receiver) return { status: 404 as const, body: { message: '用户不存在' } }
@@ -69,8 +69,8 @@ export async function createFriendRequest(
       ],
     },
     include: {
-      sender: { select: friendUserSelect },
-      receiver: { select: friendUserSelect },
+      User_FriendRequest_senderIdToUser: { select: friendUserSelect },
+      User_FriendRequest_receiverIdToUser: { select: friendUserSelect },
     },
   })
   if (existing) return { status: 200 as const, body: { message: '等待通过', status: 'PENDING', request: existing } }
@@ -84,8 +84,8 @@ export async function createFriendRequest(
         message: message || null,
       },
       include: {
-        sender: { select: friendUserSelect },
-        receiver: { select: friendUserSelect },
+        User_FriendRequest_senderIdToUser: { select: friendUserSelect },
+        User_FriendRequest_receiverIdToUser: { select: friendUserSelect },
       },
     })
 
@@ -113,9 +113,9 @@ export async function decideFriendRequest(userId: string, requestId: string, act
         id: requestId,
         receiverId: userId,
         status: 'PENDING',
-        sender: activeUserWhere,
+        User_FriendRequest_senderIdToUser: activeUserWhere,
       },
-      include: { sender: { select: { nickname: true } } },
+      include: { User_FriendRequest_senderIdToUser: { select: { nickname: true } } },
     })
     if (!friendRequest) return null
 

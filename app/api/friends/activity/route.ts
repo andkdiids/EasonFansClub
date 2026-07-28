@@ -13,17 +13,17 @@ export async function GET() {
   const activities = await prisma.friendActivity.findMany({
     where: {
       actorId: { in: friendIds },
-      actor: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     orderBy: { createdAt: 'desc' },
     take: 30,
     include: {
-      actor: {
+      User: {
         select: {
           uid: true,
           nickname: true,
           avatarUrl: true,
-          profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
     },
@@ -37,7 +37,10 @@ export async function GET() {
       type: item.type,
       targetUrl: item.targetUrl,
       createdAt: item.createdAt.toISOString(),
-      actor: item.actor,
+      actor: {
+        ...item.User,
+        profile: item.User.Profile,
+      },
     })),
   })
 }

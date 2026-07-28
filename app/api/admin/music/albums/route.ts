@@ -40,9 +40,10 @@ export async function POST(request: Request) {
         displayOrder,
         status: 'DRAFT',
       },
-      include: { songs: true },
+      include: { MusicSong: true },
     })
-    return NextResponse.json({ album, message: '专辑草稿已创建' }, { status: 201 })
+    const { MusicSong, ...albumData } = album
+    return NextResponse.json({ album: { ...albumData, songs: MusicSong }, message: '专辑草稿已创建' }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return NextResponse.json({ message: '同名、同艺人和同年份的专辑已存在' }, { status: 409 })

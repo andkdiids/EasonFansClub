@@ -69,12 +69,12 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
 type LeaderboardRow = ScoreRecord & {
   userId: string
   mode?: GuessSongMode
-  user: {
+  User: {
     uid: number
     nickname: string
     username: string
     avatarUrl: string | null
-    profile: { avatarUrl: string | null } | null
+    Profile: { avatarUrl: string | null } | null
   }
 }
 
@@ -82,9 +82,9 @@ function serializeRow(row: LeaderboardRow, rank: number) {
   return {
     rank,
     userId: row.userId,
-    uid: row.user.uid,
-    nickname: row.user.nickname || row.user.username,
-    avatarUrl: row.user.profile?.avatarUrl || row.user.avatarUrl,
+    uid: row.User.uid,
+    nickname: row.User.nickname || row.User.username,
+    avatarUrl: row.User.Profile?.avatarUrl || row.User.avatarUrl,
     mode: row.mode,
     score: row.score,
     correctCount: row.correctCount,
@@ -108,13 +108,13 @@ export async function getGuessSongLeaderboard(input: {
       ...(input.mode === 'ALL' ? {} : { mode: input.mode }),
     },
     include: {
-      user: {
+      User: {
         select: {
           uid: true,
           nickname: true,
           username: true,
           avatarUrl: true,
-          profile: { select: { avatarUrl: true } },
+          Profile: { select: { avatarUrl: true } },
         },
       },
     },
@@ -129,7 +129,7 @@ export async function getGuessSongLeaderboard(input: {
       if (!current) {
         grouped.set(entry.userId, {
           userId: entry.userId,
-          user: entry.user,
+          User: entry.User,
           score: entry.score,
           correctCount: entry.correctCount,
           maxStreak: entry.maxStreak,

@@ -24,8 +24,8 @@ export async function GET(request: Request) {
       where: query
         ? {
             OR: [
-              { text: { contains: query, mode: 'insensitive' } },
-              { songTitle: { contains: query, mode: 'insensitive' } },
+              { text: { contains: query } },
+              { songTitle: { contains: query } },
             ],
           }
         : undefined,

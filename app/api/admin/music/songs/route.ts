@@ -43,9 +43,10 @@ export async function POST(request: Request) {
         sourceType,
         sourceUrl: optionalMusicText(body?.sourceUrl, 1000),
       },
-      include: { album: true },
+      include: { MusicAlbum: true },
     })
-    return NextResponse.json({ song, message: '歌曲已创建' }, { status: 201 })
+    const { MusicAlbum, ...songData } = song
+    return NextResponse.json({ song: { ...songData, album: MusicAlbum }, message: '歌曲已创建' }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ message: '该专辑中已存在相同曲序或歌曲名称' }, { status: 409 })
     throw error

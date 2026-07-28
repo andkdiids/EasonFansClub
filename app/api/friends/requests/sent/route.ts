@@ -12,14 +12,22 @@ export async function GET() {
   const requests = await prisma.friendRequest.findMany({
     where: {
       senderId: guard.user.id,
-      receiver: activeUserWhere,
+      User_FriendRequest_receiverIdToUser: activeUserWhere,
     },
     orderBy: { createdAt: 'desc' },
     take: REQUEST_LIST_LIMIT,
     include: {
-      receiver: { select: friendUserSelect },
+      User_FriendRequest_receiverIdToUser: { select: friendUserSelect },
     },
   })
 
-  return NextResponse.json({ requests })
+  return NextResponse.json({
+    requests: requests.map(({ User_FriendRequest_receiverIdToUser, ...request }) => ({
+      ...request,
+      receiver: {
+        ...User_FriendRequest_receiverIdToUser,
+        profile: User_FriendRequest_receiverIdToUser.Profile,
+      },
+    })),
+  })
 }

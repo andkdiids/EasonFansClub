@@ -20,11 +20,11 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
   const item = await prisma.cultureItem.findFirst({
     where: { slug, isVisible: true },
     include: {
-      comments: {
+      CultureComment: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
         take: 20,
-        include: { user: { select: { nickname: true, profile: true } } },
+        include: { User: { select: { nickname: true, Profile: true } } },
       },
     },
   })
@@ -78,13 +78,13 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
         <section className="rounded-[28px] bg-white/82 p-6 shadow-sm">
           <h2 className="text-2xl font-black text-brand-950">评论</h2>
           <div className="mt-4 space-y-3">
-            {item.comments.map((comment) => (
+            {item.CultureComment.map((comment) => (
               <div key={comment.id} className="rounded-2xl bg-sky-50/80 p-4">
-                <p className="text-sm font-black text-brand-950">{comment.user.profile?.displayName || comment.user.nickname}</p>
+                <p className="text-sm font-black text-brand-950">{comment.User.Profile?.displayName || comment.User.nickname}</p>
                 <p className="mt-2 text-sm font-bold leading-7 text-slate-600">{comment.content}</p>
               </div>
             ))}
-            {!item.comments.length ? <p className="rounded-2xl bg-sky-50/80 p-4 text-sm font-bold text-slate-500">暂无评论。</p> : null}
+            {!item.CultureComment.length ? <p className="rounded-2xl bg-sky-50/80 p-4 text-sm font-bold text-slate-500">暂无评论。</p> : null}
           </div>
         </section>
       </main>

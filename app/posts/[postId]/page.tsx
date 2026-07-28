@@ -39,7 +39,7 @@ function loadPost(postId: string, userId?: string) {
   return prisma.post.findUnique({
     where: { id: postId },
     include: {
-      author: {
+      User: {
         select: {
           uid: true,
           id: true,
@@ -48,12 +48,12 @@ function loadPost(postId: string, userId?: string) {
           avatarUrl: true,
           status: true,
           isDeleted: true,
-          profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-      board: { select: { name: true, slug: true } },
-      replies: {
-        where: { isDeleted: false, author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
+      Board: { select: { name: true, slug: true } },
+      Reply: {
+        where: { isDeleted: false, User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
         orderBy: { createdAt: 'asc' },
         take: POST_DETAIL_REPLY_LIMIT,
         select: {
@@ -61,23 +61,23 @@ function loadPost(postId: string, userId?: string) {
           content: true,
           parentId: true,
           likeCount: true,
-          likes: userId ? { where: { userId }, select: { id: true } } : false,
+          ReplyLike: userId ? { where: { userId }, select: { id: true } } : false,
           createdAt: true,
-          author: {
+          User: {
             select: {
               id: true,
               uid: true,
               nickname: true,
               level: true,
               avatarUrl: true,
-              profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, avatarUrl: true } },
             },
           },
         },
       },
-      likes: userId ? { where: { userId }, select: { id: true } } : false,
-      favorites: userId ? { where: { userId }, select: { id: true } } : false,
-      media: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' } },
+      Like: userId ? { where: { userId }, select: { id: true } } : false,
+      PostFavorite: userId ? { where: { userId }, select: { id: true } } : false,
+      PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' } },
     },
   })
 }
@@ -102,29 +102,31 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   const chain: Array<FocusedReply & { likes: [] }> = []
   let currentId: string | null = focusId
   for (let depth = 0; currentId && depth < 12; depth += 1) {
-    const reply: FocusedReply | null = await prisma.reply.findFirst({
-      where: { id: currentId, postId, isDeleted: false, author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } },
+    const row: (Omit<FocusedReply, 'author'> & {
+      User: Omit<FocusedReply['author'], 'profile'> & { Profile: FocusedReply['author']['profile'] }
+    }) | null = await prisma.reply.findFirst({
+      where: { id: currentId, postId, isDeleted: false, User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
       select: {
         id: true,
         content: true,
         parentId: true,
         likeCount: true,
         createdAt: true,
-        author: {
+        User: {
           select: {
             id: true,
             uid: true,
             nickname: true,
             level: true,
             avatarUrl: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
       },
     })
-    if (!reply) break
-    chain.unshift({ ...reply, likes: [] })
-    currentId = reply.parentId
+    if (!row) break
+    chain.unshift({ ...row, author: { ...row.User, profile: row.User.Profile }, likes: [] })
+    currentId = row.parentId
   }
   return chain
 }
@@ -148,25 +150,37 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     notFound()
   }
 
-  if (focusId && !post.replies.some((reply) => reply.id === focusId)) {
+  if (focusId && !post.Reply.some((reply) => reply.id === focusId)) {
     const focusedReplies = await loadFocusedReplyChain(postId, focusId)
-    const existingIds = new Set(post.replies.map((reply) => reply.id))
-    post.replies.push(...focusedReplies.filter((reply) => !existingIds.has(reply.id)))
+    const existingIds = new Set(post.Reply.map((reply) => reply.id))
+    post.Reply.push(...focusedReplies.filter((reply) => !existingIds.has(reply.id)).map((reply) => ({
+      id: reply.id,
+      content: reply.content,
+      parentId: reply.parentId,
+      likeCount: reply.likeCount,
+      createdAt: reply.createdAt,
+      User: { ...reply.author, Profile: reply.author.profile },
+      ReplyLike: [],
+    })))
   }
 
-  if (post.isDeleted || post.status !== 'PUBLISHED' || post.author.isDeleted || post.author.status !== 'ACTIVE' || !post.author.profile) {
-    console.warn('[post:detail:unavailable]', { postId, postStatus: post.status, authorStatus: post.author.status })
+  if (post.isDeleted || post.status !== 'PUBLISHED' || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile) {
+    console.warn('[post:detail:unavailable]', { postId, postStatus: post.status, authorStatus: post.User.status })
     return <PostLoadFallback />
   }
 
-  const liked = Array.isArray(post.likes) && post.likes.length > 0
-  const favorited = Array.isArray(post.favorites) && post.favorites.length > 0
-  const authorAvatar = publicImageUrl(post.author.profile.avatarUrl || post.author.avatarUrl)
-  const authorName = post.author.profile.displayName || post.author.nickname
-  const isArchivedAuthor = post.author.uid === 0
+  const liked = Array.isArray(post.Like) && post.Like.length > 0
+  const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
+  const authorAvatar = publicImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl)
+  const authorName = post.User.Profile.displayName || post.User.nickname
+  const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))
-  const canDeletePost = Boolean(user && (user.id === post.author.id || isAdminRole(user.role)))
-  const replyRows = post.replies.map(({ likes, ...reply }) => ({ ...reply, liked: Array.isArray(likes) && likes.length > 0 }))
+  const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
+  const replyRows = post.Reply.map(({ ReplyLike, User, ...reply }) => ({
+    ...reply,
+    author: { ...User, profile: User.Profile },
+    liked: Array.isArray(ReplyLike) && ReplyLike.length > 0,
+  }))
   const directReplyCount = new Map<string, number>()
   replyRows.forEach((reply) => {
     if (reply.parentId) directReplyCount.set(reply.parentId, (directReplyCount.get(reply.parentId) || 0) + 1)
@@ -193,8 +207,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
             {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
-            <Link href={`/boards/${post.board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
-              {post.board.name}
+            <Link href={`/boards/${post.Board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
+              {post.Board.name}
             </Link>
           </div>
           <h1 className="text-4xl font-black leading-tight text-brand-950">{post.title}</h1>
@@ -205,11 +219,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
                 <span>{authorName}</span>
               </span>
             ) : (
-              <Link href={`/user/${formatUid(post.author.uid)}`} className="flex items-center gap-2 text-brand-950">
+              <Link href={`/user/${formatUid(post.User.uid)}`} className="flex items-center gap-2 text-brand-950">
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                   {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : authorName.slice(0, 1)}
                 </span>
-                <span>{authorName} · Lv.{post.author.level}</span>
+                <span>{authorName} · Lv.{post.User.level}</span>
               </Link>
             )}
             <span>{formatDate(post.createdAt)}</span>
@@ -217,16 +231,16 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <span>回复 {post.replyCount}</span>
           </div>
           <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{post.content}</div>
-          {post.media.length ? <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">{post.media.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />)}</div> : null}
+          {post.PostMedia.length ? <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">{post.PostMedia.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />)}</div> : null}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
               <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
             {canManagePost ? (
-              <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.board.slug}`} />
+              <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.Board.slug}`} />
             ) : canDeletePost ? (
-              <DeletePostButton postId={post.id} redirectTo={`/boards/${post.board.slug}`} />
+              <DeletePostButton postId={post.id} redirectTo={`/boards/${post.Board.slug}`} />
             ) : null}
           </div>
         </article>

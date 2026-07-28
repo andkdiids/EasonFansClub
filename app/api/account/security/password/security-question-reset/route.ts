@@ -29,17 +29,17 @@ export async function POST(request: Request) {
     getAccountSecuritySettings(),
     prisma.user.findUnique({
       where: { id: guard.user.id },
-      select: { id: true, passwordHash: true, mustSetupSecurity: true, securityQuestionRecoveryEnabled: true, securityQuestions: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], take: 1, select: { sortOrder: true, answerHash: true } } },
+      select: { id: true, passwordHash: true, mustSetupSecurity: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { sortOrder: true, answerHash: true } } },
     }),
   ])
   if (!user) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
-  const availability = getSecurityQuestionRecoveryAvailability({ globalEnabled: settings.enableSecurityQuestionRecovery, userEnabled: user.securityQuestionRecoveryEnabled, questionCount: user.securityQuestions.length })
+  const availability = getSecurityQuestionRecoveryAvailability({ globalEnabled: settings.enableSecurityQuestionRecovery, userEnabled: user.securityQuestionRecoveryEnabled, questionCount: user.UserSecurityQuestion ? 1 : 0 })
   if (user.mustSetupSecurity || !availability.available) return NextResponse.json({ message: '当前账号不能使用密保重置，请先完成密保设置。' }, { status: 403 })
 
   const accountKey = `account:${hashToken(user.id)}`
   const lock = await checkRateLimit(accountKey, wrongAnswerAction, 5)
   if (lock.limited) return NextResponse.json({ message: '密保答案错误或请求暂时受限。', retryAfter: lock.retryAfter }, { status: 429 })
-  const valid = await verifySecurityAnswers(user.securityQuestions, [{ answer }])
+  const valid = await verifySecurityAnswers(user.UserSecurityQuestion ? [user.UserSecurityQuestion] : [], [{ answer }])
   if (!valid) {
     await recordRateLimitHit(accountKey, wrongAnswerAction, 30 * 60)
     return NextResponse.json({ message: '密保答案错误或请求暂时受限。' }, { status: 400 })

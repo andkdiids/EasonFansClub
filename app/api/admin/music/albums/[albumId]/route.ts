@@ -19,10 +19,11 @@ export async function GET(_request: Request, { params }: Context) {
   const { albumId } = await params
   const album = await prisma.musicAlbum.findUnique({
     where: { id: albumId },
-    include: { songs: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } },
+    include: { MusicSong: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } },
   })
   if (!album) return NextResponse.json({ message: '专辑不存在' }, { status: 404 })
-  return NextResponse.json({ album })
+  const { MusicSong, ...albumData } = album
+  return NextResponse.json({ album: { ...albumData, songs: MusicSong } })
 }
 
 export async function PATCH(request: Request, { params }: Context) {
@@ -59,9 +60,10 @@ export async function PATCH(request: Request, { params }: Context) {
         displayOrder,
         status: requestedStatus,
       },
-      include: { songs: { orderBy: { trackNumber: 'asc' } } },
+      include: { MusicSong: { orderBy: { trackNumber: 'asc' } } },
     })
-    return NextResponse.json({ album, message: requestedStatus === 'PUBLISHED' ? '专辑已发布' : '专辑草稿已保存' })
+    const { MusicSong, ...albumData } = album
+    return NextResponse.json({ album: { ...albumData, songs: MusicSong }, message: requestedStatus === 'PUBLISHED' ? '专辑已发布' : '专辑草稿已保存' })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return NextResponse.json({ message: '同名、同艺人和同年份的专辑已存在' }, { status: 409 })

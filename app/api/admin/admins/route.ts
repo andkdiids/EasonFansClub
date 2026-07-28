@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     : []
 
   const target = await prisma.user.findFirst({
-    where: { id: userId, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+    where: { id: userId, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     select: { id: true, role: true, uid: true, nickname: true },
   })
   if (!target) return NextResponse.json({ message: '用户不存在或状态不可用' }, { status: 404 })

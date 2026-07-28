@@ -25,14 +25,14 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const requestPage = Math.max(1, Number(params.requestPage) || 1)
   const numericUid = Number(q)
 
-  const activeUserFilter = { uid: { gt: 0 }, status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } }
+  const activeUserFilter = { uid: { gt: 0 }, status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } }
   const friendships = await safeDb(
     'friends.friendships',
     prisma.friendship.findMany({
       where: { OR: [{ userAId: user.id }, { userBId: user.id }] },
       include: {
-        userA: { include: { profile: true } },
-        userB: { include: { profile: true } },
+        User_Friendship_userAIdToUser: { include: { Profile: true } },
+        User_Friendship_userBIdToUser: { include: { Profile: true } },
       },
       orderBy: { createdAt: 'desc' },
       skip: (friendPage - 1) * FRIEND_LIST_LIMIT,
@@ -43,8 +43,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const received = await safeDb(
     'friends.received',
     prisma.friendRequest.findMany({
-      where: { receiverId: user.id, status: 'PENDING', sender: activeUserFilter },
-      include: { sender: { include: { profile: true } } },
+      where: { receiverId: user.id, status: 'PENDING', User_FriendRequest_senderIdToUser: activeUserFilter },
+      include: { User_FriendRequest_senderIdToUser: { include: { Profile: true } } },
       orderBy: { createdAt: 'desc' },
       skip: (requestPage - 1) * FRIEND_REQUEST_LIMIT,
       take: FRIEND_REQUEST_LIMIT + 1,
@@ -54,8 +54,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const sent = await safeDb(
     'friends.sent',
     prisma.friendRequest.findMany({
-      where: { senderId: user.id, status: 'PENDING', receiver: activeUserFilter },
-      include: { receiver: { include: { profile: true } } },
+      where: { senderId: user.id, status: 'PENDING', User_FriendRequest_receiverIdToUser: activeUserFilter },
+      include: { User_FriendRequest_receiverIdToUser: { include: { Profile: true } } },
       orderBy: { createdAt: 'desc' },
       skip: (requestPage - 1) * FRIEND_REQUEST_LIMIT,
       take: FRIEND_REQUEST_LIMIT + 1,
@@ -70,14 +70,14 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
             id: { not: user.id },
             ...activeUserFilter,
             OR: [
-              { nickname: { contains: q, mode: 'insensitive' } },
-              { profile: { displayName: { contains: q, mode: 'insensitive' } } },
+              { nickname: { contains: q } },
+              { Profile: { displayName: { contains: q } } },
               { phone: q },
-              { email: { contains: q, mode: 'insensitive' } },
+              { email: { contains: q } },
               ...(Number.isInteger(numericUid) ? [{ uid: numericUid }] : []),
             ],
           },
-          include: { profile: true },
+          include: { Profile: true },
           take: 20,
         })
       : Promise.resolve([]),
@@ -87,8 +87,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
   const hasMoreFriends = friendships.length > FRIEND_LIST_LIMIT
   const hasMoreRequests = received.length > FRIEND_REQUEST_LIMIT || sent.length > FRIEND_REQUEST_LIMIT
   const friends = friendships.slice(0, FRIEND_LIST_LIMIT)
-    .map((item) => (item.userAId === user.id ? item.userB : item.userA))
-    .filter((item) => item.status === 'ACTIVE' && !item.isDeleted && item.profile)
+    .map((item) => (item.userAId === user.id ? item.User_Friendship_userBIdToUser : item.User_Friendship_userAIdToUser))
+    .filter((item) => item.status === 'ACTIVE' && !item.isDeleted && item.Profile)
 
   const friendIds = new Set(friends.map((item) => item.id))
   const sentPendingReceiverIds = new Set(sent.filter((item) => item.status === 'PENDING').map((item) => item.receiverId))
@@ -140,10 +140,10 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
           </Panel>
           <div className="space-y-6">
             <Panel id="received-requests" title="收到的申请">
-              {received.length ? received.slice(0, FRIEND_REQUEST_LIMIT).map((item) => <RequestCard key={item.id} user={item.sender} createdAt={item.createdAt} status="等待处理"><FriendRequestDecision requestId={item.id} /></RequestCard>) : <Empty />}
+              {received.length ? received.slice(0, FRIEND_REQUEST_LIMIT).map((item) => <RequestCard key={item.id} user={item.User_FriendRequest_senderIdToUser} createdAt={item.createdAt} status="等待处理"><FriendRequestDecision requestId={item.id} /></RequestCard>) : <Empty />}
             </Panel>
             <Panel id="sent-requests" title="发出的申请">
-              {sent.length ? sent.slice(0, FRIEND_REQUEST_LIMIT).map((item) => <RequestCard key={item.id} user={item.receiver} createdAt={item.createdAt} status={statusText(item.status)} />) : <Empty />}
+              {sent.length ? sent.slice(0, FRIEND_REQUEST_LIMIT).map((item) => <RequestCard key={item.id} user={item.User_FriendRequest_receiverIdToUser} createdAt={item.createdAt} status={statusText(item.status)} />) : <Empty />}
             </Panel>
             <Pagination previous={requestPage > 1 ? `/friends?requestPage=${requestPage - 1}` : null} next={hasMoreRequests ? `/friends?requestPage=${requestPage + 1}` : null} />
           </div>
@@ -179,12 +179,12 @@ type FriendUser = {
   bio: string | null
   status: string
   isDeleted: boolean
-  profile: { displayName: string; avatarUrl: string | null; bio: string | null } | null
+  Profile: { displayName: string; avatarUrl: string | null; bio: string | null } | null
 }
 
 function UserCard({ user, status, action }: { user: FriendUser; status?: string; action?: ReactNode }) {
-  const name = user.profile?.displayName || user.nickname
-  const avatar = publicImageUrl(user.profile?.avatarUrl || user.avatarUrl)
+  const name = user.Profile?.displayName || user.nickname
+  const avatar = publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl)
   return (
     <div className="rounded-2xl bg-sky-50 p-4 transition hover:bg-sky-100">
       <div className="flex items-center justify-between gap-3">
@@ -199,7 +199,7 @@ function UserCard({ user, status, action }: { user: FriendUser; status?: string;
         </Link>
         {action}
       </div>
-      <p className="mt-3 text-sm font-bold text-slate-500">{user.profile?.bio || user.bio || '还没有简介。'}</p>
+      <p className="mt-3 text-sm font-bold text-slate-500">{user.Profile?.bio || user.bio || '还没有简介。'}</p>
     </div>
   )
 }

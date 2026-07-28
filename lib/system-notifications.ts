@@ -29,8 +29,8 @@ export const systemNotificationSelect = {
   version: true,
   createdAt: true,
   updatedAt: true,
-  createdBy: { select: { uid: true, nickname: true } },
-  _count: { select: { reads: true } },
+  User: { select: { uid: true, nickname: true } },
+  _count: { select: { SystemNotificationRead: true } },
 } satisfies Prisma.SystemNotificationSelect
 
 export type SystemNotificationItem = Prisma.SystemNotificationGetPayload<{ select: typeof systemNotificationSelect }>
@@ -71,7 +71,7 @@ export const effectiveSystemNotificationOrder = [
 ] satisfies Prisma.SystemNotificationOrderByWithRelationInput[]
 
 export function serializeSystemNotification(item: SystemNotificationItem, totalUsers?: number) {
-  const readCount = item._count.reads
+  const readCount = item._count.SystemNotificationRead
   return {
     id: item.id,
     title: item.title,
@@ -91,7 +91,7 @@ export function serializeSystemNotification(item: SystemNotificationItem, totalU
     version: item.version,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-    createdBy: item.createdBy,
+    createdBy: item.User,
     readCount,
     unreadCount: typeof totalUsers === 'number' ? Math.max(totalUsers - readCount, 0) : undefined,
   }

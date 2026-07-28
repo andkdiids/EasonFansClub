@@ -81,7 +81,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
       type: { notIn: ['FRIEND_REQUEST', 'MESSAGE'] },
       NOT: { link: { startsWith: '/feedback/' } },
     } }),
-    prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, reads: { none: { userId } } } }),
+    prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
     prisma.feedback.count({ where: { userId, userUnread: true } }),
     prisma.friendRequest.count({ where: { receiverId: userId, status: 'PENDING' } }),
     prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'MESSAGE' } }),
@@ -104,7 +104,7 @@ export async function getUnreadNotificationCount(userId: string) {
       where: {
         ...effectiveSystemNotificationWhere(now),
         type: { not: 'UPDATE' },
-        reads: { none: { userId } },
+        SystemNotificationRead: { none: { userId } },
       },
     }),
   ])
@@ -131,11 +131,11 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         isRead: true,
         createdAt: true,
         readAt: true,
-        actor: {
+        User_Notification_actorIdToUser: {
           select: {
             nickname: true,
             avatarUrl: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
       },
@@ -144,7 +144,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
       where: {
         ...effectiveSystemNotificationWhere(now),
         type: { not: 'UPDATE' },
-        ...(options.unreadOnly ? { reads: { none: { userId } } } : {}),
+        ...(options.unreadOnly ? { SystemNotificationRead: { none: { userId } } } : {}),
       },
       orderBy: effectiveSystemNotificationOrder,
       take: limit,
@@ -159,7 +159,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         sticky: true,
         publishAt: true,
         createdAt: true,
-        reads: { where: { userId }, select: { readAt: true }, take: 1 },
+        SystemNotificationRead: { where: { userId }, select: { readAt: true }, take: 1 },
       },
     }),
   ])
@@ -175,8 +175,8 @@ export async function listUnifiedNotifications(userId: string, options: { unread
       content: item.content,
       link: item.link,
       targetUrl: item.link,
-      actorName: item.actor?.profile?.displayName || item.actor?.nickname || null,
-      actorAvatarUrl: publicImageUrl(item.actor?.profile?.avatarUrl || item.actor?.avatarUrl),
+      actorName: item.User_Notification_actorIdToUser?.Profile?.displayName || item.User_Notification_actorIdToUser?.nickname || null,
+      actorAvatarUrl: publicImageUrl(item.User_Notification_actorIdToUser?.Profile?.avatarUrl || item.User_Notification_actorIdToUser?.avatarUrl),
       popup: false,
       sticky: false,
       isRead: item.isRead,
@@ -194,7 +194,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
     })),
     ...system.map((item) => {
       const targetUrl = item.buttonUrl || item.link
-      const isRead = item.reads.length > 0
+      const isRead = item.SystemNotificationRead.length > 0
       return {
         id: item.id,
         source: 'system' as const,
@@ -212,7 +212,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         isRead,
         read: isRead,
         createdAt: item.publishAt || item.createdAt,
-        readAt: item.reads[0]?.readAt || null,
+        readAt: item.SystemNotificationRead[0]?.readAt || null,
         replyTarget: null,
         replyDisabledReason: null,
       }
@@ -234,7 +234,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
       select: { id: true, postId: true },
     }) : [],
     dailyTargets.length ? prisma.dailyMessageComment.findMany({
-      where: { id: { in: dailyTargets.map((target) => target.parentId) }, isDeleted: false, message: { isDeleted: false } },
+      where: { id: { in: dailyTargets.map((target) => target.parentId) }, isDeleted: false, DailyMessage: { isDeleted: false } },
       select: { id: true, messageId: true },
     }) : [],
     feedbackTargets.length ? prisma.feedback.findMany({
@@ -243,7 +243,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
     }) : [],
     wallTargets.length ? prisma.profileWallMessage.findMany({
       where: { id: { in: wallTargets.map((target) => target.parentId) }, deletedAt: null },
-      select: { id: true, receiver: { select: { uid: true } } },
+      select: { id: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
     }) : [],
   ])
 
@@ -263,7 +263,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         return { ...item, replyDisabledReason: '该反馈已关闭，无法回复' }
       }
     }
-    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.receiver.uid) === target.resourceId)) {
+    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)) {
       return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
     }
     return item
@@ -277,7 +277,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       ...effectiveSystemNotificationWhere(now),
       popup: true,
       type: { in: POPUP_SYSTEM_TYPES },
-      reads: { none: { userId } },
+      SystemNotificationRead: { none: { userId } },
     },
     orderBy: effectiveSystemNotificationOrder,
     take: Math.min(Math.max(limit, 1), 10),
@@ -346,7 +346,7 @@ export async function markUnifiedNotificationRead(userId: string, source: string
 export async function markAllUnifiedNotificationsRead(userId: string) {
   const now = new Date()
   const unreadSystem = await prisma.systemNotification.findMany({
-    where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, reads: { none: { userId } } },
+    where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } },
     select: { id: true },
     take: 500,
   })

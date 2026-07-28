@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: Context) {
   try {
     const current = await prisma.guessSongQuestion.findUnique({
       where: { id: questionId },
-      include: { audioVariants: { select: { durationSeconds: true, storagePath: true } } },
+      include: { GuessSongAudioVariant: { select: { durationSeconds: true, storagePath: true } } },
     })
     if (!current) return guessSongError('题目不存在', 404)
     if (parsed.data.musicSongId) {
@@ -38,7 +38,7 @@ export async function PATCH(request: Request, { params }: Context) {
       processingStatus: current.processingStatus,
       difficulty: parsed.data.difficulty,
       allowEndless: parsed.data.allowEndless,
-      variantDurations: current.audioVariants.map((variant) => variant.durationSeconds),
+      variantDurations: current.GuessSongAudioVariant.map((variant) => variant.durationSeconds),
     })) {
       return guessSongError('题目音频尚未就绪，或缺少当前模式需要的音频变体', 409)
     }
@@ -48,7 +48,7 @@ export async function PATCH(request: Request, { params }: Context) {
         parsed.data.allowEndless,
       )
       const requiredKeys = requiredDurations.map((duration) =>
-        current.audioVariants.find((variant) => variant.durationSeconds === duration)?.storagePath,
+        current.GuessSongAudioVariant.find((variant) => variant.durationSeconds === duration)?.storagePath,
       )
       const existing = await Promise.all(requiredKeys.map((key) => key
         ? guessSongObjectExists(key)
@@ -60,9 +60,10 @@ export async function PATCH(request: Request, { params }: Context) {
     const question = await prisma.guessSongQuestion.update({
       where: { id: questionId },
       data: parsed.data,
-      include: { audioVariants: { orderBy: { durationSeconds: 'asc' } }, musicSong: true },
+      include: { GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } }, MusicSong: true },
     })
-    return guessSongOk({ question })
+    const { GuessSongAudioVariant, ...questionData } = question
+    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
       return guessSongError('题目不存在', 404)
@@ -81,17 +82,17 @@ export async function DELETE(request: Request, { params }: Context) {
     const question = await prisma.guessSongQuestion.findUnique({
       where: { id: questionId },
       include: {
-        _count: { select: { sessionQuestions: true } },
-        audioVariants: { select: { storagePath: true } },
+        _count: { select: { GuessSongSessionQuestion: true } },
+        GuessSongAudioVariant: { select: { storagePath: true } },
       },
     })
     if (!question) return guessSongError('题目不存在', 404)
-    if (question._count.sessionQuestions > 0) {
+    if (question._count.GuessSongSessionQuestion > 0) {
       return guessSongError('该题目已有历史游戏记录，请停用而不是删除', 409)
     }
     const paths = [
       ...(question.sourceAudioPath ? [question.sourceAudioPath] : []),
-      ...question.audioVariants.map((variant) => variant.storagePath),
+      ...question.GuessSongAudioVariant.map((variant) => variant.storagePath),
     ]
     await deleteGuessSongObjects(paths)
     await prisma.guessSongQuestion.delete({ where: { id: questionId } })

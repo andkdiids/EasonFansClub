@@ -11,13 +11,13 @@ export async function GET(_request: Request, { params }: Params) {
   const post = await prisma.post.findFirst({
     where: { id: postId, isDeleted: false },
     include: {
-      author: { select: { id: true, nickname: true, level: true, avatarUrl: true } },
-      board: { select: { name: true, slug: true } },
-      replies: {
+      User: { select: { id: true, nickname: true, level: true, avatarUrl: true } },
+      Board: { select: { name: true, slug: true } },
+      Reply: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'asc' },
         take: POST_DETAIL_REPLY_LIMIT,
-        include: { author: { select: { nickname: true, level: true, avatarUrl: true } } },
+        include: { User: { select: { nickname: true, level: true, avatarUrl: true } } },
       },
     },
   })
@@ -26,7 +26,15 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
   }
 
-  return NextResponse.json({ post })
+  const { User, Board, Reply, ...postData } = post
+  return NextResponse.json({
+    post: {
+      ...postData,
+      author: User,
+      board: Board,
+      replies: Reply.map(({ User: replyAuthor, ...reply }) => ({ ...reply, author: replyAuthor })),
+    },
+  })
 }
 
 export async function PATCH(request: Request, { params }: Params) {

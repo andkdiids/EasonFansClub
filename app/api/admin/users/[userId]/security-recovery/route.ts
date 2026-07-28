@@ -30,13 +30,13 @@ export async function PATCH(request: Request, context: RouteContext) {
           uid: true,
           role: true,
           securityQuestionRecoveryEnabled: true,
-          _count: { select: { securityQuestions: true } },
+          UserSecurityQuestion: { select: { id: true } },
         },
       })
 
       if (!target) throw new Error('USER_NOT_FOUND')
       if (target.uid <= 0 || target.role === 'SUPER_ADMIN') throw new Error('PROTECTED_ACCOUNT')
-      if (nextEnabled && target._count.securityQuestions < 1) throw new Error('SECURITY_QUESTIONS_INCOMPLETE')
+      if (nextEnabled && !target.UserSecurityQuestion) throw new Error('SECURITY_QUESTIONS_INCOMPLETE')
 
       const previousEnabled = target.securityQuestionRecoveryEnabled
       if (previousEnabled !== nextEnabled) {
@@ -72,7 +72,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
       return {
         id: target.id,
-        securityQuestionsSet: target._count.securityQuestions >= 1,
+        securityQuestionsSet: Boolean(target.UserSecurityQuestion),
         securityQuestionRecoveryEnabled: nextEnabled,
         changed: previousEnabled !== nextEnabled,
       }

@@ -28,33 +28,33 @@ export const feedbackStatuses = Object.keys(feedbackStatusLabels) as FeedbackSta
 export const feedbackVisibleStatuses = ['OPEN', 'PROCESSING', 'REPLIED', 'RESOLVED'] as const satisfies readonly FeedbackStatus[]
 
 export const feedbackInclude = {
-  user: {
+  User: {
     select: {
       id: true,
       uid: true,
       nickname: true,
       avatarUrl: true,
-      profile: { select: { displayName: true, avatarUrl: true } },
+      Profile: { select: { displayName: true, avatarUrl: true } },
     },
   },
-  attachments: {
+  FeedbackAttachment: {
     where: { replyId: null },
     orderBy: { createdAt: 'asc' },
   },
-  replies: {
+  FeedbackReply: {
     orderBy: { createdAt: 'asc' },
     include: {
-      admin: {
+      User: {
         select: {
           id: true,
           uid: true,
           nickname: true,
           avatarUrl: true,
           role: true,
-          profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-      attachments: { orderBy: { createdAt: 'asc' } },
+      FeedbackAttachment: { orderBy: { createdAt: 'asc' } },
     },
   },
 } satisfies Prisma.FeedbackInclude
@@ -69,15 +69,15 @@ export const feedbackListSelect = {
   lastReplyAt: true,
   createdAt: true,
   updatedAt: true,
-  user: {
+  User: {
     select: {
       id: true,
       uid: true,
       nickname: true,
-      profile: { select: { displayName: true } },
+      Profile: { select: { displayName: true } },
     },
   },
-  _count: { select: { replies: true, attachments: true } },
+  _count: { select: { FeedbackReply: true, FeedbackAttachment: true } },
 } satisfies Prisma.FeedbackSelect
 
 type FeedbackWithThread = Prisma.FeedbackGetPayload<{ include: typeof feedbackInclude }>
@@ -89,13 +89,13 @@ function displayUser(user: {
   nickname: string
   avatarUrl?: string | null
   role?: string
-  profile?: { displayName: string | null; avatarUrl?: string | null } | null
+  Profile?: { displayName: string | null; avatarUrl?: string | null } | null
 }) {
   return {
     id: user.id,
     uid: user.uid,
-    nickname: user.profile?.displayName || user.nickname,
-    avatarUrl: publicImageUrl(user.profile?.avatarUrl || user.avatarUrl || null),
+    nickname: user.Profile?.displayName || user.nickname,
+    avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl || null),
     role: user.role,
   }
 }
@@ -122,23 +122,23 @@ export function serializeFeedbackListItem(item: FeedbackListItem) {
     lastReplyAt: item.lastReplyAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-    replyCount: item._count.replies,
-    attachmentCount: item._count.attachments,
-    user: displayUser(item.user),
+    replyCount: item._count.FeedbackReply,
+    attachmentCount: item._count.FeedbackAttachment,
+    user: displayUser(item.User),
   }
 }
 
 export function serializeFeedback(item: FeedbackWithThread, options: { includeContact: boolean }) {
-  const user = displayUser(item.user)
-  const serializedReplies = item.replies.map((reply) => ({
+  const user = displayUser(item.User)
+  const serializedReplies = item.FeedbackReply.map((reply) => ({
     id: reply.id,
     content: reply.content,
     authorRole: reply.authorRole,
     isReadByUser: reply.isReadByUser,
     isReadByAdmin: reply.isReadByAdmin,
     createdAt: reply.createdAt,
-    author: displayUser(reply.admin),
-    attachments: reply.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
+    author: displayUser(reply.User),
+    attachments: reply.FeedbackAttachment.map(serializeAttachment).filter((attachment) => attachment.url),
   }))
   const hasStoredInitialMessage = serializedReplies.some((reply) => (
     reply.authorRole === 'USER' &&
@@ -153,7 +153,7 @@ export function serializeFeedback(item: FeedbackWithThread, options: { includeCo
     isReadByAdmin: !item.adminUnread,
     createdAt: item.createdAt,
     author: user,
-    attachments: item.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
+    attachments: item.FeedbackAttachment.map(serializeAttachment).filter((attachment) => attachment.url),
   }
 
   return {
@@ -174,7 +174,7 @@ export function serializeFeedback(item: FeedbackWithThread, options: { includeCo
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     user,
-    attachments: item.attachments.map(serializeAttachment).filter((attachment) => attachment.url),
+    attachments: item.FeedbackAttachment.map(serializeAttachment).filter((attachment) => attachment.url),
     replies: hasStoredInitialMessage ? serializedReplies : [initialMessage, ...serializedReplies],
   }
 }

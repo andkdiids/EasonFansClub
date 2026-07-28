@@ -45,7 +45,7 @@ export function serializeChangelog(item: ChangelogItem) {
     publishedAt: item.publishAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-    createdBy: item.createdBy,
+    createdBy: item.User,
   }
 }
 

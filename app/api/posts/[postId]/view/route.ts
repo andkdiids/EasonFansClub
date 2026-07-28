@@ -44,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ postId
     id: postId,
     isDeleted: false,
     status: 'PUBLISHED' as const,
-    author: { status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } },
+    User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }
   if (shouldIncrement) recentRequests.set(key, now)
   const updated = shouldIncrement

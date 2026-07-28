@@ -19,7 +19,7 @@ export function publicUserSelect() {
     exp: true,
     points: true,
     createdAt: true,
-    profile: true,
+    Profile: true,
   } satisfies Prisma.UserSelect
 }
 
@@ -56,7 +56,7 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
       status: true,
       isDeleted: true,
       passwordHash: true,
-      profile: { select: { id: true } },
+      Profile: { select: { id: true } },
     },
   })
 
@@ -85,11 +85,11 @@ export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' 
       email: true,
       phone: true,
       emailVerifiedAt: true,
-      profile: { select: { id: true } },
+      Profile: { select: { id: true } },
     },
   })
 
-  if (!user || !user.profile || !user.uid || user.isDeleted) return null
+  if (!user || !user.Profile || !user.uid || user.isDeleted) return null
   return user
 }
 

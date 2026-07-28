@@ -9,7 +9,7 @@ datasource db {
 }
 
 model AccountSecurityLog {
-  id        String   @id
+  id        String   @id @default(cuid())
   action    String
   ipAddress String?
   userAgent String?
@@ -23,7 +23,7 @@ model AccountSecurityLog {
 }
 
 model Achievement {
-  id              String              @id
+  id              String              @id @default(cuid())
   title           String
   slug            String              @unique
   description     String?
@@ -38,7 +38,7 @@ model Achievement {
   isVisible       Boolean             @default(true)
   sortOrder       Int                 @default(0)
   createdAt       DateTime            @default(now())
-  updatedAt       DateTime
+  updatedAt       DateTime            @updatedAt
   UserAchievement UserAchievement[]
 
   @@index([category, sortOrder])
@@ -47,7 +47,7 @@ model Achievement {
 }
 
 model Activity {
-  id                   String                 @id
+  id                   String                 @id @default(cuid())
   title                String
   description          String
   type                 ActivityType           @default(OTHER)
@@ -59,7 +59,7 @@ model Activity {
   startsAt             DateTime?
   endsAt               DateTime?
   createdAt            DateTime               @default(now())
-  updatedAt            DateTime
+  updatedAt            DateTime               @updatedAt
   ActivityFavorite     ActivityFavorite[]
   ActivityRegistration ActivityRegistration[]
   Lottery              Lottery[]
@@ -70,7 +70,7 @@ model Activity {
 }
 
 model ActivityFavorite {
-  id         String   @id
+  id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
   activityId String
   userId     String
@@ -81,7 +81,7 @@ model ActivityFavorite {
 }
 
 model ActivityRegistration {
-  id          String    @id
+  id          String    @id @default(cuid())
   note        String?
   checkedInAt DateTime?
   createdAt   DateTime  @default(now())
@@ -95,7 +95,7 @@ model ActivityRegistration {
 }
 
 model AdminAction {
-  id                                  String          @id
+  id                                  String          @id @default(cuid())
   action                              AdminActionType
   reason                              String?
   metadata                            Json?
@@ -120,7 +120,7 @@ model AdminAction {
 }
 
 model AdminActionLog {
-  id                                     String   @id
+  id                                     String   @id @default(cuid())
   adminId                                String
   action                                 String
   targetUserId                           String
@@ -135,11 +135,11 @@ model AdminActionLog {
 }
 
 model AdminPermission {
-  id            String   @id
+  id            String   @id @default(cuid())
   permissionKey String
   enabled       Boolean  @default(true)
   createdAt     DateTime @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime @updatedAt
   userId        String
   User          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -149,19 +149,19 @@ model AdminPermission {
 }
 
 model Announcement {
-  id          String   @id
+  id          String   @id @default(cuid())
   title       String
   content     String
   isPinned    Boolean  @default(false)
   isPublished Boolean  @default(true)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
 
   @@index([isPublished, isPinned])
 }
 
 model Badge {
-  id          String      @id
+  id          String      @id @default(cuid())
   name        String      @unique
   slug        String      @unique
   description String?
@@ -170,27 +170,27 @@ model Badge {
   isAutoGrant Boolean     @default(false)
   isActive    Boolean     @default(true)
   createdAt   DateTime    @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime    @updatedAt
   UserBadge   UserBadge[]
 
   @@index([isActive])
 }
 
 model Banner {
-  id        String   @id
+  id        String   @id @default(cuid())
   title     String
   imageUrl  String
   link      String?
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
 
   @@index([isActive, sortOrder])
 }
 
 model Block {
-  id                         String   @id
+  id                         String   @id @default(cuid())
   reason                     String?
   createdAt                  DateTime @default(now())
   blockerId                  String
@@ -202,7 +202,7 @@ model Block {
 }
 
 model Board {
-  id            String          @id
+  id            String          @id @default(cuid())
   name          String          @unique
   slug          String          @unique
   description   String?
@@ -210,7 +210,7 @@ model Board {
   postCount     Int             @default(0)
   isActive      Boolean         @default(true)
   createdAt     DateTime        @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime        @updatedAt
   categoryId    String?
   coverUrl      String?
   followerCount Int             @default(0)
@@ -233,20 +233,20 @@ model Board {
 }
 
 model BoardCategory {
-  id          String   @id
+  id          String   @id @default(cuid())
   name        String   @unique
   slug        String   @unique
   description String?
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
   Board       Board[]
 
   @@index([sortOrder])
 }
 
 model BoardFavorite {
-  id        String   @id
+  id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   boardId   String
   userId    String
@@ -258,7 +258,7 @@ model BoardFavorite {
 }
 
 model Changelog {
-  id          String          @id
+  id          String          @id @default(cuid())
   version     String          @unique
   major       Int
   minor       Int
@@ -270,7 +270,7 @@ model Changelog {
   status      ChangelogStatus @default(DRAFT)
   publishedAt DateTime?
   createdAt   DateTime        @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime        @updatedAt
   createdById String
   User        User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
 
@@ -353,9 +353,9 @@ model CheckIn_before_streak_fix {
 }
 
 model Conversation {
-  id                      String                    @id
+  id                      String                    @id @default(cuid())
   createdAt               DateTime                  @default(now())
-  updatedAt               DateTime
+  updatedAt               DateTime                  @updatedAt
   lastMessageAt           DateTime?
   pairKey                 String?                   @unique
   ConversationParticipant ConversationParticipant[]
@@ -365,7 +365,7 @@ model Conversation {
 }
 
 model ConversationParticipant {
-  id             String       @id
+  id             String       @id @default(cuid())
   lastReadAt     DateTime?
   isDeleted      Boolean      @default(false)
   isMuted        Boolean      @default(false)
@@ -380,11 +380,11 @@ model ConversationParticipant {
 }
 
 model CultureComment {
-  id          String      @id
+  id          String      @id @default(cuid())
   content     String
   isDeleted   Boolean     @default(false)
   createdAt   DateTime    @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime    @updatedAt
   itemId      String
   userId      String
   CultureItem CultureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
@@ -395,7 +395,7 @@ model CultureComment {
 }
 
 model CultureFavorite {
-  id          String      @id
+  id          String      @id @default(cuid())
   createdAt   DateTime    @default(now())
   itemId      String
   userId      String
@@ -407,7 +407,7 @@ model CultureFavorite {
 }
 
 model CultureItem {
-  id                  String                @id
+  id                  String                @id @default(cuid())
   type                CultureContentType
   title               String
   slug                String                @unique
@@ -432,7 +432,7 @@ model CultureItem {
   isVisible           Boolean               @default(true)
   sortOrder           Int                   @default(0)
   createdAt           DateTime              @default(now())
-  updatedAt           DateTime
+  updatedAt           DateTime              @updatedAt
   CultureComment      CultureComment[]
   CultureFavorite     CultureFavorite[]
   LyricCard           LyricCard[]
@@ -490,12 +490,12 @@ model DailyMessage {
 }
 
 model DailyMessageComment {
-  id                        String                @id
+  id                        String                @id @default(cuid())
   content                   String
   isDeleted                 Boolean               @default(false)
   deletedAt                 DateTime?
   createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime
+  updatedAt                 DateTime              @updatedAt
   messageId                 String
   authorId                  String
   parentId                  String?
@@ -510,7 +510,7 @@ model DailyMessageComment {
 }
 
 model DailyMessageFavorite {
-  id           String       @id
+  id           String       @id @default(cuid())
   createdAt    DateTime     @default(now())
   messageId    String
   userId       String
@@ -522,7 +522,7 @@ model DailyMessageFavorite {
 }
 
 model DailyMessageLike {
-  id           String       @id
+  id           String       @id @default(cuid())
   createdAt    DateTime     @default(now())
   messageId    String
   userId       String
@@ -534,7 +534,7 @@ model DailyMessageLike {
 }
 
 model DailyQuote {
-  id        String   @id
+  id        String   @id @default(cuid())
   content   String
   source    String?
   songTitle String?
@@ -542,7 +542,7 @@ model DailyQuote {
   isVisible Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
 
   @@index([isPinned, isVisible])
   @@index([sortOrder])
@@ -566,7 +566,7 @@ model DailyTaskProgress {
 }
 
 model DailyTaskTemplate {
-  id                String              @id
+  id                String              @id @default(cuid())
   key               String              @unique
   title             String
   description       String?
@@ -576,14 +576,14 @@ model DailyTaskTemplate {
   sortOrder         Int                 @default(0)
   isActive          Boolean             @default(true)
   createdAt         DateTime            @default(now())
-  updatedAt         DateTime
+  updatedAt         DateTime            @updatedAt
   DailyTaskProgress DailyTaskProgress[]
 
   @@index([isActive, sortOrder])
 }
 
 model DirectMessage {
-  id             String       @id
+  id             String       @id @default(cuid())
   type           MessageType  @default(TEXT)
   content        String
   imageUrl       String?
@@ -599,7 +599,7 @@ model DirectMessage {
 }
 
 model EmailVerification {
-  id        String    @id
+  id        String    @id @default(cuid())
   tokenHash String    @unique
   email     String
   expiresAt DateTime
@@ -613,7 +613,7 @@ model EmailVerification {
 }
 
 model EntertainmentDailyDraw {
-  id                  String             @id
+  id                  String             @id @default(cuid())
   dateKey             String
   points              Int
   prescriptionCode    String             @unique
@@ -651,14 +651,14 @@ model ExperienceLog {
 }
 
 model Feedback {
-  id                 String               @id
+  id                 String               @id @default(cuid())
   type               FeedbackType
   title              String
   content            String
   imageUrl           String?
   status             FeedbackStatus       @default(OPEN)
   createdAt          DateTime             @default(now())
-  updatedAt          DateTime
+  updatedAt          DateTime             @updatedAt
   userId             String
   contact            String?
   adminUnread        Boolean              @default(true)
@@ -679,7 +679,7 @@ model Feedback {
 }
 
 model FeedbackAttachment {
-  id            String         @id
+  id            String         @id @default(cuid())
   url           String
   mimeType      String?
   createdAt     DateTime       @default(now())
@@ -693,7 +693,7 @@ model FeedbackAttachment {
 }
 
 model FeedbackReply {
-  id                 String               @id
+  id                 String               @id @default(cuid())
   content            String
   createdAt          DateTime             @default(now())
   feedbackId         String
@@ -710,7 +710,7 @@ model FeedbackReply {
 }
 
 model Follow {
-  id                            String   @id
+  id                            String   @id @default(cuid())
   createdAt                     DateTime @default(now())
   followerId                    String
   followingId                   String
@@ -741,11 +741,11 @@ model FriendActivity {
 }
 
 model FriendRequest {
-  id                                  String              @id
+  id                                  String              @id @default(cuid())
   message                             String?
   status                              FriendRequestStatus @default(PENDING)
   createdAt                           DateTime            @default(now())
-  updatedAt                           DateTime
+  updatedAt                           DateTime            @updatedAt
   senderId                            String
   receiverId                          String
   User_FriendRequest_receiverIdToUser User                @relation("FriendRequest_receiverIdToUser", fields: [receiverId], references: [id], onDelete: Cascade)
@@ -757,7 +757,7 @@ model FriendRequest {
 }
 
 model Friendship {
-  id                            String   @id
+  id                            String   @id @default(cuid())
   createdAt                     DateTime @default(now())
   userAId                       String
   userBId                       String
@@ -769,18 +769,18 @@ model Friendship {
 }
 
 model GrowthLevelConfig {
-  id          String   @id
+  id          String   @id @default(cuid())
   level       Int      @unique
   name        String
   requiredExp Int
   createdAt   DateTime @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
 
   @@index([requiredExp])
 }
 
 model GuessSongAudioVariant {
-  id                   String                 @id
+  id                   String                 @id @default(cuid())
   durationSeconds      Int
   storagePath          String
   fileSize             Int
@@ -794,7 +794,7 @@ model GuessSongAudioVariant {
 }
 
 model GuessSongLeaderboardEntry {
-  id               String              @id
+  id               String              @id @default(cuid())
   mode             GuessSongMode
   periodType       GuessSongPeriodType
   periodKey        String
@@ -804,7 +804,7 @@ model GuessSongLeaderboardEntry {
   totalPlayCount   Int
   achievedAt       DateTime
   createdAt        DateTime            @default(now())
-  updatedAt        DateTime
+  updatedAt        DateTime            @updatedAt
   userId           String
   sessionId        String
   GuessSongSession GuessSongSession    @relation(fields: [sessionId], references: [id])
@@ -817,7 +817,7 @@ model GuessSongLeaderboardEntry {
 }
 
 model GuessSongPlayRequest {
-  id                       String                   @id
+  id                       String                   @id @default(cuid())
   requestKey               String
   playCountAfter           Int
   createdAt                DateTime                 @default(now())
@@ -831,7 +831,7 @@ model GuessSongPlayRequest {
 }
 
 model GuessSongQuestion {
-  id                       String                     @id
+  id                       String                     @id @default(cuid())
   songTitle                String
   albumTitle               String?
   difficulty               GuessSongDifficulty
@@ -849,7 +849,7 @@ model GuessSongQuestion {
   answerCount              Int                        @default(0)
   correctCount             Int                        @default(0)
   createdAt                DateTime                   @default(now())
-  updatedAt                DateTime
+  updatedAt                DateTime                   @updatedAt
   musicSongId              String?
   GuessSongAudioVariant    GuessSongAudioVariant[]
   MusicSong                MusicSong?                 @relation(fields: [musicSongId], references: [id])
@@ -864,7 +864,7 @@ model GuessSongQuestion {
 }
 
 model GuessSongSession {
-  id                        String                      @id
+  id                        String                      @id @default(cuid())
   activeKey                 String?                     @unique
   mode                      GuessSongMode
   status                    GuessSongSessionStatus      @default(IN_PROGRESS)
@@ -880,7 +880,7 @@ model GuessSongSession {
   completedAt               DateTime?
   expiresAt                 DateTime
   createdAt                 DateTime                    @default(now())
-  updatedAt                 DateTime
+  updatedAt                 DateTime                    @updatedAt
   userId                    String
   GuessSongLeaderboardEntry GuessSongLeaderboardEntry[]
   User                      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -893,7 +893,7 @@ model GuessSongSession {
 }
 
 model GuessSongSessionQuestion {
-  id                      String                 @id
+  id                      String                 @id @default(cuid())
   publicId                String                 @unique
   position                Int
   playbackDurationSeconds Int
@@ -920,7 +920,7 @@ model GuessSongSessionQuestion {
 }
 
 model Like {
-  id        String   @id
+  id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   postId    String
   userId    String
@@ -933,7 +933,7 @@ model Like {
 }
 
 model LoginDevice {
-  id          String     @id
+  id          String     @id @default(cuid())
   deviceType  DeviceType @default(WEB)
   deviceName  String?
   ipAddress   String?
@@ -947,7 +947,7 @@ model LoginDevice {
 }
 
 model Lottery {
-  id           String         @id
+  id           String         @id @default(cuid())
   title        String
   pointsCost   Int            @default(0)
   startsAt     DateTime?
@@ -962,7 +962,7 @@ model Lottery {
 }
 
 model LotteryEntry {
-  id           String        @id
+  id           String        @id @default(cuid())
   createdAt    DateTime      @default(now())
   lotteryId    String
   prizeId      String?
@@ -976,7 +976,7 @@ model LotteryEntry {
 }
 
 model LotteryPrize {
-  id           String         @id
+  id           String         @id @default(cuid())
   name         String
   type         RewardType
   quantity     Int            @default(1)
@@ -989,7 +989,7 @@ model LotteryPrize {
 }
 
 model LyricCard {
-  id                String             @id
+  id                String             @id @default(cuid())
   lyric             String
   imageUrl          String?
   isFavorite        Boolean            @default(false)
@@ -1006,7 +1006,7 @@ model LyricCard {
 }
 
 model LyricCardTemplate {
-  id            String      @id
+  id            String      @id @default(cuid())
   name          String
   backgroundUrl String?
   textColor     String      @default("#071722")
@@ -1014,21 +1014,21 @@ model LyricCardTemplate {
   isVisible     Boolean     @default(true)
   sortOrder     Int         @default(0)
   createdAt     DateTime    @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime    @updatedAt
   LyricCard     LyricCard[]
 
   @@index([isVisible, sortOrder])
 }
 
 model LyricPrescription {
-  id                     String                   @id
+  id                     String                   @id @default(cuid())
   text                   String
   songTitle              String
   albumTitle             String?
   enabled                Boolean                  @default(true)
   displayCount           Int                      @default(0)
   createdAt              DateTime                 @default(now())
-  updatedAt              DateTime
+  updatedAt              DateTime                 @updatedAt
   EntertainmentDailyDraw EntertainmentDailyDraw[]
 
   @@index([displayCount])
@@ -1036,7 +1036,7 @@ model LyricPrescription {
 }
 
 model MusicAlbum {
-  id           String                 @id
+  id           String                 @id @default(cuid())
   name         String
   artist       String                 @default("陈奕迅")
   releaseYear  Int
@@ -1059,7 +1059,7 @@ model MusicAlbum {
 }
 
 model MusicFavorite {
-  id         String     @id
+  id         String     @id @default(cuid())
   createdAt  DateTime   @default(now())
   trackId    String
   userId     String
@@ -1071,7 +1071,7 @@ model MusicFavorite {
 }
 
 model MusicPlayRecord {
-  id              String     @id
+  id              String     @id @default(cuid())
   durationSeconds Int        @default(0)
   playedAt        DateTime   @default(now())
   trackId         String
@@ -1084,7 +1084,7 @@ model MusicPlayRecord {
 }
 
 model MusicSong {
-  id                String              @id
+  id                String              @id @default(cuid())
   title             String
   artist            String              @default("陈奕迅")
   albumId           String
@@ -1120,7 +1120,7 @@ model MusicSong {
 }
 
 model MusicTrack {
-  id              String            @id
+  id              String            @id @default(cuid())
   title           String
   artist          String            @default("Eason Chan")
   source          String?
@@ -1129,7 +1129,7 @@ model MusicTrack {
   sortOrder       Int               @default(0)
   isVisible       Boolean           @default(true)
   createdAt       DateTime          @default(now())
-  updatedAt       DateTime
+  updatedAt       DateTime          @updatedAt
   MusicFavorite   MusicFavorite[]
   MusicPlayRecord MusicPlayRecord[]
 
@@ -1139,7 +1139,7 @@ model MusicTrack {
 }
 
 model Notification {
-  id                                  String           @id
+  id                                  String           @id @default(cuid())
   type                                NotificationType
   title                               String
   content                             String?
@@ -1160,7 +1160,7 @@ model Notification {
 }
 
 model OnlineSession {
-  id        String   @id
+  id        String   @id @default(cuid())
   tokenId   String?
   ipAddress String?
   userAgent String?
@@ -1173,7 +1173,7 @@ model OnlineSession {
 }
 
 model PageLayout {
-  id                                  String               @id
+  id                                  String               @id @default(cuid())
   pageKey                             String               @unique
   draftConfig                         Json
   publishedConfig                     Json
@@ -1181,7 +1181,7 @@ model PageLayout {
   version                             Int                  @default(1)
   publishedAt                         DateTime?
   createdAt                           DateTime             @default(now())
-  updatedAt                           DateTime
+  updatedAt                           DateTime             @updatedAt
   updatedById                         String?
   publishedById                       String?
   User_PageLayout_publishedByIdToUser User?                @relation("PageLayout_publishedByIdToUser", fields: [publishedById], references: [id])
@@ -1194,7 +1194,7 @@ model PageLayout {
 }
 
 model PageLayoutRevision {
-  id            String                   @id
+  id            String                   @id @default(cuid())
   pageLayoutId  String
   version       Int
   config        Json
@@ -1212,7 +1212,7 @@ model PageLayoutRevision {
 }
 
 model PasswordResetToken {
-  id           String             @id
+  id           String             @id @default(cuid())
   tokenHash    String             @unique
   expiresAt    DateTime
   consumedAt   DateTime?
@@ -1259,7 +1259,7 @@ model PointLog {
 }
 
 model Poll {
-  id         String       @id
+  id         String       @id @default(cuid())
   question   String
   allowMulti Boolean      @default(false)
   expiresAt  DateTime?
@@ -1271,7 +1271,7 @@ model Poll {
 }
 
 model PollOption {
-  id        String     @id
+  id        String     @id @default(cuid())
   title     String
   voteCount Int        @default(0)
   sortOrder Int        @default(0)
@@ -1283,7 +1283,7 @@ model PollOption {
 }
 
 model PollVote {
-  id         String     @id
+  id         String     @id @default(cuid())
   createdAt  DateTime   @default(now())
   pollId     String
   optionId   String
@@ -1296,7 +1296,7 @@ model PollVote {
 }
 
 model Post {
-  id            String          @id
+  id            String          @id @default(cuid())
   title         String
   content       String
   viewCount     Int             @default(0)
@@ -1307,7 +1307,7 @@ model Post {
   isDeleted     Boolean         @default(false)
   deletedAt     DateTime?
   createdAt     DateTime        @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime        @updatedAt
   authorId      String
   boardId       String
   contentType   PostContentType @default(NORMAL)
@@ -1346,7 +1346,7 @@ model Post {
 }
 
 model PostFavorite {
-  id        String   @id
+  id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   postId    String
   userId    String
@@ -1358,7 +1358,7 @@ model PostFavorite {
 }
 
 model PostMedia {
-  id        String    @id
+  id        String    @id @default(cuid())
   type      MediaType
   url       String
   thumbnail String?
@@ -1383,13 +1383,13 @@ model PostTag {
 }
 
 model Profile {
-  id             String                @id
+  id             String                @id @default(cuid())
   displayName    String
   avatarUrl      String?
   backgroundUrl  String?
   bio            String?
   createdAt      DateTime              @default(now())
-  updatedAt      DateTime
+  updatedAt      DateTime              @updatedAt
   userId         String                @unique
   wallVisibility ProfileWallVisibility @default(PUBLIC)
   User           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1399,7 +1399,7 @@ model Profile {
 }
 
 model ProfileWallLike {
-  id                 String             @id
+  id                 String             @id @default(cuid())
   createdAt          DateTime           @default(now())
   messageId          String
   userId             String
@@ -1411,10 +1411,10 @@ model ProfileWallLike {
 }
 
 model ProfileWallMessage {
-  id                                       String               @id
+  id                                       String               @id @default(cuid())
   content                                  String
   createdAt                                DateTime             @default(now())
-  updatedAt                                DateTime
+  updatedAt                                DateTime             @updatedAt
   deletedAt                                DateTime?
   senderId                                 String
   receiverId                               String
@@ -1433,7 +1433,7 @@ model ProfileWallMessage {
 }
 
 model RateLimitLog {
-  id        String   @id
+  id        String   @id @default(cuid())
   key       String
   action    String
   count     Int      @default(1)
@@ -1445,12 +1445,12 @@ model RateLimitLog {
 }
 
 model Reply {
-  id          String        @id
+  id          String        @id @default(cuid())
   content     String
   isDeleted   Boolean       @default(false)
   deletedAt   DateTime?
   createdAt   DateTime      @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime      @updatedAt
   postId      String
   authorId    String
   parentId    String?
@@ -1470,7 +1470,7 @@ model Reply {
 }
 
 model ReplyLike {
-  id        String   @id
+  id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   replyId   String
   userId    String
@@ -1483,7 +1483,7 @@ model ReplyLike {
 }
 
 model Report {
-  id                             String           @id
+  id                             String           @id @default(cuid())
   targetType                     ReportTargetType
   reason                         String
   description                    String?
@@ -1507,7 +1507,7 @@ model Report {
 }
 
 model SearchHistory {
-  id        String   @id
+  id        String   @id @default(cuid())
   keyword   String
   createdAt DateTime @default(now())
   userId    String
@@ -1517,7 +1517,7 @@ model SearchHistory {
 }
 
 model SearchKeyword {
-  id         String   @id
+  id         String   @id @default(cuid())
   keyword    String   @unique
   count      Int      @default(1)
   lastUsedAt DateTime @default(now())
@@ -1526,7 +1526,7 @@ model SearchKeyword {
 }
 
 model SensitiveWord {
-  id        String   @id
+  id        String   @id @default(cuid())
   word      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1535,20 +1535,20 @@ model SensitiveWord {
 }
 
 model SiteSetting {
-  id        String               @id
+  id        String               @id @default(cuid())
   key       String               @unique
   value     String
   valueType SiteSettingValueType @default(TEXT)
   group     String               @default("general")
   label     String?
-  updatedAt DateTime
+  updatedAt DateTime             @updatedAt
   createdAt DateTime             @default(now())
 
   @@index([group])
 }
 
 model SmsCode {
-  id        String    @id
+  id        String    @id @default(cuid())
   phone     String
   codeHash  String
   scene     String
@@ -1561,7 +1561,7 @@ model SmsCode {
 }
 
 model SystemNotification {
-  id                     String                   @id
+  id                     String                   @id @default(cuid())
   title                  String
   content                String
   link                   String?
@@ -1569,7 +1569,7 @@ model SystemNotification {
   isPublished            Boolean                  @default(true)
   publishedAt            DateTime                 @default(now())
   createdAt              DateTime                 @default(now())
-  updatedAt              DateTime
+  updatedAt              DateTime                 @updatedAt
   createdById            String
   cover                  String?
   priority               Int                      @default(0)
@@ -1594,7 +1594,7 @@ model SystemNotification {
 }
 
 model SystemNotificationRead {
-  id                 String             @id
+  id                 String             @id @default(cuid())
   readAt             DateTime           @default(now())
   notificationId     String
   userId             String
@@ -1607,32 +1607,32 @@ model SystemNotificationRead {
 }
 
 model Tag {
-  id         String    @id
+  id         String    @id @default(cuid())
   name       String    @unique
   slug       String    @unique
   usageCount Int       @default(0)
   createdAt  DateTime  @default(now())
-  updatedAt  DateTime
+  updatedAt  DateTime  @updatedAt
   PostTag    PostTag[]
 
   @@index([usageCount])
 }
 
 model Task {
-  id          String   @id
+  id          String   @id @default(cuid())
   name        String
   description String?
   expReward   Int
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
 
   @@index([createdAt])
   @@index([enabled])
 }
 
 model User {
-  id                                                     String                      @id
+  id                                                     String                      @id @default(cuid())
   username                                               String
   email                                                  String?
   phone                                                  String?
@@ -1648,7 +1648,7 @@ model User {
   isDeleted                                              Boolean                     @default(false)
   deletedAt                                              DateTime?
   createdAt                                              DateTime                    @default(now())
-  updatedAt                                              DateTime
+  updatedAt                                              DateTime                    @updatedAt
   backgroundUrl                                          String?
   emailVerifiedAt                                        DateTime?
   exp                                                    Int                         @default(0)
@@ -1750,12 +1750,12 @@ model User {
 }
 
 model UserAchievement {
-  id            String      @id
+  id            String      @id @default(cuid())
   progress      Int         @default(0)
   unlocked      Boolean     @default(false)
   unlockedAt    DateTime?
   createdAt     DateTime    @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime    @updatedAt
   userId        String
   achievementId String
   Achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
@@ -1767,11 +1767,11 @@ model UserAchievement {
 }
 
 model UserAlbumCollection {
-  id          String      @id
+  id          String      @id @default(cuid())
   owned       Boolean     @default(true)
   note        String?
   createdAt   DateTime    @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime    @updatedAt
   userId      String
   albumId     String
   CultureItem CultureItem @relation(fields: [albumId], references: [id], onDelete: Cascade)
@@ -1782,7 +1782,7 @@ model UserAlbumCollection {
 }
 
 model UserBadge {
-  id           String   @id
+  id           String   @id @default(cuid())
   isHidden     Boolean  @default(false)
   displayOrder Int      @default(0)
   grantedAt    DateTime @default(now())
@@ -1796,7 +1796,7 @@ model UserBadge {
 }
 
 model UserSecurityQuestion {
-  id         String   @id
+  id         String   @id @default(cuid())
   question   String
   answerHash String
   sortOrder  Int

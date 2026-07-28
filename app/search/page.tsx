@@ -21,18 +21,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             isDeleted: false,
             status: 'PUBLISHED',
             OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { content: { contains: q, mode: 'insensitive' } },
+              { title: { contains: q } },
+              { content: { contains: q } },
             ],
           },
           include: {
-            author: { select: { nickname: true, level: true } },
-            board: { select: { name: true, slug: true } },
+            User: { select: { nickname: true, level: true } },
+            Board: { select: { name: true, slug: true } },
           },
           take: 20,
         }),
         prisma.board.findMany({
-          where: { isActive: true, name: { contains: q, mode: 'insensitive' } },
+          where: { isActive: true, name: { contains: q } },
           take: 10,
         }),
         prisma.user.findMany({
@@ -40,39 +40,39 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             uid: { gt: 0 },
             isDeleted: false,
             status: 'ACTIVE',
-            profile: { isNot: null },
+            Profile: { isNot: null },
             OR: [
               ...(Number.isSafeInteger(numericUid) && Number(numericUid) > 0 ? [{ uid: Number(numericUid) }] : []),
-              { nickname: { contains: q, mode: 'insensitive' } },
-              { username: { contains: q, mode: 'insensitive' } },
-              { profile: { displayName: { contains: q, mode: 'insensitive' } } },
+              { nickname: { contains: q } },
+              { username: { contains: q } },
+              { Profile: { displayName: { contains: q } } },
             ],
           },
           select: {
             id: true, uid: true, nickname: true, username: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
-            profile: { select: { displayName: true, avatarUrl: true, bio: true } },
-            _count: { select: { posts: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
-            posts: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true } },
+            Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
+            _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
+            Post: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true } },
           },
           take: 10,
         }),
         prisma.musicAlbum.findMany({
-          where: { status: 'PUBLISHED', name: { contains: q, mode: 'insensitive' } },
+          where: { status: 'PUBLISHED', name: { contains: q } },
           orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }],
           select: { id: true, name: true, releaseYear: true },
           take: 10,
         }),
         prisma.musicSong.findMany({
           where: {
-            album: { status: 'PUBLISHED' },
+            MusicAlbum: { status: 'PUBLISHED' },
             OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { lyricist: { contains: q, mode: 'insensitive' } },
-              { composer: { contains: q, mode: 'insensitive' } },
-              { album: { name: { contains: q, mode: 'insensitive' } } },
+              { title: { contains: q } },
+              { lyricist: { contains: q } },
+              { composer: { contains: q } },
+              { MusicAlbum: { name: { contains: q } } },
             ],
           },
-          select: { id: true, title: true, album: { select: { name: true } } },
+          select: { id: true, title: true, MusicAlbum: { select: { name: true } } },
           take: 16,
         }),
         prisma.searchKeyword.findMany({ orderBy: { count: 'desc' }, take: 8 }),
@@ -127,7 +127,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                   <p className="font-black text-slate-950">{post.title}</p>
                   <p className="mt-2 text-sm text-slate-500">
-                    {post.board.name} · {post.author.nickname} · 回复 {post.replyCount}
+                    {post.Board.name} · {post.User.nickname} · 回复 {post.replyCount}
                   </p>
                 </Link>
               ))}
@@ -140,7 +140,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               {songs.map((song) => (
                 <Link key={song.id} href={`/music/song/${song.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                   <p className="font-black text-slate-950">歌曲 · {song.title}</p>
-                  <p className="mt-2 text-sm text-slate-500">EasMusic · {song.album.name}</p>
+                  <p className="mt-2 text-sm text-slate-500">EasMusic · {song.MusicAlbum.name}</p>
                 </Link>
               ))}
               {posts.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
@@ -160,8 +160,8 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <h2 className="font-black text-brand-950">相关用户</h2>
                 <div className="mt-3 space-y-2">
                   {users.map((item) => {
-                    const name = item.profile?.displayName || item.nickname || item.username
-                    const avatar = publicImageUrl(item.profile?.avatarUrl || item.avatarUrl)
+                    const name = item.Profile?.displayName || item.nickname || item.username
+                    const avatar = publicImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
                     const growth = calculateGrowthSummary(item.experience, growthLevels)
                     const status = friendIds.has(item.id) ? 'FRIEND' : sentIds.has(item.id) ? 'PENDING' : receivedIds.has(item.id) ? 'RECEIVED' : 'NONE'
                     return (
@@ -172,16 +172,16 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                           </span>
                           <span>
                             <strong className="block text-brand-950">{name}</strong>
-                            <small>UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.posts} 帖</small>
+                            <small>UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.Post} 帖</small>
                           </span>
                         </Link>
-                        <p className="mt-2 text-xs font-bold text-slate-500">{item.profile?.bio || `入院于 ${item.createdAt.toLocaleDateString('zh-CN')}`}</p>
+                        <p className="mt-2 text-xs font-bold text-slate-500">{item.Profile?.bio || `入院于 ${item.createdAt.toLocaleDateString('zh-CN')}`}</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <Link href={`/user/${formatUid(item.uid)}`} className="border border-sky-100 px-3 py-2 text-xs font-black text-brand-700">查看主页</Link>
                           {viewer && viewer.id !== item.id && status !== 'RECEIVED' ? <AddFriendButton uid={item.uid} initialStatus={status} /> : null}
                           {status === 'RECEIVED' && receivedRequestBySender.get(item.id) ? <FriendRequestDecision requestId={receivedRequestBySender.get(item.id)!} /> : null}
                         </div>
-                        {item.posts.length ? <div className="mt-2 space-y-1">{item.posts.map((post) => <Link key={post.id} href={`/posts/${post.id}`} className="block truncate text-xs font-bold text-slate-600">帖子 · {post.title}</Link>)}</div> : null}
+                        {item.Post.length ? <div className="mt-2 space-y-1">{item.Post.map((post) => <Link key={post.id} href={`/posts/${post.id}`} className="block truncate text-xs font-bold text-slate-600">帖子 · {post.title}</Link>)}</div> : null}
                       </article>
                     )
                   })}

@@ -25,7 +25,8 @@ export async function POST(request: Request, { params }: Context) {
       Buffer.from(await file.arrayBuffer()),
       extension,
     )
-    return guessSongOk({ question })
+    const { GuessSongAudioVariant, ...questionData } = question
+    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } })
   } catch (error) {
     return handleGuessSongError(error, 'admin.audio.upload')
   }

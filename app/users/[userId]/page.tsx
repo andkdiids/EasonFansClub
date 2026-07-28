@@ -13,7 +13,7 @@ export default async function LegacyUserPage({ params }: PageProps) {
       id: userId,
       status: 'ACTIVE',
       isDeleted: false,
-      profile: { isNot: null },
+      Profile: { isNot: null },
     },
     select: { uid: true },
   })

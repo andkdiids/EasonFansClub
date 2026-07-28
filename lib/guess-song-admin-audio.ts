@@ -31,7 +31,7 @@ async function saveProcessedAudio(
       where: { id: questionId },
       select: {
         sourceAudioPath: true,
-        audioVariants: { select: { storagePath: true } },
+        GuessSongAudioVariant: { select: { storagePath: true } },
       },
     })
     if (!old) throw new Error('QUESTION_NOT_FOUND')
@@ -46,7 +46,7 @@ async function saveProcessedAudio(
           processingStatus: 'READY',
           processingError: null,
           enabled: false,
-          audioVariants: {
+          GuessSongAudioVariant: {
             create: processed.variants.map((variant) => ({
               durationSeconds: variant.durationSeconds,
               storagePath: buildGuessSongObjectKey(
@@ -61,7 +61,7 @@ async function saveProcessedAudio(
 
     const oldPaths = [
       ...(old.sourceAudioPath ? [old.sourceAudioPath] : []),
-      ...old.audioVariants.map((variant) => variant.storagePath),
+      ...old.GuessSongAudioVariant.map((variant) => variant.storagePath),
     ].filter((path) => !uploadedPaths.includes(path))
     await deleteGuessSongObjects(oldPaths).catch((error) => {
       console.error('[guess-song.audio.cleanup-old]', error)
@@ -86,7 +86,7 @@ export async function uploadAndProcessGuessSongAudio(
     await saveProcessedAudio(questionId, processed)
     return prisma.guessSongQuestion.findUniqueOrThrow({
       where: { id: questionId },
-      include: { audioVariants: { orderBy: { durationSeconds: 'asc' } } },
+      include: { GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } } },
     })
   } catch (error) {
     await prisma.guessSongQuestion.updateMany({

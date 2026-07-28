@@ -9,7 +9,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
 
   const message = await prisma.profileWallMessage.findFirst({
     where: { id: messageId, deletedAt: null },
-    select: { id: true, senderId: true, receiver: { select: { uid: true } } },
+    select: { id: true, senderId: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
   })
   if (!message) return NextResponse.json({ message: '该留言已被删除或无法查看' }, { status: 404 })
 
@@ -30,7 +30,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
             type: 'LIKE',
             title: '有人赞了你的留言',
             content: `${user.nickname} 赞了你的留言`,
-            link: `/user/${String(message.receiver.uid).padStart(5, '0')}/wall?focus=${messageId}`,
+            link: `/user/${String(message.User_ProfileWallMessage_receiverIdToUser.uid).padStart(5, '0')}/wall?focus=${messageId}`,
           },
         })
       }

@@ -24,15 +24,21 @@ export default async function AdminDetailPage({ params }: PageProps) {
       isDeleted: false,
     },
     include: {
-      profile: true,
-      adminPermissions: { orderBy: { permissionKey: 'asc' } },
-    },
+  Profile: true,
+  AdminPermission: {
+    orderBy: { permissionKey: 'asc' },
+  },
+},
   })
   if (!admin) notFound()
 
   const enabledKeys = isSuperAdmin(admin)
-    ? new Set(allAdminPermissionKeys)
-    : new Set(admin.adminPermissions.filter((item) => item.enabled).map((item) => item.permissionKey))
+  ? new Set(allAdminPermissionKeys)
+  : new Set(
+      admin.AdminPermission
+        .filter((item) => item.enabled)
+        .map((item) => item.permissionKey)
+    )
 
   return (
     <>
@@ -48,7 +54,7 @@ export default async function AdminDetailPage({ params }: PageProps) {
             </div>
             <div className="rounded-2xl bg-sky-50 p-4">
               <p className="text-xs font-black text-slate-500">昵称</p>
-              <p className="mt-2 text-xl font-black text-brand-950">{admin.profile?.displayName || admin.nickname}</p>
+              <p className="mt-2 text-xl font-black text-brand-950">{admin.Profile?.displayName || admin.nickname}</p>
             </div>
             <div className="rounded-2xl bg-sky-50 p-4">
               <p className="text-xs font-black text-slate-500">角色</p>

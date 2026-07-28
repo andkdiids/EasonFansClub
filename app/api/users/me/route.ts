@@ -33,24 +33,38 @@ export async function GET() {
       consecutiveDays: true,
       lastLoginAt: true,
       lastActiveAt: true,
-      profile: true,
-      badges: {
+      Profile: true,
+      UserBadge: {
         where: { isHidden: false },
         orderBy: { displayOrder: 'asc' },
-        include: { badge: true },
+        include: { Badge: true },
       },
       _count: {
         select: {
-          posts: true,
-          replies: true,
-          followers: true,
-          following: true,
+          Post: true,
+          Reply: true,
+          Follow_Follow_followingIdToUser: true,
+          Follow_Follow_followerIdToUser: true,
         },
       },
     },
   })
 
-  return NextResponse.json({ profile })
+  if (!profile) return NextResponse.json({ profile: null })
+  const { Profile, UserBadge, _count, ...user } = profile
+  return NextResponse.json({
+    profile: {
+      ...user,
+      profile: Profile,
+      badges: UserBadge.map(({ Badge, ...item }) => ({ ...item, badge: Badge })),
+      _count: {
+        posts: _count.Post,
+        replies: _count.Reply,
+        followers: _count.Follow_Follow_followingIdToUser,
+        following: _count.Follow_Follow_followerIdToUser,
+      },
+    },
+  })
 }
 
 export async function PATCH(request: Request) {

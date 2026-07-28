@@ -34,8 +34,8 @@ export async function GET(request: Request) {
       where: {
         isDeleted: false,
         status: 'PUBLISHED',
-        author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-        ...(boardSlug ? { board: { slug: boardSlug } } : {}),
+        User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+        ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
       orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
       skip,
@@ -52,22 +52,24 @@ export async function GET(request: Request) {
         isPinned: true,
         isFeatured: true,
         createdAt: true,
-        author: {
+        User: {
           select: {
             uid: true,
             nickname: true,
             avatarUrl: true,
             level: true,
-            profile: { select: { avatarUrl: true, displayName: true } },
+            Profile: { select: { avatarUrl: true, displayName: true } },
           },
         },
-        board: { select: { name: true, slug: true } },
+        Board: { select: { name: true, slug: true } },
       },
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
-    const posts = pageRows.map(({ summary, content, ...post }) => ({
+    const posts = pageRows.map(({ summary, content, User, Board, ...post }) => ({
       ...post,
+      author: { ...User, profile: User.Profile },
+      board: Board,
       content: summary || createSummary(content),
     }))
 
@@ -127,7 +129,7 @@ export async function POST(request: Request) {
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR UPDATE`
       const currentUser = await tx.user.findFirstOrThrow({
-        where: { id: user.id, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+        where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         select: { points: true },
       })
       const post = await tx.post.create({

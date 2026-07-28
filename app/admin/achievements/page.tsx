@@ -11,8 +11,13 @@ export default async function AdminAchievementsPage() {
   const [achievements, userAchievements] = await Promise.all([
     prisma.achievement.findMany({
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      include: { _count: { select: { users: true } } },
-    }),
+include: {
+  _count: {
+    select: {
+      UserAchievement: true,
+    },
+  },
+}    }),
     prisma.userAchievement.count({ where: { unlocked: true } }),
   ])
 

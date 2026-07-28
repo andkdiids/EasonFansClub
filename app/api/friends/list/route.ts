@@ -14,21 +14,24 @@ export async function GET(request: Request) {
   const rows = await prisma.friendship.findMany({
     where: {
       OR: [
-        { userAId: user.id, userB: { status: 'ACTIVE', isDeleted: false, ...(q ? { OR: [{ nickname: { contains: q, mode: 'insensitive' } }, { profile: { displayName: { contains: q, mode: 'insensitive' } } }] } : {}) } },
-        { userBId: user.id, userA: { status: 'ACTIVE', isDeleted: false, ...(q ? { OR: [{ nickname: { contains: q, mode: 'insensitive' } }, { profile: { displayName: { contains: q, mode: 'insensitive' } } }] } : {}) } },
+        { userAId: user.id, User_Friendship_userBIdToUser: { status: 'ACTIVE', isDeleted: false, ...(q ? { OR: [{ nickname: { contains: q } }, { Profile: { displayName: { contains: q } } }] } : {}) } },
+        { userBId: user.id, User_Friendship_userAIdToUser: { status: 'ACTIVE', isDeleted: false, ...(q ? { OR: [{ nickname: { contains: q } }, { Profile: { displayName: { contains: q } } }] } : {}) } },
       ],
     },
     orderBy: { createdAt: 'desc' },
     skip: (page - 1) * pageSize,
     take: pageSize + 1,
     include: {
-      userA: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, isOnline: true, profile: { select: { displayName: true, avatarUrl: true } } } },
-      userB: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, isOnline: true, profile: { select: { displayName: true, avatarUrl: true } } } },
+      User_Friendship_userAIdToUser: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, isOnline: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+      User_Friendship_userBIdToUser: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, isOnline: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
     },
   })
   const hasMore = rows.length > pageSize
   return NextResponse.json({
-    friends: rows.slice(0, pageSize).map((row) => row.userAId === user.id ? row.userB : row.userA),
+    friends: rows.slice(0, pageSize).map((row) => {
+      const friend = row.userAId === user.id ? row.User_Friendship_userBIdToUser : row.User_Friendship_userAIdToUser
+      return { ...friend, profile: friend.Profile }
+    }),
     page,
     hasMore,
   })

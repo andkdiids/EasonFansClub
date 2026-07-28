@@ -34,7 +34,7 @@ export default async function PublicUserPage({ params }: PageProps) {
         uid: numericUid,
         status: 'ACTIVE',
         isDeleted: false,
-        profile: { isNot: null },
+        Profile: { isNot: null },
       },
       select: {
         id: true,
@@ -45,13 +45,13 @@ export default async function PublicUserPage({ params }: PageProps) {
         backgroundUrl: true,
         bio: true,
         createdAt: true,
-        profile: true,
+        Profile: true,
         _count: {
           select: {
-            posts: true,
-            replies: true,
-            friendshipsA: true,
-            friendshipsB: true,
+            Post: true,
+            Reply: true,
+            Friendship_Friendship_userAIdToUser: true,
+            Friendship_Friendship_userBIdToUser: true,
           },
         },
       },
@@ -69,7 +69,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   }
   console.log('[public-user:ssr] user-query:done')
 
-  if (!user || !user.profile) notFound()
+  if (!user || !user.Profile) notFound()
 
   const isSelf = false
   let friendship = null
@@ -106,11 +106,11 @@ export default async function PublicUserPage({ params }: PageProps) {
     }
   }
 
-  const avatar = publicImageUrl(user.profile.avatarUrl || user.avatarUrl)
-  const background = publicImageUrl(user.profile.backgroundUrl || user.backgroundUrl)
-  const name = user.profile.displayName || user.nickname
-  const bio = user.profile.bio || user.bio || '这个成员还没有填写个人简介。'
-  const friendCount = user._count.friendshipsA + user._count.friendshipsB
+  const avatar = publicImageUrl(user.Profile.avatarUrl || user.avatarUrl)
+  const background = publicImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
+  const name = user.Profile.displayName || user.nickname
+  const bio = user.Profile.bio || user.bio || '这个成员还没有填写个人简介。'
+  const friendCount = user._count.Friendship_Friendship_userAIdToUser + user._count.Friendship_Friendship_userBIdToUser
   const growth = await getGrowthSummary(user.experience)
   const friendStatus = friendship ? 'FRIEND' : pendingRequest?.senderId === viewer?.id ? 'PENDING' : pendingRequest ? 'RECEIVED' : 'NONE'
 
@@ -158,8 +158,8 @@ export default async function PublicUserPage({ params }: PageProps) {
             <ProfileStatsGrid
               compact
               items={[
-                ['帖子', user._count.posts],
-                ['回复', user._count.replies],
+                ['帖子', user._count.Post],
+                ['回复', user._count.Reply],
                 ['好友', friendCount],
               ]}
             />

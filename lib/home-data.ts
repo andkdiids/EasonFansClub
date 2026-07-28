@@ -42,7 +42,7 @@ async function getHomePostsUncached() {
   const baseWhere = {
     isDeleted: false,
     status: 'PUBLISHED' as const,
-    author: { status: 'ACTIVE' as const, isDeleted: false, profile: { isNot: null } },
+    User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }
   const select = {
     id: true,
@@ -55,13 +55,13 @@ async function getHomePostsUncached() {
     isPinned: true,
     isFeatured: true,
     createdAt: true,
-    board: { select: { name: true, slug: true } },
-    author: {
+    Board: { select: { name: true, slug: true } },
+    User: {
       select: {
         uid: true,
         nickname: true,
         level: true,
-        profile: { select: { displayName: true } },
+        Profile: { select: { displayName: true } },
       },
     },
   }
@@ -90,8 +90,10 @@ async function getHomePostsUncached() {
     8000,
   )
 
-  return rows.map(({ summary, content, ...post }) => ({
+  return rows.map(({ summary, content, Board, User, ...post }) => ({
     ...post,
+    board: Board,
+    author: { ...User, profile: User.Profile },
     content: excerpt(summary || content),
   }))
 }
@@ -108,7 +110,7 @@ async function getHomeDailyMessagesUncached() {
       where: {
         date: today,
         isDeleted: false,
-        user: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+        User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       },
       orderBy: [{ isFeatured: 'desc' }, { likeCount: 'desc' }, { createdAt: 'desc' }],
       take: 4,
@@ -116,12 +118,12 @@ async function getHomeDailyMessagesUncached() {
         id: true,
         mood: true,
         content: true,
-        user: {
+        User: {
           select: {
             uid: true,
             nickname: true,
             level: true,
-            profile: { select: { displayName: true } },
+            Profile: { select: { displayName: true } },
           },
         },
       },
@@ -130,7 +132,11 @@ async function getHomeDailyMessagesUncached() {
     2500,
   )
 
-  return rows.map((message) => ({ ...message, content: excerpt(message.content, 120) }))
+  return rows.map(({ User, ...message }) => ({
+    ...message,
+    user: { ...User, profile: User.Profile },
+    content: excerpt(message.content, 120),
+  }))
 }
 
 export async function getHomeActivities() {
@@ -178,7 +184,7 @@ export async function getHomeAlbums() {
 export async function getHomeUserStats(userId?: string) {
   if (!userId) return null
   const todayKey = getShanghaiDateKey(startOfLocalDay())
-  return safeDb(
+  const stats = await safeDb(
     'User.findUnique home.stats',
     prisma.user.findUnique({
       where: { id: userId },
@@ -187,11 +193,18 @@ export async function getHomeUserStats(userId?: string) {
         experience: true,
         points: true,
         consecutiveDays: true,
-        checkIns: { where: { checkinDateKey: todayKey }, take: 1, select: { id: true } },
-        _count: { select: { checkIns: true } },
+        CheckIn: { where: { checkinDateKey: todayKey }, take: 1, select: { id: true } },
+        _count: { select: { CheckIn: true } },
       },
     }),
     null,
     5000,
   )
+  if (!stats) return null
+  const { CheckIn, _count, ...userStats } = stats
+  return {
+    ...userStats,
+    checkIns: CheckIn,
+    _count: { checkIns: _count.CheckIn },
+  }
 }

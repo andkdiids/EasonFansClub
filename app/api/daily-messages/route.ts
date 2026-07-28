@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       where: {
         date: { gte: date, lt: nextDate },
         isDeleted: false,
-        user: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+        User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       },
       orderBy: sort === 'hot'
         ? [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { likeCount: 'desc' }, { commentCount: 'desc' }, { createdAt: 'desc' }]
@@ -35,17 +35,17 @@ export async function GET(request: Request) {
         isPinned: true,
         isFeatured: true,
         createdAt: true,
-        user: {
+        User: {
           select: {
             id: true,
             uid: true,
             nickname: true,
             avatarUrl: true,
             level: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
-        comments: {
+        DailyMessageComment: {
           where: { isDeleted: false, parentId: null },
           orderBy: { createdAt: 'desc' },
           take: 3,
@@ -53,13 +53,13 @@ export async function GET(request: Request) {
             id: true,
             content: true,
             createdAt: true,
-            author: {
+            User: {
               select: {
                 id: true,
                 uid: true,
                 nickname: true,
                 level: true,
-                profile: { select: { displayName: true, avatarUrl: true } },
+                Profile: { select: { displayName: true, avatarUrl: true } },
               },
             },
           },
@@ -68,7 +68,14 @@ export async function GET(request: Request) {
     })
 
     const hasMore = rows.length > take
-    const messages = hasMore ? rows.slice(0, take) : rows
+    const messages = (hasMore ? rows.slice(0, take) : rows).map(({ User, DailyMessageComment, ...message }) => ({
+      ...message,
+      user: { ...User, profile: User.Profile },
+      comments: DailyMessageComment.map(({ User: commentUser, ...comment }) => ({
+        ...comment,
+        user: { ...commentUser, profile: commentUser.Profile },
+      })),
+    }))
     const total = skip + messages.length + (hasMore ? 1 : 0)
 
     return NextResponse.json(

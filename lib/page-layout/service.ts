@@ -144,11 +144,11 @@ export async function listPageLayoutRevisions(pageKey: PageLayoutPageKey, limit 
     orderBy: { createdAt: 'desc' },
     take: Math.min(Math.max(limit, 1), 50),
     include: {
-      publishedBy: {
+      User: {
         select: {
           nickname: true,
           username: true,
-          profile: { select: { displayName: true } },
+          Profile: { select: { displayName: true } },
         },
       },
     },
@@ -167,11 +167,11 @@ export async function getPageLayoutRevision(pageKey: PageLayoutPageKey, revision
   const revision = await prisma.pageLayoutRevision.findFirst({
     where: { id: revisionId, pageLayoutId: layout.id },
     include: {
-      publishedBy: {
+      User: {
         select: {
           nickname: true,
           username: true,
-          profile: { select: { displayName: true } },
+          Profile: { select: { displayName: true } },
         },
       },
     },

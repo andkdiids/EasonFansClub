@@ -16,12 +16,12 @@ export default async function ProfileWallPage({ params, searchParams }: { params
   const [viewer, target] = await Promise.all([
     getCurrentUser(),
     prisma.user.findFirst({
-      where: { uid: numericUid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-      select: { uid: true, nickname: true, profile: { select: { displayName: true } } },
+      where: { uid: numericUid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+      select: { uid: true, nickname: true, Profile: { select: { displayName: true } } },
     }),
   ])
   if (!target) notFound()
-  const name = target.profile?.displayName || target.nickname
+  const name = target.Profile?.displayName || target.nickname
 
   return (
     <>

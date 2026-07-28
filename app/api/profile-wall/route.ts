@@ -19,8 +19,8 @@ async function isFriend(userId: string, targetId: string) {
   return Boolean(friendship)
 }
 
-async function canViewWall(viewerId: string | null, receiver: { id: string; profile: { wallVisibility: WallVisibility } | null }) {
-  const visibility = receiver.profile?.wallVisibility || 'PUBLIC'
+async function canViewWall(viewerId: string | null, receiver: { id: string; Profile: { wallVisibility: WallVisibility } | null }) {
+  const visibility = receiver.Profile?.wallVisibility || 'PUBLIC'
   if (visibility === 'PUBLIC') return true
   if (viewerId === receiver.id) return true
   if (!viewerId || visibility === 'CLOSED') return false
@@ -34,10 +34,10 @@ export async function GET(request: Request) {
   if (!Number.isSafeInteger(uid) || uid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
-    where: { uid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
+    where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     select: {
       id: true,
-      profile: { select: { wallVisibility: true } },
+      Profile: { select: { wallVisibility: true } },
     },
   })
   if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
@@ -52,55 +52,63 @@ export async function GET(request: Request) {
     orderBy: { createdAt: 'desc' },
     take: 30,
     include: {
-      sender: {
+      User_ProfileWallMessage_senderIdToUser: {
         select: {
           id: true,
           uid: true,
           nickname: true,
           avatarUrl: true,
           role: true,
-          profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-      children: {
+      other_ProfileWallMessage: {
         where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },
         take: 20,
         include: {
-          likes: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
-          sender: {
+          ProfileWallLike: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
+          User_ProfileWallMessage_senderIdToUser: {
             select: {
               id: true,
               uid: true,
               nickname: true,
               avatarUrl: true,
               role: true,
-              profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, avatarUrl: true } },
             },
           },
         },
       },
-      likes: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
+      ProfileWallLike: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
     },
   })
 
   return NextResponse.json({
-    visibility: receiver.profile?.wallVisibility || 'PUBLIC',
-    canPost: Boolean(viewer && receiver.profile?.wallVisibility !== 'CLOSED'),
+    visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
+    canPost: Boolean(viewer && receiver.Profile?.wallVisibility !== 'CLOSED'),
     messages: rows.map((item) => ({
       ...item,
+      sender: {
+        ...item.User_ProfileWallMessage_senderIdToUser,
+        profile: item.User_ProfileWallMessage_senderIdToUser.Profile,
+      },
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
       canDelete: canManageWallMessage(viewer, item.senderId, item.receiverId),
-      liked: Array.isArray(item.likes) && item.likes.length > 0,
-      commentCount: item.children.length,
-      children: item.children.map((child) => ({
+      liked: Array.isArray(item.ProfileWallLike) && item.ProfileWallLike.length > 0,
+      commentCount: item.other_ProfileWallMessage.length,
+      children: item.other_ProfileWallMessage.map((child) => ({
         ...child,
+        sender: {
+          ...child.User_ProfileWallMessage_senderIdToUser,
+          profile: child.User_ProfileWallMessage_senderIdToUser.Profile,
+        },
         children: [],
         createdAt: child.createdAt.toISOString(),
         updatedAt: child.updatedAt.toISOString(),
         canDelete: canManageWallMessage(viewer, child.senderId, child.receiverId),
-        liked: Array.isArray(child.likes) && child.likes.length > 0,
+        liked: Array.isArray(child.ProfileWallLike) && child.ProfileWallLike.length > 0,
         commentCount: 0,
       })),
     })),
@@ -123,13 +131,13 @@ export async function POST(request: Request) {
   if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
-    where: { uid: receiverUid, status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-    select: { id: true, uid: true, profile: { select: { wallVisibility: true } } },
+    where: { uid: receiverUid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+    select: { id: true, uid: true, Profile: { select: { wallVisibility: true } } },
   })
   if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const canView = await canViewWall(viewer.id, receiver)
-  if (!canView || receiver.profile?.wallVisibility === 'CLOSED') {
+  if (!canView || receiver.Profile?.wallVisibility === 'CLOSED') {
     return NextResponse.json({ message: '留言墙暂未开放' }, { status: 403 })
   }
 

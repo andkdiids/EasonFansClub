@@ -88,7 +88,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     const todayValue = formatBeijingDate(today)
     const [stats, userStats, todayCheckIn, messages] = await Promise.all([
       moduleData(async () => ({
-        activeUsers: await prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } } }),
+        activeUsers: await prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } }),
         todayCount: await prisma.checkIn.count({ where: { checkinDateKey: getShanghaiDateKey(today) } }),
         totalCheckIns: await prisma.checkIn.count({ where: { userId: user.id } }),
       })),

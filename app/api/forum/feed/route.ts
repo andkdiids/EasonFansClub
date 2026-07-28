@@ -30,13 +30,13 @@ export async function GET(request: Request) {
   const where: Prisma.PostWhereInput = {
     isDeleted: false,
     status: 'PUBLISHED',
-    author: { status: 'ACTIVE', isDeleted: false, profile: { isNot: null } },
-    ...(selectedBoard ? { boardId: selectedBoard.id } : { board: { isActive: true } }),
+    User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+    ...(selectedBoard ? { boardId: selectedBoard.id } : { Board: { isActive: true } }),
     ...(sort === 'featured' ? { isFeatured: true } : {}),
     ...(sort === 'pinned' ? { isPinned: true } : {}),
     ...(query ? { OR: [
-      { title: { contains: query, mode: 'insensitive' } },
-      { summary: { contains: query, mode: 'insensitive' } },
+      { title: { contains: query } },
+      { summary: { contains: query } },
     ] } : {}),
   }
   const orderBy: Prisma.PostOrderByWithRelationInput[] = sort === 'latest-reply'
@@ -62,9 +62,9 @@ export async function GET(request: Request) {
         id: true, title: true, summary: true, content: true,
         likeCount: true, replyCount: true, viewCount: true,
         isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
-        board: { select: { name: true, slug: true } },
-        author: { select: { uid: true, nickname: true, avatarUrl: true, level: true, profile: { select: { displayName: true, avatarUrl: true } } } },
-        likes: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
+        Board: { select: { name: true, slug: true } },
+        User: { select: { uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+        Like: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
       },
     })
     return { total, totalPages, page, rows }
@@ -75,10 +75,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
-    posts: rows.map(({ summary, content, likes, ...post }) => ({
+    posts: rows.map(({ summary, content, Like, User, Board, ...post }) => ({
       ...post,
+      author: { ...User, profile: User.Profile },
+      board: Board,
       content: excerptForumPost(summary || content),
-      likedByMe: likes.length > 0,
+      likedByMe: Like.length > 0,
     })),
     total,
     totalPages,

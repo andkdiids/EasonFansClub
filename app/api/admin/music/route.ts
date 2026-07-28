@@ -10,8 +10,10 @@ export async function GET() {
 
   const albums = await prisma.musicAlbum.findMany({
     orderBy: [{ releaseYear: 'desc' }, { createdAt: 'desc' }],
-    include: { songs: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } },
+    include: { MusicSong: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } },
   })
 
-  return NextResponse.json({ albums })
+  return NextResponse.json({
+    albums: albums.map(({ MusicSong, ...album }) => ({ ...album, songs: MusicSong })),
+  })
 }

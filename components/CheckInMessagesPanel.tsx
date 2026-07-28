@@ -249,8 +249,8 @@ export function CheckInMessagesPanel({
       <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} flex-1 ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMood(item.mood)
-          const fullIdentity = 'user' in item ? item.user : null
-          const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item ? item.author.name : '')
+          const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null
+          const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : '')
           const avatar = publicImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
           const commentMap = buildCommentMap(item.comments)

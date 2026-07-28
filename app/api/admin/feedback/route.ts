@@ -19,11 +19,11 @@ export async function GET(request: Request) {
   const pageSize = Math.min(50, Math.max(10, Number(searchParams.get('pageSize') || 20) || 20))
   const searchWhere = q
     ? [
-        { title: { contains: q, mode: 'insensitive' as const } },
-        { user: { username: { contains: q, mode: 'insensitive' as const } } },
-        { user: { nickname: { contains: q, mode: 'insensitive' as const } } },
-        { user: { profile: { displayName: { contains: q, mode: 'insensitive' as const } } } },
-        ...(/^\d+$/.test(q) ? [{ user: { uid: Number(q) } }] : []),
+        { title: { contains: q } },
+        { User: { username: { contains: q } } },
+        { User: { nickname: { contains: q } } },
+        { User: { Profile: { displayName: { contains: q } } } },
+        ...(/^\d+$/.test(q) ? [{ User: { uid: Number(q) } }] : []),
       ]
     : []
 

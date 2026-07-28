@@ -33,19 +33,19 @@ export async function GET(request: Request) {
         uid: { gt: 0 },
         isDeleted: false,
         status: 'ACTIVE',
-        profile: { isNot: null },
+        Profile: { isNot: null },
         OR: [
           ...(Number.isSafeInteger(numericUid) && Number(numericUid) > 0 ? [{ uid: Number(numericUid) }] : []),
-          { nickname: { contains: keyword, mode: 'insensitive' } },
-          { username: { contains: keyword, mode: 'insensitive' } },
-          { profile: { displayName: { contains: keyword, mode: 'insensitive' } } },
+          { nickname: { contains: keyword } },
+          { username: { contains: keyword } },
+          { Profile: { displayName: { contains: keyword } } },
         ],
       },
       select: {
         id: true, uid: true, nickname: true, username: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
-        profile: { select: { displayName: true, avatarUrl: true, bio: true } },
-        _count: { select: { posts: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
-        posts: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },
+        Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
+        _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
+        Post: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },
       },
       take: 10,
     }),
@@ -54,13 +54,13 @@ export async function GET(request: Request) {
         isDeleted: false,
         status: 'PUBLISHED',
         OR: [
-          { title: { contains: keyword, mode: 'insensitive' } },
-          { content: { contains: keyword, mode: 'insensitive' } },
+          { title: { contains: keyword } },
+          { content: { contains: keyword } },
         ],
       },
       include: {
-        author: { select: { nickname: true, level: true } },
-        board: { select: { name: true, slug: true } },
+        User: { select: { nickname: true, level: true } },
+        Board: { select: { name: true, slug: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -69,18 +69,32 @@ export async function GET(request: Request) {
       where: {
         isActive: true,
         OR: [
-          { name: { contains: keyword, mode: 'insensitive' } },
-          { description: { contains: keyword, mode: 'insensitive' } },
+          { name: { contains: keyword } },
+          { description: { contains: keyword } },
         ],
       },
       take: 10,
     }),
     prisma.tag.findMany({
-      where: { name: { contains: keyword, mode: 'insensitive' } },
+      where: { name: { contains: keyword } },
       orderBy: { usageCount: 'desc' },
       take: 10,
     }),
   ])
 
-  return NextResponse.json({ users, posts, boards, tags })
+  return NextResponse.json({
+    users: users.map(({ Profile, Post, _count, ...item }) => ({
+      ...item,
+      profile: Profile,
+      posts: Post,
+      _count: { posts: _count.Post },
+    })),
+    posts: posts.map(({ User, Board, ...post }) => ({
+      ...post,
+      author: User,
+      board: Board,
+    })),
+    boards,
+    tags,
+  })
 }

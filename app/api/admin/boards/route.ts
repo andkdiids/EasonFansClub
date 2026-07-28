@@ -34,8 +34,8 @@ export async function GET(request: Request) {
       updatedAt: true,
       categoryId: true,
       parentId: true,
-      category: { select: { id: true, name: true, slug: true } },
-      parent: { select: { id: true, name: true, slug: true } },
+      BoardCategory: { select: { id: true, name: true, slug: true } },
+      Board: { select: { id: true, name: true, slug: true } },
     },
   })
   const hasMore = boards.length > limit

@@ -13,29 +13,29 @@ export const dynamic = 'force-dynamic'
 export default async function MusicSongPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const [song, config] = await Promise.all([
-    prisma.musicSong.findFirst({ where: { id, album: { status: 'PUBLISHED' } }, include: { album: true } }),
+    prisma.musicSong.findFirst({ where: { id, MusicAlbum: { status: 'PUBLISHED' } }, include: { MusicAlbum: true } }),
     getSiteAppearance(),
   ])
   if (!song) notFound()
 
-  const coverUrl = song.album.coverUrl
-  const releaseLabel = formatMusicReleaseDate(song.album.releaseDate, song.releaseYear)
+  const coverUrl = song.MusicAlbum.coverUrl
+  const releaseLabel = formatMusicReleaseDate(song.MusicAlbum.releaseDate, song.releaseYear)
   const tags = song.tags?.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) || []
   const credits = [['作词', song.lyricist], ['作曲', song.composer], ['编曲', song.arranger]]
   const songStory = song.description || song.story
 
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>
-    <Link href={`/music/album/${song.albumId}`} className="inline-flex items-center gap-2 text-sm font-black text-sky-300/80 transition hover:text-white">← 返回《{song.album.name}》</Link>
+    <Link href={`/music/album/${song.albumId}`} className="inline-flex items-center gap-2 text-sm font-black text-sky-300/80 transition hover:text-white">← 返回《{song.MusicAlbum.name}》</Link>
 
     <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
       <MusicDetailReveal direction="left" hover className="mx-auto w-full max-w-[320px]">
-        <MusicCover src={coverUrl} alt={`${song.album.name}专辑封面`} className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" />
+        <MusicCover src={coverUrl} alt={`${song.MusicAlbum.name}专辑封面`} className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" />
       </MusicDetailReveal>
       <MusicDetailReveal direction="right" delay={0.08}>
         <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">SONG ARCHIVE</p>
         <h1 className="mt-4 text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{song.title}</h1>
         <p className="mt-5 text-xl font-black text-slate-200">{song.artist}</p>
-        <p className="mt-3 text-sm font-bold text-slate-300/65">《{song.album.name}》 · {releaseLabel}</p>
+        <p className="mt-3 text-sm font-bold text-slate-300/65">《{song.MusicAlbum.name}》 · {releaseLabel}</p>
         {tags.length ? <div className="mt-5 flex flex-wrap gap-2">{tags.map((tag) => <span key={tag} className="rounded-full border border-sky-200/15 bg-sky-300/[0.08] px-3 py-1.5 text-xs font-black text-sky-100/75">{tag}</span>)}</div> : null}
         <div className="mt-7 flex flex-wrap gap-3"><button type="button" disabled className="rounded-full bg-white px-6 py-3 text-sm font-black text-[#07182d] opacity-75 disabled:cursor-not-allowed">▶ 播放歌曲</button><Link href={`/music/album/${song.albumId}`} className="rounded-full border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/15">返回专辑</Link></div>
       </MusicDetailReveal>

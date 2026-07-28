@@ -20,12 +20,12 @@ export async function POST(request: Request) {
   }
   const record = await prisma.passwordResetToken.findFirst({
     where: { tokenHash: hashToken(challenge), type: 'SECURITY_QUESTION', stage: 'CHALLENGE', consumedAt: null, expiresAt: { gt: new Date() } },
-    select: { id: true, userId: true, attemptCount: true, user: { select: { securityQuestionRecoveryEnabled: true, securityQuestions: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], take: 1, select: { sortOrder: true, answerHash: true } } } } },
+    select: { id: true, userId: true, attemptCount: true, User: { select: { securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { sortOrder: true, answerHash: true } } } } },
   })
   const availability = getSecurityQuestionRecoveryAvailability({
     globalEnabled: settings.enableSecurityQuestionRecovery,
-    userEnabled: record?.user.securityQuestionRecoveryEnabled || false,
-    questionCount: record?.user.securityQuestions.length || 0,
+    userEnabled: record?.User.securityQuestionRecoveryEnabled || false,
+    questionCount: record?.User.UserSecurityQuestion ? 1 : 0,
   })
   if (!record || !availability.available) {
     return NextResponse.json({ message: '当前账号未启用密保问题找回，请联系管理员或使用其他可用方式。' }, { status: 403 })
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   const accountKey = `account:${hashToken(record.userId)}`
   const lock = await checkRateLimit(accountKey, 'password-reset:wrong-answer', 5)
   if (lock.limited) return NextResponse.json({ message: '验证失败次数过多，请稍后再试', retryAfter: lock.retryAfter }, { status: 429 })
-  const valid = await verifySecurityAnswers(record.user.securityQuestions, body?.answers)
+  const valid = await verifySecurityAnswers(record.User.UserSecurityQuestion ? [record.User.UserSecurityQuestion] : [], body?.answers)
   if (!valid) {
     await Promise.all([
       recordRateLimitHit(accountKey, 'password-reset:wrong-answer', 30 * 60),

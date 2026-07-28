@@ -13,7 +13,7 @@ export async function GET() {
         email: true,
         emailVerifiedAt: true,
         securityQuestionRecoveryEnabled: true,
-        _count: { select: { securityQuestions: true } },
+        UserSecurityQuestion: { select: { id: true } },
       },
     }),
     getAccountSecuritySettings(),
@@ -22,10 +22,10 @@ export async function GET() {
   const recoveryAvailability = getSecurityQuestionRecoveryAvailability({
     globalEnabled: settings.enableSecurityQuestionRecovery,
     userEnabled: user.securityQuestionRecoveryEnabled,
-    questionCount: user._count.securityQuestions,
+    questionCount: user.UserSecurityQuestion ? 1 : 0,
   })
   return NextResponse.json({
-    securityQuestionsSet: user._count.securityQuestions >= 1,
+    securityQuestionsSet: Boolean(user.UserSecurityQuestion),
     securityQuestionRecoveryEnabled: user.securityQuestionRecoveryEnabled,
     emailBound: Boolean(user.email),
     emailVerified: Boolean(user.emailVerifiedAt),

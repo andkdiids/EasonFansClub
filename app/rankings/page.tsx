@@ -8,7 +8,7 @@ export default async function RankingsPage() {
   // 签到榜:一次性取出未删除用户的全部签到日期键(仅两个小字段),内存分组重算,避免 N+1,不读用户表上的连续天数快照
   const [points, checkInKeys, posts, growthLevels] = await Promise.all([
     prisma.user.findMany({ where: { isDeleted: false }, orderBy: { points: 'desc' }, take: 10, select: { id: true, nickname: true, points: true, experience: true } }),
-    prisma.checkIn.findMany({ where: { user: { isDeleted: false } }, select: { userId: true, checkinDateKey: true } }),
+    prisma.checkIn.findMany({ where: { User: { isDeleted: false } }, select: { userId: true, checkinDateKey: true } }),
     prisma.post.findMany({ where: { isDeleted: false }, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, replyCount: true, likeCount: true } }),
     listGrowthLevels(),
   ])

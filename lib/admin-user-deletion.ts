@@ -64,7 +64,7 @@ export async function getUserDeletionPreview(userId: string): Promise<UserDeleti
       email: true,
       createdAt: true,
       role: true,
-      profile: { select: { displayName: true, avatarUrl: true } },
+      Profile: { select: { displayName: true, avatarUrl: true } },
     },
   })
 
@@ -108,8 +108,8 @@ export async function getUserDeletionPreview(userId: string): Promise<UserDeleti
     user: {
       id: user.id,
       uid: user.uid,
-      nickname: user.profile?.displayName || user.nickname,
-      avatarUrl: user.profile?.avatarUrl || user.avatarUrl,
+      nickname: user.Profile?.displayName || user.nickname,
+      avatarUrl: user.Profile?.avatarUrl || user.avatarUrl,
       phone: user.phone,
       email: user.email,
       createdAt: user.createdAt,
@@ -215,7 +215,7 @@ async function deleteUserRows(tx: Tx, userId: string, deletePublicContent: boole
 
   deletedRows.directMessages = (await tx.directMessage.deleteMany({ where: { senderId: userId } })).count
   deletedRows.conversationParticipants = (await tx.conversationParticipant.deleteMany({ where: { userId } })).count
-  deletedRows.emptyConversations = (await tx.conversation.deleteMany({ where: { participants: { none: {} } } })).count
+  deletedRows.emptyConversations = (await tx.conversation.deleteMany({ where: { ConversationParticipant: { none: {} } } })).count
 
   deletedRows.reports = (
     await tx.report.deleteMany({
@@ -238,8 +238,8 @@ async function deleteUserRows(tx: Tx, userId: string, deletePublicContent: boole
   deletedRows.userAlbumCollections = (await tx.userAlbumCollection.deleteMany({ where: { userId } })).count
   deletedRows.lyricCards = (await tx.lyricCard.deleteMany({ where: { userId } })).count
 
-  await tx.reply.updateMany({ where: { parent: { is: { authorId: userId } } }, data: { parentId: null } })
-  await tx.dailyMessageComment.updateMany({ where: { parent: { is: { authorId: userId } } }, data: { parentId: null } })
+  await tx.reply.updateMany({ where: { Reply: { is: { authorId: userId } } }, data: { parentId: null } })
+  await tx.dailyMessageComment.updateMany({ where: { DailyMessageComment: { is: { authorId: userId } } }, data: { parentId: null } })
 
   deletedRows.replies = (await tx.reply.deleteMany({ where: { authorId: userId } })).count
   deletedRows.dailyMessageComments = (await tx.dailyMessageComment.deleteMany({ where: { authorId: userId } })).count
@@ -267,7 +267,7 @@ export async function deleteUserPermanently(input: DeleteUserInput): Promise<Del
           phone: true,
           avatarUrl: true,
           backgroundUrl: true,
-          profile: { select: { avatarUrl: true, backgroundUrl: true } },
+          Profile: { select: { avatarUrl: true, backgroundUrl: true } },
         },
       })
       if (!target || target.uid <= 0) throw new Error('USER_NOT_FOUND')
@@ -289,7 +289,7 @@ export async function deleteUserPermanently(input: DeleteUserInput): Promise<Del
         if (superAdminCount <= 1) throw new Error('LAST_SUPER_ADMIN')
       }
 
-      const storagePaths = collectStoragePaths([target.avatarUrl, target.backgroundUrl, target.profile?.avatarUrl, target.profile?.backgroundUrl])
+      const storagePaths = collectStoragePaths([target.avatarUrl, target.backgroundUrl, target.Profile?.avatarUrl, target.Profile?.backgroundUrl])
       const deletedRows = await deleteUserRows(tx, input.userId, input.deletePublicContent)
 
       if (!isSelf) {

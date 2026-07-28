@@ -266,7 +266,7 @@ console.timeEnd('register:hashSecurityQuestions')
           isDeleted: false,
           securityQuestionRecoveryEnabled: hashedSecurityQuestions.length >= 1,
           registrationIdempotencyKeyHash: idempotencyKeyHash,
-          profile: {
+          Profile: {
             create: {
               displayName: nickname,
             },

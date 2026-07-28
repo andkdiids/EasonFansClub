@@ -22,15 +22,15 @@ export async function POST(request: Request) {
   const user = await prisma.user.findFirst({
     where: { isDeleted: false, status: 'ACTIVE', OR: [
       { usernameNormalized: normalizeLoginAccount(identifier) },
-      { email: { equals: identifier, mode: 'insensitive' } },
+      { email: { equals: identifier } },
       { phone: identifier },
     ] },
-    select: { id: true, securityQuestionRecoveryEnabled: true, securityQuestions: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], take: 1, select: { question: true, sortOrder: true } } },
+    select: { id: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { question: true, sortOrder: true } } },
   })
   const availability = getSecurityQuestionRecoveryAvailability({
     globalEnabled: settings.enableSecurityQuestionRecovery,
     userEnabled: user?.securityQuestionRecoveryEnabled || false,
-    questionCount: user?.securityQuestions.length || 0,
+    questionCount: user?.UserSecurityQuestion ? 1 : 0,
   })
   if (!user || !availability.available) {
     return NextResponse.json({
@@ -44,5 +44,5 @@ export async function POST(request: Request) {
     prisma.passwordResetToken.updateMany({ where: { userId: user.id, type: 'SECURITY_QUESTION', stage: 'CHALLENGE', consumedAt: null }, data: { consumedAt: new Date() } }),
     prisma.passwordResetToken.create({ data: { userId: user.id, type: 'SECURITY_QUESTION', stage: 'CHALLENGE', tokenHash: hashToken(challenge), expiresAt: new Date(Date.now() + 10 * 60 * 1000) } }),
   ])
-  return NextResponse.json({ message: genericMessage, challenge, questions: user.securityQuestions })
+  return NextResponse.json({ message: genericMessage, challenge, questions: user.UserSecurityQuestion ? [user.UserSecurityQuestion] : [] })
 }

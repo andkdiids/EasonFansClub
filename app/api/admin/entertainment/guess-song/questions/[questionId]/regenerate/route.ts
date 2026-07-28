@@ -11,7 +11,9 @@ export async function POST(request: Request, { params }: Context) {
   if (!guard.user) return guessSongError('当前账号没有题库管理权限', guard.response.status)
   const { questionId } = await params
   try {
-    return guessSongOk({ question: await regenerateGuessSongAudio(questionId) })
+    const question = await regenerateGuessSongAudio(questionId)
+    const { GuessSongAudioVariant, ...questionData } = question
+    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } })
   } catch (error) {
     return handleGuessSongError(error, 'admin.audio.regenerate')
   }
