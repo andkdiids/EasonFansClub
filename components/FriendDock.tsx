@@ -65,6 +65,7 @@ export function FriendDock({
   const [chatFriend, setChatFriend] = useState<FriendDockUser | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [content, setContent] = useState('')
+  const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [newMessageNotice, setNewMessageNotice] = useState(false)
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
@@ -77,6 +78,7 @@ export function FriendDock({
   const beforeCursorRef = useRef('')
   const nearBottomRef = useRef(true)
   const backdropCloseTimerRef = useRef(0)
+  const sendingMessageIdsRef = useRef(new Set<string>())
 
   const notifyClients = useCallback((type: 'friends' | 'messages' | 'unread') => {
     window.dispatchEvent(new Event('unread-summary:refresh'))
@@ -204,6 +206,33 @@ export function FriendDock({
       window.visualViewport?.removeEventListener('resize', update)
       window.visualViewport?.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const root = document.documentElement
+    const body = document.body
+    const scrollY = window.scrollY
+    const rootOverflow = root.style.overflow
+    const bodyOverflow = body.style.overflow
+    const bodyPosition = body.style.position
+    const bodyTop = body.style.top
+    const bodyWidth = body.style.width
+
+    root.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+
+    return () => {
+      root.style.overflow = rootOverflow
+      body.style.overflow = bodyOverflow
+      body.style.position = bodyPosition
+      body.style.top = bodyTop
+      body.style.width = bodyWidth
+      window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' })
     }
   }, [open])
 
@@ -369,7 +398,9 @@ export function FriendDock({
   }
 
   async function sendMessage(input: { content: string; clientMessageId: string; optimisticId?: string }) {
-    if (!conversationId) return
+    if (!conversationId || sendingMessageIdsRef.current.has(input.clientMessageId)) return false
+    sendingMessageIdsRef.current.add(input.clientMessageId)
+    setSending(true)
     const optimisticId = input.optimisticId || `pending:${input.clientMessageId}`
     const optimistic: Message = {
       id: optimisticId,
@@ -384,27 +415,41 @@ export function FriendDock({
       ? current.map((item) => item.id === optimisticId ? optimistic : item)
       : [...current, optimistic])
     window.requestAnimationFrame(() => scrollToBottom('smooth'))
-    const response = await fetch(`/api/direct-conversations/${conversationId}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: input.content, clientMessageId: input.clientMessageId }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
+    try {
+      const response = await fetch(`/api/direct-conversations/${conversationId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: input.content, clientMessageId: input.clientMessageId }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
+        setError(data?.error || data?.message || '发送失败，可点击消息重试')
+        return false
+      }
+      if (!data?.message?.id) throw new Error('服务器未返回有效消息')
+      mergeMessages([data.message])
+      notifyClients('messages')
+      return true
+    } catch (sendError) {
       setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
-      setError(data.message || '发送失败，可点击消息重试')
-      return
+      setError(sendError instanceof TypeError
+        ? '网络连接中断，消息未确认发送，可点击消息重试'
+        : sendError instanceof Error ? sendError.message : '发送失败，可点击消息重试')
+      return false
+    } finally {
+      sendingMessageIdsRef.current.delete(input.clientMessageId)
+      setSending(sendingMessageIdsRef.current.size > 0)
     }
-    mergeMessages([data.message])
-    notifyClients('messages')
   }
 
   function send() {
     const trimmed = content.trim()
-    if (!trimmed) return
-    setContent('')
+    if (!trimmed || sending || sendingMessageIdsRef.current.size > 0) return
     setError('')
-    void sendMessage({ content: trimmed, clientMessageId: crypto.randomUUID() })
+    void sendMessage({ content: trimmed, clientMessageId: crypto.randomUUID() }).then((success) => {
+      if (success) setContent((current) => current.trim() === trimmed ? '' : current)
+    })
   }
 
   async function loadOlderMessages() {
@@ -572,7 +617,7 @@ export function FriendDock({
                 placeholder="输入私信…"
                 aria-label="私信内容"
               />
-              <button type="button" disabled={!content.trim()} onClick={send}>发送</button>
+              <button type="button" disabled={!content.trim() || sending} onClick={send}>{sending ? '发送中…' : '发送'}</button>
             </div>
           </div>
         ) : (

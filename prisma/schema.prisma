@@ -1105,6 +1105,8 @@ model MusicSong {
   lyrics                  String?
   sourceType              String?
   sourceUrl               String?
+  previewUrl              String?
+  previewDuration         Int                       @default(7)
   createdAt               DateTime                  @default(now())
   language                String?
   tags                    String?

@@ -73,42 +73,58 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
-  const { conversationId } = await params
-  const body = await request.json().catch(() => null)
-  const rawContent = String(body?.content ?? '').trim()
-  if (!rawContent) return NextResponse.json({ message: '消息不能为空' }, { status: 400, headers: privateHeaders })
-  if (rawContent.length > 1000) return NextResponse.json({ message: '消息不能超过1000个字符' }, { status: 413, headers: privateHeaders })
-  const content = sanitizeText(rawContent, 1000)
-  if (!content) return NextResponse.json({ message: '消息不能为空' }, { status: 400, headers: privateHeaders })
-  if (await containsSensitiveContent(content)) return NextResponse.json({ message: '消息包含违禁内容' }, { status: 400, headers: privateHeaders })
-  const clientMessageId = String(body?.clientMessageId || '').trim()
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientMessageId)) {
-    return NextResponse.json({ message: '消息幂等标识无效' }, { status: 400, headers: privateHeaders })
-  }
-
-  const conversation = await getConversation(user.id, conversationId)
-  if (!conversation) return NextResponse.json({ message: '会话不存在或无权发送' }, { status: 404, headers: privateHeaders })
-  const otherUserId = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)?.userId
-  if (!otherUserId) return NextResponse.json({ message: '会话成员无效' }, { status: 400, headers: privateHeaders })
-  const recipient = await prisma.user.findFirst({
-    where: { id: otherUserId, status: 'ACTIVE', isDeleted: false },
-    select: { id: true },
-  })
-  if (!recipient) return NextResponse.json({ message: '接收用户不存在或不可用' }, { status: 404, headers: privateHeaders })
-  const [userAId, userBId] = normalizeFriendPair(user.id, otherUserId)
-  const friendship = await prisma.friendship.findUnique({ where: { userAId_userBId: { userAId, userBId } }, select: { id: true } })
-  if (!friendship) return NextResponse.json({ message: '只能给好友发送私信' }, { status: 403, headers: privateHeaders })
-
-  const existing = await prisma.directMessage.findUnique({
-    where: { senderId_clientMessageId: { senderId: user.id, clientMessageId } },
-    select: messageSelect,
-  })
-  if (existing) return NextResponse.json({ message: serializeMessage(existing, user.id, null) }, { headers: privateHeaders })
-
-  const now = new Date()
+  let senderId = ''
+  let idempotencyKey = ''
+  let normalizedContent = ''
   try {
+    const user = await getCurrentUser()
+    if (!user) return messageFailure(401, 'UNAUTHORIZED', '请先登录')
+    senderId = user.id
+    const { conversationId } = await params
+    const body = await request.json().catch(() => null)
+    const rawContent = String(body?.content ?? '').trim()
+    if (!rawContent) return messageFailure(400, 'INVALID_CONTENT', '消息不能为空')
+    if (rawContent.length > 1000) return messageFailure(413, 'INVALID_CONTENT', '消息不能超过1000个字符')
+    const content = sanitizeText(rawContent, 1000)
+    normalizedContent = content
+    if (!content) return messageFailure(400, 'INVALID_CONTENT', '消息不能为空')
+    if (await containsSensitiveContent(content)) return messageFailure(400, 'INVALID_CONTENT', '消息包含违禁内容')
+    const clientMessageId = String(body?.clientMessageId || '').trim()
+    idempotencyKey = clientMessageId
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientMessageId)) {
+      return messageFailure(400, 'INVALID_CLIENT_MESSAGE_ID', '消息幂等标识无效')
+    }
+
+    const conversation = await getConversation(user.id, conversationId)
+    if (!conversation) return messageFailure(404, 'NOT_PARTICIPANT', '会话不存在或无权发送')
+    const otherUserId = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)?.userId
+    if (!otherUserId) return messageFailure(409, 'NOT_PARTICIPANT', '会话成员无效')
+    const recipient = await prisma.user.findFirst({
+      where: { id: otherUserId, status: 'ACTIVE', isDeleted: false },
+      select: { id: true },
+    })
+    if (!recipient) return messageFailure(404, 'NOT_PARTICIPANT', '接收用户不存在或不可用')
+    const [userAId, userBId] = normalizeFriendPair(user.id, otherUserId)
+    const friendship = await prisma.friendship.findUnique({
+      where: { userAId_userBId: { userAId, userBId } },
+      select: { id: true },
+    })
+    if (!friendship) return messageFailure(403, 'NOT_FRIEND', '只能给好友发送私信')
+
+    const existing = await prisma.directMessage.findUnique({
+      where: { senderId_clientMessageId: { senderId: user.id, clientMessageId } },
+      select: messageSelect,
+    })
+    if (existing) {
+      if (existing.content !== content) return messageFailure(409, 'DUPLICATE_MESSAGE', '该消息标识已被其他内容使用')
+      return NextResponse.json({
+        success: true,
+        duplicate: true,
+        message: serializeMessage(existing, user.id, null),
+      }, { headers: privateHeaders })
+    }
+
+    const now = new Date()
     const message = await prisma.$transaction(async (tx) => {
       const created = await tx.directMessage.create({
         data: { conversationId, senderId: user.id, content, type: 'TEXT', clientMessageId },
@@ -121,17 +137,39 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       })
       return created
     })
-    return NextResponse.json({ message: serializeMessage(message, user.id, null) }, { status: 201, headers: privateHeaders })
+    return NextResponse.json({
+      success: true,
+      duplicate: false,
+      message: serializeMessage(message, user.id, null),
+    }, { status: 201, headers: privateHeaders })
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const duplicate = await prisma.directMessage.findUniqueOrThrow({
-        where: { senderId_clientMessageId: { senderId: user.id, clientMessageId } },
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && senderId && idempotencyKey) {
+      const duplicate = await prisma.directMessage.findUnique({
+        where: { senderId_clientMessageId: { senderId, clientMessageId: idempotencyKey } },
         select: messageSelect,
-      })
-      return NextResponse.json({ message: serializeMessage(duplicate, user.id, null) }, { headers: privateHeaders })
+      }).catch(() => null)
+      if (duplicate?.content === normalizedContent) {
+        return NextResponse.json({
+          success: true,
+          duplicate: true,
+          message: serializeMessage(duplicate, senderId, null),
+        }, { headers: privateHeaders })
+      }
+      return messageFailure(409, 'DUPLICATE_MESSAGE', '该消息标识已被其他内容使用')
     }
-    throw error
+    console.error('[direct-message.send]', {
+      code: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined,
+      name: error instanceof Error ? error.name : 'UnknownError',
+    })
+    return messageFailure(500, 'DATABASE_ERROR', '消息发送失败，请稍后重试')
   }
+}
+
+function messageFailure(status: number, code: string, error: string) {
+  return NextResponse.json(
+    { success: false, error, code, message: error },
+    { status, headers: privateHeaders },
+  )
 }
 
 function parseCursor(value: string | null) {
@@ -159,9 +197,13 @@ function serializeMessage(
   peerLastReadAt: Date | null,
 ) {
   return {
-    ...message,
+    id: message.id,
+    content: message.content,
+    senderId: message.senderId,
+    clientMessageId: message.clientMessageId,
+    createdAt: message.createdAt.toISOString(),
     readAt: message.senderId === currentUserId && peerLastReadAt && message.createdAt <= peerLastReadAt
-      ? peerLastReadAt
+      ? peerLastReadAt.toISOString()
       : null,
   }
 }

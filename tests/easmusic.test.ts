@@ -65,13 +65,13 @@ test('PNG 封面自动转换为 WebP 且不放大小图', async () => {
   assert.equal(metadata.height, 900)
 })
 
-test('封面 API 使用 music-cover Bucket、固定 WebP 路径和 Supabase Storage', () => {
+test('封面 API 使用固定 WebP 路径和腾讯云 COS', () => {
   const route = readFileSync('app/api/admin/music/covers/route.ts', 'utf8')
-  assert.match(route, /SUPABASE_MUSIC_BUCKET \|\| 'music-cover'/)
   assert.match(route, /const folder = entityType === 'album' \? 'albums'[\s\S]*'tours' : 'concerts'/)
   assert.match(route, /music-cover\/\$\{folder\}\/\$\{entityId\}\/cover\.webp/)
-  assert.match(route, /'Content-Type': 'image\/webp'/)
-  assert.match(route, /'x-upsert': 'true'/)
+  assert.match(route, /uploadMusicMedia\(\{ kind: 'cover'/)
+  assert.match(route, /contentType: 'image\/webp'/)
+  assert.doesNotMatch(route, /SUPABASE|supabase/i)
   assert.match(route, /musicAlbum\.update/)
   assert.match(route, /musicSong\.update/)
 })
@@ -280,8 +280,11 @@ test('Excel 导入功能与 xlsx 依赖已移除', () => {
   assert.doesNotMatch(packageJson, /"xlsx"/)
 })
 
-test('播放器仍为中立框架且不连接音频', () => {
+test('播放器只连接服务器生成的7秒试听且不循环', () => {
   const player = readFileSync('components/music/MusicPlayer.tsx', 'utf8')
-  assert.match(player, /播放入口（框架）/)
-  assert.doesNotMatch(player, /<audio|new Audio|\.play\(/)
+  assert.match(player, /<audio/)
+  assert.match(player, /previewUrl/)
+  assert.match(player, /Math\.min\(7, previewDuration \|\| 7\)/)
+  assert.match(player, /loop=\{false\}/)
+  assert.match(player, /audio\.currentTime >= duration/)
 })

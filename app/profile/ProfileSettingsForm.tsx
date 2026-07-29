@@ -18,6 +18,7 @@ type InitialProfile = {
 }
 
 type UploadKind = 'avatar' | 'background'
+type BackgroundUploadStage = 'idle' | 'processing' | 'uploading'
 type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
 type CropState = {
@@ -200,6 +201,7 @@ export function ProfileSettingsForm({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState<UploadKind | null>(null)
+  const [backgroundStage, setBackgroundStage] = useState<BackgroundUploadStage>('idle')
   const [isSaving, setIsSaving] = useState(false)
   const [crop, setCrop] = useState<CropState | null>(null)
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
@@ -320,24 +322,47 @@ export function ProfileSettingsForm({
 
     setMessage('')
     setError('')
-    setUploading('background')
-
-    const body = new FormData()
-    body.append('file', file)
-    body.append('kind', 'background')
-
-    const response = await fetch('/api/uploads/profile-image', { method: 'POST', body })
-    const data = await response.json().catch(() => null)
-    setUploading(null)
-
-    if (!response.ok) {
-      setError(data?.message || '背景图上传失败，请换一张图片再试')
+    if (!allowedAvatarTypes.has(file.type)) {
+      setError('背景图仅支持 JPG、PNG 或 WebP。')
+      event.target.value = ''
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('背景图不能超过 8MB。')
       event.target.value = ''
       return
     }
 
-    setForm((current) => ({ ...current, backgroundUrl: data.url }))
-    setMessage('背景图已更新。')
+    setUploading('background')
+    setBackgroundStage('processing')
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+    setBackgroundStage('uploading')
+
+    const body = new FormData()
+    body.append('file', file)
+    body.append('kind', 'background')
+    try {
+      const response = await fetchWithTimeout('/api/uploads/profile-image', { method: 'POST', body }, avatarUploadTimeoutMs)
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.message || '背景图上传失败，请换一张图片再试')
+      if (!data?.url) throw new Error('背景图已上传，但服务器没有返回有效地址')
+      setForm((current) => ({ ...current, backgroundUrl: data.url }))
+      setMessage('背景图已更新。')
+    } catch (uploadError) {
+      const uploadMessage =
+        uploadError instanceof DOMException && uploadError.name === 'AbortError'
+          ? '背景图上传超时，请稍后重试'
+          : uploadError instanceof TypeError
+            ? '网络连接中断，请检查网络后重试'
+            : uploadError instanceof Error ? uploadError.message : '背景图上传失败，请稍后重试'
+      setError(uploadMessage)
+    } finally {
+      if (mountedRef.current) {
+        setUploading(null)
+        setBackgroundStage('idle')
+      }
+      event.target.value = ''
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -419,10 +444,22 @@ export function ProfileSettingsForm({
                   {backgroundPreview ? '' : '背景预览'}
                 </div>
               </div>
-              <button type="button" onClick={() => backgroundInputRef.current?.click()} className="mt-3 rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
-                {uploading === 'background' ? '上传中...' : '上传背景图'}
-              </button>
-              <input ref={backgroundInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={uploadBackground} className="hidden" />
+              <label
+                htmlFor="profile-background-upload"
+                aria-disabled={uploading !== null}
+                className={`mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm ${uploading !== null ? 'pointer-events-none opacity-60' : ''}`}
+              >
+                {backgroundStage === 'processing' ? '处理中…' : backgroundStage === 'uploading' ? '上传中…' : '上传背景图'}
+              </label>
+              <input
+                id="profile-background-upload"
+                ref={backgroundInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={uploading !== null}
+                onChange={uploadBackground}
+                className="sr-only"
+              />
             </div>
           </div>
 

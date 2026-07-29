@@ -185,7 +185,8 @@ test('E院中心保留三列且演唱会入口继续可用', () => {
 test('资料保存区和后台保存区避开移动导航', () => {
   assert.match(read('app/profile/ProfileSettingsForm.tsx'), /profile-settings-actions/)
   assert.match(read('app/admin/music/concerts/[concertId]/AdminConcertEditor.tsx'), /admin-save-bar/)
-  assert.match(css, /\.profile-settings-actions \{ bottom:calc\(var\(--mobile-bottom-nav-total\) \+ 8px\)/)
+  assert.match(css, /\.profile-settings-actions \{ bottom:0/)
+  assert.match(css, /\.profile-editor-drawer \.profile-settings-actions \{ bottom:0/)
   assert.match(css, /\.admin-save-bar \{ bottom:calc\(var\(--mobile-bottom-nav-total\) \+ 8px\)/)
 })
 
