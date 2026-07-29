@@ -108,6 +108,15 @@ test('不足60秒的音频保留实际时长且不补静音', async () => {
   assert.ok(result.durationMs >= 29_900 && result.durationMs <= 30_100)
 })
 
+test('MP3 输入与规范化源文件路径分离，不会因同名而失败', async () => {
+  assert.match(previewProcessor, /`input\.\$\{safeExtension\}`/)
+  const first = await createMusicSourceAndPreview(createTestWave(8), 'wav')
+  const second = await createMusicSourceAndPreview(first.source, 'mp3')
+  assert.ok(second.source.byteLength > 10_000)
+  assert.ok(second.preview.byteLength > 10_000)
+  assert.ok(second.durationMs >= 7_000 && second.durationMs <= 9_000)
+})
+
 test('Sharp 与 COS 上传具有生产约束和超时保护', () => {
   assert.match(coverProcessor, /MUSIC_COVER_MAX_WIDTH = 2000/)
   assert.match(coverProcessor, /MUSIC_COVER_QUALITY = 82/)

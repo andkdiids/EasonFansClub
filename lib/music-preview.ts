@@ -58,7 +58,7 @@ function parseDurationMs(stderr: string) {
 export async function createMusicSourceAndPreview(input: Buffer, extension: string) {
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'ecfc-music-preview-'))
   const safeExtension = extension.replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'audio'
-  const inputPath = path.join(tempDirectory, `source.${safeExtension}`)
+  const inputPath = path.join(tempDirectory, `input.${safeExtension}`)
   const sourcePath = path.join(tempDirectory, 'source.mp3')
   const outputPath = path.join(tempDirectory, 'preview.mp3')
   try {
