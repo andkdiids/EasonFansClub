@@ -583,17 +583,19 @@ model DailyTaskTemplate {
 }
 
 model DirectMessage {
-  id             String       @id @default(cuid())
-  type           MessageType  @default(TEXT)
-  content        String
-  imageUrl       String?
-  isDeleted      Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  conversationId String
-  senderId       String
-  Conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  User           User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  id              String       @id @default(cuid())
+  type            MessageType  @default(TEXT)
+  content         String
+  imageUrl        String?
+  isDeleted       Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  conversationId  String
+  senderId        String
+  clientMessageId String?
+  Conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  User            User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
+  @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
 }
@@ -1036,26 +1038,29 @@ model LyricPrescription {
 }
 
 model MusicAlbum {
-  id           String                 @id @default(cuid())
-  name         String
-  artist       String                 @default("陈奕迅")
-  releaseYear  Int
-  coverUrl     String?
-  description  String?
-  language     String                 @default("粤语")
-  createdAt    DateTime               @default(now())
-  era          String?
-  albumType    String?
-  releaseDate  DateTime?
-  company      String?
-  story        String?
-  status       MusicPublicationStatus @default(DRAFT)
-  displayOrder Int                    @default(0)
-  MusicSong    MusicSong[]
+  id            String                 @id @default(cuid())
+  name          String
+  artist        String                 @default("陈奕迅")
+  releaseYear   Int
+  coverUrl      String?
+  description   String?
+  language      String                 @default("粤语")
+  createdAt     DateTime               @default(now())
+  era           String?
+  albumType     String?
+  releaseDate   DateTime?
+  company       String?
+  story         String?
+  status        MusicPublicationStatus @default(DRAFT)
+  displayOrder  Int                    @default(0)
+  isFeatured    Boolean                @default(false)
+  featuredOrder Int?
+  MusicSong     MusicSong[]
 
   @@unique([name, artist, releaseYear])
   @@index([releaseYear, createdAt])
   @@index([status, displayOrder, releaseYear])
+  @@index([status, isFeatured, featuredOrder, createdAt])
 }
 
 model MusicFavorite {
@@ -1084,39 +1089,150 @@ model MusicPlayRecord {
 }
 
 model MusicSong {
-  id                String              @id @default(cuid())
-  title             String
-  artist            String              @default("陈奕迅")
-  albumId           String
-  trackNumber       Int
-  releaseYear       Int
-  duration          Int?
-  coverUrl          String?
-  composer          String?
-  lyricist          String?
-  arranger          String?
-  producer          String?
-  story             String?
-  lyrics            String?
-  sourceType        String?
-  sourceUrl         String?
-  createdAt         DateTime            @default(now())
-  language          String?
-  tags              String?
-  era               String?
-  trackType         String?
-  concertVersion    String?
-  mood              String?
-  scene             String?
-  recommendLevel    String?
-  description       String?
-  GuessSongQuestion GuessSongQuestion[]
-  MusicAlbum        MusicAlbum          @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  id                      String                    @id @default(cuid())
+  title                   String
+  artist                  String                    @default("陈奕迅")
+  albumId                 String
+  trackNumber             Int
+  releaseYear             Int
+  duration                Int?
+  coverUrl                String?
+  composer                String?
+  lyricist                String?
+  arranger                String?
+  producer                String?
+  story                   String?
+  lyrics                  String?
+  sourceType              String?
+  sourceUrl               String?
+  previewUrl              String?
+  previewDuration         Int                       @default(7)
+  createdAt               DateTime                  @default(now())
+  language                String?
+  tags                    String?
+  era                     String?
+  trackType               String?
+  concertVersion          String?
+  mood                    String?
+  scene                   String?
+  recommendLevel          String?
+  description             String?
+  GuessSongQuestion       GuessSongQuestion[]
+  MusicConcertSetlistItem MusicConcertSetlistItem[]
+  MusicAlbum              MusicAlbum                @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, title])
   @@unique([albumId, trackNumber])
   @@index([albumId, trackNumber])
   @@index([title, artist])
+}
+
+model MusicTour {
+  id           String                 @id @default(cuid())
+  name         String
+  subtitle     String?
+  description  String?                @db.Text
+  posterUrl    String?                @db.Text
+  startDate    DateTime?
+  endDate      DateTime?
+  status       MusicPublicationStatus @default(DRAFT)
+  sortOrder    Int                    @default(0)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  MusicConcert MusicConcert[]
+
+  @@index([status])
+  @@index([sortOrder])
+  @@index([startDate])
+  @@index([status, sortOrder, startDate, createdAt])
+}
+
+model MusicConcert {
+  id                      String                    @id @default(cuid())
+  tourId                  String
+  title                   String?
+  concertDate             DateTime
+  city                    String
+  countryOrRegion         String?
+  venue                   String?
+  sessionNumber           String?
+  posterUrl               String?                   @db.Text
+  description             String?                   @db.Text
+  status                  MusicPublicationStatus    @default(DRAFT)
+  sortOrder               Int                       @default(0)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  MusicTour               MusicTour                 @relation(fields: [tourId], references: [id], onDelete: Restrict)
+  MusicConcertSetlistItem MusicConcertSetlistItem[]
+  MusicConcertHighlight   MusicConcertHighlight[]
+  UserMusicConcert        UserMusicConcert[]
+
+  @@index([tourId])
+  @@index([concertDate])
+  @@index([city])
+  @@index([status])
+  @@index([tourId, concertDate])
+  @@index([status, concertDate, createdAt])
+}
+
+model UserMusicConcert {
+  id           String       @id @default(cuid())
+  userId       String
+  concertId    String
+  seatInfo     String?
+  mood         String?
+  note         String?      @db.Text
+  isPublic     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicConcert MusicConcert @relation(fields: [concertId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, concertId])
+  @@index([userId])
+  @@index([concertId])
+  @@index([userId, createdAt])
+  @@index([concertId, isPublic])
+}
+
+model MusicConcertSetlistItem {
+  id           String              @id @default(cuid())
+  concertId    String
+  songId       String?
+  displayName  String?
+  section      MusicSetlistSection @default(MAIN)
+  position     Int
+  versionName  String?
+  note         String?
+  isEncore     Boolean             @default(false)
+  isRequest    Boolean             @default(false)
+  isDebut      Boolean             @default(false)
+  isGuest      Boolean             @default(false)
+  isMedley     Boolean             @default(false)
+  isSpecial    Boolean             @default(false)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  MusicConcert MusicConcert        @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  MusicSong    MusicSong?          @relation(fields: [songId], references: [id], onDelete: SetNull)
+
+  @@index([concertId])
+  @@index([songId])
+  @@index([concertId, section, position])
+}
+
+model MusicConcertHighlight {
+  id           String             @id @default(cuid())
+  concertId    String
+  title        String
+  content      String             @db.Text
+  type         MusicHighlightType @default(OTHER)
+  sortOrder    Int                @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  MusicConcert MusicConcert       @relation(fields: [concertId], references: [id], onDelete: Cascade)
+
+  @@index([concertId])
+  @@index([concertId, sortOrder])
 }
 
 model MusicTrack {
@@ -1734,6 +1850,7 @@ model User {
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
   UserSecurityQuestion                                   UserSecurityQuestion?
+  UserMusicConcert                                       UserMusicConcert[]
 
   @@index([createdAt])
   @@index([email])
@@ -1993,6 +2110,26 @@ enum MessageType {
 enum MusicPublicationStatus {
   DRAFT
   PUBLISHED
+}
+
+enum MusicSetlistSection {
+  OPENING
+  MAIN
+  TALK
+  REQUEST
+  ENCORE
+  SPECIAL
+  OTHER
+}
+
+enum MusicHighlightType {
+  TALK
+  GUEST
+  SONG
+  STAGE
+  INTERACTION
+  MEMORIAL
+  OTHER
 }
 
 enum NotificationType {

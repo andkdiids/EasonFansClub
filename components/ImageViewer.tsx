@@ -76,7 +76,7 @@ export function ImageViewer({
       role="dialog"
       aria-modal="true"
       aria-label={`${alt}图片查看器`}
-      className="fixed inset-0 z-[100] bg-black/95 text-white"
+      className="fixed inset-0 z-[var(--layer-image-viewer)] bg-black/95 text-white"
     >
       <div className="absolute inset-x-0 top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-white/10 bg-black/70 px-3 backdrop-blur sm:px-5">
         <span className="truncate text-xs font-bold text-white/70">{alt}</span>

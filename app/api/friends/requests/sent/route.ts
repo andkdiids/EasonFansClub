@@ -29,5 +29,5 @@ export async function GET() {
         profile: User_FriendRequest_receiverIdToUser.Profile,
       },
     })),
-  })
+  }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }

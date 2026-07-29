@@ -38,7 +38,14 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
   }, [menuOpen])
 
   async function logout() {
-    if ((await fetch('/api/auth/logout', { method: 'POST' })).ok) location.replace('/login')
+    if ((await fetch('/api/auth/logout', { method: 'POST' })).ok) {
+      if ('BroadcastChannel' in window) {
+        const channel = new BroadcastChannel(`eason-private-sync:${user.id}`)
+        channel.postMessage({ type: 'logout', userId: user.id })
+        channel.close()
+      }
+      location.replace('/login')
+    }
   }
 
   return <header className={`app-topbar ${home ? 'app-topbar-home' : ''} ${inverse ? 'app-topbar-inverse' : ''}`}>

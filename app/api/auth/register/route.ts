@@ -50,25 +50,15 @@ function parseRegistrationType(value: unknown): RegistrationType | null {
   return value === 'PHONE' || value === 'EMAIL' ? value : null
 }
 export async function POST(request: Request) {
-  console.log('① register api')
 const originError = rejectInvalidRequestOrigin(request)
-
-console.log('①.5 origin checked', {
-  blocked: Boolean(originError),
-  origin: request.headers.get('origin'),
-  host: request.headers.get('host'),
-})
 
 if (originError) return originError
 
   try {
     const body = await request.json().catch(() => null)
-    console.log('② body parsed')
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() || ''
     const idempotencyKeyHash = idempotencyKey.length >= 16 && idempotencyKey.length <= 128 ? hashToken(idempotencyKey) : null
     if (idempotencyKeyHash) {
-  console.time('register:replayUser')
-
   const replayUser = await prisma.user.findUnique({
     where: { registrationIdempotencyKeyHash: idempotencyKeyHash },
     select: {
@@ -82,8 +72,6 @@ if (originError) return originError
     },
   })
 
-  console.timeEnd('register:replayUser')
-       
       if (replayUser) {
         return NextResponse.json({
           user: replayUser,
@@ -94,9 +82,7 @@ if (originError) return originError
       }
     }
     const registrationType = parseRegistrationType(body?.registrationType)
-    console.time('register:getPolicy')
 const policy = await getRegistrationPolicy()
-console.timeEnd('register:getPolicy')
     const clientIp = getClientIp(request)
     const ipRateLimitKey = `ip:${clientIp}`
 
@@ -113,8 +99,6 @@ console.timeEnd('register:getPolicy')
       return jsonError('当前未开放邮箱注册', 403, 'EMAIL_REGISTRATION_DISABLED', { registrationType: '当前未开放邮箱注册' })
     }
 
-    console.time('register:requestRateLimit')
-
   const requestLimit = await consumeRateLimit(
   ipRateLimitKey,
   registerRequestLimit.action,
@@ -122,7 +106,6 @@ console.timeEnd('register:getPolicy')
   registerRequestLimit.windowSeconds,
 )
 
-console.timeEnd('register:requestRateLimit')
     if (requestLimit.limited) {
       return jsonError('操作过于频繁，请稍后再试。', 429, 'REGISTER_REQUEST_RATE_LIMITED', {}, {
         retryAfter: requestLimit.retryAfter,
@@ -169,9 +152,7 @@ console.timeEnd('register:requestRateLimit')
       return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
     }
 
-    console.time('register:turnstile')
 const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
-console.timeEnd('register:turnstile')
     if (!turnstile.success) {
       return jsonError(turnstile.message || '人机验证失败', 400, turnstile.message === '请先完成人机验证' ? 'TURNSTILE_REQUIRED' : 'TURNSTILE_FAILED', {
         turnstileToken: turnstile.message || '人机验证失败',
@@ -182,8 +163,6 @@ console.timeEnd('register:turnstile')
       return jsonError('邮件服务尚未配置，暂时无法开放邮箱注册', 503, 'EMAIL_SERVICE_NOT_CONFIGURED')
     }
 
-    console.time('register:duplicateCheck')
-
 const [duplicate, accountDuplicate] = await Promise.all([
   findActiveConflict({
     phone: registrationType === 'PHONE' ? phone : null,
@@ -192,7 +171,6 @@ const [duplicate, accountDuplicate] = await Promise.all([
   findLoginAccountConflict(usernameNormalized),
 ])
 
-console.timeEnd('register:duplicateCheck')
     if (duplicate) {
       if (registrationType === 'PHONE' && duplicate.phone === phone) {
         return jsonError('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
@@ -209,15 +187,11 @@ console.timeEnd('register:duplicateCheck')
       })
     }
 
-    console.time('register:successRateLimit')
-
 const successLimit = await checkRateLimit(
   ipRateLimitKey,
   registerSuccessLimit.action,
   registerSuccessLimit.limit,
 )
-
-console.timeEnd('register:successRateLimit')
 
 if (successLimit.limited) {
   return jsonError('当前网络注册账号数量较多，请稍后再试。', 429, 'REGISTER_SUCCESS_RATE_LIMITED', {}, {
@@ -225,22 +199,14 @@ if (successLimit.limited) {
   })
 }
 
-console.time('register:hashPassword')
-
 const passwordHash = await hashPassword(password)
-
-console.timeEnd('register:hashPassword')
-
-    console.time('register:hashSecurityQuestions')
 
 const hashedSecurityQuestions =
   policy.requireSecurityQuestionsForNewUsers
     ? await hashSecurityQuestions(securityQuestions.slice(0, 1))
     : []
 
-console.timeEnd('register:hashSecurityQuestions')
     const successLimitExpiresAt = new Date(Date.now() + registerSuccessLimit.windowSeconds * 1000)
-   console.time('register:transaction')
     const user = await prisma.$transaction(async (tx) => {
       const latest = await tx.user.findFirst({
         orderBy: { uid: 'desc' },
@@ -249,9 +215,6 @@ console.timeEnd('register:hashSecurityQuestions')
       if ((latest?.uid ?? -1) >= MAX_UID) {
         throw new Error('UID_LIMIT_REACHED')
       }
-       console.time('register:userCreate')
-       console.log('准备创建用户')
-       console.time('createUser')
       const created = await tx.user.create({
         data: {
           username,
@@ -281,11 +244,6 @@ console.timeEnd('register:hashSecurityQuestions')
         },
       })
   
-      console.timeEnd('createUser')
-    console.timeEnd('register:userCreate')
-    console.log('用户创建完成', created.id)
-
-    console.time('createSecurityQuestions')
       if (hashedSecurityQuestions.length) {
         await tx.userSecurityQuestion.createMany({
           data: hashedSecurityQuestions.map((item) => ({ ...item, userId: created.id })),
@@ -302,8 +260,6 @@ console.timeEnd('register:hashSecurityQuestions')
           reason: registrationType === 'PHONE' ? '手机号注册账号' : '邮箱注册账号',
         },
       })
-console.timeEnd('createSecurityQuestions')
-
       await tx.rateLimitLog.create({
         data: {
           key: ipRateLimitKey,
@@ -314,7 +270,6 @@ console.timeEnd('createSecurityQuestions')
 
       return created
     })
-console.timeEnd('register:transaction')
     let devVerificationUrl = ''
     let emailSent = false
     if (registrationType === 'EMAIL') {

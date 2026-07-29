@@ -1,18 +1,19 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { getNotificationTarget } from '@/lib/notification-target'
-import type { UnifiedNotification } from '@/lib/notifications'
+import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 
-type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'feedback' | 'system'
+type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'messages' | 'feedback' | 'system'
 
 const categoryLabels: Record<NotificationCategory, string> = {
   all: '全部',
   reply: '回复',
   like: '点赞',
-  friend: '好友',
+  friend: '好友申请',
+  messages: '私信',
   feedback: '反馈',
   system: '系统',
 }
@@ -21,6 +22,7 @@ const typeIcon: Record<string, string> = {
   reply: '↩',
   like: '♥',
   friend: '+',
+  messages: '✉',
   feedback: '!',
   system: 'i',
 }
@@ -42,14 +44,16 @@ function getInitial(name?: string | null) {
 
 export function NotificationsClient({
   initialNotifications,
-  initialUnreadCount,
+  initialUnreadSummary,
 }: {
   initialNotifications: UnifiedNotification[]
-  initialUnreadCount: number
+  initialUnreadSummary: UnreadSummary
 }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [notifications, setNotifications] = useState(initialNotifications)
-  const [unreadCount, setUnreadCount] = useState(initialUnreadCount)
+  const [unreadSummary, setUnreadSummary] = useState(initialUnreadSummary)
+  const unreadCount = unreadSummary.total
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all')
   const [isUpdating, setIsUpdating] = useState(false)
   const [replyingKey, setReplyingKey] = useState<string | null>(null)
@@ -76,7 +80,12 @@ export function NotificationsClient({
     const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !item.isRead)
     setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
     if (!hiddenUnread.length) return
-    setUnreadCount((count) => Math.max(0, count - hiddenUnread.length))
+    setUnreadSummary((summary) => ({
+      ...summary,
+      notifications: Math.max(0, summary.notifications - hiddenUnread.length),
+      system: Math.max(0, summary.system - hiddenUnread.length),
+      total: Math.max(0, summary.total - hiddenUnread.length),
+    }))
     void fetch('/api/notifications', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -89,19 +98,38 @@ export function NotificationsClient({
   }, [])
 
   const categoryCounts = useMemo(() => {
-    const counts = Object.fromEntries(Object.keys(categoryLabels).map((key) => [key, 0])) as Record<NotificationCategory, number>
-    counts.all = notifications.length
-    notifications.forEach((item) => {
-      const category = (item.category || 'system') as NotificationCategory
-      if (counts[category] !== undefined) counts[category] += 1
-    })
-    return counts
-  }, [notifications])
+    return {
+      all: unreadSummary.total,
+      reply: unreadSummary.replies,
+      like: unreadSummary.likes,
+      friend: unreadSummary.friendRequests,
+      messages: unreadSummary.messages,
+      feedback: unreadSummary.feedback,
+      system: unreadSummary.system,
+    } satisfies Record<NotificationCategory, number>
+  }, [unreadSummary])
 
   const filteredNotifications = useMemo(() => {
     if (activeCategory === 'all') return notifications
     return notifications.filter((item) => item.category === activeCategory)
   }, [activeCategory, notifications])
+
+  async function refreshUnreadSummary() {
+    const response = await fetch('/api/notifications/unread-summary', { cache: 'no-store' })
+    if (!response.ok) return
+    setUnreadSummary(await response.json() as UnreadSummary)
+  }
+
+  useEffect(() => {
+    const requestedCategory = searchParams.get('category') as NotificationCategory | null
+    if (requestedCategory && requestedCategory in categoryLabels) setActiveCategory(requestedCategory)
+  }, [searchParams])
+
+  useEffect(() => {
+    const refresh = () => void refreshUnreadSummary()
+    window.addEventListener('unread-summary:refresh', refresh)
+    return () => window.removeEventListener('unread-summary:refresh', refresh)
+  }, [])
 
   async function markRead(item: UnifiedNotification) {
     if (item.isRead) return
@@ -114,7 +142,6 @@ export function NotificationsClient({
     setIsUpdating(false)
     if (!response.ok) return
     setNotifications((current) => current.map((row) => row.id === item.id && row.source === item.source ? { ...row, isRead: true, readAt: new Date() } : row))
-    setUnreadCount((count) => Math.max(count - 1, 0))
     window.dispatchEvent(new Event('unread-summary:refresh'))
     router.refresh()
   }
@@ -180,8 +207,8 @@ export function NotificationsClient({
     setIsUpdating(false)
     if (!response.ok) return
     setNotifications((current) => current.map((row) => ({ ...row, isRead: true, readAt: row.readAt || new Date() })))
-    setUnreadCount(0)
     window.dispatchEvent(new Event('unread-summary:refresh'))
+    await refreshUnreadSummary()
     router.refresh()
   }
 
@@ -209,7 +236,6 @@ export function NotificationsClient({
     }
     const keys = new Set(items.map((item) => `${item.source}:${item.id}`))
     setNotifications((current) => current.filter((item) => !keys.has(`${item.source}:${item.id}`)))
-    setUnreadCount((count) => Math.max(0, count - items.filter((item) => !item.isRead).length))
     window.dispatchEvent(new Event('unread-summary:refresh'))
   }
 
@@ -336,7 +362,19 @@ export function NotificationsClient({
       </div>
 
       <div className="space-y-3">
-        {filteredNotifications.length ? (
+        {activeCategory === 'messages' ? (
+          <div className="rounded-[24px] border border-sky-100 bg-white/82 p-8 text-center">
+            <p className="text-lg font-black text-brand-950">未读私信 {unreadSummary.messages} 条</p>
+            <p className="mt-2 text-sm font-bold text-slate-500">私信不会复制成普通通知，点击后在好友窗口查看会话。</p>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event('friend-dock:open'))}
+              className="mt-4 min-h-11 rounded-xl bg-brand-950 px-5 text-sm font-black text-white"
+            >
+              打开好友与私信
+            </button>
+          </div>
+        ) : filteredNotifications.length ? (
           filteredNotifications.map(renderNotification)
         ) : (
           <div className="rounded-[24px] border border-sky-100 bg-white/82 p-10 text-center">

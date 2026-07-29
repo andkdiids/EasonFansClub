@@ -1,0 +1,240 @@
+name: Configure production entry
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/configure-production-entry.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-entry
+  cancel-in-progress: false
+
+env:
+  APP_PORT: "3000"
+  PRODUCTION_DOMAIN: ecfc.fans
+
+jobs:
+  configure:
+    name: Configure Nginx and HTTPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate server secrets
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          for secret_name in SERVER_HOST SERVER_USER SERVER_PORT SERVER_SSH_KEY; do
+            if [ -z "${!secret_name:-}" ]; then
+              echo "::error::Required repository secret ${secret_name} is missing or empty."
+              exit 1
+            fi
+          done
+
+      - name: Configure origin Nginx and certificate
+        uses: appleboy/ssh-action@v1
+        env:
+          APP_PORT: ${{ env.APP_PORT }}
+          PRODUCTION_DOMAIN: ${{ env.PRODUCTION_DOMAIN }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: APP_PORT,PRODUCTION_DOMAIN
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+
+            export NVM_DIR="${HOME}/.nvm"
+            if [ -s "${NVM_DIR}/nvm.sh" ]; then
+              . "${NVM_DIR}/nvm.sh"
+            fi
+
+            sudo -n true
+            command -v nginx
+            command -v pm2
+
+            curl --fail --silent --show-error \
+              --max-time 10 \
+              "http://127.0.0.1:${APP_PORT}/login" > /dev/null
+            pm2 describe easonfansclub
+            ss -ltn | grep -E ":${APP_PORT}[[:space:]]"
+
+            sudo install -d -m 755 /var/www/letsencrypt
+
+            active_config="/etc/nginx/sites-available/${PRODUCTION_DOMAIN}"
+            backup_dir="/etc/nginx/sites-disabled-by-production-entry"
+            sudo install -d -m 755 "${backup_dir}"
+
+            shopt -s nullglob
+            for enabled_config in /etc/nginx/sites-enabled/*; do
+              resolved_config="$(readlink -f "${enabled_config}")"
+              if [ "${resolved_config}" = "${active_config}" ]; then
+                continue
+              fi
+
+              if sudo grep -Eq \
+                "server_name[^;]*((^|[[:space:]])${PRODUCTION_DOMAIN}|www\\.${PRODUCTION_DOMAIN})([[:space:]]|;)" \
+                "${resolved_config}"; then
+                backup_name="$(basename "${enabled_config}").$(date +%Y%m%d%H%M%S)"
+                echo "Disabling duplicate domain config: ${enabled_config}"
+                sudo mv "${enabled_config}" "${backup_dir}/${backup_name}"
+              fi
+            done
+            shopt -u nullglob
+
+            sudo tee "/etc/nginx/sites-available/${PRODUCTION_DOMAIN}" > /dev/null <<NGINX_HTTP
+            server {
+                listen 80;
+                listen [::]:80;
+                server_name ${PRODUCTION_DOMAIN} www.${PRODUCTION_DOMAIN};
+
+                location ^~ /.well-known/acme-challenge/ {
+                    root /var/www/letsencrypt;
+                    default_type "text/plain";
+                    try_files \$uri =404;
+                }
+
+                location / {
+                    proxy_pass http://127.0.0.1:${APP_PORT};
+                    proxy_http_version 1.1;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_read_timeout 180s;
+                    proxy_send_timeout 180s;
+                    client_max_body_size 110m;
+                }
+            }
+            NGINX_HTTP
+
+            sudo ln -sfn \
+              "/etc/nginx/sites-available/${PRODUCTION_DOMAIN}" \
+              "/etc/nginx/sites-enabled/${PRODUCTION_DOMAIN}"
+            sudo nginx -t
+            sudo systemctl reload nginx
+
+            if [ ! -s "/etc/letsencrypt/live/${PRODUCTION_DOMAIN}/fullchain.pem" ] ||
+               [ ! -s "/etc/letsencrypt/live/${PRODUCTION_DOMAIN}/privkey.pem" ]; then
+              if ! command -v certbot > /dev/null 2>&1; then
+                sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+                sudo env DEBIAN_FRONTEND=noninteractive \
+                  apt-get install -y certbot
+              fi
+
+              sudo certbot certonly \
+                --webroot \
+                --webroot-path /var/www/letsencrypt \
+                --domains "${PRODUCTION_DOMAIN}" \
+                --domains "www.${PRODUCTION_DOMAIN}" \
+                --non-interactive \
+                --agree-tos \
+                --register-unsafely-without-email \
+                --keep-until-expiring
+            fi
+
+            sudo tee "/etc/nginx/sites-available/${PRODUCTION_DOMAIN}" > /dev/null <<NGINX_HTTPS
+            server {
+                listen 80;
+                listen [::]:80;
+                server_name ${PRODUCTION_DOMAIN} www.${PRODUCTION_DOMAIN};
+
+                location ^~ /.well-known/acme-challenge/ {
+                    root /var/www/letsencrypt;
+                    default_type "text/plain";
+                    try_files \$uri =404;
+                }
+
+                location / {
+                    return 301 https://\$host\$request_uri;
+                }
+            }
+
+            server {
+                listen 443 ssl http2;
+                listen [::]:443 ssl http2;
+                server_name ${PRODUCTION_DOMAIN} www.${PRODUCTION_DOMAIN};
+
+                ssl_certificate /etc/letsencrypt/live/${PRODUCTION_DOMAIN}/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/${PRODUCTION_DOMAIN}/privkey.pem;
+                ssl_protocols TLSv1.2 TLSv1.3;
+                ssl_session_cache shared:SSL:10m;
+                ssl_session_timeout 1d;
+
+                location / {
+                    proxy_pass http://127.0.0.1:${APP_PORT};
+                    proxy_http_version 1.1;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_read_timeout 180s;
+                    proxy_send_timeout 180s;
+                    client_max_body_size 110m;
+                }
+            }
+            NGINX_HTTPS
+
+            sudo install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
+            printf '%s\n' \
+              '#!/bin/sh' \
+              'set -eu' \
+              'nginx -t' \
+              'systemctl reload nginx' \
+              | sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx > /dev/null
+            sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+
+            sudo nginx -t
+            sudo systemctl reload nginx
+            sudo systemctl enable --now certbot.timer
+
+            curl --fail --silent --show-error \
+              --max-time 10 \
+              "http://127.0.0.1:${APP_PORT}/login" > /dev/null
+            curl --fail --silent --show-error \
+              --resolve "${PRODUCTION_DOMAIN}:443:127.0.0.1" \
+              --max-time 15 \
+              "https://${PRODUCTION_DOMAIN}/login" > /dev/null
+            sudo certbot certificates
+            systemctl is-active nginx
+            systemctl is-active certbot.timer
+            pm2 describe easonfansclub
+
+      - name: Verify public HTTPS
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 12); do
+            if curl --fail \
+              --location \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 20 \
+              "https://${PRODUCTION_DOMAIN}/login" > /dev/null; then
+              echo "Public HTTPS check passed: https://${PRODUCTION_DOMAIN}/login"
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "::error::Public HTTPS did not become healthy."
+          exit 1

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
+import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
 import { ImageViewer } from '@/components/ImageViewer'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
@@ -35,6 +36,26 @@ function PostLoadFallback() {
   )
 }
 
+function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR' }>) {
+  const title = reason === 'POST' ? '该帖子已被删除或无法查看' : '该帖子作者资料暂时无法查看'
+  const description = reason === 'POST'
+    ? '帖子可能已被删除、撤回或尚未公开。'
+    : '作者账号或公开资料当前不可用。'
+
+  return (
+    <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
+      <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post</p>
+        <h1 className="mt-3 text-3xl font-black text-brand-950">{title}</h1>
+        <p className="mt-3 text-sm font-bold leading-7 text-slate-500">{description}</p>
+        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+          返回 E院广场
+        </Link>
+      </section>
+    </main>
+  )
+}
+
 function loadPost(postId: string, userId?: string) {
   return prisma.post.findUnique({
     where: { id: postId },
@@ -52,32 +73,37 @@ function loadPost(postId: string, userId?: string) {
         },
       },
       Board: { select: { name: true, slug: true } },
-      Reply: {
-        where: { isDeleted: false, User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
-        orderBy: { createdAt: 'asc' },
-        take: POST_DETAIL_REPLY_LIMIT,
-        select: {
-          id: true,
-          content: true,
-          parentId: true,
-          likeCount: true,
-          ReplyLike: userId ? { where: { userId }, select: { id: true } } : false,
-          createdAt: true,
-          User: {
-            select: {
-              id: true,
-              uid: true,
-              nickname: true,
-              level: true,
-              avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
-            },
-          },
-        },
-      },
       Like: userId ? { where: { userId }, select: { id: true } } : false,
       PostFavorite: userId ? { where: { userId }, select: { id: true } } : false,
       PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' } },
+    },
+  })
+}
+
+function loadPostReplies(postId: string, userId?: string) {
+  return prisma.reply.findMany({
+    where: { postId, isDeleted: false },
+    orderBy: { createdAt: 'asc' },
+    take: POST_DETAIL_REPLY_LIMIT,
+    select: {
+      id: true,
+      content: true,
+      parentId: true,
+      likeCount: true,
+      ReplyLike: userId ? { where: { userId }, select: { id: true } } : false,
+      createdAt: true,
+      User: {
+        select: {
+          id: true,
+          uid: true,
+          nickname: true,
+          level: true,
+          avatarUrl: true,
+          status: true,
+          isDeleted: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
     },
   })
 }
@@ -150,23 +176,51 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     notFound()
   }
 
-  if (focusId && !post.Reply.some((reply) => reply.id === focusId)) {
-    const focusedReplies = await loadFocusedReplyChain(postId, focusId)
-    const existingIds = new Set(post.Reply.map((reply) => reply.id))
-    post.Reply.push(...focusedReplies.filter((reply) => !existingIds.has(reply.id)).map((reply) => ({
-      id: reply.id,
-      content: reply.content,
-      parentId: reply.parentId,
-      likeCount: reply.likeCount,
-      createdAt: reply.createdAt,
-      User: { ...reply.author, Profile: reply.author.profile },
-      ReplyLike: [],
-    })))
+  if (post.isDeleted || post.status !== 'PUBLISHED') {
+    return <PostUnavailableFallback reason="POST" />
   }
 
-  if (post.isDeleted || post.status !== 'PUBLISHED' || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile) {
-    console.warn('[post:detail:unavailable]', { postId, postStatus: post.status, authorStatus: post.User.status })
-    return <PostLoadFallback />
+  if (post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile) {
+    console.warn('[post:detail:unavailable]', {
+      postId,
+      reason: post.User.isDeleted
+        ? 'AUTHOR_DELETED'
+        : post.User.status !== 'ACTIVE'
+          ? 'AUTHOR_INACTIVE'
+          : 'AUTHOR_PROFILE_MISSING',
+      authorStatus: post.User.status,
+      authorIsDeleted: post.User.isDeleted,
+      authorHasProfile: Boolean(post.User.Profile),
+    })
+    return <PostUnavailableFallback reason="AUTHOR" />
+  }
+
+  let commentsLoadError = false
+  let postReplies: Awaited<ReturnType<typeof loadPostReplies>> = []
+  try {
+    postReplies = await loadPostReplies(postId, user?.id)
+  } catch (error) {
+    commentsLoadError = true
+    console.error('[post:comments:load-failed]', { postId, userId: user?.id, error })
+  }
+
+  if (focusId && !postReplies.some((reply) => reply.id === focusId)) {
+    try {
+      const focusedReplies = await loadFocusedReplyChain(postId, focusId)
+      const existingIds = new Set(postReplies.map((reply) => reply.id))
+      postReplies.push(...focusedReplies.filter((reply) => !existingIds.has(reply.id)).map((reply) => ({
+        id: reply.id,
+        content: reply.content,
+        parentId: reply.parentId,
+        likeCount: reply.likeCount,
+        createdAt: reply.createdAt,
+        User: { ...reply.author, status: 'ACTIVE' as const, isDeleted: false, Profile: reply.author.profile },
+        ReplyLike: [],
+      })))
+    } catch (error) {
+      commentsLoadError = true
+      console.warn('[post:comments:focus-load-failed]', { postId, focusId, error })
+    }
   }
 
   const liked = Array.isArray(post.Like) && post.Like.length > 0
@@ -176,9 +230,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
-  const replyRows = post.Reply.map(({ ReplyLike, User, ...reply }) => ({
+  const replyRows = postReplies.map(({ ReplyLike, User, ...reply }) => ({
     ...reply,
-    author: { ...User, profile: User.Profile },
+    author: User.status === 'ACTIVE' && !User.isDeleted
+      ? { ...User, profile: User.Profile }
+      : { id: '', uid: 0, nickname: '已注销用户', level: 0, avatarUrl: null, profile: null },
     liked: Array.isArray(ReplyLike) && ReplyLike.length > 0,
   }))
   const directReplyCount = new Map<string, number>()
@@ -245,15 +301,18 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           </div>
         </article>
 
-        <PostRepliesSection
-          postId={post.id}
-          initialReplies={replyRows}
-          initialReplyCount={post.replyCount}
-          currentUserId={user?.id}
-          currentUserRole={user?.role}
-          focusId={focusId}
-          hotReplyIds={hotReplyIds}
-        />
+        <CommentSectionBoundary>
+          <PostRepliesSection
+            postId={post.id}
+            initialReplies={replyRows}
+            initialReplyCount={post.replyCount}
+            currentUserId={user?.id}
+            currentUserRole={user?.role}
+            focusId={focusId}
+            hotReplyIds={hotReplyIds}
+            commentsLoadError={commentsLoadError}
+          />
+        </CommentSectionBoundary>
       </main>
     </>
   )

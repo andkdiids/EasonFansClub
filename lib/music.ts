@@ -23,6 +23,16 @@ export function optionalMusicText(value: unknown, maxLength: number) {
   return text || null
 }
 
+export function parseMusicFeatured(value: unknown) {
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+export function parseMusicFeaturedOrder(value: unknown, isFeatured: boolean) {
+  if (!isFeatured) return null
+  const order = Number(value)
+  return Number.isInteger(order) && order >= 0 ? order : 0
+}
+
 export function musicCover(albumCover?: string | null, songCover?: string | null) {
   return songCover || albumCover || null
 }

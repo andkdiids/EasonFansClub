@@ -16,7 +16,6 @@ const backgroundTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
   ['image/webp', 'webp'],
-  ['image/gif', 'gif'],
 ])
 
 function createCompatibleId() {
@@ -95,10 +94,10 @@ export async function POST(request: Request) {
     }
   } else {
     if (!backgroundTypes.has(file.type)) {
-      return NextResponse.json({ message: '背景图仅支持 JPG、PNG、WEBP 或 GIF' }, { status: 400 })
+      return NextResponse.json({ message: '背景图仅支持 JPG、PNG 或 WebP' }, { status: 400 })
     }
     if (file.size > backgroundMaxFileSize) {
-      return NextResponse.json({ message: '背景图不能超过 8MB' }, { status: 400 })
+      return NextResponse.json({ message: '背景图不能超过 8MB' }, { status: 413 })
     }
   }
 

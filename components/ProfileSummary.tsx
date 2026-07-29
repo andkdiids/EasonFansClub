@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { resolveGrowthLevelName } from '@/lib/growth-display'
 
 type ProfileHeaderProps = {
   displayName: string
@@ -84,6 +85,7 @@ export function ProfileHeader({
 }: ProfileHeaderProps) {
   const initial = displayName.slice(0, 1).toUpperCase()
   const admissionInfo = formatAdmissionInfo(createdAt)
+  const growthLevelName = resolveGrowthLevelName(level, levelName)
 
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
@@ -105,11 +107,9 @@ export function ProfileHeader({
               <h1 className="truncate text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]">{displayName}</h1>
             </div>
           </div>
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
+          <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
-            {showGrowth ? <span className="rounded-full border border-white/16 bg-white/10 px-2 py-1 font-black text-white backdrop-blur">
-  {levelName || `Lv.${level}`}
-</span> : null}
+            <span className="profile-growth-badge rounded-full px-2 py-1 font-black">{growthLevelName}</span>
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">
             {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天

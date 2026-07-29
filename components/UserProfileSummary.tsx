@@ -4,19 +4,11 @@ import Link from 'next/link'
 import { UserAvatar, getUserDisplayName } from '@/components/UserAvatar'
 import type { SessionUser } from '@/lib/auth'
 import { formatUid } from '@/lib/uid'
-const LEVEL_TITLES: Record<number, string> = {
-  1: '初入E院',
-  2: 'E院观察员',
-  3: '资深E友',
-  4: '旋律收藏家',
-  5: 'E院研究员',
-  6: '资深院友',
-  7: '神经研究员',
-  8: '终身E友',
-}
+import { resolveGrowthLevelName } from '@/lib/growth-display'
 
 export type AppShellGrowth = {
   level: number
+  levelName: string
   experience: number
   nextRequiredExp: number | null
   progressPercent: number
@@ -31,7 +23,7 @@ export function UserProfileSummary({ user, growth, onActivate }: Readonly<{ user
       <span className="sidebar-avatar"><UserAvatar user={user} /></span>
       <span>
   <strong>{name}</strong>
-  <small>{LEVEL_TITLES[growth.level] ?? '初入E院'}</small>
+  <small>{resolveGrowthLevelName(growth.level, growth.levelName)}</small>
 </span>
     </>
 

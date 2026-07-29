@@ -13,11 +13,14 @@ function withNoStoreHeaders(response: NextResponse) {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if ((pathname === '/' || pathname === '/welcome' || pathname === '/community') && !request.cookies.has(authCookieName)) {
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirect', '/welcome')
-    return withNoStoreHeaders(NextResponse.redirect(loginUrl))
-  }
+if (
+  (pathname === '/' || pathname === '/welcome' || pathname === '/community') &&
+  !request.cookies.has(authCookieName)
+) {
+  const loginUrl = new URL('/login', request.url)
+  loginUrl.searchParams.set('redirect', pathname)
+  return withNoStoreHeaders(NextResponse.redirect(loginUrl))
+}
 
   return withNoStoreHeaders(NextResponse.next())
 }

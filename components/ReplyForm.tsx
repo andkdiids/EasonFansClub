@@ -18,6 +18,7 @@ export function ReplyForm({
 }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const submittingRef = useRef(false)
   const [content, setContent] = useState('')
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
@@ -38,28 +39,45 @@ export function ReplyForm({
 
   async function submitReply(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
-    if (isSubmitting) return
+    if (submittingRef.current) return
+    submittingRef.current = true
     setError('')
     setSuccess('')
     setIsSubmitting(true)
-    const response = await fetch(`/api/posts/${postId}/replies`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, parentId: replyTo?.id, imageUrls }),
-    })
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
-    if (!response.ok) {
-      setError(data.message || data.errors?.content || '回复失败')
-      return
+    try {
+      const response = await fetch(`/api/posts/${postId}/replies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, parentId: replyTo?.id, imageUrls }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(data.message || data.errors?.content || '回复失败')
+        return
+      }
+      if (!data.success || !data.reply?.id || !data.reply?.author) {
+        setError('回复已提交，但评论数据加载失败，请刷新评论区重试')
+        return
+      }
+      setContent('')
+      setImageUrls([])
+      onReplyCancel?.()
+      onReplyCreated?.(data.reply)
+      setSuccess(data.rewardPoints === 3 ? '评论成功，获得 +3 积分' : '评论成功')
+      if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
+      if (!onReplyCreated) {
+        try {
+          router.refresh()
+        } catch {
+          setError('评论刷新失败，请稍后重试')
+        }
+      }
+    } catch {
+      setError('网络异常，无法确认回复状态，请刷新评论区后再试')
+    } finally {
+      submittingRef.current = false
+      setIsSubmitting(false)
     }
-    setContent('')
-    setImageUrls([])
-    onReplyCancel?.()
-    onReplyCreated?.(data.reply)
-    setSuccess(data.rewardPoints === 3 ? '评论成功，获得 +3 积分' : '评论成功')
-    if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
-    if (!onReplyCreated) router.refresh()
   }
 
   return (

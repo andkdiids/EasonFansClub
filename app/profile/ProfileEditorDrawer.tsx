@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
 
@@ -28,26 +29,95 @@ export function ProfileEditorDrawer({
   const router = useRouter()
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(initialOpen)
+  const [mounted, setMounted] = useState(false)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  const closeEditor = useCallback(() => {
+    setIsOpen(false)
+    router.replace(pathname, { scroll: false })
+  }, [pathname, router])
+
+  const cancelEditor = useCallback(() => {
+    if (window.confirm('放弃未保存的资料修改吗？')) closeEditor()
+  }, [closeEditor])
+
+  useEffect(() => setMounted(true), [])
 
   useEffect(() => {
     setIsOpen(initialOpen)
   }, [initialOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const root = document.documentElement
+    const body = document.body
+    const scrollY = window.scrollY
+    const rootOverflow = root.style.overflow
+    const bodyOverflow = body.style.overflow
+    const bodyPosition = body.style.position
+    const bodyTop = body.style.top
+    const bodyWidth = body.style.width
+
+    root.dataset.profileEditorOpen = 'true'
+    root.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus())
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancelEditor()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      delete root.dataset.profileEditorOpen
+      root.style.overflow = rootOverflow
+      body.style.overflow = bodyOverflow
+      body.style.position = bodyPosition
+      body.style.top = bodyTop
+      body.style.width = bodyWidth
+      window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' })
+    }
+  }, [cancelEditor, isOpen])
 
   function openEditor() {
     setIsOpen(true)
     router.replace(`${pathname}?edit=1`, { scroll: false })
   }
 
-  function closeEditor() {
-    setIsOpen(false)
-    router.replace(pathname, { scroll: false })
-  }
-
-  function cancelEditor() {
-    if (window.confirm('放弃未保存的资料修改吗？')) {
-      closeEditor()
-    }
-  }
+  const drawer = mounted && isOpen
+    ? createPortal(
+      <div className="profile-editor-overlay fixed inset-0 z-[var(--layer-dialog)] overflow-hidden bg-slate-950/65 backdrop-blur-sm">
+        <aside
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="profile-editor-title"
+          className="profile-editor-drawer ml-auto flex h-full min-h-0 w-full flex-col overflow-hidden bg-white shadow-2xl md:max-w-2xl"
+        >
+          <div className="flex shrink-0 items-center justify-between border-b border-sky-100 bg-white px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
+              <h2 id="profile-editor-title" className="mt-1 text-xl font-black text-brand-950">编辑资料</h2>
+            </div>
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={cancelEditor}
+              className="relative z-10 min-h-11 shrink-0 rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 hover:bg-sky-100"
+            >
+              关闭
+            </button>
+          </div>
+          <div className="profile-editor-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-sky-50/40 px-4 py-5 sm:px-6">
+            <ProfileSettingsForm initialProfile={initialProfile} onCancel={cancelEditor} onSaved={closeEditor} />
+          </div>
+        </aside>
+      </div>,
+      document.body,
+    )
+    : null
 
   return (
     <>
@@ -56,25 +126,7 @@ export function ProfileEditorDrawer({
           编辑资料
         </button>
       )}
-
-      {isOpen ? (
-        <div className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-sm">
-          <aside className="ml-auto flex h-full w-full flex-col bg-white shadow-2xl md:max-w-2xl">
-            <div className="flex items-center justify-between border-b border-sky-100 px-5 py-4">
-              <div>
-                <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
-                <h2 className="mt-1 text-xl font-black text-brand-950">编辑资料</h2>
-              </div>
-              <button type="button" onClick={cancelEditor} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 hover:bg-sky-100">
-                关闭
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto bg-sky-50/40 px-4 py-5 sm:px-6">
-              <ProfileSettingsForm initialProfile={initialProfile} onCancel={cancelEditor} onSaved={closeEditor} />
-            </div>
-          </aside>
-        </div>
-      ) : null}
+      {drawer}
     </>
   )
 }

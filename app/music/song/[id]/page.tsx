@@ -4,6 +4,7 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicPlayer } from '@/components/music/MusicPlayer'
+import { PersonalSongHistory } from '@/components/music/live/PersonalSongHistory'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -46,7 +47,8 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
       <dl className="mt-7 grid gap-4 sm:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
     </MusicDetailReveal>
 
-    <div className="mt-8"><MusicPlayer title={song.title} artist={song.artist} coverUrl={coverUrl} sourceType={song.sourceType} /></div>
+    <div className="mt-8"><MusicPlayer title={song.title} artist={song.artist} coverUrl={coverUrl} sourceType={song.sourceType} previewUrl={song.previewUrl} previewDuration={song.previewDuration} /></div>
+    <PersonalSongHistory songId={song.id} />
 
     <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">LYRICS ARCHIVE</p><h2 className="mt-2 text-3xl font-black text-white">歌词</h2>

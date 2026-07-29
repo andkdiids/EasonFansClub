@@ -49,7 +49,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             ],
           },
           select: {
-            id: true, uid: true, nickname: true, username: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+            id: true, uid: true, nickname: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
             Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
             _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
             Post: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true } },
@@ -160,7 +160,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <h2 className="font-black text-brand-950">相关用户</h2>
                 <div className="mt-3 space-y-2">
                   {users.map((item) => {
-                    const name = item.Profile?.displayName || item.nickname || item.username
+                    const name = item.Profile?.displayName || item.nickname
                     const avatar = publicImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
                     const growth = calculateGrowthSummary(item.experience, growthLevels)
                     const status = friendIds.has(item.id) ? 'FRIEND' : sentIds.has(item.id) ? 'PENDING' : receivedIds.has(item.id) ? 'RECEIVED' : 'NONE'

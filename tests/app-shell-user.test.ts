@@ -22,7 +22,7 @@ test('Sidebar 与 Topbar 共用头像组件且成长文案不再显示 Lv', () =
   const summary = read('components/UserProfileSummary.tsx')
   assert.match(summary, /<UserAvatar user=\{user\}/)
   assert.match(topbar, /<UserAvatar user=\{user\}/)
-  assert.match(summary, /等级 \{growth\.level\}/)
+  assert.match(summary, /resolveGrowthLevelName\(growth\.level, growth\.levelName\)/)
   assert.match(summary, /EXP/)
   assert.doesNotMatch(sidebar + summary, /Lv\./)
 })

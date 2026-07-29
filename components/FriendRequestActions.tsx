@@ -29,12 +29,14 @@ export function AddFriendButton({
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 409) {
       setError(data.message || '发送失败')
       return
     }
 
-    setStatus(data.status === 'FRIEND' ? 'FRIEND' : 'PENDING')
+    setStatus(data.status === 'FRIEND' ? 'FRIEND' : data.status === 'INCOMING_PENDING' ? 'RECEIVED' : 'PENDING')
+    window.dispatchEvent(new Event('friend-dock:refresh'))
+    window.dispatchEvent(new Event('unread-summary:refresh'))
     router.refresh()
   }
 
@@ -86,6 +88,8 @@ export function FriendRequestDecision({ requestId }: Readonly<{ requestId: strin
       return
     }
 
+    window.dispatchEvent(new Event('friend-dock:refresh'))
+    window.dispatchEvent(new Event('unread-summary:refresh'))
     router.refresh()
   }
 

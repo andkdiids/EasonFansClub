@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { BackButton } from '@/components/BackButton'
-import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
+import { ProfileHeader } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
@@ -10,7 +10,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
-import { getGrowthSummary } from '@/lib/growth'
+import { getGrowthSummarySafe } from '@/lib/growth'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,15 +18,11 @@ type PageProps = { params: Promise<{ uid: string }> }
 
 export default async function PublicUserPage({ params }: PageProps) {
   const { uid } = await params
-  console.log('[public-user:ssr] start', uid)
   const numericUid = parseUidParam(uid)
   if (numericUid === null) notFound()
   if (numericUid <= 0) notFound()
 
   const viewer = await getCurrentUser()
-  if (viewer?.uid === numericUid) redirect('/profile')
-  console.log('[public-user:ssr] viewer', viewer ? 'session' : 'anonymous')
-  console.log('[public-user:ssr] user-query:start')
   let user
   try {
     user = await withDbTimeout('User.findFirst publicUser.profile', prisma.user.findFirst({
@@ -48,10 +44,12 @@ export default async function PublicUserPage({ params }: PageProps) {
         Profile: true,
         _count: {
           select: {
-            Post: true,
-            Reply: true,
-            Friendship_Friendship_userAIdToUser: true,
-            Friendship_Friendship_userBIdToUser: true,
+            UserMusicConcert: {
+              where: {
+                isPublic: true,
+                MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
+              },
+            },
           },
         },
       },
@@ -67,17 +65,15 @@ export default async function PublicUserPage({ params }: PageProps) {
     }, error)
     throw error
   }
-  console.log('[public-user:ssr] user-query:done')
-
   if (!user || !user.Profile) notFound()
 
-  const isSelf = false
+  const isSelf = viewer?.id === user.id
+  if (isSelf) redirect('/profile')
   let friendship = null
   let pendingRequest: { senderId: string; receiverId: string } | null = null
 
   if (viewer && !isSelf) {
     try {
-      console.log('[public-user:ssr] relationship-query:start')
       const [userAId, userBId] = normalizeFriendPair(viewer.id, user.id)
       friendship = await withDbTimeout('Friendship.findUnique publicUser.friendship', prisma.friendship.findUnique({
         where: { userAId_userBId: { userAId, userBId } },
@@ -93,7 +89,6 @@ export default async function PublicUserPage({ params }: PageProps) {
         },
         select: { senderId: true, receiverId: true },
       }), 2500)
-      console.log('[public-user:ssr] relationship-query:done')
     } catch (error) {
       console.error('[public-user:ssr] relationship-query:failed', {
         queries: [
@@ -110,8 +105,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   const background = publicImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const name = user.Profile.displayName || user.nickname
   const bio = user.Profile.bio || user.bio || '这个成员还没有填写个人简介。'
-  const friendCount = user._count.Friendship_Friendship_userAIdToUser + user._count.Friendship_Friendship_userBIdToUser
-  const growth = await getGrowthSummary(user.experience)
+  const growth = await getGrowthSummarySafe(user.experience)
   const friendStatus = friendship ? 'FRIEND' : pendingRequest?.senderId === viewer?.id ? 'PENDING' : pendingRequest ? 'RECEIVED' : 'NONE'
 
   return (
@@ -123,6 +117,9 @@ export default async function PublicUserPage({ params }: PageProps) {
           uid={user.uid}
           level={growth.level}
           levelName={growth.levelName}
+          experience={growth.experience}
+          nextRequiredExp={growth.nextRequiredExp}
+          progressPercent={growth.progressPercent}
           showGrowth={true}
           createdAt={user.createdAt}
           avatarUrl={avatar}
@@ -141,6 +138,7 @@ export default async function PublicUserPage({ params }: PageProps) {
                 </div>
                 <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
                   {viewer ? <Link href={`/user/${formatUid(user.uid)}/wall`} className="rounded-xl border border-sky-100 bg-brand-700 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">去留言</Link> : null}
+                  {user._count.UserMusicConcert > 0 ? <Link href={`/user/${formatUid(user.uid)}/live`} className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">查看TA公开的现场记录</Link> : null}
                   {isSelf ? (
                     <Link href="/profile?edit=1" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
                       编辑个人资料
@@ -155,14 +153,6 @@ export default async function PublicUserPage({ params }: PageProps) {
                 </div>
               </div>
             </div>
-            <ProfileStatsGrid
-              compact
-              items={[
-                ['帖子', user._count.Post],
-                ['回复', user._count.Reply],
-                ['好友', friendCount],
-              ]}
-            />
           </aside>
 
           <PublicUserModules uid={formatUid(user.uid)} isSelf={isSelf} />

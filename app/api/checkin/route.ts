@@ -9,10 +9,6 @@ import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
-function logPerf(metric: string, start: number, extra?: Record<string, unknown>) {
-  console.info('[perf]', { metric, ms: Date.now() - start, ...extra })
-}
-
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
@@ -72,10 +68,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const requestStart = Date.now()
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再挂号' }, { status: 401 })
-  logPerf('checkin.auth.ms', requestStart, { userId: user.id })
 
   const body = await request.json().catch(() => null)
   const moodKey = sanitizeText(body?.mood, 40)
@@ -97,13 +91,10 @@ export async function POST(request: Request) {
   const today = startOfLocalDay(checkedAt)
   const todayKey = getShanghaiDateKey(checkedAt)
 
-  const existingStart = Date.now()
   const existing = await prisma.checkIn.findUnique({
     where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
     select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
   })
-  logPerf('checkin.existing.ms', existingStart, { userId: user.id })
-
   if (existing) {
     const [profile, history] = await Promise.all([
       prisma.user.findUnique({
@@ -132,7 +123,6 @@ export async function POST(request: Request) {
     })
   }
 
-  const transactionStart = Date.now()
   let result
   try {
     result = await prisma.$transaction(async (tx) => {
@@ -152,13 +142,6 @@ export async function POST(request: Request) {
     const requestedExp = getRandomCheckInExperience()
     const nextPoints = currentUser.points + gainedPoints
 
-    console.info('[checkin.create.before]', {
-      userId: user.id,
-      todayKey,
-      gainedPoints,
-      gainedExp: null,
-      requestedExp,
-    })
     const createdCheckIn = await tx.checkIn.create({
       data: {
         userId: user.id,
@@ -173,13 +156,6 @@ export async function POST(request: Request) {
       },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
     })
-    console.info('[checkin.create.after]', {
-      id: createdCheckIn.id,
-      userId: user.id,
-      todayKey,
-      points: createdCheckIn.points,
-      exp: createdCheckIn.exp,
-    })
     const expAward = await awardExperience(tx, {
       userId: user.id,
       amount: requestedExp,
@@ -189,25 +165,11 @@ export async function POST(request: Request) {
       sourceId: createdCheckIn.id,
     })
     const gainedExp = expAward.amount
-    console.info('[checkin.update.before]', {
-      id: createdCheckIn.id,
-      userId: user.id,
-      gainedPoints,
-      gainedExp,
-    })
     const checkIn = await tx.checkIn.update({
       where: { id: createdCheckIn.id },
       data: { exp: gainedExp },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
     })
-    console.info('[checkin.update.after]', {
-      id: checkIn.id,
-      userId: user.id,
-      todayKey,
-      points: checkIn.points,
-      exp: checkIn.exp,
-    })
-
     let dailyMessageId: string | null = null
     if (message) {
       const dailyMessage = await tx.dailyMessage.create({
@@ -285,13 +247,6 @@ export async function POST(request: Request) {
     }
     throw error
   }
-  logPerf('checkin.transaction.ms', transactionStart, { userId: user.id })
-
-  
-
-  
-  const verifyStart = Date.now()
-
 const [verifyCheckIn, verifyUser] = await Promise.all([
   prisma.checkIn.findUnique({
     where: {
@@ -325,23 +280,6 @@ const [verifyCheckIn, verifyUser] = await Promise.all([
     },
   }),
 ])
-
-logPerf('checkin.verify.ms', verifyStart, { userId: user.id })
-console.info('[checkin.verify.result]', verifyCheckIn
-  ? {
-      id: verifyCheckIn.id,
-      userId: user.id,
-      todayKey,
-      points: verifyCheckIn.points,
-      exp: verifyCheckIn.exp,
-    }
-  : {
-      id: null,
-      userId: user.id,
-      todayKey,
-      points: null,
-      exp: null,
-    })
 
 if (!verifyCheckIn) {
   console.error('[checkin.verify.failed]', {
@@ -387,8 +325,6 @@ if (
 
 
 
-const afterStart = Date.now()
-
 Promise.allSettled([
   syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
   prisma.dailyTaskTemplate.findUnique({ 
@@ -421,7 +357,6 @@ Promise.allSettled([
       : null
   )),
 ]).then((results) => {
-  logPerf('checkin.afterwork.ms', afterStart, { userId: user.id })
   results.forEach((item, index) => {
     if (item.status === 'rejected') {
       console.error(
@@ -434,7 +369,6 @@ Promise.allSettled([
   })
 })
 
-logPerf('checkin.response.ready.ms', requestStart, { userId: user.id })
 return NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,

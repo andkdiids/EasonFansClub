@@ -24,10 +24,8 @@ function parseDate(value?: string) {
 }
 
 export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string; message?: string; focus?: string }> }) {
-  const pageStart = Date.now()
   const sessionUser = await getCurrentUser()
   if (!sessionUser) redirect('/login')
-  console.info('[perf]', { metric: 'page.checkin.auth.ms', ms: Date.now() - pageStart })
 
   const params = await searchParams
   const selectedDate = parseDate(params.date)
@@ -36,7 +34,6 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const todayKey = getShanghaiDateKey(today)
   const sort: CheckInMessageSort = params.sort === 'hot' ? 'hot' : 'latest'
 
-  const queryStart = Date.now()
   const friendIdsPromise = safeDb('Friendship.findMany checkin.friendIds', getFriendIds(sessionUser.id), [], 3000)
   const [user, activeUsers, todayCount, todayCheckIn, selectedMessages, friendIds, moodStats, checkInHistory] = await Promise.all([
     withDbTimeout(
@@ -97,9 +94,6 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     [],
     8000,
   )
-  console.info('[perf]', { metric: 'page.checkin.parallelQueries.ms', ms: Date.now() - queryStart })
-  console.info('[perf]', { metric: 'page.checkin.total.ms', ms: Date.now() - pageStart })
-
   if (!user) redirect('/login')
 
   const streaks = calculateCheckinStreaks(checkInHistory.map((item) => item.checkinDateKey))

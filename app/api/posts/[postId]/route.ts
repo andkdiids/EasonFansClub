@@ -9,15 +9,40 @@ const POST_DETAIL_REPLY_LIMIT = 50
 export async function GET(_request: Request, { params }: Params) {
   const { postId } = await params
   const post = await prisma.post.findFirst({
-    where: { id: postId, isDeleted: false },
+    where: {
+      id: postId,
+      isDeleted: false,
+      status: 'PUBLISHED',
+      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+    },
     include: {
-      User: { select: { id: true, nickname: true, level: true, avatarUrl: true } },
+      User: {
+        select: {
+          id: true,
+          nickname: true,
+          level: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
       Board: { select: { name: true, slug: true } },
       Reply: {
-        where: { isDeleted: false },
+        where: {
+          isDeleted: false,
+          User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+        },
         orderBy: { createdAt: 'asc' },
         take: POST_DETAIL_REPLY_LIMIT,
-        include: { User: { select: { nickname: true, level: true, avatarUrl: true } } },
+        include: {
+          User: {
+            select: {
+              nickname: true,
+              level: true,
+              avatarUrl: true,
+              Profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
       },
     },
   })

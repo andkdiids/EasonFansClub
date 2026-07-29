@@ -68,6 +68,7 @@ export async function getSessionUserFromCookie() {
 
 export async function getCurrentUser() {
   const sessionUser = await getSessionUserFromCookie()
+
   if (!sessionUser) return null
 
   const now = Date.now()
