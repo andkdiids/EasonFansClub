@@ -103,17 +103,23 @@ export function FriendDock({
   const nearBottomRef = useRef(true)
   const backdropCloseTimerRef = useRef(0)
   const sendingMessageIdsRef = useRef(new Set<string>())
+  const chatSessionRef = useRef(0)
 
   const resetChat = useCallback(() => {
+    chatSessionRef.current += 1
+    sendingMessageIdsRef.current.clear()
     setChatFriend(null)
     setConversationId('')
     setMessages([])
     setContent('')
+    setSending(false)
     setError('')
     cursorRef.current = ''
     beforeCursorRef.current = ''
+    nearBottomRef.current = true
     setNewMessageNotice(false)
     setHasOlderMessages(false)
+    setLoadingOlder(false)
   }, [])
 
   const closeDock = useCallback(() => {
@@ -408,6 +414,7 @@ export function FriendDock({
   }
 
   async function openChat(friend: FriendDockUser) {
+    const chatSession = ++chatSessionRef.current
     setError('')
     setProfileFriend(null)
     const response = await fetch('/api/direct-conversations', {
@@ -416,6 +423,7 @@ export function FriendDock({
       body: JSON.stringify({ targetUid: friend.uid }),
     })
     const data = await response.json().catch(() => ({}))
+    if (chatSession !== chatSessionRef.current) return
     if (!response.ok) {
       setError(data.message || '无法打开会话')
       return
@@ -428,6 +436,7 @@ export function FriendDock({
     beforeCursorRef.current = ''
     const messagesResponse = await fetch(`/api/direct-conversations/${nextConversationId}/messages`, { cache: 'no-store' })
     const messagesData = await messagesResponse.json().catch(() => ({}))
+    if (chatSession !== chatSessionRef.current) return
     if (!messagesResponse.ok) {
       setError(messagesData.message || '消息加载失败')
       return
@@ -444,6 +453,7 @@ export function FriendDock({
 
   async function sendMessage(input: { content: string; clientMessageId: string; optimisticId?: string }) {
     if (!conversationId || sendingMessageIdsRef.current.has(input.clientMessageId)) return false
+    const chatSession = chatSessionRef.current
     sendingMessageIdsRef.current.add(input.clientMessageId)
     setSending(true)
     const optimisticId = input.optimisticId || `pending:${input.clientMessageId}`
@@ -472,6 +482,7 @@ export function FriendDock({
       } catch {
         throw new Error(response.ok ? '服务器返回格式异常，消息未确认发送' : `发送失败（HTTP ${response.status}）`)
       }
+      if (chatSession !== chatSessionRef.current) return false
       if (!response.ok) {
         console.error('[friend-dock.send]', { status: response.status, response: data })
         setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
@@ -486,6 +497,7 @@ export function FriendDock({
       return true
     } catch (sendError) {
       console.error('[friend-dock.send]', sendError)
+      if (chatSession !== chatSessionRef.current) return false
       setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
       setError(sendError instanceof TypeError
         ? '网络连接中断，消息未确认发送，可点击消息重试'
@@ -493,7 +505,7 @@ export function FriendDock({
       return false
     } finally {
       sendingMessageIdsRef.current.delete(input.clientMessageId)
-      setSending(sendingMessageIdsRef.current.size > 0)
+      if (chatSession === chatSessionRef.current) setSending(sendingMessageIdsRef.current.size > 0)
     }
   }
 

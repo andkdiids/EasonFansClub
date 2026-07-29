@@ -154,13 +154,15 @@ test('好友窗内部列表项可操作且不会被 outside-click 关闭', () =>
   assert.match(friendDock, /onProfile=\{\(\) => setProfileFriend\(friend\)\}/)
 })
 
-test('好友窗口高度基于 100dvh 且止于 BottomNav 上方', () => {
-  assert.match(css, /--friend-dock-mobile-height:min\(72dvh,max\(180px,calc\(var\(--friend-dock-viewport-height,100dvh\) - var\(--mobile-bottom-nav-total\) - 88px\)\)\)/)
-  assert.match(css, /\.friend-dock-panel \{[^}]*max-height:var\(--friend-dock-mobile-height\)/)
+test('好友窗口作为右侧抽屉填满动态视口且内容限制在面板内', () => {
+  assert.match(css, /\.friend-dock-panel \{[^}]*width:88vw;[^}]*height:var\(--friend-dock-viewport-height,100dvh\);[^}]*max-height:var\(--friend-dock-viewport-height,100dvh\)/)
+  assert.match(css, /\.friend-dock-panel \.friend-list-layout,\.friend-dock-panel \.friend-chat-layout \{[^}]*min-height:0;[^}]*overflow:hidden/)
 })
 
 test('E院中心作为完整卡片止于底部导航上方', () => {
   assert.match(css, /--mobile-center-action-overhang:\s*28px/)
+  assert.match(css, /\.app-mobile-nav \{[^}]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\);[^}]*overflow:visible/)
+  assert.match(css, /\.app-mobile-nav \.mobile-center-icon \{[^}]*left:50%;[^}]*border-radius:50%;[^}]*color:#fff;[^}]*background:var\(--primary\);[^}]*box-shadow:[^;}]+;[^}]*transform:translateX\(-50%\)/)
   assert.match(css, /\.mobile-center-backdrop \{[^}]*inset:0;[^}]*height:100dvh/)
   assert.match(css, /\.mobile-center-sheet \{[^}]*bottom:calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-center-action-overhang\) \+ 10px\)[^}]*max-height:min\(620px,calc\(100dvh - var\(--mobile-bottom-nav-total\) - var\(--mobile-center-action-overhang\) - 54px\)\)[^}]*border-radius:18px/)
 })

@@ -24,6 +24,13 @@ test('closed FriendDock restores both expanded and collapsed triggers', () => {
   assert.match(friendDock, /ref=\{toggleRef\}/)
 })
 
+test('closing FriendDock invalidates pending chat work and clears all chat-only state', () => {
+  assert.match(friendDock, /const chatSessionRef = useRef\(0\)/)
+  assert.match(friendDock, /const resetChat = useCallback\(\(\) => \{[\s\S]*chatSessionRef\.current \+= 1[\s\S]*setChatFriend\(null\)[\s\S]*setConversationId\(''\)[\s\S]*setMessages\(\[\]\)[\s\S]*setContent\(''\)[\s\S]*setSending\(false\)[\s\S]*setLoadingOlder\(false\)/)
+  assert.match(friendDock, /const closeDock = useCallback\(\(\) => \{[\s\S]*setOpen\(false\)[\s\S]*resetChat\(\)/)
+  assert.match(friendDock, /if \(chatSession !== chatSessionRef\.current\) return/)
+})
+
 test('E center still hides the FriendDock entry', () => {
   assert.match(css, /data-eason-center-open='true'[\s\S]*\.friend-dock/)
   assert.match(mobileNavigation, /window\.dispatchEvent\(new Event\('friend-dock:close'\)\)/)
@@ -60,10 +67,10 @@ test('FriendDock title actions and close button are vertically centered', () => 
   assert.match(css, /\.friend-dock-header-actions a,[^{]*\{[^}]*min-height:44px;[^}]*align-items:center;[^}]*justify-content:center/)
 })
 
-test('mobile FriendDock uses at most 72dvh and reserves nav and background space', () => {
-  assert.match(css, /--friend-dock-mobile-height:min\(72dvh,max\(180px,calc\(var\(--friend-dock-viewport-height,100dvh\) - var\(--mobile-bottom-nav-total\) - 88px\)\)\)/)
-  assert.match(css, /max-height:var\(--friend-dock-mobile-height\)/)
-  assert.match(css, /height:var\(--friend-dock-mobile-height\)/)
+test('mobile FriendDock is a contained right drawer that fills the dynamic viewport', () => {
+  assert.match(css, /\.friend-dock-panel \{[^}]*top:var\(--friend-dock-viewport-top,0px\);[^}]*right:0;[^}]*width:88vw;[^}]*max-width:90vw;[^}]*height:var\(--friend-dock-viewport-height,100dvh\);[^}]*contain:layout paint;[^}]*overflow:hidden/)
+  assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[^}]*height:var\(--friend-dock-viewport-height,100dvh\);[^}]*max-height:var\(--friend-dock-viewport-height,100dvh\)/)
+  assert.match(css, /@keyframes friend-dock-drawer-in \{ from \{ transform:translateX\(100%\); \} to \{ transform:translateX\(0\); \} \}/)
 })
 
 test('mobile FriendDock tracks visualViewport changes for keyboard compression', () => {

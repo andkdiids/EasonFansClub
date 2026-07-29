@@ -38,8 +38,8 @@ test('本人和他人主页都传入真实等级称号且不显示 Lv', () => {
 })
 
 test('等级胶囊不会再被 flat-page 改成白底白字且 320px 可换行', () => {
-  assert.match(profileSummary, /profile-growth-badge/)
-  assert.match(css, /\.profile-growth-badge \{[^}]*color:#fff;[^}]*background:rgba\(2,8,18,.58\)/)
+  assert.equal((profileSummary.match(/className="profile-identity-badge"/g) || []).length, 2)
+  assert.match(css, /\.profile-identity-badge \{[^}]*min-height:24px;[^}]*border-radius:9999px;[^}]*padding:4px 8px;[^}]*color:#fff;[^}]*background:rgba\(2,8,18,.58\)/)
   assert.match(profileSummary, /profile-identity-badges[\s\S]*flex-wrap/)
 })
 

@@ -108,8 +108,8 @@ export function ProfileHeader({
             </div>
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center gap-1.5 text-xs font-bold leading-none text-white/90">
-            <span className="rounded-full border border-white/16 bg-slate-950/16 px-2 py-1 backdrop-blur">UID {formatUid(uid)}</span>
-            <span className="profile-growth-badge rounded-full px-2 py-1 font-black">{growthLevelName}</span>
+            <span className="profile-identity-badge">UID {formatUid(uid)}</span>
+            <span className="profile-identity-badge">{growthLevelName}</span>
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">
             {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天
