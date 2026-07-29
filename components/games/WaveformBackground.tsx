@@ -31,7 +31,7 @@ export function WaveformBackground({ active }: Readonly<{ active: boolean }>) {
         const envelope = Math.sin(normalized * Math.PI)
         const wave = active
           ? Math.sin(normalized * Math.PI * 10 + phase) * Math.sin(normalized * Math.PI * 3.4 + phase * .72)
-          : 0
+          : Math.sin(normalized * Math.PI * 4) * .08
         const y = height / 2 + wave * height * .21 * envelope
         if (x === 0) context.moveTo(x, y)
         else context.lineTo(x, y)

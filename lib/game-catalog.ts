@@ -27,7 +27,7 @@ export type GameCategoryFilter = typeof gameCategories[number]
 export const gameCatalog: GameCatalogItem[] = [
   {
     slug: 'guess-song',
-    title: 'E声猜歌',
+    title: '听听',
     eyebrow: 'LISTEN & GUESS',
     description: '听一小段旋律，在有限播放次数内找出正确歌曲。',
     longDescription: '从熟悉的旋律切入，在不同音频长度与播放次数限制下挑战你的 Eason 歌曲记忆。',

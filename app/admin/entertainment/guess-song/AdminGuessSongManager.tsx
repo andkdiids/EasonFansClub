@@ -537,7 +537,7 @@ export function AdminGuessSongManager() {
     <main className="flat-page guess-song-admin">
       <header>
         <p>Entertainment CMS</p>
-        <h1>E声猜歌题库</h1>
+        <h1>听听题库</h1>
         <span>先创建题目资料，再上传至少 7 秒的音频；服务端会生成私有的 2～7 秒 MP3 变体。</span>
       </header>
       {message ? <p className="guess-song-admin-message" role="status">{message}</p> : null}

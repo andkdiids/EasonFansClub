@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { MusicAlbumArchiveShowcase } from '@/components/music/MusicAlbumArchiveShowcase'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
+import { EasMusicCassetteHero } from '@/components/music/cassette/EasMusicCassetteHero'
 import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
@@ -12,7 +13,7 @@ import { getSiteAppearance } from '@/lib/site-config'
 export const dynamic = 'force-dynamic'
 
 export default async function MusicPage() {
-  const [albums, tours, layoutConfig, config] = await Promise.all([
+  const [albums, tours, cassetteSourceSongs, layoutConfig, config] = await Promise.all([
     prisma.musicAlbum.findMany({ where: { status: 'PUBLISHED' }, orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }], include: { _count: { select: { MusicSong: true } } } }),
     prisma.musicTour.findMany({
       where: { status: 'PUBLISHED' },
@@ -22,14 +23,52 @@ export default async function MusicPage() {
         _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } },
       },
     }),
+    prisma.musicSong.findMany({
+      where: {
+        previewUrl: { not: null },
+        MusicAlbum: { status: 'PUBLISHED' },
+      },
+      orderBy: [{ releaseYear: 'desc' }, { trackNumber: 'asc' }, { createdAt: 'asc' }],
+      take: 60,
+      select: {
+        id: true,
+        title: true,
+        artist: true,
+        releaseYear: true,
+        language: true,
+        coverUrl: true,
+        previewUrl: true,
+        previewDuration: true,
+        MusicAlbum: {
+          select: {
+            id: true,
+            name: true,
+            coverUrl: true,
+          },
+        },
+      },
+    }),
     getPublishedPageLayoutConfig('music'),
     getSiteAppearance(),
   ])
   const carouselAlbums = albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl!, songCount: album._count.MusicSong, releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear) }))
   const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl, songCount: album._count.MusicSong }))
   const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({ ...tour, concertCount: _count.MusicConcert, cities: [...new Set(MusicConcert.map((concert) => concert.city))] }))
+  const cassetteSongs = cassetteSourceSongs.flatMap((song) => song.previewUrl ? [{
+    id: song.id,
+    title: song.title,
+    artist: song.artist,
+    albumId: song.MusicAlbum.id,
+    albumTitle: song.MusicAlbum.name,
+    releaseYear: song.releaseYear,
+    language: song.language,
+    coverUrl: song.coverUrl || song.MusicAlbum.coverUrl,
+    previewUrl: song.previewUrl,
+    previewDuration: Math.min(60, song.previewDuration || 60),
+  }] : [])
 
   const musicMain = <div className="space-y-14 sm:space-y-20">
+    <EasMusicCassetteHero songs={cassetteSongs} />
     <MusicAlbumArchiveShowcase carouselAlbums={carouselAlbums} albums={archiveAlbums} />
     <MusicSectionNavigation />
     <section aria-labelledby="eason-in-concert-title">

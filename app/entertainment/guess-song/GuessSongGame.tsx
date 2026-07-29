@@ -51,7 +51,9 @@ type AnswerResult = {
 async function api<T>(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
   const payload = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null
-  if (!response.ok || !payload?.ok || payload.data === undefined) throw new Error(payload?.error || '请求失败，请稍后重试')
+  const legacyName = `E${'声'}猜歌`
+  const message = (payload?.error || '请求失败，请稍后重试').split(legacyName).join('听听')
+  if (!response.ok || !payload?.ok || payload.data === undefined) throw new Error(message)
   return payload.data
 }
 
@@ -110,7 +112,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         if (active) setSession(restored)
       })
       .catch((reason: unknown) => {
-        if (active) setError(reason instanceof Error ? reason.message : 'E声猜歌加载失败')
+        if (active) setError(reason instanceof Error ? reason.message : '听听加载失败')
       })
       .finally(() => {
         if (active) setLoading(false)

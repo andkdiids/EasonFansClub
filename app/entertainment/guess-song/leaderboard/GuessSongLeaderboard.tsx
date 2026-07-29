@@ -52,7 +52,7 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
     <>
       <header className="guess-song-heading">
         <p>Leaderboard</p>
-        <h1>E声猜歌排行榜</h1>
+        <h1>听听排行榜</h1>
         <span>每周一及每月1日按北京时间开启新榜单</span>
       </header>
       <div className="guess-song-leaderboard-filters">
