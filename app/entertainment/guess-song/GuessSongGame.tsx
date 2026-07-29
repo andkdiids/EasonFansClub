@@ -79,22 +79,28 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
   const [loading, setLoading] = useState(true)
   const [startingMode, setStartingMode] = useState<Mode | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [audioError, setAudioError] = useState('')
   const [answering, setAnswering] = useState(false)
   const [playedOnce, setPlayedOnce] = useState(false)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [error, setError] = useState('')
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioGenerationRef = useRef(0)
   const timeoutSubmittedRef = useRef<string | null>(null)
   const submitAnswerRef = useRef<(optionKey: string | null) => void>(() => undefined)
 
   function stopAudio() {
+    audioGenerationRef.current += 1
     const audio = audioRef.current
-    if (!audio) return
-    audio.pause()
-    audio.src = ''
-    audio.load()
     audioRef.current = null
+    if (audio) {
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+    }
     setPlaying(false)
+    setAudioLoading(false)
     setRemainingSeconds(0)
   }
 
@@ -102,6 +108,7 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
 
   useEffect(() => {
     stopAudio()
+    setAudioError('')
     setPlayedOnce(false)
     setAnswerResult(null)
     setNextSession(null)
@@ -144,10 +151,12 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
 
   async function playAudio() {
     const question = session?.question
-    if (!session || !question || playing || question.remainingPlayCount <= 0) return
+    if (!session || !question || playing || audioLoading || question.remainingPlayCount <= 0) return
     stopAudio()
     setError('')
-    setPlaying(true)
+    setAudioError('')
+    setAudioLoading(true)
+    const audioGeneration = audioGenerationRef.current
     try {
       const data = await api<{
         signedUrl: string
@@ -160,6 +169,7 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId: question.publicId, requestKey: createUUID() }),
       })
+      if (audioGeneration !== audioGenerationRef.current) return
       setSession((current) => current?.question ? {
         ...current,
         totalPlayCount: current.totalPlayCount + 1,
@@ -170,7 +180,7 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
           answerDeadlineAt: data.answerDeadlineAt,
         },
       } : current)
-      const audio = new Audio(data.signedUrl)
+      const audio = new Audio()
       audio.preload = 'auto'
       audio.playbackRate = 1
       audioRef.current = audio
@@ -179,20 +189,31 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
         setRemainingSeconds(Math.max(0, Math.ceil(data.durationSeconds - audio.currentTime)))
       })
       audio.addEventListener('ended', () => {
+        if (audioRef.current !== audio || audioGeneration !== audioGenerationRef.current) return
         setPlaying(false)
+        setAudioLoading(false)
         setPlayedOnce(true)
         setRemainingSeconds(0)
         audioRef.current = null
       }, { once: true })
       audio.addEventListener('error', () => {
+        if (audioRef.current !== audio || audioGeneration !== audioGenerationRef.current) return
         setPlaying(false)
-        setError('音频加载失败，请检查网络后重试')
+        setAudioLoading(false)
+        setAudioError('音频加载失败，请检查网络后重试')
         audioRef.current = null
       }, { once: true })
+      audio.src = data.signedUrl
+      audio.load()
       await audio.play()
+      if (audioRef.current !== audio || audioGeneration !== audioGenerationRef.current) return
+      setAudioLoading(false)
+      setPlaying(true)
     } catch (requestError) {
+      if (audioGeneration !== audioGenerationRef.current) return
       setPlaying(false)
-      setError(requestError instanceof Error ? requestError.message : '音频播放失败')
+      setAudioLoading(false)
+      setAudioError(requestError instanceof Error ? requestError.message : '音频播放失败')
     }
   }
 
@@ -233,6 +254,8 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
 
   function continueGame() {
     if (!nextSession) return
+    stopAudio()
+    setAudioError('')
     setSession(nextSession)
     setAnswerResult(null)
     setNextSession(null)
@@ -329,12 +352,15 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
         <button type="button" onClick={() => void abandon()}>退出本局</button>
       </header>
       {error ? <p className="guess-song-error" role="alert">{error}</p> : null}
+      {audioError ? <p className="guess-song-error" role="alert">{audioError}</p> : null}
       <div className={`guess-song-wave ${playing ? 'is-playing' : ''}`} aria-hidden="true">
         {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
       </div>
-      <button className="guess-song-play" type="button" onClick={() => void playAudio()} disabled={playing || question.remainingPlayCount <= 0 || Boolean(answerResult)}>
-        {playing
-          ? `正在播放 00:${String(remainingSeconds).padStart(2, '0')}`
+      <button className="guess-song-play" type="button" onClick={() => void playAudio()} disabled={playing || audioLoading || question.remainingPlayCount <= 0 || Boolean(answerResult)}>
+        {audioLoading
+          ? '正在加载音频…'
+          : playing
+            ? `正在播放 00:${String(remainingSeconds).padStart(2, '0')}`
           : question.remainingPlayCount <= 0
             ? '播放次数已用完'
             : playedOnce || question.playCount > 0
