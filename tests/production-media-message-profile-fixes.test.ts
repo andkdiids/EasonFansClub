@@ -126,10 +126,10 @@ test('私信发送统一走 form submit 并处理响应解析失败', () => {
 })
 
 test('桌面 FriendDock 固定动态视口高度且只有好友列表内部滚动', () => {
-  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*--friend-dock-desktop-height:min\(620px,calc\(100dvh - 100px\)\)[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:var\(--friend-dock-desktop-height\);[\s\S]*max-height:var\(--friend-dock-desktop-height\)/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel \{[\s\S]*height:640px;[\s\S]*max-height:calc\(100vh - 120px\);[\s\S]*transform:none;[\s\S]*animation:none/)
   assert.match(css, /\.friend-dock-panel \{[^}]*overflow:hidden;[^}]*pointer-events:auto/)
   assert.match(css, /\.friend-dock-header \{[^}]*flex:none/)
-  assert.match(css, /\.friend-dock-list \{[^}]*flex:1;[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-list \{ height:100%; min-height:0; flex:1 1 0; overflow-y:auto; \}/)
 })
 
 test('FriendDock 发送点击层可用且输入和按钮触控区至少44px', () => {
@@ -154,8 +154,10 @@ test('关闭 FriendDock 会统一清理聊天状态并重新打开好友列表',
 })
 
 test('好友列表和私信面板在桌面端保持相同固定高度', () => {
-  assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{ height:min\(620px,calc\(100dvh - 100px\)\); max-height:min\(620px,calc\(100dvh - 100px\)\); \}/)
-  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-chat \.friend-chat-layout \{ height:100%; \}/)
+  assert.match(friendDock, /<div className="friend-dock-body">[\s\S]*className="friend-chat-layout"[\s\S]*className="friend-list-layout"/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:640px;[\s\S]*max-height:calc\(100vh - 120px\)/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-list-layout,\.friend-chat-layout \{ height:100%; min-height:0; flex:1 1 0; \}/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-chat-messages \{ min-height:0; flex:1 1 0; overflow-y:auto; \}[\s\S]*\.friend-chat-composer \{ position:relative; bottom:auto; flex:none; \}/)
 })
 
 test('公共顶部搜索区域仅移除非首页分割线', () => {

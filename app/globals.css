@@ -219,9 +219,8 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .friend-dock-unread-dot { position:absolute; top:5px; left:3px; width:7px; height:7px; border-radius:50%; background:var(--danger); }
 .friend-dock-backdrop { position:fixed; z-index:var(--layer-overlay); inset:0; width:100vw; height:100dvh; min-height:100svh; pointer-events:auto; touch-action:manipulation; background:rgba(2,8,18,.5); }
 .friend-dock-panel { position:fixed; z-index:var(--layer-friend-window); right:24px; bottom:76px; isolation:isolate; display:flex; width:min(390px,calc(100vw - 24px)); max-width:calc(100vw - 24px); max-height:min(680px,calc(100dvh - 100px)); flex-direction:column; overflow:hidden; pointer-events:auto; border:1px solid var(--border-strong); border-radius:18px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 24px 70px rgba(2,8,18,.28); }
-.friend-dock-panel.is-list,.friend-dock-panel.is-chat { height:min(620px,calc(100dvh - 100px)); max-height:min(620px,calc(100dvh - 100px)); }
 .friend-dock-header { position:relative; z-index:2; display:flex; min-height:60px; flex:none; align-items:center; justify-content:space-between; gap:8px; border-bottom:1px solid var(--border); padding:8px 10px 8px 12px; background:var(--surface-elevated); }.friend-dock-title { min-width:0; overflow:hidden; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }.friend-dock-header-actions { display:flex; min-height:44px; flex:none; align-items:center; gap:4px; }.friend-dock-header-actions a,.friend-dock-header-actions button,.friend-dock-header>button { display:inline-flex; min-height:44px; align-items:center; justify-content:center; border:0; padding:0 8px; color:var(--primary); background:transparent; font-size:12px; font-weight:850; }.friend-dock-header-actions button { width:44px; padding:0; color:var(--foreground-muted); font-size:20px; }.friend-dock-notifications-link { gap:5px; white-space:nowrap; }.friend-dock-notification-badge { display:inline-grid; min-width:18px; height:18px; place-items:center; border-radius:9px; padding:0 4px; color:#fff; background:var(--danger); font-size:9px; line-height:18px; }.friend-dock-chat-person { display:flex!important; min-width:0; flex:1; align-items:center; gap:8px; border:0; padding:0!important; color:var(--foreground)!important; background:transparent; text-align:left; }.friend-dock-chat-person>span { display:grid; min-width:0; }.friend-dock-chat-person strong,.friend-dock-chat-person small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.friend-list-layout,.friend-chat-layout { position:relative; display:flex; min-height:0; flex:1; flex-direction:column; }
+.friend-dock-body { position:relative; display:flex; min-height:0; flex:1; overflow:hidden; }.friend-list-layout,.friend-chat-layout { position:relative; display:flex; min-height:0; width:100%; flex:1; flex-direction:column; }
 .friend-dock-search { position:relative; flex:none; padding:10px 12px; }.friend-dock-search input { width:100%; height:42px; border:1px solid var(--border); border-radius:10px; padding:0 38px 0 12px; color:var(--foreground); background:var(--surface-subtle); font-size:13px; outline:none; }.friend-dock-search input:focus { border-color:var(--primary); }.friend-dock-search button { position:absolute; top:13px; right:16px; width:34px; height:34px; border:0; color:var(--foreground-muted); background:transparent; font-size:18px; }
 .friend-dock-list { min-height:0; flex:1; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y; padding:0 12px; scrollbar-color:var(--border-strong) transparent; scrollbar-gutter:stable; scrollbar-width:thin; }
 .friend-dock-list::-webkit-scrollbar { width:7px; }
@@ -617,10 +616,6 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
     margin-right: clamp(44px, 9vw, 150px);
     margin-left: auto;
   }
-  .friend-dock-panel.is-list,.friend-dock-panel.is-chat {
-    height:calc(100dvh - 100px);
-    max-height:620px;
-  }
 }
 
 @media (max-width: 1023px) {
@@ -799,20 +794,28 @@ font-weight:600;
   .friend-dock-backdrop { display:none; pointer-events:none; }
   .friend-dock[data-friend-dock-open='true']>.friend-dock-actions { display:flex; pointer-events:auto; }
   .friend-dock-panel {
-    --friend-dock-desktop-height:min(620px,calc(100dvh - 100px));
     top:auto;
     right:24px;
     bottom:76px;
+    left:auto;
     width:min(390px,calc(100vw - 24px));
     max-width:calc(100vw - 24px);
-    height:var(--friend-dock-desktop-height);
-    max-height:var(--friend-dock-desktop-height);
+    height:640px;
+    max-height:calc(100vh - 120px);
+    contain:none;
+    border-radius:18px;
+    transform:none;
+    animation:none;
   }
   .friend-dock-panel.is-list,.friend-dock-panel.is-chat {
-    height:var(--friend-dock-desktop-height);
-    max-height:var(--friend-dock-desktop-height);
+    height:640px;
+    max-height:calc(100vh - 120px);
   }
-  .friend-dock-panel.is-chat .friend-chat-layout { height:100%; }
+  .friend-dock-body { height:100%; min-height:0; flex:1 1 0; }
+  .friend-list-layout,.friend-chat-layout { height:100%; min-height:0; flex:1 1 0; }
+  .friend-dock-list { height:100%; min-height:0; flex:1 1 0; overflow-y:auto; }
+  .friend-chat-messages { min-height:0; flex:1 1 0; overflow-y:auto; }
+  .friend-chat-composer { position:relative; bottom:auto; flex:none; }
 }
 
 @media (max-width:359px) {

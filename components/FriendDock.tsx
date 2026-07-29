@@ -637,8 +637,9 @@ export function FriendDock({
           </div>
         </header>
 
-        {chatFriend ? (
-          <div className="friend-chat-layout">
+        <div className="friend-dock-body">
+          {chatFriend ? (
+            <div className="friend-chat-layout">
             <div
               ref={messageListRef}
               className="friend-chat-messages"
@@ -700,9 +701,9 @@ export function FriendDock({
               />
               <button type="submit" disabled={!content.trim() || sending}>{sending ? '发送中…' : '发送'}</button>
             </form>
-          </div>
-        ) : (
-          <div className="friend-list-layout">
+            </div>
+          ) : (
+            <div className="friend-list-layout">
             <div className="friend-dock-search">
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索好友或其他用户" aria-label="搜索好友或其他用户" />
               {query ? <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">×</button> : null}
@@ -724,8 +725,9 @@ export function FriendDock({
               {!debouncedQuery && hasMore ? <button type="button" className="friend-dock-load-more" onClick={() => void loadFriends(page + 1, true)}>加载更多好友</button> : null}
               <div className="friend-dock-list-end" aria-hidden="true" />
             </div>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
         {error ? <p className="friend-dock-error">{error}<button type="button" onClick={() => setError('')}>×</button></p> : null}
         {profileFriend ? <FriendProfileCard
           friend={profileFriend}
