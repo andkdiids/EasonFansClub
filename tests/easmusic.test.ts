@@ -63,6 +63,36 @@ test('PNG 封面自动转换为 WebP 且不放大小图', async () => {
   assert.equal(metadata.format, 'webp')
   assert.equal(metadata.width, 640)
   assert.equal(metadata.height, 900)
+  assert.equal(metadata.hasAlpha, false)
+})
+
+test('CMYK JPG 标准化后可转换为 WebP', async () => {
+  const source = await sharp({
+    create: { width: 1200, height: 800, channels: 3, background: '#f2c230' },
+  }).toColourspace('cmyk').jpeg({ quality: 90 }).toBuffer()
+  const sourceMetadata = await sharp(source).metadata()
+  assert.equal(sourceMetadata.format, 'jpeg')
+  assert.equal(sourceMetadata.space, 'cmyk')
+
+  const output = await convertMusicCoverToWebp(source)
+  const metadata = await sharp(output).metadata()
+  assert.equal(metadata.format, 'webp')
+  assert.equal(metadata.width, 1200)
+  assert.equal(metadata.height, 800)
+  assert.equal(metadata.space, 'srgb')
+  assert.equal(metadata.hasAlpha, false)
+})
+
+test('WebP 封面标准化后仍输出 WebP', async () => {
+  const source = await sharp({
+    create: { width: 900, height: 600, channels: 4, background: { r: 20, g: 90, b: 160, alpha: 0.5 } },
+  }).webp({ quality: 95 }).toBuffer()
+  const output = await convertMusicCoverToWebp(source)
+  const metadata = await sharp(output).metadata()
+  assert.equal(metadata.format, 'webp')
+  assert.equal(metadata.width, 900)
+  assert.equal(metadata.height, 600)
+  assert.equal(metadata.hasAlpha, false)
 })
 
 test('封面 API 使用固定 WebP 路径和腾讯云 COS', () => {

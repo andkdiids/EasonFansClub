@@ -70,7 +70,10 @@ async function uploadCover(request: Request) {
     })
   } catch (error) {
     console.error('[music-cover.sharp]', error)
-    return failure(400, 'IMAGE_PROCESSING_FAILED', '图片转换失败，请确认文件格式正确且没有损坏')
+    const detail = error instanceof Error && error.message.trim()
+      ? error.message.trim().slice(0, 500)
+      : 'Sharp 未返回具体错误'
+    return failure(400, 'IMAGE_PROCESSING_FAILED', `图片转换失败：${detail}`)
   }
 
   const folder = entityType === 'album' ? 'albums' : entityType === 'song' ? 'songs' : entityType === 'tour' ? 'tours' : 'concerts'
