@@ -20,8 +20,11 @@ test('移动底部导航固定为首页、广场、E院中心、EasMusic、我�
 
 test('E院中心抽屉支持遮罩、关闭、返回键、路由变化及滚动锁定', () => {
   const mobile = readFileSync('components/layout/MobileNavigation.tsx', 'utf8')
-  assert.match(mobile, /mobile-center-overlay/)
-  assert.match(mobile, /event\.target === event\.currentTarget/)
+  assert.match(mobile, /mobile-center-backdrop/)
+  assert.match(mobile, /createPortal\(/)
+  assert.match(mobile, /onPointerDown=\{consumeBackdropEvent\}/)
+  assert.match(mobile, /event\.preventDefault\(\)/)
+  assert.match(mobile, /event\.stopPropagation\(\)/)
   assert.match(mobile, /history\.pushState/)
   assert.match(mobile, /window\.history\.back/)
   assert.match(mobile, /addEventListener\('popstate'/)

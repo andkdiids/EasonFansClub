@@ -2,7 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { UiIcon } from '@/components/UiIcon'
 import { isAppNavigationActive, primaryNavigation } from './navigation'
 
@@ -21,6 +28,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
   const router = useRouter()
   const [centerOpen, setCenterOpen] = useState(false)
   const pendingHref = useRef('')
+  const backdropCloseTimer = useRef(0)
   const items = primaryNavigation.filter((item) => item.mobile)
   const first = items.slice(0, 2)
   const last = items.slice(2)
@@ -71,6 +79,8 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
 
   useEffect(() => setCenterOpen(false), [pathname])
 
+  useEffect(() => () => window.clearTimeout(backdropCloseTimer.current), [])
+
   function openCenter() {
     if (centerOpen) return
     window.dispatchEvent(new Event('friend-dock:close'))
@@ -79,9 +89,34 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
   }
 
   function closeCenter() {
+    window.clearTimeout(backdropCloseTimer.current)
     pendingHref.current = ''
     if (window.history.state?.easonCenterSheet) window.history.back()
     else setCenterOpen(false)
+  }
+
+  function consumeBackdropEvent(event: ReactPointerEvent<HTMLButtonElement> | ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  function closeCenterAfterPointer(event: ReactPointerEvent<HTMLButtonElement>) {
+    consumeBackdropEvent(event)
+    backdropCloseTimer.current = window.setTimeout(closeCenter, 0)
+  }
+
+  function closeCenterFromBackdrop(event: ReactMouseEvent<HTMLButtonElement>) {
+    consumeBackdropEvent(event)
+    closeCenter()
+  }
+
+  function interceptNavigationWhileCenterOpen(event: ReactMouseEvent<HTMLElement>) {
+    if (!centerOpen) return
+    const target = event.target as Element
+    if (target.closest('.mobile-center-button')) return
+    event.preventDefault()
+    event.stopPropagation()
+    closeCenter()
   }
 
   function navigateFromCenter(href: string) {
@@ -98,16 +133,16 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
     ? [...centerItems, { href: '/admin', label: '后台管理', icon: 'settings' as const }]
     : centerItems
 
-  return <>
-    <nav data-mobile-main-nav className="app-mobile-nav" aria-label="移动端导航">
-      {first.map(renderItem)}
-      <button type="button" className="mobile-center-button" aria-label="E院中心" aria-haspopup="dialog" aria-expanded={centerOpen} data-active={centerActive || undefined} onClick={centerOpen ? closeCenter : openCenter}>
-        <span className="mobile-center-icon"><UiIcon name="grid" /></span>
-        <span>E院中心</span>
-      </button>
-      {last.map(renderItem)}
-    </nav>
-    {centerOpen ? <div className="mobile-center-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCenter() }}>
+  const centerOverlay = centerOpen && typeof document !== 'undefined' ? createPortal(
+    <>
+      <button
+        type="button"
+        className="mobile-center-backdrop"
+        aria-label="关闭 E院中心"
+        onPointerDown={consumeBackdropEvent}
+        onPointerUp={closeCenterAfterPointer}
+        onClick={closeCenterFromBackdrop}
+      />
       <section className="mobile-center-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-center-title">
         <header>
           <div><p>EASON FANS CLUB</p><h2 id="mobile-center-title">E院中心</h2></div>
@@ -121,6 +156,25 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
           </button>)}
         </nav>
       </section>
-    </div> : null}
+    </>,
+    document.body,
+  ) : null
+
+  return <>
+    <nav
+      data-mobile-main-nav
+      data-center-open={centerOpen || undefined}
+      className="app-mobile-nav"
+      aria-label="移动端导航"
+      onClickCapture={interceptNavigationWhileCenterOpen}
+    >
+      {first.map(renderItem)}
+      <button type="button" className="mobile-center-button" aria-label="E院中心" aria-haspopup="dialog" aria-expanded={centerOpen} data-active={centerActive || undefined} onClick={centerOpen ? closeCenter : openCenter}>
+        <span className="mobile-center-icon"><UiIcon name="grid" /></span>
+        <span>E院中心</span>
+      </button>
+      {last.map(renderItem)}
+    </nav>
+    {centerOverlay}
   </>
 }
