@@ -54,8 +54,8 @@ test('notification link has an accessible unread label and navigates correctly',
 
 test('FriendDock title actions and close button are vertically centered', () => {
   assert.match(css, /\.friend-dock-header \{[^}]*align-items:center/)
-  assert.match(css, /\.friend-dock-header-actions \{[^}]*min-height:40px;[^}]*align-items:center/)
-  assert.match(css, /\.friend-dock-header-actions a,[^{]*\{[^}]*min-height:40px;[^}]*align-items:center;[^}]*justify-content:center/)
+  assert.match(css, /\.friend-dock-header-actions \{[^}]*min-height:44px;[^}]*align-items:center/)
+  assert.match(css, /\.friend-dock-header-actions a,[^{]*\{[^}]*min-height:44px;[^}]*align-items:center;[^}]*justify-content:center/)
 })
 
 test('mobile FriendDock uses at most 72dvh and reserves nav and background space', () => {
