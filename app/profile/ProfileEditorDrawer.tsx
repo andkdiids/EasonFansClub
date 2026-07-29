@@ -89,12 +89,12 @@ export function ProfileEditorDrawer({
 
   const drawer = mounted && isOpen
     ? createPortal(
-      <div className="profile-editor-overlay fixed inset-0 z-[var(--layer-dialog)] bg-slate-950/65 backdrop-blur-sm">
+      <div className="profile-editor-overlay fixed inset-0 z-[var(--layer-dialog)] overflow-hidden bg-slate-950/65 backdrop-blur-sm">
         <aside
           role="dialog"
           aria-modal="true"
           aria-labelledby="profile-editor-title"
-          className="profile-editor-drawer ml-auto flex h-[100dvh] min-h-[100svh] max-h-[100dvh] w-full flex-col overflow-hidden bg-white shadow-2xl md:max-w-2xl"
+          className="profile-editor-drawer ml-auto flex h-full min-h-0 w-full flex-col overflow-hidden bg-white shadow-2xl md:max-w-2xl"
         >
           <div className="flex shrink-0 items-center justify-between border-b border-sky-100 bg-white px-5 py-4">
             <div className="min-w-0">
@@ -110,7 +110,7 @@ export function ProfileEditorDrawer({
               关闭
             </button>
           </div>
-          <div className="profile-editor-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain bg-sky-50/40 px-4 py-5 sm:px-6">
+          <div className="profile-editor-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-sky-50/40 px-4 py-5 sm:px-6">
             <ProfileSettingsForm initialProfile={initialProfile} onCancel={cancelEditor} onSaved={closeEditor} />
           </div>
         </aside>

@@ -44,6 +44,28 @@ const emptySummary: UnreadSummary = {
   total: 0,
 }
 
+function createMessageId() {
+  const cryptoApi = globalThis.crypto
+  if (typeof cryptoApi?.randomUUID === 'function') {
+    try {
+      return globalThis.crypto.randomUUID()
+    } catch (error) {
+      console.error('[friend-dock.message-id.randomUUID]', error)
+    }
+  }
+
+  const bytes = new Uint8Array(16)
+  if (typeof cryptoApi?.getRandomValues === 'function') {
+    cryptoApi.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export function FriendDock({
   currentUserId,
   unreadSummary = emptySummary,
@@ -72,6 +94,7 @@ export function FriendDock({
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [viewport, setViewport] = useState({ height: 0, top: 0 })
+  const [isMobileDrawer, setIsMobileDrawer] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
@@ -80,6 +103,33 @@ export function FriendDock({
   const nearBottomRef = useRef(true)
   const backdropCloseTimerRef = useRef(0)
   const sendingMessageIdsRef = useRef(new Set<string>())
+
+  const resetChat = useCallback(() => {
+    setChatFriend(null)
+    setConversationId('')
+    setMessages([])
+    setContent('')
+    setError('')
+    cursorRef.current = ''
+    beforeCursorRef.current = ''
+    setNewMessageNotice(false)
+    setHasOlderMessages(false)
+  }, [])
+
+  const closeDock = useCallback(() => {
+    window.clearTimeout(backdropCloseTimerRef.current)
+    setOpen(false)
+    setProfileFriend(null)
+    resetChat()
+    window.requestAnimationFrame(() => toggleRef.current?.focus())
+  }, [resetChat])
+
+  const openFriendList = useCallback(() => {
+    resetChat()
+    setProfileFriend(null)
+    setCollapsed(false)
+    setOpen(true)
+  }, [resetChat])
 
   const notifyClients = useCallback((type: 'friends' | 'messages' | 'unread') => {
     window.dispatchEvent(new Event('unread-summary:refresh'))
@@ -114,6 +164,14 @@ export function FriendDock({
   }, [currentUserId])
 
   useEffect(() => () => window.clearTimeout(backdropCloseTimerRef.current), [])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)')
+    const update = () => setIsMobileDrawer(media.matches)
+    update()
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [])
 
   useEffect(() => {
     window.localStorage.setItem(`friend-dock:collapsed:${currentUserId}`, collapsed ? '1' : '0')
@@ -152,16 +210,12 @@ export function FriendDock({
   useEffect(() => {
     setOpen(false)
     setProfileFriend(null)
-    setChatFriend(null)
-    setConversationId('')
-  }, [pathname, currentUserId])
+    resetChat()
+  }, [pathname, currentUserId, resetChat])
 
   useEffect(() => {
-    const openDock = () => {
-      setCollapsed(false)
-      setOpen(true)
-    }
-    const closeFromOtherOverlay = () => setOpen(false)
+    const openDock = () => openFriendList()
+    const closeFromOtherOverlay = () => closeDock()
     const refresh = () => {
       if (open && !chatFriend && !debouncedQuery) void loadFriends(1)
     }
@@ -183,10 +237,10 @@ export function FriendDock({
       window.removeEventListener('friend-dock:close', closeFromOtherOverlay)
       window.removeEventListener('friend-dock:refresh', refresh)
     }
-  }, [currentUserId, open, chatFriend, debouncedQuery, loadFriends])
+  }, [currentUserId, open, chatFriend, debouncedQuery, loadFriends, openFriendList, closeDock])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !isMobileDrawer) return
     let frame = 0
     const update = () => {
       window.cancelAnimationFrame(frame)
@@ -208,10 +262,10 @@ export function FriendDock({
       window.visualViewport?.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
     }
-  }, [open])
+  }, [open, isMobileDrawer])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !isMobileDrawer) return
     const root = document.documentElement
     const body = document.body
     const scrollY = window.scrollY
@@ -235,7 +289,7 @@ export function FriendDock({
       body.style.width = bodyWidth
       window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' })
     }
-  }, [open])
+  }, [open, isMobileDrawer])
 
   useEffect(() => {
     if (!open) return
@@ -330,13 +384,6 @@ export function FriendDock({
     }
   }, [open, conversationId, currentUserId, markConversationRead, mergeMessages])
 
-  function closeDock() {
-    window.clearTimeout(backdropCloseTimerRef.current)
-    setOpen(false)
-    setProfileFriend(null)
-    window.requestAnimationFrame(() => toggleRef.current?.focus())
-  }
-
   function consumeBackdropEvent(event: ReactPointerEvent<HTMLDivElement> | ReactMouseEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget) return false
     event.preventDefault()
@@ -357,12 +404,7 @@ export function FriendDock({
   }
 
   function leaveChat() {
-    setChatFriend(null)
-    setConversationId('')
-    setMessages([])
-    cursorRef.current = ''
-    beforeCursorRef.current = ''
-    setNewMessageNotice(false)
+    resetChat()
   }
 
   async function openChat(friend: FriendDockUser) {
@@ -431,6 +473,7 @@ export function FriendDock({
         throw new Error(response.ok ? '服务器返回格式异常，消息未确认发送' : `发送失败（HTTP ${response.status}）`)
       }
       if (!response.ok) {
+        console.error('[friend-dock.send]', { status: response.status, response: data })
         setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
         setError(data?.error || (typeof data?.message === 'string' ? data.message : '') || `发送失败（HTTP ${response.status}），可点击消息重试`)
         return false
@@ -442,6 +485,7 @@ export function FriendDock({
       notifyClients('messages')
       return true
     } catch (sendError) {
+      console.error('[friend-dock.send]', sendError)
       setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
       setError(sendError instanceof TypeError
         ? '网络连接中断，消息未确认发送，可点击消息重试'
@@ -460,9 +504,10 @@ export function FriendDock({
     setError('')
     let clientMessageId = ''
     try {
-      clientMessageId = crypto.randomUUID()
-    } catch {
-      setError('当前浏览器无法生成消息标识，请刷新页面或升级浏览器后重试')
+      clientMessageId = createMessageId()
+    } catch (messageIdError) {
+      console.error('[friend-dock.message-id]', messageIdError)
+      setError('发送失败，请稍后重试')
       return
     }
     void sendMessage({ content: trimmed, clientMessageId }).then((success) => {
@@ -531,13 +576,15 @@ export function FriendDock({
   const groupedMessages = useMemo(() => groupMessages(messages), [messages])
   const overlay = open && typeof document !== 'undefined' ? createPortal(
     <>
-      <div
-        className="friend-dock-backdrop"
-        aria-hidden="true"
-        onPointerDown={consumeBackdropEvent}
-        onPointerUp={handleBackdropPointerUp}
-        onClick={handleBackdropClick}
-      />
+      {isMobileDrawer ? (
+        <div
+          className="friend-dock-backdrop"
+          aria-hidden="true"
+          onPointerDown={consumeBackdropEvent}
+          onPointerUp={handleBackdropPointerUp}
+          onClick={handleBackdropClick}
+        />
+      ) : null}
       <section
         ref={panelRef}
         className={`friend-dock-panel ${chatFriend ? 'is-chat' : 'is-list'}`}
@@ -682,12 +729,12 @@ export function FriendDock({
         <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开好友入口">
           ‹{unreadSummary.total > 0 ? <span className="friend-dock-unread-dot" /> : null}
         </button>
-      ) : !open ? (
+      ) : !open || !isMobileDrawer ? (
         <div className="friend-dock-actions">
-          <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={() => setOpen((value) => !value)} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
+          <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={open ? closeDock : openFriendList} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
             好友{unreadSummary.total > 0 ? <b>{unreadSummary.total > 99 ? '99+' : unreadSummary.total}</b> : null}
           </button>
-          <button type="button" className="friend-dock-collapse" onClick={() => { setOpen(false); setCollapsed(true) }} aria-label="收起好友入口">›</button>
+          <button type="button" className="friend-dock-collapse" onClick={() => { closeDock(); setCollapsed(true) }} aria-label="收起好友入口">›</button>
         </div>
       ) : null}
     </div>

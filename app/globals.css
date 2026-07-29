@@ -195,6 +195,7 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .app-main-area { position:relative; min-width:0; width:calc(100% - 192px); margin-left:192px; }
 .app-page-content { min-width:0; width:100%; overflow:visible; }
 .app-topbar { position:sticky; z-index:55; top:0; display:flex; width:100%; min-width:0; height:58px; align-items:center; gap:20px; border-bottom:1px solid var(--border); padding:0 24px; color:var(--foreground); background:color-mix(in srgb,var(--surface),transparent 3%); }
+.app-topbar:not(.app-topbar-home) { border-bottom:0; box-shadow:none; }
 .app-topbar-home { position:absolute; border-color:rgba(255,255,255,.12); background:linear-gradient(180deg,rgba(2,8,14,.5),transparent); }
 .app-topbar-inverse { color:#fff; border-color:rgba(255,255,255,.1); background:#071523; }.app-topbar-home.app-topbar-inverse { background:linear-gradient(180deg,rgba(2,8,14,.58),transparent); }
 .app-topbar-brand { display:none; color:inherit; text-decoration:none; }
@@ -218,8 +219,7 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .friend-dock-unread-dot { position:absolute; top:5px; left:3px; width:7px; height:7px; border-radius:50%; background:var(--danger); }
 .friend-dock-backdrop { position:fixed; z-index:var(--layer-overlay); inset:0; width:100vw; height:100dvh; min-height:100svh; pointer-events:auto; touch-action:manipulation; background:rgba(2,8,18,.5); }
 .friend-dock-panel { position:fixed; z-index:var(--layer-friend-window); right:24px; bottom:76px; isolation:isolate; display:flex; width:min(390px,calc(100vw - 24px)); max-width:calc(100vw - 24px); max-height:min(680px,calc(100dvh - 100px)); flex-direction:column; overflow:hidden; pointer-events:auto; border:1px solid var(--border-strong); border-radius:18px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 24px 70px rgba(2,8,18,.28); }
-.friend-dock-panel.is-list { height:min(620px,calc(100dvh - 100px)); }
-.friend-dock-panel.is-chat { height:min(680px,calc(100dvh - 100px)); }
+.friend-dock-panel.is-list,.friend-dock-panel.is-chat { height:min(620px,calc(100dvh - 100px)); max-height:min(620px,calc(100dvh - 100px)); }
 .friend-dock-header { position:relative; z-index:2; display:flex; min-height:60px; flex:none; align-items:center; justify-content:space-between; gap:8px; border-bottom:1px solid var(--border); padding:8px 10px 8px 12px; background:var(--surface-elevated); }.friend-dock-title { min-width:0; overflow:hidden; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }.friend-dock-header-actions { display:flex; min-height:44px; flex:none; align-items:center; gap:4px; }.friend-dock-header-actions a,.friend-dock-header-actions button,.friend-dock-header>button { display:inline-flex; min-height:44px; align-items:center; justify-content:center; border:0; padding:0 8px; color:var(--primary); background:transparent; font-size:12px; font-weight:850; }.friend-dock-header-actions button { width:44px; padding:0; color:var(--foreground-muted); font-size:20px; }.friend-dock-notifications-link { gap:5px; white-space:nowrap; }.friend-dock-notification-badge { display:inline-grid; min-width:18px; height:18px; place-items:center; border-radius:9px; padding:0 4px; color:#fff; background:var(--danger); font-size:9px; line-height:18px; }.friend-dock-chat-person { display:flex!important; min-width:0; flex:1; align-items:center; gap:8px; border:0; padding:0!important; color:var(--foreground)!important; background:transparent; text-align:left; }.friend-dock-chat-person>span { display:grid; min-width:0; }.friend-dock-chat-person strong,.friend-dock-chat-person small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .friend-list-layout,.friend-chat-layout { position:relative; display:flex; min-height:0; flex:1; flex-direction:column; }
 .friend-dock-search { position:relative; flex:none; padding:10px 12px; }.friend-dock-search input { width:100%; height:42px; border:1px solid var(--border); border-radius:10px; padding:0 38px 0 12px; color:var(--foreground); background:var(--surface-subtle); font-size:13px; outline:none; }.friend-dock-search input:focus { border-color:var(--primary); }.friend-dock-search button { position:absolute; top:13px; right:16px; width:34px; height:34px; border:0; color:var(--foreground-muted); background:transparent; font-size:18px; }
@@ -616,13 +616,9 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
     margin-right: clamp(44px, 9vw, 150px);
     margin-left: auto;
   }
-  .friend-dock-panel.is-list {
+  .friend-dock-panel.is-list,.friend-dock-panel.is-chat {
     height:calc(100dvh - 100px);
     max-height:620px;
-  }
-  .friend-dock-panel.is-chat {
-    height:calc(100dvh - 100px);
-    max-height:680px;
   }
 }
 
@@ -789,8 +785,26 @@ font-weight:600;
   visibility:hidden;
   pointer-events:none;
 }
-.profile-editor-overlay { height:100dvh; min-height:100svh; }
+.profile-editor-overlay { top:max(0px,env(safe-area-inset-top)); height:calc(100dvh - max(0px,env(safe-area-inset-top))); min-height:0; }
+.profile-editor-drawer { height:100%; min-height:0; max-height:100%; }
+.profile-editor-scroll { min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y; -webkit-overflow-scrolling:touch; }
 .profile-editor-drawer .profile-settings-actions { bottom:0; }
+
+@media (min-width:768px) {
+  .friend-dock-backdrop { display:none; pointer-events:none; }
+  .friend-dock[data-friend-dock-open='true']>.friend-dock-actions { display:flex; pointer-events:auto; }
+  .friend-dock-panel {
+    top:auto;
+    right:24px;
+    bottom:76px;
+    width:min(390px,calc(100vw - 24px));
+    max-width:calc(100vw - 24px);
+  }
+  .friend-dock-panel.is-list,.friend-dock-panel.is-chat {
+    height:calc(100dvh - 100px);
+    max-height:620px;
+  }
+}
 
 @media (max-width:359px) {
   .forum-pagination-edge { display:none!important; }

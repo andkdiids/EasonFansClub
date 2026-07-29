@@ -103,7 +103,7 @@ test('私信重试复用 clientMessageId 并保留失败输入', () => {
   assert.match(friendDock, /sendMessage\(\{ content: message\.content, clientMessageId: message\.clientMessageId/)
   assert.match(friendDock, /setContent\(\(current\) => current\.trim\(\) === trimmed \? '' : current\)/)
   assert.match(friendDock, /sendingMessageIdsRef\.current\.has/)
-  assert.match(friendDock, /clientMessageId = crypto\.randomUUID\(\)/)
+  assert.match(friendDock, /clientMessageId = createMessageId\(\)/)
   assert.match(friendDock, /finally \{/)
 })
 
@@ -121,11 +121,12 @@ test('私信发送统一走 form submit 并处理响应解析失败', () => {
   assert.match(friendDock, /<button type="submit" disabled=/)
   assert.match(friendDock, /response\.ok \? '服务器返回格式异常，消息未确认发送'/)
   assert.match(friendDock, /if \(!response\.ok\)/)
-  assert.match(friendDock, /当前浏览器无法生成消息标识/)
+  assert.match(friendDock, /typeof cryptoApi\?\.randomUUID === 'function'/)
+  assert.match(friendDock, /bytes\[6\] = \(bytes\[6\] & 0x0f\) \| 0x40/)
 })
 
 test('桌面 FriendDock 固定动态视口高度且只有好友列表内部滚动', () => {
-  assert.match(css, /@media \(min-width: 1024px\) \{[\s\S]*\.friend-dock-panel\.is-list \{[\s\S]*height:calc\(100dvh - 100px\);[\s\S]*max-height:620px/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:calc\(100dvh - 100px\);[\s\S]*max-height:620px/)
   assert.match(css, /\.friend-dock-panel \{[^}]*overflow:hidden;[^}]*pointer-events:auto/)
   assert.match(css, /\.friend-dock-header \{[^}]*flex:none/)
   assert.match(css, /\.friend-dock-list \{[^}]*flex:1;[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain/)
@@ -136,6 +137,30 @@ test('FriendDock 发送点击层可用且输入和按钮触控区至少44px', ()
   assert.match(css, /\.friend-chat-composer \{[^}]*z-index:2;[^}]*pointer-events:auto/)
   assert.match(css, /\.friend-chat-composer textarea \{[^}]*min-height:44px/)
   assert.match(css, /\.friend-chat-composer button \{[^}]*height:44px;[^}]*pointer-events:auto/)
+})
+
+test('FriendDock 仅在小于768px渲染遮罩并锁定页面', () => {
+  assert.match(friendDock, /window\.matchMedia\('\(max-width: 767px\)'\)/)
+  assert.match(friendDock, /\{isMobileDrawer \? \([\s\S]*className="friend-dock-backdrop"/)
+  assert.match(friendDock, /if \(!open \|\| !isMobileDrawer\) return/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-backdrop \{ display:none; pointer-events:none; \}/)
+})
+
+test('关闭 FriendDock 会统一清理聊天状态并重新打开好友列表', () => {
+  assert.match(friendDock, /const resetChat = useCallback\(\(\) => \{[\s\S]*setChatFriend\(null\)[\s\S]*setConversationId\(''\)[\s\S]*setMessages\(\[\]\)/)
+  assert.match(friendDock, /const closeDock = useCallback\(\(\) => \{[\s\S]*setOpen\(false\)[\s\S]*resetChat\(\)/)
+  assert.match(friendDock, /const openFriendList = useCallback\(\(\) => \{[\s\S]*resetChat\(\)[\s\S]*setOpen\(true\)/)
+  assert.match(friendDock, /onClick=\{open \? closeDock : openFriendList\}/)
+})
+
+test('好友列表和私信面板在桌面端保持相同固定高度', () => {
+  assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{ height:min\(620px,calc\(100dvh - 100px\)\); max-height:min\(620px,calc\(100dvh - 100px\)\); \}/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:calc\(100dvh - 100px\);[\s\S]*max-height:620px/)
+})
+
+test('公共顶部搜索区域仅移除非首页分割线', () => {
+  assert.match(css, /\.app-topbar:not\(\.app-topbar-home\) \{ border-bottom:0; box-shadow:none; \}/)
+  assert.match(css, /\.app-topbar-home \{[^}]*border-color:/)
 })
 
 test('资料编辑器通过 body Portal 高于全局 Header 和底栏', () => {
@@ -159,9 +184,9 @@ test('非首页 Header 去除分隔阴影而首页样式保持独立', () => {
 })
 
 test('资料抽屉覆盖动态视口且底部操作栏不再避让已隐藏底栏', () => {
-  assert.match(profileDrawer, /h-\[100dvh\]/)
-  assert.match(profileDrawer, /min-h-\[100svh\]/)
-  assert.match(profileDrawer, /min-h-0 flex-1 overflow-y-auto overscroll-contain/)
+  assert.match(profileDrawer, /profile-editor-drawer[\s\S]*h-full min-h-0/)
+  assert.match(profileDrawer, /profile-editor-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain/)
+  assert.match(css, /\.profile-editor-overlay \{[^}]*height:calc\(100dvh - max\(0px,env\(safe-area-inset-top\)\)\);[^}]*min-height:0/)
   assert.match(css, /\.profile-editor-drawer \.profile-settings-actions \{ bottom:0; \}/)
 })
 

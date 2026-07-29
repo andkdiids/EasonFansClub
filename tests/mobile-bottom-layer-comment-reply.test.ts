@@ -144,8 +144,8 @@ test('好友窗支持遮罩、关闭按钮、Esc、再次点击入口和路由�
   assert.match(friendDock, /handleBackdropClick[\s\S]*closeDock\(\)/)
   assert.match(friendDock, /aria-label="关闭好友窗口"/)
   assert.match(friendDock, /event\.key !== 'Escape'/)
-  assert.match(friendDock, /setOpen\(\(value\) => !value\)/)
-  assert.match(friendDock, /\[pathname, currentUserId\]/)
+  assert.match(friendDock, /onClick=\{open \? closeDock : openFriendList\}/)
+  assert.match(friendDock, /\[pathname, currentUserId, resetChat\]/)
 })
 
 test('好友窗内部列表项可操作且不会被 outside-click 关闭', () => {

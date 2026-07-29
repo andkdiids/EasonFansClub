@@ -8,12 +8,14 @@ const mobileNavigation = read('components/layout/MobileNavigation.tsx')
 const css = read('app/globals.css')
 const appShell = read('components/layout/AppShell.tsx')
 
-test('open FriendDock does not render its trigger or collapsed handle', () => {
+test('open mobile FriendDock hides its trigger while desktop keeps a close toggle', () => {
   assert.match(friendDock, /\{!open && collapsed \? \(/)
-  assert.match(friendDock, /\) : !open \? \(/)
+  assert.match(friendDock, /\) : !open \|\| !isMobileDrawer \? \(/)
+  assert.match(friendDock, /onClick=\{open \? closeDock : openFriendList\}/)
   assert.match(friendDock, /\) : null\}/)
   assert.match(css, /friend-dock\[data-friend-dock-open='true'\]>\.friend-dock-actions/)
   assert.match(css, /friend-dock\[data-friend-dock-open='true'\]>\.friend-dock-toggle \{ display:none; pointer-events:none;/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*friend-dock\[data-friend-dock-open='true'\]>\.friend-dock-actions \{ display:flex; pointer-events:auto; \}/)
 })
 
 test('closed FriendDock restores both expanded and collapsed triggers', () => {
