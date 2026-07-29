@@ -34,7 +34,19 @@ export async function GET(request: Request) {
       },
       orderBy: [{ releaseYear: 'desc' }, { trackNumber: 'asc' }, { createdAt: 'asc' }],
       take: 30,
-      select: { id: true, title: true, artist: true, releaseYear: true, lyricist: true, composer: true, arranger: true, lyrics: true, MusicAlbum: { select: { name: true, artist: true } } },
+      select: {
+        id: true,
+        title: true,
+        artist: true,
+        releaseYear: true,
+        lyricist: true,
+        composer: true,
+        arranger: true,
+        lyrics: true,
+        coverUrl: true,
+        previewUrl: true,
+        MusicAlbum: { select: { id: true, name: true, artist: true, coverUrl: true } },
+      },
     }),
     prisma.musicTour.findMany({
       where: { status: 'PUBLISHED', OR: [{ name: { contains: query } }, { subtitle: { contains: query } }, { description: { contains: query } }] },
@@ -56,10 +68,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     query,
     albums: albums.map((album) => ({ ...album, type: 'album' as const })),
-    songs: songs.map(({ MusicAlbum, lyrics, ...song }) => ({
+    songs: songs.map(({ MusicAlbum, lyrics, previewUrl, ...song }) => ({
       ...song,
       type: 'song' as const,
+      coverUrl: song.coverUrl || MusicAlbum.coverUrl,
       album: MusicAlbum,
+      hasPreview: Boolean(previewUrl),
       lyricSnippet: buildMusicLyricSnippet(lyrics, query),
     })),
     tours: tours.map(({ _count, ...tour }) => ({ ...tour, type: 'tour' as const, concertCount: _count.MusicConcert })),

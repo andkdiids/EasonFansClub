@@ -1,11 +1,31 @@
 'use client'
 
+import Link from 'next/link'
+import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 type Difficulty = 'EASY' | 'ADVANCED' | 'HARD'
 type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED'
 type Variant = { id: string; durationSeconds: number; storagePath: string; fileSize: number }
-type MusicSong = { id: string; title: string; album: { name: string } }
+type MusicSong = {
+  id: string
+  title: string
+  artist: string
+  trackNumber: number
+  releaseYear: number
+  coverUrl: string | null
+  previewUrl: string | null
+  sourceAudioRevision: string | null
+  hasAudioSource: boolean
+  hasGuessClip: boolean
+  album: {
+    id: string
+    name: string
+    artist: string
+    releaseYear: number
+    coverUrl: string | null
+  }
+}
 type Question = {
   id: string
   songTitle: string
@@ -19,6 +39,9 @@ type Question = {
   wrongOption2: string
   wrongOption3: string
   sourceAudioPath: string | null
+  audioSourceType: string | null
+  musicSourceRevision: string | null
+  sourceStale?: boolean
   audioDurationMs: number | null
   processingStatus: ProcessingStatus
   processingError: string | null
@@ -83,7 +106,7 @@ const acceptedAudioTypes = new Set([
   'audio/aac',
   'audio/x-aac',
 ])
-const maxFileSize = 20 * 1024 * 1024
+const maxFileSize = 100 * 1024 * 1024
 
 async function api<T>(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
@@ -160,6 +183,10 @@ function inspectAudioDuration(file: File) {
 export function AdminGuessSongManager() {
   const [questions, setQuestions] = useState<Question[]>([])
   const [musicSongs, setMusicSongs] = useState<MusicSong[]>([])
+  const [sourceMode, setSourceMode] = useState<'EASMUSIC_SONG' | 'MANUAL_UPLOAD'>('EASMUSIC_SONG')
+  const [songQuery, setSongQuery] = useState('')
+  const [songYear, setSongYear] = useState('')
+  const [songAlbum, setSongAlbum] = useState('')
   const [form, setForm] = useState<FormState>(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null)
@@ -178,6 +205,21 @@ export function AdminGuessSongManager() {
   const [error, setError] = useState('')
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const uploadRegionRef = useRef<HTMLDivElement | null>(null)
+  const selectedMusicSong = musicSongs.find((song) => song.id === form.musicSongId) || null
+  const filteredMusicSongs = musicSongs.filter((song) => {
+    const keyword = songQuery.trim().toLocaleLowerCase('zh-CN')
+    const matchesKeyword = !keyword || [
+      song.title,
+      song.artist,
+      song.album.name,
+      song.album.artist,
+    ].some((value) => value.toLocaleLowerCase('zh-CN').includes(keyword))
+    return matchesKeyword
+      && (!songYear || String(song.releaseYear) === songYear)
+      && (!songAlbum || song.album.id === songAlbum)
+  })
+  const songYears = [...new Set(musicSongs.map((song) => song.releaseYear))].sort((a, b) => b - a)
+  const songAlbums = [...new Map(musicSongs.map((song) => [song.album.id, song.album])).values()]
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -232,12 +274,27 @@ export function AdminGuessSongManager() {
   function edit(question: Question) {
     setEditingId(question.id)
     setForm(questionToForm(question))
+    setSourceMode(question.audioSourceType === 'MANUAL_UPLOAD' || !question.musicSongId
+      ? 'MANUAL_UPLOAD'
+      : 'EASMUSIC_SONG')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function reset() {
     setEditingId(null)
     setForm(emptyForm)
+    setSourceMode('EASMUSIC_SONG')
+  }
+
+  function selectMusicSong(song: MusicSong) {
+    if (!song.hasAudioSource) return
+    setForm((current) => ({
+      ...current,
+      musicSongId: song.id,
+      songTitle: current.songTitle.trim() ? current.songTitle : song.title,
+      correctAnswer: current.correctAnswer.trim() ? current.correctAnswer : song.title,
+      albumTitle: current.albumTitle.trim() ? current.albumTitle : song.album.name,
+    }))
   }
 
   function openUpload(question: Question) {
@@ -252,6 +309,10 @@ export function AdminGuessSongManager() {
   async function save(event: FormEvent) {
     event.preventDefault()
     if (saving) return
+    if (sourceMode === 'EASMUSIC_SONG' && !form.musicSongId) {
+      setError('请先从 EasMusic 歌曲库选择拥有音频源的歌曲')
+      return
+    }
     const wasEditing = Boolean(editingId)
     setSaving(true)
     setError('')
@@ -276,11 +337,13 @@ export function AdminGuessSongManager() {
       } else {
         setEditingId(null)
         setForm(emptyForm)
-        setActiveUploadId(data.question.id)
+        setActiveUploadId(sourceMode === 'MANUAL_UPLOAD' ? data.question.id : null)
         setSelectedFile(null)
         setSelectedDuration(null)
         setFileError('')
-        setMessage('题目已创建，请上传至少7秒的音频片段')
+        setMessage(sourceMode === 'EASMUSIC_SONG'
+          ? '题目已创建，请在题目卡片点击“生成猜歌片段”'
+          : '题目已创建，请上传音频并生成猜歌片段')
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '保存失败')
@@ -358,6 +421,29 @@ export function AdminGuessSongManager() {
       setMessage('音频变体已重新生成，题目已自动停用，请试听后再启用。')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '重新生成失败')
+      await load()
+    } finally {
+      setUploadStage(null)
+      setBusyId(null)
+    }
+  }
+
+  async function generateFromMusic(question: Question) {
+    if (!question.musicSongId || busyId) return
+    setBusyId(question.id)
+    setUploadStage('converting')
+    setError('')
+    setMessage('')
+    try {
+      const data = await api<{ question: Question }>(
+        `/api/admin/entertainment/guess-song/questions/${question.id}/from-music`,
+        { method: 'POST' },
+      )
+      setQuestions((current) => current.map((item) =>
+        item.id === question.id ? data.question : item))
+      setMessage('已从 EasMusic 私有音频源生成独立的 2～7 秒猜歌片段，请试听确认。')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '猜歌片段生成失败')
       await load()
     } finally {
       setUploadStage(null)
@@ -469,18 +555,6 @@ export function AdminGuessSongManager() {
           {field('songTitle', '歌曲名称')}
           {field('albumTitle', '专辑名称（可选）', false)}
           <label>
-            <span>关联 EasMusic（可选）</span>
-            <select
-              value={form.musicSongId}
-              onChange={(event) => setForm({ ...form, musicSongId: event.target.value })}
-            >
-              <option value="">不关联</option>
-              {musicSongs.map((song) => (
-                <option key={song.id} value={song.id}>{song.title} · {song.album.name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
             <span>难度</span>
             <select
               value={form.difficulty}
@@ -499,6 +573,88 @@ export function AdminGuessSongManager() {
           {field('wrongOption2', '错误选项二')}
           {field('wrongOption3', '错误选项三')}
         </div>
+        <fieldset className="guess-song-source-picker">
+          <legend>音频来源</legend>
+          <div className="guess-song-source-tabs">
+            <label>
+              <input
+                type="radio"
+                checked={sourceMode === 'EASMUSIC_SONG'}
+                onChange={() => setSourceMode('EASMUSIC_SONG')}
+              />
+              从 EasMusic 歌曲库选择
+            </label>
+            <label>
+              <input
+                type="radio"
+                checked={sourceMode === 'MANUAL_UPLOAD'}
+                onChange={() => {
+                  setSourceMode('MANUAL_UPLOAD')
+                  setForm((current) => ({ ...current, musicSongId: '' }))
+                }}
+              />
+              手动上传音频
+            </label>
+          </div>
+          {sourceMode === 'EASMUSIC_SONG' ? (
+            <>
+              <div className="guess-song-library-filters">
+                <input
+                  aria-label="搜索歌曲、专辑或歌手"
+                  placeholder="搜索歌曲、专辑或歌手"
+                  value={songQuery}
+                  onChange={(event) => setSongQuery(event.target.value)}
+                />
+                <select value={songYear} onChange={(event) => setSongYear(event.target.value)}>
+                  <option value="">全部年份</option>
+                  {songYears.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+                <select value={songAlbum} onChange={(event) => setSongAlbum(event.target.value)}>
+                  <option value="">全部专辑</option>
+                  {songAlbums.map((album) => (
+                    <option key={album.id} value={album.id}>{album.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="guess-song-library-list">
+                {filteredMusicSongs.slice(0, 100).map((song) => (
+                  <article key={song.id} aria-current={form.musicSongId === song.id}>
+                    <span className="guess-song-library-cover relative">
+                      {song.coverUrl || song.album.coverUrl
+                        ? <Image src={song.coverUrl || song.album.coverUrl || ''} alt="" fill sizes="48px" className="object-cover" />
+                        : '♪'}
+                    </span>
+                    <div>
+                      <strong>{String(song.trackNumber).padStart(2, '0')} · {song.title}</strong>
+                      <span>{song.album.name} · {song.artist} · {song.releaseYear}</span>
+                      <small>
+                        {song.hasAudioSource ? '已有音频源' : '尚未上传音频'}
+                        {' · '}{song.previewUrl ? '已有 60 秒试听' : '暂无试听'}
+                        {' · '}{song.hasGuessClip ? '已有猜歌题目' : '未生成猜歌片段'}
+                      </small>
+                    </div>
+                    {song.hasAudioSource ? (
+                      <button type="button" onClick={() => selectMusicSong(song)}>
+                        {form.musicSongId === song.id ? '已选择' : '选择'}
+                      </button>
+                    ) : (
+                      <Link href={`/admin/music/albums/${song.album.id}`}>编辑歌曲</Link>
+                    )}
+                  </article>
+                ))}
+              </div>
+              {selectedMusicSong ? (
+                <p className="guess-song-selected-source">
+                  已选择《{selectedMusicSong.title}》；保存题目后可从私有音频源生成最长 7 秒片段。
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="guess-song-selected-source">
+              保留旧题目与特殊 Live 音频的手动上传方式；题目保存后再上传文件。
+            </p>
+          )}
+        </fieldset>
         <div className="guess-song-admin-checks">
           <label>
             <input
@@ -556,6 +712,7 @@ export function AdminGuessSongManager() {
           const enableBlockReason = getEnableBlockReason(question)
           const active = activeUploadId === question.id
           const busy = busyId === question.id
+          const linkedSong = musicSongs.find((song) => song.id === question.musicSongId)
           return (
             <article key={question.id}>
               <div className="guess-song-admin-question-main">
@@ -573,6 +730,11 @@ export function AdminGuessSongManager() {
                 {question.processingStatus === 'FAILED' && question.processingError ? (
                   <p className="guess-song-admin-processing-error" role="alert">
                     {safeProcessingError(question.processingError)}
+                  </p>
+                ) : null}
+                {question.sourceStale ? (
+                  <p className="guess-song-admin-processing-error">
+                    歌曲音频已更新，当前猜歌片段仍为旧版本，可选择重新生成。
                   </p>
                 ) : null}
               </div>
@@ -600,13 +762,23 @@ export function AdminGuessSongManager() {
               </div>
 
               <div className="guess-song-admin-actions">
+                {question.musicSongId ? (
+                  <button
+                    type="button"
+                    disabled={!linkedSong?.hasAudioSource || busy}
+                    title={!linkedSong?.hasAudioSource ? '关联歌曲尚未上传音频源' : undefined}
+                    onClick={() => void generateFromMusic(question)}
+                  >
+                    {question.audioVariants.length ? '重新生成猜歌片段' : '生成猜歌片段'}
+                  </button>
+                ) : null}
                 <button type="button" disabled={busy} onClick={() => openUpload(question)}>
-                  {question.sourceAudioPath ? '重新上传' : '上传音频'}
+                  {question.sourceAudioPath ? '重新上传' : '手动上传'}
                 </button>
                 <button
                   type="button"
-                  disabled={!question.sourceAudioPath || busy}
-                  title={!question.sourceAudioPath ? '尚无源音频，无法重新生成' : undefined}
+                  disabled={(!question.sourceAudioPath && !question.musicSongId) || busy}
+                  title={!question.sourceAudioPath && !question.musicSongId ? '尚无源音频，无法重新生成' : undefined}
                   onClick={() => void regenerate(question)}
                 >
                   重新生成
@@ -633,7 +805,7 @@ export function AdminGuessSongManager() {
                   <div>
                     <small>第二步</small>
                     <h3>{question.sourceAudioPath ? '重新上传音频' : '上传音频'}</h3>
-                    <p>支持 MP3、M4A、WAV、AAC，最大 20MB，音频至少 7 秒。</p>
+                    <p>支持 MP3、M4A、WAV、AAC，最大 100MB，音频至少 7 秒。</p>
                   </div>
                   <label className="guess-song-admin-file">
                     <span>选择音频文件</span>

@@ -27,6 +27,7 @@ export function MusicPreviewUploader({
 }>) {
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState(currentUrl || '')
+  const [previewDuration, setPreviewDuration] = useState(currentDuration || 60)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -54,7 +55,7 @@ export function MusicPreviewUploader({
     }
     setFile(nextFile)
     setStage('selected')
-    setMessage(`已选择 ${nextFile.name}`)
+    setMessage(`等待上传：已选择 ${nextFile.name}`)
   }
 
   async function upload() {
@@ -66,16 +67,20 @@ export function MusicPreviewUploader({
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), MUSIC_UPLOAD_TIMEOUT_MS)
     let conversionTimer: number | undefined
+    let previewUploadTimer: number | undefined
     const formData = new FormData()
     formData.set('file', file)
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       setStage('uploading')
-      setMessage('正在上传音频…')
+      setMessage('正在上传原始音频…')
       conversionTimer = window.setTimeout(() => {
         setStage('converting')
-        setMessage('服务器正在生成 7 秒试听片段…')
+        setMessage('正在生成最长 60 秒试听…')
       }, 800)
+      previewUploadTimer = window.setTimeout(() => {
+        setMessage('正在上传试听文件…')
+      }, 3500)
       const response = await fetch(`/api/admin/music/songs/${songId}/preview`, {
         method: 'POST',
         body: formData,
@@ -87,9 +92,10 @@ export function MusicPreviewUploader({
         throw new Error('服务器未返回有效的试听片段信息')
       }
       setPreviewUrl(data.previewUrl)
+      setPreviewDuration(data.previewDuration)
       setFile(null)
       setStage('complete')
-      setMessage('7 秒试听片段已生成并保存，完整音频未上传')
+      setMessage(`上传成功：已生成 ${data.previewDuration} 秒试听，原始音频仅供服务端处理`)
       onUploaded?.(data.previewUrl, data.previewDuration)
     } catch (uploadError) {
       console.error('[music-preview.upload-client]', uploadError)
@@ -99,6 +105,7 @@ export function MusicPreviewUploader({
     } finally {
       window.clearTimeout(timeout)
       if (conversionTimer) window.clearTimeout(conversionTimer)
+      if (previewUploadTimer) window.clearTimeout(previewUploadTimer)
       setUploading(false)
     }
   }
@@ -106,7 +113,7 @@ export function MusicPreviewUploader({
   return (
     <div className="w-full border-t border-sky-100 pt-3">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="text-xs font-black text-brand-950" htmlFor={`music-preview-${songId}`}>试听音频</label>
+        <label className="text-xs font-black text-brand-950" htmlFor={`music-preview-${songId}`}>上传歌曲音频并生成试听</label>
         <input
           id={`music-preview-${songId}`}
           type="file"
@@ -121,14 +128,14 @@ export function MusicPreviewUploader({
           onClick={() => void upload()}
           className="rounded-full bg-brand-950 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
         >
-          {uploading ? '处理中…' : '生成 7 秒试听'}
+          {uploading ? '处理中…' : '上传并生成 60 秒试听'}
         </button>
         {previewUrl ? (
-          <audio controls preload="none" src={previewUrl} className="h-9 max-w-full" aria-label={`${currentDuration || 7} 秒试听片段`} />
+          <audio controls preload="none" src={previewUrl} className="h-9 max-w-full" aria-label={`${previewDuration} 秒试听片段`} />
         ) : null}
       </div>
-      <p className="mt-2 text-[11px] font-bold text-slate-500">支持 MP3 / M4A / WAV / AAC，最大 100MB；服务器仅保存转码后的 7 秒 MP3。</p>
-      <MusicUploadStatus stage={stage} conversionLabel="生成 7 秒试听" />
+      <p className="mt-2 text-[11px] font-bold text-slate-500">支持 MP3 / M4A / WAV / AAC，最大 100MB；原始音频私有保存，前台仅能访问最长 60 秒试听。</p>
+      <MusicUploadStatus stage={stage} conversionLabel="生成并上传 60 秒试听" />
       {message ? <p className="mt-2 text-xs font-black text-emerald-700">{message}</p> : null}
       {error ? <p className="mt-2 text-xs font-black text-red-600" role="alert">{error}</p> : null}
     </div>

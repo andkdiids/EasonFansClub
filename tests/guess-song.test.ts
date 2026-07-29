@@ -121,7 +121,7 @@ test('服务端综合计分会取整数并组合播放与连击倍率', () => {
 
 test('无尽答错扣除机会且归零完成场次', () => {
   const service = source('lib/guess-song-session.ts')
-  assert.match(service, /Math\.max\(0, question\.session\.livesRemaining - 1\)/)
+  assert.match(service, /Math\.max\(0, question\.GuessSongSession\.livesRemaining - 1\)/)
   assert.match(service, /livesRemaining === 0/)
 })
 
@@ -175,7 +175,7 @@ test('停用题目不会进入新游戏', () => {
 
 test('已有历史记录题目不能物理删除', () => {
   const route = source('app/api/admin/entertainment/guess-song/questions/[questionId]/route.ts')
-  assert.match(route, /sessionQuestions/)
+  assert.match(route, /GuessSongSessionQuestion/)
   assert.match(route, /已有历史游戏记录，请停用而不是删除/)
 })
 
@@ -188,7 +188,7 @@ test('过期场次不能继续播放或答题', () => {
 test('用户不能访问其他人的场次', () => {
   const service = source('lib/guess-song-session.ts')
   assert.match(service, /session\.userId !== userId/)
-  assert.match(service, /session\.userId !== input\.userId/)
+  assert.match(service, /question\.GuessSongSession\.userId !== input\.userId/)
 })
 
 test('签名地址只由服务端当前题对应变体路径生成', () => {
@@ -299,20 +299,21 @@ test('后台试听仅签名数据库所属题目的变体且不增加播放次�
   assert.doesNotMatch(preview, /playCount.*increment|guessSongPlayRequest/)
 })
 
-test('后台题库采用创建后上传的两步流程并复用现有音频接口', () => {
+test('后台题库支持从 EasMusic 生成或继续手动上传', () => {
   const admin = source('app/admin/entertainment/guess-song/AdminGuessSongManager.tsx')
-  assert.match(admin, /题目已创建，请上传至少7秒的音频片段/)
-  assert.match(admin, /setActiveUploadId\(data\.question\.id\)/)
+  assert.match(admin, /从 EasMusic 歌曲库选择/)
+  assert.match(admin, /生成猜歌片段/)
+  assert.match(admin, /questions\/\$\{question\.id\}\/from-music/)
   assert.match(admin, /scrollIntoView/)
-  assert.match(admin, /上传并生成音频片段/)
+  assert.match(admin, /手动上传音频/)
   assert.match(admin, /questions\/\$\{question\.id\}\/audio/)
   assert.match(admin, /questions\/\$\{question\.id\}\/regenerate/)
 })
 
-test('后台上传前校验格式、20MB与至少7秒时长', () => {
+test('后台上传前校验格式、100MB与至少7秒时长', () => {
   const admin = source('app/admin/entertainment/guess-song/AdminGuessSongManager.tsx')
   assert.match(admin, /mp3\|m4a\|wav\|aac/)
-  assert.match(admin, /20 \* 1024 \* 1024/)
+  assert.match(admin, /100 \* 1024 \* 1024/)
   assert.match(admin, /duration < 7/)
   assert.match(admin, /正在生成 2～7 秒片段/)
   assert.match(admin, /正在上传腾讯云 COS/)
@@ -346,7 +347,7 @@ test('删除无历史题目先清理COS对象再删除数据库记录', () => {
   const storageDelete = route.indexOf('await deleteGuessSongObjects(paths)')
   const databaseDelete = route.indexOf('await prisma.guessSongQuestion.delete')
   assert.ok(storageDelete >= 0 && databaseDelete > storageDelete)
-  assert.match(route, /_count\.sessionQuestions > 0/)
+  assert.match(route, /_count\.GuessSongSessionQuestion > 0/)
 })
 
 test('COS HeadObject用于对象存在与元数据检查', async () => {

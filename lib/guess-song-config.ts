@@ -1,4 +1,5 @@
 import type { GuessSongMode } from '@prisma/client'
+import { MUSIC_AUDIO_MAX_FILE_SIZE } from '@/lib/music-upload-constraints'
 
 export const GUESS_SONG_MODE_CONFIG = {
   EASY: {
@@ -45,7 +46,7 @@ export const GUESS_SONG_MODE_CONFIG = {
 export const GUESS_SONG_AUDIO_DURATIONS = [2, 3, 4, 5, 6, 7] as const
 export const GUESS_SONG_INITIAL_LIVES = 3
 export const GUESS_SONG_ANSWER_SECONDS = 30
-export const GUESS_SONG_MAX_FILE_SIZE = 20 * 1024 * 1024
+export const GUESS_SONG_MAX_FILE_SIZE = MUSIC_AUDIO_MAX_FILE_SIZE
 export const GUESS_SONG_AUDIO_TYPES = new Set([
   'audio/mpeg',
   'audio/mp3',

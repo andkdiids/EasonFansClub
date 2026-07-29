@@ -12,6 +12,8 @@ const mediaStorage = read('lib/music-media-storage.ts')
 const player = read('components/music/MusicPlayer.tsx')
 const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260730110000_add_music_song_preview/migration.sql')
+const audioReuseMigration = read('prisma/migrations/20260730190000_reuse_music_song_audio/migration.sql')
+const playerProvider = read('components/music/MusicPlayerProvider.tsx')
 const messagesRoute = read('app/api/direct-conversations/[conversationId]/messages/route.ts')
 const profileDrawer = read('app/profile/ProfileEditorDrawer.tsx')
 const profileForm = read('app/profile/ProfileSettingsForm.tsx')
@@ -57,18 +59,19 @@ test('音频上传严格限制100MB和支持格式', () => {
   assert.match(previewRoute, /failure\(413, 'FILE_TOO_LARGE'/)
 })
 
-test('FFmpeg 只输出7秒128kbps MP3并在 finally 清理临时目录', () => {
-  assert.match(previewProcessor, /MUSIC_PREVIEW_DURATION = 7/)
-  assert.match(previewProcessor, /'-t',\s*String\(MUSIC_PREVIEW_DURATION\)/)
+test('FFmpeg 输出最长60秒128kbps MP3并在 finally 清理临时目录', () => {
+  assert.match(previewProcessor, /EASMUSIC_PREVIEW_MAX_SECONDS = 60/)
+  assert.match(previewProcessor, /'-t',\s*String\(EASMUSIC_PREVIEW_MAX_SECONDS\)/)
   assert.match(previewProcessor, /'128k'/)
   assert.match(previewProcessor, /'libmp3lame'/)
   assert.match(previewProcessor, /finally \{[\s\S]*rm\(tempDirectory, \{ recursive: true, force: true \}\)/)
 })
 
-test('试听只上传派生文件且使用稳定 COS 路径', () => {
-  assert.match(previewRoute, /music-preview\/\$\{song\.albumId\}\/\$\{song\.id\}\/preview\.mp3/)
-  assert.match(previewRoute, /sourceStored: false/)
-  assert.doesNotMatch(previewRoute, /sourceUrl|sourceStored: true/)
+test('私有音频源与公开试听使用不同的版本化 COS 路径', () => {
+  assert.match(previewRoute, /music-preview\/\$\{song\.albumId\}\/\$\{song\.id\}\/\$\{revision\}\.mp3/)
+  assert.match(previewRoute, /music-sources\/\$\{song\.albumId\}\/\$\{song\.id\}\/\$\{revision\}\.mp3/)
+  assert.match(previewRoute, /sourceStored: true/)
+  assert.match(previewRoute, /uploadGuessSongObject/)
 })
 
 test('MusicSong 预览字段和 migration 仅做增量新增', () => {
@@ -76,14 +79,17 @@ test('MusicSong 预览字段和 migration 仅做增量新增', () => {
   assert.match(schema, /previewDuration\s+Int\s+@default\(7\)/)
   assert.match(migration, /ADD COLUMN `previewUrl`/)
   assert.match(migration, /ADD COLUMN `previewDuration`/)
+  assert.match(audioReuseMigration, /sourceAudioPath/)
+  assert.match(audioReuseMigration, /musicSourceRevision/)
+  assert.doesNotMatch(audioReuseMigration, /\b(DROP|TRUNCATE|DELETE)\b/i)
   assert.doesNotMatch(migration, /\b(DROP|TRUNCATE|DELETE)\b/i)
 })
 
-test('歌曲详情播放器最多播放7秒且不循环', () => {
-  assert.match(player, /previewDuration = 7/)
-  assert.match(player, /Math\.min\(7, previewDuration \|\| 7\)/)
-  assert.match(player, /loop=\{false\}/)
-  assert.match(player, /audio\.pause\(\)/)
+test('歌曲详情播放器最多播放60秒且全站共享单一音频实例', () => {
+  assert.match(player, /previewDuration = 60/)
+  assert.match(player, /Math\.min\(60, previewDuration \|\| 60\)/)
+  assert.match(playerProvider, /const audio = new Audio\(\)/)
+  assert.match(playerProvider, /audio\.pause\(\)/)
 })
 
 test('Nginx 接收100MB音频并为转码保留超时时间', () => {

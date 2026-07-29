@@ -853,6 +853,8 @@ model GuessSongQuestion {
   createdAt                DateTime                   @default(now())
   updatedAt                DateTime                   @updatedAt
   musicSongId              String?
+  audioSourceType          String?
+  musicSourceRevision      String?
   GuessSongAudioVariant    GuessSongAudioVariant[]
   MusicSong                MusicSong?                 @relation(fields: [musicSongId], references: [id])
   GuessSongSessionQuestion GuessSongSessionQuestion[]
@@ -1154,6 +1156,9 @@ model MusicSong {
   lyrics                  String?
   sourceType              String?
   sourceUrl               String?
+  sourceAudioPath         String?
+  sourceAudioDurationMs   Int?
+  sourceAudioRevision     String?
   previewUrl              String?
   previewDuration         Int                       @default(7)
   createdAt               DateTime                  @default(now())

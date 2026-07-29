@@ -27,24 +27,64 @@ export async function GET(request: Request) {
           ...(enabled === 'true' ? { enabled: true } : enabled === 'false' ? { enabled: false } : {}),
         },
         include: {
-          MusicSong: { select: { id: true, title: true, MusicAlbum: { select: { name: true } } } },
+          MusicSong: {
+            select: {
+              id: true,
+              title: true,
+              sourceAudioRevision: true,
+              MusicAlbum: { select: { name: true } },
+            },
+          },
           GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } },
         },
         orderBy: { createdAt: 'desc' },
         take: 500,
       }),
       prisma.musicSong.findMany({
-        select: { id: true, title: true, MusicAlbum: { select: { name: true } } },
-        orderBy: [{ title: 'asc' }],
+        select: {
+          id: true,
+          title: true,
+          artist: true,
+          trackNumber: true,
+          releaseYear: true,
+          coverUrl: true,
+          previewUrl: true,
+          sourceAudioPath: true,
+          sourceAudioRevision: true,
+          MusicAlbum: {
+            select: {
+              id: true,
+              name: true,
+              artist: true,
+              releaseYear: true,
+              coverUrl: true,
+            },
+          },
+          _count: { select: { GuessSongQuestion: true } },
+        },
+        orderBy: [{ releaseYear: 'desc' }, { trackNumber: 'asc' }],
         take: 1000,
       }),
     ])
     return guessSongOk({
-      questions: questions.map(({ GuessSongAudioVariant, ...question }) => ({
+      questions: questions.map(({ GuessSongAudioVariant, MusicSong, ...question }) => ({
         ...question,
+        musicSong: MusicSong
+          ? { id: MusicSong.id, title: MusicSong.title, album: MusicSong.MusicAlbum }
+          : null,
+        sourceStale: Boolean(
+          question.audioSourceType === 'EASMUSIC_SONG'
+          && MusicSong?.sourceAudioRevision
+          && question.musicSourceRevision !== MusicSong.sourceAudioRevision
+        ),
         audioVariants: GuessSongAudioVariant,
       })),
-      musicSongs: musicSongs.map(({ MusicAlbum, ...song }) => ({ ...song, album: MusicAlbum })),
+      musicSongs: musicSongs.map(({ MusicAlbum, sourceAudioPath, _count, ...song }) => ({
+        ...song,
+        hasAudioSource: Boolean(sourceAudioPath),
+        hasGuessClip: _count.GuessSongQuestion > 0,
+        album: MusicAlbum,
+      })),
     })
   } catch (error) {
     return handleGuessSongError(error, 'admin.questions.list')

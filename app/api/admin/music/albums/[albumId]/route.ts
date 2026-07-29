@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { optionalMusicText, parseMusicFeatured, parseMusicFeaturedOrder, parseMusicYear } from '@/lib/music'
 import { prisma } from '@/lib/prisma'
+import { deleteGuessSongObjects } from '@/lib/guess-song-storage'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type Context = { params: Promise<{ albumId: string }> }
@@ -81,7 +82,16 @@ export async function DELETE(_request: Request, { params }: Context) {
   if (!guard.user) return guard.response
   const { albumId } = await params
   try {
+    const sources = await prisma.musicSong.findMany({
+      where: { albumId, sourceAudioPath: { not: null } },
+      select: { sourceAudioPath: true },
+    })
     await prisma.musicAlbum.delete({ where: { id: albumId } })
+    await deleteGuessSongObjects(
+      sources.flatMap((song) => song.sourceAudioPath ? [song.sourceAudioPath] : []),
+    ).catch((error) => {
+      console.error('[music-album.delete-sources]', error)
+    })
     return NextResponse.json({ ok: true, message: '专辑及其歌曲已删除' })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return NextResponse.json({ message: '专辑不存在' }, { status: 404 })

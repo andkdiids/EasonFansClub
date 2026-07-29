@@ -68,7 +68,7 @@ export async function processGuessSongAudio(input: Buffer, extension = 'audio') 
       })
     const durationMs = parseDurationMs(probe.stderr)
     if (!durationMs) throw new GuessSongAudioProcessingError('无法读取音频时长，请确认文件未损坏')
-    if (durationMs < 7000) throw new GuessSongAudioProcessingError('音频源长度不能少于 7 秒')
+    if (durationMs <= 0) throw new GuessSongAudioProcessingError('音频文件不包含可用音轨')
 
     await runFfmpeg([
       '-y', '-hide_banner', '-loglevel', 'error', '-i', inputPath,

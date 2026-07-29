@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
+import { MusicBackButton } from '@/components/music/MusicBackButton'
 import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicPlayer } from '@/components/music/MusicPlayer'
@@ -22,11 +23,18 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
   const coverUrl = song.MusicAlbum.coverUrl
   const releaseLabel = formatMusicReleaseDate(song.MusicAlbum.releaseDate, song.releaseYear)
   const tags = song.tags?.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) || []
-  const credits = [['作词', song.lyricist], ['作曲', song.composer], ['编曲', song.arranger]]
+  const credits = [
+    ['曲序', String(song.trackNumber).padStart(2, '0')],
+    ['作词', song.lyricist],
+    ['作曲', song.composer],
+    ['编曲', song.arranger],
+    ['制作人', song.producer],
+    ['发行信息', releaseLabel],
+  ]
   const songStory = song.description || song.story
 
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>
-    <Link href={`/music/album/${song.albumId}`} className="inline-flex items-center gap-2 text-sm font-black text-sky-300/80 transition hover:text-white">← 返回《{song.MusicAlbum.name}》</Link>
+    <MusicBackButton fallbackHref={`/music/album/${song.albumId}`} label={`返回《${song.MusicAlbum.name}》`} />
 
     <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
       <MusicDetailReveal direction="left" hover className="mx-auto w-full max-w-[320px]">
@@ -38,16 +46,16 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
         <p className="mt-5 text-xl font-black text-slate-200">{song.artist}</p>
         <p className="mt-3 text-sm font-bold text-slate-300/65">《{song.MusicAlbum.name}》 · {releaseLabel}</p>
         {tags.length ? <div className="mt-5 flex flex-wrap gap-2">{tags.map((tag) => <span key={tag} className="rounded-full border border-sky-200/15 bg-sky-300/[0.08] px-3 py-1.5 text-xs font-black text-sky-100/75">{tag}</span>)}</div> : null}
-        <div className="mt-7 flex flex-wrap gap-3"><button type="button" disabled className="rounded-full bg-white px-6 py-3 text-sm font-black text-[#07182d] opacity-75 disabled:cursor-not-allowed">▶ 播放歌曲</button><Link href={`/music/album/${song.albumId}`} className="rounded-full border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/15">返回专辑</Link></div>
+        <div className="mt-7 flex flex-wrap gap-3"><a href="#song-preview" className="rounded-full bg-white px-6 py-3 text-sm font-black text-[#07182d]">▶ 播放试听</a><Link href={`/music/album/${song.albumId}`} className="rounded-full border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/15">返回专辑</Link></div>
       </MusicDetailReveal>
     </section>
 
     <MusicDetailReveal delay={0.12} className="mt-14 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CREATIVE CREDITS</p><h2 className="mt-2 text-3xl font-black text-white">创作资料</h2>
-      <dl className="mt-7 grid gap-4 sm:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
+      <dl className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
     </MusicDetailReveal>
 
-    <div className="mt-8"><MusicPlayer title={song.title} artist={song.artist} coverUrl={coverUrl} sourceType={song.sourceType} previewUrl={song.previewUrl} previewDuration={song.previewDuration} /></div>
+    <div id="song-preview" className="mt-8 scroll-mt-24"><MusicPlayer id={song.id} title={song.title} artist={song.artist} albumName={song.MusicAlbum.name} coverUrl={coverUrl} sourceType={song.sourceType} previewUrl={song.previewUrl} previewDuration={song.previewDuration} /></div>
     <PersonalSongHistory songId={song.id} />
 
     <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">

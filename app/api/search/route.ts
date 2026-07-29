@@ -13,7 +13,15 @@ export async function GET(request: Request) {
       orderBy: [{ count: 'desc' }, { lastUsedAt: 'desc' }],
       take: 10,
     })
-    return NextResponse.json({ users: [], posts: [], boards: [], tags: [], hotKeywords })
+    return NextResponse.json({
+      users: [],
+      posts: [],
+      boards: [],
+      tags: [],
+      albums: [],
+      songs: [],
+      hotKeywords,
+    })
   }
 
   const user = await getCurrentUser()
@@ -27,7 +35,7 @@ export async function GET(request: Request) {
     await prisma.searchHistory.create({ data: { userId: user.id, keyword } })
   }
 
-  const [users, posts, boards, tags] = await Promise.all([
+  const [users, posts, boards, tags, albums, songs] = await Promise.all([
     prisma.user.findMany({
       where: {
         uid: { gt: 0 },
@@ -80,6 +88,48 @@ export async function GET(request: Request) {
       orderBy: { usageCount: 'desc' },
       take: 10,
     }),
+    prisma.musicAlbum.findMany({
+      where: {
+        status: 'PUBLISHED',
+        OR: [
+          { name: { contains: keyword } },
+          { artist: { contains: keyword } },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        artist: true,
+        releaseYear: true,
+        coverUrl: true,
+      },
+      orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }],
+      take: 10,
+    }),
+    prisma.musicSong.findMany({
+      where: {
+        MusicAlbum: { status: 'PUBLISHED' },
+        OR: [
+          { title: { contains: keyword } },
+          { artist: { contains: keyword } },
+          { lyrics: { contains: keyword } },
+          { lyricist: { contains: keyword } },
+          { composer: { contains: keyword } },
+          { MusicAlbum: { name: { contains: keyword } } },
+        ],
+      },
+      select: {
+        id: true,
+        title: true,
+        artist: true,
+        coverUrl: true,
+        previewUrl: true,
+        MusicAlbum: {
+          select: { id: true, name: true, coverUrl: true },
+        },
+      },
+      take: 16,
+    }),
   ])
 
   return NextResponse.json({
@@ -96,5 +146,13 @@ export async function GET(request: Request) {
     })),
     boards,
     tags,
+    albums,
+    songs: songs.map(({ MusicAlbum, ...song }) => ({
+      ...song,
+      coverUrl: song.coverUrl || MusicAlbum.coverUrl,
+      album: MusicAlbum,
+      hasPreview: Boolean(song.previewUrl),
+      previewUrl: undefined,
+    })),
   })
 }

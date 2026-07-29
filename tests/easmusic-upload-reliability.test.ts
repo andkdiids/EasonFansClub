@@ -7,7 +7,7 @@ import {
   MUSIC_AUDIO_MAX_FILE_SIZE,
   MUSIC_COVER_MAX_FILE_SIZE,
 } from '../lib/music-upload-constraints'
-import { createMusicPreview } from '../lib/music-preview'
+import { createMusicPreview, createMusicSourceAndPreview } from '../lib/music-preview'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const previewUploader = read('app/admin/music/MusicPreviewUploader.tsx')
@@ -83,20 +83,29 @@ test('API 异常始终返回带 error 的 JSON 并记录上传上下文', () => 
   }
 })
 
-test('FFmpeg 只生成前 7 秒 128kbps MP3 并清理完整源文件', () => {
+test('FFmpeg 独立生成最长 60 秒试听和私有规范化音频源', () => {
   assert.match(previewProcessor, /'-ss',\s*'0'/)
-  assert.match(previewProcessor, /'-t',\s*String\(MUSIC_PREVIEW_DURATION\)/)
+  assert.match(previewProcessor, /EASMUSIC_PREVIEW_MAX_SECONDS = 60/)
+  assert.match(previewProcessor, /'-t',\s*String\(EASMUSIC_PREVIEW_MAX_SECONDS\)/)
   assert.match(previewProcessor, /'128k'/)
   assert.match(previewProcessor, /'libmp3lame'/)
   assert.match(previewProcessor, /finally \{[\s\S]*rm\(tempDirectory, \{ recursive: true, force: true \}\)/)
-  assert.match(previewRoute, /music-preview\/\$\{song\.albumId\}\/\$\{song\.id\}\/preview\.mp3/)
-  assert.match(previewRoute, /sourceStored: false/)
+  assert.match(previewRoute, /music-sources\/\$\{song\.albumId\}\/\$\{song\.id\}\/\$\{revision\}\.mp3/)
+  assert.match(previewRoute, /music-preview\/\$\{song\.albumId\}\/\$\{song\.id\}\/\$\{revision\}\.mp3/)
+  assert.match(previewRoute, /sourceStored: true/)
 })
 
 test('FFmpeg 可将 8 秒 WAV 实际转换为非空 MP3 试听文件', async () => {
   const preview = await createMusicPreview(createTestWave(8), 'wav')
   assert.ok(preview.byteLength > 10_000)
   assert.ok(preview.subarray(0, 3).toString() === 'ID3' || (preview[0] === 0xff && (preview[1] & 0xe0) === 0xe0))
+})
+
+test('不足60秒的音频保留实际时长且不补静音', async () => {
+  const result = await createMusicSourceAndPreview(createTestWave(30), 'wav')
+  assert.ok(result.preview.byteLength > 10_000)
+  assert.equal(result.previewDuration, 30)
+  assert.ok(result.durationMs >= 29_900 && result.durationMs <= 30_100)
 })
 
 test('Sharp 与 COS 上传具有生产约束和超时保护', () => {

@@ -1,4 +1,7 @@
-import { processGuessSongAudio } from '@/lib/guess-song-audio'
+import {
+  GuessSongAudioProcessingError,
+  processGuessSongAudio,
+} from '@/lib/guess-song-audio'
 import {
   buildGuessSongObjectKey,
   deleteGuessSongObjects,
@@ -11,14 +14,23 @@ import { createUUID } from '@/lib/utils/uuid'
 async function saveProcessedAudio(
   questionId: string,
   processed: Awaited<ReturnType<typeof processGuessSongAudio>>,
+  options: {
+    audioSourceType: 'MANUAL_UPLOAD' | 'EASMUSIC_SONG'
+    musicSourceRevision?: string | null
+    persistSource: boolean
+  },
 ) {
   const revision = createUUID()
   const uploadedPaths: string[] = []
-  const sourceAudioPath = buildGuessSongObjectKey(`questions/${questionId}/source/${revision}.mp3`)
+  const sourceAudioPath = options.persistSource
+    ? buildGuessSongObjectKey(`questions/${questionId}/source/${revision}.mp3`)
+    : null
 
   try {
-    await uploadGuessSongObject({ key: sourceAudioPath, body: processed.source })
-    uploadedPaths.push(sourceAudioPath)
+    if (sourceAudioPath) {
+      await uploadGuessSongObject({ key: sourceAudioPath, body: processed.source })
+      uploadedPaths.push(sourceAudioPath)
+    }
     for (const variant of processed.variants) {
       const storagePath = buildGuessSongObjectKey(
         `questions/${questionId}/variants/${revision}/${variant.durationSeconds}s.mp3`,
@@ -42,6 +54,8 @@ async function saveProcessedAudio(
         where: { id: questionId },
         data: {
           sourceAudioPath,
+          audioSourceType: options.audioSourceType,
+          musicSourceRevision: options.musicSourceRevision || null,
           audioDurationMs: processed.durationMs,
           processingStatus: 'READY',
           processingError: null,
@@ -83,7 +97,11 @@ export async function uploadAndProcessGuessSongAudio(
   })
   try {
     const processed = await processGuessSongAudio(input, extension)
-    await saveProcessedAudio(questionId, processed)
+    await saveProcessedAudio(questionId, processed, {
+      audioSourceType: 'MANUAL_UPLOAD',
+      musicSourceRevision: null,
+      persistSource: true,
+    })
     return prisma.guessSongQuestion.findUniqueOrThrow({
       where: { id: questionId },
       include: { GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } } },
@@ -104,9 +122,75 @@ export async function uploadAndProcessGuessSongAudio(
 export async function regenerateGuessSongAudio(questionId: string) {
   const question = await prisma.guessSongQuestion.findUnique({
     where: { id: questionId },
-    select: { sourceAudioPath: true },
+    select: {
+      sourceAudioPath: true,
+      audioSourceType: true,
+      musicSongId: true,
+      MusicSong: {
+        select: {
+          sourceAudioPath: true,
+          sourceAudioRevision: true,
+        },
+      },
+    },
   })
+  if (question?.audioSourceType === 'EASMUSIC_SONG' && question.musicSongId) {
+    return generateGuessSongAudioFromMusicSong(questionId)
+  }
   if (!question?.sourceAudioPath) throw new Error('音频源文件不存在，请重新上传')
   const source = await downloadGuessSongObject(question.sourceAudioPath)
   return uploadAndProcessGuessSongAudio(questionId, source, 'mp3')
+}
+
+export async function generateGuessSongAudioFromMusicSong(questionId: string) {
+  const question = await prisma.guessSongQuestion.findUnique({
+    where: { id: questionId },
+    select: {
+      musicSongId: true,
+      MusicSong: {
+        select: {
+          sourceAudioPath: true,
+          sourceAudioRevision: true,
+        },
+      },
+    },
+  })
+  if (!question) throw new GuessSongAudioProcessingError('题目不存在')
+  if (!question.musicSongId || !question.MusicSong) {
+    throw new GuessSongAudioProcessingError('请先选择 EasMusic 歌曲')
+  }
+  if (!question.MusicSong.sourceAudioPath || !question.MusicSong.sourceAudioRevision) {
+    throw new GuessSongAudioProcessingError('所选歌曲尚未上传可用音频源')
+  }
+
+  await prisma.guessSongQuestion.update({
+    where: { id: questionId },
+    data: { processingStatus: 'PROCESSING', processingError: null, enabled: false },
+  })
+  try {
+    const source = await downloadGuessSongObject(question.MusicSong.sourceAudioPath)
+    const processed = await processGuessSongAudio(source, 'mp3')
+    await saveProcessedAudio(questionId, processed, {
+      audioSourceType: 'EASMUSIC_SONG',
+      musicSourceRevision: question.MusicSong.sourceAudioRevision,
+      persistSource: false,
+    })
+    return prisma.guessSongQuestion.findUniqueOrThrow({
+      where: { id: questionId },
+      include: {
+        GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } },
+        MusicSong: true,
+      },
+    })
+  } catch (error) {
+    await prisma.guessSongQuestion.updateMany({
+      where: { id: questionId },
+      data: {
+        processingStatus: 'FAILED',
+        processingError: error instanceof Error ? error.message.slice(0, 500) : '音频处理失败',
+        enabled: false,
+      },
+    })
+    throw error
+  }
 }

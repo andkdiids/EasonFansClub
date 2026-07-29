@@ -90,6 +90,10 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
   const timeoutSubmittedRef = useRef<string | null>(null)
   const submitAnswerRef = useRef<(optionKey: string | null) => void>(() => undefined)
 
+  useEffect(() => {
+    window.dispatchEvent(new Event('easmusic:pause-all'))
+  }, [])
+
   function stopAudio() {
     audioGenerationRef.current += 1
     const audio = audioRef.current
@@ -153,6 +157,7 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
     const question = session?.question
     if (!session || !question || playing || audioLoading || question.remainingPlayCount <= 0) return
     stopAudio()
+    window.dispatchEvent(new Event('easmusic:pause-all'))
     setError('')
     setAudioError('')
     setAudioLoading(true)

@@ -312,11 +312,13 @@ test('Excel 导入功能与 xlsx 依赖已移除', () => {
   assert.doesNotMatch(packageJson, /"xlsx"/)
 })
 
-test('播放器只连接服务器生成的7秒试听且不循环', () => {
+test('播放器复用全局单实例并只播放最长60秒试听', () => {
   const player = readFileSync('components/music/MusicPlayer.tsx', 'utf8')
-  assert.match(player, /<audio/)
+  const provider = readFileSync('components/music/MusicPlayerProvider.tsx', 'utf8')
   assert.match(player, /previewUrl/)
-  assert.match(player, /Math\.min\(7, previewDuration \|\| 7\)/)
-  assert.match(player, /loop=\{false\}/)
-  assert.match(player, /audio\.currentTime >= duration/)
+  assert.match(player, /Math\.min\(60, previewDuration \|\| 60\)/)
+  assert.match(player, /useMusicPlayer/)
+  assert.match(provider, /const audio = new Audio\(\)/)
+  assert.match(provider, /audio\.addEventListener\('ended'/)
+  assert.doesNotMatch(provider, /\.loop\s*=/)
 })

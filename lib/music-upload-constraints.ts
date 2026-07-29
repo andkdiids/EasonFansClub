@@ -29,3 +29,14 @@ export function isSupportedMusicAudioFile(file: Pick<File, 'name' | 'type'>) {
 export function isSupportedMusicCoverFile(file: Pick<File, 'name' | 'type'>) {
   return MUSIC_COVER_TYPES.has(file.type.toLowerCase()) || MUSIC_COVER_EXTENSIONS.has(extensionOf(file.name))
 }
+
+export function detectMusicAudioType(buffer: Buffer) {
+  if (buffer.length < 12) return null
+  if (buffer.subarray(0, 3).toString('ascii') === 'ID3'
+    || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return 'mp3'
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WAVE') return 'wav'
+  if (buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'm4a'
+  if (buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0) return 'aac'
+  return null
+}

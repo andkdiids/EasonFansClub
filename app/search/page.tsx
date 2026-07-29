@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Image from 'next/image'
 import { PageContainer } from '@/components/PageContainer'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
@@ -57,9 +58,12 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           take: 10,
         }),
         prisma.musicAlbum.findMany({
-          where: { status: 'PUBLISHED', name: { contains: q } },
+          where: {
+            status: 'PUBLISHED',
+            OR: [{ name: { contains: q } }, { artist: { contains: q } }],
+          },
           orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }],
-          select: { id: true, name: true, releaseYear: true },
+          select: { id: true, name: true, artist: true, releaseYear: true, coverUrl: true },
           take: 10,
         }),
         prisma.musicSong.findMany({
@@ -67,12 +71,21 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             MusicAlbum: { status: 'PUBLISHED' },
             OR: [
               { title: { contains: q } },
+              { artist: { contains: q } },
+              { lyrics: { contains: q } },
               { lyricist: { contains: q } },
               { composer: { contains: q } },
               { MusicAlbum: { name: { contains: q } } },
             ],
           },
-          select: { id: true, title: true, MusicAlbum: { select: { name: true } } },
+          select: {
+            id: true,
+            title: true,
+            artist: true,
+            coverUrl: true,
+            previewUrl: true,
+            MusicAlbum: { select: { name: true, coverUrl: true } },
+          },
           take: 16,
         }),
         prisma.searchKeyword.findMany({ orderBy: { count: 'desc' }, take: 8 }),
@@ -131,16 +144,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                   </p>
                 </Link>
               ))}
+              {albums.length ? <h2 className="pt-3 text-lg font-black text-brand-950">专辑</h2> : null}
               {albums.map((album) => (
-                <Link key={album.id} href={`/music/album/${album.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
-                  <p className="font-black text-slate-950">专辑 · {album.name}</p>
-                  <p className="mt-2 text-sm text-slate-500">EasMusic · {album.releaseYear}</p>
+                <Link key={album.id} href={`/music/album/${album.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
+                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{album.coverUrl ? <Image src={album.coverUrl} alt="" fill sizes="56px" className="object-cover" /> : '♪'}</span>
+                  <span><strong className="block font-black text-slate-950">{album.name}</strong><small className="mt-1 block text-sm text-slate-500">{album.artist} · {album.releaseYear}</small></span>
                 </Link>
               ))}
+              {songs.length ? <h2 className="pt-3 text-lg font-black text-brand-950">歌曲</h2> : null}
               {songs.map((song) => (
-                <Link key={song.id} href={`/music/song/${song.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
-                  <p className="font-black text-slate-950">歌曲 · {song.title}</p>
-                  <p className="mt-2 text-sm text-slate-500">EasMusic · {song.MusicAlbum.name}</p>
+                <Link key={song.id} href={`/music/song/${song.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
+                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{song.coverUrl || song.MusicAlbum.coverUrl ? <Image src={song.coverUrl || song.MusicAlbum.coverUrl || ''} alt="" fill sizes="56px" className="object-cover" /> : '♪'}</span>
+                  <span><strong className="block font-black text-slate-950">{song.title}</strong><small className="mt-1 block text-sm text-slate-500">{song.artist} · {song.MusicAlbum.name} · {song.previewUrl ? '支持试听' : '暂无试听'}</small></span>
                 </Link>
               ))}
               {posts.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
