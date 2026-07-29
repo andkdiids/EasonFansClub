@@ -12,6 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 import ProfileAchievementPreview from '@/components/achievements/ProfileAchievementPreview'
+import { getGrowthSummarySafe } from '@/lib/growth'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,7 +41,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           phone: true,
           emailVerifiedAt: true,
           phoneVerifiedAt: true,
-          level: true,
+          experience: true,
           createdAt: true,
           Profile: true,
         },
@@ -64,6 +65,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   
   const background = publicImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
+  const growth = await getGrowthSummarySafe(profile.experience)
   const layoutConfig = await getPublishedPageLayoutConfig('profile')
   const achievements = await prisma.userAchievement.findMany({
   where: {
@@ -116,7 +118,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         <ProfileHeader
           displayName={displayName}
           uid={profile.uid}
-          level={profile.level}
+          level={growth.level}
+          levelName={growth.levelName}
           createdAt={profile.createdAt}
           avatarUrl={avatar}
           backgroundUrl={background}

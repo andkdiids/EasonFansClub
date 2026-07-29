@@ -1,17 +1,9 @@
 import type { ExperienceLogType, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { defaultGrowthLevels, resolveGrowthLevelName } from '@/lib/growth-display'
 
 export const dailyExpLimit = 30
-
-export const defaultGrowthLevels = [
-  { level: 1, name: '初入E院', requiredExp: 0 },
-  { level: 2, name: '观察期', requiredExp: 1000 },
-  { level: 3, name: '稳定治疗', requiredExp: 3000 },
-  { level: 4, name: '长期住院', requiredExp: 7000 },
-  { level: 5, name: '资深病友', requiredExp: 12000 },
-  { level: 6, name: '核心成员', requiredExp: 18000 },
-  { level: 7, name: '终身病友', requiredExp: 25000 },
-] as const
+export { defaultGrowthLevels, resolveGrowthLevelName }
 
 export type GrowthLevel = {
   level: number
@@ -44,7 +36,7 @@ export function normalizeGrowthLevels(levels: GrowthLevel[]) {
   return merged
     .map((item) => ({
       level: Math.max(1, Math.min(7, Number(item.level) || 1)),
-      name: String(item.name || '').trim() || defaultGrowthLevels[Math.max(0, Math.min(6, (Number(item.level) || 1) - 1))].name,
+      name: resolveGrowthLevelName(item.level, item.name),
       requiredExp: Math.max(0, Math.floor(Number(item.requiredExp) || 0)),
     }))
     .sort((a, b) => a.requiredExp - b.requiredExp || a.level - b.level)
@@ -77,6 +69,10 @@ export function calculateGrowthSummary(experience: number, levels: GrowthLevel[]
 
 export async function getGrowthSummary(experience: number) {
   return calculateGrowthSummary(experience, await listGrowthLevels())
+}
+
+export async function getGrowthSummarySafe(experience: number) {
+  return getGrowthSummary(experience).catch(() => calculateGrowthSummary(experience, [...defaultGrowthLevels]))
 }
 
 export async function awardExperience(

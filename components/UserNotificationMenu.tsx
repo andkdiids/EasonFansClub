@@ -14,11 +14,13 @@ export function UserNotificationMenu({
   avatarUrl,
   isAdmin,
   initialSummary,
+  currentUserId,
 }: {
   displayName: string
   avatarUrl?: string | null
   isAdmin: boolean
   initialSummary: UnreadSummary
+  currentUserId: string
 }) {
   const [summary, setSummary] = useState(initialSummary)
   const [loggingOut, setLoggingOut] = useState(false)
@@ -33,10 +35,15 @@ export function UserNotificationMenu({
       method: 'POST',
       cache: 'no-store',
     })
-        if (!response.ok) {
+    if (!response.ok) {
       throw new Error('退出登录失败')
     }
 
+    if ('BroadcastChannel' in window) {
+      const channel = new BroadcastChannel(`eason-private-sync:${currentUserId}`)
+      channel.postMessage({ type: 'logout', userId: currentUserId })
+      channel.close()
+    }
     window.location.replace('/login')
       } catch {
     setLoggingOut(false)
@@ -45,16 +52,30 @@ export function UserNotificationMenu({
 }
 
   useEffect(() => {
-    const controller = new AbortController()
-    const refresh = () => fetch('/api/notifications/unread-summary', { cache: 'no-store', signal: controller.signal })
+    let controller: AbortController | null = null
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return Promise.resolve(null)
+      controller = new AbortController()
+      return fetch('/api/notifications/unread-summary', { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() as Promise<UnreadSummary> : null)
       .then((next) => { if (next) setSummary(next) })
       .catch(() => null)
+    }
     const listener = () => void refresh()
+    const channel = 'BroadcastChannel' in window
+      ? new BroadcastChannel(`eason-private-sync:${currentUserId}`)
+      : null
+    if (channel) {
+      channel.onmessage = (event) => {
+        if (event.data?.userId !== currentUserId) return
+        if (event.data?.type === 'logout') window.location.reload()
+        else void refresh()
+      }
+    }
     window.addEventListener('unread-summary:refresh', listener)
-    const timer = window.setInterval(refresh, 30000)
-    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('unread-summary:refresh', listener) }
-  }, [])
+    const timer = window.setInterval(refresh, 5000)
+    return () => { controller?.abort(); channel?.close(); window.clearInterval(timer); window.removeEventListener('unread-summary:refresh', listener) }
+  }, [currentUserId])
 
   const itemClass = 'flex min-h-10 items-center rounded-sm px-3 py-2 text-sm font-bold text-slate-700 hover:bg-sky-50'
   return <details data-user-menu className="relative z-[var(--layer-popover)] shrink-0">
@@ -72,7 +93,7 @@ export function UserNotificationMenu({
       <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} /></Link>
       <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} /></Link>
       <Link href="/friends" className={itemClass}>我的好友<Badge count={summary.friendRequests} /></Link>
-      <Link href="/notifications?category=message" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
+      <Link href="/notifications?category=messages" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
       <Link href="/settings/security" className={itemClass}>账号安全</Link>
       {isAdmin ? <Link href="/admin" className={`${itemClass} text-brand-700`}>后台管理</Link> : null}
 <button

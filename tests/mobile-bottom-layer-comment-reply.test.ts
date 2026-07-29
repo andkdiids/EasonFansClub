@@ -123,21 +123,21 @@ test('好友入口收起状态按用户隔离存入 localStorage', () => {
 })
 
 test('好友入口复用 AppShell 的统一未读统计并显示 99+', () => {
-  assert.match(appShell, /<FriendDock currentUserId=\{user\.id\} unreadCount=\{currentUnreadCount\}/)
-  assert.match(friendDock, /unreadCount > 99 \? '99\+' : unreadCount/)
-  assert.doesNotMatch(friendDock, /fetch\('\/api\/direct-conversations'.*unreadCount/)
+  assert.match(appShell, /<FriendDock currentUserId=\{user\.id\} unreadSummary=\{currentUnreadSummary\}/)
+  assert.match(friendDock, /unreadSummary\.total > 99 \? '99\+' : unreadSummary\.total/)
+  assert.doesNotMatch(friendDock, /fetch\('\/api\/direct-conversations'.*unreadSummary/)
 })
 
 test('统一未读计数覆盖通知、反馈、好友申请和私信', () => {
   const notifications = read('lib/notifications.ts')
   assert.match(notifications, /getUnreadNotificationCount[\s\S]*getUnreadSummary\(userId\)\)\.total/)
-  for (const field of ['general', 'feedback', 'friendRequests', 'directMessages']) assert.match(notifications, new RegExp(field))
+  for (const field of ['notifications', 'feedback', 'friendRequests', 'directMessages', 'messages']) assert.match(notifications, new RegExp(field))
 })
 
-test('好友窗 outside-click 只注册 pointerdown 并排除窗口和入口', () => {
-  assert.match(friendDock, /document\.addEventListener\('pointerdown', onPointerDown\)/)
-  assert.match(friendDock, /panelRef\.current\?\.contains\(target\) \|\| toggleRef\.current\?\.contains\(target\)/)
-  assert.doesNotMatch(friendDock, /addEventListener\('(touchstart|mousedown)'/)
+test('好友窗 outside-click 使用 body portal 遮罩且不干扰窗口内部', () => {
+  assert.match(friendDock, /createPortal\(/)
+  assert.match(friendDock, /friend-dock-backdrop[\s\S]*onPointerDown=\{closeDock\}/)
+  assert.match(friendDock, /FriendProfileCard/)
 })
 
 test('好友窗支持遮罩、关闭按钮、Esc、再次点击入口和路由关闭', () => {
@@ -150,16 +150,18 @@ test('好友窗支持遮罩、关闭按钮、Esc、再次点击入口和路由�
 
 test('好友窗内部列表项可操作且不会被 outside-click 关闭', () => {
   assert.match(friendDock, /ref=\{panelRef\}/)
-  assert.match(friendDock, /onClick=\{\(\) => void openChat\(friend\)\}/)
+  assert.match(friendDock, /onChat=\{\(\) => void openChat\(friend\)\}/)
+  assert.match(friendDock, /onProfile=\{\(\) => setProfileFriend\(friend\)\}/)
 })
 
 test('好友窗口高度基于 100dvh 且止于 BottomNav 上方', () => {
-  assert.match(css, /\.friend-dock-panel \{ position:fixed;[^}]*bottom:calc\(var\(--mobile-bottom-nav-total\) \+ 8px\)[^}]*max-height:calc\(100dvh - var\(--mobile-bottom-nav-total\) - 24px\)/)
+  assert.match(css, /\.friend-dock-panel \{ position:fixed;[^}]*top:calc\(var\(--friend-dock-viewport-top,0px\) \+ 8px\)[^}]*max-height:calc\(var\(--friend-dock-viewport-height,100dvh\) - var\(--mobile-bottom-nav-total\) - 16px\)/)
 })
 
 test('E院中心作为完整卡片止于底部导航上方', () => {
-  assert.match(css, /\.mobile-center-overlay \{[^}]*inset:0 0 var\(--mobile-bottom-nav-total\)/)
-  assert.match(css, /\.mobile-center-sheet \{[^}]*max-height:min\(620px,calc\(100dvh - var\(--mobile-bottom-nav-total\) - 32px\)\)[^}]*border-radius:18px/)
+  assert.match(css, /--mobile-center-action-overhang:\s*28px/)
+  assert.match(css, /\.mobile-center-overlay \{[^}]*inset:0 0 calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-center-action-overhang\) \+ 10px\)/)
+  assert.match(css, /\.mobile-center-sheet \{[^}]*max-height:min\(620px,calc\(100dvh - var\(--mobile-bottom-nav-total\) - var\(--mobile-center-action-overhang\) - 54px\)\)[^}]*border-radius:18px/)
 })
 
 test('E院中心支持再次点击和 Esc 关闭并锁定后恢复背景滚动', () => {

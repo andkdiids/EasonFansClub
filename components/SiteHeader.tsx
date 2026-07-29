@@ -27,7 +27,9 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
     providedUser !== undefined ? Promise.resolve(providedUser) : getCurrentUser(),
     providedConfig ? Promise.resolve(providedConfig) : measureBootstrap('site.appearance', getSiteAppearance()),
   ])
-  const unreadSummary = user ? await measureBootstrap('header.notifications.unread', getUnreadSummary(user.id)).catch(() => ({ notifications: 0, feedbackReplies: 0, friendRequests: 0, directMessages: 0, total: 0 })) : null
+  const unreadSummary = user ? await measureBootstrap('header.notifications.unread', getUnreadSummary(user.id)).catch(() => ({
+    notifications: 0, system: 0, replies: 0, likes: 0, feedbackReplies: 0, feedback: 0, friendRequests: 0, directMessages: 0, messages: 0, total: 0,
+  })) : null
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
   const isAdmin = Boolean(user && isAdminUser(user))
   const displayName = user?.nickname || ''
@@ -45,7 +47,7 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
           <DesktopSiteNavigation items={navItems} isAdmin={isAdmin} />
 
           {user ? (
-            <UserNotificationMenu displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={isAdmin} initialSummary={unreadSummary!} />
+            <UserNotificationMenu currentUserId={user.id} displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={isAdmin} initialSummary={unreadSummary!} />
           ) : (
             <div className="flex shrink-0 items-center gap-2">
               <Link href="/login" className="site-header-auth-link flat-button-secondary">登录</Link>

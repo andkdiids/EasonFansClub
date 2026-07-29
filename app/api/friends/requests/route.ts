@@ -12,5 +12,8 @@ export async function POST(request: Request) {
   if (!Number.isInteger(targetUid)) return NextResponse.json({ message: '请输入正确 UID' }, { status: 400 })
 
   const result = await createFriendRequest(user, targetUid, sanitizeText(body?.message, 120) || null)
-  return NextResponse.json(result.body, { status: result.status })
+  return NextResponse.json(result.body, {
+    status: result.status,
+    headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+  })
 }

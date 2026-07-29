@@ -10,5 +10,8 @@ export async function POST(_request: Request, context: RouteContext) {
 
   const { requestId } = await context.params
   const result = await decideFriendRequest(user.id, requestId, 'accept')
-  return NextResponse.json(result.body, { status: result.status })
+  return NextResponse.json(result.body, {
+    status: result.status,
+    headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+  })
 }

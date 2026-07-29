@@ -73,6 +73,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
 
   function openCenter() {
     if (centerOpen) return
+    window.dispatchEvent(new Event('friend-dock:close'))
     window.history.pushState({ ...window.history.state, easonCenterSheet: true }, '')
     setCenterOpen(true)
   }

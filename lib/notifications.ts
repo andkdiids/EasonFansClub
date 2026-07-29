@@ -34,6 +34,7 @@ function getNotificationCategory(type: string, link?: string | null) {
   if (type === 'REPLY') return 'reply'
   if (type === 'LIKE') return 'like'
   if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'friend'
+  if (type === 'MESSAGE') return 'messages'
   return 'system'
 }
 
@@ -66,32 +67,62 @@ export type UnifiedNotification = {
 
 export type UnreadSummary = {
   notifications: number
+  system: number
+  replies: number
+  likes: number
   feedbackReplies: number
+  feedback: number
   friendRequests: number
   directMessages: number
+  messages: number
   total: number
 }
 
 export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
   const now = new Date()
-  const [generalPersonal, system, feedbackReplies, friendRequests, directMessages] = await Promise.all([
+  const [otherPersonal, system, replies, likes, feedbackReplies, pendingFriendRequests, friendUpdates, directMessageRows] = await Promise.all([
     prisma.notification.count({ where: {
       recipientId: userId,
       isRead: false,
-      type: { notIn: ['FRIEND_REQUEST', 'MESSAGE'] },
+      type: { notIn: ['FRIEND_REQUEST', 'MESSAGE', 'REPLY', 'LIKE'] },
       NOT: { link: { startsWith: '/feedback/' } },
     } }),
     prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
+    prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'REPLY' } }),
+    prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'LIKE' } }),
     prisma.feedback.count({ where: { userId, userUnread: true } }),
     prisma.friendRequest.count({ where: { receiverId: userId, status: 'PENDING' } }),
-    prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'MESSAGE' } }),
+    prisma.notification.count({ where: {
+      recipientId: userId,
+      isRead: false,
+      type: 'FRIEND_REQUEST',
+      title: { not: '好友申请' },
+    } }),
+    prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
+      SELECT COUNT(*) AS unreadCount
+      FROM DirectMessage dm
+      INNER JOIN ConversationParticipant cp
+        ON cp.conversationId = dm.conversationId
+       AND cp.userId = ${userId}
+      WHERE dm.senderId <> ${userId}
+        AND dm.isDeleted = false
+        AND cp.isDeleted = false
+        AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
+    `,
   ])
-  const notifications = generalPersonal + system
+  const directMessages = Number(directMessageRows[0]?.unreadCount || 0)
+  const notifications = otherPersonal + system + replies + likes
+  const friendRequests = pendingFriendRequests + friendUpdates
   return {
     notifications,
+    system: system + otherPersonal,
+    replies,
+    likes,
     feedbackReplies,
+    feedback: feedbackReplies,
     friendRequests,
     directMessages,
+    messages: directMessages,
     total: notifications + feedbackReplies + friendRequests + directMessages,
   }
 }
