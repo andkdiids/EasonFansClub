@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { gameCatalog, gameCategories, type GameCategoryFilter } from '@/lib/game-catalog'
 import { GameBanner } from './GameBanner'
 import { GameGrid } from './GameGrid'
+import { WaveformBackground } from './WaveformBackground'
 
 type LobbySummary = {
   weeklyBest: number | null
@@ -43,6 +44,9 @@ export function GameCenter() {
 
   return (
     <main className="games-page">
+      <div className="games-waveform" aria-hidden="true">
+        <WaveformBackground active />
+      </div>
       <header className="games-heading">
         <span>GAMES</span>
         <h1>娱乐中心</h1>
