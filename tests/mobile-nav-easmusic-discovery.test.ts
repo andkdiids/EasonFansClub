@@ -33,7 +33,7 @@ test('E院中心抽屉支持遮罩、关闭、返回键、路由变化及滚动�
   assert.match(mobile, /body\.style\.overflow = 'hidden'/)
 })
 
-test('精选专辑字段、MySQL migration、后台配置和首页 fallback 完整', () => {
+test('历史精选字段保持兼容，但 EasMusic 首页展示全部已发布专辑', () => {
   const schema = readFileSync('prisma/schema.prisma', 'utf8')
   const migration = readFileSync('prisma/migrations/20260729010000_add_music_album_featured_fields/migration.sql', 'utf8')
   const home = readFileSync('app/music/page.tsx', 'utf8')
@@ -46,9 +46,9 @@ test('精选专辑字段、MySQL migration、后台配置和首页 fallback 完�
   assert.match(migration, /ALTER TABLE `MusicAlbum`/)
   assert.match(migration, /`isFeatured` BOOLEAN NOT NULL DEFAULT false/)
   assert.doesNotMatch(migration, /DROP|DELETE|TRUNCATE/)
-  assert.match(home, /status: 'PUBLISHED', isFeatured: true/)
-  assert.match(home, /featuredOrder: 'asc'/)
-  assert.match(home, /featuredAlbums\.length > 0[\s\S]*displayOrder: 'asc'/)
+  assert.match(home, /musicAlbum\.findMany\(\{ where: \{ status: 'PUBLISHED' \}/)
+  assert.match(home, /displayOrder: 'asc'/)
+  assert.doesNotMatch(home, /isFeatured: true|featuredAlbums/)
   for (const source of [createApi, updateApi]) {
     assert.match(source, /parseMusicFeatured/)
     assert.match(source, /featuredOrder/)

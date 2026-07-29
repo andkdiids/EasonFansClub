@@ -147,12 +147,13 @@ test('后台入口只有通过页面管理员权限校验后展示', () => {
   assert.match(admin, /演唱会管理/)
 })
 
-test('现有 EasMusic 首页保留精选 fallback、搜索和新增现场入口', () => {
+test('EasMusic 首页使用全部专辑并提供 Eason in Concert 时间轴入口', () => {
   const home = read('app/music/page.tsx')
-  assert.match(home, /featuredAlbums\.length > 0/)
-  assert.match(home, /MusicSearchDialog/)
-  assert.match(home, /Eason现场/)
-  assert.match(home, /href="\/music\/live"/)
+  assert.match(home, /MusicAlbumArchiveShowcase/)
+  assert.match(home, /MusicConcertTimeline/)
+  assert.match(home, /Eason in Concert/)
+  assert.match(home, /href="\/music\/concerts"/)
+  assert.doesNotMatch(home, /featuredAlbums|精选专辑/)
 })
 
 test('现有移动导航仍保持五项且 EasMusic 入口不变', () => {

@@ -1055,12 +1055,61 @@ model MusicAlbum {
   displayOrder  Int                    @default(0)
   isFeatured    Boolean                @default(false)
   featuredOrder Int?
+  AlbumReview   AlbumReview[]
   MusicSong     MusicSong[]
 
   @@unique([name, artist, releaseYear])
   @@index([releaseYear, createdAt])
   @@index([status, displayOrder, releaseYear])
   @@index([status, isFeatured, featuredOrder, createdAt])
+}
+
+model AlbumReview {
+  id                  String                 @id @default(cuid())
+  title               String
+  coverUrl            String?                @db.Text
+  content             String                 @db.LongText
+  images              Json
+  status              MusicPublicationStatus @default(DRAFT)
+  likeCount           Int                    @default(0)
+  favoriteCount       Int                    @default(0)
+  publishedAt         DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  albumId             String
+  authorId            String
+  MusicAlbum          MusicAlbum             @relation(fields: [albumId], references: [id], onDelete: Restrict)
+  User                User                   @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  AlbumReviewLike     AlbumReviewLike[]
+  AlbumReviewFavorite AlbumReviewFavorite[]
+
+  @@index([albumId, status, publishedAt])
+  @@index([authorId, createdAt])
+  @@index([status, publishedAt, createdAt])
+}
+
+model AlbumReviewLike {
+  id          String      @id @default(cuid())
+  createdAt   DateTime    @default(now())
+  reviewId    String
+  userId      String
+  AlbumReview AlbumReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@index([userId, createdAt])
+}
+
+model AlbumReviewFavorite {
+  id          String      @id @default(cuid())
+  createdAt   DateTime    @default(now())
+  reviewId    String
+  userId      String
+  AlbumReview AlbumReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@index([userId, createdAt])
 }
 
 model MusicFavorite {
@@ -1785,6 +1834,9 @@ model User {
   AccountSecurityLog                                     AccountSecurityLog[]
   ActivityFavorite                                       ActivityFavorite[]
   ActivityRegistration                                   ActivityRegistration[]
+  AlbumReview                                            AlbumReview[]
+  AlbumReviewFavorite                                    AlbumReviewFavorite[]
+  AlbumReviewLike                                        AlbumReviewLike[]
   AdminAction_AdminAction_adminIdToUser                  AdminAction[]               @relation("AdminAction_adminIdToUser")
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]               @relation("AdminAction_targetUserIdToUser")
   AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]            @relation("AdminActionLog_adminIdToUser")

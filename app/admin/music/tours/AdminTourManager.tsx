@@ -51,7 +51,7 @@ export function AdminTourManager() {
   }
 
   return <main className="admin-mobile-page mx-auto max-w-6xl space-y-6 px-4 py-7 sm:px-5">
-    <section className="border border-sky-100 bg-white/90 p-6 shadow-sm"><Link href="/admin/music" className="text-sm font-black text-brand-700">← EasMusic 管理</Link><h1 className="mt-4 text-4xl font-black text-brand-950">巡演管理</h1><p className="mt-2 text-sm font-bold text-slate-500">维护 Eason现场 的巡演档案、发布状态与顺序。</p></section>
+    <section className="border border-sky-100 bg-white/90 p-6 shadow-sm"><Link href="/admin/music" className="text-sm font-black text-brand-700">← EasMusic 管理</Link><h1 className="mt-4 text-4xl font-black text-brand-950">巡演管理</h1><p className="mt-2 text-sm font-bold text-slate-500">维护 Eason in Concert 的巡演档案、发布状态与顺序。</p></section>
     {message ? <p role="status" className="bg-emerald-50 p-3 text-sm font-black text-emerald-700">{message}</p> : null}
     {error ? <p role="alert" className="bg-red-50 p-3 text-sm font-black text-red-700">{error}</p> : null}
     <form onSubmit={save} className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7">

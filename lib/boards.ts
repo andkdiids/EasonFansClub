@@ -23,10 +23,4 @@ export const defaultBoards = [
     description: '周边、应援物料交换',
     sortOrder: 4,
   },
-  {
-    name: '签到区',
-    slug: 'checkin',
-    description: '签到记录、连续签到展示、积分说明',
-    sortOrder: 5,
-  },
 ]

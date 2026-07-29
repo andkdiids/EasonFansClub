@@ -284,9 +284,9 @@ test('我的现场继续使用EasMusic深蓝壳层', () => {
   assert.match(read('components/music/MusicArchiveShell.tsx'), /bg-\[#06101d\]/)
 })
 
-test('第一阶段公开Eason现场入口保留', () => {
+test('旧现场入口保持兼容并使用 Eason in Concert 名称', () => {
   const source = read('app/music/live/page.tsx')
-  assert.match(source, /Eason现场/)
+  assert.match(source, /Eason in Concert/)
   assert.match(source, /现场档案正在整理中/)
 })
 

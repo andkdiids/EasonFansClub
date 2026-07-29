@@ -225,17 +225,19 @@ test('音乐路由主题覆盖所有子路由且不误判相似路径', () => {
   assert.match(navigation, /isMusicRoute\(pathname\)/)
 })
 
-test('专辑墙、移动端精选卡片与轻量背景动效统一为音乐档案馆视觉', () => {
+test('专辑墙、可展开全量专辑与轻量背景动效统一为音乐档案馆视觉', () => {
   const albums = readFileSync('app/music/albums/page.tsx', 'utf8')
   const home = readFileSync('app/music/page.tsx', 'utf8')
+  const showcase = readFileSync('components/music/MusicAlbumArchiveShowcase.tsx', 'utf8')
   const card = readFileSync('components/music/MusicAlbumCard.tsx', 'utf8')
   const shell = readFileSync('components/music/MusicArchiveShell.tsx', 'utf8')
   const globalCss = readFileSync('app/globals.css', 'utf8')
   assert.match(albums, /MusicArchiveShell/)
   assert.match(albums, /grid-cols-2[\s\S]*sm:grid-cols-3[\s\S]*lg:grid-cols-4[\s\S]*xl:grid-cols-5/)
   assert.match(albums, /theme="dark"/)
-  assert.match(home, /grid-cols-1[\s\S]*min-\[360px\]:grid-cols-2[\s\S]*sm:grid-cols-3[\s\S]*md:grid-cols-4[\s\S]*lg:grid-cols-5[\s\S]*xl:grid-cols-7[\s\S]*2xl:grid-cols-8/)
-  assert.match(home, /albums\.map\(\(album\)/)
+  assert.match(home, /MusicAlbumArchiveShowcase/)
+  assert.match(showcase, /grid-cols-2[\s\S]*sm:grid-cols-3[\s\S]*md:grid-cols-4[\s\S]*lg:grid-cols-5[\s\S]*xl:grid-cols-6/)
+  assert.match(showcase, /albums\.map\(\(album\)/)
   assert.match(card, /max-w-\[175px\]/)
   assert.match(card, /line-clamp-2[\s\S]*xl:min-h-10[\s\S]*xl:text-\[15px\]/)
   assert.match(shell, /matchMedia\('\(hover: hover\) and \(pointer: fine\) and \(min-width: 768px\)'\)/)
