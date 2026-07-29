@@ -3,8 +3,9 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { awardExperience } from '@/lib/growth'
-import { POINTS } from '@/lib/points'
+import { getRandomPostRegistrationFee, POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
+import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { parseContentImageUrls } from '@/lib/content-images'
 import { getShanghaiDateKey } from '@/lib/checkin'
@@ -128,9 +129,9 @@ export async function POST(request: Request) {
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
-      const currentUser = await tx.user.findFirstOrThrow({
+      await tx.user.findFirstOrThrow({
         where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-        select: { points: true },
+        select: { id: true },
       })
       const post = await tx.post.create({
         data: {
@@ -161,31 +162,34 @@ export async function POST(request: Request) {
       })
 
       const dateKey = getShanghaiDateKey(new Date())
-      const reward = await tx.pointLog.createMany({
-        data: [{
-          userId: user.id,
-          action: 'POST_DAILY_FIRST',
-          points: POINTS.dailyFirstPost,
-          before: currentUser.points,
-          after: currentUser.points + POINTS.dailyFirstPost,
-          postId: post.id,
-          dateKey,
-          businessKey: `post-daily:${user.id}:${dateKey}`,
-          reason: '每日首次发帖',
-        }],
-        skipDuplicates: true,
+      const feeAward = await awardRegistrationFee(tx, {
+        userId: user.id,
+        requestedAmount: getRandomPostRegistrationFee(),
+        action: 'POST_DAILY_FIRST',
+        reason: '每日首次发帖',
+        businessKey: `post-daily:${user.id}:${dateKey}`,
+        postId: post.id,
       })
-      if (reward.count) await tx.user.update({ where: { id: user.id }, data: { points: { increment: POINTS.dailyFirstPost } } })
 
-      return { post, rewardPoints: reward.count ? POINTS.dailyFirstPost : 0 }
+      return { post, rewardPoints: feeAward.awardedAmount, registrationFeeLimitReached: feeAward.capped }
     })
 
-    const detailUrl = `/posts/${result.post.id}${result.rewardPoints ? `?reward=${result.rewardPoints}` : ''}`
+    const detailQuery = result.rewardPoints
+      ? `?reward=${result.rewardPoints}`
+      : result.registrationFeeLimitReached
+        ? '?registrationFeeLimit=1'
+        : ''
+    const detailUrl = `/posts/${result.post.id}${detailQuery}`
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)
     })
 
-    return NextResponse.json({ post: { ...result.post, detailUrl }, detailUrl, rewardPoints: result.rewardPoints }, { status: 201 })
+    return NextResponse.json({
+      post: { ...result.post, detailUrl },
+      detailUrl,
+      rewardPoints: result.rewardPoints,
+      registrationFeeLimitReached: result.registrationFeeLimitReached,
+    }, { status: 201 })
   } catch (error) {
     console.error('[post:create:error]', { userId: user.id, boardId: input.boardId, error })
     return NextResponse.json({ message: '发布帖子暂时失败，请稍后重试' }, { status: 503 })

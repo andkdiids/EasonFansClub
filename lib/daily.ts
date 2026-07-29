@@ -19,7 +19,6 @@ export const DAILY_QUOTES = [
   '如果想念有声音，那就让它循环播放。',
 ]
 
-export const CHECK_IN_POINTS = 10
 export const CHECK_IN_EXP = 5
 
 export function getMood(key?: string | null) {
@@ -44,10 +43,6 @@ export function calcMoodIndex(moods: { mood: string; _count: { mood: number } }[
 }
 
 export function getStreakBonus(streak: number) {
-  if (streak >= 100) return { points: 100, exp: 80, label: '连续100天特别奖励' }
-  if (streak >= 30) return { points: 40, exp: 30, label: '连续30天奖励' }
-  if (streak >= 15) return { points: 25, exp: 18, label: '连续15天奖励' }
-  if (streak >= 7) return { points: 15, exp: 10, label: '连续7天奖励' }
-  if (streak >= 3) return { points: 5, exp: 5, label: '连续3天奖励' }
+  if (streak >= 7) return { points: 7, exp: 0, label: '长期患者奖励' }
   return null
 }

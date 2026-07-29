@@ -117,17 +117,18 @@ test('挂号时间按北京时间显示真实创建分钟', () => {
   assert.doesNotMatch(route, /createdAt: today/)
 })
 
-test('每日挂号积分与经验区域提供成长体系说明', () => {
+test('每日挂号费与经验区域提供成长体系说明', () => {
   const button = readFileSync('components/CheckInButton.tsx', 'utf8')
   const guide = readFileSync('components/CheckInGrowthGuideCard.tsx', 'utf8')
   assert.match(button, /<CheckInGrowthGuideCard compact=\{isCompact\} \/>/)
   assert.match(guide, /🚑 E院成长体系/)
   assert.match(guide, /【经验值 EXP】/)
-  assert.match(guide, /【E院积分】/)
-  assert.match(guide, /【积分获取方式】/)
-  assert.match(guide, /未来可能用于/)
-  assert.match(guide, /具体规则以后开放/)
-  assert.match(guide, /md:grid-cols-3/)
+  assert.match(guide, /【挂号费】/)
+  assert.match(guide, /【如何获取挂号费】/)
+  assert.match(guide, /未来用途/)
+  assert.match(guide, /每日普通挂号费最高 30/)
+  assert.match(guide, /长期患者奖励/)
+  assert.match(guide, /百日病历/)
 })
 
 test('移动端资料卡与布局编辑器使用独立尺寸和显式网格', () => {

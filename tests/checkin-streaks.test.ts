@@ -61,7 +61,7 @@ test('签到成功响应严格使用事务后查询到的 CheckIn 奖励值', ()
   assert.doesNotMatch(route, /\[checkin\.verify\.result\]/)
   assert.match(route, /\[checkin\.verify\.mismatch\]/)
   assert.match(button, /verifyData\?\.checkedToday/)
-  assert.match(button, /\+\$\{nextCheckIn\.points\} 积分、\+\$\{nextCheckIn\.exp\} 经验/)
+  assert.match(button, /\+\$\{nextCheckIn\.points\} 挂号费、\+\$\{nextCheckIn\.exp\} 经验/)
 })
 
 test('应用运行时只接受 DATABASE_URL 中的 MySQL 连接', () => {

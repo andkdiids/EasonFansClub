@@ -9,7 +9,7 @@ const achievements = [
   ['CHECKIN_STREAK', '连续3天挂号', 'checkin-streak-3', '💊', '连续挂号 3 天。', 'checkinStreak', 3, 'NORMAL', 10],
   ['CHECKIN_STREAK', '连续7天挂号', 'checkin-streak-7', '💉', '连续挂号 7 天。', 'checkinStreak', 7, 'RARE', 11],
   ['CHECKIN_STREAK', '连续30天挂号', 'checkin-streak-30', '🩹', '连续挂号 30 天。', 'checkinStreak', 30, 'EPIC', 12],
-  ['CHECKIN_STREAK', '连续100天挂号', 'checkin-streak-100', '🏥', '连续挂号 100 天。', 'checkinStreak', 100, 'LEGENDARY', 13],
+  ['CHECKIN_STREAK', '百日病历', 'checkin-streak-100', '📋', '连续挂号 100 天，解锁百日病历徽章、专属称号及一次性挂号费奖励。', 'checkinStreak', 100, 'LEGENDARY', 13],
   ['CHECKIN_STREAK', '连续365天挂号', 'checkin-streak-365', '👨‍⚕️', '连续挂号 365 天。', 'checkinStreak', 365, 'LIMITED', 14],
   ...[7, 27, 74, 270, 727, 1874].map((days, index) => [
     'CHECKIN_TOTAL',

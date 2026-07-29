@@ -15,17 +15,17 @@ const lyrics: LyricCandidate[] = [
   { id: 'c', text: '短句 C', songTitle: '歌曲 C', albumTitle: null },
 ]
 
-test('积分奖励池严格对应 35/30/20/10/5 权重边界', () => {
-  assert.equal(selectEntertainmentReward(0), 5)
-  assert.equal(selectEntertainmentReward(34), 5)
-  assert.equal(selectEntertainmentReward(35), 8)
-  assert.equal(selectEntertainmentReward(64), 8)
-  assert.equal(selectEntertainmentReward(65), 10)
-  assert.equal(selectEntertainmentReward(84), 10)
-  assert.equal(selectEntertainmentReward(85), 15)
-  assert.equal(selectEntertainmentReward(94), 15)
-  assert.equal(selectEntertainmentReward(95), 20)
-  assert.equal(selectEntertainmentReward(99), 20)
+test('挂号费奖励池严格对应 35/30/20/10/5 权重边界', () => {
+  assert.equal(selectEntertainmentReward(0), 1)
+  assert.equal(selectEntertainmentReward(34), 1)
+  assert.equal(selectEntertainmentReward(35), 3)
+  assert.equal(selectEntertainmentReward(64), 3)
+  assert.equal(selectEntertainmentReward(65), 5)
+  assert.equal(selectEntertainmentReward(84), 5)
+  assert.equal(selectEntertainmentReward(85), 7)
+  assert.equal(selectEntertainmentReward(94), 7)
+  assert.equal(selectEntertainmentReward(95), 10)
+  assert.equal(selectEntertainmentReward(99), 10)
 })
 
 test('北京时间日期键在 UTC 跨日边界按 Asia/Shanghai 计算', () => {
@@ -45,7 +45,7 @@ test('可用歌词不足时允许回退重复，不阻断抽奖', () => {
   assert.equal(selectLyricCandidate([], new Set(), () => 0), null)
 })
 
-test('数据库模型提供每日唯一约束、歌词快照与积分流水关联', () => {
+test('数据库模型提供每日唯一约束、歌词快照与挂号费流水关联', () => {
   const schema = source('prisma/schema.prisma')
   assert.match(schema, /@@unique\(\[userId, dateKey\]\)/)
   assert.match(schema, /lyricText\s+String\?/)
@@ -53,12 +53,12 @@ test('数据库模型提供每日唯一约束、歌词快照与积分流水关�
   assert.match(schema, /ENTERTAINMENT_DAILY_DRAW/)
 })
 
-test('抽奖服务在同一事务创建记录、增加积分、写流水与累计展示次数', () => {
+test('抽奖服务在同一事务创建记录、通过统一服务增加挂号费与累计展示次数', () => {
   const service = source('lib/entertainment.ts')
   assert.match(service, /prisma\.\$transaction/)
   assert.match(service, /tx\.entertainmentDailyDraw\.create/)
-  assert.match(service, /points: \{ increment: points \}/)
-  assert.match(service, /tx\.pointLog\.create/)
+  assert.match(service, /awardRegistrationFee\(tx/)
+  assert.match(service, /requestedAmount: requestedPoints/)
   assert.match(service, /displayCount: \{ increment: 1 \}/)
   assert.match(service, /error\.code === 'P2002'/)
   assert.match(service, /findExistingDraw\(userId, dateKey\)/)
@@ -78,11 +78,11 @@ test('后台歌词接口和页面都要求 entertainment_manage 权限', () => {
   for (const item of [collectionRoute, itemRoute, page]) assert.match(item, /entertainment_manage/)
 })
 
-test('歌词为空仍创建抽奖与积分流水，且处方卡提供 midnight 可读样式', () => {
+test('歌词为空仍创建抽奖与挂号费流水，且处方卡提供 midnight 可读样式', () => {
   const service = source('lib/entertainment.ts')
   const styles = source('app/globals.css')
   assert.match(service, /lyricPrescriptionId: lyric\?\.id \?\? null/)
-  assert.match(service, /tx\.pointLog\.create/)
+  assert.match(service, /awardRegistrationFee\(tx/)
   assert.match(styles, /:root\[data-theme='midnight'\] \.prescription-card/)
   assert.match(styles, /color:var\(--foreground\)/)
 })

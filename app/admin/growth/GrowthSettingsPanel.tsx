@@ -55,7 +55,7 @@ export function GrowthSettingsPanel({
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Growth System</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950">成长系统管理</h1>
           <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600">
-            当前每日经验上限为 {dailyExpLimit} XP。任务系统数据结构已就绪，当前共有 {taskCount} 个任务配置。
+            当前每日经验上限为 {dailyExpLimit} XP。任务系统数据结构已就绪，当前共有 {taskCount} 个任务配置；任务中的 points 字段在业务与界面中统一表示“奖励挂号费”。
           </p>
         </div>
         <button
@@ -70,6 +70,12 @@ export function GrowthSettingsPanel({
 
       {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
       {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4"><span className="text-xs font-black text-slate-500">签到奖励挂号费</span><strong className="mt-1 block text-xl text-brand-950">随机 3～7</strong></div>
+        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4"><span className="text-xs font-black text-slate-500">普通挂号费日上限</span><strong className="mt-1 block text-xl text-brand-950">30</strong></div>
+        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4"><span className="text-xs font-black text-slate-500">长期患者额外奖励</span><strong className="mt-1 block text-xl text-brand-950">第 7 天起 +7</strong></div>
+      </div>
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-sky-100">
         <div className="grid grid-cols-[70px_minmax(0,1fr)_130px] bg-sky-50 px-4 py-2 text-xs font-black text-slate-500">

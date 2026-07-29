@@ -217,7 +217,7 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
               <th className="px-3 py-2">角色</th>
               <th className="px-3 py-2">状态</th>
               <th className="px-3 py-2">密保</th>
-              <th className="px-3 py-2">积分</th>
+              <th className="px-3 py-2">挂号费</th>
               <th className="px-3 py-2">注册时间</th>
               <th className="px-3 py-2 text-right">操作</th>
             </tr>
@@ -259,7 +259,7 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
                     {user.securityQuestionFailureCount > 0 ? <p className="mt-1 text-xs font-bold text-amber-700">近期失败 {user.securityQuestionFailureCount} 次{user.securityQuestionLockedUntil ? `，锁定至 ${formatDate(user.securityQuestionLockedUntil)}` : ''}</p> : null}
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-600">
-                    Lv.{user.level} / {user.points} 分
+                    Lv.{user.level} / {user.points} 挂号费
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-500">{formatDate(user.createdAt)}</td>
                   <td className="rounded-r-2xl px-3 py-3 text-right">

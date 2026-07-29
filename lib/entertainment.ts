@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute, getBeijingDateKey, shiftBeijingDateKey } from '@/lib/beijing-time'
 import { selectEntertainmentReward } from '@/lib/entertainment-rewards'
 import { prisma } from '@/lib/prisma'
+import { awardRegistrationFee } from '@/lib/registration-fee'
 
 export const EMPTY_LYRIC_MESSAGE = '今日处方暂未开具，请等待管理员补充歌词库'
 
@@ -117,12 +118,12 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
         .filter((id): id is string => Boolean(id)),
     )
     const lyric = selectLyricCandidate(candidates, recentIds)
-    const points = selectEntertainmentReward()
-    const draw = await tx.entertainmentDailyDraw.create({
+    const requestedPoints = selectEntertainmentReward()
+    const createdDraw = await tx.entertainmentDailyDraw.create({
       data: {
         userId,
         dateKey,
-        points,
+        points: 0,
         prescriptionCode: createPrescriptionCode(),
         lyricPrescriptionId: lyric?.id ?? null,
         lyricText: lyric?.text ?? null,
@@ -132,23 +133,19 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
       },
       include: dailyDrawInclude,
     })
-
-    const updatedUser = await tx.user.update({
-      where: { id: userId },
-      data: { points: { increment: points } },
-      select: { points: true },
+    const feeAward = await awardRegistrationFee(tx, {
+      userId,
+      requestedAmount: requestedPoints,
+      action: 'ENTERTAINMENT_DAILY_DRAW',
+      reason: '娱乐中心每日抽奖',
+      businessKey: `entertainment-draw:${createdDraw.id}`,
+      dailyDrawId: createdDraw.id,
+      now,
     })
-
-    await tx.pointLog.create({
-      data: {
-        userId,
-        action: 'ENTERTAINMENT_DAILY_DRAW',
-        points,
-        before: updatedUser.points - points,
-        after: updatedUser.points,
-        dailyDrawId: draw.id,
-        reason: '娱乐中心每日抽奖',
-      },
+    const draw = await tx.entertainmentDailyDraw.update({
+      where: { id: createdDraw.id },
+      data: { points: feeAward.awardedAmount },
+      include: dailyDrawInclude,
     })
 
     if (lyric) {
@@ -158,7 +155,10 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
       })
     }
 
-    return serializeDailyDraw(draw, updatedUser.points)
+    return {
+      ...serializeDailyDraw(draw, feeAward.totalPoints),
+      registrationFeeLimitReached: feeAward.capped,
+    }
   })
 }
 

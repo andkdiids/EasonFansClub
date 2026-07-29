@@ -1,5 +1,6 @@
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
+import { awardRegistrationFee, HUNDRED_DAY_RECORD_REWARD } from '@/lib/registration-fee'
 
 export type AchievementSyncCategory =
   | 'REGISTER'
@@ -83,6 +84,37 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
   const stats = await getUserAchievementStats(userId)
   if (!stats) return []
 
+  if (!categories?.length || categories.includes('CHECKIN_STREAK')) {
+    await prisma.achievement.upsert({
+      where: { slug: 'checkin-streak-100' },
+      update: {
+        title: '百日病历',
+        description: `连续挂号 100 天，解锁百日病历徽章、专属称号及 ${HUNDRED_DAY_RECORD_REWARD} 挂号费奖励。`,
+        icon: '📋',
+        category: 'CHECKIN_STREAK',
+        rarity: 'LEGENDARY',
+        conditionKey: 'checkinStreak',
+        conditionValue: 100,
+        isAutoGrant: true,
+        isVisible: true,
+        sortOrder: 13,
+      },
+      create: {
+        title: '百日病历',
+        slug: 'checkin-streak-100',
+        description: `连续挂号 100 天，解锁百日病历徽章、专属称号及 ${HUNDRED_DAY_RECORD_REWARD} 挂号费奖励。`,
+        icon: '📋',
+        category: 'CHECKIN_STREAK',
+        rarity: 'LEGENDARY',
+        conditionKey: 'checkinStreak',
+        conditionValue: 100,
+        isAutoGrant: true,
+        isVisible: true,
+        sortOrder: 13,
+      },
+    })
+  }
+
   const achievements = await prisma.achievement.findMany({
     where: { isVisible: true, ...(categories?.length ? { category: { in: categories } } : {}) },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -126,6 +158,16 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
         unlockedAt,
       },
     })
+    if (achievement.slug === 'checkin-streak-100' && shouldUnlock) {
+      await prisma.$transaction((tx) => awardRegistrationFee(tx, {
+        userId,
+        requestedAmount: HUNDRED_DAY_RECORD_REWARD,
+        action: 'ACTIVITY_REWARD',
+        reason: '“百日病历”成就一次性奖励',
+        businessKey: `achievement-reward:${userId}:${achievement.id}`,
+        countsTowardDailyLimit: false,
+      }))
+    }
   }
 
   if (categories?.length) {

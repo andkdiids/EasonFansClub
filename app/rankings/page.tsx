@@ -39,7 +39,7 @@ export default async function RankingsPage() {
         </section>
         <section className="grid gap-6 lg:grid-cols-3">
           {[
-            ['积分榜', points.map((u) => { const growth = calculateGrowthSummary(u.experience, growthLevels); return `${u.nickname} · ${growth.levelName} · Lv.${growth.level} · ${u.points}分` })],
+            ['挂号费榜', points.map((u) => { const growth = calculateGrowthSummary(u.experience, growthLevels); return `${u.nickname} · ${growth.levelName} · Lv.${growth.level} · ${u.points}挂号费` })],
             ['签到榜', streakTop.map((item) => { const u = userById.get(item.userId); return u ? `${u.nickname} · 连续${item.currentStreak}天` : null }).filter((row): row is string => Boolean(row))],
             ['热帖榜', posts.map((p) => `${p.title} · ${p.replyCount}回复 · ${p.likeCount}赞`)],
           ].map(([title, rows]) => (

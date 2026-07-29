@@ -81,7 +81,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           <Link href="/checkin" className="stat-checkin"><span>今日挂号</span><strong>{data.stats?.checkIns.length?'已签到':'去签到'}</strong><small>{data.stats?`连续签到 ${data.stats.consecutiveDays} 天 · 累计 ${data.stats._count.checkIns} 天`:'正在读取签到数据'}</small>{data.stats?.checkIns.length?<i>✓</i>:null}</Link>
           <div><span>成长等级</span><strong>等级 {data.stats?.level??'—'}</strong><div className="stat-progress"><i style={{width:`${growth.progressPercent}%`}}/></div><small>{growth.nextRequiredExp?`${fmt(growth.experience)} / ${fmt(growth.nextRequiredExp)} EXP`: `${fmt(growth.experience)} EXP`}</small></div>
           <div><span>经验值</span><strong>{data.stats?fmt(data.stats.experience):'—'}</strong></div>
-          <div><span>E积分</span><strong>{data.stats?fmt(data.stats.points):'—'}</strong></div>
+          <div><span>挂号费</span><strong>{data.stats?fmt(data.stats.points):'—'}</strong></div>
           <div className="stat-total"><span>累计签到</span><strong>{data.stats?`${fmt(data.stats._count.checkIns)} 天`:'—'}</strong><Link href="/checkin">查看签到记录 ›</Link></div>
         </section>:null}
         {failed?<p className="community-error">部分社区内容暂时无法载入，请稍后刷新。</p>:null}

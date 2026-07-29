@@ -1,72 +1,54 @@
 export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?: boolean }>) {
   return (
     <details className="group overflow-hidden rounded-2xl border border-sky-100 bg-gradient-to-br from-white to-sky-50/80 shadow-sm">
-      <summary
-        className={`flex cursor-pointer list-none items-center justify-between gap-3 font-black text-brand-950 outline-none transition hover:bg-sky-50 focus-visible:ring-2 focus-visible:ring-brand-300 [&::-webkit-details-marker]:hidden ${
-          compact ? 'px-3 py-2 text-xs' : 'px-4 py-3 text-sm'
-        }`}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <span aria-hidden="true">🚑</span>
-          <span>了解经验值与 E院积分</span>
-        </span>
-        <span
-          aria-hidden="true"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-base text-brand-700 transition-transform group-open:rotate-45"
-        >
-          ＋
-        </span>
+      <summary className={`flex cursor-pointer list-none items-center justify-between gap-3 font-black text-brand-950 outline-none transition hover:bg-sky-50 focus-visible:ring-2 focus-visible:ring-brand-300 [&::-webkit-details-marker]:hidden ${compact ? 'px-3 py-2 text-xs' : 'px-4 py-3 text-sm'}`}>
+        <span className="flex min-w-0 items-center gap-2"><span aria-hidden="true">🚑</span><span>了解经验值与挂号费</span></span>
+        <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-base text-brand-700 transition-transform group-open:rotate-45">＋</span>
       </summary>
 
       <div className={`border-t border-sky-100 ${compact ? 'p-3' : 'p-4 sm:p-5'}`}>
         <h2 className="text-lg font-black text-brand-950 sm:text-xl">🚑 E院成长体系</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <section className="rounded-2xl border border-sky-100 bg-white/85 p-4">
-            <h3 className="font-black text-brand-800">【经验值 EXP】</h3>
-            <p className="mt-2 text-sm font-bold leading-6 text-slate-700">
-              经验值代表用户在私家E院的活跃程度。
-            </p>
-            <p className="mt-3 text-xs font-black text-slate-500">目前用途</p>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm font-bold leading-6 text-slate-700">
-              <li>记录用户成长历程</li>
-              <li>展示用户活跃程度</li>
-            </ul>
-            <p className="mt-3 text-xs font-black text-slate-500">未来可能用于</p>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm font-bold leading-6 text-slate-700">
-              <li>用户等级</li>
-              <li>成长徽章</li>
-              <li>社区身份展示</li>
-              <li>更多功能解锁</li>
-            </ul>
-            <p className="mt-3 text-xs font-bold leading-5 text-slate-500">相关功能将随E院成长体系逐步扩展。</p>
-          </section>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <GuideSection title="【经验值 EXP】">
+            <p>经验值代表你在私家E院的成长历程。</p>
+            <GuideList title="用途" items={['提升用户等级', '解锁成长称号', '展示用户活跃程度']} />
+            <GuideList title="获取方式" items={['每日挂号', '社区互动', '完成任务', '官方活动']} />
+          </GuideSection>
 
-          <section className="rounded-2xl border border-sky-100 bg-white/85 p-4">
-            <h3 className="font-black text-brand-800">【E院积分】</h3>
-            <p className="mt-2 text-sm font-bold leading-6 text-slate-700">积分用于未来参与E院活动。</p>
-            <p className="mt-3 text-xs font-black text-slate-500">未来如举办</p>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm font-bold leading-6 text-slate-700">
-              <li>粉丝福利活动</li>
-              <li>线下活动</li>
-              <li>特别活动</li>
-              <li>周边活动</li>
-            </ul>
-            <p className="mt-2 text-sm font-bold leading-6 text-slate-700">部分活动可能需要消耗一定积分。</p>
-          </section>
+          <GuideSection title="【挂号费】">
+            <p>挂号费是私家E院专属权益货币。</p>
+            <GuideList title="未来用途" items={['活动报名', '福利兑换', '限定活动参与', '特殊权益开放', '未来可能开放香港名医预约玩法']} />
+          </GuideSection>
 
-          <section className="rounded-2xl border border-sky-100 bg-white/85 p-4">
-            <h3 className="font-black text-brand-800">【积分获取方式】</h3>
-            <p className="mt-2 text-xs font-black text-slate-500">积分获取方式</p>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm font-bold leading-6 text-slate-700">
-              <li>每日挂号</li>
-              <li>社区互动</li>
-              <li>完成任务</li>
-              <li>官方活动</li>
-            </ul>
-            <p className="mt-3 text-xs font-bold leading-5 text-slate-500">具体规则以后开放。</p>
-          </section>
+          <GuideSection title="【如何获取挂号费】">
+            <p><strong>每日挂号：</strong>每日首次签到随机获得 3～7 挂号费。</p>
+            <GuideList title="其他普通来源" items={['每日任务：根据任务内容获得奖励', '完成社区互动：+1～3 挂号费', '发布帖子：+1～3 挂号费', '完成娱乐中心小游戏：+1～10 挂号费', '官方活动：根据活动规则发放']} />
+          </GuideSection>
+
+          <GuideSection title="【每日获取限制】">
+            <p>每日普通挂号费最高 30 挂号费，包括每日挂号、普通任务、社区互动和娱乐奖励。</p>
+            <p>达到 30 后，普通奖励停止增加，并于次日重新计算。</p>
+          </GuideSection>
+
+          <GuideSection title="【连续签到奖励】">
+            <p>连续签到达到 7 天，解锁“长期患者奖励”；从第 7 天起，每日签到额外获得 +7 挂号费。</p>
+            <p>这部分奖励不计入每日 30 挂号费限制。签到中断后需重新连续签到 7 天。</p>
+          </GuideSection>
+
+          <GuideSection title="【特别成就】">
+            <p>连续签到 100 天可获得“百日病历”成就、徽章、专属称号和一次性挂号费奖励。</p>
+          </GuideSection>
         </div>
       </div>
     </details>
   )
 }
+
+function GuideSection({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
+  return <section className="space-y-2 rounded-2xl border border-sky-100 bg-white/85 p-4 text-sm font-bold leading-6 text-slate-700"><h3 className="font-black text-brand-800">{title}</h3>{children}</section>
+}
+
+function GuideList({ title, items }: Readonly<{ title: string; items: string[] }>) {
+  return <div><p className="text-xs font-black text-slate-500">{title}</p><ul className="mt-1 list-disc space-y-1 pl-5">{items.map((item) => <li key={item}>{item}</li>)}</ul></div>
+}
+import type { ReactNode } from 'react'

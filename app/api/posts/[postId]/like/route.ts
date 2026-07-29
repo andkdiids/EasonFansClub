@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { POINTS, calcLevel } from '@/lib/points'
+import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
+import { awardRegistrationFee } from '@/lib/registration-fee'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -33,23 +34,15 @@ export async function POST(_request: Request, { params }: Params) {
     })
 
     if (post.authorId !== user.id) {
-      const author = await tx.user.findUnique({ where: { id: post.authorId }, select: { points: true, exp: true } })
+      const author = await tx.user.findUnique({ where: { id: post.authorId }, select: { id: true } })
       if (author) {
-        const nextPoints = author.points + POINTS.postLikeReceived
-        await tx.user.update({
-          where: { id: post.authorId },
-          data: { points: nextPoints, level: calcLevel(nextPoints + author.exp) },
-        })
-        await tx.pointLog.create({
-          data: {
-            userId: post.authorId,
-            action: 'POST_LIKE_RECEIVED',
-            points: POINTS.postLikeReceived,
-            before: author.points,
-            after: nextPoints,
-            postId,
-            reason: '帖子收到点赞',
-          },
+        await awardRegistrationFee(tx, {
+          userId: post.authorId,
+          requestedAmount: POINTS.postLikeReceived,
+          action: 'POST_LIKE_RECEIVED',
+          reason: '帖子收到点赞',
+          businessKey: `post-like-received:${postId}:${user.id}`,
+          postId,
         })
       }
     }

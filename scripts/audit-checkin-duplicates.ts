@@ -22,7 +22,7 @@ async function main() {
     duplicateUsers: Number(summary?.duplicateUsers || BigInt(0)),
     duplicateDates: Number(summary?.duplicateDates || BigInt(0)),
     recordsToRemove: Number(summary?.recordsToRemove || BigInt(0)),
-    note: '该命令只读，不修改积分、经验、留言、通知或挂号记录。',
+    note: '该命令只读，不修改挂号费、经验、留言、通知或挂号记录。',
   }, null, 2))
 }
 

@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
+import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
 import { getShanghaiDateKey } from '@/lib/checkin'
@@ -60,9 +61,9 @@ export async function POST(request: Request, { params }: Params) {
 
   const reply = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
-    const currentUser = await tx.user.findFirstOrThrow({
+    await tx.user.findFirstOrThrow({
       where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-      select: { points: true },
+      select: { id: true },
     })
     const duplicateReply = await tx.reply.findFirst({
       where: {
@@ -113,24 +114,23 @@ export async function POST(request: Request, { params }: Params) {
 
     const dateKey = getShanghaiDateKey(new Date())
     const rewardedToday = await tx.pointLog.count({ where: { userId: user.id, action: 'POST_COMMENT_DAILY', dateKey } })
-    const rewardPoints = rewardedToday < POINTS.dailyPostCommentLimit ? POINTS.dailyPostComment : 0
-    if (rewardPoints) {
-      await tx.pointLog.create({ data: {
+    const feeAward = rewardedToday < POINTS.dailyPostCommentLimit
+      ? await awardRegistrationFee(tx, {
         userId: user.id,
         action: 'POST_COMMENT_DAILY',
-        points: rewardPoints,
-        before: currentUser.points,
-        after: currentUser.points + rewardPoints,
+        requestedAmount: POINTS.dailyPostComment,
+        reason: '每日评论奖励',
         postId,
         replyId: createdReply.id,
-        dateKey,
         businessKey: `post-comment:${createdReply.id}`,
-        reason: '每日评论奖励',
-      } })
-      await tx.user.update({ where: { id: user.id }, data: { points: { increment: rewardPoints } } })
-    }
+      })
+      : null
 
-    return { createdReply, rewardPoints }
+    return {
+      createdReply,
+      rewardPoints: feeAward?.awardedAmount || 0,
+      registrationFeeLimitReached: Boolean(feeAward?.capped),
+    }
   })
 
   if ('duplicateReplyId' in reply) {
@@ -140,7 +140,7 @@ export async function POST(request: Request, { params }: Params) {
     }, { status: 409 })
   }
 
-  const { createdReply, rewardPoints } = reply
+  const { createdReply, rewardPoints, registrationFeeLimitReached } = reply
   const recipientId = parentReply?.authorId || post.authorId
   if (recipientId !== user.id) {
     try {
@@ -180,5 +180,6 @@ export async function POST(request: Request, { params }: Params) {
       },
     },
     rewardPoints,
+    registrationFeeLimitReached,
   }, { status: 201 })
 }

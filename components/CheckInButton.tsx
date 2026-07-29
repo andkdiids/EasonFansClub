@@ -219,7 +219,11 @@ onStateChange?.({
       : undefined,
 })
       
-      setMessage(`今日挂号成功，获得 +${nextCheckIn.points} 积分、+${nextCheckIn.exp} 经验`)
+      const streakBonus = Number(data.streakBonusRegistrationFee) || 0
+      const feeMessage = data.registrationFeeLimitReached
+        ? `今日挂号成功，获得 +${nextCheckIn.points} 挂号费、+${nextCheckIn.exp} 经验。今日挂号费获取已达到上限，明日继续努力。`
+        : `今日挂号成功，获得 +${nextCheckIn.points} 挂号费、+${nextCheckIn.exp} 经验`
+      setMessage(streakBonus ? `${feeMessage}（含长期患者奖励 +${streakBonus} 挂号费）` : feeMessage)
       window.dispatchEvent(
         new CustomEvent('checkin:completed', {
           detail: {
@@ -250,7 +254,7 @@ onStateChange?.({
             </div>
           </div>
           <div className="flex min-w-0 flex-wrap gap-1">
-            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-black text-brand-700">+{todayCheckIn.points} 积分</span>
+            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-black text-brand-700">+{todayCheckIn.points} 挂号费</span>
             <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-black text-brand-700">+{todayCheckIn.exp} 经验</span>
           </div>
         </div>
@@ -260,7 +264,7 @@ onStateChange?.({
       <div className={`${isCompact ? 'space-y-2' : 'space-y-4'} ${previewMode ? 'pointer-events-none select-none' : ''}`}>
         <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">Lv.{stats.level}</span>
-          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">{stats.points} 积分</span>
+          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">{stats.points} 挂号费</span>
           <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">{stats.exp} 经验</span>
         </div>
         <CheckInGrowthGuideCard compact={isCompact} />
@@ -279,7 +283,8 @@ onStateChange?.({
           ) : (
             <p className={isCompact ? 'mt-2 rounded-2xl bg-white/80 px-3 py-2 text-xs font-bold text-slate-500' : 'mt-4 rounded-2xl bg-white/80 px-4 py-2 text-sm font-bold text-slate-500'}>今天没有填写留言。</p>
           )}
-          <p className={isCompact ? 'mt-2 text-xs font-black text-emerald-700' : 'mt-4 text-sm font-black text-emerald-700'}>本次获得 +{todayCheckIn.points} 积分、+{todayCheckIn.exp} 经验</p>
+          <p className={isCompact ? 'mt-2 text-xs font-black text-emerald-700' : 'mt-4 text-sm font-black text-emerald-700'}>本次获得 +{todayCheckIn.points} 挂号费、+{todayCheckIn.exp} 经验</p>
+          {todayCheckIn.streakDay >= 7 ? <p className="mt-1 text-xs font-black text-amber-700">长期患者奖励已生效：每日额外 +7 挂号费，不计入普通获取上限。</p> : null}
         </div>
         {message ? <p className="text-sm font-bold text-brand-700">{message}</p> : null}
       </div>

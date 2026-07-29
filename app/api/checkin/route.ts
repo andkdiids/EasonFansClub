@@ -3,10 +3,12 @@ import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
-import { CHECK_IN_POINTS, getMood, getStreakBonus } from '@/lib/daily'
+import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
+import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
+import { awardRegistrationFee, REGISTRATION_FEE_LIMIT_MESSAGE } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 export async function GET() {
@@ -126,10 +128,6 @@ export async function POST(request: Request) {
   let result
   try {
     result = await prisma.$transaction(async (tx) => {
-    const currentUser = await tx.user.findUniqueOrThrow({
-      where: { id: user.id },
-      select: { points: true },
-    })
     // 不再链式读取昨日记录的连签数加一;按全部签到记录(含今日)统一重算
     const existingKeys = await tx.checkIn.findMany({
       where: { userId: user.id },
@@ -138,9 +136,8 @@ export async function POST(request: Request) {
     const streaks = calculateCheckinStreaks([...existingKeys.map((item) => item.checkinDateKey), todayKey], checkedAt)
     const nextStreak = streaks.currentStreak
     const bonus = getStreakBonus(nextStreak)
-    const gainedPoints = CHECK_IN_POINTS + (bonus?.points || 0)
+    const requestedRegistrationFee = getRandomCheckInPoints()
     const requestedExp = getRandomCheckInExperience()
-    const nextPoints = currentUser.points + gainedPoints
 
     const createdCheckIn = await tx.checkIn.create({
       data: {
@@ -148,7 +145,7 @@ export async function POST(request: Request) {
         checkDate: checkedAt,
         checkinDateKey: todayKey,
         createdAt: checkedAt,
-        points: gainedPoints,
+        points: 0,
         exp: 0,
         streakDay: nextStreak,
         mood: mood?.key ?? null,
@@ -156,6 +153,28 @@ export async function POST(request: Request) {
       },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
     })
+    const ordinaryFeeAward = await awardRegistrationFee(tx, {
+      userId: user.id,
+      requestedAmount: requestedRegistrationFee,
+      action: 'DAILY_CHECK_IN',
+      reason: '每日挂号',
+      businessKey: `checkin:${createdCheckIn.id}`,
+      checkInId: createdCheckIn.id,
+      now: checkedAt,
+    })
+    const streakFeeAward = bonus
+      ? await awardRegistrationFee(tx, {
+          userId: user.id,
+          requestedAmount: bonus.points,
+          action: 'CONTINUOUS_CHECK_IN_BONUS',
+          reason: bonus.label,
+          businessKey: `checkin-streak:${createdCheckIn.id}`,
+          checkInId: createdCheckIn.id,
+          countsTowardDailyLimit: false,
+          now: checkedAt,
+        })
+      : null
+    const gainedPoints = ordinaryFeeAward.awardedAmount + (streakFeeAward?.awardedAmount || 0)
     const expAward = await awardExperience(tx, {
       userId: user.id,
       amount: requestedExp,
@@ -167,7 +186,7 @@ export async function POST(request: Request) {
     const gainedExp = expAward.amount
     const checkIn = await tx.checkIn.update({
       where: { id: createdCheckIn.id },
-      data: { exp: gainedExp },
+      data: { points: gainedPoints, exp: gainedExp },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
     })
     let dailyMessageId: string | null = null
@@ -198,23 +217,10 @@ export async function POST(request: Request) {
     const updatedUser = await tx.user.update({
       where: { id: user.id },
       data: {
-        points: nextPoints,
         consecutiveDays: nextStreak,
         lastCheckInDate: today,
       },
       select: { points: true, exp: true, experience: true, consecutiveDays: true, level: true },
-    })
-
-    await tx.pointLog.create({
-      data: {
-        userId: user.id,
-        action: 'DAILY_CHECK_IN',
-        points: gainedPoints,
-        before: currentUser.points,
-        after: nextPoints,
-        checkInId: checkIn.id,
-        reason: bonus ? `每日挂号，${bonus.label}` : '每日挂号',
-      },
     })
 
     return {
@@ -223,6 +229,9 @@ export async function POST(request: Request) {
       gainedPoints: checkIn.points,
       gainedExp: checkIn.exp,
       bonus,
+      ordinaryRegistrationFee: ordinaryFeeAward.awardedAmount,
+      streakBonusRegistrationFee: streakFeeAward?.awardedAmount || 0,
+      registrationFeeLimitReached: ordinaryFeeAward.capped,
       dailyMessageId,
       streaks,
     }
@@ -325,7 +334,7 @@ if (
 
 
 
-Promise.allSettled([
+const postCheckinResults = await Promise.allSettled([
   syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
   prisma.dailyTaskTemplate.findUnique({ 
     where: { key: 'daily-checkin' }, 
@@ -356,8 +365,8 @@ Promise.allSettled([
         })
       : null
   )),
-]).then((results) => {
-  results.forEach((item, index) => {
+])
+postCheckinResults.forEach((item, index) => {
     if (item.status === 'rejected') {
       console.error(
         index === 0 
@@ -367,10 +376,9 @@ Promise.allSettled([
       )
     }
   })
-})
 
 return NextResponse.json({
-    message: '今日挂号成功',
+    message: result.registrationFeeLimitReached ? REGISTRATION_FEE_LIMIT_MESSAGE : '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
     todayCheckIn: verifyCheckIn,
@@ -378,6 +386,9 @@ return NextResponse.json({
     gainedPoints: verifyCheckIn.points,
     gainedExp: verifyCheckIn.exp,
     bonus: result.bonus,
+    ordinaryRegistrationFee: result.ordinaryRegistrationFee,
+    streakBonusRegistrationFee: result.streakBonusRegistrationFee,
+    registrationFeeLimitReached: result.registrationFeeLimitReached,
     dailyMessageId: result.dailyMessageId,
     consecutiveDays: result.streaks.currentStreak,
     currentStreak: result.streaks.currentStreak,

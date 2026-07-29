@@ -8,7 +8,7 @@
  * 安全约定:
  * - 默认 dry-run,只输出审计结果,不写数据库。
  * - 只有显式传入 --apply 才会执行更新。
- * - 只更新 checkinDateKey,不碰 checkDate / createdAt / streakDay / 积分 / 经验等任何其它字段。
+ * - 只更新 checkinDateKey,不碰 checkDate / createdAt / streakDay / 挂号费 / 经验等任何其它字段。
  * - 修正后若同一用户同一日期出现重复(真实冲突),整体停止,不覆盖、不删除、不合并。
  *
  * 用法:

@@ -1,11 +1,11 @@
 import { randomInt } from 'node:crypto'
 
 export const ENTERTAINMENT_REWARD_POOL = [
-  { points: 5, weight: 35 },
-  { points: 8, weight: 30 },
-  { points: 10, weight: 20 },
-  { points: 15, weight: 10 },
-  { points: 20, weight: 5 },
+  { points: 1, weight: 35 },
+  { points: 3, weight: 30 },
+  { points: 5, weight: 20 },
+  { points: 7, weight: 10 },
+  { points: 10, weight: 5 },
 ] as const
 
 export function selectEntertainmentReward(roll = randomInt(100)) {

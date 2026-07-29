@@ -72,7 +72,7 @@ test('每日发帖和评论积分使用北京日期、行锁、业务键及评�
     assert.match(source, /businessKey/)
   }
   assert.match(post, /POST_DAILY_FIRST/)
-  assert.match(post, /dailyFirstPost/)
+  assert.match(post, /getRandomPostRegistrationFee/)
   assert.match(reply, /POST_COMMENT_DAILY/)
   assert.match(reply, /rewardedToday < POINTS\.dailyPostCommentLimit/)
   assert.match(reply, /post-comment:\$\{createdReply\.id\}/)
