@@ -65,6 +65,7 @@ jobs:
             lib \
             prisma \
             public \
+            types \
             package.json \
             pnpm-lock.yaml \
             pnpm-workspace.yaml \
