@@ -3,7 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createPortal } from 'react-dom'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
@@ -68,6 +76,7 @@ export function FriendDock({
   const cursorRef = useRef('')
   const beforeCursorRef = useRef('')
   const nearBottomRef = useRef(true)
+  const backdropCloseTimerRef = useRef(0)
 
   const notifyClients = useCallback((type: 'friends' | 'messages' | 'unread') => {
     window.dispatchEvent(new Event('unread-summary:refresh'))
@@ -100,6 +109,8 @@ export function FriendDock({
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(`friend-dock:collapsed:${currentUserId}`) === '1')
   }, [currentUserId])
+
+  useEffect(() => () => window.clearTimeout(backdropCloseTimerRef.current), [])
 
   useEffect(() => {
     window.localStorage.setItem(`friend-dock:collapsed:${currentUserId}`, collapsed ? '1' : '0')
@@ -288,9 +299,29 @@ export function FriendDock({
   }, [open, conversationId, currentUserId, markConversationRead, mergeMessages])
 
   function closeDock() {
+    window.clearTimeout(backdropCloseTimerRef.current)
     setOpen(false)
     setProfileFriend(null)
     window.requestAnimationFrame(() => toggleRef.current?.focus())
+  }
+
+  function consumeBackdropEvent(event: ReactPointerEvent<HTMLDivElement> | ReactMouseEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return false
+    event.preventDefault()
+    event.stopPropagation()
+    return true
+  }
+
+  function handleBackdropPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!consumeBackdropEvent(event)) return
+    // Keep the backdrop mounted through the browser's compatibility click.
+    // If that click is suppressed by preventDefault, this fallback still closes it.
+    backdropCloseTimerRef.current = window.setTimeout(closeDock, 0)
+  }
+
+  function handleBackdropClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (!consumeBackdropEvent(event)) return
+    closeDock()
   }
 
   function leaveChat() {
@@ -437,7 +468,13 @@ export function FriendDock({
   const groupedMessages = useMemo(() => groupMessages(messages), [messages])
   const overlay = open && typeof document !== 'undefined' ? createPortal(
     <>
-      <div className="friend-dock-backdrop" aria-hidden="true" onPointerDown={closeDock} />
+      <div
+        className="friend-dock-backdrop"
+        aria-hidden="true"
+        onPointerDown={consumeBackdropEvent}
+        onPointerUp={handleBackdropPointerUp}
+        onClick={handleBackdropClick}
+      />
       <section
         ref={panelRef}
         className={`friend-dock-panel ${chatFriend ? 'is-chat' : 'is-list'}`}
@@ -456,14 +493,22 @@ export function FriendDock({
                 <span><strong>{chatFriend.profile?.displayName || chatFriend.nickname}</strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
-          ) : (
-            <div>
-              <strong>好友与私信</strong>
-              <small>私信 {unreadSummary.messages} · 好友申请 {unreadSummary.friendRequests} · 全部 {unreadSummary.total}</small>
-            </div>
-          )}
+          ) : <strong className="friend-dock-title">好友与私信</strong>}
           <div className="friend-dock-header-actions">
-            {!chatFriend ? <Link href="/notifications">通知中心</Link> : null}
+            {!chatFriend ? (
+              <Link
+                className="friend-dock-notifications-link"
+                href="/notifications"
+                aria-label={unreadSummary.total > 0 ? `通知中心，${unreadSummary.total}条未读` : '通知中心'}
+              >
+                <span>通知中心</span>
+                {unreadSummary.total > 0 ? (
+                  <b className="friend-dock-notification-badge">
+                    {unreadSummary.total > 99 ? '99+' : unreadSummary.total}
+                  </b>
+                ) : null}
+              </Link>
+            ) : null}
             <button type="button" onClick={closeDock} aria-label="关闭好友窗口">×</button>
           </div>
         </header>
@@ -570,18 +615,18 @@ export function FriendDock({
   return (
     <div className={`friend-dock ${collapsed ? 'is-collapsed' : ''}`} data-friend-dock-open={open || undefined}>
       {overlay}
-      {collapsed ? (
+      {!open && collapsed ? (
         <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开好友入口">
           ‹{unreadSummary.total > 0 ? <span className="friend-dock-unread-dot" /> : null}
         </button>
-      ) : (
+      ) : !open ? (
         <div className="friend-dock-actions">
           <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={() => setOpen((value) => !value)} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
             好友{unreadSummary.total > 0 ? <b>{unreadSummary.total > 99 ? '99+' : unreadSummary.total}</b> : null}
           </button>
           <button type="button" className="friend-dock-collapse" onClick={() => { setOpen(false); setCollapsed(true) }} aria-label="收起好友入口">›</button>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

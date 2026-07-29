@@ -136,12 +136,12 @@ test('统一未读计数覆盖通知、反馈、好友申请和私信', () => {
 
 test('好友窗 outside-click 使用 body portal 遮罩且不干扰窗口内部', () => {
   assert.match(friendDock, /createPortal\(/)
-  assert.match(friendDock, /friend-dock-backdrop[\s\S]*onPointerDown=\{closeDock\}/)
+  assert.match(friendDock, /friend-dock-backdrop[\s\S]*onPointerDown=\{consumeBackdropEvent\}[\s\S]*onPointerUp=\{handleBackdropPointerUp\}[\s\S]*onClick=\{handleBackdropClick\}/)
   assert.match(friendDock, /FriendProfileCard/)
 })
 
 test('好友窗支持遮罩、关闭按钮、Esc、再次点击入口和路由关闭', () => {
-  assert.match(friendDock, /friend-dock-backdrop[\s\S]*onPointerDown=\{closeDock\}/)
+  assert.match(friendDock, /handleBackdropClick[\s\S]*closeDock\(\)/)
   assert.match(friendDock, /aria-label="关闭好友窗口"/)
   assert.match(friendDock, /event\.key !== 'Escape'/)
   assert.match(friendDock, /setOpen\(\(value\) => !value\)/)
@@ -155,13 +155,14 @@ test('好友窗内部列表项可操作且不会被 outside-click 关闭', () =>
 })
 
 test('好友窗口高度基于 100dvh 且止于 BottomNav 上方', () => {
-  assert.match(css, /\.friend-dock-panel \{ position:fixed;[^}]*top:calc\(var\(--friend-dock-viewport-top,0px\) \+ 8px\)[^}]*max-height:calc\(var\(--friend-dock-viewport-height,100dvh\) - var\(--mobile-bottom-nav-total\) - 16px\)/)
+  assert.match(css, /--friend-dock-mobile-height:min\(72dvh,max\(180px,calc\(var\(--friend-dock-viewport-height,100dvh\) - var\(--mobile-bottom-nav-total\) - 88px\)\)\)/)
+  assert.match(css, /\.friend-dock-panel \{[^}]*max-height:var\(--friend-dock-mobile-height\)/)
 })
 
 test('E院中心作为完整卡片止于底部导航上方', () => {
   assert.match(css, /--mobile-center-action-overhang:\s*28px/)
-  assert.match(css, /\.mobile-center-overlay \{[^}]*inset:0 0 calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-center-action-overhang\) \+ 10px\)/)
-  assert.match(css, /\.mobile-center-sheet \{[^}]*max-height:min\(620px,calc\(100dvh - var\(--mobile-bottom-nav-total\) - var\(--mobile-center-action-overhang\) - 54px\)\)[^}]*border-radius:18px/)
+  assert.match(css, /\.mobile-center-backdrop \{[^}]*inset:0;[^}]*height:100dvh/)
+  assert.match(css, /\.mobile-center-sheet \{[^}]*bottom:calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-center-action-overhang\) \+ 10px\)[^}]*max-height:min\(620px,calc\(100dvh - var\(--mobile-bottom-nav-total\) - var\(--mobile-center-action-overhang\) - 54px\)\)[^}]*border-radius:18px/)
 })
 
 test('E院中心支持再次点击和 Esc 关闭并锁定后恢复背景滚动', () => {
