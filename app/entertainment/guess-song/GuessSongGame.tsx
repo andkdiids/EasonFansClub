@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
+import { createUUID } from '@/lib/utils/uuid'
 
 type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
 type SessionQuestion = {
@@ -157,7 +158,7 @@ export function GuessSongGame({ initialSessionId }: Readonly<{ initialSessionId:
       }>(`/api/entertainment/guess-song/sessions/${session.id}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionId: question.publicId, requestKey: crypto.randomUUID() }),
+        body: JSON.stringify({ questionId: question.publicId, requestKey: createUUID() }),
       })
       setSession((current) => current?.question ? {
         ...current,

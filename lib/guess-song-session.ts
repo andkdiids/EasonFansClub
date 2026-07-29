@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt } from 'node:crypto'
 import { Prisma, type GuessSongMode } from '@prisma/client'
 import {
   GUESS_SONG_ANSWER_SECONDS,
@@ -15,6 +15,7 @@ import {
   getGuessSongSignedUrlExpires,
 } from '@/lib/guess-song-storage'
 import { prisma } from '@/lib/prisma'
+import { createUUID } from '@/lib/utils/uuid'
 
 type OptionSnapshot = { key: string; label: string }
 
@@ -54,7 +55,7 @@ function createOptions(question: EligibleQuestion) {
     { label: question.wrongOption1, correct: false },
     { label: question.wrongOption2, correct: false },
     { label: question.wrongOption3, correct: false },
-  ]).map((option) => ({ ...option, key: randomUUID() }))
+  ]).map((option) => ({ ...option, key: createUUID() }))
   return {
     options: options.map(({ key, label }) => ({ key, label })),
     correctOptionKey: options.find((option) => option.correct)?.key || options[0].key,
@@ -90,7 +91,7 @@ async function createSessionQuestion(
     data: {
       sessionId: input.sessionId,
       questionId: input.question.id,
-      publicId: randomUUID(),
+      publicId: createUUID(),
       position: input.position,
       playbackDurationSeconds: input.durationSeconds,
       maxPlayCount: input.maxPlayCount,

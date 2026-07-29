@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { processGuessSongAudio } from '@/lib/guess-song-audio'
 import {
   buildGuessSongObjectKey,
@@ -7,12 +6,13 @@ import {
   uploadGuessSongObject,
 } from '@/lib/guess-song-storage'
 import { prisma } from '@/lib/prisma'
+import { createUUID } from '@/lib/utils/uuid'
 
 async function saveProcessedAudio(
   questionId: string,
   processed: Awaited<ReturnType<typeof processGuessSongAudio>>,
 ) {
-  const revision = randomUUID()
+  const revision = createUUID()
   const uploadedPaths: string[] = []
   const sourceAudioPath = buildGuessSongObjectKey(`questions/${questionId}/source/${revision}.mp3`)
 

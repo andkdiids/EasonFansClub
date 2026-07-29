@@ -338,7 +338,7 @@ test('重传先提交新对象Key再清理旧COS对象', () => {
   const transaction = audio.indexOf('await prisma.$transaction')
   const cleanupOld = audio.indexOf('await deleteGuessSongObjects(oldPaths)')
   assert.ok(transaction >= 0 && cleanupOld > transaction)
-  assert.match(audio, /randomUUID\(\)/)
+  assert.match(audio, /createUUID\(\)/)
 })
 
 test('删除无历史题目先清理COS对象再删除数据库记录', () => {
