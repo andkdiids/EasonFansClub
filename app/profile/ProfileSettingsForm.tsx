@@ -404,7 +404,7 @@ export function ProfileSettingsForm({
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="space-y-5 rounded-[28px] border border-sky-100 bg-white/88 p-6 shadow-sm">
+      <form onSubmit={handleSubmit} className="profile-settings-form space-y-5 rounded-[28px] border p-6 shadow-sm">
         <div>
           <p className="text-sm font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
           <h2 className="mt-2 text-2xl font-black text-brand-950">编辑资料</h2>
@@ -557,7 +557,7 @@ export function ProfileSettingsForm({
         {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
         {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
-        <div className="profile-settings-actions sticky bottom-0 -mx-6 -mb-6 flex gap-3 border-t border-sky-100 bg-white/95 p-4 backdrop-blur">
+        <div className="profile-settings-actions">
           {onCancel ? (
             <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60">
               取消
@@ -571,7 +571,7 @@ export function ProfileSettingsForm({
 
       {crop ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">
-          <section className="w-full max-w-md rounded-[28px] bg-white p-5 shadow-2xl">
+          <section className="profile-avatar-crop w-full max-w-md rounded-[28px] p-5 shadow-2xl">
             <h3 className="text-xl font-black text-brand-950">调整头像</h3>
             <p className="mt-1 text-sm font-bold text-slate-500">拖动图片调整位置，使用滑块缩放。</p>
             <div

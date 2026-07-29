@@ -94,9 +94,9 @@ export function ProfileEditorDrawer({
           role="dialog"
           aria-modal="true"
           aria-labelledby="profile-editor-title"
-          className="profile-editor-drawer ml-auto flex h-full min-h-0 w-full flex-col overflow-hidden bg-white shadow-2xl md:max-w-2xl"
+          className="profile-editor-drawer ml-auto flex h-full min-h-0 w-full flex-col overflow-hidden shadow-2xl md:max-w-2xl"
         >
-          <div className="flex shrink-0 items-center justify-between border-b border-sky-100 bg-white px-5 py-4">
+          <div className="profile-editor-header flex shrink-0 items-center justify-between border-b px-5 py-4">
             <div className="min-w-0">
               <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
               <h2 id="profile-editor-title" className="mt-1 text-xl font-black text-brand-950">编辑资料</h2>
@@ -110,7 +110,7 @@ export function ProfileEditorDrawer({
               关闭
             </button>
           </div>
-          <div className="profile-editor-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-sky-50/40 px-4 py-5 sm:px-6">
+          <div className="profile-editor-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
             <ProfileSettingsForm initialProfile={initialProfile} onCancel={cancelEditor} onSaved={closeEditor} />
           </div>
         </aside>

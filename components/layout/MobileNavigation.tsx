@@ -19,6 +19,7 @@ const centerItems = [
   { href: '/entertainment', label: '娱乐中心', icon: 'star' as const },
   { href: '/activities', label: '演唱会', icon: 'calendar' as const },
   { href: '/notifications', label: '通知中心', icon: 'bell' as const, showsUnread: true },
+  { href: '/friends/activity', label: '好友动态', icon: 'friends' as const },
   { href: '/rankings', label: '排行榜', icon: 'chart' as const },
   { href: '/feedback', label: '反馈与更新', icon: 'feedback' as const },
 ]
