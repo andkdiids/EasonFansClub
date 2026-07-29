@@ -75,7 +75,7 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
           </article>
         )) : <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>}
       </section>
-      <nav className="guess-song-back-links"><Link href="/entertainment/guess-song">返回模式选择</Link><Link href="/entertainment">返回娱乐中心</Link></nav>
+      <nav className="guess-song-back-links"><Link href="/games/guess-song">返回游戏详情</Link><Link href="/games">返回娱乐中心</Link></nav>
     </>
   )
 }

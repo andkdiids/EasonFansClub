@@ -18,6 +18,7 @@ const shelllessPrefixes = ['/login', '/register', '/forgot-password', '/welcome'
 export function AppShell({ children, user, growth, logoUrl, unreadSummary, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionUser | null; growth: AppShellGrowth; logoUrl: string | null; unreadSummary: UnreadSummary; canManageLayout: boolean; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
   const isMusicRoute = pathname === '/music' || pathname.startsWith('/music/')
+  const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname)
   const [currentUnreadSummary, setCurrentUnreadSummary] = useState(unreadSummary)
   const refreshingRef = useRef(false)
   const currentUnreadCount = currentUnreadSummary.total
@@ -65,7 +66,7 @@ export function AppShell({ children, user, growth, logoUrl, unreadSummary, canMa
     }
   }, [user])
 
-  if (!user || shelllessPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return children
+  if (!user || isImmersiveGameRoute || shelllessPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return children
 
   return <div className="app-shell" data-music-route={isMusicRoute || undefined}>
     <Sidebar user={user} growth={growth} logoUrl={logoUrl} unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} />

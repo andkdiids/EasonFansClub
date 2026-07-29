@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { MusicMiniPlayer } from '@/components/music/MusicMiniPlayer'
 
 export type MusicPreviewTrack = {
@@ -28,6 +29,8 @@ type PlayerContextValue = {
 const MusicPlayerContext = createContext<PlayerContextValue | null>(null)
 
 export function MusicPlayerProvider({ children }: Readonly<{ children: React.ReactNode }>) {
+  const pathname = usePathname()
+  const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const queueRef = useRef<MusicPreviewTrack[]>([])
   const [track, setTrack] = useState<MusicPreviewTrack | null>(null)
@@ -130,7 +133,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   return (
     <MusicPlayerContext.Provider value={value}>
       {children}
-      {track ? (
+      {track && !isImmersiveGameRoute ? (
         <MusicMiniPlayer
           title={track.title}
           artist={track.albumName || track.artist}

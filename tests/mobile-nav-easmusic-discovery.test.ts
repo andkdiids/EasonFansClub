@@ -11,7 +11,7 @@ test('移动底部导航固定为首页、广场、E院中心、EasMusic、我�
   assert.doesNotMatch(navigation, /href: '\/notifications'[\s\S]{0,120}mobile: true/)
   assert.match(mobile, /aria-label="E院中心"/)
   assert.match(mobile, /UiIcon name="grid"/)
-  for (const href of ['/posts/new', '/checkin', '/entertainment', '/activities', '/notifications', '/trending', '/feedback']) {
+  for (const href of ['/posts/new', '/checkin', '/games', '/activities', '/notifications', '/trending', '/feedback']) {
     assert.match(mobile, new RegExp(`href: '${href.replace('/', '\\/')}'`))
   }
   assert.doesNotMatch(mobile, /href: '\/rankings'/)

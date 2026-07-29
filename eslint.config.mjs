@@ -16,6 +16,7 @@ const eslintConfig = [
       'node_modules/**',
       'coverage/**',
       'dist/**',
+      'scripts/database-migration/.generated/**',
       'next-env.d.ts',
       'tsconfig.tsbuildinfo',
     ],
