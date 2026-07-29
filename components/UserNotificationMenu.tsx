@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import type { UnreadSummary } from '@/lib/notifications'
+import { SafeAvatar } from '@/components/SafeAvatar'
 
 function Badge({ count }: { count: number }) {
   if (count <= 0) return null
@@ -11,12 +12,14 @@ function Badge({ count }: { count: number }) {
 
 export function UserNotificationMenu({
   displayName,
+  uid,
   avatarUrl,
   isAdmin,
   initialSummary,
   currentUserId,
 }: {
   displayName: string
+  uid: number
   avatarUrl?: string | null
   isAdmin: boolean
   initialSummary: UnreadSummary
@@ -82,7 +85,7 @@ export function UserNotificationMenu({
     <summary className="site-user-menu-trigger flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-sm border border-sky-100 bg-white px-1.5 py-1 pr-3">
       <span className="relative">
         <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-          {avatarUrl ? <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" /> : displayName.slice(0, 1).toUpperCase()}
+          <SafeAvatar src={avatarUrl} name={displayName} uid={uid} />
         </span>
         {summary.total > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
       </span>

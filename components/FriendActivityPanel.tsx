@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { getMood } from '@/lib/daily'
 import { publicImageUrl } from '@/lib/images'
@@ -53,21 +54,22 @@ function dateRange(filter: TimeFilter, customStart: string, customEnd: string) {
   return { startDate: customStart, endDate: customEnd }
 }
 
-export function FriendActivityPanel() {
+export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: boolean }>) {
   const [activities, setActivities] = useState<FriendActivity[]>([])
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('7days')
   const [activityType, setActivityType] = useState<ActivityType>('')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [page, setPage] = useState(1)
-  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 1, hasPrevious: false, hasNext: false })
+  const limit = compact ? 10 : 20
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit, total: 0, totalPages: 1, hasPrevious: false, hasNext: false })
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
     const range = dateRange(timeFilter, customStart, customEnd)
-    const params = new URLSearchParams({ page: String(page), limit: '20' })
+    const params = new URLSearchParams({ page: compact ? '1' : String(page), limit: String(limit) })
     if (activityType) params.set('type', activityType)
     if (range.startDate) params.set('startDate', range.startDate)
     if (range.endDate) params.set('endDate', range.endDate)
@@ -82,7 +84,7 @@ export function FriendActivityPanel() {
       })
       .then((data) => {
         setActivities(Array.isArray(data.activities) ? data.activities : [])
-        setPagination(data.pagination || { page, limit: 20, total: 0, totalPages: 1, hasPrevious: false, hasNext: false })
+        setPagination(data.pagination || { page, limit, total: 0, totalPages: 1, hasPrevious: false, hasNext: false })
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
@@ -92,7 +94,7 @@ export function FriendActivityPanel() {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [activityType, customEnd, customStart, page, timeFilter])
+  }, [activityType, compact, customEnd, customStart, limit, page, timeFilter])
 
   function changeTime(value: TimeFilter) {
     setTimeFilter(value)
@@ -100,15 +102,15 @@ export function FriendActivityPanel() {
   }
 
   return (
-    <section className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-6">
+    <section className="rounded-sm border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Activity</p>
           <h2 className="mt-1 text-2xl font-black text-brand-950">好友动态</h2>
         </div>
-        <p className="text-xs font-bold text-slate-500">共 {pagination.total} 条</p>
+        <p className="text-xs font-bold text-slate-500">{compact ? '最近 7 天 · 最多 10 条' : `共 ${pagination.total} 条`}</p>
       </div>
-      <div className="mt-5 grid gap-3 rounded-2xl bg-sky-50/70 p-4 md:grid-cols-2">
+      {!compact ? <div className="mt-5 grid gap-3 bg-sky-50/70 p-4 md:grid-cols-2">
         <label className="text-xs font-black text-slate-600">时间筛选
           <select value={timeFilter} onChange={(event) => changeTime(event.target.value as TimeFilter)} className={`${inputClass} mt-1 w-full`}>
             <option value="today">今天</option>
@@ -128,7 +130,7 @@ export function FriendActivityPanel() {
           <label className="text-xs font-black text-slate-600">开始日期<input type="date" value={customStart} onChange={(event) => { setCustomStart(event.target.value); setPage(1) }} className={`${inputClass} mt-1 w-full`} /></label>
           <label className="text-xs font-black text-slate-600">结束日期<input type="date" value={customEnd} onChange={(event) => { setCustomEnd(event.target.value); setPage(1) }} className={`${inputClass} mt-1 w-full`} /></label>
         </> : null}
-      </div>
+      </div> : null}
 
       <div className="mt-5 space-y-3">
         {loading ? <p className="rounded-2xl bg-sky-50 p-5 text-center text-sm font-black text-slate-500">好友动态加载中...</p> : null}
@@ -140,10 +142,10 @@ export function FriendActivityPanel() {
           const avatar = publicImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
           const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : '最近发帖'
           return (
-            <article key={item.id} className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
+            <article key={item.id} className="border border-sky-100 bg-sky-50/60 p-4">
               <div className="flex gap-3">
                 <a href={`/user/${formatUid(item.actor.uid)}`} className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-white">
-                  <SafeAvatar src={avatar} name={name} className="h-full w-full" />
+                  <SafeAvatar src={avatar} name={name} uid={item.actor.uid} className="h-full w-full" />
                 </a>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +155,7 @@ export function FriendActivityPanel() {
                   </div>
                   {item.content ? <p className="mt-2 line-clamp-3 text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    {item.targetUrl ? <a href={item.targetUrl} className="text-xs font-black text-brand-700">查看动态</a> : <span />}
+                    {item.targetUrl ? <Link href={item.targetUrl} className="text-xs font-black text-brand-700">查看原动态</Link> : <span />}
                     <time className="text-xs font-bold text-slate-400">{new Date(item.createdAt).toLocaleString('zh-CN')}</time>
                   </div>
                 </div>
@@ -163,7 +165,8 @@ export function FriendActivityPanel() {
         }) : null}
       </div>
 
-      {!loading && !failed && pagination.totalPages > 1 ? <nav aria-label="好友动态分页" className="mt-5 flex items-center justify-center gap-4 border-t border-sky-100 pt-5">
+      {compact ? <Link href="/friends/activity" className="mt-5 flex min-h-11 items-center justify-center border-t border-sky-100 pt-5 text-sm font-black text-brand-700">查看更多动态</Link> : null}
+      {!compact && !loading && !failed && pagination.totalPages > 1 ? <nav aria-label="好友动态分页" className="mt-5 flex items-center justify-center gap-4 border-t border-sky-100 pt-5">
         <button type="button" disabled={!pagination.hasPrevious} onClick={() => setPage((current) => Math.max(1, current - 1))} className="min-h-11 rounded-xl border border-sky-100 bg-white px-4 text-sm font-black text-brand-700 disabled:opacity-40">上一页</button>
         <span className="text-sm font-black text-brand-950">{pagination.page} / {pagination.totalPages}</span>
         <button type="button" disabled={!pagination.hasNext} onClick={() => setPage((current) => current + 1)} className="min-h-11 rounded-xl border border-sky-100 bg-white px-4 text-sm font-black text-brand-700 disabled:opacity-40">下一页</button>

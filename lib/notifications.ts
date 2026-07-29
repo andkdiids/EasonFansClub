@@ -54,6 +54,7 @@ export type UnifiedNotification = {
   link: string | null
   targetUrl: string | null
   actorName: string | null
+  actorUid: number | null
   actorAvatarUrl: string | null
   popup: boolean
   sticky: boolean
@@ -153,6 +154,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         readAt: true,
         User_Notification_actorIdToUser: {
           select: {
+            uid: true,
             nickname: true,
             avatarUrl: true,
             Profile: { select: { displayName: true, avatarUrl: true } },
@@ -196,6 +198,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
       link: item.link,
       targetUrl: item.link,
       actorName: item.User_Notification_actorIdToUser?.Profile?.displayName || item.User_Notification_actorIdToUser?.nickname || null,
+      actorUid: item.User_Notification_actorIdToUser?.uid || null,
       actorAvatarUrl: publicImageUrl(item.User_Notification_actorIdToUser?.Profile?.avatarUrl || item.User_Notification_actorIdToUser?.avatarUrl),
       popup: false,
       sticky: false,
@@ -226,6 +229,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         link: targetUrl,
         targetUrl,
         actorName: null,
+        actorUid: null,
         actorAvatarUrl: null,
         popup: item.popup,
         sticky: item.sticky,
@@ -328,6 +332,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       link: targetUrl,
       targetUrl,
       actorName: null,
+      actorUid: null,
       actorAvatarUrl: null,
       popup: item.popup,
       sticky: item.sticky,

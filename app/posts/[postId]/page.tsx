@@ -273,13 +273,13 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold text-slate-500">
             {isArchivedAuthor ? (
               <span className="flex items-center gap-2 text-brand-950">
-                <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">{authorName.slice(0, 1)}</span>
+                <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">E</span>
                 <span>{authorName}</span>
               </span>
             ) : (
               <Link href={`/user/${formatUid(post.User.uid)}`} className="flex items-center gap-2 text-brand-950">
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                  {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : authorName.slice(0, 1)}
+                  {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : formatUid(post.User.uid).slice(0, 1)}
                 </span>
                 <span>{authorName} · Lv.{post.User.level}</span>
               </Link>

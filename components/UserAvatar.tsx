@@ -5,7 +5,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import type { SessionUser } from '@/lib/auth'
 
 type UserAvatarProps = {
-  user: Pick<SessionUser, 'nickname' | 'username' | 'avatarUrl'>
+  user: Pick<SessionUser, 'nickname' | 'username' | 'avatarUrl' | 'uid'>
   className?: string
   textClassName?: string
 }
@@ -28,5 +28,5 @@ export function UserAvatar({ user, className = 'h-full w-full', textClassName = 
     return () => window.removeEventListener('profile-avatar-updated', updateAvatar)
   }, [])
 
-  return <SafeAvatar src={avatarUrl} name={displayName} className={className} textClassName={textClassName} />
+  return <SafeAvatar src={avatarUrl} name={displayName} uid={user.uid} className={className} textClassName={textClassName} />
 }

@@ -66,7 +66,7 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
         {data?.rows.length ? data.rows.map((row) => (
           <article key={row.userId}>
             <strong className="guess-song-rank">{row.rank}</strong>
-            <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} /></span>
+            <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
             <div><strong>{row.nickname}</strong><small>UID {formatUid(row.uid)}</small></div>
             <div><strong>{row.score}</strong><small>最高分</small></div>
             <div><strong>{row.correctCount}</strong><small>答对</small></div>

@@ -39,7 +39,7 @@ export function FriendProfileCard({
       >
         <button type="button" className="friend-profile-card-close" onClick={onClose} aria-label="关闭好友资料卡">×</button>
         <div className="friend-profile-card-avatar">
-          <SafeAvatar src={avatar} name={name} className="h-full w-full" />
+          <SafeAvatar src={avatar} name={name} uid={friend.uid} className="h-full w-full" />
         </div>
         <h2 id="friend-profile-card-name">{name}</h2>
         <p className="friend-profile-card-meta">

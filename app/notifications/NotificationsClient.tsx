@@ -38,8 +38,8 @@ function formatTime(value: Date | string) {
   }).format(date)
 }
 
-function getInitial(name?: string | null) {
-  return (name || 'E').slice(0, 1).toUpperCase()
+function getInitial(uid?: number | null) {
+  return uid ? String(uid).padStart(5, '0').slice(0, 1) : 'E'
 }
 
 export function NotificationsClient({
@@ -255,7 +255,7 @@ export function NotificationsClient({
         <div className="flex min-w-0 gap-3 sm:gap-4">
           <div className="relative shrink-0">
             <span className="grid h-11 w-11 place-items-center overflow-hidden rounded-2xl bg-brand-950 text-sm font-black text-white sm:h-12 sm:w-12">
-              {item.actorAvatarUrl ? <img src={item.actorAvatarUrl} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorName || item.typeLabel)}
+              {item.actorAvatarUrl ? <img src={item.actorAvatarUrl} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
             </span>
             <span className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-sky-100 text-[11px] font-black text-brand-700">
               {typeIcon[category] || 'i'}

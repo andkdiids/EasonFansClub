@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
+import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -79,14 +80,14 @@ export function PostList({
               {post.author.uid !== undefined && !isArchivedAuthor ? (
                 <Link href={`/user/${formatUid(post.author.uid)}`} onClick={(event) => event.stopPropagation()} className="flex items-center gap-2 text-brand-950">
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                    {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : authorName.slice(0, 1)}
+                    <SafeAvatar src={authorAvatar} name={authorName} uid={post.author.uid} />
                   </span>
                   <span>{authorName} · UID {formatUid(post.author.uid)} · Lv.{post.author.level}</span>
                 </Link>
               ) : post.author.uid !== undefined ? (
                 <span className="flex items-center gap-2 text-brand-950">
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">
-                    {authorName.slice(0, 1)}
+                    {post.author.uid === 0 ? 'E' : formatUid(post.author.uid).slice(0, 1)}
                   </span>
                   <span>{authorName}</span>
                 </span>

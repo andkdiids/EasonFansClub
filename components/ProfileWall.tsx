@@ -167,7 +167,7 @@ function WallMessageCard({ message, expanded, onToggleComments, onLike, onReply,
     <article id={`wall-message-${message.id}`} className="scroll-mt-20 rounded-2xl border border-sky-100 bg-white p-3 shadow-sm">
       <div className="flex gap-3">
         <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl bg-sky-50">
-          <SafeAvatar src={avatar} name={name} className="h-full w-full" />
+          <SafeAvatar src={avatar} name={name} uid={message.sender.uid} className="h-full w-full" />
         </a>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

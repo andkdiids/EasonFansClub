@@ -19,6 +19,7 @@ import { normalizeText } from '@/lib/validators'
 import { hashSecurityQuestions, parseSecurityQuestions } from '@/lib/account-security'
 import { hashToken } from '@/lib/tokens'
 import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
+import { chooseDefaultAvatar } from '@/lib/default-avatars'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 const registerRequestLimit = {
@@ -215,6 +216,7 @@ const hashedSecurityQuestions =
       if ((latest?.uid ?? -1) >= MAX_UID) {
         throw new Error('UID_LIMIT_REACHED')
       }
+      const defaultAvatarUrl = await chooseDefaultAvatar(tx)
       const created = await tx.user.create({
         data: {
           username,
@@ -225,6 +227,7 @@ const hashedSecurityQuestions =
           emailVerifiedAt: null,
           phoneVerifiedAt: null,
           passwordHash,
+          avatarUrl: defaultAvatarUrl,
           status: 'ACTIVE',
           isDeleted: false,
           securityQuestionRecoveryEnabled: hashedSecurityQuestions.length >= 1,

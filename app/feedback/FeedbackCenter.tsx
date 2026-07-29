@@ -385,10 +385,10 @@ function FeedbackThread({
   )
 }
 
-function Avatar({ user }: { user: { nickname: string; avatarUrl?: string | null } }) {
+function Avatar({ user }: { user: { uid: number; nickname: string; avatarUrl?: string | null } }) {
   return (
     <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] text-white">
-      {user.avatarUrl ? <img src={user.avatarUrl} alt={user.nickname} className="h-full w-full object-cover" /> : user.nickname.slice(0, 1)}
+      {user.avatarUrl ? <img src={user.avatarUrl} alt={user.nickname} className="h-full w-full object-cover" /> : String(user.uid).padStart(5, '0').slice(0, 1)}
     </span>
   )
 }

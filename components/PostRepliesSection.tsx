@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { ImageViewer } from '@/components/ImageViewer'
 import { ReplyForm } from '@/components/ReplyForm'
+import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -186,7 +187,7 @@ export function PostRepliesSection({
       <div key={reply.id} id={`reply-${reply.id}`} className="min-w-0 scroll-mt-20 py-2">
         <div className="flex min-w-0 items-start gap-2">
           <Link href={`/user/${formatUid(reply.author.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
-            {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
+            <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
           </Link>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -236,7 +237,7 @@ export function PostRepliesSection({
           <div className="mb-3 flex items-center justify-between gap-3 text-sm font-bold text-slate-500">
             <Link href={`/user/${formatUid(reply.author.uid)}`} className="flex items-center gap-2 text-brand-950">
               <span className="grid h-8 w-8 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
+                <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
               </span>
               <span>{name} · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
             </Link>

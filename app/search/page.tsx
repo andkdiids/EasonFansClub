@@ -168,7 +168,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       <article key={item.id} className="border-b border-sky-100 py-3 last:border-0">
                         <Link href={`/user/${formatUid(item.uid)}`} className="flex items-center gap-3 font-bold text-slate-700">
                           <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden bg-brand-950 text-white">
-                            {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
+                            {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : formatUid(item.uid).slice(0, 1)}
                           </span>
                           <span>
                             <strong className="block text-brand-950">{name}</strong>

@@ -83,7 +83,7 @@ export function ProfileHeader({
   backgroundUrl,
   showGrowth = true,
 }: ProfileHeaderProps) {
-  const initial = displayName.slice(0, 1).toUpperCase()
+  const initial = formatUid(uid).slice(0, 1)
   const admissionInfo = formatAdmissionInfo(createdAt)
   const growthLevelName = resolveGrowthLevelName(level, levelName)
 

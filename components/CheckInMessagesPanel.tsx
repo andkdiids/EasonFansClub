@@ -278,7 +278,7 @@ export function CheckInMessagesPanel({
                   </div>
                 ) : fullIdentity ? (
                   <a href={`/user/${formatUid(fullIdentity.uid)}`} className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
-                    {avatar ? <SafeAvatar src={avatar} name={name} className="h-full w-full" /> : mood?.icon || '🎵'}
+                    {avatar ? <SafeAvatar src={avatar} name={name} uid={fullIdentity?.uid} className="h-full w-full" /> : mood?.icon || '🎵'}
                   </a>
                 ) : null}
                 <div className="min-w-0 flex-1">
@@ -306,7 +306,7 @@ export function CheckInMessagesPanel({
                         return (
                           <div key={comment.id} id={`comment-${comment.id}`} className="rounded-xl bg-white/70 p-2 text-sm leading-6 text-slate-600">
                             <div className="flex items-start gap-2">
-                              {anonymous || !commentIdentity ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} className="h-full w-full" textClassName="text-xs" /></a>}
+                              {anonymous || !commentIdentity ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} uid={commentIdentity.uid} className="h-full w-full" textClassName="text-xs" /></a>}
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950">{commentName}</a>}
@@ -336,7 +336,7 @@ export function CheckInMessagesPanel({
                                       return (
                                         <div key={child.id} id={`comment-${child.id}`} className="min-w-0 py-2">
                                           <div className="flex min-w-0 items-start gap-2">
-                                            {anonymous || !childIdentity ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} className="h-full w-full" textClassName="text-[10px]" /></a>}
+                                            {anonymous || !childIdentity ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} uid={childIdentity.uid} className="h-full w-full" textClassName="text-[10px]" /></a>}
                                             <div className="min-w-0 flex-1">
                                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                                                 {anonymous || !childIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="font-black text-brand-950">{childName}</a>}

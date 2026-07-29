@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic'
 const adminModules = [
   { href: '/admin/dashboard', title: '数据面板', desc: '查看注册、发帖、回复、挂号等核心数据。' },
   { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
+  { href: '/admin/default-avatars', title: '默认头像管理', desc: '维护系统默认头像池，为未上传头像的用户固定分配头像。' },
   { href: '/admin/security-settings', title: '账户安全设置', desc: '统一配置注册方式、密保、邮箱、手机与密码找回策略。' },
   { href: '/admin/content', title: '内容管理', desc: '管理首页模块、公告、板块、活动和友情链接。' },
   { href: '/admin/achievements', title: '成就 / 勋章', desc: '管理成就、勋章、稀有度、条件和手动发放。' },

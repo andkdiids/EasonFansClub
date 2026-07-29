@@ -3,6 +3,7 @@ import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 import { invalidateCurrentUserCache } from '@/lib/auth'
+import { isDefaultAvatarUrl } from '@/lib/default-avatars'
 
 export const runtime = 'nodejs'
 
@@ -182,7 +183,8 @@ export async function POST(request: Request) {
   invalidateCurrentUserCache(guard.user.id)
 
   if (kind === 'avatar') {
-    const oldPath = storagePathFromPublicUrl(current?.Profile?.avatarUrl || current?.avatarUrl)
+    const oldAvatarUrl = current?.Profile?.avatarUrl || current?.avatarUrl
+    const oldPath = await isDefaultAvatarUrl(oldAvatarUrl) ? null : storagePathFromPublicUrl(oldAvatarUrl)
     const newPath = storagePathFromPublicUrl(safeUrl)
     if (oldPath && oldPath !== newPath) {
       void removeStorageObject(oldPath)
