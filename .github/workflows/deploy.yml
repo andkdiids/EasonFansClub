@@ -17,12 +17,16 @@ env:
   APP_DIR: /home/${{ secrets.SERVER_USER }}/EasonFansClub
   APP_PORT: "3000"
   PACKAGE_NAME: easonfansclub-${{ github.sha }}.tar.gz
+  MAX_PACKAGE_BYTES: "52428800"
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.head_commit.message, '[infra-only]')
     name: Deploy production
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     steps:
       - name: Validate deployment secrets
@@ -48,20 +52,64 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "===== [package 1/4] Build production source manifest ====="
           mkdir -p .deploy
           git archive \
             --format=tar.gz \
             --output=".deploy/${PACKAGE_NAME}" \
-            "${GITHUB_SHA}"
+            "${GITHUB_SHA}" \
+            -- \
+            app \
+            components \
+            lib \
+            prisma \
+            public \
+            package.json \
+            pnpm-lock.yaml \
+            pnpm-workspace.yaml \
+            next.config.ts \
+            tsconfig.json \
+            next-env.d.ts \
+            middleware.ts \
+            postcss.config.js \
+            tailwind.config.ts \
+            eslint.config.mjs
+
+          echo "===== [package 2/4] Validate archive ====="
           test -s ".deploy/${PACKAGE_NAME}"
-          tar -tzf ".deploy/${PACKAGE_NAME}" > /dev/null
+          tar -tzf ".deploy/${PACKAGE_NAME}" > .deploy/package-contents.txt
+          for required_path in app components lib prisma public package.json pnpm-lock.yaml; do
+            if ! grep -Eq "^${required_path}(/|$)" .deploy/package-contents.txt; then
+              echo "::error::Required production path is missing from deploy package: ${required_path}"
+              exit 1
+            fi
+          done
+          if grep -Eq '(^|/)(node_modules|\.git|tests|\.next/cache)(/|$)|(^|/)\.env($|\.)|\.log$' .deploy/package-contents.txt; then
+            echo "::error::Deploy package contains a forbidden development or temporary file."
+            grep -E '(^|/)(node_modules|\.git|tests|\.next/cache)(/|$)|(^|/)\.env($|\.)|\.log$' .deploy/package-contents.txt
+            exit 1
+          fi
+          package_bytes="$(stat -c '%s' ".deploy/${PACKAGE_NAME}")"
+          package_files="$(wc -l < .deploy/package-contents.txt | tr -d ' ')"
+          package_mib="$(awk -v bytes="${package_bytes}" 'BEGIN { printf "%.2f", bytes / 1048576 }')"
+          if [ "${package_bytes}" -gt "${MAX_PACKAGE_BYTES}" ]; then
+            echo "::error::Deploy package is ${package_mib} MiB, exceeding the 50 MiB safety limit."
+            exit 1
+          fi
+
+          echo "===== [package 3/4] Create checksum ====="
           (
             cd .deploy
             sha256sum "${PACKAGE_NAME}" > "${PACKAGE_NAME}.sha256"
           )
 
-          echo "Package size:"
-          du -h ".deploy/${PACKAGE_NAME}"
+          echo "===== [package 4/4] Package summary ====="
+          echo "Archive: ${PACKAGE_NAME}"
+          echo "Files: ${package_files}"
+          echo "Size: ${package_bytes} bytes (${package_mib} MiB)"
+          echo "SHA256: $(cut -d ' ' -f 1 ".deploy/${PACKAGE_NAME}.sha256")"
+          echo "PACKAGE_BYTES=${package_bytes}" >> "${GITHUB_ENV}"
+          echo "PACKAGE_MIB=${package_mib}" >> "${GITHUB_ENV}"
 
       - name: Check server connection and directory permissions
         uses: appleboy/ssh-action@v1
@@ -87,18 +135,56 @@ jobs:
             stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
             df -h "${APP_DIR}"
 
+      - name: Configure deployment SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${SERVER_SSH_KEY}" \
+            | tr -d '\r' \
+            > "${RUNNER_TEMP}/easonfansclub_deploy_key"
+          chmod 600 "${RUNNER_TEMP}/easonfansclub_deploy_key"
+
+          echo "===== [ssh] Register Tencent Cloud host key ====="
+          timeout 30s ssh-keyscan \
+            -T 15 \
+            -p "${SERVER_PORT}" \
+            -H "${SERVER_HOST}" \
+            >> "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/known_hosts"
+
       - name: Upload deploy package
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          source: ".deploy/${{ env.PACKAGE_NAME }},.deploy/${{ env.PACKAGE_NAME }}.sha256"
-          target: "${{ env.APP_DIR }}/.deploy-incoming"
-          strip_components: 1
-          overwrite: true
-          command_timeout: 5m
+        timeout-minutes: 12
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -euo pipefail
+
+          echo "===== [upload 1/2] Upload source archive ====="
+          echo "Uploading ${PACKAGE_NAME}: ${PACKAGE_BYTES} bytes (${PACKAGE_MIB} MiB)"
+          upload_started="$(date +%s)"
+          timeout --signal=TERM 10m scp \
+            -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
+            -P "${SERVER_PORT}" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=30 \
+            -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o StrictHostKeyChecking=yes \
+            ".deploy/${PACKAGE_NAME}" \
+            ".deploy/${PACKAGE_NAME}.sha256" \
+            "${SERVER_USER}@${SERVER_HOST}:${APP_DIR}/.deploy-incoming/"
+
+          upload_seconds="$(( $(date +%s) - upload_started ))"
+          echo "===== [upload 2/2] Upload completed ====="
+          echo "Uploaded ${PACKAGE_BYTES} bytes in ${upload_seconds}s."
 
       - name: Install, migrate, build, and restart
         uses: appleboy/ssh-action@v1
@@ -117,6 +203,11 @@ jobs:
           script: |
             set -euo pipefail
 
+            log_step() {
+              printf '\n===== [deploy %s] %s =====\n' "$1" "$2"
+            }
+
+            log_step "1/8" "Load production runtime"
             export NVM_DIR="${HOME}/.nvm"
             if [ -s "${NVM_DIR}/nvm.sh" ]; then
               . "${NVM_DIR}/nvm.sh"
@@ -126,10 +217,13 @@ jobs:
             command -v pnpm
             command -v pm2
 
+            log_step "2/8" "Verify uploaded package"
             incoming_dir="${APP_DIR}/.deploy-incoming"
             cd "${incoming_dir}"
+            echo "Remote package size: $(stat -c '%s bytes' "${PACKAGE_NAME}")"
             sha256sum -c "${PACKAGE_NAME}.sha256"
 
+            log_step "3/8" "Extract source into existing application directory"
             cd "${APP_DIR}"
             tar -xzf "${incoming_dir}/${PACKAGE_NAME}"
             printf '%s\n' "${DEPLOY_SHA}" > .deployed-sha
@@ -142,16 +236,29 @@ jobs:
             pnpm -v
             pm2 -v
 
+            log_step "4/8" "Install production dependencies"
+            install_started="$(date +%s)"
             pnpm install --frozen-lockfile
             test -d node_modules
+            echo "Dependency install completed in $(( $(date +%s) - install_started ))s."
+
+            log_step "5/8" "Generate Prisma client and apply existing migrations"
             pnpm prisma generate
             pnpm prisma migrate deploy
+
+            log_step "6/8" "Build Next.js production bundle"
+            build_started="$(date +%s)"
             pnpm build
+            echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
+
+            log_step "7/8" "Restart PM2 application"
             pm2 restart easonfansclub --update-env
+            echo "PM2 restart command completed successfully."
 
             rm -f "${incoming_dir:?}/${PACKAGE_NAME}" \
               "${incoming_dir:?}/${PACKAGE_NAME}.sha256"
 
+            log_step "8/8" "Run local health check"
             for attempt in $(seq 1 10); do
               if curl --fail --silent --show-error \
                 --max-time 10 \
