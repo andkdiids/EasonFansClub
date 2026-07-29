@@ -6,7 +6,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, getSessionUserFromCookie } from '@/lib/auth'
 import { calculateGrowthSummary, defaultGrowthLevels, getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
-import { getUnreadNotificationCount } from '@/lib/notifications'
+import { getUnreadSummary } from '@/lib/notifications'
 import { getSiteAppearance } from '@/lib/site-config'
 import './globals.css'
 
@@ -19,13 +19,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const cookieUser = await getSessionUserFromCookie()
   const sessionUser = cookieUser ? await getCurrentUser().catch(() => cookieUser) : null
   const fallbackGrowth = calculateGrowthSummary(sessionUser?.experience || 0, [...defaultGrowthLevels])
-  const [appearance, unreadCount, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([
+  const emptyUnreadSummary = { notifications: 0, system: 0, replies: 0, likes: 0, feedbackReplies: 0, feedback: 0, friendRequests: 0, directMessages: 0, messages: 0, total: 0 }
+  const [appearance, unreadSummary, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([
     getSiteAppearance().catch(() => null),
-    getUnreadNotificationCount(sessionUser.id).catch(() => 0),
+    getUnreadSummary(sessionUser.id).catch(() => emptyUnreadSummary),
     hasAdminPermission(sessionUser, 'layout.manage').catch(() => false),
     hasAdminPermission(sessionUser).catch(() => false),
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
-  ]) : [null, 0, false, false, fallbackGrowth]
+  ]) : [null, emptyUnreadSummary, false, false, fallbackGrowth]
   const logoUrl = publicImageUrl(appearance?.images.navLogoUrl || appearance?.images.logoUrl)
   return (
     <html lang="zh-CN" suppressHydrationWarning>
@@ -34,7 +35,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body>
         <VirtualKeyboardManager />
-        <AppShell user={sessionUser} growth={growth} logoUrl={logoUrl} unreadCount={unreadCount} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
+        <AppShell user={sessionUser} growth={growth} logoUrl={logoUrl} unreadSummary={unreadSummary} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
           {children}
         </AppShell>
         <NotificationToast enabled={Boolean(sessionUser)} />

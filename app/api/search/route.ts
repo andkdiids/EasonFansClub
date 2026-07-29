@@ -42,7 +42,7 @@ export async function GET(request: Request) {
         ],
       },
       select: {
-        id: true, uid: true, nickname: true, username: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+        id: true, uid: true, nickname: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
         Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
         _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
         Post: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },

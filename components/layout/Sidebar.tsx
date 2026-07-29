@@ -34,7 +34,14 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
   }, [menuOpen])
 
   async function logout() {
-    if ((await fetch('/api/auth/logout', { method: 'POST' })).ok) location.replace('/login')
+    if ((await fetch('/api/auth/logout', { method: 'POST' })).ok) {
+      if ('BroadcastChannel' in window) {
+        const channel = new BroadcastChannel(`eason-private-sync:${user.id}`)
+        channel.postMessage({ type: 'logout', userId: user.id })
+        channel.close()
+      }
+      location.replace('/login')
+    }
   }
 
   function navigation(items: typeof primaryNavigation, label: string) {

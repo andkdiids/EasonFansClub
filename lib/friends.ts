@@ -58,7 +58,7 @@ export async function createFriendRequest(
   const friendship = await prisma.friendship.findUnique({
     where: { userAId_userBId: { userAId, userBId } },
   })
-  if (friendship) return { status: 200 as const, body: { message: '已是好友', status: 'FRIEND' } }
+  if (friendship) return { status: 409 as const, body: { message: '你们已经是好友', status: 'FRIEND' } }
 
   const existing = await prisma.friendRequest.findFirst({
     where: {
@@ -73,7 +73,17 @@ export async function createFriendRequest(
       User_FriendRequest_receiverIdToUser: { select: friendUserSelect },
     },
   })
-  if (existing) return { status: 200 as const, body: { message: '等待通过', status: 'PENDING', request: existing } }
+  if (existing) {
+    const incoming = existing.receiverId === currentUser.id
+    return {
+      status: 409 as const,
+      body: {
+        message: incoming ? '对方已向你发送好友申请' : '好友申请已发送，请等待对方处理',
+        status: incoming ? 'INCOMING_PENDING' : 'OUTGOING_PENDING',
+        request: existing,
+      },
+    }
+  }
 
   const friendRequest = await prisma.$transaction(async (tx) => {
     const request = await tx.friendRequest.create({
@@ -103,7 +113,7 @@ export async function createFriendRequest(
     return request
   })
 
-  return { status: 201 as const, body: { message: '好友申请已发送', status: 'PENDING', request: friendRequest } }
+  return { status: 201 as const, body: { message: '好友申请已发送', status: 'OUTGOING_PENDING', request: friendRequest } }
 }
 
 export async function decideFriendRequest(userId: string, requestId: string, action: 'accept' | 'reject') {
@@ -122,6 +132,16 @@ export async function decideFriendRequest(userId: string, requestId: string, act
     const updated = await tx.friendRequest.update({
       where: { id: requestId },
       data: { status: action === 'accept' ? 'ACCEPTED' : 'REJECTED' },
+    })
+    await tx.notification.updateMany({
+      where: {
+        recipientId: userId,
+        actorId: friendRequest.senderId,
+        type: 'FRIEND_REQUEST',
+        title: '好友申请',
+        isRead: false,
+      },
+      data: { isRead: true, readAt: new Date() },
     })
 
     if (action === 'accept') {

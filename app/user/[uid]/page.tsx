@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { BackButton } from '@/components/BackButton'
-import { ProfileHeader, ProfileStatsGrid } from '@/components/ProfileSummary'
+import { ProfileHeader } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
@@ -10,7 +10,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
-import { getGrowthSummary } from '@/lib/growth'
+import { getGrowthSummarySafe } from '@/lib/growth'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +23,6 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (numericUid <= 0) notFound()
 
   const viewer = await getCurrentUser()
-  if (viewer?.uid === numericUid) redirect('/profile')
   let user
   try {
     user = await withDbTimeout('User.findFirst publicUser.profile', prisma.user.findFirst({
@@ -45,10 +44,6 @@ export default async function PublicUserPage({ params }: PageProps) {
         Profile: true,
         _count: {
           select: {
-            Post: true,
-            Reply: true,
-            Friendship_Friendship_userAIdToUser: true,
-            Friendship_Friendship_userBIdToUser: true,
             UserMusicConcert: {
               where: {
                 isPublic: true,
@@ -72,7 +67,8 @@ export default async function PublicUserPage({ params }: PageProps) {
   }
   if (!user || !user.Profile) notFound()
 
-  const isSelf = false
+  const isSelf = viewer?.id === user.id
+  if (isSelf) redirect('/profile')
   let friendship = null
   let pendingRequest: { senderId: string; receiverId: string } | null = null
 
@@ -109,8 +105,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   const background = publicImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const name = user.Profile.displayName || user.nickname
   const bio = user.Profile.bio || user.bio || '这个成员还没有填写个人简介。'
-  const friendCount = user._count.Friendship_Friendship_userAIdToUser + user._count.Friendship_Friendship_userBIdToUser
-  const growth = await getGrowthSummary(user.experience)
+  const growth = await getGrowthSummarySafe(user.experience)
   const friendStatus = friendship ? 'FRIEND' : pendingRequest?.senderId === viewer?.id ? 'PENDING' : pendingRequest ? 'RECEIVED' : 'NONE'
 
   return (
@@ -122,6 +117,9 @@ export default async function PublicUserPage({ params }: PageProps) {
           uid={user.uid}
           level={growth.level}
           levelName={growth.levelName}
+          experience={growth.experience}
+          nextRequiredExp={growth.nextRequiredExp}
+          progressPercent={growth.progressPercent}
           showGrowth={true}
           createdAt={user.createdAt}
           avatarUrl={avatar}
@@ -155,14 +153,6 @@ export default async function PublicUserPage({ params }: PageProps) {
                 </div>
               </div>
             </div>
-            <ProfileStatsGrid
-              compact
-              items={[
-                ['帖子', user._count.Post],
-                ['回复', user._count.Reply],
-                ['好友', friendCount],
-              ]}
-            />
           </aside>
 
           <PublicUserModules uid={formatUid(user.uid)} isSelf={isSelf} />
