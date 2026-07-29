@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
-import { EmojiButton } from '@/components/EmojiPicker'
+import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 
 export function ReplyForm({
@@ -24,18 +24,6 @@ export function ReplyForm({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  function insertEmoji(emoji: string) {
-    const input = textareaRef.current
-    const start = input?.selectionStart ?? content.length
-    const end = input?.selectionEnd ?? content.length
-    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`
-    setContent(next)
-    requestAnimationFrame(() => {
-      input?.focus()
-      input?.setSelectionRange(start + emoji.length, start + emoji.length)
-    })
-  }
 
   async function submitReply(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
@@ -107,7 +95,7 @@ export function ReplyForm({
       </label>
       <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
       <div className="mt-3 flex items-center justify-between gap-3">
-        <EmojiButton onSelect={insertEmoji} />
+        <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布回复'}
         </button>

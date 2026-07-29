@@ -126,7 +126,7 @@ test('私信发送统一走 form submit 并处理响应解析失败', () => {
 })
 
 test('桌面 FriendDock 固定动态视口高度且只有好友列表内部滚动', () => {
-  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:calc\(100dvh - 100px\);[\s\S]*max-height:620px/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*--friend-dock-desktop-height:min\(620px,calc\(100dvh - 100px\)\)[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:var\(--friend-dock-desktop-height\);[\s\S]*max-height:var\(--friend-dock-desktop-height\)/)
   assert.match(css, /\.friend-dock-panel \{[^}]*overflow:hidden;[^}]*pointer-events:auto/)
   assert.match(css, /\.friend-dock-header \{[^}]*flex:none/)
   assert.match(css, /\.friend-dock-list \{[^}]*flex:1;[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain/)
@@ -136,7 +136,7 @@ test('FriendDock 发送点击层可用且输入和按钮触控区至少44px', ()
   assert.match(css, /\.friend-dock-panel \{[^}]*z-index:var\(--layer-friend-window\);[^}]*isolation:isolate/)
   assert.match(css, /\.friend-chat-composer \{[^}]*z-index:2;[^}]*pointer-events:auto/)
   assert.match(css, /\.friend-chat-composer textarea \{[^}]*min-height:44px/)
-  assert.match(css, /\.friend-chat-composer button \{[^}]*height:44px;[^}]*pointer-events:auto/)
+  assert.match(css, /\.friend-chat-composer>button\[type='submit'\] \{[^}]*height:44px;[^}]*pointer-events:auto/)
 })
 
 test('FriendDock 仅在小于768px渲染遮罩并锁定页面', () => {
@@ -155,7 +155,7 @@ test('关闭 FriendDock 会统一清理聊天状态并重新打开好友列表',
 
 test('好友列表和私信面板在桌面端保持相同固定高度', () => {
   assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{ height:min\(620px,calc\(100dvh - 100px\)\); max-height:min\(620px,calc\(100dvh - 100px\)\); \}/)
-  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[\s\S]*height:calc\(100dvh - 100px\);[\s\S]*max-height:620px/)
+  assert.match(css, /@media \(min-width:768px\) \{[\s\S]*\.friend-dock-panel\.is-chat \.friend-chat-layout \{ height:100%; \}/)
 })
 
 test('公共顶部搜索区域仅移除非首页分割线', () => {

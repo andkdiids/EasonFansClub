@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
-import { EmojiButton } from '@/components/EmojiPicker'
+import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 
 type Board = { id: string; name: string; slug: string }
@@ -16,18 +16,6 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  function insertEmoji(emoji: string) {
-    const input = textareaRef.current
-    const start = input?.selectionStart ?? content.length
-    const end = input?.selectionEnd ?? content.length
-    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`
-    setContent(next)
-    requestAnimationFrame(() => {
-      input?.focus()
-      input?.setSelectionRange(start + emoji.length, start + emoji.length)
-    })
-  }
 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -80,7 +68,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
       </label>
       <div className="flex items-center justify-between gap-3">
-        <EmojiButton onSelect={insertEmoji} />
+        <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布帖子'}
         </button>

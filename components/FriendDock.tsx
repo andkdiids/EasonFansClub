@@ -13,6 +13,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { EmojiPicker } from '@/components/EmojiPicker'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
@@ -98,6 +99,7 @@ export function FriendDock({
   const panelRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
+  const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const cursorRef = useRef('')
   const beforeCursorRef = useRef('')
   const nearBottomRef = useRef(true)
@@ -680,7 +682,9 @@ export function FriendDock({
             </div>
             {newMessageNotice ? <button type="button" className="friend-chat-new-message" onClick={() => scrollToBottom('smooth')}>有新消息 ↓</button> : null}
             <form className="friend-chat-composer" onSubmit={submitMessage}>
+              <EmojiPicker textareaRef={messageInputRef} value={content} onChange={setContent} maxLength={1000} disabled={sending} />
               <textarea
+                ref={messageInputRef}
                 value={content}
                 maxLength={1000}
                 rows={1}

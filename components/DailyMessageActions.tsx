@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
-import { EmojiButton } from '@/components/EmojiPicker'
+import { EmojiPicker } from '@/components/EmojiPicker'
 
 export function DailyMessageActions({
   messageId,
@@ -36,18 +36,6 @@ export function DailyMessageActions({
   const [favorites, setFavorites] = useState(Math.max(favoriteCount, 0))
   const [comments, setComments] = useState(Math.max(commentCount, 0))
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  function insertEmoji(emoji: string) {
-    const input = textareaRef.current
-    const start = input?.selectionStart ?? comment.length
-    const end = input?.selectionEnd ?? comment.length
-    const next = `${comment.slice(0, start)}${emoji}${comment.slice(end)}`.slice(0, 300)
-    setComment(next)
-    requestAnimationFrame(() => {
-      input?.focus()
-      input?.setSelectionRange(start + emoji.length, start + emoji.length)
-    })
-  }
 
   async function toggle(path: string, kind: 'like' | 'favorite') {
     if (isSubmitting) return
@@ -146,7 +134,7 @@ export function DailyMessageActions({
           />
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <EmojiButton onSelect={insertEmoji} />
+              <EmojiPicker textareaRef={textareaRef} value={comment} onChange={setComment} maxLength={300} disabled={isSubmitting} />
               <span className="text-xs font-bold text-slate-400">{comment.length}/300</span>
             </div>
             <button onClick={submitComment} disabled={isSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-black text-white disabled:opacity-60">

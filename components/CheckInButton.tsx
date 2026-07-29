@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { CheckInGrowthGuideCard } from '@/components/CheckInGrowthGuideCard'
-import { EmojiButton } from '@/components/EmojiPicker'
+import { EmojiPicker } from '@/components/EmojiPicker'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
 import { BEIJING_TIME_ZONE, formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { DAILY_MOODS, getMood } from '@/lib/daily'
@@ -146,18 +146,6 @@ export function CheckInButton({
     return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', onStorage) }
   }, [onStateChange, previewMode])
   
-  function insertEmoji(emoji: string) {
-    const input = textareaRef.current
-    const start = input?.selectionStart ?? note.length
-    const end = input?.selectionEnd ?? note.length
-    const next = `${note.slice(0, start)}${emoji}${note.slice(end)}`.slice(0, 300)
-    setNote(next)
-    requestAnimationFrame(() => {
-      input?.focus()
-      input?.setSelectionRange(start + emoji.length, start + emoji.length)
-    })
-  }
-
   async function checkIn() {
     if (previewMode || submittingRef.current || isSubmitting || todayCheckIn) return
 
@@ -334,7 +322,7 @@ onStateChange?.({
           className={isCompact ? 'mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white/85 px-3 py-2 text-sm font-bold leading-6 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70' : 'mt-3 w-full resize-none rounded-2xl border border-sky-100 bg-white/85 px-4 py-2 font-bold leading-7 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70'}
         />
         <div className={isCompact ? 'mt-1 flex items-center justify-between' : 'mt-2 flex items-center justify-between'}>
-          <EmojiButton onSelect={insertEmoji} />
+          <EmojiPicker textareaRef={textareaRef} value={note} onChange={setNote} maxLength={300} disabled={previewMode || isSubmitting} />
           <span className="text-xs font-bold text-slate-400">{note.length}/300</span>
         </div>
       </label>

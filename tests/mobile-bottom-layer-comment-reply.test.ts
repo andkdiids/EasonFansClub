@@ -154,8 +154,8 @@ test('好友窗内部列表项可操作且不会被 outside-click 关闭', () =>
   assert.match(friendDock, /onProfile=\{\(\) => setProfileFriend\(friend\)\}/)
 })
 
-test('好友窗口作为右侧抽屉填满动态视口且内容限制在面板内', () => {
-  assert.match(css, /\.friend-dock-panel \{[^}]*width:88vw;[^}]*height:var\(--friend-dock-viewport-height,100dvh\);[^}]*max-height:var\(--friend-dock-viewport-height,100dvh\)/)
+test('好友窗口作为右侧浮层抽屉保留页面上下文且内容限制在面板内', () => {
+  assert.match(css, /\.friend-dock-panel \{[^}]*width:80vw;[^}]*max-width:420px;[^}]*height:82vh;[^}]*max-height:calc\(100vh - 120px\)/)
   assert.match(css, /\.friend-dock-panel \.friend-list-layout,\.friend-dock-panel \.friend-chat-layout \{[^}]*min-height:0;[^}]*overflow:hidden/)
 })
 

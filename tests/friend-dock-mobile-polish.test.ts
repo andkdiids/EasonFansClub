@@ -67,10 +67,10 @@ test('FriendDock title actions and close button are vertically centered', () => 
   assert.match(css, /\.friend-dock-header-actions a,[^{]*\{[^}]*min-height:44px;[^}]*align-items:center;[^}]*justify-content:center/)
 })
 
-test('mobile FriendDock is a contained right drawer that fills the dynamic viewport', () => {
-  assert.match(css, /\.friend-dock-panel \{[^}]*top:var\(--friend-dock-viewport-top,0px\);[^}]*right:0;[^}]*width:88vw;[^}]*max-width:90vw;[^}]*height:var\(--friend-dock-viewport-height,100dvh\);[^}]*contain:layout paint;[^}]*overflow:hidden/)
-  assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[^}]*height:var\(--friend-dock-viewport-height,100dvh\);[^}]*max-height:var\(--friend-dock-viewport-height,100dvh\)/)
-  assert.match(css, /@keyframes friend-dock-drawer-in \{ from \{ transform:translateX\(100%\); \} to \{ transform:translateX\(0\); \} \}/)
+test('mobile FriendDock is a contained floating drawer that keeps page context visible', () => {
+  assert.match(css, /\.friend-dock-panel \{[^}]*top:50%;[^}]*right:0;[^}]*width:80vw;[^}]*max-width:420px;[^}]*height:82vh;[^}]*max-height:calc\(100vh - 120px\);[^}]*contain:layout paint;[^}]*overflow:hidden;[^}]*transform:translateY\(-50%\)/)
+  assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[^}]*height:82vh;[^}]*max-height:calc\(100vh - 120px\)/)
+  assert.match(css, /@keyframes friend-dock-drawer-in \{ from \{ transform:translate\(100%,-50%\); \} to \{ transform:translate\(0,-50%\); \} \}/)
 })
 
 test('mobile FriendDock tracks visualViewport changes for keyboard compression', () => {
