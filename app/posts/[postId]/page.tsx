@@ -91,6 +91,17 @@ function loadPostReplies(postId: string, userId?: string) {
       parentId: true,
       likeCount: true,
       ReplyLike: userId ? { where: { userId }, select: { id: true } } : false,
+      ReplyMention: {
+        orderBy: { startIndex: 'asc' },
+        select: {
+          id: true,
+          startIndex: true,
+          endIndex: true,
+          User_ReplyMention_mentionedUserIdToUser: {
+            select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
+          },
+        },
+      },
       createdAt: true,
       User: {
         select: {
@@ -109,28 +120,54 @@ function loadPostReplies(postId: string, userId?: string) {
 }
 
 type FocusedReply = {
+  id: string
+  content: string
+  parentId: string | null
+  likeCount: number
+  createdAt: Date
+  mentions: Array<{
     id: string
-    content: string
-    parentId: string | null
-    likeCount: number
-    createdAt: Date
-    author: {
+    startIndex: number
+    endIndex: number
+    user: { id: string; uid: number; name: string }
+  }>
+  author: {
+    id: string
+    uid: number
+    nickname: string
+    level: number
+    avatarUrl: string | null
+    profile: { displayName: string; avatarUrl: string | null } | null
+  }
+}
+
+type FocusedReplyQueryRow = {
+  id: string
+  content: string
+  parentId: string | null
+  likeCount: number
+  createdAt: Date
+  User: Omit<FocusedReply['author'], 'profile'> & {
+    Profile: FocusedReply['author']['profile']
+  }
+  ReplyMention: Array<{
+    id: string
+    startIndex: number
+    endIndex: number
+    User_ReplyMention_mentionedUserIdToUser: {
       id: string
       uid: number
       nickname: string
-      level: number
-      avatarUrl: string | null
-      profile: { displayName: string; avatarUrl: string | null } | null
+      Profile: { displayName: string } | null
     }
+  }>
 }
 
 async function loadFocusedReplyChain(postId: string, focusId: string) {
   const chain: Array<FocusedReply & { likes: [] }> = []
   let currentId: string | null = focusId
   for (let depth = 0; currentId && depth < 12; depth += 1) {
-    const row: (Omit<FocusedReply, 'author'> & {
-      User: Omit<FocusedReply['author'], 'profile'> & { Profile: FocusedReply['author']['profile'] }
-    }) | null = await prisma.reply.findFirst({
+    const row: FocusedReplyQueryRow | null = await prisma.reply.findFirst({
       where: { id: currentId, postId, isDeleted: false, User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
       select: {
         id: true,
@@ -148,10 +185,34 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
             Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
+        ReplyMention: {
+          orderBy: { startIndex: 'asc' },
+          select: {
+            id: true,
+            startIndex: true,
+            endIndex: true,
+            User_ReplyMention_mentionedUserIdToUser: {
+              select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
+            },
+          },
+        },
       },
     })
     if (!row) break
-    chain.unshift({ ...row, author: { ...row.User, profile: row.User.Profile }, likes: [] })
+    const { User: replyUser, ReplyMention: replyMentions, ...replyRow } = row
+    chain.unshift({
+      ...replyRow,
+      mentions: replyMentions.map(({ User_ReplyMention_mentionedUserIdToUser: mentionedUser, ...mention }) => ({
+        ...mention,
+        user: {
+          id: mentionedUser.id,
+          uid: mentionedUser.uid,
+          name: mentionedUser.Profile?.displayName || mentionedUser.nickname,
+        },
+      })),
+      author: { ...replyUser, profile: replyUser.Profile },
+      likes: [],
+    })
     currentId = row.parentId
   }
   return chain
@@ -217,6 +278,17 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         createdAt: reply.createdAt,
         User: { ...reply.author, status: 'ACTIVE' as const, isDeleted: false, Profile: reply.author.profile },
         ReplyLike: [],
+        ReplyMention: reply.mentions.map((mention) => ({
+          id: mention.id,
+          startIndex: mention.startIndex,
+          endIndex: mention.endIndex,
+          User_ReplyMention_mentionedUserIdToUser: {
+            id: mention.user.id,
+            uid: mention.user.uid,
+            nickname: mention.user.name,
+            Profile: { displayName: mention.user.name },
+          },
+        })),
       })))
     } catch (error) {
       commentsLoadError = true
@@ -231,12 +303,20 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
-  const replyRows = postReplies.map(({ ReplyLike, User, ...reply }) => ({
+  const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
     ...reply,
     author: User.status === 'ACTIVE' && !User.isDeleted
       ? { ...User, profile: User.Profile }
       : { id: '', uid: 0, nickname: '已注销用户', level: 0, avatarUrl: null, profile: null },
     liked: Array.isArray(ReplyLike) && ReplyLike.length > 0,
+    mentions: ReplyMention.map(({ User_ReplyMention_mentionedUserIdToUser: mentionedUser, ...mention }) => ({
+      ...mention,
+      user: {
+        id: mentionedUser.id,
+        uid: mentionedUser.uid,
+        name: mentionedUser.Profile?.displayName || mentionedUser.nickname,
+      },
+    })),
   }))
   const directReplyCount = new Map<string, number>()
   replyRows.forEach((reply) => {

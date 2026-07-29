@@ -16,12 +16,11 @@ const revalidateTargets = [
   '/notifications',
   '/friends',
   '/profile',
-  '/rankings',
+  '/trending',
   '/search',
   '/admin',
   '/admin/appearance',
   '/admin/visuals',
-  '/birthday',
 ]
 
 export async function GET() {

@@ -1506,6 +1506,7 @@ model Post {
   @@index([contentType])
   @@index([status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_global_feed_idx")
   @@index([status, isDeleted, isPinned, isFeatured, likeCount, replyCount], map: "Post_hot_feed_idx")
+  @@index([status, isDeleted, createdAt], map: "Post_trending_window_idx")
   @@index([isDeleted])
   @@index([isFeatured, createdAt])
   @@index([isPinned, createdAt])
@@ -1615,23 +1616,24 @@ model RateLimitLog {
 }
 
 model Reply {
-  id          String        @id @default(cuid())
-  content     String
-  isDeleted   Boolean       @default(false)
-  deletedAt   DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  postId      String
-  authorId    String
-  parentId    String?
-  likeCount   Int           @default(0)
-  AdminAction AdminAction[]
-  User        User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  Reply       Reply?        @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
-  other_Reply Reply[]       @relation("ReplyToReply")
-  Post        Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
-  ReplyLike   ReplyLike[]
-  Report      Report[]
+  id           String         @id @default(cuid())
+  content      String
+  isDeleted    Boolean        @default(false)
+  deletedAt    DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  postId       String
+  authorId     String
+  parentId     String?
+  likeCount    Int            @default(0)
+  AdminAction  AdminAction[]
+  User         User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Reply        Reply?         @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
+  other_Reply  Reply[]        @relation("ReplyToReply")
+  Post         Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  ReplyLike    ReplyLike[]
+  ReplyMention ReplyMention[]
+  Report       Report[]
 
   @@index([authorId, createdAt])
   @@index([isDeleted])
@@ -1650,6 +1652,24 @@ model ReplyLike {
   @@unique([replyId, userId])
   @@index([replyId, createdAt])
   @@index([userId, createdAt])
+}
+
+model ReplyMention {
+  id                                      String   @id @default(cuid())
+  replyId                                 String
+  mentionerId                             String
+  mentionedUserId                         String
+  startIndex                              Int
+  endIndex                                Int
+  displayText                             String
+  createdAt                               DateTime @default(now())
+  Reply                                   Reply    @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  User_ReplyMention_mentionerIdToUser     User     @relation("ReplyMentionMentioner", fields: [mentionerId], references: [id], onDelete: Cascade)
+  User_ReplyMention_mentionedUserIdToUser User     @relation("ReplyMentionMentionedUser", fields: [mentionedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([replyId, mentionedUserId])
+  @@index([mentionerId, createdAt])
+  @@index([mentionedUserId, createdAt])
 }
 
 model Report {
@@ -1898,6 +1918,8 @@ model User {
   ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]        @relation("ProfileWallMessage_senderIdToUser")
   Reply                                                  Reply[]
   ReplyLike                                              ReplyLike[]
+  ReplyMention_ReplyMention_mentionerIdToUser            ReplyMention[]              @relation("ReplyMentionMentioner")
+  ReplyMention_ReplyMention_mentionedUserIdToUser        ReplyMention[]              @relation("ReplyMentionMentionedUser")
   Report_Report_reporterIdToUser                         Report[]                    @relation("Report_reporterIdToUser")
   Report_Report_targetUserIdToUser                       Report[]                    @relation("Report_targetUserIdToUser")
   SearchHistory                                          SearchHistory[]

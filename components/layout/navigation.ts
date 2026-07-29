@@ -11,11 +11,11 @@ export const primaryNavigation: AppNavigationItem[] = [
   { href: '/community', label: '首页', icon: 'home', mobile: true },
   { href: '/forum', label: 'E院广场', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
   { href: '/music', label: 'EasMusic', icon: 'music', activePrefixes: ['/music'], mobile: true },
-  { href: '/activities', label: '演唱会', icon: 'calendar', activePrefixes: ['/activities'] },
+  { href: '/activities', label: '活动中心', icon: 'calendar', activePrefixes: ['/activities'] },
   { href: '/entertainment', label: '娱乐中心', icon: 'star', activePrefixes: ['/entertainment'] },
   { href: '/notifications', label: '消息', icon: 'bell', activePrefixes: ['/notifications'], showsUnread: true },
   { href: '/profile', label: '我的', icon: 'user', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },
-  { href: '/rankings', label: '排行榜', icon: 'chart', activePrefixes: ['/rankings'] },
+  { href: '/trending', label: '热门帖子', icon: 'chart', activePrefixes: ['/trending'] },
 ]
 
 export const quickNavigation: AppNavigationItem[] = [

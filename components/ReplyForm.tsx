@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
+import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 
 export function ReplyForm({
   postId,
@@ -20,6 +21,7 @@ export function ReplyForm({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const submittingRef = useRef(false)
   const [content, setContent] = useState('')
+  const [mentions, setMentions] = useState<MentionDraft[]>([])
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -36,7 +38,7 @@ export function ReplyForm({
       const response = await fetch(`/api/posts/${postId}/replies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, parentId: replyTo?.id, imageUrls }),
+        body: JSON.stringify({ content, parentId: replyTo?.id, imageUrls, mentions }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -48,6 +50,7 @@ export function ReplyForm({
         return
       }
       setContent('')
+      setMentions([])
       setImageUrls([])
       onReplyCancel?.()
       onReplyCreated?.(data.reply)
@@ -82,19 +85,13 @@ export function ReplyForm({
       ) : null}
       <label className="block">
         <span className="text-sm font-black text-slate-700">{replyTo ? '楼中楼回复' : '回复帖子'}</span>
-        <textarea
-          ref={textareaRef}
+        <FriendMentionInput
+          textareaRef={textareaRef}
           value={content}
-          onChange={(event) => setContent(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              submitReply()
-            }
-          }}
-          rows={5}
-          className="mt-3 w-full rounded-lg border border-sky-100 px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
-          placeholder="写下你的回复..."
+          mentions={mentions}
+          onChange={setContent}
+          onMentionsChange={setMentions}
+          onSubmitShortcut={() => void submitReply()}
         />
       </label>
       <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>

@@ -103,6 +103,8 @@ model User {
   profileWallMessagesSent         ProfileWallMessage[]        @relation("ProfileWallSender")
   replies                         Reply[]
   replyLikes                      ReplyLike[]
+  replyMentionsCreated            ReplyMention[]              @relation("ReplyMentionMentioner")
+  replyMentionsReceived           ReplyMention[]              @relation("ReplyMentionMentionedUser")
   reports                         Report[]                    @relation("Reporter")
   reportedReports                 Report[]                    @relation("ReportedUser")
   searchHistory                   SearchHistory[]
@@ -269,6 +271,7 @@ model Post {
   @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_board_feed_idx")
   @@index([status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_global_feed_idx")
   @@index([status, isDeleted, isPinned, isFeatured, likeCount, replyCount], map: "Post_hot_feed_idx")
+  @@index([status, isDeleted, createdAt], map: "Post_trending_window_idx")
 }
 
 model Reply {
@@ -288,6 +291,7 @@ model Reply {
   children     Reply[]       @relation("ReplyThread")
   post         Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
   likes        ReplyLike[]
+  mentions     ReplyMention[]
   reports      Report[]
 
   @@index([postId, createdAt])
@@ -320,6 +324,24 @@ model ReplyLike {
   @@unique([replyId, userId])
   @@index([userId, createdAt])
   @@index([replyId, createdAt])
+}
+
+model ReplyMention {
+  id              String   @id @default(cuid())
+  replyId         String
+  mentionerId     String
+  mentionedUserId String
+  startIndex      Int
+  endIndex        Int
+  displayText     String
+  createdAt       DateTime @default(now())
+  reply           Reply    @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  mentioner       User     @relation("ReplyMentionMentioner", fields: [mentionerId], references: [id], onDelete: Cascade)
+  mentionedUser   User     @relation("ReplyMentionMentionedUser", fields: [mentionedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([replyId, mentionedUserId])
+  @@index([mentionerId, createdAt])
+  @@index([mentionedUserId, createdAt])
 }
 
 model PostFavorite {

@@ -17,10 +17,10 @@ const centerItems = [
   { href: '/posts/new', label: '发布帖子', icon: 'forum' as const },
   { href: '/checkin', label: '每日挂号', icon: 'check' as const },
   { href: '/entertainment', label: '娱乐中心', icon: 'star' as const },
-  { href: '/activities', label: '演唱会', icon: 'calendar' as const },
+  { href: '/activities', label: '活动中心', icon: 'calendar' as const },
   { href: '/notifications', label: '通知中心', icon: 'bell' as const, showsUnread: true },
   { href: '/friends/activity', label: '好友动态', icon: 'friends' as const },
-  { href: '/rankings', label: '排行榜', icon: 'chart' as const },
+  { href: '/trending', label: '热门帖子', icon: 'chart' as const },
   { href: '/feedback', label: '反馈与更新', icon: 'feedback' as const },
 ]
 

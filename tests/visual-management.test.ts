@@ -42,11 +42,11 @@ test('后台视觉编辑器支持上传、双预览、滑块、拖拽与独立�
   assert.match(manager, /保存当前位置/)
 })
 
-test('登录、首页、活动、生日和 EasMusic 均接入视觉配置', () => {
+test('登录、首页、活动和 EasMusic 接入视觉配置且旧生日页关闭', () => {
   assert.match(read('app/login/page.tsx'), /heroVisual=\{config\.heroVisuals\.login\}/)
   assert.match(read('components/HomeLayoutSurface.tsx'), /siteConfig\.heroVisuals\.home/)
   assert.match(read('app/activities/page.tsx'), /heroVisuals\.activities/)
-  assert.match(read('app/birthday/page.tsx'), /heroVisuals\.birthday/)
+  assert.match(read('app/birthday/page.tsx'), /redirect\('\/activities'\)/)
   assert.match(read('app/music/page.tsx'), /heroVisuals\.music/)
   assert.match(read('components/music/MusicArchiveShell.tsx'), /backgroundVisual/)
 })

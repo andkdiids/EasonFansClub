@@ -22,11 +22,14 @@ test('回复 API 返回前端可直接渲染且可序列化的 author 结构', (
   assert.match(replyRoute, /author:\s*\{[\s\S]*profile:\s*replyAuthor\.Profile/)
 })
 
-test('通知副作用在回复事务提交后执行且失败不改变回复成功', () => {
+test('回复、提及关系与通知在同一事务成功后一起返回', () => {
+  const transactionStart = replyRoute.indexOf('prisma.$transaction')
+  const mentionCreate = replyRoute.indexOf('tx.replyMention.createMany')
+  const notificationCreate = replyRoute.indexOf('tx.notification.createMany')
   const transactionEnd = replyRoute.indexOf("if ('duplicateReplyId' in reply)")
-  const notificationCreate = replyRoute.indexOf('prisma.notification.create')
-  assert.ok(transactionEnd > 0 && notificationCreate > transactionEnd)
-  assert.match(replyRoute, /catch \(error\) \{[\s\S]*\[post:reply:notification-failed\]/)
+  assert.ok(transactionStart > 0 && mentionCreate > transactionStart)
+  assert.ok(notificationCreate > mentionCreate && transactionEnd > notificationCreate)
+  assert.match(replyRoute, /key:\s*`reply-mention:\$\{createdReply\.id\}:\$\{mention\.userId\}`/)
 })
 
 test('服务端使用用户行锁和时间窗阻止快速重复回复', () => {
@@ -179,9 +182,9 @@ test('E院中心打开时隐藏好友、返回顶部和布局工具', () => {
   assert.match(css, /data-eason-center-open='true'[\s\S]*\.friend-dock[\s\S]*\.back-to-top-button[\s\S]*\.app-layout-tools/)
 })
 
-test('E院中心保留三列且演唱会入口继续可用', () => {
+test('E院中心保留三列且活动中心入口继续可用', () => {
   assert.match(css, /\.mobile-center-sheet>nav \{ display:grid; grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
-  assert.match(mobileNavigation, /\{ href: '\/activities', label: '演唱会'/)
+  assert.match(mobileNavigation, /\{ href: '\/activities', label: '活动中心'/)
 })
 
 test('资料保存区和后台保存区避开移动导航', () => {

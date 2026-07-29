@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { ImageViewer } from '@/components/ImageViewer'
+import { MentionText, type ReplyMentionView } from '@/components/MentionText'
 import { ReplyForm } from '@/components/ReplyForm'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
@@ -18,6 +19,7 @@ type ReplyItem = {
   likeCount: number
   liked: boolean
   createdAt: Date | string
+  mentions: ReplyMentionView[]
   author: {
     id: string
     uid: number
@@ -49,6 +51,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     likeCount: Number(reply.likeCount) || 0,
     liked: Boolean(reply.liked),
     createdAt: typeof reply.createdAt === 'string' || reply.createdAt instanceof Date ? reply.createdAt : new Date().toISOString(),
+    mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
     author: {
       ...unavailableAuthor,
       ...sourceAuthor,
@@ -198,7 +201,7 @@ export function PostRepliesSection({
             </div>
             <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6 text-slate-700">
               {replyToName ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}
-              {replyBody.text}
+              <MentionText text={replyBody.text} mentions={reply.mentions} />
             </p>
             {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
@@ -244,7 +247,7 @@ export function PostRepliesSection({
             <span>#{index + 1} · {formatDate(new Date(reply.createdAt))}</span>
           </div>
           <p className="whitespace-pre-wrap leading-7 text-slate-700">
-            {replyBody.text}
+            <MentionText text={replyBody.text} mentions={reply.mentions} />
           </p>
           {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
