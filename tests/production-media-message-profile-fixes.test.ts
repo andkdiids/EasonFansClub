@@ -103,6 +103,7 @@ test('私信重试复用 clientMessageId 并保留失败输入', () => {
   assert.match(friendDock, /sendMessage\(\{ content: message\.content, clientMessageId: message\.clientMessageId/)
   assert.match(friendDock, /setContent\(\(current\) => current\.trim\(\) === trimmed \? '' : current\)/)
   assert.match(friendDock, /sendingMessageIdsRef\.current\.has/)
+  assert.match(friendDock, /clientMessageId = crypto\.randomUUID\(\)/)
   assert.match(friendDock, /finally \{/)
 })
 
@@ -110,7 +111,31 @@ test('私信网络异常恢复发送状态且轮询不覆盖 optimistic 消息',
   assert.match(friendDock, /sendError instanceof TypeError/)
   assert.match(friendDock, /status: 'FAILED'/)
   assert.match(friendDock, /setSending\(sendingMessageIdsRef\.current\.size > 0\)/)
-  assert.match(friendDock, /const optimistic = current\.find/)
+  assert.match(friendDock, /item\.id === message\.id/)
+  assert.match(friendDock, /item\.clientMessageId === message\.clientMessageId/)
+})
+
+test('私信发送统一走 form submit 并处理响应解析失败', () => {
+  assert.match(friendDock, /<form className="friend-chat-composer" onSubmit=\{submitMessage\}>/)
+  assert.match(friendDock, /event\.currentTarget\.form\?\.requestSubmit\(\)/)
+  assert.match(friendDock, /<button type="submit" disabled=/)
+  assert.match(friendDock, /response\.ok \? '服务器返回格式异常，消息未确认发送'/)
+  assert.match(friendDock, /if \(!response\.ok\)/)
+  assert.match(friendDock, /当前浏览器无法生成消息标识/)
+})
+
+test('桌面 FriendDock 固定动态视口高度且只有好友列表内部滚动', () => {
+  assert.match(css, /@media \(min-width: 1024px\) \{[\s\S]*\.friend-dock-panel\.is-list \{[\s\S]*height:calc\(100dvh - 100px\);[\s\S]*max-height:620px/)
+  assert.match(css, /\.friend-dock-panel \{[^}]*overflow:hidden;[^}]*pointer-events:auto/)
+  assert.match(css, /\.friend-dock-header \{[^}]*flex:none/)
+  assert.match(css, /\.friend-dock-list \{[^}]*flex:1;[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain/)
+})
+
+test('FriendDock 发送点击层可用且输入和按钮触控区至少44px', () => {
+  assert.match(css, /\.friend-dock-panel \{[^}]*z-index:var\(--layer-friend-window\);[^}]*isolation:isolate/)
+  assert.match(css, /\.friend-chat-composer \{[^}]*z-index:2;[^}]*pointer-events:auto/)
+  assert.match(css, /\.friend-chat-composer textarea \{[^}]*min-height:44px/)
+  assert.match(css, /\.friend-chat-composer button \{[^}]*height:44px;[^}]*pointer-events:auto/)
 })
 
 test('资料编辑器通过 body Portal 高于全局 Header 和底栏', () => {

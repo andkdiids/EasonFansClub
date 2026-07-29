@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
@@ -255,9 +256,11 @@ export function FriendDock({
     setMessages((current) => {
       const byId = new Map(current.map((message) => [message.id, message]))
       incoming.forEach((message) => {
-        const optimistic = current.find((item) => item.clientMessageId && item.clientMessageId === message.clientMessageId)
-        if (optimistic) byId.delete(optimistic.id)
-        if (!byId.has(message.id) && message.senderId !== currentUserId) appendedIncoming = true
+        const duplicate = [...byId.values()].find((item) =>
+          item.id === message.id
+          || Boolean(item.clientMessageId && message.clientMessageId && item.clientMessageId === message.clientMessageId))
+        if (duplicate) byId.delete(duplicate.id)
+        if (!duplicate && message.senderId !== currentUserId) appendedIncoming = true
         byId.set(message.id, { ...message, status: message.readAt ? 'READ' : 'SENT' })
       })
       const peerRead = peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0
@@ -421,13 +424,20 @@ export function FriendDock({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: input.content, clientMessageId: input.clientMessageId }),
       })
-      const data = await response.json().catch(() => null)
+      let data: { success?: boolean; error?: string; message?: Message | string } | null = null
+      try {
+        data = await response.json()
+      } catch {
+        throw new Error(response.ok ? '服务器返回格式异常，消息未确认发送' : `发送失败（HTTP ${response.status}）`)
+      }
       if (!response.ok) {
         setMessages((current) => current.map((message) => message.id === optimisticId ? { ...message, status: 'FAILED' } : message))
-        setError(data?.error || data?.message || '发送失败，可点击消息重试')
+        setError(data?.error || (typeof data?.message === 'string' ? data.message : '') || `发送失败（HTTP ${response.status}），可点击消息重试`)
         return false
       }
-      if (!data?.message?.id) throw new Error('服务器未返回有效消息')
+      if (!data?.success || !data.message || typeof data.message === 'string' || !data.message.id) {
+        throw new Error('服务器未返回有效消息，消息未确认发送')
+      }
       mergeMessages([data.message])
       notifyClients('messages')
       return true
@@ -443,11 +453,19 @@ export function FriendDock({
     }
   }
 
-  function send() {
+  function submitMessage(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     const trimmed = content.trim()
     if (!trimmed || sending || sendingMessageIdsRef.current.size > 0) return
     setError('')
-    void sendMessage({ content: trimmed, clientMessageId: crypto.randomUUID() }).then((success) => {
+    let clientMessageId = ''
+    try {
+      clientMessageId = crypto.randomUUID()
+    } catch {
+      setError('当前浏览器无法生成消息标识，请刷新页面或升级浏览器后重试')
+      return
+    }
+    void sendMessage({ content: trimmed, clientMessageId }).then((success) => {
       if (success) setContent((current) => current.trim() === trimmed ? '' : current)
     })
   }
@@ -602,7 +620,7 @@ export function FriendDock({
               {!messages.length ? <p className="friend-chat-empty">还没有消息，打个招呼吧。</p> : null}
             </div>
             {newMessageNotice ? <button type="button" className="friend-chat-new-message" onClick={() => scrollToBottom('smooth')}>有新消息 ↓</button> : null}
-            <div className="friend-chat-composer">
+            <form className="friend-chat-composer" onSubmit={submitMessage}>
               <textarea
                 value={content}
                 maxLength={1000}
@@ -611,14 +629,14 @@ export function FriendDock({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault()
-                    send()
+                    event.currentTarget.form?.requestSubmit()
                   }
                 }}
                 placeholder="输入私信…"
                 aria-label="私信内容"
               />
-              <button type="button" disabled={!content.trim() || sending} onClick={send}>{sending ? '发送中…' : '发送'}</button>
-            </div>
+              <button type="submit" disabled={!content.trim() || sending}>{sending ? '发送中…' : '发送'}</button>
+            </form>
           </div>
         ) : (
           <div className="friend-list-layout">
