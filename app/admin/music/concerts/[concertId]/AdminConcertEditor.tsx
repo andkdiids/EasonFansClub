@@ -17,7 +17,7 @@ const newItem = (position: number): SetlistItem => ({ songId: null, displayName:
 export function AdminConcertEditor({ concertId }: { concertId: string }) {
   const [concert, setConcert] = useState<Concert | null>(null)
   const [tours, setTours] = useState<Tour[]>([])
-  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '', venue: '', sessionNumber: '', description: '', status: 'DRAFT' as Concert['status'], sortOrder: '0' })
+  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '中国', venue: '', description: '', status: 'DRAFT' as Concert['status'] })
   const [setlist, setSetlist] = useState<SetlistItem[]>([])
   const [highlights, setHighlights] = useState<Highlight[]>([])
   const [searches, setSearches] = useState<Record<number, SongOption[]>>({})
@@ -35,7 +35,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
     if (!concertResponse.ok) return setError(data?.message || '场次加载失败')
     const item = data.concert as Concert
     setConcert(item)
-    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0,10), city: item.city, countryOrRegion: item.countryOrRegion || '', venue: item.venue || '', sessionNumber: item.sessionNumber || '', description: item.description || '', status: item.status, sortOrder: String(item.sortOrder) })
+    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0,10), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', description: item.description || '', status: item.status })
     setSetlist(item.setlist.map((row, index) => ({ ...row, position: index + 1, displayName: row.displayName || '', versionName: row.versionName || '', note: row.note || '' })))
     setHighlights(item.highlights.map((row, index) => ({ ...row, sortOrder: index })))
     if (toursResponse.ok) setTours(((await toursResponse.json()).tours || []).map((tour: Tour) => ({ id: tour.id, name: tour.name })))
@@ -101,9 +101,8 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
         <label className="text-sm font-black">城市<input required value={form.city} onChange={(e) => updateForm('city', e.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black">国家或地区<input value={form.countryOrRegion} onChange={(e) => updateForm('countryOrRegion', e.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black">场馆<input value={form.venue} onChange={(e) => updateForm('venue', e.target.value)} className={`${field} mt-1`} /></label>
-        <label className="text-sm font-black">场次编号<input value={form.sessionNumber} onChange={(e) => updateForm('sessionNumber', e.target.value)} className={`${field} mt-1`} /></label>
+        <div className="text-sm font-black">系统场次编号<div className={`${field} mt-1 bg-sky-50 text-brand-800`}>第 {concert.sessionNumber || concert.sortOrder || 1} 场（自动排序）</div></div>
         <label className="text-sm font-black">自定义标题<input value={form.title} onChange={(e) => updateForm('title', e.target.value)} className={`${field} mt-1`} /></label>
-        <label className="text-sm font-black">排序<input type="number" min="0" value={form.sortOrder} onChange={(e) => updateForm('sortOrder', e.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black sm:col-span-2 lg:col-span-4">介绍<textarea value={form.description} onChange={(e) => updateForm('description', e.target.value)} className={`${field} mt-1 min-h-28`} /></label>
       </div><div className="mt-6"><MusicCoverUploader entityType="concert" entityId={concertId} currentUrl={concert.posterUrl} onUploaded={(posterUrl) => setConcert((current) => current ? { ...current, posterUrl } : current)} /></div></section>
       <section className="border border-sky-100 bg-white/90 p-5 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-2xl font-black text-brand-950">现场歌单</h2><button type="button" onClick={() => { setSetlist((current) => [...current, newItem(current.length + 1)]); setDirty(true) }} className="bg-brand-950 px-4 py-2 text-sm font-black text-white">新增一行</button></div>
