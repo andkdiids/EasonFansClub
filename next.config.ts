@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
     '@ffmpeg-installer/linux-x64',
     '@ffmpeg-installer/linux-arm64',
     'cos-nodejs-sdk-v5',
+    'sharp',
   ],
   images: {
     remotePatterns: [

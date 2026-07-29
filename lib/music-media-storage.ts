@@ -2,6 +2,8 @@ import COS from 'cos-nodejs-sdk-v5'
 
 type MusicMediaKind = 'cover' | 'preview'
 
+const COS_UPLOAD_TIMEOUT_MS = 120_000
+
 export class MusicMediaStorageError extends Error {
   constructor(message: string) {
     super(message)
@@ -15,7 +17,7 @@ function getConfig() {
   const bucket = (process.env.TENCENT_COS_MUSIC_BUCKET || process.env.TENCENT_COS_BUCKET)?.trim()
   const region = (process.env.TENCENT_COS_MUSIC_REGION || process.env.TENCENT_COS_REGION)?.trim()
   if (!secretId || !secretKey || !bucket || !region) {
-    throw new MusicMediaStorageError('腾讯云 COS 音乐媒体存储尚未配置')
+    throw new MusicMediaStorageError('腾讯云 COS 音乐媒体存储尚未配置完整')
   }
   return { secretId, secretKey, bucket, region }
 }
@@ -28,12 +30,13 @@ function publicUrl(bucket: string, region: string, key: string) {
 
 function logStorageFailure(kind: MusicMediaKind, error: unknown) {
   const detail = error && typeof error === 'object'
-    ? error as { code?: unknown; statusCode?: unknown }
+    ? error as { code?: unknown; statusCode?: unknown; message?: unknown }
     : null
   console.error('[music-media.cos]', {
     kind,
     code: typeof detail?.code === 'string' ? detail.code : undefined,
     statusCode: typeof detail?.statusCode === 'number' ? detail.statusCode : undefined,
+    message: typeof detail?.message === 'string' ? detail.message.slice(0, 300) : undefined,
   })
 }
 
@@ -47,22 +50,33 @@ export async function uploadMusicMedia(params: {
   const key = params.key.trim().replace(/^\/+/, '')
   if (!key || key.includes('..')) throw new MusicMediaStorageError('音乐媒体对象路径无效')
   const client = new COS({ SecretId: config.secretId, SecretKey: config.secretKey })
+  let timeout: ReturnType<typeof setTimeout> | undefined
   try {
-    await client.putObject({
-      Bucket: config.bucket,
-      Region: config.region,
-      Key: key,
-      Body: params.body,
-      ContentLength: params.body.byteLength,
-      ContentType: params.contentType,
-      CacheControl: 'public, max-age=31536000, immutable',
-      ACL: 'public-read',
-    })
+    await Promise.race([
+      client.putObject({
+        Bucket: config.bucket,
+        Region: config.region,
+        Key: key,
+        Body: params.body,
+        ContentLength: params.body.byteLength,
+        ContentType: params.contentType,
+        CacheControl: 'public, max-age=31536000, immutable',
+        ACL: 'public-read',
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('COS_UPLOAD_TIMEOUT')), COS_UPLOAD_TIMEOUT_MS)
+      }),
+    ])
   } catch (error) {
     logStorageFailure(params.kind, error)
-    throw new MusicMediaStorageError(params.kind === 'cover'
-      ? '封面上传至腾讯云 COS 失败，请稍后重试'
-      : '试听片段上传至腾讯云 COS 失败，请稍后重试')
+    const timedOut = error instanceof Error && error.message === 'COS_UPLOAD_TIMEOUT'
+    throw new MusicMediaStorageError(timedOut
+      ? '上传腾讯云 COS 超时，请检查服务器网络与 COS 配置'
+      : params.kind === 'cover'
+        ? '封面上传至腾讯云 COS 失败，请稍后重试'
+        : '试听片段上传至腾讯云 COS 失败，请稍后重试')
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
   return publicUrl(config.bucket, config.region, key)
 }

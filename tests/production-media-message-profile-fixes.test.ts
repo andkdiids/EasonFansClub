@@ -7,6 +7,7 @@ const friendDock = read('components/FriendDock.tsx')
 const coverRoute = read('app/api/admin/music/covers/route.ts')
 const previewRoute = read('app/api/admin/music/songs/[songId]/preview/route.ts')
 const previewProcessor = read('lib/music-preview.ts')
+const uploadConstraints = read('lib/music-upload-constraints.ts')
 const mediaStorage = read('lib/music-media-storage.ts')
 const player = read('components/music/MusicPlayer.tsx')
 const schema = read('prisma/schema.prisma')
@@ -48,9 +49,9 @@ test('COS 音乐对象使用公开读取地址且不暴露密钥', () => {
 })
 
 test('音频上传严格限制100MB和支持格式', () => {
-  assert.match(previewProcessor, /100 \* 1024 \* 1024/)
+  assert.match(uploadConstraints, /100 \* 1024 \* 1024/)
   for (const type of ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/aac']) {
-    assert.match(previewProcessor, new RegExp(type.replace('/', '\\/')))
+    assert.match(uploadConstraints, new RegExp(type.replace('/', '\\/')))
   }
   assert.match(previewRoute, /FILE_TOO_LARGE/)
   assert.match(previewRoute, /failure\(413, 'FILE_TOO_LARGE'/)

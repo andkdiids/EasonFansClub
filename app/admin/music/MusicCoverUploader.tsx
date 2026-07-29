@@ -2,9 +2,18 @@
 
 import Image from 'next/image'
 import { useState } from 'react'
-
-const MAX_COVER_SIZE = 10 * 1024 * 1024
-const COVER_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+import { MusicUploadStatus } from '@/app/admin/music/MusicUploadStatus'
+import {
+  MUSIC_UPLOAD_TIMEOUT_MS,
+  musicUploadError,
+  musicUploadNetworkError,
+  readMusicUploadResponse,
+  type MusicUploadStage,
+} from '@/app/admin/music/music-upload-client'
+import {
+  isSupportedMusicCoverFile,
+  MUSIC_COVER_MAX_FILE_SIZE,
+} from '@/lib/music-upload-constraints'
 
 export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploaded }: Readonly<{
   entityType: 'album' | 'song' | 'tour' | 'concert'
@@ -17,57 +26,84 @@ export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploade
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [stage, setStage] = useState<MusicUploadStage>('idle')
 
   function chooseFile(nextFile: File | null) {
     setMessage('')
     setError('')
-    if (!nextFile) return setFile(null)
-    if (!COVER_TYPES.has(nextFile.type)) {
+    if (!nextFile) {
       setFile(null)
+      setStage('idle')
+      return
+    }
+    if (!isSupportedMusicCoverFile(nextFile)) {
+      setFile(null)
+      setStage('error')
       setError('仅支持 JPG、JPEG、PNG、WebP')
       return
     }
-    if (nextFile.size > MAX_COVER_SIZE) {
+    if (nextFile.size === 0 || nextFile.size > MUSIC_COVER_MAX_FILE_SIZE) {
       setFile(null)
-      setError('封面图片不能超过 10MB')
+      setStage('error')
+      setError(nextFile.size === 0 ? '图片文件不能为空' : '封面图片不能超过 10MB')
       return
     }
     setFile(nextFile)
+    setStage('selected')
+    setMessage(`已选择 ${nextFile.name}`)
   }
 
   async function upload() {
     if (!file || uploading) return
     setUploading(true)
+    setStage('processing')
     setError('')
-    setMessage('正在转换并上传，请勿关闭页面…')
+    setMessage('正在校验图片并准备上传…')
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), MUSIC_UPLOAD_TIMEOUT_MS)
+    let conversionTimer: number | undefined
     const form = new FormData()
     form.set('file', file)
     form.set('entityType', entityType)
     form.set('entityId', entityId)
     try {
-      const response = await fetch('/api/admin/music/covers', { method: 'POST', body: form })
-      const data = await response.json().catch(() => null)
-      if (!response.ok) {
-        const fallback = response.status === 413
-          ? '封面图片超过服务器上传限制'
-          : response.status === 401 || response.status === 403
-            ? '登录状态或管理员权限已失效'
-            : '封面上传失败，请稍后重试'
-        throw new Error(data?.message || fallback)
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      setStage('uploading')
+      setMessage('正在上传图片…')
+      conversionTimer = window.setTimeout(() => {
+        setStage('converting')
+        setMessage('服务器正在转换并压缩 WebP…')
+      }, 500)
+      const response = await fetch('/api/admin/music/covers', {
+        method: 'POST',
+        body: form,
+        signal: controller.signal,
+      })
+      const data = await readMusicUploadResponse(response)
+      if (!response.ok) throw new Error(musicUploadError(response, data))
+      if (data.success !== true || typeof data.url !== 'string') {
+        throw new Error('服务器未返回有效的封面地址')
       }
       setUrl(data.url)
       setFile(null)
+      setStage('complete')
       setMessage('封面已转换为 WebP 并保存')
       onUploaded?.(data.url)
     } catch (uploadError) {
+      console.error('[music-cover.upload-client]', uploadError)
+      setStage('error')
       setMessage('')
-      setError(uploadError instanceof TypeError
-        ? '网络连接中断，请检查网络后重试'
-        : uploadError instanceof Error ? uploadError.message : '封面上传失败，请稍后重试')
+      setError(musicUploadNetworkError(uploadError))
     } finally {
+      window.clearTimeout(timeout)
+      if (conversionTimer) window.clearTimeout(conversionTimer)
       setUploading(false)
     }
   }
+
+  const label = entityType === 'tour' || entityType === 'concert'
+    ? '现场海报'
+    : entityType === 'album' ? '专辑封面' : '歌曲封面'
 
   return (
     <section className="rounded-[24px] border border-sky-100 bg-sky-50/55 p-4 sm:p-5">
@@ -75,14 +111,15 @@ export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploade
         <div className="relative aspect-square w-36 shrink-0 overflow-hidden rounded-2xl bg-white shadow-sm">
           {url
             ? <Image src={url} alt="音乐封面" fill sizes="144px" className="object-cover" />
-            : <div className="grid h-full place-items-center text-4xl text-brand-500">♪</div>}
+            : <div className="grid h-full place-items-center text-4xl text-brand-500">♫</div>}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="font-black text-brand-950">上传{entityType === 'tour' || entityType === 'concert' ? '现场海报' : entityType === 'album' ? '专辑封面' : '歌曲封面'}</h3>
+          <h3 className="font-black text-brand-950">上传{label}</h3>
           <p className="mt-1 text-xs font-bold leading-5 text-slate-500">JPG、JPEG、PNG、WebP，最大 10MB；自动压缩为质量 82 的 WebP，最大宽度 2000px。</p>
           <input
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+            disabled={uploading}
             onChange={(event) => chooseFile(event.target.files?.[0] || null)}
             className="mt-3 block w-full text-xs font-bold text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-2 file:font-black file:text-brand-700"
           />
@@ -96,8 +133,9 @@ export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploade
           </button>
         </div>
       </div>
+      <MusicUploadStatus stage={stage} conversionLabel="转换 WebP" />
       {message ? <p className="mt-3 text-xs font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="mt-3 text-xs font-black text-red-600">{error}</p> : null}
+      {error ? <p className="mt-3 text-xs font-black text-red-600" role="alert">{error}</p> : null}
     </section>
   )
 }
