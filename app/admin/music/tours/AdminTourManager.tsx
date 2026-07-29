@@ -6,8 +6,8 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { MusicCoverUploader } from '@/app/admin/music/MusicCoverUploader'
 
 type Tour = { id: string; name: string; subtitle?: string | null; description?: string | null; posterUrl?: string | null; startDate?: string | null; endDate?: string | null; status: 'DRAFT' | 'PUBLISHED'; sortOrder: number; concertCount: number }
-type TourForm = { name: string; subtitle: string; description: string; startDate: string; endDate: string; status: Tour['status']; sortOrder: string }
-const empty: TourForm = { name: '', subtitle: '', description: '', startDate: '', endDate: '', status: 'DRAFT', sortOrder: '0' }
+type TourForm = { name: string; subtitle: string; description: string; coverUrl: string; startDate: string; endDate: string; status: Tour['status']; sortOrder: string }
+const empty: TourForm = { name: '', subtitle: '', description: '', coverUrl: '', startDate: '', endDate: '', status: 'DRAFT', sortOrder: '0' }
 const field = 'w-full border border-sky-100 bg-white px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-400'
 
 export function AdminTourManager() {
@@ -27,7 +27,7 @@ export function AdminTourManager() {
 
   function edit(tour: Tour) {
     setEditing(tour)
-    setForm({ name: tour.name, subtitle: tour.subtitle || '', description: tour.description || '', startDate: tour.startDate?.slice(0, 10) || '', endDate: tour.endDate?.slice(0, 10) || '', status: tour.status, sortOrder: String(tour.sortOrder) })
+    setForm({ name: tour.name, subtitle: tour.subtitle || '', description: tour.description || '', coverUrl: tour.posterUrl || '', startDate: tour.startDate?.slice(0, 10) || '', endDate: tour.endDate?.slice(0, 10) || '', status: tour.status, sortOrder: String(tour.sortOrder) })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -66,7 +66,7 @@ export function AdminTourManager() {
         <label className="text-sm font-black text-slate-700 sm:col-span-2">巡演介绍<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className={`${field} mt-1 min-h-32`} /></label>
       </div>
       <button disabled={busy} className="mt-5 bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{busy ? '保存中…' : '保存巡演'}</button>
-      {editing ? <div className="mt-6"><MusicCoverUploader entityType="tour" entityId={editing.id} currentUrl={editing.posterUrl} onUploaded={() => void load()} /></div> : <p className="mt-3 text-xs font-bold text-slate-500">创建后点击编辑，即可复用现有 WebP 流程上传海报。</p>}
+      {editing ? <div className="mt-6"><MusicCoverUploader entityType="tour" entityId={editing.id} currentUrl={form.coverUrl || editing.posterUrl} onUploaded={(url) => { setForm((current) => ({ ...current, coverUrl: url })); setEditing((current) => current ? { ...current, posterUrl: url } : current); setTours((current) => current.map((tour) => tour.id === editing.id ? { ...tour, posterUrl: url } : tour)); void load() }} /></div> : <p className="mt-3 text-xs font-bold text-slate-500">创建后点击编辑，即可复用现有 WebP 流程上传海报。</p>}
     </form>
     <section className="overflow-x-auto border border-sky-100 bg-white/90 shadow-sm">
       <table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-sky-50 text-xs font-black text-brand-950"><tr>{['海报','巡演名称','时间','场次','状态','排序','操作'].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>

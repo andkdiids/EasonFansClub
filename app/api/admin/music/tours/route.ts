@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       name,
       subtitle: sanitizeText(body?.subtitle, 200) || null,
       description: sanitizeText(body?.description, 20_000) || null,
-      posterUrl: sanitizeText(body?.posterUrl, 1000) || null,
+      posterUrl: sanitizeText(body?.coverUrl ?? body?.posterUrl, 1000) || null,
       startDate,
       endDate,
       sortOrder,
