@@ -1,6 +1,9 @@
 'use client'
 
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { useRef } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -8,8 +11,10 @@ import { formatUid } from '@/lib/uid'
 type Friend = { id: string; uid: number; nickname: string; avatarUrl: string | null; level: number; isOnline: boolean; profile: { displayName: string | null; avatarUrl: string | null } | null }
 type Message = { id: string; content: string; senderId: string; createdAt: string }
 
-export function FriendDock({ currentUserId }: { currentUserId: string }) {
+export function FriendDock({ currentUserId, unreadCount }: { currentUserId: string; unreadCount: number }) {
+  const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
   const [query, setQuery] = useState('')
   const [conversationId, setConversationId] = useState('')
@@ -18,17 +23,18 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
-  const [unreadCount, setUnreadCount] = useState(0)
+  const panelRef = useRef<HTMLElement>(null)
+  const toggleRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    setOpen(window.sessionStorage.getItem('friend-dock:open') === '1')
-    fetch('/api/direct-conversations', { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => setUnreadCount(Array.isArray(data?.conversations) ? data.conversations.reduce((sum: number, item: { unreadCount?: number }) => sum + (item.unreadCount || 0), 0) : 0))
-      .catch(() => null)
-  }, [])
+    setCollapsed(window.localStorage.getItem(`friend-dock:collapsed:${currentUserId}`) === '1')
+  }, [currentUserId])
+
   useEffect(() => {
-    window.sessionStorage.setItem('friend-dock:open', open ? '1' : '0')
+    window.localStorage.setItem(`friend-dock:collapsed:${currentUserId}`, collapsed ? '1' : '0')
+  }, [collapsed, currentUserId])
+
+  useEffect(() => {
     if (!open) return
     const params = new URLSearchParams({ q: query, pageSize: '15' })
     const controller = new AbortController()
@@ -38,6 +44,39 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
       .catch(() => null)
     return () => controller.abort()
   }, [open, query])
+
+  useEffect(() => {
+    setOpen(false)
+    setChatFriend(null)
+    setConversationId('')
+  }, [pathname, currentUserId])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (panelRef.current?.contains(target) || toggleRef.current?.contains(target)) return
+      setOpen(false)
+      window.requestAnimationFrame(() => toggleRef.current?.focus())
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      window.requestAnimationFrame(() => toggleRef.current?.focus())
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  function closeDock() {
+    setOpen(false)
+    window.requestAnimationFrame(() => toggleRef.current?.focus())
+  }
 
   async function openChat(friend: Friend) {
     setError('')
@@ -52,7 +91,6 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
       return
     }
     setChatFriend(friend)
-    setUnreadCount(0)
     setConversationId(data.conversation.id)
     const messagesResponse = await fetch(`/api/direct-conversations/${data.conversation.id}/messages`, { cache: 'no-store' })
     const messagesData = await messagesResponse.json().catch(() => ({}))
@@ -79,14 +117,17 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
   }
 
   return (
-    <div className="friend-dock">
+    <div className={`friend-dock ${collapsed ? 'is-collapsed' : ''}`} data-friend-dock-open={open || undefined}>
       {open ? (
-        <section className={`friend-dock-panel ${chatFriend ? 'is-chat' : 'is-list'}`} aria-label="好友与私信">
+        <>
+        <div className="friend-dock-backdrop" aria-hidden="true" onPointerDown={closeDock} />
+        <section ref={panelRef} className={`friend-dock-panel ${chatFriend ? 'is-chat' : 'is-list'}`} aria-label="好友与私信">
           <header className="flex min-h-12 items-center justify-between border-b border-sky-100 px-3">
             <strong>{chatFriend ? `与 ${chatFriend.profile?.displayName || chatFriend.nickname} 私信` : '好友'}</strong>
             <div className="flex gap-2">
+              {!chatFriend ? <Link href="/notifications" className="px-2 py-1 text-xs font-black text-brand-700">通知中心</Link> : null}
               {chatFriend ? <button type="button" onClick={() => { setChatFriend(null); setConversationId('') }} aria-label="返回好友列表">返回</button> : null}
-              <button type="button" onClick={() => setOpen(false)} aria-label="关闭好友窗口">关闭</button>
+              <button type="button" onClick={closeDock} aria-label="关闭好友窗口">×</button>
             </div>
           </header>
           {chatFriend ? (
@@ -118,8 +159,18 @@ export function FriendDock({ currentUserId }: { currentUserId: string }) {
           )}
           {error ? <p className="border-t border-red-100 bg-red-50 p-2 text-xs font-black text-red-600">{error}</p> : null}
         </section>
+        </>
       ) : null}
-      <button type="button" className="friend-dock-toggle" onClick={() => setOpen((value) => !value)} aria-label={open ? '收起好友窗口' : '打开好友窗口'}>好友{unreadCount ? ` ${unreadCount}` : ''}</button>
+      {collapsed ? (
+        <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开好友入口">‹{unreadCount > 0 ? <span className="friend-dock-unread-dot" /> : null}</button>
+      ) : (
+        <div className="friend-dock-actions">
+          <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={() => setOpen((value) => !value)} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
+            好友{unreadCount > 0 ? <b>{unreadCount > 99 ? '99+' : unreadCount}</b> : null}
+          </button>
+          <button type="button" className="friend-dock-collapse" onClick={() => { setOpen(false); setCollapsed(true) }} aria-label="收起好友入口">›</button>
+        </div>
+      )}
     </div>
   )
 }

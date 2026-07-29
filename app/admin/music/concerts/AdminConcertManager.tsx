@@ -41,7 +41,7 @@ export function AdminConcertManager() {
     const response = await fetch(`/api/admin/music/concerts/${concert.id}`, { method: 'DELETE' }); const data = await response.json().catch(() => null)
     if (!response.ok) setError(data?.message || '删除失败'); else await loadConcerts()
   }
-  return <main className="mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5">
+  return <main className="admin-mobile-page mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5">
     <section className="border border-sky-100 bg-white/90 p-6 shadow-sm"><Link href="/admin/music" className="text-sm font-black text-brand-700">← EasMusic 管理</Link><h1 className="mt-4 text-4xl font-black text-brand-950">演唱会管理</h1></section>
     {error ? <p role="alert" className="bg-red-50 p-3 text-sm font-black text-red-700">{error}</p> : null}
     <form onSubmit={create} className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7"><h2 className="text-2xl font-black text-brand-950">创建场次草稿</h2><div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

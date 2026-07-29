@@ -55,6 +55,6 @@ export function AppShell({ children, user, growth, logoUrl, unreadCount, canMana
     </div>
     <MobileNavigation unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} />
     <BackToTopButton />
-    <FriendDock currentUserId={user.id} />
+    <FriendDock currentUserId={user.id} unreadCount={currentUnreadCount} />
   </div>
 }

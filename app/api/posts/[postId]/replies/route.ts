@@ -54,7 +54,7 @@ export async function POST(request: Request, { params }: Params) {
       },
     } : null
     if (!parentReply) {
-      return NextResponse.json({ message: '不能回复不存在或已删除的评论' }, { status: 400 })
+      return NextResponse.json({ message: '不能回复不存在或已删除的评论' }, { status: 409 })
     }
   }
 
@@ -64,6 +64,19 @@ export async function POST(request: Request, { params }: Params) {
       where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       select: { points: true },
     })
+    const duplicateReply = await tx.reply.findFirst({
+      where: {
+        postId,
+        authorId: user.id,
+        parentId: parentId || null,
+        content,
+        isDeleted: false,
+        createdAt: { gte: new Date(Date.now() - 8_000) },
+      },
+      select: { id: true },
+    })
+    if (duplicateReply) return { duplicateReplyId: duplicateReply.id }
+
     const createdReply = await tx.reply.create({
       data: {
         postId,
@@ -117,9 +130,21 @@ export async function POST(request: Request, { params }: Params) {
       await tx.user.update({ where: { id: user.id }, data: { points: { increment: rewardPoints } } })
     }
 
-    const recipientId = parentReply?.authorId || post.authorId
-    if (recipientId !== user.id) {
-      await tx.notification.create({
+    return { createdReply, rewardPoints }
+  })
+
+  if ('duplicateReplyId' in reply) {
+    return NextResponse.json({
+      message: '相同回复正在处理中，请勿重复提交',
+      replyId: reply.duplicateReplyId,
+    }, { status: 409 })
+  }
+
+  const { createdReply, rewardPoints } = reply
+  const recipientId = parentReply?.authorId || post.authorId
+  if (recipientId !== user.id) {
+    try {
+      await prisma.notification.create({
         data: {
           recipientId,
           actorId: user.id,
@@ -131,10 +156,29 @@ export async function POST(request: Request, { params }: Params) {
           link: `/posts/${postId}?focus=${createdReply.id}`,
         },
       })
+    } catch (error) {
+      console.warn('[post:reply:notification-failed]', {
+        postId,
+        replyId: createdReply.id,
+        recipientId,
+        error,
+      })
     }
+  }
 
-    return { createdReply, rewardPoints }
-  })
-
-  return NextResponse.json({ reply: reply.createdReply, rewardPoints: reply.rewardPoints }, { status: 201 })
+  const { User: replyAuthor, ...serializedReply } = createdReply
+  return NextResponse.json({
+    success: true,
+    reply: {
+      ...serializedReply,
+      createdAt: serializedReply.createdAt.toISOString(),
+      updatedAt: serializedReply.updatedAt.toISOString(),
+      author: {
+        ...replyAuthor,
+        profile: replyAuthor.Profile,
+        Profile: undefined,
+      },
+    },
+    rewardPoints,
+  }, { status: 201 })
 }

@@ -27,14 +27,46 @@ type ReplyItem = {
   }
 }
 
+const unavailableAuthor: ReplyItem['author'] = {
+  id: '',
+  uid: 0,
+  nickname: '已注销用户',
+  level: 0,
+  avatarUrl: null,
+  profile: null,
+}
+
+function normalizeReply(value: unknown): ReplyItem | null {
+  if (!value || typeof value !== 'object') return null
+  const reply = value as Partial<ReplyItem>
+  if (typeof reply.id !== 'string' || typeof reply.content !== 'string') return null
+  const sourceAuthor = reply.author && typeof reply.author === 'object' ? reply.author : unavailableAuthor
+  return {
+    id: reply.id,
+    content: reply.content,
+    parentId: typeof reply.parentId === 'string' ? reply.parentId : null,
+    likeCount: Number(reply.likeCount) || 0,
+    liked: Boolean(reply.liked),
+    createdAt: typeof reply.createdAt === 'string' || reply.createdAt instanceof Date ? reply.createdAt : new Date().toISOString(),
+    author: {
+      ...unavailableAuthor,
+      ...sourceAuthor,
+      nickname: sourceAuthor.nickname?.trim() || '已注销用户',
+      level: Number(sourceAuthor.level) || 0,
+      profile: sourceAuthor.profile || null,
+    },
+  }
+}
+
 function isAdminRole(role?: string) {
   return role === 'ADMIN' || role === 'SUPER_ADMIN'
 }
 
 function buildReplyTree(replies: ReplyItem[]) {
   const byParent = new Map<string | null, ReplyItem[]>()
+  const ids = new Set(replies.map((reply) => reply.id))
   replies.forEach((reply) => {
-    const key = reply.parentId || null
+    const key = reply.parentId && ids.has(reply.parentId) && reply.parentId !== reply.id ? reply.parentId : null
     byParent.set(key, [...(byParent.get(key) || []), reply])
   })
   return byParent
@@ -52,6 +84,7 @@ export function PostRepliesSection({
   currentUserRole,
   focusId,
   hotReplyIds,
+  commentsLoadError,
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
@@ -60,8 +93,9 @@ export function PostRepliesSection({
   currentUserRole?: string
   focusId?: string
   hotReplyIds?: string[]
+  commentsLoadError?: boolean
 }>) {
-  const [replies, setReplies] = useState(initialReplies)
+  const [replies, setReplies] = useState(() => initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => buildReplyTree(replies), [replies])
@@ -110,9 +144,9 @@ export function PostRepliesSection({
   }, [focusId, replies, replyMap])
 
   function addReply(reply: unknown) {
-    if (!reply || typeof reply !== 'object') return
-    const created = reply as Partial<ReplyItem> & Omit<ReplyItem, 'likeCount' | 'liked'>
-    setReplies((current) => [...current, { ...created, likeCount: Number(created.likeCount) || 0, liked: Boolean(created.liked) }])
+    const created = normalizeReply(reply)
+    if (!created) return
+    setReplies((current) => current.some((item) => item.id === created.id) ? current : [...current, created])
   }
 
   function removeReply(replyId: string) {
@@ -126,7 +160,10 @@ export function PostRepliesSection({
 
   function collectThreadReplies(rootId: string) {
     const result: Array<{ reply: ReplyItem; replyToName: string }> = []
+    const visited = new Set<string>()
     const visit = (parentId: string) => {
+      if (visited.has(parentId)) return
+      visited.add(parentId)
       const parent = replyMap.get(parentId)
       const parentName = parent ? parent.author.profile?.displayName || parent.author.nickname : ''
       ;(tree.get(parentId) || []).forEach((child) => {
@@ -246,6 +283,7 @@ export function PostRepliesSection({
   return (
     <section className="space-y-3">
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
+      {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
       {hotReplyIds?.length ? (
         <div className="border border-sky-100 bg-sky-50/75 p-4">
           <h3 className="font-black text-brand-950">热门评论</h3>

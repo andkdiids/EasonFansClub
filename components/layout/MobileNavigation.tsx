@@ -33,10 +33,18 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
     if (!centerOpen) return
     const root = document.documentElement
     const body = document.body
+    const scrollY = window.scrollY
     const previousRootOverflow = root.style.overflow
     const previousBodyOverflow = body.style.overflow
+    const previousBodyPosition = body.style.position
+    const previousBodyTop = body.style.top
+    const previousBodyWidth = body.style.width
+    root.dataset.easonCenterOpen = 'true'
     root.style.overflow = 'hidden'
     body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && history.state?.easonCenterSheet) history.back()
     }
@@ -51,6 +59,11 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
     return () => {
       root.style.overflow = previousRootOverflow
       body.style.overflow = previousBodyOverflow
+      body.style.position = previousBodyPosition
+      body.style.top = previousBodyTop
+      body.style.width = previousBodyWidth
+      delete root.dataset.easonCenterOpen
+      window.scrollTo({ top: scrollY, behavior: 'auto' })
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('popstate', onPopState)
     }
@@ -87,7 +100,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
   return <>
     <nav data-mobile-main-nav className="app-mobile-nav" aria-label="移动端导航">
       {first.map(renderItem)}
-      <button type="button" className="mobile-center-button" aria-label="E院中心" aria-haspopup="dialog" aria-expanded={centerOpen} data-active={centerActive || undefined} onClick={openCenter}>
+      <button type="button" className="mobile-center-button" aria-label="E院中心" aria-haspopup="dialog" aria-expanded={centerOpen} data-active={centerActive || undefined} onClick={centerOpen ? closeCenter : openCenter}>
         <span className="mobile-center-icon"><UiIcon name="grid" /></span>
         <span>E院中心</span>
       </button>

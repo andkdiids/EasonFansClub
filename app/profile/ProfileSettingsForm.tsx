@@ -520,7 +520,7 @@ export function ProfileSettingsForm({
         {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
         {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
-        <div className="sticky bottom-0 -mx-6 -mb-6 flex gap-3 border-t border-sky-100 bg-white/95 p-4 backdrop-blur">
+        <div className="profile-settings-actions sticky bottom-0 -mx-6 -mb-6 flex gap-3 border-t border-sky-100 bg-white/95 p-4 backdrop-blur">
           {onCancel ? (
             <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60">
               取消

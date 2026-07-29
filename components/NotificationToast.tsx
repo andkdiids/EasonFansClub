@@ -66,7 +66,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
   const createdAt = new Date(toast.createdAt)
 
   return (
-    <div className="fixed inset-x-4 bottom-24 z-50 md:inset-x-auto md:bottom-6 md:right-6 md:w-96">
+    <div className="notification-toast fixed inset-x-4 md:inset-x-auto md:right-6 md:w-96">
       <div className="rounded-[24px] border border-sky-100/90 bg-white/88 p-4 shadow-2xl shadow-sky-900/20 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

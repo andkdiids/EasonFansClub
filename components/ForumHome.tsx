@@ -135,14 +135,14 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         {loading && data ? <p aria-live="polite" className="forum-loading-note">正在加载第 {page} 页…</p> : null}
         {!error && data ? <PostList posts={data.posts} total={data.total} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
         {data && data.totalPages > 1 ? (
-          <nav aria-label="论坛分页" className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
-            <ForumPageLink label="首页" page={1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} />
+          <nav aria-label="论坛分页" className="forum-pagination flex flex-wrap items-center justify-center">
+            <ForumPageLink label="首页" page={1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} edge />
             <ForumPageLink label="上一页" page={page - 1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} />
             {getForumPageWindow(page, data.totalPages).map((pageNumber) => (
               <ForumPageLink key={pageNumber} label={String(pageNumber)} page={pageNumber} currentPage={page} disabled={loading} pathname={pathname} query={queryString} numbered />
             ))}
             <ForumPageLink label="下一页" page={page + 1} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} />
-            <ForumPageLink label="末页" page={data.totalPages} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} />
+            <ForumPageLink label="末页" page={data.totalPages} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} edge />
           </nav>
         ) : null}
       </div>
@@ -150,10 +150,11 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   )
 }
 
-function ForumPageLink({ label, page, currentPage, disabled, pathname, query, numbered = false }: { label: string; page: number; currentPage: number; disabled: boolean; pathname: string; query: string; numbered?: boolean }) {
+function ForumPageLink({ label, page, currentPage, disabled, pathname, query, numbered = false, edge = false }: { label: string; page: number; currentPage: number; disabled: boolean; pathname: string; query: string; numbered?: boolean; edge?: boolean }) {
   const className = numbered
-    ? `grid h-9 min-w-9 place-items-center rounded-full px-2 text-xs font-black ${page === currentPage ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'}`
-    : 'rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700'
-  if (disabled || page === currentPage) return <span aria-disabled="true" aria-current={page === currentPage ? 'page' : undefined} className={`${className} cursor-not-allowed opacity-40`}>{label}</span>
+    ? `grid h-10 min-w-10 place-items-center rounded-full px-2 text-xs font-black ${page === currentPage ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'}`
+    : `grid min-h-10 place-items-center rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 ${edge ? 'forum-pagination-edge' : ''}`
+  if (page === currentPage) return <span aria-current="page" className={className}>{label}</span>
+  if (disabled) return <span aria-disabled="true" className={`${className} cursor-not-allowed opacity-40`}>{label}</span>
   return <Link href={buildForumHref(pathname, query, { page })} scroll={false} className={className}>{label}</Link>
 }

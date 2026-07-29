@@ -97,18 +97,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
 }
 
 export async function getUnreadNotificationCount(userId: string) {
-  const now = new Date()
-  const [personalUnread, systemUnread] = await Promise.all([
-    prisma.notification.count({ where: { recipientId: userId, isRead: false } }),
-    prisma.systemNotification.count({
-      where: {
-        ...effectiveSystemNotificationWhere(now),
-        type: { not: 'UPDATE' },
-        SystemNotificationRead: { none: { userId } },
-      },
-    }),
-  ])
-  return personalUnread + systemUnread
+  return (await getUnreadSummary(userId)).total
 }
 
 export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number } = {}) {

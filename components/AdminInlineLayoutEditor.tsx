@@ -154,14 +154,14 @@ export function AdminInlineLayoutEditor({ pageKey }: { pageKey: PageLayoutPageKe
 
   if (!layout || !workingConfig) {
     return (
-      <div className="fixed bottom-20 right-4 z-50 max-w-sm rounded-2xl border border-sky-100 bg-white p-4 text-sm font-black text-slate-600 shadow-xl">
+      <div className="inline-layout-editor fixed bottom-20 right-4 z-50 max-w-sm rounded-2xl border border-sky-100 bg-white p-4 text-sm font-black text-slate-600 shadow-xl">
         {error || '正在进入布局编辑模式...'}
       </div>
     )
   }
 
   return (
-    <aside className="fixed bottom-20 right-4 z-50 max-h-[75vh] w-[min(92vw,360px)] overflow-auto rounded-2xl border border-sky-100 bg-white p-4 shadow-2xl shadow-sky-900/20 md:bottom-5">
+    <aside className="inline-layout-editor fixed bottom-20 right-4 z-50 max-h-[75vh] w-[min(92vw,360px)] overflow-auto rounded-2xl border border-sky-100 bg-white p-4 shadow-2xl shadow-sky-900/20 md:bottom-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Inline Layout v2</p>

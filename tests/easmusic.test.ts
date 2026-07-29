@@ -220,7 +220,7 @@ test('音乐搜索弹窗使用 body portal、最高层级并锁定底层交互',
   const carousel = readFileSync('components/music/MusicAlbumCarousel.tsx', 'utf8')
   assert.match(dialog, /createPortal/)
   assert.match(dialog, /document\.body/)
-  assert.match(dialog, /z-\[10000\]/)
+  assert.match(dialog, /z-\[var\(--layer-dialog\)\]/)
   assert.match(dialog, /body\.style\.overflow = 'hidden'/)
   assert.match(dialog, /easmusic:search-dialog/)
   assert.match(dialog, /backdrop-blur-\[18px\]/)

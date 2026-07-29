@@ -7,11 +7,11 @@ const read = (path: string) => readFileSync(path, 'utf8')
 test('移动底栏挂在 AppShell 顶层并统一使用安全区高度', () => {
   const shell = read('components/layout/AppShell.tsx')
   const css = read('app/globals.css')
-  assert.ok(shell.indexOf('</div>\n    <MobileNavigation') > shell.indexOf('<div className="app-main-area">'))
-  assert.match(css, /--mobile-nav-height:\s*62px/)
-  assert.match(css, /--mobile-nav-offset:.*safe-area-inset-bottom/)
-  assert.match(css, /\.app-page-content \{ padding-bottom:calc\(var\(--mobile-nav-offset\) \+ 8px\)/)
-  assert.match(css, /\.app-mobile-nav \{ position:fixed; z-index:70; right:0; bottom:0; left:0/)
+  assert.match(shell, /<div className="app-main-area">[\s\S]*<\/div>\r?\n    <MobileNavigation/)
+  assert.match(css, /--mobile-nav-height:\s*var\(--mobile-bottom-nav-height\)/)
+  assert.match(css, /--mobile-nav-offset:\s*var\(--mobile-bottom-nav-total\)/)
+  assert.match(css, /\.site-footer-info \{ padding-bottom: calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-page-bottom-gap\)\)/)
+  assert.match(css, /\.app-mobile-nav \{ position:fixed; z-index:var\(--layer-mobile-nav\); right:0; bottom:0; left:0/)
 })
 
 test('全局返回顶部使用被动监听、rAF 和 reduced motion', () => {
