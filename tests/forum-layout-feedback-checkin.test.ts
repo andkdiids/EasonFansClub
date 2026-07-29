@@ -73,7 +73,7 @@ test('验收修复保持真实签到记录、整卡点击、申请过滤与通�
   assert.match(checkin, /withDbTimeout\(\s*'CheckIn\.findUnique checkinApi\.todayCheckIn'/)
   assert.doesNotMatch(checkin, /isSameLocalDay|resolvedTodayCheckIn/)
   assert.match(cards, /absolute inset-0 z-20/)
-  assert.match(friends, /senderId: user\.id, status: 'PENDING'/)
+  assert.match(friends, /senderId: user\.id, User_FriendRequest_receiverIdToUser: activeUserFilter/)
   assert.match(notifications, /export async function DELETE/)
 })
 

@@ -100,7 +100,7 @@ export function FriendRequestDecision({ requestId }: Readonly<{ requestId: strin
         disabled={isSubmitting}
         className="rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-60"
       >
-        同意
+        接受
       </button>
       <button
         onClick={() => decide('reject')}
@@ -110,6 +110,41 @@ export function FriendRequestDecision({ requestId }: Readonly<{ requestId: strin
         拒绝
       </button>
       {error ? <p className="w-full text-xs font-bold text-red-600">{error}</p> : null}
+    </div>
+  )
+}
+
+export function FriendRequestCancel({ requestId }: Readonly<{ requestId: string }>) {
+  const router = useRouter()
+  const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  async function cancel() {
+    if (isSubmitting || !window.confirm('确定取消这条好友申请吗？')) return
+    setError('')
+    setIsSubmitting(true)
+    const response = await fetch(`/api/friends/requests/${requestId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel' }),
+    })
+    const data = await response.json().catch(() => ({}))
+    setIsSubmitting(false)
+    if (!response.ok) {
+      setError(data.message || '取消失败')
+      return
+    }
+    window.dispatchEvent(new Event('friend-dock:refresh'))
+    window.dispatchEvent(new Event('unread-summary:refresh'))
+    router.refresh()
+  }
+
+  return (
+    <div className="mt-3">
+      <button type="button" onClick={cancel} disabled={isSubmitting} className="min-h-11 rounded-full bg-white px-4 text-sm font-black text-slate-600 disabled:opacity-60">
+        {isSubmitting ? '取消中...' : '取消申请'}
+      </button>
+      {error ? <p className="mt-2 text-xs font-bold text-red-600">{error}</p> : null}
     </div>
   )
 }
