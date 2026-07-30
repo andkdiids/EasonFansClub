@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CassetteSong } from '@/types/music-cassette'
 
+type DragPoint = { x: number; y: number }
+
 type DragOptions = {
   deckRef: RefObject<HTMLElement | null>
   disabled: boolean
   onDrop: (song: CassetteSong) => void
   onDragState: (songId: string | null, overDeck: boolean) => void
+  onDragPoint: (point: DragPoint | null) => void
 }
 
 type DragSession = {
@@ -20,7 +23,7 @@ type DragSession = {
   overDeck: boolean
 }
 
-export function useCassetteDrag({ deckRef, disabled, onDrop, onDragState }: DragOptions) {
+export function useCassetteDrag({ deckRef, disabled, onDrop, onDragState, onDragPoint }: DragOptions) {
   const sessionRef = useRef<DragSession | null>(null)
   const frameRef = useRef(0)
 
@@ -33,8 +36,9 @@ export function useCassetteDrag({ deckRef, disabled, onDrop, onDragState }: Drag
       session.element.removeAttribute('data-dragging')
     }
     sessionRef.current = null
+    onDragPoint(null)
     onDragState(null, false)
-  }, [onDragState])
+  }, [onDragPoint, onDragState])
 
   useEffect(() => reset, [reset])
 
@@ -67,8 +71,7 @@ export function useCassetteDrag({ deckRef, disabled, onDrop, onDragState }: Drag
       }
       window.cancelAnimationFrame(frameRef.current)
       frameRef.current = window.requestAnimationFrame(() => {
-        session.element.style.setProperty('--cassette-drag-x', `${deltaX}px`)
-        session.element.style.setProperty('--cassette-drag-y', `${deltaY}px`)
+        onDragPoint({ x: event.clientX, y: event.clientY })
       })
       const rect = deckRef.current?.getBoundingClientRect()
       const overDeck = Boolean(
@@ -93,7 +96,7 @@ export function useCassetteDrag({ deckRef, disabled, onDrop, onDragState }: Drag
     onPointerCancel() {
       reset()
     },
-  }), [deckRef, disabled, onDragState, onDrop, reset])
+  }), [deckRef, disabled, onDragPoint, onDragState, onDrop, reset])
 
   return { bind, cancelDrag: reset }
 }

@@ -1,8 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { CassetteField } from '@/components/music/cassette/CassetteField'
 import { CassetteRecorder } from '@/components/music/cassette/CassetteRecorder'
+import { CassetteTapeVisual } from '@/components/music/cassette/CassetteTape'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { useCassetteDrag } from '@/hooks/useCassetteDrag'
 import { createCassetteSeed, selectCassetteSongs } from '@/lib/music-cassette'
@@ -49,12 +51,15 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
   const [seed, setSeed] = useState(() => createCassetteSeed())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null)
   const [overDeck, setOverDeck] = useState(false)
   const [transition, setTransition] = useState<'idle' | 'inserting' | 'ejecting'>('idle')
   const [pendingTrack, setPendingTrack] = useState<CassetteSong | null>(null)
   const tapes = useMemo(() => selectCassetteSongs(songs, 8, seed), [seed, songs])
   const selectedTrack = tapes.find((song) => song.id === selectedId) || null
   const activeTrack = player.track ? toCassetteSong(player.track, songs) : null
+  const draggingIndex = draggingId ? tapes.findIndex((song) => song.id === draggingId) : -1
+  const draggingTrack = draggingIndex >= 0 ? tapes[draggingIndex] : null
 
   const schedule = useCallback((callback: () => void, delay: number) => {
     const timer = window.setTimeout(() => {
@@ -107,6 +112,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
     disabled: transition !== 'idle' || player.loading,
     onDrop: insertSong,
     onDragState,
+    onDragPoint: setDragPoint,
   })
 
   const eject = useCallback(() => {
@@ -198,6 +204,22 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
           <p>待公开试听片段准备完成后，这里会自动出现可播放的歌曲。</p>
         </div>
       )}
+      {/* While dragging, the tape floats in a body-level layer so it escapes
+          the hero's overflow/stacking context and can travel over the whole
+          page; the original tape stays behind as a ghost. */}
+      {draggingTrack && dragPoint
+        ? createPortal(
+          <div className="easmusic-drag-layer" aria-hidden="true">
+            <div
+              className="easmusic-tape easmusic-tape-float"
+              style={{ '--float-x': `${dragPoint.x}px`, '--float-y': `${dragPoint.y}px` } as CSSProperties}
+            >
+              <CassetteTapeVisual song={draggingTrack} index={draggingIndex} />
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </section>
   )
 }

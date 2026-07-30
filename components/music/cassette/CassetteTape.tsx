@@ -19,6 +19,23 @@ type CassetteTapeProps = {
   onPointerCancel?: PointerEventHandler<HTMLButtonElement>
 }
 
+export function CassetteTapeVisual({ song, index }: Readonly<{ song: CassetteSong; index: number }>) {
+  return (
+    <>
+      <span className="easmusic-tape-shell" aria-hidden="true">
+        <MusicCover src={song.coverUrl} alt="" sizes="48px" className="easmusic-tape-sticker" />
+        <i className="easmusic-tape-reel is-left" />
+        <i className="easmusic-tape-reel is-right" />
+        <b>{String(index + 1).padStart(2, '0')}</b>
+      </span>
+      <span className="easmusic-tape-copy">
+        <strong>{song.title}</strong>
+        <small>{song.albumTitle}</small>
+      </span>
+    </>
+  )
+}
+
 export function CassetteTape({
   song,
   index,
@@ -49,16 +66,7 @@ export function CassetteTape({
       onClick={onSelect}
       {...pointerHandlers}
     >
-      <span className="easmusic-tape-shell" aria-hidden="true">
-        <MusicCover src={song.coverUrl} alt="" sizes="48px" className="easmusic-tape-sticker" />
-        <i className="easmusic-tape-reel is-left" />
-        <i className="easmusic-tape-reel is-right" />
-        <b>{String(index + 1).padStart(2, '0')}</b>
-      </span>
-      <span className="easmusic-tape-copy">
-        <strong>{song.title}</strong>
-        <small>{song.albumTitle}</small>
-      </span>
+      <CassetteTapeVisual song={song} index={index} />
     </button>
   )
 }

@@ -1279,15 +1279,17 @@ svg {
   }
 }
 
-/* EasMusic interactive cassette sampler */
+/* EasMusic interactive cassette sampler. The hero is transparent and
+   unclipped: the page-level galaxy background from MusicArchiveShell shows
+   through, and tapes may overflow the hero's edges (horizontal scroll is
+   still contained by main[overflow-x:clip]). */
 .easmusic-cassette-hero {
   position:relative;
-  overflow:hidden;
-  border-block:1px solid rgba(139,186,222,.18);
+  overflow:visible;
+  border:none;
+  outline:none;
+  box-shadow:none;
   padding:28px 0 24px;
-  background:
-    linear-gradient(90deg,transparent,rgba(55,132,188,.06) 28%,rgba(62,218,164,.055) 72%,transparent),
-    repeating-linear-gradient(90deg,transparent 0,transparent 79px,rgba(155,190,218,.025) 80px);
 }
 .easmusic-cassette-heading {
   position:relative;
@@ -1316,11 +1318,6 @@ svg {
 .easmusic-cassette-heading button:disabled,.easmusic-cassette-selection button:disabled { cursor:not-allowed; opacity:.45; }
 .easmusic-cassette-stage { position:relative; display:grid; min-height:570px; place-items:center; padding:32px clamp(220px,19vw,285px) 18px; }
 .easmusic-cassette-field { position:absolute; z-index:2; inset:0; pointer-events:none; }
-/* While a tape is dragged it must travel above the recorder, the album
-   carousel (z-20) and all page decorations, and must not be clipped by the
-   hero; z-index:30 stays below the site chrome (topbar 55 / sidebar 60). */
-.easmusic-cassette-field:has(.easmusic-tape[data-dragging='true']) { z-index:30; overflow:visible; }
-.easmusic-cassette-hero:has(.easmusic-tape[data-dragging='true']) { overflow:visible; }
 .easmusic-tape {
   --cassette-drag-x:0px;
   --cassette-drag-y:0px;
@@ -1348,7 +1345,9 @@ svg {
 }
 .easmusic-tape:focus-visible { outline:2px solid #65e0ac; outline-offset:3px; }
 .easmusic-tape:hover,.easmusic-tape[data-selected='true'] { z-index:4; border-color:rgba(101,224,172,.68); box-shadow:0 24px 50px rgba(0,0,0,.38),0 0 24px rgba(76,217,160,.08); }
-.easmusic-tape[data-dragging='true'] { z-index:12; cursor:grabbing; transform:translate3d(calc(var(--cassette-offset-x) + var(--cassette-drag-x)),calc(var(--cassette-offset-y) + var(--cassette-drag-y)),0) rotate(0) scale(1.06); transition:none; }
+/* While dragging, the original tape hides completely; the only moving visual
+   is the body-level float layer portaled to document.body. */
+.easmusic-tape[data-dragging='true'] { opacity:0; pointer-events:none; transition:opacity .18s ease; }
 .easmusic-tape[data-muted='true'] { opacity:.32; }
 .easmusic-tape:nth-child(1) { top:8%; left:2%; }
 .easmusic-tape:nth-child(2) { top:37%; left:0; }
@@ -1442,7 +1441,6 @@ svg {
   .easmusic-cassette-field { position:relative; display:flex; width:100%; gap:9px; overflow-x:auto; padding:7px 14px 18px; pointer-events:auto; scrollbar-width:none; }
   .easmusic-tape { position:relative; top:auto!important; right:auto!important; bottom:auto!important; left:auto!important; display:grid!important; width:158px; min-width:158px; transform:rotate(var(--cassette-rotate)); }
   .easmusic-tape:nth-child(n+5) { display:none!important; }
-  .easmusic-tape[data-dragging='true'] { position:relative; transform:translate3d(var(--cassette-drag-x),var(--cassette-drag-y),0) rotate(0) scale(1.04); }
   .easmusic-recorder { width:calc(100% - 28px); margin-top:22px; padding:14px; }
   .easmusic-recorder-handle { height:26px; border-width:6px; }
   .easmusic-recorder-face { grid-template-columns:70px minmax(0,1fr) 70px; gap:8px; }
@@ -1455,6 +1453,25 @@ svg {
   .easmusic-recorder-face { grid-template-columns:48px minmax(0,1fr) 48px; }
   .easmusic-recorder { width:calc(100% - 20px); }
   .easmusic-deck-slot { height:96px; }
+}
+
+/* Dragged tape float layer: rendered at document.body via portal so no page
+   ancestor (hero overflow, layout frames, main) can clip or restack it.
+   z-index:40 sits above all page content (album carousel z-20) but below the
+   site chrome (topbar 55 / sidebar 60 / global player 65 / mobile nav 70). */
+.easmusic-drag-layer { position:fixed; z-index:40; inset:0; overflow:hidden; pointer-events:none; background:none; border:none; outline:none; box-shadow:none; }
+.easmusic-tape.easmusic-tape-float {
+  position:fixed !important;
+  top:var(--float-y) !important;
+  right:auto !important;
+  bottom:auto !important;
+  left:var(--float-x) !important;
+  z-index:1;
+  margin:0;
+  transform:translate(-50%,-50%) scale(1.06) !important;
+  transition:none;
+  pointer-events:none;
+  cursor:grabbing;
 }
 
 /* Games hub and immersive play surfaces */
@@ -2020,6 +2037,42 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
   .site-page-main { padding-inline: 16px; }
   .auth-page-layout { width: calc(100% - 32px); }
 }
+
+/* Mobile authentication screen. This block must stay after the final
+   desktop cascade above: the desktop .auth-page-layout grid otherwise
+   overrides the single-column layout on phones and overflows the page. */
+@media (max-width: 768px) {
+  .auth-page {
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: clip;
+    overflow-y: auto;
+  }
+  /* Keep the hero person intact instead of cropping it with cover. */
+  .auth-page .hero-background {
+    background-size: contain;
+    background-position: var(--hero-position-mobile);
+  }
+  .auth-page-layout {
+    display: block;
+    width: calc(100% - 40px);
+    margin: auto;
+    padding: 84px 0 36px;
+  }
+  .auth-brand-copy { display: block; margin-bottom: 26px; text-align: center; }
+  .auth-brand-copy h2 {
+    margin: 10px 0 12px;
+    font-size: clamp(30px, 9vw, 42px);
+    white-space: nowrap;
+  }
+  .auth-brand-copy span { font-size: 13px; letter-spacing: .08em; white-space: nowrap; }
+  .auth-brand-copy em { margin-top: 14px; font-size: 11px; letter-spacing: .22em; white-space: nowrap; }
+  .auth-form-panel { width: 100%; padding: 22px 18px; }
+  .auth-form-heading h1 { white-space: nowrap; }
+}
+
 .home-feature-posts .post-thumb {
   display:none;
 }
