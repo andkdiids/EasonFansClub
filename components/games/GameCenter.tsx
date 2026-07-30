@@ -42,14 +42,11 @@ export function GameCenter() {
     })
   }, [category, query])
 
-  return (
-    <main className="games-page">
-      <div className="games-waveform" aria-hidden="true">
-        <WaveformBackground active />
-      </div>
-      <header className="games-heading">
+return (
+  <main className="games-page games-center-background games-full-width">
+    <header className="games-heading">
         <span>GAMES</span>
-        <h1>娱乐中心</h1>
+        <h1>娱乐天空</h1>
         <p>发现更多有趣的互动游戏</p>
       </header>
       <GameBanner games={gameCatalog.filter((game) => game.featured)} />

@@ -38,7 +38,7 @@ test('普通挂号费榜和签到榜没有可公开调用的数据 API', () => {
   assert.equal(existsSync('app/api/leaderboards'), false)
 })
 
-test('娱乐中心排行榜页面、API 与成绩写入逻辑保持独立', () => {
+test('娱乐天空排行榜页面、API 与成绩写入逻辑保持独立', () => {
   assert.match(gameLeaderboardPage, /GuessSongLeaderboard/)
   assert.match(gameLeaderboardApi, /getGuessSongLeaderboard/)
   assert.doesNotMatch(gameLeaderboardApi, /排行榜暂未开放|redirect\('\/community'\)/)

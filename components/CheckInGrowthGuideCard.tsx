@@ -22,7 +22,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
 
           <GuideSection eyebrow="权益资源" title="什么是挂号费">
             <p>挂号费是私家E院专属权益资源。</p>
-            <GuideList title="未来可用于" items={['粉丝活动报名', '限定福利兑换', '特殊权益解锁', '娱乐中心玩法', '未来可能开放香港名医预约等特色玩法']} />
+            <GuideList title="未来可用于" items={['粉丝活动报名', '限定福利兑换', '特殊权益解锁', '娱乐天空玩法', '未来可能开放香港名医预约等特色玩法']} />
           </GuideSection>
         </div>
 
@@ -41,7 +41,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
             <GuideList items={[
               '每日任务：根据任务内容获得挂号费',
               '社区互动：参与社区活动获得挂号费奖励',
-              '娱乐中心：参与猜歌、小游戏等玩法获得挂号费',
+              '娱乐天空：参与猜歌、小游戏等玩法获得挂号费',
               '官方活动：根据活动规则发放',
             ]} />
             <p className="text-xs text-slate-500">具体奖励以任务页面和活动页面显示为准。</p>
@@ -57,7 +57,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
                 </span>
               </div>
               <div>
-                <GuideList title="计算范围" items={['每日签到奖励', '每日任务', '社区互动', '娱乐中心普通奖励']} />
+                <GuideList title="计算范围" items={['每日签到奖励', '每日任务', '社区互动', '娱乐天空普通奖励']} />
                 <p className="mt-2">普通奖励达到 30 后不再增加；连续挂号额外奖励不受该上限影响。</p>
               </div>
             </div>

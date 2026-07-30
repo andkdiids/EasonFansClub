@@ -16,7 +16,7 @@ import { isAppNavigationActive, primaryNavigation } from './navigation'
 const centerItems = [
   { href: '/posts/new', label: '发布帖子', icon: 'forum' as const },
   { href: '/checkin', label: '每日挂号', icon: 'check' as const },
-  { href: '/games', label: '娱乐中心', icon: 'star' as const },
+  { href: '/games', label: '娱乐天空', icon: 'star' as const },
   { href: '/activities', label: '活动中心', icon: 'calendar' as const },
   { href: '/notifications', label: '通知中心', icon: 'bell' as const, showsUnread: true },
   { href: '/friends/activity', label: '好友动态', icon: 'friends' as const },

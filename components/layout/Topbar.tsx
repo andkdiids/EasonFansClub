@@ -86,7 +86,7 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
       </Link>
 
       <Link href="/games" onClick={() => setMenuOpen(false)}>
-        娱乐中心
+        娱乐天空
       </Link>
 
       <Link href="/settings/security" onClick={() => setMenuOpen(false)}>

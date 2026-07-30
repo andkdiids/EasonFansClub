@@ -390,7 +390,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         <nav>
           <button type="button" onClick={() => void restart()} disabled={exiting}>重新挑战</button>
           <Link href="/entertainment/guess-song/leaderboard">查看排行榜</Link>
-          <Link href="/games">返回娱乐中心</Link>
+          <Link href="/games">返回娱乐天空</Link>
         </nav>
       </main>
     )
@@ -401,7 +401,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const progress = durationSeconds ? elapsedSeconds / durationSeconds * 100 : 0
 
   return (
-    <main className="guess-play-page">
+  <main className="immersive-game-layout guess-play-page">
       <button type="button" className="game-exit-button" onClick={requestExit} aria-label="退出游戏">← <span>退出游戏</span></button>
       <div className={`guess-play-shell ${answerResult && !answerResult.correct ? 'is-wrong' : ''}`}>
         <GuessHeader

@@ -63,7 +63,7 @@ export function EntertainmentCenter() {
       })
       .catch((requestError: unknown) => {
         if (requestError instanceof DOMException && requestError.name === 'AbortError') return
-        setError(requestError instanceof Error ? requestError.message : '娱乐中心加载失败')
+        setError(requestError instanceof Error ? requestError.message : '娱乐天空加载失败')
       })
       .finally(() => setLoading(false))
     return () => controller.abort()
@@ -106,13 +106,13 @@ export function EntertainmentCenter() {
     <>
       <header className="entertainment-heading">
         <p>Entertainment</p>
-        <h1>娱乐中心</h1>
+        <h1>娱乐天空</h1>
         <span>每日来一点小惊喜</span>
       </header>
 
       {error ? <p className="entertainment-error" role="alert">{error}</p> : null}
 
-      <section className="entertainment-entry-grid" aria-label="娱乐中心功能">
+      <section className="entertainment-entry-grid" aria-label="娱乐天空功能">
         <button type="button" className="entertainment-entry is-active" onClick={() => setDrawOpen(true)}>
           <UiIcon name="star" />
           <span>

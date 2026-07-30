@@ -49,7 +49,7 @@ export const gameCatalog: GameCatalogItem[] = [
     title: '每日处方',
     eyebrow: 'DAILY PRESCRIPTION',
     description: '每天领取一次属于你的歌词处方与挂号费惊喜。',
-    longDescription: '每日零点按北京时间刷新。领取结果仍完全沿用娱乐中心原有服务端规则。',
+    longDescription: '每日零点按北京时间刷新。领取结果仍完全沿用娱乐天空原有服务端规则。',
     categories: ['休闲'],
     difficulty: '轻松',
     players: '单人',

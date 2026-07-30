@@ -25,8 +25,10 @@ export function AuthFormShell({
   footer: React.ReactNode
 }>) {
   return (
-    <main className="auth-page">
-      <HeroBackground visual={heroVisual} fallbackImageUrl={backgroundUrl} priority />
+<main className="auth-page">     <HeroBackground 
+  visual={heroVisual}
+  priority
+/>
       <div className="auth-page-overlay" />
       <header className="auth-page-header"><Link href="/" aria-label={siteName}><BrandMark logoUrl={publicImageUrl(logoUrl)} inverse compact /></Link><ThemeToggle className="hero-icon-button" /></header>
       <div className="auth-page-layout">
