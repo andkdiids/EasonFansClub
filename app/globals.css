@@ -1455,7 +1455,6 @@ svg {
   padding:28px 0 56px;
   color:#f4f8fb;
 }
-.games-page::before,
 .game-detail-page::before {
   position:fixed;
   z-index:-1;
@@ -1465,18 +1464,33 @@ svg {
     linear-gradient(145deg,#07101d 0%,#091421 48%,#050b13 100%);
   content:"";
 }
-/* Keep the site shell transparent on game routes so the fixed backdrop above
-   really spans the browser; opaque shell backgrounds would cover it. */
+/* Game-route backdrops live on fixed negative-z layers below the content
+   (.games-waveform carries the hub gradient + waveform canvas,
+   .game-detail-page::before carries the detail gradient). An opaque body or
+   shell background paints over negative-z layers, so every ancestor above
+   them must stay transparent; html stays dark to avoid light overscroll. */
+:root:has(.games-page),
+:root:has(.game-detail-page),
+:root:has(.immersive-game-layout) { background:#050b13; }
 body:has(.games-page),
-body:has(.game-detail-page) { background:#050b13; }
+body:has(.game-detail-page) { background:transparent; }
 body:has(.games-page) .app-shell,
 body:has(.game-detail-page) .app-shell,
 body:has(.games-page) .app-page-content,
 body:has(.game-detail-page) .app-page-content { background:transparent; }
 body:has(.games-page) .site-footer-info,
 body:has(.game-detail-page) .site-footer-info { color:rgba(226,232,240,.62); border-color:rgba(255,255,255,.1); background:transparent; }
-.games-waveform { position:fixed; z-index:-1; inset:0; overflow:hidden; pointer-events:none; }
-.games-waveform .guess-waveform { inset:0; left:0; width:100%; height:100%; opacity:.55; transform:none; }
+.games-waveform {
+  position:fixed;
+  z-index:-1;
+  inset:0;
+  overflow:hidden;
+  background:
+    radial-gradient(circle at 78% 5%,rgba(31,105,174,.18),transparent 32rem),
+    linear-gradient(145deg,#07101d 0%,#091421 48%,#050b13 100%);
+  pointer-events:none;
+}
+.games-waveform .guess-waveform { inset:0; left:0; width:100%; max-width:none; height:100%; opacity:.55; transform:none; }
 .games-heading>span,.game-library-heading span,.game-detail-banner>div>span,.game-detail-sections article>span,.guess-detail-modes header>span,.guess-detail-dashboard aside>span,.daily-game-panel header>span {
   color:#56d7a2;
   font-size:10px;
@@ -1619,7 +1633,7 @@ body:has(.immersive-game-layout) { min-height:100dvh; background:#050a11; }
 .guess-play-header dd { margin-top:5px; font-size:18px; font-weight:900; }
 .guess-play-message { margin:12px 18px 0; }
 .cassette-stage { position:relative; display:grid; min-height:370px; place-items:center; overflow:visible; padding:24px; }
-.guess-waveform { position:absolute; z-index:0; top:0; bottom:0; left:calc(50% - 50vw); width:100vw; height:100%; opacity:.75; }
+.guess-waveform { position:absolute; z-index:0; top:0; bottom:0; left:calc(50% - 50vw); width:100vw; max-width:none; height:100%; opacity:.75; }
 .cassette-player { position:relative; z-index:2; width:min(660px,88%); border:1px solid rgba(178,207,229,.25); padding:20px; background:linear-gradient(145deg,#172536,#0b1420); box-shadow:0 25px 65px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.06); transform:perspective(800px) rotateX(1deg); transition:box-shadow .25s ease; }
 .cassette-stage.is-playing .cassette-player { box-shadow:0 25px 70px rgba(0,0,0,.5),0 0 45px rgba(46,204,143,.11),inset 0 1px rgba(255,255,255,.06); }
 .cassette-player>header { display:flex; align-items:center; justify-content:space-between; color:#7890a5; font-size:8px; font-weight:900; letter-spacing:.2em; }

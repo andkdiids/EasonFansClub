@@ -1159,7 +1159,7 @@ model MusicSong {
   sourceAudioPath         String?
   sourceAudioDurationMs   Int?
   sourceAudioRevision     String?
-  previewUrl              String?
+  previewUrl              String?                   @db.Text
   previewDuration         Int                       @default(7)
   createdAt               DateTime                  @default(now())
   language                String?
