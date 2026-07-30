@@ -1,7 +1,6 @@
 'use client'
 
 import type { CSSProperties, PointerEventHandler } from 'react'
-import { MusicCover } from '@/components/music/MusicCover'
 import type { CassetteSong } from '@/types/music-cassette'
 
 type CassetteTapeProps = {
@@ -22,19 +21,40 @@ type CassetteTapeProps = {
 export function CassetteTapeVisual({ song, index }: Readonly<{ song: CassetteSong; index: number }>) {
   return (
     <>
-      <span className="easmusic-tape-shell" aria-hidden="true">
-        <MusicCover src={song.coverUrl} alt="" sizes="48px" className="easmusic-tape-sticker" />
-        <i className="easmusic-tape-reel is-left" />
-        <i className="easmusic-tape-reel is-right" />
-        <b>{String(index + 1).padStart(2, '0')}</b>
-      </span>
-      <span className="easmusic-tape-copy">
-        <strong>{song.title}</strong>
-        <small>{song.albumTitle}</small>
-      </span>
+    <span className="easmusic-tape-shell">
+
+  <img
+    src="/images/cassette/cassette-transparent.png"
+    alt=""
+    className="easmusic-tape-image"
+  />
+
+<span className="easmusic-tape-copy">
+  <strong>{song.title}</strong>
+</span>
+
+
+<b className="easmusic-tape-side">
+  A
+</b>
+
+<b className="easmusic-tape-number">
+  {String(index + 1).padStart(2, '0')}
+</b>
+
+<span className="easmusic-tape-copy">
+  <strong>{song.title}</strong>
+</span>
+
+<span className="easmusic-tape-brand">
+  ECFC · EASMUSIC ARCHIVE
+</span>
+
+</span>
     </>
   )
 }
+
 
 export function CassetteTape({
   song,
