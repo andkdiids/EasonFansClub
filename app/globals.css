@@ -1316,7 +1316,11 @@ svg {
 .easmusic-cassette-heading button:disabled,.easmusic-cassette-selection button:disabled { cursor:not-allowed; opacity:.45; }
 .easmusic-cassette-stage { position:relative; display:grid; min-height:570px; place-items:center; padding:32px clamp(220px,19vw,285px) 18px; }
 .easmusic-cassette-field { position:absolute; z-index:2; inset:0; pointer-events:none; }
-.easmusic-cassette-field:has(.easmusic-tape[data-dragging='true']) { z-index:8; overflow:visible; }
+/* While a tape is dragged it must travel above the recorder, the album
+   carousel (z-20) and all page decorations, and must not be clipped by the
+   hero; z-index:30 stays below the site chrome (topbar 55 / sidebar 60). */
+.easmusic-cassette-field:has(.easmusic-tape[data-dragging='true']) { z-index:30; overflow:visible; }
+.easmusic-cassette-hero:has(.easmusic-tape[data-dragging='true']) { overflow:visible; }
 .easmusic-tape {
   --cassette-drag-x:0px;
   --cassette-drag-y:0px;
