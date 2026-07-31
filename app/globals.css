@@ -2258,6 +2258,13 @@ text-align:center;
 .guess-song-user-skeleton { height:14px; }
 .guess-song-stat-skeleton { width:60%; height:14px; margin:0 auto; }
 @keyframes guess-song-skeleton-shine { 0% { background-position:100% 0 } 100% { background-position:-100% 0 } }
+/* 排行榜数据区容器：相对定位以承载轻量 loading 细进度条（绝对定位，不引发布局抖动） */
+.guess-song-board-wrap { position:relative; }
+/* 切换周期时的轻量 loading：仅顶部细进度条 + 列表轻微降透明度，绝不以空列表 / 骨架替换内容 */
+.guess-song-loading-bar { position:absolute; top:-12px; left:0; right:0; height:3px; overflow:hidden; border-radius:3px; background:rgba(255,255,255,.08); z-index:2; }
+.guess-song-loading-bar::before { content:''; position:absolute; top:0; left:0; height:100%; width:40%; border-radius:3px; background:linear-gradient(90deg,transparent,var(--primary),transparent); animation:guess-song-bar-slide 1s linear infinite; }
+@keyframes guess-song-bar-slide { 0% { transform:translateX(-100%) } 100% { transform:translateX(300%) } }
+.guess-song-leaderboard.is-loading { opacity:.55; transition:opacity .15s ease; }
 .guess-song-rank { color:var(--primary); font-size:18px; text-align:center; }
 .guess-song-rank-avatar { display:block; width:34px; height:34px; overflow:hidden; border-radius:50%; }
 .guess-song-rank-user { display:flex; flex-direction:column; min-width:0; }

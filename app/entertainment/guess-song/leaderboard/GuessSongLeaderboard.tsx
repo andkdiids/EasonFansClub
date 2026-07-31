@@ -51,21 +51,32 @@ const periodNotes: Record<Period, string> = {
 const statLabels = ['最高分', '答对数', '最高连击']
 
 export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }: Readonly<{ initialPeriod: Period; initialMode: string; initialData: Data | null }>) {
+  // 周期/模式初始值直接来自 URL（已由服务端 page.tsx 解析），首屏即正确，不存在 WEEK→YEAR 二次渲染
   const [period, setPeriod] = useState<Period>(initialPeriod)
   const [mode, setMode] = useState<Mode>(initialMode in modeLabels ? (initialMode as Mode) : 'EASY')
+  // 始终保留「上一份数据」：切换周期时先显示旧榜单，避免空列表 / 骨架闪烁，数据返回后直接原地替换
   const [data, setData] = useState<Data | null>(initialData)
-  const [loading, setLoading] = useState<boolean>(!initialData)
+  // 仅在「尚未加载过任何数据」且非专家模式时，首屏才进入 loading（服务端已预取，通常首屏即 data 就绪）
+  const [loading, setLoading] = useState<boolean>(!initialData && initialMode !== 'EXPERT')
   const [error, setError] = useState('')
-  // 已成功加载过的 period:mode 组合，避免切换回已有数据时重复请求/闪屏
-  const fetchedFor = useRef<string>(initialData ? `${initialPeriod}:${initialMode}` : '')
+  // 已加载数据缓存：period:mode -> Data。命中即秒切、不触发 loading 闪烁；未命中也保留旧列表仅显轻量 loading
+  const cache = useRef<Map<string, Data>>(new Map())
+  if (initialData) cache.current.set(`${initialPeriod}:${initialMode}`, initialData)
 
   useEffect(() => {
     // 专家模式为预留入口，不请求排行榜 API
     if (mode === 'EXPERT') return
     const key = `${period}:${mode}`
-    // 初始周期已由服务端预取；切换回已加载过的周期直接复用，不重新请求
-    if (fetchedFor.current === key) return
-    fetchedFor.current = key
+    // 命中缓存：直接替换，无需 loading，无闪烁
+    const cached = cache.current.get(key)
+    if (cached) {
+      setData(cached)
+      setLoading(false)
+      setError('')
+      return
+    }
+    let cancelled = false
+    // 保留旧 data 不清除，仅置轻量 loading（细进度条 + 轻微降透明度），杜绝空列表 / 骨架闪现
     setLoading(true)
     setError('')
     fetch(`/api/entertainment/guess-song/leaderboard?period=${period}&mode=${mode}`, { cache: 'no-store' })
@@ -74,21 +85,32 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
         if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || '排行榜加载失败')
         return payload.data
       })
-      .then(setData)
-      .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : '排行榜加载失败'))
-      .finally(() => setLoading(false))
+      .then((payload) => {
+        if (cancelled) return
+        cache.current.set(key, payload)
+        setData(payload)
+      })
+      .catch((requestError: unknown) => {
+        if (cancelled) return
+        setError(requestError instanceof Error ? requestError.message : '排行榜加载失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [mode, period])
 
-  // 当前 data 是否属于「当前选中的周期 + 模式」。不匹配时（切换中或初始无数据）不渲染旧数据
-  const ready = !!data && data.periodType === period && data.mode === mode
   const isExpert = mode === 'EXPERT'
-  const showSkeleton = loading && !ready && !isExpert
-  const ownRank = ready && data.currentUser && data.currentUser.rank > 0 ? data.currentUser : null
+  // 仅当「从未成功加载过任何数据」且仍在首次请求中，才显示骨架（切换时旧数据在场，永不显骨架）
+  const firstLoad = !data && loading
+  const ownRank = data && data.currentUser && data.currentUser.rank > 0 ? data.currentUser : null
   const ownRowBelow = !!ownRank && ownRank.rank > 10
-  const ownNone = ready && !ownRank && data.rows.length > 0
+  const ownNone = !!data && !ownRank && data.rows.length > 0
 
-  // YEAR 标题：仅当数据已就绪为年榜时使用其 periodKey，否则用当前自然年，杜绝 2026-08年度 闪屏
-  const yearLabel = ready && data.periodType === 'YEAR' && data.periodKey ? data.periodKey : String(new Date().getFullYear())
+  // YEAR 标题：仅当已加载数据确为年榜时使用其 periodKey，否则用当前自然年，杜绝 2026-08年度 闪屏
+  const yearLabel = period === 'YEAR' ? (data && data.periodType === 'YEAR' && data.periodKey ? data.periodKey : String(new Date().getFullYear())) : ''
   const headingTitle = period === 'YEAR' ? `${yearLabel}年度听听挑战排名` : periodTitles[period]
 
   const renderPlayer = (row: Row, key: string, className?: string) => (
@@ -147,22 +169,26 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
           <span>敬请期待</span>
         </div>
       ) : (
-        <>
-          {ready ? <p className="guess-song-algorithm">{data.algorithm}</p> : null}
-          <section className="guess-song-leaderboard">
-            {showSkeleton ? (
-              renderSkeleton()
-            ) : ready && data.rows.length ? (
-              <>
+        <div className="guess-song-board-wrap">
+          {/* 轻量 loading 指示：仅细进度条，绝不替换内容，杜绝空列表 / 骨架闪现 */}
+          {loading ? <div className="guess-song-loading-bar" aria-hidden="true" /> : null}
+          {data ? (
+            <>
+              <p className="guess-song-algorithm">{data.algorithm}</p>
+              <section className={`guess-song-leaderboard${loading ? ' is-loading' : ''}`}>
                 {renderHead()}
                 {data.rows.map((row) => renderPlayer(row, row.userId))}
-              </>
-            ) : <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>}
-          </section>
-          {ownRowBelow ? <div className="guess-song-leaderboard-ellipsis" aria-hidden="true">···</div> : null}
-          {ownRowBelow && ownRank ? renderPlayer(ownRank, 'me', 'guess-song-leaderboard-self is-self') : null}
-          {ownNone ? <div className="guess-song-leaderboard-none"><span>暂无排名</span></div> : null}
-        </>
+              </section>
+              {ownRowBelow ? <div className="guess-song-leaderboard-ellipsis" aria-hidden="true">···</div> : null}
+              {ownRowBelow && ownRank ? renderPlayer(ownRank, 'me', 'guess-song-leaderboard-self is-self') : null}
+              {ownNone ? <div className="guess-song-leaderboard-none"><span>暂无排名</span></div> : null}
+            </>
+          ) : firstLoad ? (
+            renderSkeleton()
+          ) : (
+            <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>
+          )}
+        </div>
       )}
       <nav className="guess-song-back-links"><Link href="/games/guess-song">返回游戏详情</Link><Link href="/games">返回娱乐天空</Link></nav>
     </>
