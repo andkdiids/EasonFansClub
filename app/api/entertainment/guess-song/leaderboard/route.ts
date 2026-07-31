@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const periodType: GuessSongPeriodType | 'YEAR' =
     rawPeriod === 'MONTH' ? 'MONTH' : rawPeriod === 'YEAR' ? 'YEAR' : 'WEEK'
   const rawMode = params.get('mode')
-  const mode: GuessSongMode | 'ALL' = rawMode && isGuessSongMode(rawMode) ? rawMode : 'ALL'
+  const mode: GuessSongMode = rawMode && isGuessSongMode(rawMode) ? rawMode : 'EASY'
   try {
     return guessSongOk(await getGuessSongLeaderboard({
       userId: guard.user.id,

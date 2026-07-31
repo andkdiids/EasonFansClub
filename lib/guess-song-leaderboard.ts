@@ -97,7 +97,7 @@ function serializeRow(row: LeaderboardRow, rank: number) {
 export async function getGuessSongLeaderboard(input: {
   userId: string
   periodType: GuessSongPeriodType | 'YEAR'
-  mode: GuessSongMode | 'ALL'
+  mode: GuessSongMode
   now?: Date
 }) {
   let periodKey: string
@@ -110,7 +110,7 @@ export async function getGuessSongLeaderboard(input: {
       where: {
         status: 'COMPLETED',
         completedAt: { gte: start, lt: end },
-        ...(input.mode === 'ALL' ? {} : { mode: input.mode }),
+        mode: input.mode,
       },
       select: {
         userId: true,
@@ -131,28 +131,25 @@ export async function getGuessSongLeaderboard(input: {
         },
       },
     })
-    const grouped = new Map<string, LeaderboardRow>()
+    // 年榜：按当前模式统计，每个用户只取最高分的那一局（非累计求和）
+    const best = new Map<string, LeaderboardRow>()
     for (const session of sessions) {
-      const current = grouped.get(session.userId)
-      if (!current) {
-        grouped.set(session.userId, {
-          userId: session.userId,
-          User: session.User,
-          score: session.score,
-          correctCount: session.correctCount,
-          maxStreak: session.maxStreak,
-          totalPlayCount: session.totalPlayCount,
-          achievedAt: session.completedAt!,
-        })
-      } else {
-        current.score += session.score
-        current.correctCount += session.correctCount
-        current.maxStreak = Math.max(current.maxStreak, session.maxStreak)
-        current.totalPlayCount += session.totalPlayCount
-        if (session.completedAt! < current.achievedAt) current.achievedAt = session.completedAt!
+      const candidate: LeaderboardRow = {
+        userId: session.userId,
+        mode: session.mode,
+        User: session.User,
+        score: session.score,
+        correctCount: session.correctCount,
+        maxStreak: session.maxStreak,
+        totalPlayCount: session.totalPlayCount,
+        achievedAt: session.completedAt!,
+      }
+      const current = best.get(session.userId)
+      if (!current || compareGuessSongScores(candidate, current) < 0) {
+        best.set(session.userId, candidate)
       }
     }
-    rows = [...grouped.values()]
+    rows = [...best.values()]
   } else {
     const resolved = getGuessSongPeriod(input.periodType, input.now)
     periodKey = resolved.periodKey
@@ -160,7 +157,7 @@ export async function getGuessSongLeaderboard(input: {
       where: {
         periodType: input.periodType,
         periodKey,
-        ...(input.mode === 'ALL' ? {} : { mode: input.mode }),
+        mode: input.mode,
       },
       include: {
         User: {
@@ -175,33 +172,8 @@ export async function getGuessSongLeaderboard(input: {
       },
       take: 1000,
     })
-
-    if (input.mode === 'ALL') {
-    const grouped = new Map<string, LeaderboardRow>()
-    for (const entry of entries) {
-      const current = grouped.get(entry.userId)
-      if (!current) {
-        grouped.set(entry.userId, {
-          userId: entry.userId,
-          User: entry.User,
-          score: entry.score,
-          correctCount: entry.correctCount,
-          maxStreak: entry.maxStreak,
-          totalPlayCount: entry.totalPlayCount,
-          achievedAt: entry.achievedAt,
-        })
-      } else {
-        current.score += entry.score
-        current.correctCount += entry.correctCount
-        current.maxStreak = Math.max(current.maxStreak, entry.maxStreak)
-        current.totalPlayCount += entry.totalPlayCount
-        if (entry.achievedAt < current.achievedAt) current.achievedAt = entry.achievedAt
-      }
-    }
-    rows = [...grouped.values()]
-  } else {
+    // 周榜/月榜：guessSongLeaderboardEntry 已存储该用户该模式该周期的最高单局成绩，直接采用（非累计）
     rows = entries.map((entry) => ({ ...entry, mode: entry.mode }))
-  }
   }
 
   rows.sort(compareGuessSongScores)
@@ -210,9 +182,7 @@ export async function getGuessSongLeaderboard(input: {
     periodType: input.periodType,
     periodKey,
     mode: input.mode,
-    algorithm: input.mode === 'ALL'
-      ? '综合榜为用户四种模式当期最高有效分之和；并列时依次比较答对数、最高连击、总播放次数和更早达成时间。'
-      : '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
+    algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
     rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1)),
     currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1)) : null,
   }
