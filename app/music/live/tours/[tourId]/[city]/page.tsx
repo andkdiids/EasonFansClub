@@ -1,6 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound, redirect } from 'next/navigation'
+import { notFound, permanentRedirect } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
@@ -52,7 +52,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   const canonicalCitySlug = generateCitySlug(dbCity)
   // 规范的公开地址：/music/live/tours/<slug>/<CITY>；旧的 id / 原始 city 直链 308 跳转
   if (tourId !== canonicalTourSlug || city !== canonicalCitySlug) {
-    redirect(`/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}`)
+    permanentRedirect(`/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}`)
   }
   const [meta, config] = await Promise.all([
     prisma.musicTour.findFirst({

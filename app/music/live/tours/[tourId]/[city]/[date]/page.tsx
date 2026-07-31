@@ -1,6 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound, redirect } from 'next/navigation'
+import { notFound, permanentRedirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { AttendancePanel } from '@/components/music/live/AttendancePanel'
@@ -31,7 +31,7 @@ export default async function MusicConcertBySlugPage({
     city !== resolved.citySlug ||
     date !== resolved.dateSlug
   ) {
-    redirect(`/music/live/tours/${resolved.tourSlug}/${resolved.citySlug}/${resolved.dateSlug}`)
+    permanentRedirect(`/music/live/tours/${resolved.tourSlug}/${resolved.citySlug}/${resolved.dateSlug}`)
   }
 
   const currentUser = await getCurrentUser()

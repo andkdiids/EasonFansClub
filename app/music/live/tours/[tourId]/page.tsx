@@ -1,6 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound, redirect } from 'next/navigation'
+import { notFound, permanentRedirect } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { formatLiveDateRange } from '@/lib/music-live'
 import { generateArchiveSlug, generateCitySlug } from '@/lib/music-slug'
@@ -16,7 +16,7 @@ export default async function MusicTourPage({ params }: { params: Promise<{ tour
   if (!match) notFound()
   // 旧的 CUID 直链跳转到规范的 slug 公开地址；slug 直链直接渲染
   const canonicalSlug = generateArchiveSlug(match.name)
-  if (tourId !== canonicalSlug) redirect(`/music/live/tours/${canonicalSlug}`)
+  if (tourId !== canonicalSlug) permanentRedirect(`/music/live/tours/${canonicalSlug}`)
   const [tour, config] = await Promise.all([
     prisma.musicTour.findFirst({
       where: { id: match.id, status: 'PUBLISHED' },

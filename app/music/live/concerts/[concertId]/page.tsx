@@ -1,4 +1,4 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound, permanentRedirect } from 'next/navigation'
 import { resolveConcertSlugPath } from '@/lib/music-archive'
 
 export const dynamic = 'force-dynamic'
@@ -13,5 +13,5 @@ export default async function MusicConcertRedirectPage({
   const { concertId } = await params
   const path = await resolveConcertSlugPath(concertId)
   if (!path) notFound()
-  redirect(`/music/live/tours/${path.tourSlug}/${path.citySlug}/${path.dateSlug}`)
+  permanentRedirect(`/music/live/tours/${path.tourSlug}/${path.citySlug}/${path.dateSlug}`)
 }
