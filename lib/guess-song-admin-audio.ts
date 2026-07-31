@@ -168,8 +168,16 @@ export async function generateGuessSongAudioFromMusicSong(questionId: string) {
     data: { processingStatus: 'PROCESSING', processingError: null, enabled: false },
   })
   try {
-    const source = await downloadGuessSongObject(question.MusicSong.sourceAudioPath)
-    const processed = await processGuessSongAudio(source, 'mp3')
+   console.log(
+  '[COS DEBUG PATH]',
+  question.MusicSong.sourceAudioPath,
+)
+
+const source = await downloadGuessSongObject(
+  question.MusicSong.sourceAudioPath,
+)
+
+const processed = await processGuessSongAudio(source, 'mp3')
     await saveProcessedAudio(questionId, processed, {
       audioSourceType: 'EASMUSIC_SONG',
       musicSourceRevision: question.MusicSong.sourceAudioRevision,

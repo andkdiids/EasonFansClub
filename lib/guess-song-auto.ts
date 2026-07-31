@@ -13,8 +13,14 @@ const AUTO_POOL_SELECT = {
   title: true,
   albumId: true,
   releaseYear: true,
+  sourceAudioPath: true,
   sourceAudioRevision: true,
-  MusicAlbum: { select: { name: true, status: true } },
+  MusicAlbum: { 
+    select: { 
+      name: true, 
+      status: true 
+    } 
+  },
 } as const
 
 function autoPoolWhere(config: Pick<GuessSongQuizConfig, 'sourceType' | 'albumId' | 'year'>) {
