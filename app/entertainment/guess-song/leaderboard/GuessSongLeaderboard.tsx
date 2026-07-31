@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 
-type Period = 'WEEK' | 'MONTH'
+type Period = 'WEEK' | 'MONTH' | 'YEAR'
 type Mode = 'ALL' | 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
 type Row = {
   rank: number
@@ -28,6 +28,17 @@ type Data = {
 }
 
 const modeLabels: Record<Mode, string> = { ALL: '综合', EASY: '简单', ADVANCED: '进阶', HARD: '困难', ENDLESS: '无尽' }
+const periodLabels: Record<Period, string> = { WEEK: '周榜', MONTH: '月榜', YEAR: '年榜' }
+const periodTitles: Record<Period, string> = {
+  WEEK: '本周听听挑战排名',
+  MONTH: '本月听听挑战排名',
+  YEAR: '年度听听挑战排名',
+}
+const periodNotes: Record<Period, string> = {
+  WEEK: '每周一按北京时间开启新榜单',
+  MONTH: '每月1日按北京时间开启新榜单',
+  YEAR: '每年1月1日按北京时间开启新榜单',
+}
 
 export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ initialPeriod: Period; initialMode: string }>) {
   const [period, setPeriod] = useState<Period>(initialPeriod)
@@ -51,6 +62,10 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
   const ownRowBelow = !!ownRank && ownRank.rank > 10
   const ownNone = !!data && !ownRank && data.rows.length > 0
 
+  const headingTitle = period === 'YEAR'
+    ? `${data?.periodKey ?? new Date().getFullYear()}年度听听挑战排名`
+    : periodTitles[period]
+
   const renderPlayer = (row: Row, key: string, className?: string) => (
     <article key={key} className={className}>
       <strong className="guess-song-rank">{row.rank}</strong>
@@ -66,11 +81,11 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
     <>
       <header className="guess-song-heading">
         <p>Leaderboard</p>
-        <h1>听听排行榜</h1>
-        <span>每周一及每月1日按北京时间开启新榜单</span>
+        <h1>{headingTitle}</h1>
+        <span>{periodNotes[period]}</span>
       </header>
       <div className="guess-song-leaderboard-filters">
-        <div>{(['WEEK', 'MONTH'] as const).map((item) => <button key={item} aria-pressed={period === item} onClick={() => setPeriod(item)}>{item === 'WEEK' ? '周榜' : '月榜'}</button>)}</div>
+        <div>{(['WEEK', 'MONTH', 'YEAR'] as const).map((item) => <button key={item} aria-pressed={period === item} onClick={() => setPeriod(item)}>{periodLabels[item]}</button>)}</div>
         <div>{(Object.keys(modeLabels) as Mode[]).map((item) => <button key={item} aria-pressed={mode === item} onClick={() => setMode(item)}>{modeLabels[item]}</button>)}</div>
       </div>
       {error ? <p className="guess-song-error">{error}</p> : null}

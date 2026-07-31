@@ -8,10 +8,19 @@ function beijingDayStart(value: Date) {
 }
 
 export function getGuessSongPeriod(
-  periodType: GuessSongPeriodType,
+  periodType: GuessSongPeriodType | 'YEAR',
   value = new Date(),
 ) {
   const dayStart = beijingDayStart(value)
+  if (periodType === 'YEAR') {
+    const year = Number(getBeijingDateKey(dayStart).slice(0, 4))
+    const start = new Date(`${year}-01-01T00:00:00+08:00`)
+    return {
+      periodKey: String(year),
+      start,
+      end: new Date(`${year + 1}-01-01T00:00:00+08:00`),
+    }
+  }
   if (periodType === 'MONTH') {
     const dateKey = getBeijingDateKey(dayStart)
     const start = new Date(`${dateKey.slice(0, 7)}-01T00:00:00+08:00`)

@@ -11,7 +11,9 @@ export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guessSongError('请先登录', guard.response.status)
   const params = new URL(request.url).searchParams
-  const periodType: GuessSongPeriodType = params.get('period') === 'MONTH' ? 'MONTH' : 'WEEK'
+  const rawPeriod = params.get('period')
+  const periodType: GuessSongPeriodType | 'YEAR' =
+    rawPeriod === 'MONTH' ? 'MONTH' : rawPeriod === 'YEAR' ? 'YEAR' : 'WEEK'
   const rawMode = params.get('mode')
   const mode: GuessSongMode | 'ALL' = rawMode && isGuessSongMode(rawMode) ? rawMode : 'ALL'
   try {

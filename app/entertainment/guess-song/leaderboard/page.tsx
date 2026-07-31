@@ -11,9 +11,11 @@ export default async function GuessSongLeaderboardPage({ searchParams }: PagePro
   const user = await getCurrentUser()
   if (!user) redirect('/login?redirect=%2Fentertainment%2Fguess-song%2Fleaderboard')
   const query = await searchParams
+  const period = query?.period
+  const initialPeriod = period === 'MONTH' ? 'MONTH' : period === 'YEAR' ? 'YEAR' : 'WEEK'
   return (
     <PageContainer className="guess-song-page">
-      <GuessSongLeaderboard initialPeriod={query?.period === 'MONTH' ? 'MONTH' : 'WEEK'} initialMode={query?.mode || 'ALL'} />
+      <GuessSongLeaderboard initialPeriod={initialPeriod} initialMode={query?.mode || 'ALL'} />
     </PageContainer>
   )
 }

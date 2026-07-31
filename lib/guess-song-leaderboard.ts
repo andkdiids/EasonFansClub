@@ -96,33 +96,87 @@ function serializeRow(row: LeaderboardRow, rank: number) {
 
 export async function getGuessSongLeaderboard(input: {
   userId: string
-  periodType: GuessSongPeriodType
+  periodType: GuessSongPeriodType | 'YEAR'
   mode: GuessSongMode | 'ALL'
   now?: Date
 }) {
-  const { periodKey } = getGuessSongPeriod(input.periodType, input.now)
-  const entries = await prisma.guessSongLeaderboardEntry.findMany({
-    where: {
-      periodType: input.periodType,
-      periodKey,
-      ...(input.mode === 'ALL' ? {} : { mode: input.mode }),
-    },
-    include: {
-      User: {
-        select: {
-          uid: true,
-          nickname: true,
-          username: true,
-          avatarUrl: true,
-          Profile: { select: { avatarUrl: true } },
+  let periodKey: string
+  let rows: LeaderboardRow[]
+
+  if (input.periodType === 'YEAR') {
+    const { start, end, periodKey: yearKey } = getGuessSongPeriod('YEAR', input.now)
+    periodKey = yearKey
+    const sessions = await prisma.guessSongSession.findMany({
+      where: {
+        status: 'COMPLETED',
+        completedAt: { gte: start, lt: end },
+        ...(input.mode === 'ALL' ? {} : { mode: input.mode }),
+      },
+      select: {
+        userId: true,
+        mode: true,
+        score: true,
+        correctCount: true,
+        maxStreak: true,
+        totalPlayCount: true,
+        completedAt: true,
+        User: {
+          select: {
+            uid: true,
+            nickname: true,
+            username: true,
+            avatarUrl: true,
+            Profile: { select: { avatarUrl: true } },
+          },
         },
       },
-    },
-    take: 1000,
-  })
+    })
+    const grouped = new Map<string, LeaderboardRow>()
+    for (const session of sessions) {
+      const current = grouped.get(session.userId)
+      if (!current) {
+        grouped.set(session.userId, {
+          userId: session.userId,
+          User: session.User,
+          score: session.score,
+          correctCount: session.correctCount,
+          maxStreak: session.maxStreak,
+          totalPlayCount: session.totalPlayCount,
+          achievedAt: session.completedAt!,
+        })
+      } else {
+        current.score += session.score
+        current.correctCount += session.correctCount
+        current.maxStreak = Math.max(current.maxStreak, session.maxStreak)
+        current.totalPlayCount += session.totalPlayCount
+        if (session.completedAt! < current.achievedAt) current.achievedAt = session.completedAt!
+      }
+    }
+    rows = [...grouped.values()]
+  } else {
+    const resolved = getGuessSongPeriod(input.periodType, input.now)
+    periodKey = resolved.periodKey
+    const entries = await prisma.guessSongLeaderboardEntry.findMany({
+      where: {
+        periodType: input.periodType,
+        periodKey,
+        ...(input.mode === 'ALL' ? {} : { mode: input.mode }),
+      },
+      include: {
+        User: {
+          select: {
+            uid: true,
+            nickname: true,
+            username: true,
+            avatarUrl: true,
+            Profile: { select: { avatarUrl: true } },
+          },
+        },
+      },
+      take: 1000,
+    })
 
-  let rows: LeaderboardRow[]
-  if (input.mode === 'ALL') {
+    if (input.mode === 'ALL') {
     const grouped = new Map<string, LeaderboardRow>()
     for (const entry of entries) {
       const current = grouped.get(entry.userId)
@@ -147,6 +201,7 @@ export async function getGuessSongLeaderboard(input: {
     rows = [...grouped.values()]
   } else {
     rows = entries.map((entry) => ({ ...entry, mode: entry.mode }))
+  }
   }
 
   rows.sort(compareGuessSongScores)
