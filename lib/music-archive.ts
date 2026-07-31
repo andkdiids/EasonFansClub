@@ -30,6 +30,10 @@ export async function resolveCitySlugToCity(tourId: string, citySlug: string): P
     orderBy: { city: 'asc' },
   })
   const decoded = decodeURIComponent(citySlug)
-  const match = rows.find((row) => generateCitySlug(row.city) === citySlug || row.city === decoded)
+  // 兼容三种输入：中文原始城市（香港）、规范大写 slug（HONG-KONG）、小写 slug（hong-kong）
+  const target = citySlug.toLowerCase()
+  const match = rows.find(
+    (row) => generateCitySlug(row.city).toLowerCase() === target || row.city === decoded,
+  )
   return match ? match.city : null
 }
