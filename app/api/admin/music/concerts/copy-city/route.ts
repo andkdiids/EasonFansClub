@@ -39,7 +39,6 @@ export async function POST(request: Request) {
   if (!sourceConcerts.length) {
     return NextResponse.json({ message: `来源城市 ${sourceCity} 暂无场次可复制` }, { status: 400 })
   }
-  const template = sourceConcerts[0]
 
   const duplicates = await prisma.musicConcert.findMany({
     where: { tourId, city: targetCity, concertDate: { in: concertDates } },
@@ -56,17 +55,19 @@ export async function POST(request: Request) {
   try {
     const created = await prisma.$transaction(async (tx) => {
       const createdIds: string[] = []
-      for (const concertDate of concertDates) {
+      for (let index = 0; index < concertDates.length; index++) {
+        // 一一对应：第 index 个目标日期复制第 index 个源场次；源场次不足时复用最后一个源场次作为模板
+        const source = sourceConcerts[index] ?? sourceConcerts[sourceConcerts.length - 1]
         const concert = await tx.musicConcert.create({
           data: {
             tourId,
-            concertDate,
+            concertDate: concertDates[index],
             city: targetCity,
             title: `${targetCity}站`,
-            countryOrRegion: template.countryOrRegion || DEFAULT_CONCERT_COUNTRY,
-            venue: options.venue ? (template.venue || null) : null,
-            posterUrl: options.poster ? (template.posterUrl || null) : null,
-            description: options.description ? (template.description || null) : null,
+            countryOrRegion: source.countryOrRegion || DEFAULT_CONCERT_COUNTRY,
+            venue: options.venue ? (source.venue || null) : null,
+            posterUrl: options.poster ? (source.posterUrl || null) : null,
+            description: options.description ? (source.description || null) : null,
             status: 'DRAFT',
             sessionNumber: null,
             sortOrder: 0,
@@ -74,11 +75,11 @@ export async function POST(request: Request) {
         })
         createdIds.push(concert.id)
         if (options.setlist) {
-          const items = template.MusicConcertSetlistItem.map((item, index) => ({
+          const items = source.MusicConcertSetlistItem.map((item, position) => ({
             songId: item.songId,
             displayName: item.displayName,
             section: item.section,
-            position: index + 1,
+            position: position + 1,
             versionName: item.versionName,
             note: item.note,
             isEncore: item.isEncore,
@@ -93,11 +94,11 @@ export async function POST(request: Request) {
           }
         }
         if (options.highlights) {
-          const items = template.MusicConcertHighlight.map((item, index) => ({
+          const items = source.MusicConcertHighlight.map((item, position) => ({
             type: item.type,
             title: item.title,
             content: item.content,
-            sortOrder: index,
+            sortOrder: position,
           }))
           if (items.length) {
             await tx.musicConcertHighlight.createMany({ data: items.map((item) => ({ ...item, concertId: concert.id })) })
@@ -117,7 +118,7 @@ export async function POST(request: Request) {
       return tx.musicConcert.findMany({ where: { id: { in: createdIds } }, orderBy: [{ concertDate: 'asc' }] })
     })
     return NextResponse.json(
-      { concerts: created, message: `已从 ${sourceCity} 复制到 ${targetCity}，生成 ${created.length} 个草稿场次` },
+      { concerts: created, message: `已将 ${sourceCity} 各场次按日期顺序复制到 ${targetCity}，生成 ${created.length} 个草稿场次` },
       { status: 201 },
     )
   } catch (error) {

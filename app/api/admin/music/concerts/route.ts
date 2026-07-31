@@ -18,9 +18,33 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const tourId = sanitizeText(params.get('tourId'), 100)
   const city = sanitizeText(params.get('city'), 100)
+  const mode = params.get('mode')
   const status = params.get('status')
   const keyword = sanitizeText(params.get('q'), 100)
   const year = Number(params.get('year'))
+
+  // 城市分组模式：仅返回该巡演下的城市及其场次计数（含首尾日期），不加载全部场次，
+  // 避免未来单巡演超过 200 场时被截断。
+  if (mode === 'cities') {
+    if (!tourId) return NextResponse.json({ cities: [] })
+    const grouped = await prisma.musicConcert.groupBy({
+      by: ['city'],
+      where: { tourId },
+      _count: { _all: true },
+      _min: { concertDate: true },
+      _max: { concertDate: true },
+    })
+    const cities = grouped
+      .map((group) => ({
+        city: group.city,
+        count: group._count._all,
+        firstDate: group._min.concertDate ? group._min.concertDate.toISOString().slice(0, 10) : null,
+        lastDate: group._max.concertDate ? group._max.concertDate.toISOString().slice(0, 10) : null,
+      }))
+      .sort((left, right) => left.city.localeCompare(right.city, 'zh-CN'))
+    return NextResponse.json({ cities })
+  }
+
   const yearStart = Number.isInteger(year) && year >= 1900 && year <= 2100 ? new Date(`${year}-01-01T00:00:00.000Z`) : null
   const where: Prisma.MusicConcertWhereInput = {
     ...(tourId ? { tourId } : {}),
@@ -33,7 +57,8 @@ export async function GET(request: Request) {
     where,
     orderBy: [{ concertDate: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
     include: { MusicTour: { select: { id: true, name: true } }, _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true, UserMusicConcert: true } } },
-    take: 200,
+    // city 级查询（三级浏览第三级）不限制条数，避免单城市场次被截断；平铺模式保留 200 上限
+    ...(city ? {} : { take: 200 }),
   })
   return NextResponse.json({
     concerts: concerts.map(({ MusicTour, _count, ...concert }) => ({

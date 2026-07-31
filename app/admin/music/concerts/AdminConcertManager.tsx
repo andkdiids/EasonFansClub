@@ -15,6 +15,7 @@ type BrowseConcert = {
   sortOrder: number
   status: 'DRAFT' | 'PUBLISHED'
 }
+type CityGroup = { city: string; count: number; firstDate: string | null; lastDate: string | null }
 type SetlistSource = 'PREVIOUS' | 'NEW'
 
 const empty = {
@@ -37,12 +38,14 @@ export function AdminConcertManager() {
   const [form, setForm] = useState(empty)
   const [concertDates, setConcertDates] = useState<string[]>([])
 
-  // 三级浏览
+  // 三级浏览（懒加载：巡演 → 城市 → 场次）
   const [browseTourId, setBrowseTourId] = useState('')
-  const [browseConcerts, setBrowseConcerts] = useState<BrowseConcert[]>([])
+  const [cities, setCities] = useState<CityGroup[]>([])                 // 二级：城市分组（来自 ?mode=cities，不加载全部场次）
   const [openCity, setOpenCity] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [cityConcerts, setCityConcerts] = useState<BrowseConcert[]>([]) // 三级：某城市场次（来自 ?tourId&city）
+  const [browseConcerts, setBrowseConcerts] = useState<BrowseConcert[]>([]) // 平铺模式（showAll）仍受 200 上限约束
   const [showAll, setShowAll] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   // 批量海报
   const [posterPanelOpen, setPosterPanelOpen] = useState(false)
@@ -62,6 +65,7 @@ export function AdminConcertManager() {
   }, [])
   useEffect(() => { void loadTours() }, [loadTours])
 
+  // 平铺模式：加载该巡演全部场次（上限 200，仅 showAll 时使用）
   const loadBrowse = useCallback(async () => {
     if (!browseTourId) { setBrowseConcerts([]); return }
     const response = await fetch(`/api/admin/music/concerts?tourId=${encodeURIComponent(browseTourId)}`)
@@ -69,28 +73,41 @@ export function AdminConcertManager() {
     if (response.ok) setBrowseConcerts(data.concerts || [])
     else setError(data?.message || '场次加载失败')
   }, [browseTourId])
-  useEffect(() => { void loadBrowse() }, [loadBrowse])
 
-  const cities = useMemo(() => {
-    const groups = new Map<string, { city: string; concerts: BrowseConcert[] }>()
-    for (const concert of browseConcerts) {
-      const group = groups.get(concert.city) || { city: concert.city, concerts: [] }
-      group.concerts.push(concert)
-      groups.set(concert.city, group)
-    }
-    return [...groups.values()]
-      .map((group) => ({
-        city: group.city,
-        count: group.concerts.length,
-        firstDate: group.concerts.reduce((min, item) => (item.concertDate < min ? item.concertDate : min), group.concerts[0].concertDate).slice(0, 10),
-        lastDate: group.concerts.reduce((max, item) => (item.concertDate > max ? item.concertDate : max), group.concerts[0].concertDate).slice(0, 10),
-      }))
-      .sort((left, right) => left.city.localeCompare(right.city, 'zh-CN'))
-  }, [browseConcerts])
+  // 二级：城市分组（仅返回城市+计数，不加载全部场次，避免单巡演超 200 场被截断）
+  const loadCities = useCallback(async () => {
+    if (!browseTourId) { setCities([]); return }
+    const response = await fetch(`/api/admin/music/concerts?mode=cities&tourId=${encodeURIComponent(browseTourId)}`)
+    const data = await response.json().catch(() => null)
+    if (response.ok) setCities(data.cities || [])
+    else setError(data?.message || '城市加载失败')
+  }, [browseTourId])
+
+  // 三级：某城市场次（city 级查询不限条数）
+  const loadCityConcerts = useCallback(async () => {
+    if (!browseTourId || !openCity) { setCityConcerts([]); return }
+    const response = await fetch(`/api/admin/music/concerts?tourId=${encodeURIComponent(browseTourId)}&city=${encodeURIComponent(openCity)}`)
+    const data = await response.json().catch(() => null)
+    if (response.ok) setCityConcerts(data.concerts || [])
+    else setError(data?.message || '场次加载失败')
+  }, [browseTourId, openCity])
+
+  useEffect(() => {
+    if (showAll) void loadBrowse()
+    else void loadCities()
+  }, [showAll, loadBrowse, loadCities])
+  useEffect(() => { void loadCityConcerts() }, [loadCityConcerts])
+
+  // 任意写操作后刷新当前视图（仅重载相关层级，不拉取全部场次）
+  async function refresh() {
+    await loadCities()
+    if (openCity) await loadCityConcerts()
+    if (showAll) await loadBrowse()
+  }
 
   const openCityConcerts = useMemo(
-    () => (openCity ? browseConcerts.filter((concert) => concert.city === openCity).sort((a, b) => a.concertDate.localeCompare(b.concertDate)) : []),
-    [openCity, browseConcerts],
+    () => (openCity ? [...cityConcerts].sort((left, right) => left.concertDate.localeCompare(right.concertDate)) : []),
+    [openCity, cityConcerts],
   )
 
   function addMessage(text: string) { setMessage(text); setError('') }
@@ -123,7 +140,7 @@ export function AdminConcertManager() {
       addMessage(data?.message || `已创建 ${concertDates.length} 个场次`)
       setConcertDates([])
       setForm((current) => ({ ...current, setlistText: '' }))
-      await loadBrowse()
+      await refresh()
     }
     setBusy(false)
   }
@@ -136,7 +153,7 @@ export function AdminConcertManager() {
     else {
       addMessage('场次已删除，其余场次已自动重新编号')
       setSelectedIds((current) => current.filter((id) => id !== concert.id))
-      await loadBrowse()
+      await refresh()
     }
   }
 
@@ -152,7 +169,7 @@ export function AdminConcertManager() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok) addError(data?.message || '操作失败')
-    else { addMessage(data.message); setSelectedIds([]); setPosterPanelOpen(false); setBatchPosterUrl(''); await loadBrowse() }
+    else { addMessage(data.message); setSelectedIds([]); setPosterPanelOpen(false); setBatchPosterUrl(''); await refresh() }
   }
 
   async function applyPoster() {
@@ -163,7 +180,7 @@ export function AdminConcertManager() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok) addError(data?.message || '海报更新失败')
-    else { addMessage(data.message); setSelectedIds([]); setPosterPanelOpen(false); setBatchPosterUrl(''); await loadBrowse() }
+    else { addMessage(data.message); setSelectedIds([]); setPosterPanelOpen(false); setBatchPosterUrl(''); await refresh() }
   }
 
   async function copyCity() {
@@ -182,7 +199,7 @@ export function AdminConcertManager() {
       addMessage(data.message)
       setCopyOpen(false)
       setCopyForm({ targetCity: '', concertDates: [], options: { venue: true, poster: true, description: true, setlist: true, highlights: true } })
-      await loadBrowse()
+      await refresh()
     }
     setBusy(false)
   }
@@ -284,7 +301,7 @@ export function AdminConcertManager() {
               <button type="button" onClick={() => { setOpenCity((current) => (current === group.city ? null : group.city)); setSelectedIds([]) }} className="flex items-center gap-3 text-left">
                 <span className="text-lg font-black text-brand-950">{group.city}</span>
                 <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-black text-brand-800">{group.count} 场</span>
-                <span className="text-xs font-bold text-slate-400">{group.firstDate} ~ {group.lastDate}</span>
+                <span className="text-xs font-bold text-slate-400">{group.firstDate ?? ''} ~ {group.lastDate ?? ''}</span>
                 <span className="text-xs font-black text-slate-400">{openCity === group.city ? '▲' : '▼'}</span>
               </button>
               <button type="button" onClick={() => { setOpenCity(group.city); setSelectedIds([]); setCopyOpen(true) }} className="rounded-lg bg-sky-50 px-3 py-2 text-sm font-black text-brand-700">复制城市</button>
@@ -321,12 +338,13 @@ export function AdminConcertManager() {
                       </tr>)}
                     </tbody>
                   </table>
+                  {!openCityConcerts.length ? <p className="mt-4 text-sm font-bold text-slate-500">{group.city} 暂无场次。</p> : null}
                 </div>
 
                 {copyOpen ? (
                   <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
                     <h3 className="text-lg font-black text-brand-950">复制「{group.city}」到新城市</h3>
-                    <p className="mt-1 text-sm font-bold text-slate-500">基于 {group.city} 首个场次的内容生成新场次，管理员后续仅需修改城市、日期、场馆。</p>
+                    <p className="mt-1 text-sm font-bold text-slate-500">将 {group.city} 各场次按日期顺序一一对应到新城市的各个日期（如 12-09 → 新城市首个日期），管理员后续仅需微调城市、日期、场馆。</p>
                     <div className="mt-4 grid gap-4 lg:grid-cols-2">
                       <label className="text-sm font-black text-slate-700">目标城市
                         <input value={copyForm.targetCity} onChange={(event) => setCopyForm((current) => ({ ...current, targetCity: event.target.value }))} className={`${field} mt-1`} />
