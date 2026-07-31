@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { MusicCoverUploader } from '@/app/admin/music/MusicCoverUploader'
 import { MultiDatePicker } from '@/components/music/live/MultiDatePicker'
 
@@ -206,6 +206,26 @@ export function AdminConcertManager() {
 
   const selectedCount = selectedIds.length
 
+  // 当前展开城市场次的勾选派生状态（仅前端状态，不触达 API/DB）
+  const openCityIds = useMemo(() => openCityConcerts.map((concert) => concert.id), [openCityConcerts])
+  const allCitySelected = openCityIds.length > 0 && openCityIds.every((id) => selectedIds.includes(id))
+  const someCitySelected = openCityIds.some((id) => selectedIds.includes(id))
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const element = selectAllRef.current
+    if (element) element.indeterminate = someCitySelected && !allCitySelected
+  }, [someCitySelected, allCitySelected])
+
+  function toggleSelectAll() {
+    if (allCitySelected) {
+      // 取消全选：仅清空当前城市场次的选择
+      setSelectedIds((current) => current.filter((id) => !openCityIds.includes(id)))
+    } else {
+      // 全选：选中当前城市已加载的全部场次（合并去重）
+      setSelectedIds((current) => [...new Set([...current, ...openCityIds])])
+    }
+  }
+
   return <main className="admin-mobile-page mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5">
     <section className="border border-sky-100 bg-white/90 p-6 shadow-sm">
       <Link href="/admin/music" className="text-sm font-black text-brand-700">← EasMusic 管理</Link>
@@ -309,7 +329,7 @@ export function AdminConcertManager() {
             {openCity === group.city ? (
               <div className="border-t border-sky-100 p-4">
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="text-sm font-black text-slate-600">勾选场次后批量操作：</span>
+                  <span className="text-sm font-black text-slate-600">已选择 {selectedCount} / {openCityConcerts.length} 个场次</span>
                   <button type="button" onClick={() => bulkAction('publish')} disabled={!selectedCount} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量发布</button>
                   <button type="button" onClick={() => bulkAction('unpublish')} disabled={!selectedCount} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量取消发布</button>
                   <button type="button" onClick={() => bulkAction('draft')} disabled={!selectedCount} className="rounded-lg bg-slate-500 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量转草稿</button>
@@ -326,7 +346,10 @@ export function AdminConcertManager() {
 
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-left text-sm">
-                    <thead className="bg-sky-50 text-xs font-black"><tr>{['', '日期', '场馆', '排序', '状态', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead>
+                    <thead className="bg-sky-50 text-xs font-black"><tr>
+                      <th className="w-10 p-3"><input ref={selectAllRef} type="checkbox" checked={allCitySelected} onChange={toggleSelectAll} aria-label="全选当前城市场次" /></th>
+                      {['日期', '场馆', '排序', '状态', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}
+                    </tr></thead>
                     <tbody>
                       {openCityConcerts.map((concert) => <tr key={concert.id} className="border-t border-sky-100">
                         <td className="p-3"><input type="checkbox" checked={selectedIds.includes(concert.id)} onChange={() => toggleSelect(concert.id)} aria-label={`选择 ${concert.concertDate.slice(0, 10)}`} /></td>
