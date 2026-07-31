@@ -855,6 +855,7 @@ model GuessSongQuestion {
   musicSongId              String?
   audioSourceType          String?
   musicSourceRevision      String?
+  questionType             String                     @default("MANUAL")
   GuessSongAudioVariant    GuessSongAudioVariant[]
   MusicSong                MusicSong?                 @relation(fields: [musicSongId], references: [id])
   GuessSongSessionQuestion GuessSongSessionQuestion[]
@@ -864,6 +865,7 @@ model GuessSongQuestion {
   @@index([difficulty, enabled])
   @@index([musicSongId])
   @@index([processingStatus])
+  @@index([questionType, enabled, processingStatus])
   @@index([songTitle])
 }
 
@@ -880,6 +882,7 @@ model GuessSongSession {
   livesRemaining            Int                         @default(0)
   totalPlayCount            Int                         @default(0)
   currentPosition           Int                         @default(1)
+  questionCount             Int?
   startedAt                 DateTime                    @default(now())
   completedAt               DateTime?
   expiresAt                 DateTime
@@ -921,6 +924,18 @@ model GuessSongSessionQuestion {
   @@index([publicId])
   @@index([questionId])
   @@index([sessionId, answeredAt])
+}
+
+model GuessSongQuizConfig {
+  id            String              @id @default("global")
+  enabled       Boolean             @default(true)
+  sourceType    String              @default("ALL")
+  albumId       String?
+  year          Int?
+  difficulty    GuessSongDifficulty @default(EASY)
+  questionCount Int                 @default(10)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 }
 
 model Like {

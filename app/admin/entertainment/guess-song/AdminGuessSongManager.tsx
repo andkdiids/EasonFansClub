@@ -31,6 +31,7 @@ type Question = {
   songTitle: string
   albumTitle: string | null
   musicSongId: string | null
+  questionType: string
   difficulty: Difficulty
   enabled: boolean
   allowEndless: boolean

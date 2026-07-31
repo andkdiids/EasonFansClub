@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { NextResponse } from 'next/server'
+import { ensureAutoQuestionForSong } from '@/lib/guess-song-auto'
 import { MusicMediaStorageError, uploadMusicMedia } from '@/lib/music-media-storage'
 import {
   createMusicSourceAndPreview,
@@ -124,13 +125,22 @@ async function uploadPreview(request: Request, { params }: { params: Promise<{ s
         console.error('[music-preview.cleanup-old-source]', cleanupError)
       })
     }
-    console.info('[music-preview.complete]', { songId, sourceStored: true })
+    // A published song with fresh audio joins the guess-song pool automatically;
+    // failures here must never fail the upload itself.
+    const guessClip = await ensureAutoQuestionForSong(song.id)
+      .then((result) => (result.created ? 'created' : `skipped:${result.reason}`))
+      .catch((hookError: unknown) => {
+        console.error('[music-preview.guess-clip]', hookError)
+        return 'failed'
+      })
+    console.info('[music-preview.complete]', { songId, sourceStored: true, guessClip })
     return NextResponse.json({
       success: true,
       previewUrl,
       previewDuration: processed.previewDuration,
       sourceDuration: Math.round(processed.durationMs / 100) / 10,
       sourceStored: true,
+      guessClip,
     })
   } catch (error) {
     if (privateSourceUploaded) {

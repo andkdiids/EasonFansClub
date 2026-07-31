@@ -11,6 +11,12 @@ import {
 import { getGuessSongPeriod } from '@/lib/guess-song-period'
 import { getGuessSongRanks, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
 import {
+  getGuessSongQuizConfigOrDefault,
+  GUESS_SONG_QUESTION_TYPE_AUTO,
+  GUESS_SONG_QUESTION_TYPE_MANUAL,
+  GUESS_SONG_QUIZ_CONFIG_ID,
+} from '@/lib/guess-song-quiz-config'
+import {
   createGuessSongSignedUrl,
   getGuessSongSignedUrlExpires,
 } from '@/lib/guess-song-storage'
@@ -101,7 +107,19 @@ async function createSessionQuestion(
   })
 }
 
-async function findEligibleQuestions(mode: GuessSongMode) {
+/** Manual questions keep their original rules; AUTO questions serve every mode
+    but only while their album is published and auto generation is enabled. */
+function eligibleSourceFilter(mode: GuessSongMode, autoEnabled: boolean): Prisma.GuessSongQuestionWhereInput[] {
+  const autoBranch: Prisma.GuessSongQuestionWhereInput[] = autoEnabled
+    ? [{ questionType: GUESS_SONG_QUESTION_TYPE_AUTO, MusicSong: { MusicAlbum: { status: 'PUBLISHED' } } }]
+    : []
+  if (mode === 'ENDLESS') {
+    return [{ questionType: GUESS_SONG_QUESTION_TYPE_MANUAL }, ...autoBranch]
+  }
+  return [{ questionType: GUESS_SONG_QUESTION_TYPE_MANUAL, difficulty: mode }, ...autoBranch]
+}
+
+async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) {
   const config = GUESS_SONG_MODE_CONFIG[mode]
   return prisma.guessSongQuestion.findMany({
     where: mode === 'ENDLESS'
@@ -109,12 +127,13 @@ async function findEligibleQuestions(mode: GuessSongMode) {
           enabled: true,
           allowEndless: true,
           processingStatus: 'READY',
+          OR: eligibleSourceFilter(mode, autoEnabled),
           GuessSongAudioVariant: { some: { durationSeconds: { in: [...GUESS_SONG_AUDIO_DURATIONS] } } },
         }
       : {
           enabled: true,
-          difficulty: mode,
           processingStatus: 'READY',
+          OR: eligibleSourceFilter(mode, autoEnabled),
           GuessSongAudioVariant: { some: { durationSeconds: config.durationSeconds ?? undefined } },
         },
     select: {
@@ -133,13 +152,15 @@ async function createNextEndlessQuestion(
   tx: Prisma.TransactionClient,
   sessionId: string,
   position: number,
-  previousQuestionId?: string,
+  previousQuestionId: string | undefined,
+  autoEnabled: boolean,
 ) {
   const candidates = await tx.guessSongQuestion.findMany({
     where: {
       enabled: true,
       allowEndless: true,
       processingStatus: 'READY',
+      OR: eligibleSourceFilter('ENDLESS', autoEnabled),
       GuessSongAudioVariant: { some: { durationSeconds: { in: [...GUESS_SONG_AUDIO_DURATIONS] } } },
     },
     select: {
@@ -187,11 +208,13 @@ export async function createOrResumeGuessSongSession(
     await prisma.guessSongSession.update({ where: { id: active.id }, data: { status: 'EXPIRED', activeKey: null } })
   }
 
-  const candidates = await findEligibleQuestions(mode)
+  const quizConfig = await getGuessSongQuizConfigOrDefault()
+  const candidates = await findEligibleQuestions(mode, quizConfig.enabled)
   const config = GUESS_SONG_MODE_CONFIG[mode]
-  if (mode !== 'ENDLESS' && candidates.length < (config.questionCount ?? 10)) {
+  const questionCount = mode === 'ENDLESS' ? null : quizConfig.questionCount ?? config.questionCount ?? 10
+  if (mode !== 'ENDLESS' && candidates.length < (questionCount ?? 10)) {
     throw new GuessSongServiceError(
-      `${config.label}模式至少需要 ${config.questionCount} 道已启用且音频就绪的题目，当前只有 ${candidates.length} 道`,
+      `${config.label}模式至少需要 ${questionCount} 道已启用且音频就绪的题目，当前只有 ${candidates.length} 道`,
       409,
       'QUESTION_POOL_INSUFFICIENT',
     )
@@ -208,15 +231,16 @@ export async function createOrResumeGuessSongSession(
           activeKey: `${userId}:${mode}`,
           mode,
           livesRemaining: mode === 'ENDLESS' ? GUESS_SONG_INITIAL_LIVES : 0,
+          questionCount,
           expiresAt: sessionExpiry(mode, now),
           startedAt: now,
         },
       })
 
       if (mode === 'ENDLESS') {
-        await createNextEndlessQuestion(tx, created.id, 1)
+        await createNextEndlessQuestion(tx, created.id, 1, undefined, quizConfig.enabled)
       } else {
-        const selected = shuffle(candidates).slice(0, config.questionCount ?? 10)
+        const selected = shuffle(candidates).slice(0, questionCount ?? 10)
         for (let index = 0; index < selected.length; index += 1) {
           await createSessionQuestion(tx, {
             sessionId: created.id,
@@ -273,7 +297,7 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     livesRemaining: session.livesRemaining,
     totalPlayCount: session.totalPlayCount,
     currentPosition: session.currentPosition,
-    totalQuestions: config.questionCount,
+    totalQuestions: session.questionCount ?? config.questionCount,
     expiresAt: session.expiresAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,
     question: session.status === 'IN_PROGRESS' && currentQuestion
@@ -505,7 +529,7 @@ export async function answerGuessSongQuestion(input: {
       ? Math.max(0, question.GuessSongSession.livesRemaining - 1)
       : question.GuessSongSession.livesRemaining
     const normalCompleted = question.GuessSongSession.mode !== 'ENDLESS'
-      && question.position >= (GUESS_SONG_MODE_CONFIG[question.GuessSongSession.mode].questionCount ?? 10)
+      && question.position >= (question.GuessSongSession.questionCount ?? GUESS_SONG_MODE_CONFIG[question.GuessSongSession.mode].questionCount ?? 10)
     const completed = normalCompleted || (question.GuessSongSession.mode === 'ENDLESS' && livesRemaining === 0)
 
     const claimed = await tx.guessSongSessionQuestion.updateMany({
@@ -554,11 +578,13 @@ export async function answerGuessSongQuestion(input: {
     ])
 
     if (!completed && question.GuessSongSession.mode === 'ENDLESS') {
+      const quizConfig = await tx.guessSongQuizConfig.findUnique({ where: { id: GUESS_SONG_QUIZ_CONFIG_ID } })
       await createNextEndlessQuestion(
         tx,
         input.sessionId,
         question.position + 1,
         question.questionId,
+        quizConfig?.enabled ?? true,
       )
     }
 

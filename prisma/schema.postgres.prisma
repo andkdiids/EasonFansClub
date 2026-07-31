@@ -735,6 +735,8 @@ model GuessSongQuestion {
   createdAt        DateTime                   @default(now())
   updatedAt        DateTime                   @updatedAt
   musicSongId      String?
+  questionType     String                     @default("MANUAL")
+  musicSongId      String?
   audioVariants    GuessSongAudioVariant[]
   musicSong        MusicSong?                 @relation(fields: [musicSongId], references: [id])
   sessionQuestions GuessSongSessionQuestion[]
@@ -742,6 +744,8 @@ model GuessSongQuestion {
   @@index([difficulty, enabled])
   @@index([allowEndless, enabled])
   @@index([processingStatus])
+  @@index([questionType, enabled, processingStatus])
+  @@index([songTitle])  @@index([processingStatus])
   @@index([songTitle])
   @@index([musicSongId])
   @@index([createdAt])
@@ -773,6 +777,8 @@ model GuessSongSession {
   maxStreak          Int                         @default(0)
   livesRemaining     Int                         @default(0)
   totalPlayCount     Int                         @default(0)
+  currentPosition    Int                         @default(1)
+  questionCount      Int?
   currentPosition    Int                         @default(1)
   startedAt          DateTime                    @default(now())
   completedAt        DateTime?
@@ -814,6 +820,20 @@ model GuessSongSessionQuestion {
   @@unique([sessionId, position])
   @@index([sessionId, answeredAt])
   @@index([questionId])
+  @@index([publicId])
+}
+
+model GuessSongQuizConfig {
+  id            String              @id @default("global")
+  enabled       Boolean             @default(true)
+  sourceType    String              @default("ALL")
+  albumId       String?
+  year          Int?
+  difficulty    GuessSongDifficulty @default(EASY)
+  questionCount Int                 @default(10)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+}
   @@index([publicId])
 }
 
