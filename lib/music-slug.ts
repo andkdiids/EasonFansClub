@@ -122,3 +122,14 @@ export function generateCitySlug(city: string): string {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
 }
+
+// 单场日期 slug：数据库日期 2022-12-10 -> 20221210。
+// 注意：使用 UTC 提取日历日期，与 lib/music-live.ts 的 formatLiveDate（timeZone: 'UTC'）保持一致，
+// 确保 URL 中的日期与页面展示的日期完全相同。仅用于生成 URL，不写回数据库。
+export function generateDateSlug(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}${m}${day}`
+}

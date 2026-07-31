@@ -4,7 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
-import { generateArchiveSlug, generateCitySlug } from '@/lib/music-slug'
+import { generateArchiveSlug, generateCitySlug, generateDateSlug } from '@/lib/music-slug'
 import { resolveTourByArchiveSlug, resolveCitySlugToCity } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -129,9 +129,10 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
       <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cityConcerts.map((concert, index) => {
           const sessionLabel = concert.sessionNumber || String(index + 1)
+          const concertHref = `/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}/${generateDateSlug(concert.concertDate)}`
           return (
             <div key={concert.id} className="min-w-0 border border-white/10 bg-white/[0.055] p-5 transition hover:border-sky-300/30 hover:bg-white/[0.09]">
-              <Link href={`/music/live/concerts/${concert.id}`} className="block">
+              <Link href={concertHref} className="block">
                 <div className="flex items-center justify-between gap-3">
                   <time className="text-xs font-black text-sky-300/70">{formatLiveDate(concert.concertDate)}</time>
                   <span className="shrink-0 border border-sky-300/20 px-2 py-1 text-[10px] font-black text-sky-100/75">第 {sessionLabel} 场</span>
@@ -149,7 +150,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
                   <p className="mt-2 text-sm font-bold text-slate-400">暂无 Encore</p>
                 )}
               </div>
-              <Link href={`/music/live/concerts/${concert.id}`} className="mt-3 inline-block text-xs font-black text-sky-100/65">查看完整歌单 →</Link>
+              <Link href={concertHref} className="mt-3 inline-block text-xs font-black text-sky-100/65">查看完整歌单 →</Link>
             </div>
           )
         })}
