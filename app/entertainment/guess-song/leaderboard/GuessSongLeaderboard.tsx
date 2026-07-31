@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import { formatUid } from '@/lib/uid'
 
 type Period = 'WEEK' | 'MONTH'
 type Mode = 'ALL' | 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
@@ -49,6 +48,21 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
   }, [mode, period])
 
   const ownRank = data?.currentUser && data.currentUser.rank > 0 ? data.currentUser : null
+  const ownRowBelow = !!ownRank && ownRank.rank > 10
+  const ownNone = !!data && !ownRank && data.rows.length > 0
+
+  const renderPlayer = (row: Row, key: string, className?: string) => (
+    <article key={key} className={className}>
+      <strong className="guess-song-rank">{row.rank}</strong>
+      <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
+      <div className="guess-song-rank-user"><strong>{row.nickname}</strong></div>
+      <div className="guess-song-rank-stats">
+        <span>{row.score}</span>
+        <span>{row.correctCount}</span>
+        <span>{row.maxStreak}</span>
+      </div>
+    </article>
+  )
 
   return (
     <>
@@ -65,34 +79,30 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
       {data ? <p className="guess-song-algorithm">{data.algorithm}</p> : null}
       <div className="guess-song-sort-bar" role="group" aria-label="排行榜排序">
         <span className="guess-song-sort-label">排序：</span>
-        <button type="button" aria-pressed="true">最高分 ↓</button>
-        <button type="button" disabled aria-disabled="true" title="敬请期待">答对数</button>
-        <button type="button" disabled aria-disabled="true" title="敬请期待">连击数</button>
+        <button type="button" aria-pressed="true">总得分 ↓</button>
+        <button type="button" disabled aria-disabled="true" title="敬请期待">总答对</button>
+        <button type="button" disabled aria-disabled="true" title="敬请期待">最高连击</button>
       </div>
       <section className="guess-song-leaderboard">
-        {data?.rows.length ? data.rows.map((row) => (
-          <article key={row.userId}>
-            <strong className="guess-song-rank">{row.rank}</strong>
-            <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
-            <div className="guess-song-rank-user"><strong>{row.nickname}</strong><small>UID {formatUid(row.uid)}</small></div>
-            <div className="guess-song-rank-score"><strong>{row.score}</strong><span>分</span></div>
-          </article>
-        )) : <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>}
-      </section>
-      {data?.rows.length ? <div className="guess-song-leaderboard-ellipsis" aria-hidden="true">···</div> : null}
-      {data ? (
-        <section className="guess-song-own-rank">
-          <span className="guess-song-own-rank-label">我的排名</span>
-          {ownRank ? (
-            <div className="guess-song-own-rank-detail">
-              <strong>第 {ownRank.rank} 名</strong>
-              <span>{ownRank.score} 分</span>
+        {data?.rows.length ? (
+          <>
+            <div className="guess-song-leaderboard-head" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <div className="guess-song-rank-stats">
+                <span>总得分</span>
+                <span>总答对</span>
+                <span>最高连击</span>
+              </div>
             </div>
-          ) : (
-            <strong className="guess-song-own-rank-empty">暂未上榜</strong>
-          )}
-        </section>
-      ) : null}
+            {data.rows.map((row) => renderPlayer(row, row.userId))}
+          </>
+        ) : <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>}
+      </section>
+      {ownRowBelow ? <div className="guess-song-leaderboard-ellipsis" aria-hidden="true">···</div> : null}
+      {ownRowBelow && ownRank ? renderPlayer(ownRank, 'me', 'guess-song-leaderboard-self is-self') : null}
+      {ownNone ? <div className="guess-song-leaderboard-none"><span>暂无排名</span></div> : null}
       <nav className="guess-song-back-links"><Link href="/games/guess-song">返回游戏详情</Link><Link href="/games">返回娱乐天空</Link></nav>
     </>
   )
