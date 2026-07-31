@@ -106,7 +106,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
     </section>
 
     {allSame ? (
-      <SetlistBlock items={baseNormal} title={`${decodedCity}站统一歌单`} eyebrow="UNIFIED SETLIST" idPrefix="unified" />
+      <SetlistBlock items={baseNormal} excludeEncore title={`${decodedCity}站统一歌单`} eyebrow="UNIFIED SETLIST" idPrefix="unified" />
     ) : (
       <SetlistBlock items={baseNormal} title={`${decodedCity}站基础歌单`} eyebrow="BASE SETLIST" idPrefix="base" />
     )}
@@ -116,6 +116,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
       <h2 id="city-concerts-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">演出场次</h2>
       <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cityConcerts.map((concert) => {
+          // 差异场次 = 普通歌单与基础签名不同（仅在不一致模式下才可能存在）
           const isDiff = !allSame && concert.signature !== baseSignature
           return (
             <div key={concert.id} className="min-w-0 border border-white/10 bg-white/[0.055] p-5">
@@ -125,6 +126,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
                 <p className="mt-2 break-words text-sm font-bold text-slate-300/65">{concert.venue || '场馆待整理'}{concert.sessionNumber ? ` · ${concert.sessionNumber}` : ''}</p>
                 <p className="mt-4 text-xs font-black text-sky-100/65">查看完整歌单 →</p>
               </Link>
+              {/* 统一模式：每个卡片只显示 Encore 歌曲，绝不重复完整歌单 */}
               {concert.encore.length && !isDiff ? (
                 <div className="mt-3 border-t border-white/10 pt-3">
                   <p className="text-[10px] font-black tracking-[0.2em] text-sky-300/55">ENCORE</p>
@@ -133,6 +135,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
                   </ul>
                 </div>
               ) : null}
+              {/* 仅差异场次展示该场完整歌单（含 Encore）；统一模式 / 基础一致场次不渲染 */}
               {isDiff ? <SetlistBlock items={concert.full} title={`${formatLiveDate(concert.concertDate)} 歌单`} eyebrow="SETLIST" idPrefix={`concert-${concert.id}`} /> : null}
             </div>
           )

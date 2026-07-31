@@ -22,14 +22,17 @@ export function SetlistBlock({
   title,
   eyebrow = 'LIVE SETLIST',
   idPrefix = 'setlist',
+  excludeEncore = false,
 }: {
   items: SetlistItemForBlock[]
   title: string
   eyebrow?: string
   idPrefix?: string
+  excludeEncore?: boolean
 }) {
+  const source = excludeEncore ? items.filter((item) => !item.isEncore) : items
   const grouped = Object.entries(MUSIC_SETLIST_SECTION_LABELS)
-    .map(([section, label]) => ({ section, label, items: items.filter((item) => item.section === section) }))
+    .map(([section, label]) => ({ section, label, items: source.filter((item) => item.section === section) }))
     .filter((group) => group.items.length)
   if (!grouped.length) return null
   const headingId = `${idPrefix}-title`
