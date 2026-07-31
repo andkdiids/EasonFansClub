@@ -11,7 +11,9 @@ import { GuessResultOverlay } from '@/components/games/GuessResultOverlay'
 import { createUUID } from '@/lib/utils/uuid'
 
 type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
+type AnswerMode = 'CHOICE' | 'INPUT'
 type SessionQuestion = {
+  answerMode: AnswerMode
   publicId: string
   position: number
   playbackDurationSeconds: number
@@ -427,14 +429,15 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           onToggle={() => void toggleAudio()}
         />
         <section className="guess-answer-zone">
-          <GuessAnswerInput
-            key={question.publicId}
-            options={question.options}
-            disabled={answering || Boolean(answerResult)}
-            played={question.playCount > 0}
-            wrongPulse={answerResult && !answerResult.correct ? 1 : 0}
-            onSubmit={(key) => void submitAnswer(key)}
-          />
+<GuessAnswerInput
+  key={question.publicId}
+mode="CHOICE"
+  options={question.options}
+  disabled={answering || Boolean(answerResult)}
+  played={question.playCount > 0}
+  wrongPulse={answerResult && !answerResult.correct ? 1 : 0}
+  onSubmit={(key) => void submitAnswer(key)}
+/>
           <GuessFooter played={question.playCount > 0} playCount={question.playCount} maxPlayCount={question.maxPlayCount} />
         </section>
         {answerResult ? (

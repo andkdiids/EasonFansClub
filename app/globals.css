@@ -1923,7 +1923,7 @@ body:has(.immersive-game-layout) {
 .guess-play-header dt { color:#718aa0; font-size:8px; text-transform:uppercase; }
 .guess-play-header dd { margin-top:5px; font-size:18px; font-weight:900; }
 .guess-play-message { margin:12px 18px 0; }
-.cassette-stage { position:relative; display:grid; min-height:370px; place-items:center; overflow:visible; padding:24px; }
+.cassette-stage { position:relative; display:grid; min-height:200px; place-items:center; overflow:visible; padding:24px; }
 .guess-waveform { position:absolute; z-index:0; top:0; bottom:0; left:calc(50% - 50vw); width:100vw; max-width:none; height:100%; opacity:.75; }
 .cassette-player { position:relative; z-index:2; width:min(660px,88%); border:1px solid rgba(178,207,229,.25); padding:20px; background:linear-gradient(145deg,#172536,#0b1420); box-shadow:0 25px 65px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.06); transform:perspective(800px) rotateX(1deg); transition:box-shadow .25s ease; }
 .cassette-stage.is-playing .cassette-player { box-shadow:0 25px 70px rgba(0,0,0,.5),0 0 45px rgba(46,204,143,.11),inset 0 1px rgba(255,255,255,.06); }
@@ -1949,7 +1949,7 @@ body:has(.immersive-game-layout) {
 .game-progress i { display:block; height:100%; background:#54dba4; transition:width .1s linear; }
 .cassette-controls>div>p { display:flex; justify-content:space-between; margin:7px 0 0; color:#70869a; font-size:8px; }
 .cassette-controls>b { color:#7990a3; font-size:8px; letter-spacing:.1em; }
-.guess-answer-zone { width:min(980px,100%); margin-inline:auto; border-top:0; padding:14px 18px; }
+.guess-answer-zone { width:min(980px,100%); margin-inline:auto; border-top:0; padding:0; }
 .guess-answer-input { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 140px; gap:9px; }
 .guess-answer-input label>span { display:block; margin-bottom:7px; color:#71889d; font-size:8px; font-weight:900; letter-spacing:.1em; }
 .guess-answer-input input { width:100%; height:48px; border:1px solid rgba(138,174,204,.24); border-radius:0; padding:0 14px; color:#f0f6fa; background:#0a1522; outline:0; }
@@ -2087,7 +2087,74 @@ body:has(.immersive-game-layout) {
 .guess-song-wave { display:flex; height:96px; align-items:center; justify-content:center; gap:5px; border-bottom:1px solid var(--border); padding:18px; }.guess-song-wave i { width:3px; height:12px; background:var(--border-strong); }.guess-song-wave.is-playing i { background:var(--primary); animation:guess-song-wave .8s ease-in-out infinite alternate; }.guess-song-wave i:nth-child(3n) { animation-delay:.18s; }.guess-song-wave i:nth-child(4n) { animation-delay:.32s; }.guess-song-wave i:nth-child(5n) { animation-delay:.46s; }
 @keyframes guess-song-wave { to { height:48px; } }
 .guess-song-play { display:block; min-width:230px; min-height:48px; margin:24px auto 0; border:1px solid var(--primary); border-radius:2px; padding:0 20px; color:#fff; background:var(--primary); font-size:13px; font-weight:850; }.guess-song-play:disabled { cursor:not-allowed; opacity:.58; }.guess-song-play-count,.guess-song-hint { margin:10px 0 0; color:var(--foreground-muted); font-size:10px; text-align:center; }
-.guess-song-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:24px; }.guess-song-options button { min-height:56px; border:1px solid var(--border); border-radius:2px; padding:12px 16px; color:var(--foreground); background:var(--surface-elevated); font-size:13px; font-weight:750; text-align:left; }.guess-song-options button:hover:not(:disabled) { border-color:var(--primary); background:var(--surface-subtle); }.guess-song-options button:disabled { cursor:not-allowed; opacity:.6; }
+.guess-song-options {
+    display:grid;
+    grid-template-columns:repeat(2, minmax(320px, 560px));
+    justify-content:center;
+    gap:10px;
+    width:100%;
+    margin-top:0px;
+}
+.guess-song-options {
+
+    display:grid;
+
+    grid-template-columns:repeat(2,240px);
+
+    justify-content:center;
+
+    gap:10px;
+
+    width:100%;
+
+    margin-top:20px;
+}
+
+
+.guess-song-options button {
+  justify-content:center;
+text-align:center;
+
+    min-height:48px;
+
+    display:flex;
+    align-items:center;
+    gap:28px;
+
+    border:1px solid rgba(120,160,200,.35);
+    border-radius:4px;
+
+    padding:0 20px;
+
+    background:
+    linear-gradient(
+        135deg,
+        rgba(30,50,75,.9),
+        rgba(10,20,35,.9)
+    );
+
+    color:#fff;
+
+    font-size:15px;
+    font-weight:800;
+
+    cursor:pointer;
+
+    transition:.25s;
+}
+
+
+
+
+
+
+.guess-song-options button:hover:not(:disabled) {
+  border-color: rgba(255,255,255,.65);
+  background: #16283d !important;
+  color: #ffffff !important;
+  box-shadow: none;
+}
+.guess-song-options button:disabled { cursor:not-allowed; opacity:.6; }
 .guess-song-answer-result { margin:0 24px 24px; border-left:3px solid var(--success); padding:16px; background:var(--surface-subtle); }.guess-song-answer-result.is-wrong { border-left-color:var(--danger); }.guess-song-answer-result>strong,.guess-song-answer-result>span { display:block; }.guess-song-answer-result.is-correct>strong { color:var(--success); }.guess-song-answer-result.is-wrong>strong { color:var(--danger); }.guess-song-answer-result>span { margin-top:8px; color:var(--foreground-muted); font-size:12px; }.guess-song-answer-result button { min-height:42px; margin-top:14px; border:1px solid var(--border); border-radius:2px; padding:0 16px; color:var(--foreground); background:var(--surface); font-weight:800; }
 .guess-song-settlement { margin:26px 0; border:1px solid var(--border); padding:30px; background:var(--surface); }.guess-song-settlement h1 { margin:8px 0 0; font-size:30px; }.guess-song-settlement>strong { display:block; margin-top:24px; color:var(--primary); font-size:48px; }.guess-song-settlement>div { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); margin-top:24px; border:1px solid var(--border); }.guess-song-settlement>div span { display:flex; min-height:80px; flex-direction:column; justify-content:center; border-right:1px solid var(--border); padding:12px; color:var(--foreground-muted); font-size:10px; }.guess-song-settlement>div span:last-child { border-right:0; }.guess-song-settlement>div strong { margin-top:8px; color:var(--foreground); font-size:19px; }.guess-song-settlement>p:not(:first-child) { color:var(--foreground-muted); }.guess-song-settlement nav,.guess-song-back-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }.guess-song-settlement nav>*,.guess-song-back-links a { min-height:44px; border:1px solid var(--border); border-radius:2px; padding:0 16px; color:var(--foreground); background:var(--surface); font-size:12px; font-weight:800; line-height:42px; text-decoration:none; }.guess-song-settlement nav button { color:#fff; border-color:var(--primary); background:var(--primary); }
 .guess-song-leaderboard-filters { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; border:1px solid var(--border); border-top:0; padding:12px; background:var(--surface); }.guess-song-leaderboard-filters>div { display:flex; flex-wrap:wrap; gap:6px; }.guess-song-leaderboard-filters button { min-height:38px; border:1px solid var(--border); border-radius:2px; padding:0 13px; color:var(--foreground-muted); background:transparent; font-size:11px; font-weight:800; }.guess-song-leaderboard-filters button[aria-pressed='true'] { color:var(--primary); border-color:var(--primary); background:var(--navigation-active); }
@@ -2097,6 +2164,43 @@ body:has(.immersive-game-layout) {
 .guess-song-admin-filters { display:grid; grid-template-columns:1fr 180px 180px; gap:8px; margin:-22px -22px 0; border-bottom:1px solid var(--border); padding:14px 22px; }.guess-song-admin-filters>* { min-height:40px; border:1px solid var(--border); border-radius:2px; padding:0 10px; color:var(--foreground); background:var(--surface-elevated); }.guess-song-admin-list>article { display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:14px; margin:0 -22px; border-bottom:1px solid var(--border); padding:20px 22px; }.guess-song-admin-list>article:last-child { border-bottom:0; }.guess-song-admin-question-main>div { display:flex; flex-wrap:wrap; gap:6px; }.guess-song-admin-question-main>div span { border:1px solid var(--border); padding:4px 7px; color:var(--foreground-muted); font-size:9px; }.guess-song-admin-question-main h2 { margin:10px 0 0; font-size:19px; }.guess-song-admin-question-main p { margin:8px 0 0; font-size:12px; }.guess-song-admin-question-main small { display:block; margin-top:10px; color:var(--foreground-muted); }.guess-song-admin-processing-error { color:var(--danger); }.guess-song-admin-variants,.guess-song-admin-actions { display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; }.guess-song-admin-variants button,.guess-song-admin-actions button,.guess-song-admin-actions label { min-height:36px; border:1px solid var(--border); border-radius:2px; padding:0 10px; color:var(--foreground-muted); background:transparent; font-size:10px; font-weight:800; line-height:34px; cursor:pointer; }.guess-song-admin-actions { grid-column:1/-1; }.guess-song-admin-actions input[type='file'] { display:none; }.guess-song-admin-actions .is-disabled { cursor:not-allowed; opacity:.5; }
 .guess-song-admin-form-heading small,.guess-song-admin-upload small { color:var(--primary); font-size:9px; font-weight:900; letter-spacing:.12em; }.guess-song-admin-preview { display:grid; align-content:start; gap:9px; }.guess-song-admin-preview>strong { color:var(--foreground-muted); font-size:10px; }.guess-song-admin-variants button[aria-pressed='true'] { border-color:var(--primary); color:var(--primary); }.guess-song-admin :where(button:disabled) { cursor:not-allowed; opacity:.45; }.guess-song-admin-disabled-reason { align-self:center; color:var(--danger); font-size:10px; font-weight:750; }.guess-song-admin-upload { grid-column:1/-1; display:grid; gap:12px; border:1px solid var(--primary); padding:16px; background:var(--surface-elevated); }.guess-song-admin-upload h3 { margin:4px 0 0; font-size:16px; }.guess-song-admin-upload p { margin:5px 0 0; color:var(--foreground-muted); font-size:11px; }.guess-song-admin-file { display:grid; gap:7px; color:var(--foreground); font-size:11px; font-weight:800; }.guess-song-admin-file input { min-height:42px; border:1px solid var(--border); border-radius:2px; padding:7px; color:var(--foreground-muted); background:var(--surface); }.guess-song-admin-file-meta { color:var(--foreground)!important; font-weight:750; }.guess-song-admin-progress { display:flex; align-items:center; justify-content:space-between; gap:10px; border-left:3px solid var(--primary); padding:10px 12px; background:var(--surface); }.guess-song-admin-progress strong { font-size:12px; }.guess-song-admin-progress span { color:var(--foreground-muted); font-size:10px; }.guess-song-admin-upload-actions { display:flex; flex-wrap:wrap; gap:7px; }.guess-song-admin-upload-actions button { min-height:38px; border:1px solid var(--border); border-radius:2px; padding:0 12px; color:var(--foreground); background:transparent; font-size:10px; font-weight:850; }.guess-song-admin-upload-actions button:first-child { border-color:var(--primary); color:#fff; background:var(--primary); }.guess-song-empty p { margin:4px 0; }
 .guess-song-source-picker { margin-top:16px; border:1px solid var(--border); padding:14px; }.guess-song-source-picker legend { padding:0 6px; color:var(--foreground); font-size:12px; font-weight:900; }.guess-song-source-tabs { display:flex; flex-wrap:wrap; gap:18px; }.guess-song-source-tabs label { display:flex; align-items:center; gap:7px; color:var(--foreground); font-size:12px; font-weight:800; }.guess-song-library-filters { display:grid; grid-template-columns:minmax(0,1fr) 140px 200px; gap:8px; margin-top:14px; }.guess-song-library-filters>* { min-height:40px; border:1px solid var(--border); padding:0 10px; color:var(--foreground); background:var(--surface-elevated); }.guess-song-library-list { display:grid; max-height:340px; margin-top:10px; border:1px solid var(--border); overflow-y:auto; }.guess-song-library-list>article { display:grid; grid-template-columns:48px minmax(0,1fr) auto; align-items:center; gap:10px; border-bottom:1px solid var(--border); padding:9px; }.guess-song-library-list>article:last-child { border-bottom:0; }.guess-song-library-list>article[aria-current='true'] { background:color-mix(in srgb,var(--primary) 10%,var(--surface)); }.guess-song-library-cover { display:grid; width:48px; height:48px; place-items:center; overflow:hidden; color:var(--primary); background:var(--surface-elevated); }.guess-song-library-cover img { width:100%; height:100%; object-fit:cover; }.guess-song-library-list article div { display:grid; min-width:0; gap:3px; }.guess-song-library-list article :where(strong,span,small) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.guess-song-library-list article span,.guess-song-library-list article small { color:var(--foreground-muted); font-size:10px; }.guess-song-library-list article :where(button,a) { min-height:36px; border:1px solid var(--primary); padding:0 10px; color:var(--primary); background:transparent; font-size:10px; font-weight:850; line-height:34px; }.guess-song-selected-source { margin:10px 0 0; color:var(--foreground-muted); font-size:11px; font-weight:750; }
+.guess-answer-input {
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    margin-top:0;
+}
+
+.guess-song-options button.selected {
+  border-color:#ffffff;
+  background:#16283d;
+  color:#ffffff;
+  box-shadow:
+    0 0 8px rgba(255,255,255,.7),
+    0 0 18px rgba(255,255,255,.35);
+}
+.guess-song-options button.selected:hover {
+  border-color:#ffffff;
+  background:var(--surface-elevated);
+  color:var(--foreground);
+
+  box-shadow:
+    0 0 8px rgba(255,255,255,.7),
+    0 0 18px rgba(255,255,255,.35);
+}
+
+.guess-answer-input > button:last-child {
+    width:220px;
+    height:52px;
+    margin:20px auto 0;
+    display:block;
+    border:1px solid var(--primary);
+    border-radius:2px;
+    color:#fff;
+    background:var(--primary);
+    font-size:14px;
+    font-weight:800;
+}
 
 @media (max-width:800px) {
   .guess-song-page,.guess-song-admin { width:calc(100% - 28px); }
@@ -2418,4 +2522,12 @@ body:has(.games-full-width) .app-shell main {
   .auth-form-footer {
     margin-top:8px;
   }
+}
+.guess-song-options button.selected:hover {
+  border-color:#ffffff;
+  background:#16283d;
+  color:#ffffff;
+  box-shadow:
+    0 0 8px rgba(255,255,255,.7),
+    0 0 18px rgba(255,255,255,.35);
 }
