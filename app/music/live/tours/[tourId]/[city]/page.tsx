@@ -101,6 +101,8 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   const allSame = cityConcerts.length > 0 && cityConcerts.every((concert) => concert.signature === cityConcerts[0].signature)
   const baseNormal = cityConcerts[0]?.normal ?? []
   const cityPoster = cityConcerts[0]?.posterUrl ?? meta.posterUrl
+  // 从该城市所有场次提取第一个非空场馆作为「主要场馆」展示（仅展示用，不改数据库）
+  const primaryVenue = cityConcerts.map((concert) => concert.venue).find((venue) => venue && venue.trim()) ?? null
 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href={`/music/live/tours/${canonicalTourSlug}`} className="text-sm font-black text-sky-300/80">← 返回 {meta.name}</Link>
@@ -111,7 +113,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
         <h1 className="mt-4 break-words text-4xl font-black tracking-tight text-white sm:text-6xl">{dbCity}站</h1>
         <p className="mt-4 break-words text-xl font-black text-slate-200">{meta.name}</p>
         <p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(meta.startDate, meta.endDate)}</p>
-        <dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">本城市场次</dt><dd className="mt-1 text-xl font-black">{cityConcerts.length} 场</dd></div></dl>
+        <dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">本城市场次</dt><dd className="mt-1 text-xl font-black">{cityConcerts.length} 场</dd></div><div><dt className="text-xs text-slate-400">主要场馆</dt><dd className="mt-1 text-xl font-black">{primaryVenue ?? '场馆待整理'}</dd></div></dl>
       </div>
     </section>
 
@@ -134,8 +136,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
                   <time className="text-xs font-black text-sky-300/70">{formatLiveDate(concert.concertDate)}</time>
                   <span className="shrink-0 border border-sky-300/20 px-2 py-1 text-[10px] font-black text-sky-100/75">第 {sessionLabel} 场</span>
                 </div>
-                <h3 className="mt-2 break-words text-xl font-black text-white">{concert.title || dbCity}</h3>
-                <p className="mt-2 break-words text-sm font-bold text-slate-300/65">{dbCity} · {concert.venue || '场馆待整理'}</p>
+                {concert.title ? <h3 className="mt-2 break-words text-xl font-black text-white">{concert.title}</h3> : null}
               </Link>
               <div className="mt-3 border-t border-white/10 pt-3">
                 <p className="text-[10px] font-black tracking-[0.2em] text-sky-300/55">ENCORE</p>
