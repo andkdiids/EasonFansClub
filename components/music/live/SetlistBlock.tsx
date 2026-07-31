@@ -23,19 +23,54 @@ export function SetlistBlock({
   eyebrow = 'LIVE SETLIST',
   idPrefix = 'setlist',
   excludeEncore = false,
+  layout = 'sections',
 }: {
   items: SetlistItemForBlock[]
   title: string
   eyebrow?: string
   idPrefix?: string
   excludeEncore?: boolean
+  layout?: 'sections' | 'columns'
 }) {
   const source = excludeEncore ? items.filter((item) => !item.isEncore) : items
+  if (!source.length) return null
+  const headingId = `${idPrefix}-title`
+
+  // 三列（桌面）/ 两列（平板）/ 单列（手机）扁平展示：保留编号、歌名与段落分类
+  if (layout === 'columns') {
+    const sorted = [...source].sort((left, right) => left.position - right.position)
+    return (
+      <section className="mt-14" aria-labelledby={headingId}>
+        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{eyebrow}</p>
+        <h2 id={headingId} className="mt-2 text-3xl font-black text-white sm:text-4xl">{title}</h2>
+        <ol className="mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-2 lg:columns-3">
+          {sorted.map((item) => {
+            const sectionLabel = MUSIC_SETLIST_SECTION_LABELS[item.section as keyof typeof MUSIC_SETLIST_SECTION_LABELS] ?? item.section
+            const name = item.MusicSong?.title || item.displayName || '未命名曲目'
+            return (
+              <li key={item.id} className="break-inside-avoid py-2">
+                <div className="flex items-baseline gap-3">
+                  <span className="shrink-0 text-sm font-black text-sky-300/55">{String(item.position).padStart(2, '0')}</span>
+                  <div className="min-w-0">
+                    {item.MusicSong?.id ? (
+                      <Link href={`/music/song/${item.MusicSong.id}`} className="break-words font-black text-white hover:text-sky-200">{name}</Link>
+                    ) : (
+                      <span className="break-words font-black text-white">{name}</span>
+                    )}
+                    <span className="ml-2 text-[10px] font-black text-slate-400">{sectionLabel}</span>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+      </section>
+    )
+  }
+
   const grouped = Object.entries(MUSIC_SETLIST_SECTION_LABELS)
     .map(([section, label]) => ({ section, label, items: source.filter((item) => item.section === section) }))
     .filter((group) => group.items.length)
-  if (!grouped.length) return null
-  const headingId = `${idPrefix}-title`
   return (
     <section className="mt-14" aria-labelledby={headingId}>
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{eyebrow}</p>

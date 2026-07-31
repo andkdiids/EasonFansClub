@@ -1,5 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
+import { generateArchiveSlug } from '@/lib/music-slug'
 
 export type ConcertTimelineTour = {
   id: string
@@ -27,7 +28,7 @@ export function MusicConcertTimeline({ tours, compact = false }: Readonly<{ tour
           <time className="hidden text-3xl font-black tracking-tight text-sky-200 sm:block">{year(tour.startDate)}</time>
           <span className="mx-auto mt-2 block size-3 rounded-full border-2 border-sky-200 bg-[#07182d] shadow-[0_0_24px_rgba(125,211,252,.55)] sm:ml-auto sm:mr-[-6px]" />
         </div>
-        <Link href={`/music/live/tours/${tour.id}`} className={`group overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.055] transition hover:-translate-y-1 hover:border-sky-300/30 hover:bg-white/[0.09] ${compact ? 'grid sm:grid-cols-[150px_1fr]' : 'grid md:grid-cols-[230px_1fr]'}`}>
+        <Link href={`/music/live/tours/${generateArchiveSlug(tour.name)}`} className={`group overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.055] transition hover:-translate-y-1 hover:border-sky-300/30 hover:bg-white/[0.09] ${compact ? 'grid sm:grid-cols-[150px_1fr]' : 'grid md:grid-cols-[230px_1fr]'}`}>
           <div className={`relative bg-[#0b2038] ${compact ? 'aspect-[16/9] sm:aspect-[3/4]' : 'aspect-[16/10] md:aspect-[3/4]'}`}>
             {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={compact ? '150px' : '(max-width: 768px) 100vw, 230px'} className="object-cover transition duration-500 group-hover:scale-105" /> : <div className="grid h-full place-items-center text-3xl font-black text-sky-200/20">LIVE</div>}
           </div>
