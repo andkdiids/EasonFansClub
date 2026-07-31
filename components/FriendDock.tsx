@@ -857,12 +857,15 @@ function formatDateGroup(value: string) {
 }
 
 function formatMessageTime(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', {
+  const formatted = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
+    hourCycle: 'h23',
   }).format(new Date(value))
+
+  return formatted.replace(/^24:/, '00:')
 }
 
 function formatConversationTime(value: string) {
