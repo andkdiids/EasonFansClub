@@ -18,25 +18,27 @@ export default async function MusicTourPage({ params }: { params: Promise<{ tour
         MusicConcert: {
           where: { status: 'PUBLISHED' },
           orderBy: [{ concertDate: 'asc' }],
-          select: { city: true, concertDate: true },
+          select: { city: true, concertDate: true, posterUrl: true },
         },
       },
     }),
     getSiteAppearance(),
   ])
   if (!tour) notFound()
-  const groups = new Map<string, { city: string; count: number; firstDate: Date; lastDate: Date }>()
+  const groups = new Map<string, { city: string; count: number; firstDate: Date; lastDate: Date; posterUrl: string | null }>()
   for (const concert of tour.MusicConcert) {
-    const group = groups.get(concert.city) || { city: concert.city, count: 0, firstDate: concert.concertDate, lastDate: concert.concertDate }
+    const group = groups.get(concert.city) || { city: concert.city, count: 0, firstDate: concert.concertDate, lastDate: concert.concertDate, posterUrl: concert.posterUrl }
     group.count += 1
     if (concert.concertDate < group.firstDate) group.firstDate = concert.concertDate
     if (concert.concertDate > group.lastDate) group.lastDate = concert.concertDate
+    if (!group.posterUrl && concert.posterUrl) group.posterUrl = concert.posterUrl
     groups.set(concert.city, group)
   }
   const cities = [...groups.values()]
     .map((group) => ({
       city: group.city,
       count: group.count,
+      posterUrl: group.posterUrl,
       firstDate: group.firstDate.toISOString().slice(0, 10),
       lastDate: group.lastDate.toISOString().slice(0, 10),
     }))
@@ -51,7 +53,8 @@ export default async function MusicTourPage({ params }: { params: Promise<{ tour
       <h2 id="tour-cities-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">巡演城市</h2>
       <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cities.map((item) => <Link key={item.city} href={`/music/live/tours/${tour.id}/${encodeURIComponent(item.city)}`} className="min-w-0 border border-white/10 bg-white/[0.055] p-5 transition hover:border-sky-300/30 hover:bg-white/[0.09]">
-          <h3 className="break-words text-xl font-black text-white">{item.city}</h3>
+          <div className="relative aspect-[3/4] w-full border border-white/15 bg-[#0b2038]">{item.posterUrl ? <Image src={item.posterUrl} alt={`${item.city}演唱会海报`} fill sizes="(max-width:640px) 100vw, 320px" className="object-cover" /> : <div className="grid h-full place-items-center text-3xl text-sky-200/25">LIVE</div>}</div>
+          <h3 className="mt-4 break-words text-xl font-black text-white">{item.city}</h3>
           <p className="mt-2 text-sm font-bold text-slate-300/65">{item.count} 场 · {item.firstDate.slice(0, 7)} ~ {item.lastDate.slice(0, 7)}</p>
           <p className="mt-4 text-xs font-black text-sky-100/65">查看城市详情 →</p>
         </Link>)}
