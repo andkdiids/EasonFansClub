@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { formatLiveDate } from '@/lib/music-live'
+import { buildConcertSlugPath } from '@/lib/music-slug'
 import { normalizedCityKey } from '@/lib/music-personal-live'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
@@ -51,7 +52,7 @@ export default async function PublicUserLivePage({ params }: { params: Promise<{
     </dl>
     {!user.UserMusicConcert.length ? <section className="mt-8 border border-white/10 bg-white/[0.04] p-7"><p className="font-bold text-slate-300">TA暂时没有公开现场记录。</p></section> : <section className="mt-10 space-y-3" aria-label="公开观演时间线">{user.UserMusicConcert.map((record) => {
       const concert = record.MusicConcert
-      return <Link key={concert.id} href={`/music/live/concerts/${concert.id}`} className="grid min-w-0 gap-2 border-l-2 border-sky-300/40 bg-white/[0.045] p-5 hover:bg-white/[0.08] sm:grid-cols-[140px_minmax(0,1fr)]"><time className="text-sm font-black text-sky-200">{formatLiveDate(concert.concertDate)}</time><div className="min-w-0"><h2 className="break-words text-xl font-black text-white">{concert.city}{concert.sessionNumber ? ` · ${concert.sessionNumber}` : ''}</h2><p className="mt-1 break-words text-sm text-slate-300/70">{concert.venue || '场馆待整理'} · {concert.MusicTour.name}</p>{record.mood ? <p className="mt-2 text-sm font-bold text-sky-200/70">当晚心情：{record.mood}</p> : null}</div></Link>
+      return <Link key={concert.id} href={buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate)} className="grid min-w-0 gap-2 border-l-2 border-sky-300/40 bg-white/[0.045] p-5 hover:bg-white/[0.08] sm:grid-cols-[140px_minmax(0,1fr)]"><time className="text-sm font-black text-sky-200">{formatLiveDate(concert.concertDate)}</time><div className="min-w-0"><h2 className="break-words text-xl font-black text-white">{concert.city}{concert.sessionNumber ? ` · ${concert.sessionNumber}` : ''}</h2><p className="mt-1 break-words text-sm text-slate-300/70">{concert.venue || '场馆待整理'} · {concert.MusicTour.name}</p>{record.mood ? <p className="mt-2 text-sm font-bold text-sky-200/70">当晚心情：{record.mood}</p> : null}</div></Link>
     })}</section>}
   </MusicArchiveShell>
 }

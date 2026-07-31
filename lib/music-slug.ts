@@ -133,3 +133,9 @@ export function generateDateSlug(date: Date | string): string {
   const day = String(d.getUTCDate()).padStart(2, '0')
   return `${y}${m}${day}`
 }
+
+// 单场公开地址：/music/live/tours/<tourSlug>/<CITY>/<YYYYMMDD>。
+// 纯函数（不依赖 prisma），服务端/客户端组件均可调用，统一避免暴露 CUID。
+export function buildConcertSlugPath(tourName: string, city: string, concertDate: Date | string): string {
+  return `/music/live/tours/${generateArchiveSlug(tourName)}/${generateCitySlug(city)}/${generateDateSlug(concertDate)}`
+}

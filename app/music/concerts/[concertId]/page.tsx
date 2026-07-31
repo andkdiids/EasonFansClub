@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
+import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 
@@ -62,7 +63,7 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
               <p className="mt-2 text-sm font-bold text-slate-300/65">{concert.countryOrRegion || '中国'} · {concert.city}</p>
               <p className="mt-1 text-sm font-bold text-slate-300/65">{concert.venue || '场馆待整理'}</p>
             </div>
-            <Link href={`/music/live/concerts/${concert.id}`} className="rounded-full border border-sky-300/20 px-4 py-2 text-center text-xs font-black text-sky-100 transition hover:border-sky-300/50">完整场次资料</Link>
+            <Link href={buildConcertSlugPath(tour.name, concert.city, concert.concertDate)} className="rounded-full border border-sky-300/20 px-4 py-2 text-center text-xs font-black text-sky-100 transition hover:border-sky-300/50">完整场次资料</Link>
           </div>
           {concert.MusicConcertSetlistItem.length ? <div className="mt-5 border-t border-white/10 pt-5">
             <h4 className="text-xs font-black tracking-[0.16em] text-sky-300/60">歌单</h4>
