@@ -56,11 +56,9 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
       <strong className="guess-song-rank">{row.rank}</strong>
       <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
       <div className="guess-song-rank-user"><strong>{row.nickname}</strong></div>
-      <div className="guess-song-rank-stats">
-        <span>{row.score}</span>
-        <span>{row.correctCount}</span>
-        <span>{row.maxStreak}</span>
-      </div>
+      <span className="guess-song-stat">{row.score}</span>
+      <span className="guess-song-stat is-desktop-only">{row.correctCount}</span>
+      <span className="guess-song-stat is-desktop-only">{row.maxStreak}</span>
     </article>
   )
 
@@ -77,12 +75,6 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
       </div>
       {error ? <p className="guess-song-error">{error}</p> : null}
       {data ? <p className="guess-song-algorithm">{data.algorithm}</p> : null}
-      <div className="guess-song-sort-bar" role="group" aria-label="排行榜排序">
-        <span className="guess-song-sort-label">排序：</span>
-        <button type="button" aria-pressed="true">总得分 ↓</button>
-        <button type="button" disabled aria-disabled="true" title="敬请期待">总答对</button>
-        <button type="button" disabled aria-disabled="true" title="敬请期待">最高连击</button>
-      </div>
       <section className="guess-song-leaderboard">
         {data?.rows.length ? (
           <>
@@ -90,11 +82,9 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
               <span />
               <span />
               <span />
-              <div className="guess-song-rank-stats">
-                <span>总得分</span>
-                <span>总答对</span>
-                <span>最高连击</span>
-              </div>
+              <span className="guess-song-stat-head">总得分</span>
+              <span className="guess-song-stat-head is-desktop-only">总答对</span>
+              <span className="guess-song-stat-head is-desktop-only">最高连击</span>
             </div>
             {data.rows.map((row) => renderPlayer(row, row.userId))}
           </>
