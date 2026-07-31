@@ -38,6 +38,7 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
   const [summary, setSummary] = useState<LobbySummary | null>(null)
   const [starting, setStarting] = useState<Mode | null>(null)
   const [error, setError] = useState('')
+  const [panel, setPanel] = useState<null | 'rules' | 'records'>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -67,22 +68,79 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
     }
   }
 
+  function scrollToDifficulty() {
+    if (typeof document === 'undefined') return
+    document.getElementById('difficulty')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const actions = (
-    <div className="game-detail-actions">
+    <>
+      <div className="game-detail-actions">
         <button type="button" onClick={() => void start('EASY')} disabled={Boolean(starting)}>
           {starting ? '正在进入…' : '立即开始'}
         </button>
         <Link href="/games/guess-song#rules">游戏规则</Link>
         <Link href="/entertainment/guess-song/leaderboard">排行榜</Link>
         <a href="#history">历史记录</a>
-    </div>
+      </div>
+      {/* 移动端专用：Hero 右上角入口（规则 / 排行），点击展开对应内容 */}
+      <div className="game-detail-mobile-top">
+        <button type="button" onClick={() => setPanel('rules')}>规则</button>
+        <Link href="/entertainment/guess-song/leaderboard">排行</Link>
+      </div>
+      {/* 移动端专用：底部同行（紧凑记录信息 左 / 开始游戏 右）；开始游戏滚动到难度选择，不自动开局 */}
+      <div className="game-detail-mobile-bottom">
+        <div className="guess-detail-records-inline">
+          <span>最高分 <b>{summary?.weeklyBest ?? '—'}</b></span>
+          <span>最高连击 <b>{summary?.recentSession?.maxStreak ?? '—'}</b></span>
+        </div>
+        <button type="button" className="guess-detail-start-mobile" onClick={scrollToDifficulty}>开始游戏</button>
+      </div>
+      {panel ? (
+        <div className="game-detail-mobile-panel" role="dialog" aria-modal="true" aria-label={panel === 'rules' ? '游戏规则' : '我的记录'}>
+          <div className="game-detail-mobile-panel-backdrop" onClick={() => setPanel(null)} />
+          <div className="game-detail-mobile-panel-sheet">
+            <header>
+              <h3>{panel === 'rules' ? '游戏规则' : '我的记录'}</h3>
+              <button type="button" className="game-detail-mobile-panel-close" onClick={() => setPanel(null)} aria-label="关闭">✕</button>
+            </header>
+            {panel === 'rules' ? (
+              <div className="panel-rules">
+                <section>
+                  <span>玩法说明</span>
+                  <ol>{game.rules.map((rule) => <li key={rule}>{rule}</li>)}</ol>
+                </section>
+                <section>
+                  <span>难度说明</span>
+                  <ul>{modes.map((item) => <li key={item.mode}><b>{item.label}</b>：{item.detail}</li>)}</ul>
+                </section>
+                <section>
+                  <span>奖励与积分</span>
+                  <ul>{game.rewards.map((reward) => <li key={reward}>{reward}</li>)}</ul>
+                </section>
+              </div>
+            ) : (
+              <div className="panel-records">
+                <dl>
+                  <div><dt>本周最佳</dt><dd>{summary?.weeklyBest ?? '—'}</dd></div>
+                  <div><dt>本月最佳</dt><dd>{summary?.monthlyBest ?? '—'}</dd></div>
+                </dl>
+                {summary?.recentSession ? (
+                  <p>最近一局 {summary.recentSession.score} 分 · 答对 {summary.recentSession.correctCount} · 最高连击 {summary.recentSession.maxStreak}</p>
+                ) : <p>完成第一场游戏后，记录会显示在这里。</p>}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 
   return (
     <GameDetailLayout game={game} actions={actions}>
       {error ? <p className="game-detail-error" role="alert">{error}</p> : null}
       <section className="guess-detail-dashboard">
-        <div className="guess-detail-modes">
+        <div className="guess-detail-modes" id="difficulty">
           <header><span>SELECT MODE</span><h2>选择难度</h2></header>
           <div>
             {modes.map((item) => {

@@ -158,8 +158,8 @@ export async function getGuessSongLeaderboard(input: {
     algorithm: input.mode === 'ALL'
       ? '综合榜为用户四种模式当期最高有效分之和；并列时依次比较答对数、最高连击、总播放次数和更早达成时间。'
       : '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
-    rows: rows.slice(0, 50).map(serializeRow),
-    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], ownIndex + 1) : null,
+    rows: rows.slice(0, 10).map(serializeRow),
+    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1)) : null,
   }
 }
 

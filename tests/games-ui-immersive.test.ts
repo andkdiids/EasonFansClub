@@ -30,7 +30,6 @@ test('all games share the detail template while guess song has mode, ranking and
   const detail = read('components/games/GuessSongDetail.tsx')
   assert.match(layout, /玩法说明/)
   assert.match(layout, /奖励与积分/)
-  assert.match(layout, /最近更新/)
   assert.match(detail, /立即开始/)
   assert.match(detail, /排行榜/)
   assert.match(detail, /历史记录/)
@@ -92,7 +91,7 @@ test('cassette, canvas waveform and answer UI are split into focused components'
   assert.match(waveform, /requestAnimationFrame/)
   assert.match(waveform, /document\.visibilityState === 'hidden'/)
   assert.match(waveform, /cancelAnimationFrame/)
-  assert.match(answer, /输入或选择歌曲/)
+  assert.match(answer, /输入歌曲名称/)
 })
 
 test('guess UI keeps one Audio instance at a time and leaves all core APIs unchanged', () => {

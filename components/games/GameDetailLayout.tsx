@@ -31,11 +31,6 @@ export function GameDetailLayout({ game, actions, children }: Readonly<{
           <h2>奖励与积分</h2>
           <ul>{game.rewards.map((reward) => <li key={reward}>{reward}</li>)}</ul>
         </article>
-        <article>
-          <span>WHAT&apos;S NEW</span>
-          <h2>最近更新</h2>
-          <ul>{game.updates.map((update) => <li key={update}>{update}</li>)}</ul>
-        </article>
       </section>
     </main>
   )

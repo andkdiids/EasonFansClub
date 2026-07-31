@@ -48,6 +48,8 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : '排行榜加载失败'))
   }, [mode, period])
 
+  const ownRank = data?.currentUser && data.currentUser.rank > 0 ? data.currentUser : null
+
   return (
     <>
       <header className="guess-song-heading">
@@ -61,20 +63,36 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode }: Readonly<{ 
       </div>
       {error ? <p className="guess-song-error">{error}</p> : null}
       {data ? <p className="guess-song-algorithm">{data.algorithm}</p> : null}
-      {data?.currentUser ? <section className="guess-song-own-rank">我的排名：第 {data.currentUser.rank} 名 · {data.currentUser.score} 分</section> : null}
+      <div className="guess-song-sort-bar" role="group" aria-label="排行榜排序">
+        <span className="guess-song-sort-label">排序：</span>
+        <button type="button" aria-pressed="true">最高分 ↓</button>
+        <button type="button" disabled aria-disabled="true" title="敬请期待">答对数</button>
+        <button type="button" disabled aria-disabled="true" title="敬请期待">连击数</button>
+      </div>
       <section className="guess-song-leaderboard">
         {data?.rows.length ? data.rows.map((row) => (
           <article key={row.userId}>
             <strong className="guess-song-rank">{row.rank}</strong>
             <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
-            <div><strong>{row.nickname}</strong><small>UID {formatUid(row.uid)}</small></div>
-            <div><strong>{row.score}</strong><small>最高分</small></div>
-            <div><strong>{row.correctCount}</strong><small>答对</small></div>
-            <div><strong>{row.maxStreak}</strong><small>连击</small></div>
-            <time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(row.achievedAt))}</time>
+            <div className="guess-song-rank-user"><strong>{row.nickname}</strong><small>UID {formatUid(row.uid)}</small></div>
+            <div className="guess-song-rank-score"><strong>{row.score}</strong><span>分</span></div>
           </article>
         )) : <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>}
       </section>
+      {data?.rows.length ? <div className="guess-song-leaderboard-ellipsis" aria-hidden="true">···</div> : null}
+      {data ? (
+        <section className="guess-song-own-rank">
+          <span className="guess-song-own-rank-label">我的排名</span>
+          {ownRank ? (
+            <div className="guess-song-own-rank-detail">
+              <strong>第 {ownRank.rank} 名</strong>
+              <span>{ownRank.score} 分</span>
+            </div>
+          ) : (
+            <strong className="guess-song-own-rank-empty">暂未上榜</strong>
+          )}
+        </section>
+      ) : null}
       <nav className="guess-song-back-links"><Link href="/games/guess-song">返回游戏详情</Link><Link href="/games">返回娱乐天空</Link></nav>
     </>
   )
