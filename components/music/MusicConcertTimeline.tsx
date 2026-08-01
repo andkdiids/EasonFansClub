@@ -59,7 +59,7 @@ function archiveHref(tour: ConcertTimelineTour) {
 
 function ArchivePoster({ tour, sizes, square = false }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
   return <span className={`music-concert-archive-poster${square ? ' is-square' : ''}`}>
-    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className={square ? 'object-cover' : 'object-contain'} /> : <span className="music-concert-archive-poster-fallback">LIVE</span>}
+    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className="object-contain" /> : <span className="music-concert-archive-poster-fallback">LIVE</span>}
   </span>
 }
 
@@ -93,37 +93,38 @@ function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: Conce
   useLayoutEffect(() => {
     const viewport = viewportRef.current
     if (!viewport || displayedTours.length === 0) return undefined
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     let previousTime = performance.now()
 
     const paint = (now: number) => {
       const width = viewport.clientWidth
       const height = viewport.clientHeight
       const cardSize = cardsRef.current.get(0)?.offsetWidth || (window.innerWidth < 768 ? 136 : 200)
-      const spacing = cardSize * 1.18
-      const pathLength = displayedTours.length * spacing
-      const baseX = isLarge ? 4 : width - cardSize - 4
-      const direction = isLarge ? 1 : -1
-      const arcDepth = Math.min(width * (window.innerWidth < 768 ? .28 : .38), window.innerWidth < 768 ? 88 : 150)
+      const centerX = (width - cardSize) / 2
+      const centerY = (height - cardSize) / 2
+      const radiusX = Math.max(0, centerX - 8)
+      const radiusY = Math.max(0, centerY - 10)
       const delta = Math.min(48, now - previousTime)
       previousTime = now
-      if (!paused && !hoverPausedRef.current && !dragRef.current && now > manualPauseUntilRef.current && !reduceMotion) {
-        positionRef.current = (positionRef.current + delta * .014) % pathLength
+      if (!paused && !hoverPausedRef.current && !dragRef.current && now > manualPauseUntilRef.current) {
+        positionRef.current = (positionRef.current + delta * .0036) % 360
       }
 
       cardsRef.current.forEach((element, index) => {
-        const rawY = ((index * spacing + positionRef.current) % pathLength + pathLength) % pathLength
-        const y = rawY - cardSize
-        const progress = Math.max(0, Math.min(1, (y + cardSize) / (height + cardSize)))
-        const arc = Math.sin(progress * Math.PI)
-        const x = baseX + direction * arcDepth * arc
-        const edgeDistance = Math.min(progress, 1 - progress) * 2
-        const opacity = Math.max(0, Math.min(1, edgeDistance * 2.7))
-        const scale = .78 + arc * .22
-        element.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
+        const phase = index * (360 / displayedTours.length)
+        const angleDegrees = (positionRef.current + phase) * (isLarge ? 1 : -1) + (isLarge ? 0 : 180)
+        const angle = angleDegrees * Math.PI / 180
+        const cosine = Math.cos(angle)
+        const sine = Math.sin(angle)
+        const x = centerX + cosine * radiusX
+        const y = centerY + sine * radiusY
+        const depth = (1 + (isLarge ? cosine : -cosine)) / 2
+        const opacity = .24 + depth * .76
+        const scale = .74 + depth * .26
+        const tilt = sine * (isLarge ? -2.4 : 2.4)
+        element.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${tilt}deg) scale(${scale})`
         element.style.opacity = String(opacity)
-        element.style.zIndex = String(Math.max(1, Math.round(10 + arc * 20)))
-        element.style.pointerEvents = opacity < .16 ? 'none' : ''
+        element.style.zIndex = String(Math.max(1, Math.round(10 + depth * 30)))
+        element.style.pointerEvents = opacity < .3 ? 'none' : ''
       })
       frameRef.current = window.requestAnimationFrame(paint)
     }
@@ -137,7 +138,7 @@ function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: Conce
     if (!viewport) return undefined
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      positionRef.current += event.deltaY * .72
+      positionRef.current += event.deltaY * .08
       manualPauseUntilRef.current = performance.now() + 900
     }
     viewport.addEventListener('wheel', onWheel, { passive: false })
@@ -157,7 +158,7 @@ function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: Conce
       drag.moved = true
       viewportRef.current?.setPointerCapture(event.pointerId)
     }
-    positionRef.current = drag.startPosition + deltaY
+    positionRef.current = drag.startPosition + deltaY * .3
   }
 
   function finishDrag(event: ReactPointerEvent<HTMLDivElement>) {
@@ -181,7 +182,6 @@ function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: Conce
       event.preventDefault()
       event.stopPropagation()
     }} onMouseEnter={() => { hoverPausedRef.current = true }} onMouseLeave={() => { hoverPausedRef.current = false }} onFocusCapture={() => { hoverPausedRef.current = true }} onBlurCapture={() => { hoverPausedRef.current = false }}>
-      <div className="music-concert-museum-arc" aria-hidden="true" />
       <div className="music-concert-museum-stage">
         {displayedTours.map((tour, index) => <MuseumPoster key={`${tour.id}-${index}`} tour={tour} side={side} duplicate={index >= tours.length} onOpen={onOpen} cardRef={(element) => {
           if (element) cardsRef.current.set(index, element)
