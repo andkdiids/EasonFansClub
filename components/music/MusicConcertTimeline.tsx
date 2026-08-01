@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { generateArchiveSlug } from '@/lib/music-slug'
 
 export type ConcertTimelineTour = {
@@ -17,7 +17,14 @@ export type ConcertTimelineTour = {
   cities?: string[]
 }
 
-type ConcertArchiveWallSide = 'large' | 'small'
+export type ConcertArchiveMyLive = {
+  attendedCount?: number | null
+  tourCount?: number | null
+  recentConcert?: string | null
+  favoriteConcerts?: string[]
+}
+
+type ConcertArchiveSide = 'large' | 'small'
 
 const SMALL_CONCERT_NAMES = [
   'Eason Says C’mon in Tour',
@@ -50,94 +57,92 @@ function archiveHref(tour: ConcertTimelineTour) {
   return `/music/live/tours/${generateArchiveSlug(tour.name)}`
 }
 
-function ArchivePoster({ tour, sizes }: Readonly<{ tour: ConcertTimelineTour; sizes: string }>) {
-  return <div className="music-concert-wall-poster">
-    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className="object-contain" /> : <span>LIVE</span>}
-  </div>
+function ArchivePoster({ tour, sizes, modal = false }: Readonly<{ tour: ConcertTimelineTour; sizes: string; modal?: boolean }>) {
+  return <span className={`music-concert-archive-poster${modal ? ' is-modal' : ''}`}>
+    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className="object-contain" /> : <span className="music-concert-archive-poster-fallback">LIVE</span>}
+  </span>
 }
 
-function ArchiveCard({ tour, side, compact, clone, onOpen }: Readonly<{ tour: ConcertTimelineTour; side: ConcertArchiveWallSide; compact: boolean; clone?: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
-  return <article className={`music-concert-wall-card music-concert-wall-card--${side}${clone ? ' is-clone' : ''}`} aria-hidden={clone || undefined}>
-    <button type="button" tabIndex={clone ? -1 : undefined} className="music-concert-wall-card-button" aria-label={`展开${tour.name}档案`} onClick={() => onOpen(tour)}>
-      <ArchivePoster tour={tour} sizes={compact ? '(max-width: 767px) 82px, 72px' : '(max-width: 767px) 92px, 104px'} />
-      <div className="music-concert-wall-card-body">
-        <time dateTime={tour.startDate ? new Date(tour.startDate).toISOString() : undefined}>{formatYear(tour.startDate)}</time>
-        <h3>{tour.name}</h3>
-        <p>{tour.concertCount} 场</p>
-        <span className="music-concert-wall-card-hint">查看档案 <span aria-hidden="true">↗</span></span>
-      </div>
+function ConcertArchiveCard({ tour, side, duplicate, onOpen }: Readonly<{ tour: ConcertTimelineTour; side: ConcertArchiveSide; duplicate?: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
+  return <article className={`music-concert-archive-card music-concert-archive-card--${side}`} aria-hidden={duplicate || undefined}>
+    <button type="button" tabIndex={duplicate ? -1 : undefined} className="music-concert-archive-card-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
+      <ArchivePoster tour={tour} sizes="(max-width: 767px) 104px, 132px" />
+      <span className="music-concert-archive-card-copy">
+        <span className="music-concert-archive-card-year">{formatYear(tour.startDate)}</span>
+        <strong>{tour.name}</strong>
+        <span className="music-concert-archive-card-meta">{tour.concertCount} 场 · CONCERT ARCHIVE</span>
+      </span>
     </button>
   </article>
 }
 
-function ConcertArchiveWall({ tours, side, compact, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; side: ConcertArchiveWallSide; compact: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
+function ConcertArchiveCarousel({ tours, side, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; side: ConcertArchiveSide; onOpen: (tour: ConcertTimelineTour) => void }>) {
   const isLarge = side === 'large'
   const title = isLarge ? '大型演唱会' : '小型企划'
-  const eyebrow = isLarge ? 'MAIN STAGES' : 'SPECIAL STAGES'
+  const repeatedTours = useMemo(() => {
+    if (tours.length === 0 || tours.length >= 3) return tours
+    return Array.from({ length: 3 }, (_, index) => tours[index % tours.length])
+  }, [tours])
 
-  return <section className={`music-concert-wall-section music-concert-wall-section--${side}`} aria-labelledby={`music-concert-wall-${side}-title`}>
-    <header className="music-concert-wall-heading">
-      <p>{eyebrow}</p>
-      <h2 id={`music-concert-wall-${side}-title`}>{title}</h2>
+  return <section className={`music-concert-archive-column music-concert-archive-column--${side}`} aria-labelledby={`concert-archive-${side}-title`}>
+    <header className="music-concert-archive-heading">
+      <p>{isLarge ? 'MAIN STAGES' : 'SPECIAL PROJECTS'}</p>
+      <h2 id={`concert-archive-${side}-title`}>{title}</h2>
     </header>
-    {tours.length ? <div className="music-concert-wall" data-wall-side={side}>
-      <div className="music-concert-wall-track">
-        <div className="music-concert-wall-group">
-          {tours.map((tour) => <ArchiveCard key={tour.id} tour={tour} side={side} compact={compact} onOpen={onOpen} />)}
-        </div>
-        <div className="music-concert-wall-group" aria-hidden="true">
-          {tours.map((tour) => <ArchiveCard key={`${tour.id}-clone`} tour={tour} side={side} compact={compact} clone onOpen={onOpen} />)}
-        </div>
+    {repeatedTours.length ? <div className="music-concert-archive-viewport">
+      <div className="music-concert-archive-track">
+        {[false, true].map((duplicate) => <div key={duplicate ? 'duplicate' : 'original'} className="music-concert-archive-set" aria-hidden={duplicate || undefined}>
+          {repeatedTours.map((tour, index) => <ConcertArchiveCard key={`${tour.id}-${index}-${duplicate ? 'copy' : 'source'}`} tour={tour} side={side} duplicate={duplicate || index >= tours.length} onOpen={onOpen} />)}
+        </div>)}
       </div>
-    </div> : <p className="music-concert-wall-empty">暂无收录</p>}
+    </div> : <p className="music-concert-archive-empty">暂无收录</p>}
   </section>
 }
 
-function MyLivePanel({ tours }: Readonly<{ tours: ConcertTimelineTour[] }>) {
-  return <section className="music-concert-wall-my-live" aria-labelledby="music-concert-wall-my-live-title">
-    <div className="music-concert-wall-my-live-panel">
-      <p className="music-concert-wall-my-live-eyebrow">PERSONAL ARCHIVE</p>
-      <h2 id="music-concert-wall-my-live-title">MY LIVE</h2>
-      <p className="music-concert-wall-my-live-title">我的现场</p>
-      <dl className="music-concert-wall-stats">
-        <div><dd>--</dd><dt>场现场</dt></div>
-        <div><dd>--</dd><dt>个巡演</dt></div>
+function MyLivePanel({ data }: Readonly<{ data?: ConcertArchiveMyLive }>) {
+  const favorites = data?.favoriteConcerts?.filter(Boolean).slice(0, 3) ?? []
+  return <section className="music-concert-archive-my-live" aria-labelledby="concert-archive-my-live-title">
+    <div className="music-concert-archive-my-live-glow" aria-hidden="true" />
+    <div className="music-concert-archive-my-live-panel">
+      <p className="music-concert-archive-kicker">PERSONAL COLLECTION</p>
+      <h2 id="concert-archive-my-live-title">MY LIVE</h2>
+      <p className="music-concert-archive-my-live-cn">我的现场档案</p>
+      <dl className="music-concert-archive-stats">
+        <div><dd>{data?.attendedCount ?? '--'}</dd><dt>看过的现场</dt></div>
+        <div><dd>{data?.tourCount ?? '--'}</dd><dt>看过的巡演</dt></div>
       </dl>
-      <div className="music-concert-wall-recent">
-        <span>最近现场</span>
-        <strong>--</strong>
+      <div className="music-concert-archive-recent">
+        <span>RECENT LIVE</span>
+        <strong>{data?.recentConcert || '--'}</strong>
       </div>
-      <div className="music-concert-wall-register">
-        <p>TOUR REGISTER</p>
-        <ul>
-          {tours.slice(0, 4).map((tour) => <li key={tour.id}>{tour.name}</li>)}
-          {!tours.length ? <li>--</li> : null}
-        </ul>
+      <div className="music-concert-archive-favorites">
+        <p>收藏演唱会</p>
+        <ul>{favorites.length ? favorites.map((name) => <li key={name}>{name}</li>) : <li>--</li>}</ul>
       </div>
-      <Link href="/music/live/me" className="music-concert-wall-my-live-link">进入我的现场 <span aria-hidden="true">→</span></Link>
+      <Link href="/music/live/me" className="music-concert-archive-my-live-link">进入我的现场 <span aria-hidden="true">→</span></Link>
     </div>
   </section>
 }
 
 function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour; onClose: () => void }>) {
-  return <div className="music-concert-wall-modal" role="presentation" onClick={onClose}>
-    <div className="music-concert-wall-modal-panel" role="dialog" aria-modal="true" aria-labelledby="music-concert-wall-modal-title" onClick={(event) => event.stopPropagation()}>
-      <button type="button" className="music-concert-wall-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
-      <div className="music-concert-wall-modal-grid">
-        <ArchivePoster tour={tour} sizes="(max-width: 767px) 45vw, 260px" />
-        <div className="music-concert-wall-modal-body">
-          <time dateTime={tour.startDate ? new Date(tour.startDate).toISOString() : undefined}>{formatYear(tour.startDate)}</time>
-          <h2 id="music-concert-wall-modal-title">{tour.name}</h2>
-          <p className="music-concert-wall-modal-count">{tour.concertCount} 场</p>
-          <p className="music-concert-wall-modal-description">{tour.description?.trim() || '简介暂未整理。'}</p>
-          <Link href={archiveHref(tour)} className="music-concert-wall-modal-link" onClick={(event) => event.stopPropagation()}>查看完整巡演详情 <span aria-hidden="true">→</span></Link>
+  return <div className="music-concert-archive-modal" role="presentation" onClick={onClose}>
+    <div className="music-concert-archive-modal-panel" role="dialog" aria-modal="true" aria-labelledby="concert-archive-modal-title" onClick={(event) => event.stopPropagation()}>
+      <button type="button" className="music-concert-archive-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
+      <div className="music-concert-archive-modal-grid">
+        <ArchivePoster tour={tour} sizes="(max-width: 767px) 58vw, 270px" modal />
+        <div className="music-concert-archive-modal-copy">
+          <time>{formatYear(tour.startDate)}</time>
+          <h2 id="concert-archive-modal-title">{tour.name}</h2>
+          <p className="music-concert-archive-modal-count">{tour.concertCount} 场</p>
+          <p className="music-concert-archive-modal-description">{tour.description?.trim() || '简介暂未整理。'}</p>
+          <Link href={archiveHref(tour)} className="music-concert-archive-modal-link" onClick={(event) => event.stopPropagation()}>查看完整巡演详情 <span aria-hidden="true">→</span></Link>
         </div>
       </div>
     </div>
   </div>
 }
 
-export function MusicConcertTimeline({ tours, compact = false }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean }>) {
+export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive }>) {
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
   const largeConcerts = tours.filter((tour) => !isSmallConcert(tour))
   const smallConcerts = tours.filter(isSmallConcert)
@@ -156,11 +161,11 @@ export function MusicConcertTimeline({ tours, compact = false }: Readonly<{ tour
     }
   }, [expandedTour])
 
-  return <section className={`music-concert-wall-archive${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 数字档案馆">
-    <div className="music-concert-wall-layout">
-      <ConcertArchiveWall tours={largeConcerts} side="large" compact={compact} onOpen={setExpandedTour} />
-      <MyLivePanel tours={tours} />
-      <ConcertArchiveWall tours={smallConcerts} side="small" compact={compact} onOpen={setExpandedTour} />
+  return <section className={`music-concert-archive${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会档案">
+    <div className="music-concert-archive-layout">
+      <ConcertArchiveCarousel tours={largeConcerts} side="large" onOpen={setExpandedTour} />
+      <MyLivePanel data={myLive} />
+      <ConcertArchiveCarousel tours={smallConcerts} side="small" onOpen={setExpandedTour} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} /> : null}
   </section>
