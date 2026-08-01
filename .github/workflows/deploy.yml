@@ -244,9 +244,9 @@ jobs:
             test -d node_modules
             echo "Dependency install completed in $(( $(date +%s) - install_started ))s."
 
-            log_step "5/8" "Generate Prisma client and apply existing migrations"
-            pnpm prisma generate
+            log_step "5/8" "Apply existing migrations and generate Prisma client"
             pnpm prisma migrate deploy
+            pnpm prisma generate
 
             log_step "6/8" "Build Next.js production bundle"
             build_started="$(date +%s)"
