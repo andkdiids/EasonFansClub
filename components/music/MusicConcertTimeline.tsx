@@ -24,7 +24,14 @@ export type ConcertArchiveMyLive = {
   favoriteConcerts?: string[]
 }
 
-type ConcertArchiveSide = 'large' | 'small'
+type ConcertCategory = 'main' | 'special' | 'guest'
+
+const CATEGORY_ORDER: ConcertCategory[] = ['main', 'special', 'guest']
+const CATEGORY_LABELS: Record<ConcertCategory, { eyebrow: string; label: string }> = {
+  main: { eyebrow: 'MAIN CONCERTS', label: '大型演唱会' },
+  special: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划 / 特别现场' },
+  guest: { eyebrow: 'GUEST APPEARANCES', label: '嘉宾演出' },
+}
 
 const SMALL_CONCERT_NAMES = [
   'Eason Says C’mon in Tour',
@@ -36,15 +43,19 @@ const SMALL_CONCERT_NAMES = [
   '露天音乐会',
 ]
 
+// Reserved for future front-end classification. No database field is required.
+const GUEST_CONCERT_NAMES: string[] = []
+
 function normalizeName(value: string) {
   return value.replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US')
 }
 
 const smallConcertNameRules = SMALL_CONCERT_NAMES.map(normalizeName)
+const guestConcertNameRules = GUEST_CONCERT_NAMES.map(normalizeName)
 
-function isSmallConcert(tour: ConcertTimelineTour) {
+function matchesRules(tour: ConcertTimelineTour, rules: string[]) {
   const name = normalizeName(tour.name)
-  return smallConcertNameRules.some((rule) => name === rule || name.includes(rule))
+  return rules.some((rule) => name === rule || name.includes(rule))
 }
 
 function formatYear(value: Date | string | null | undefined) {
@@ -58,18 +69,18 @@ function archiveHref(tour: ConcertTimelineTour) {
 }
 
 function ArchivePoster({ tour, sizes, square = false }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
-  return <span className={`music-concert-archive-poster${square ? ' is-square' : ''}`}>
-    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className="object-contain" /> : <span className="music-concert-archive-poster-fallback">LIVE</span>}
+  return <span className={`music-concert-gallery-image${square ? ' is-square' : ''}`}>
+    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className="object-contain" /> : <span className="music-concert-gallery-image-fallback">LIVE</span>}
   </span>
 }
 
-function MuseumPoster({ tour, side, duplicate, onOpen, cardRef }: Readonly<{ tour: ConcertTimelineTour; side: ConcertArchiveSide; duplicate?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void }>) {
+function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: ConcertTimelineTour; hidden?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void }>) {
   const year = formatYear(tour.startDate)
-  return <article ref={cardRef} className={`music-concert-museum-poster music-concert-museum-poster--${side}`} aria-hidden={duplicate || undefined}>
-    <button type="button" tabIndex={duplicate ? -1 : undefined} className="music-concert-museum-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
-      <ArchivePoster tour={tour} sizes="(max-width: 767px) 150px, 220px" square />
-      <span className="music-concert-museum-year">{year}</span>
-      <span className="music-concert-museum-caption">
+  return <article ref={cardRef} className="music-concert-gallery-poster" aria-hidden={hidden || undefined}>
+    <button type="button" tabIndex={hidden ? -1 : undefined} className="music-concert-gallery-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
+      <ArchivePoster tour={tour} sizes="(max-width: 767px) 132px, 220px" square />
+      <span className="music-concert-gallery-year">{year}</span>
+      <span className="music-concert-gallery-caption">
         <span>{year}</span>
         <strong>{tour.name}</strong>
         <small>{tour.concertCount} 场</small>
@@ -78,76 +89,80 @@ function MuseumPoster({ tour, side, duplicate, onOpen, cardRef }: Readonly<{ tou
   </article>
 }
 
-function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; side: ConcertArchiveSide; paused: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
-  const isLarge = side === 'large'
-  const displayedTours = tours.length > 0 && tours.length < 4 ? Array.from({ length: 4 }, (_, index) => tours[index % tours.length]) : tours
-  const viewportRef = useRef<HTMLDivElement>(null)
+function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; paused: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
+  const stageRef = useRef<HTMLDivElement>(null)
   const cardsRef = useRef(new Map<number, HTMLElement>())
-  const positionRef = useRef(0)
+  const rotationRef = useRef(0)
   const frameRef = useRef(0)
   const hoverPausedRef = useRef(false)
   const manualPauseUntilRef = useRef(0)
-  const dragRef = useRef<{ pointerId: number; startY: number; startPosition: number; moved: boolean } | null>(null)
+  const dragRef = useRef<{ pointerId: number; startY: number; startRotation: number; moved: boolean } | null>(null)
   const suppressClickRef = useRef(false)
+  const displayedTours = tours.slice(0, 7)
 
   useLayoutEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport || displayedTours.length === 0) return undefined
+    const stage = stageRef.current
+    if (!stage || displayedTours.length === 0) return undefined
     let previousTime = performance.now()
 
     const paint = (now: number) => {
-      const width = viewport.clientWidth
-      const height = viewport.clientHeight
-      const cardSize = cardsRef.current.get(0)?.offsetWidth || (window.innerWidth < 768 ? 136 : 200)
+      const width = stage.clientWidth
+      const height = stage.clientHeight
+      const mobile = window.innerWidth < 768
+      const orbitCount = mobile ? Math.min(displayedTours.length, 5) : displayedTours.length
+      const cardSize = cardsRef.current.get(0)?.offsetWidth || (mobile ? 124 : 204)
       const centerX = (width - cardSize) / 2
       const centerY = (height - cardSize) / 2
-      const radiusX = Math.max(0, centerX - 8)
-      const radiusY = Math.max(0, centerY - 10)
+      const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 8 : 26))
       const delta = Math.min(48, now - previousTime)
       previousTime = now
       if (!paused && !hoverPausedRef.current && !dragRef.current && now > manualPauseUntilRef.current) {
-        positionRef.current = (positionRef.current + delta * .0036) % 360
+        rotationRef.current = (rotationRef.current + delta * .003) % 360
       }
 
       cardsRef.current.forEach((element, index) => {
-        const phase = index * (360 / displayedTours.length)
-        const angleDegrees = (positionRef.current + phase) * (isLarge ? 1 : -1) + (isLarge ? 0 : 180)
+        if (index >= orbitCount) {
+          element.style.opacity = '0'
+          element.style.pointerEvents = 'none'
+          return
+        }
+        const angleDegrees = rotationRef.current - 90 + index * (360 / orbitCount)
         const angle = angleDegrees * Math.PI / 180
         const cosine = Math.cos(angle)
         const sine = Math.sin(angle)
-        const x = centerX + cosine * radiusX
-        const y = centerY + sine * radiusY
-        const depth = (1 + (isLarge ? cosine : -cosine)) / 2
-        const opacity = .24 + depth * .76
-        const scale = .74 + depth * .26
-        const tilt = sine * (isLarge ? -2.4 : 2.4)
+        const x = centerX + cosine * radius
+        const y = centerY + sine * radius
+        const depth = (sine + 1) / 2
+        const scale = .82 + depth * .18
+        const opacity = .48 + depth * .52
+        const tilt = cosine * 1.8
         element.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${tilt}deg) scale(${scale})`
         element.style.opacity = String(opacity)
         element.style.zIndex = String(Math.max(1, Math.round(10 + depth * 30)))
-        element.style.pointerEvents = opacity < .3 ? 'none' : ''
+        element.style.pointerEvents = ''
       })
       frameRef.current = window.requestAnimationFrame(paint)
     }
 
     frameRef.current = window.requestAnimationFrame(paint)
     return () => window.cancelAnimationFrame(frameRef.current)
-  }, [displayedTours.length, isLarge, paused])
+  }, [displayedTours.length, paused])
 
   useEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport) return undefined
+    const stage = stageRef.current
+    if (!stage) return undefined
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      positionRef.current += event.deltaY * .08
+      rotationRef.current += event.deltaY * .08
       manualPauseUntilRef.current = performance.now() + 900
     }
-    viewport.addEventListener('wheel', onWheel, { passive: false })
-    return () => viewport.removeEventListener('wheel', onWheel)
+    stage.addEventListener('wheel', onWheel, { passive: false })
+    return () => stage.removeEventListener('wheel', onWheel)
   }, [])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
-    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startPosition: positionRef.current, moved: false }
+    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startRotation: rotationRef.current, moved: false }
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -156,9 +171,9 @@ function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: Conce
     const deltaY = event.clientY - drag.startY
     if (Math.abs(deltaY) > 6 && !drag.moved) {
       drag.moved = true
-      viewportRef.current?.setPointerCapture(event.pointerId)
+      stageRef.current?.setPointerCapture(event.pointerId)
     }
-    positionRef.current = drag.startPosition + deltaY * .3
+    rotationRef.current = drag.startRotation + deltaY * .3
   }
 
   function finishDrag(event: ReactPointerEvent<HTMLDivElement>) {
@@ -172,64 +187,50 @@ function MuseumCarousel({ tours, side, paused, onOpen }: Readonly<{ tours: Conce
     manualPauseUntilRef.current = performance.now() + 700
   }
 
-  return <section className={`music-concert-museum-side music-concert-museum-side--${side}`} aria-labelledby={`concert-museum-${side}-title`}>
-    <header className="music-concert-museum-heading">
-      <p>{isLarge ? 'MAIN CONCERTS' : 'SPECIAL PROJECTS'}</p>
-      <h2 id={`concert-museum-${side}-title`}>{isLarge ? '大型演唱会' : '小型企划'}</h2>
-    </header>
-    {displayedTours.length ? <div ref={viewportRef} className="music-concert-museum-viewport" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag} onClickCapture={(event) => {
-      if (!suppressClickRef.current) return
-      event.preventDefault()
-      event.stopPropagation()
-    }} onMouseEnter={() => { hoverPausedRef.current = true }} onMouseLeave={() => { hoverPausedRef.current = false }} onFocusCapture={() => { hoverPausedRef.current = true }} onBlurCapture={() => { hoverPausedRef.current = false }}>
-      <div className="music-concert-museum-stage">
-        {displayedTours.map((tour, index) => <MuseumPoster key={`${tour.id}-${index}`} tour={tour} side={side} duplicate={index >= tours.length} onOpen={onOpen} cardRef={(element) => {
-          if (element) cardsRef.current.set(index, element)
-          else cardsRef.current.delete(index)
-        }} />)}
-      </div>
-      <p className="music-concert-museum-interaction-hint" aria-hidden="true">SCROLL / DRAG</p>
-    </div> : <p className="music-concert-archive-empty">暂无收录</p>}
-  </section>
+  return <div ref={stageRef} className="music-concert-gallery-wheel" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag} onClickCapture={(event) => {
+    if (!suppressClickRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+  }} onMouseEnter={() => { hoverPausedRef.current = true }} onMouseLeave={() => { hoverPausedRef.current = false }} onFocusCapture={() => { hoverPausedRef.current = true }} onBlurCapture={() => { hoverPausedRef.current = false }}>
+    <div className="music-concert-gallery-ring" aria-hidden="true" />
+    <div className="music-concert-gallery-orbit">
+      {displayedTours.map((tour, index) => <OrbitPoster key={tour.id} tour={tour} hidden={false} onOpen={onOpen} cardRef={(element) => {
+        if (element) cardsRef.current.set(index, element)
+        else cardsRef.current.delete(index)
+      }} />)}
+    </div>
+    {!displayedTours.length ? <p className="music-concert-gallery-empty">暂无收录</p> : null}
+  </div>
 }
 
-function MyLiveShowcase({ data }: Readonly<{ data?: ConcertArchiveMyLive }>) {
+function MyLiveCenter({ data }: Readonly<{ data?: ConcertArchiveMyLive }>) {
   const favorites = data?.favoriteConcerts?.filter(Boolean).slice(0, 3) ?? []
-  return <section className="music-concert-my-live" aria-labelledby="concert-museum-my-live-title">
-    <div className="music-concert-my-live-halo" aria-hidden="true" />
-    <div className="music-concert-my-live-showcase">
-      <p className="music-concert-archive-kicker">PRIVATE LIVE COLLECTION</p>
-      <h2 id="concert-museum-my-live-title">MY LIVE</h2>
-      <p className="music-concert-my-live-subtitle">我的现场收藏</p>
-      <dl className="music-concert-my-live-numbers">
-        <div><dd>{data?.attendedCount ?? '--'}</dd><dt>观看总场数</dt></div>
-        <div><dd>{data?.tourCount ?? '--'}</dd><dt>观看巡演</dt></div>
-      </dl>
-      <div className="music-concert-my-live-memory">
-        <span>最近观看</span>
-        <strong>{data?.recentConcert || '--'}</strong>
-      </div>
-      <div className="music-concert-my-live-collection">
-        <span>收藏演唱会</span>
-        <ul>{favorites.length ? favorites.map((name) => <li key={name}>{name}</li>) : <li>--</li>}</ul>
-      </div>
-      <Link href="/music/live/me" className="music-concert-my-live-link">进入我的现场 <span aria-hidden="true">→</span></Link>
-    </div>
+  return <section className="music-concert-gallery-my-live" aria-labelledby="concert-gallery-my-live-title">
+    <p>PRIVATE LIVE COLLECTION</p>
+    <h2 id="concert-gallery-my-live-title">MY LIVE</h2>
+    <strong>我的现场收藏</strong>
+    <dl>
+      <div><dd>{data?.attendedCount ?? '--'}</dd><dt>看过现场</dt></div>
+      <div><dd>{data?.tourCount ?? '--'}</dd><dt>看过巡演</dt></div>
+    </dl>
+    <div className="music-concert-gallery-recent"><span>最近观看</span><b>{data?.recentConcert || '--'}</b></div>
+    <div className="music-concert-gallery-favorites"><span>收藏演唱会</span><b>{favorites.length ? favorites.join(' · ') : '--'}</b></div>
+    <Link href="/music/live/me">进入我的现场 <span aria-hidden="true">→</span></Link>
   </section>
 }
 
 function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour; onClose: () => void }>) {
-  return <div className="music-concert-archive-modal" role="presentation" onClick={onClose}>
-    <div className="music-concert-archive-modal-panel" role="dialog" aria-modal="true" aria-labelledby="concert-archive-modal-title" onClick={(event) => event.stopPropagation()}>
-      <button type="button" className="music-concert-archive-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
-      <div className="music-concert-archive-modal-grid">
+  return <div className="music-concert-gallery-modal" role="presentation" onClick={onClose}>
+    <div className="music-concert-gallery-modal-panel" role="dialog" aria-modal="true" aria-labelledby="concert-gallery-modal-title" onClick={(event) => event.stopPropagation()}>
+      <button type="button" className="music-concert-gallery-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
+      <div className="music-concert-gallery-modal-grid">
         <ArchivePoster tour={tour} sizes="(max-width: 767px) 58vw, 270px" />
-        <div className="music-concert-archive-modal-copy">
+        <div className="music-concert-gallery-modal-copy">
           <time>{formatYear(tour.startDate)}</time>
-          <h2 id="concert-archive-modal-title">{tour.name}</h2>
-          <p className="music-concert-archive-modal-count">{tour.concertCount} 场</p>
-          <p className="music-concert-archive-modal-description">{tour.description?.trim() || '简介暂未整理。'}</p>
-          <Link href={archiveHref(tour)} className="music-concert-archive-modal-link" onClick={(event) => event.stopPropagation()}>查看完整巡演详情 <span aria-hidden="true">→</span></Link>
+          <h2 id="concert-gallery-modal-title">{tour.name}</h2>
+          <p className="music-concert-gallery-modal-count">{tour.concertCount} 场</p>
+          <p className="music-concert-gallery-modal-description">{tour.description?.trim() || '简介暂未整理。'}</p>
+          <Link href={archiveHref(tour)}>查看完整巡演详情 <span aria-hidden="true">→</span></Link>
         </div>
       </div>
     </div>
@@ -237,9 +238,30 @@ function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour
 }
 
 export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive }>) {
+  const [activeCategory, setActiveCategory] = useState<ConcertCategory>('main')
+  const [switching, setSwitching] = useState(false)
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
-  const mainConcerts = tours.filter((tour) => !isSmallConcert(tour))
-  const specialProjects = tours.filter(isSmallConcert)
+  const switchTimerRef = useRef<number | null>(null)
+  const guestConcerts = tours.filter((tour) => matchesRules(tour, guestConcertNameRules))
+  const specialProjects = tours.filter((tour) => !matchesRules(tour, guestConcertNameRules) && matchesRules(tour, smallConcertNameRules))
+  const mainConcerts = tours.filter((tour) => !matchesRules(tour, guestConcertNameRules) && !matchesRules(tour, smallConcertNameRules))
+  const categoryTours: Record<ConcertCategory, ConcertTimelineTour[]> = { main: mainConcerts, special: specialProjects, guest: guestConcerts }
+  const activeLabel = CATEGORY_LABELS[activeCategory]
+
+  function cycleCategory() {
+    if (switching) return
+    const currentIndex = CATEGORY_ORDER.indexOf(activeCategory)
+    const nextCategory = CATEGORY_ORDER[(currentIndex + 1) % CATEGORY_ORDER.length]
+    setSwitching(true)
+    switchTimerRef.current = window.setTimeout(() => {
+      setActiveCategory(nextCategory)
+      window.requestAnimationFrame(() => setSwitching(false))
+    }, 180)
+  }
+
+  useEffect(() => () => {
+    if (switchTimerRef.current !== null) window.clearTimeout(switchTimerRef.current)
+  }, [])
 
   useEffect(() => {
     if (!expandedTour) return undefined
@@ -255,11 +277,19 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
     }
   }, [expandedTour])
 
-  return <section className={`music-concert-museum${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会博物馆">
-    <div className="music-concert-museum-layout">
-      <MuseumCarousel tours={mainConcerts} side="large" paused={Boolean(expandedTour)} onOpen={setExpandedTour} />
-      <MyLiveShowcase data={myLive} />
-      <MuseumCarousel tours={specialProjects} side="small" paused={Boolean(expandedTour)} onOpen={setExpandedTour} />
+  return <section className={`music-concert-gallery${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会展厅">
+    <header className="music-concert-gallery-switcher">
+      <p>{activeLabel.eyebrow}</p>
+      <button type="button" disabled={switching} aria-label={`当前分类：${activeLabel.label}，点击切换下一分类`} onClick={cycleCategory}>
+        <span>{activeLabel.label}</span>
+        <small>点击切换分类</small>
+        <b aria-hidden="true">↻</b>
+      </button>
+      <div aria-hidden="true">{CATEGORY_ORDER.map((category) => <i key={category} data-active={category === activeCategory} />)}</div>
+    </header>
+    <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`}>
+      <MuseumWheel key={activeCategory} tours={categoryTours[activeCategory]} paused={Boolean(expandedTour) || switching} onOpen={setExpandedTour} />
+      <MyLiveCenter data={myLive} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} /> : null}
   </section>
