@@ -24,6 +24,7 @@ export function SetlistBlock({
   idPrefix = 'setlist',
   excludeEncore = false,
   layout = 'sections',
+  showHeading = true,
 }: {
   items: SetlistItemForBlock[]
   title: string
@@ -31,9 +32,10 @@ export function SetlistBlock({
   idPrefix?: string
   excludeEncore?: boolean
   layout?: 'sections' | 'columns'
+  showHeading?: boolean
 }) {
   const source = excludeEncore ? items.filter((item) => !item.isEncore) : items
-  // 正式歌单与 Encore 拆分：Encore 不混入正式歌单
+  // 主歌单与 Encore 拆分：Encore 不混入主歌单
   const normalItems = items.filter((item) => !item.isEncore)
   const encoreItems = items.filter((item) => item.isEncore)
   const showEncore = !excludeEncore
@@ -41,18 +43,19 @@ export function SetlistBlock({
   const headingId = `${idPrefix}-title`
   const encoreHeadingId = `${idPrefix}-encore-title`
 
-  // 三列（桌面）/ 两列（平板）/ 单列（手机）扁平展示：正式歌单与 Encore 分离
+  // 三列（桌面）/ 两列（平板）/ 单列（手机）扁平展示：主歌单与 Encore 分离
   if (layout === 'columns') {
     const sorted = [...normalItems].sort((left, right) => left.position - right.position)
     const hasNormal = sorted.length > 0
     return (
-      <section className="mt-14" aria-labelledby={headingId}>
+      <section className="concert-setlist-block mt-14" aria-labelledby={showHeading ? headingId : undefined} aria-label={showHeading ? undefined : '完整歌单'}>
+        {showHeading ? <>
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{eyebrow}</p>
         <h2 id={headingId} className="mt-2 text-3xl font-black text-white sm:text-4xl">{title}</h2>
+        </> : null}
         {hasNormal ? (
-          <ol className="mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-2 lg:columns-3">
+          <ol className="concert-setlist-items mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-2 lg:columns-3">
             {sorted.map((item) => {
-              const sectionLabel = MUSIC_SETLIST_SECTION_LABELS[item.section as keyof typeof MUSIC_SETLIST_SECTION_LABELS] ?? item.section
               const name = item.MusicSong?.title || item.displayName || '未命名曲目'
               const tags = [
                 item.isRequest && '点歌',
@@ -78,7 +81,6 @@ export function SetlistBlock({
                           ))}
                         </span>
                       ) : null}
-                      <span className="ml-2 text-[10px] font-black text-slate-400">{sectionLabel}</span>
                     </div>
                   </div>
                 </li>
@@ -116,9 +118,11 @@ export function SetlistBlock({
     .map(([section, label]) => ({ section, label, items: source.filter((item) => item.section === section) }))
     .filter((group) => group.items.length)
   return (
-    <section className="mt-14" aria-labelledby={headingId}>
+    <section className="concert-setlist-block mt-14" aria-labelledby={showHeading ? headingId : undefined} aria-label={showHeading ? undefined : '完整歌单'}>
+      {showHeading ? <>
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{eyebrow}</p>
       <h2 id={headingId} className="mt-2 text-3xl font-black text-white sm:text-4xl">{title}</h2>
+      </> : null}
       <div className="mt-7 space-y-8">
         {grouped.map((group) => (
           <section key={group.section}>

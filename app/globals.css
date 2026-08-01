@@ -1377,22 +1377,31 @@ svg {
 .concert-setlist-collapsible[open] .concert-setlist-collapse-label { display:inline; }
 
 @media (max-width:768px) {
-  section[aria-labelledby="mobile-concert-setlist-title"] { margin-top:18px!important; }
-  .concert-setlist-collapsible section[aria-labelledby="mobile-concert-setlist-title"] { margin-top:18px!important; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; margin-top:16px!important; columns:auto; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li { min-width:0; padding:6px 0; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div { align-items:center; gap:6px; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>span:first-child { font-size:10px; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div { min-width:0; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div>a,
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div>span { font-size:11px; line-height:1.35; }
-  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div>span:last-child { display:none; }
-  section[aria-labelledby="city-concerts-title"]>div { gap:8px!important; }
-  section[aria-labelledby="city-concerts-title"]>div>div { padding:12px!important; }
+  .concert-setlist-block { margin-top:18px!important; }
+  .concert-setlist-items { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; margin-top:16px!important; columns:auto; }
+  .concert-setlist-items>li { min-width:0; padding:6px 0; }
+  .concert-setlist-items>li>div { align-items:center; gap:6px; }
+  .concert-setlist-items>li>div>span:first-child { font-size:10px; }
+  .concert-setlist-items>li>div>div { min-width:0; }
+  .concert-setlist-items>li>div>div>a,
+  .concert-setlist-items>li>div>div>span { font-size:11px; line-height:1.35; }
+  section[aria-labelledby="city-concerts-title"]>div { grid-template-columns:repeat(2,minmax(0,1fr))!important; gap:8px!important; align-items:stretch; }
+  section[aria-labelledby="city-concerts-title"]>div>div { display:flex; min-width:0; flex-direction:column; padding:10px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div>a:first-child>div { align-items:flex-start; flex-direction:column; gap:6px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div>a:first-child time { font-size:10px; }
+  section[aria-labelledby="city-concerts-title"]>div>div>a:first-child span { padding:3px 5px; font-size:9px; }
   section[aria-labelledby="city-concerts-title"]>div>div h3 { margin-top:5px!important; font-size:16px; line-height:1.3; }
   section[aria-labelledby="city-concerts-title"]>div>div>div.mt-3 { margin-top:9px!important; padding-top:9px!important; }
   section[aria-labelledby="city-concerts-title"]>div>div>a.mt-3 { margin-top:9px!important; }
-  section[aria-labelledby="city-concerts-title"]>div>div ul { column-gap:8px; font-size:11px; line-height:1.4; }
+  section[aria-labelledby="city-concerts-title"]>div>div ul { column-gap:8px; font-size:11px; line-height:1.4; overflow-wrap:anywhere; }
+  section[aria-labelledby="city-concerts-title"]>div>div>a.mt-3 { margin-top:auto!important; padding-top:8px; }
+}
+
+@media (min-width:390px) and (max-width:767px) {
+  section[aria-labelledby="city-concerts-title"]>div { grid-template-columns:repeat(3,minmax(0,1fr))!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div { padding:8px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div h3 { font-size:14px; }
+  section[aria-labelledby="city-concerts-title"]>div>div ul { font-size:10px; }
 }
 
 /* EasMusic interactive cassette sampler. The hero is transparent and
