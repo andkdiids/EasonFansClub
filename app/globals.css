@@ -1304,6 +1304,51 @@ svg {
   }
 }
 
+/* My Live archive mobile surface. Desktop keeps the existing card/grid
+   treatment; the poster masonry is activated only below the app breakpoint. */
+.my-live-mobile-topbar { display:none; }
+.my-live-concert-poster { display:none; }
+
+@media (max-width:767px) {
+  .my-live-dashboard { min-width:0; padding-bottom:calc(var(--mobile-bottom-nav-total) + var(--mobile-page-bottom-gap)); }
+  .my-live-toolbar { display:none; }
+  .my-live-mobile-topbar { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; gap:8px; min-height:44px; border-bottom:1px solid rgba(255,255,255,.1); color:#f5f7fa; }
+  .my-live-mobile-topbar>a { display:grid; width:36px; height:36px; place-items:center; border:1px solid rgba(255,255,255,.14); color:#dbeafe; background:rgba(255,255,255,.05); font-size:19px; line-height:1; text-decoration:none; }
+  .my-live-mobile-topbar>a:last-child { justify-self:end; }
+  .my-live-mobile-topbar>span { color:#fff; font-size:14px; font-weight:900; text-align:center; }
+  .my-live-heading { padding-top:20px!important; padding-bottom:22px!important; }
+  .my-live-heading h1 { display:none; }
+  .my-live-heading>p:last-child { margin-top:10px; }
+  .my-live-tabs { scrollbar-width:none; }
+  .my-live-tabs::-webkit-scrollbar { display:none; }
+  .my-live-tabs>button { min-width:max-content; }
+  .my-live-poster-grid { display:block; column-count:2; column-gap:12px; }
+  .my-live-poster-grid>.my-live-concert-card { display:inline-block; width:100%; margin:0 0 12px; break-inside:avoid; vertical-align:top; }
+  .my-live-concert-card { padding:0; }
+  .my-live-concert-poster { display:block; border-bottom:1px solid rgba(255,255,255,.1); }
+  .my-live-concert-card-body { padding:12px; }
+  .my-live-concert-card-body .flex.flex-wrap { align-items:stretch; flex-direction:column; }
+  .my-live-concert-card-body .flex.flex-wrap>a,
+  .my-live-concert-card-body .flex.flex-wrap>button { justify-content:center; text-align:center; }
+}
+
+@media (max-width:374px) {
+  .my-live-poster-grid { column-gap:10px; }
+  .my-live-poster-grid>.my-live-concert-card { margin-bottom:10px; }
+  .my-live-concert-card-body { padding:10px; }
+  .my-live-concert-card-body h3 { font-size:17px; }
+}
+
+@media (max-width:767px) {
+  .my-live-concert-detail-page { min-width:0; padding-bottom:calc(var(--mobile-bottom-nav-total) + var(--mobile-page-bottom-gap)); }
+  .my-live-concert-detail-hero { gap:16px; }
+  .my-live-concert-detail-poster { max-width:none; }
+  .my-live-concert-detail-info { border:1px solid rgba(255,255,255,.1); padding:16px; background:rgba(255,255,255,.045); }
+  .my-live-concert-detail-info h1 { font-size:clamp(2rem,9vw,3rem); line-height:1.08; }
+  .my-live-concert-detail-meta { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:18px!important; padding-top:16px!important; }
+  .my-live-concert-detail-meta dd { font-size:13px; line-height:1.5; }
+}
+
 /* EasMusic interactive cassette sampler. The hero is transparent and
    unclipped: the page-level galaxy background from MusicArchiveShell shows
    through, and tapes may overflow the hero's edges (horizontal scroll is
@@ -1622,11 +1667,13 @@ box-shadow:none;
   .easmusic-cassette-hero { margin-inline:-4px; padding-top:22px; }
   .easmusic-cassette-heading { align-items:start; flex-direction:column; gap:15px; padding-inline:14px; }
   .easmusic-cassette-heading button { width:100%; }
-  .easmusic-cassette-stage { display:flex; min-height:0; flex-direction:column; padding:20px 0 8px; }
-  .easmusic-cassette-field { position:relative; display:flex; width:100%; gap:9px; overflow-x:auto; padding:7px 14px 18px; pointer-events:auto; scrollbar-width:none; }
-  .easmusic-tape { position:relative; top:auto!important; right:auto!important; bottom:auto!important; left:auto!important; display:grid!important; width:158px; min-width:158px; transform:rotate(var(--cassette-rotate)); }
-  .easmusic-tape:nth-child(n+5) { display:none!important; }
-  .easmusic-recorder { width:calc(100% - 28px); margin-top:22px; padding:14px; }
+  .easmusic-cassette-stage--stacked { display:flex; min-height:0; flex-direction:column; padding:20px 0 8px; }
+  .easmusic-cassette-stage--stacked .easmusic-cassette-field { position:relative; display:grid; width:100%; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; overflow:visible; padding:7px 14px 18px; pointer-events:auto; }
+  .easmusic-cassette-stage--stacked .easmusic-tape { position:relative; top:auto!important; right:auto!important; bottom:auto!important; left:auto!important; display:grid!important; width:100%; min-width:0; max-width:220px; justify-self:center; transform:rotate(var(--cassette-rotate)); }
+  .easmusic-cassette-stage--stacked .easmusic-tape-copy { top:16%; right:24%; left:24%; }
+  .easmusic-cassette-stage--stacked .easmusic-tape-copy strong { max-height:2.6em; font-size:clamp(8px,2.4vw,11px); line-height:1.25; overflow:hidden; }
+  .easmusic-cassette-stage--stacked .easmusic-tape-brand { bottom:4%; font-size:4px; }
+  .easmusic-cassette-stage--stacked .easmusic-recorder { width:calc(100% - 28px); margin:14px auto 0; padding:14px; }
   .easmusic-recorder-handle { height:26px; border-width:6px; }
   .easmusic-recorder-face { grid-template-columns:70px minmax(0,1fr) 70px; gap:8px; }
   .easmusic-recorder>footer { flex-wrap:wrap; }

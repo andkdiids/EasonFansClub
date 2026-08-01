@@ -42,10 +42,6 @@ export function CassetteTapeVisual({ song, index }: Readonly<{ song: CassetteSon
   {String(index + 1).padStart(2, '0')}
 </b>
 
-<span className="easmusic-tape-copy">
-  <strong>{song.title}</strong>
-</span>
-
 <span className="easmusic-tape-brand">
   ECFC · EASMUSIC ARCHIVE
 </span>

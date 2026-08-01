@@ -158,7 +158,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
       </header>
       {tapes.length ? (
         <>
-          <div className="easmusic-cassette-stage" data-dragging={draggingId ? 'true' : 'false'}>
+          <div className="easmusic-cassette-stage easmusic-cassette-stage--stacked" data-dragging={draggingId ? 'true' : 'false'} data-mobile-layout="stacked">
             <CassetteField
               songs={tapes}
               selectedId={selectedId}
