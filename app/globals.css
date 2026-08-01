@@ -1349,6 +1349,52 @@ svg {
   .my-live-concert-detail-meta dd { font-size:13px; line-height:1.5; }
 }
 
+@media (max-width:480.5px) {
+  .tour-city-archive-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .tour-city-archive-card-body { padding:8px 7px 9px; }
+  .tour-city-archive-card-body h3 { font-size:clamp(11px,3.6vw,14px); line-height:1.3; }
+  .tour-city-archive-card-body p { margin-top:5px; font-size:10px; line-height:1.45; overflow-wrap:anywhere; }
+  .tour-city-archive-card-body p:last-child { margin-top:7px; font-size:9px; }
+}
+
+@media (min-width:481px) and (max-width:767px) {
+  .tour-city-archive-grid { grid-template-columns:repeat(4,minmax(0,1fr))!important; gap:10px!important; }
+  .tour-city-archive-card { padding:0!important; }
+  .tour-city-archive-card-media { aspect-ratio:4/3!important; border-bottom:1px solid rgba(255,255,255,.15)!important; }
+  .tour-city-archive-card-body { padding:9px 8px 10px; }
+  .tour-city-archive-card-body h3 { font-size:14px; line-height:1.3; }
+  .tour-city-archive-card-body p { margin-top:5px; font-size:10px; line-height:1.45; overflow-wrap:anywhere; }
+  .tour-city-archive-card-body p:last-child { margin-top:7px; font-size:9px; }
+}
+
+.concert-setlist-collapsible { margin-top:32px; }
+.concert-setlist-collapsible>summary { display:flex; min-height:46px; align-items:center; justify-content:center; border:1px solid rgba(125,211,252,.24); color:#dff6ff; background:rgba(125,211,252,.07); font-size:13px; font-weight:900; cursor:pointer; list-style:none; }
+.concert-setlist-collapsible>summary::-webkit-details-marker { display:none; }
+.concert-setlist-collapsible>summary::after { margin-left:8px; content:'↓'; }
+.concert-setlist-collapsible[open]>summary::after { content:'↑'; }
+.concert-setlist-collapse-label { display:none; }
+.concert-setlist-collapsible[open] .concert-setlist-expand-label { display:none; }
+.concert-setlist-collapsible[open] .concert-setlist-collapse-label { display:inline; }
+
+@media (max-width:768px) {
+  section[aria-labelledby="mobile-concert-setlist-title"] { margin-top:18px!important; }
+  .concert-setlist-collapsible section[aria-labelledby="mobile-concert-setlist-title"] { margin-top:18px!important; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; margin-top:16px!important; columns:auto; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li { min-width:0; padding:6px 0; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div { align-items:center; gap:6px; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>span:first-child { font-size:10px; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div { min-width:0; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div>a,
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div>span { font-size:11px; line-height:1.35; }
+  section[aria-labelledby="mobile-concert-setlist-title"]>ol>li>div>div>span:last-child { display:none; }
+  section[aria-labelledby="city-concerts-title"]>div { gap:8px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div { padding:12px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div h3 { margin-top:5px!important; font-size:16px; line-height:1.3; }
+  section[aria-labelledby="city-concerts-title"]>div>div>div.mt-3 { margin-top:9px!important; padding-top:9px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div>a.mt-3 { margin-top:9px!important; }
+  section[aria-labelledby="city-concerts-title"]>div>div ul { column-gap:8px; font-size:11px; line-height:1.4; }
+}
+
 /* EasMusic interactive cassette sampler. The hero is transparent and
    unclipped: the page-level galaxy background from MusicArchiveShell shows
    through, and tapes may overflow the hero's edges (horizontal scroll is
@@ -1663,14 +1709,17 @@ box-shadow:none;
   .easmusic-tape:nth-child(4),.easmusic-tape:nth-child(8) { display:none; }
   .easmusic-recorder { width:min(560px,100%); }
 }
-@media (max-width:767px) {
+@media (max-width:768px) {
   .easmusic-cassette-hero { margin-inline:-4px; padding-top:22px; }
   .easmusic-cassette-heading { align-items:start; flex-direction:column; gap:15px; padding-inline:14px; }
   .easmusic-cassette-heading button { width:100%; }
   .easmusic-cassette-stage--stacked { display:flex; min-height:0; flex-direction:column; padding:20px 0 8px; }
-  .easmusic-cassette-stage--stacked .easmusic-cassette-field { position:relative; display:grid; width:100%; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; overflow:visible; padding:7px 14px 18px; pointer-events:auto; }
-  .easmusic-cassette-stage--stacked .easmusic-tape { position:relative; top:auto!important; right:auto!important; bottom:auto!important; left:auto!important; display:grid!important; width:100%; min-width:0; max-width:220px; justify-self:center; transform:rotate(var(--cassette-rotate)); }
-  .easmusic-cassette-stage--stacked .easmusic-tape-copy { top:16%; right:24%; left:24%; }
+  .easmusic-cassette-stage--stacked .easmusic-cassette-field { position:relative; display:grid; width:100%; grid-template-columns:repeat(2,minmax(140px,42vw)); grid-template-rows:repeat(2,minmax(0,auto)); grid-auto-flow:row; gap:10px; overflow-x:auto; overflow-y:hidden; padding:7px 14px 18px; pointer-events:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .easmusic-cassette-stage--stacked .easmusic-cassette-field::-webkit-scrollbar { display:none; }
+  .easmusic-cassette-stage--stacked .easmusic-tape { position:relative; top:auto!important; right:auto!important; bottom:auto!important; left:auto!important; display:grid!important; width:100%; min-width:0; max-width:none; transform:rotate(var(--cassette-rotate)); }
+  .easmusic-cassette-stage--stacked .easmusic-tape:nth-child(-n+4) { display:grid!important; }
+  .easmusic-cassette-stage--stacked .easmusic-tape:nth-child(n+5) { display:none!important; }
+  .easmusic-cassette-stage--stacked .easmusic-tape-copy { top:13%; right:24%; left:24%; display:grid; height:16%; align-items:center; overflow:hidden; }
   .easmusic-cassette-stage--stacked .easmusic-tape-copy strong { max-height:2.6em; font-size:clamp(8px,2.4vw,11px); line-height:1.25; overflow:hidden; }
   .easmusic-cassette-stage--stacked .easmusic-tape-brand { bottom:4%; font-size:4px; }
   .easmusic-cassette-stage--stacked .easmusic-recorder { width:calc(100% - 28px); margin:14px auto 0; padding:14px; }
