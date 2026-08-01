@@ -26,11 +26,10 @@ export type ConcertArchiveMyLive = {
 
 type ConcertCategory = 'main' | 'special' | 'guest'
 
-const CATEGORY_ORDER: ConcertCategory[] = ['main', 'special', 'guest']
 const CATEGORY_LABELS: Record<ConcertCategory, { eyebrow: string; label: string }> = {
   main: { eyebrow: 'MAIN CONCERTS', label: '大型演唱会' },
-  special: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划 / 特别现场' },
-  guest: { eyebrow: 'GUEST APPEARANCES', label: '嘉宾演出' },
+  special: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划' },
+  guest: { eyebrow: 'GUEST APPEARANCES', label: '嘉宾现场' },
 }
 
 const SMALL_CONCERT_NAMES = [
@@ -84,6 +83,7 @@ function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: Concert
         <span>{year}</span>
         <strong>{tour.name}</strong>
         <small>{tour.concertCount} 场</small>
+        <b>进入详情 <span aria-hidden="true">→</span></b>
       </span>
     </button>
   </article>
@@ -94,9 +94,8 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
   const cardsRef = useRef(new Map<number, HTMLElement>())
   const rotationRef = useRef(0)
   const frameRef = useRef(0)
-  const hoverPausedRef = useRef(false)
   const manualPauseUntilRef = useRef(0)
-  const dragRef = useRef<{ pointerId: number; startY: number; startRotation: number; moved: boolean } | null>(null)
+  const dragRef = useRef<{ pointerId: number; startAngle: number; startRotation: number; moved: boolean } | null>(null)
   const suppressClickRef = useRef(false)
   const displayedTours = tours.slice(0, 7)
 
@@ -109,14 +108,14 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
       const width = stage.clientWidth
       const height = stage.clientHeight
       const mobile = window.innerWidth < 768
-      const orbitCount = mobile ? Math.min(displayedTours.length, 5) : displayedTours.length
-      const cardSize = cardsRef.current.get(0)?.offsetWidth || (mobile ? 124 : 204)
+      const orbitCount = mobile ? Math.min(displayedTours.length, 4) : displayedTours.length
+      const cardSize = cardsRef.current.get(0)?.offsetWidth || (mobile ? 112 : 220)
       const centerX = (width - cardSize) / 2
       const centerY = (height - cardSize) / 2
-      const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 8 : 26))
+      const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 4 : 10))
       const delta = Math.min(48, now - previousTime)
       previousTime = now
-      if (!paused && !hoverPausedRef.current && !dragRef.current && now > manualPauseUntilRef.current) {
+      if (!paused && !dragRef.current && now > manualPauseUntilRef.current) {
         rotationRef.current = (rotationRef.current + delta * .003) % 360
       }
 
@@ -132,13 +131,9 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
         const sine = Math.sin(angle)
         const x = centerX + cosine * radius
         const y = centerY + sine * radius
-        const depth = (sine + 1) / 2
-        const scale = .82 + depth * .18
-        const opacity = .48 + depth * .52
-        const tilt = cosine * 1.8
-        element.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${tilt}deg) scale(${scale})`
-        element.style.opacity = String(opacity)
-        element.style.zIndex = String(Math.max(1, Math.round(10 + depth * 30)))
+        element.style.transform = `translate3d(${x}px, ${y}px, 0)`
+        element.style.opacity = '1'
+        element.style.zIndex = '20'
         element.style.pointerEvents = ''
       })
       frameRef.current = window.requestAnimationFrame(paint)
@@ -162,18 +157,26 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
-    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startRotation: rotationRef.current, moved: false }
+    const bounds = stageRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const startAngle = Math.atan2(event.clientY - (bounds.top + bounds.height / 2), event.clientX - (bounds.left + bounds.width / 2)) * 180 / Math.PI
+    dragRef.current = { pointerId: event.pointerId, startAngle, startRotation: rotationRef.current, moved: false }
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
-    const deltaY = event.clientY - drag.startY
-    if (Math.abs(deltaY) > 6 && !drag.moved) {
+    const bounds = stageRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const pointerAngle = Math.atan2(event.clientY - (bounds.top + bounds.height / 2), event.clientX - (bounds.left + bounds.width / 2)) * 180 / Math.PI
+    let angleDelta = pointerAngle - drag.startAngle
+    if (angleDelta > 180) angleDelta -= 360
+    if (angleDelta < -180) angleDelta += 360
+    if (Math.abs(angleDelta) > 2 && !drag.moved) {
       drag.moved = true
       stageRef.current?.setPointerCapture(event.pointerId)
     }
-    rotationRef.current = drag.startRotation + deltaY * .3
+    rotationRef.current = drag.startRotation + angleDelta
   }
 
   function finishDrag(event: ReactPointerEvent<HTMLDivElement>) {
@@ -191,7 +194,7 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
     if (!suppressClickRef.current) return
     event.preventDefault()
     event.stopPropagation()
-  }} onMouseEnter={() => { hoverPausedRef.current = true }} onMouseLeave={() => { hoverPausedRef.current = false }} onFocusCapture={() => { hoverPausedRef.current = true }} onBlurCapture={() => { hoverPausedRef.current = false }}>
+  }}>
     <div className="music-concert-gallery-ring" aria-hidden="true" />
     <div className="music-concert-gallery-orbit">
       {displayedTours.map((tour, index) => <OrbitPoster key={tour.id} tour={tour} hidden={false} onOpen={onOpen} cardRef={(element) => {
@@ -204,17 +207,21 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
 }
 
 function MyLiveCenter({ data }: Readonly<{ data?: ConcertArchiveMyLive }>) {
-  const favorites = data?.favoriteConcerts?.filter(Boolean).slice(0, 3) ?? []
   return <section className="music-concert-gallery-my-live" aria-labelledby="concert-gallery-my-live-title">
-    <p>PRIVATE LIVE COLLECTION</p>
+    <div className="music-concert-gallery-my-live-head">
+      <p>PRIVATE LIVE COLLECTION</p>
+      <span aria-hidden="true">EC</span>
+    </div>
     <h2 id="concert-gallery-my-live-title">MY LIVE</h2>
     <strong>我的现场收藏</strong>
-    <dl>
-      <div><dd>{data?.attendedCount ?? '--'}</dd><dt>看过现场</dt></div>
-      <div><dd>{data?.tourCount ?? '--'}</dd><dt>看过巡演</dt></div>
-    </dl>
-    <div className="music-concert-gallery-recent"><span>最近观看</span><b>{data?.recentConcert || '--'}</b></div>
-    <div className="music-concert-gallery-favorites"><span>收藏演唱会</span><b>{favorites.length ? favorites.join(' · ') : '--'}</b></div>
+    <div className="music-concert-gallery-collection-count">
+      <b>{data?.attendedCount ?? '--'}</b>
+      <span>观看现场数量</span>
+    </div>
+    <div className="music-concert-gallery-collection-details">
+      <div><span>收藏巡演数量</span><b>{data?.tourCount ?? '--'}</b></div>
+      <div><span>最近观看</span><b>{data?.recentConcert || '--'}</b></div>
+    </div>
     <Link href="/music/live/me">进入我的现场 <span aria-hidden="true">→</span></Link>
   </section>
 }
@@ -240,6 +247,7 @@ function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour
 export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive }>) {
   const [activeCategory, setActiveCategory] = useState<ConcertCategory>('main')
   const [switching, setSwitching] = useState(false)
+  const [interactionPaused, setInteractionPaused] = useState(false)
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
   const switchTimerRef = useRef<number | null>(null)
   const guestConcerts = tours.filter((tour) => matchesRules(tour, guestConcertNameRules))
@@ -248,10 +256,8 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
   const categoryTours: Record<ConcertCategory, ConcertTimelineTour[]> = { main: mainConcerts, special: specialProjects, guest: guestConcerts }
   const activeLabel = CATEGORY_LABELS[activeCategory]
 
-  function cycleCategory() {
-    if (switching) return
-    const currentIndex = CATEGORY_ORDER.indexOf(activeCategory)
-    const nextCategory = CATEGORY_ORDER[(currentIndex + 1) % CATEGORY_ORDER.length]
+  function selectCategory(nextCategory: ConcertCategory) {
+    if (switching || nextCategory === activeCategory) return
     setSwitching(true)
     switchTimerRef.current = window.setTimeout(() => {
       setActiveCategory(nextCategory)
@@ -280,15 +286,12 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
   return <section className={`music-concert-gallery${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会展厅">
     <header className="music-concert-gallery-switcher">
       <p>{activeLabel.eyebrow}</p>
-      <button type="button" disabled={switching} aria-label={`当前分类：${activeLabel.label}，点击切换下一分类`} onClick={cycleCategory}>
-        <span>{activeLabel.label}</span>
-        <small>点击切换分类</small>
-        <b aria-hidden="true">↻</b>
-      </button>
-      <div aria-hidden="true">{CATEGORY_ORDER.map((category) => <i key={category} data-active={category === activeCategory} />)}</div>
+      <div role="tablist" aria-label="演唱会分类">
+        {(Object.keys(CATEGORY_LABELS) as ConcertCategory[]).map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} disabled={switching} onClick={() => selectCategory(category)}>{CATEGORY_LABELS[category].label}</button>)}
+      </div>
     </header>
-    <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`}>
-      <MuseumWheel key={activeCategory} tours={categoryTours[activeCategory]} paused={Boolean(expandedTour) || switching} onOpen={setExpandedTour} />
+    <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`} onMouseEnter={() => setInteractionPaused(true)} onMouseLeave={() => setInteractionPaused(false)} onFocusCapture={() => setInteractionPaused(true)} onBlurCapture={() => setInteractionPaused(false)}>
+      <MuseumWheel key={activeCategory} tours={categoryTours[activeCategory]} paused={Boolean(expandedTour) || switching || interactionPaused} onOpen={setExpandedTour} />
       <MyLiveCenter data={myLive} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} /> : null}
