@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: Context) {
     const tour = await prisma.musicTour.findFirst({
       where: { id: tourId, status: 'PUBLISHED' },
       select: {
-        id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true,
+        id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true, category: true,
         MusicConcert: {
           where: { status: 'PUBLISHED' },
           orderBy: [{ concertDate: 'asc' }],
@@ -44,7 +44,7 @@ export async function GET(request: Request, { params }: Context) {
   const tour = await prisma.musicTour.findFirst({
     where: { id: tourId, status: 'PUBLISHED' },
     select: {
-      id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true,
+      id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true, category: true,
       MusicConcert: {
         where: { status: 'PUBLISHED', ...(cityParam ? { city: cityParam } : {}) },
         orderBy: [{ concertDate: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],

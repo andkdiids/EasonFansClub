@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { parseLiveDate, parseLiveInteger, parsePublicationStatus } from '@/lib/music-live'
+import { parseConcertCategory, parseLiveDate, parseLiveInteger, parsePublicationStatus } from '@/lib/music-live'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -24,11 +24,13 @@ export async function PATCH(request: Request, { params }: Context) {
   const startDate = parseLiveDate(body?.startDate)
   const endDate = parseLiveDate(body?.endDate)
   const sortOrder = parseLiveInteger(body?.sortOrder)
+  const category = parseConcertCategory(body?.category)
   const hasCoverUrl = Boolean(body && typeof body === 'object' && ('coverUrl' in body || 'posterUrl' in body))
   const posterUrl = sanitizeText(body?.coverUrl ?? body?.posterUrl, 1000) || null
   if (!name) return NextResponse.json({ message: '请填写巡演名称' }, { status: 400 })
   if (startDate === undefined || endDate === undefined || (startDate && endDate && startDate > endDate)) return NextResponse.json({ message: '巡演日期无效' }, { status: 400 })
   if (sortOrder === undefined) return NextResponse.json({ message: '排序必须是非负整数' }, { status: 400 })
+  if (!category) return NextResponse.json({ message: '演唱会分类无效' }, { status: 400 })
   try {
     const tour = await prisma.musicTour.update({
       where: { id: tourId },
@@ -39,6 +41,7 @@ export async function PATCH(request: Request, { params }: Context) {
         ...(hasCoverUrl ? { posterUrl } : {}),
         startDate,
         endDate,
+        category,
         sortOrder,
         status: parsePublicationStatus(body?.status),
       },

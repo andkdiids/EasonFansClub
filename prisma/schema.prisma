@@ -1204,6 +1204,7 @@ model MusicTour {
   posterUrl    String?                @db.Text
   startDate    DateTime?
   endDate      DateTime?
+  category     ConcertCategory        @default(MAIN)
   status       MusicPublicationStatus @default(DRAFT)
   sortOrder    Int                    @default(0)
   createdAt    DateTime               @default(now())
@@ -2204,6 +2205,12 @@ enum MessageType {
 enum MusicPublicationStatus {
   DRAFT
   PUBLISHED
+}
+
+enum ConcertCategory {
+  MAIN
+  SMALL
+  GUEST
 }
 
 enum MusicSetlistSection {

@@ -14,7 +14,7 @@ export default async function MusicLivePage() {
       where: { status: 'PUBLISHED' },
       orderBy: [{ sortOrder: 'asc' }, { startDate: 'desc' }, { createdAt: 'asc' }],
       take: 50,
-      select: { id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true, MusicConcert: { where: { status: 'PUBLISHED' }, select: { city: true } }, _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } } },
+      select: { id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true, category: true, MusicConcert: { where: { status: 'PUBLISHED' }, select: { city: true } }, _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } } },
     }),
     prisma.musicConcert.findMany({
       where: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },

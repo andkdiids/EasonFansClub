@@ -10,7 +10,7 @@ export async function GET() {
       orderBy: [{ sortOrder: 'asc' }, { startDate: 'desc' }, { createdAt: 'asc' }],
       take: 50,
       select: {
-        id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true,
+        id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true, category: true,
         MusicConcert: { where: { status: 'PUBLISHED' }, select: { city: true } },
         _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } },
       },

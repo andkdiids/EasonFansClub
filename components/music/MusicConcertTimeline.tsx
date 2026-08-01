@@ -8,6 +8,7 @@ import { generateArchiveSlug } from '@/lib/music-slug'
 export type ConcertTimelineTour = {
   id: string
   name: string
+  category: 'MAIN' | 'SMALL' | 'GUEST'
   subtitle?: string | null
   description?: string | null
   posterUrl?: string | null
@@ -30,31 +31,6 @@ const CATEGORY_LABELS: Record<ConcertCategory, { eyebrow: string; label: string 
   main: { eyebrow: 'MAIN CONCERTS', label: '大型演唱会' },
   special: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划' },
   guest: { eyebrow: 'GUEST APPEARANCES', label: '嘉宾现场' },
-}
-
-const SMALL_CONCERT_NAMES = [
-  'Eason Says C’mon in Tour',
-  "Eason Says C'mon in~Tour",
-  'Feel Free! Feel Music!',
-  'L.O.V.E is L.I.F.E',
-  'Live is so much better with Music',
-  'Eason and The DUO Band',
-  '露天音乐会',
-]
-
-// Reserved for future front-end classification. No database field is required.
-const GUEST_CONCERT_NAMES: string[] = []
-
-function normalizeName(value: string) {
-  return value.replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US')
-}
-
-const smallConcertNameRules = SMALL_CONCERT_NAMES.map(normalizeName)
-const guestConcertNameRules = GUEST_CONCERT_NAMES.map(normalizeName)
-
-function matchesRules(tour: ConcertTimelineTour, rules: string[]) {
-  const name = normalizeName(tour.name)
-  return rules.some((rule) => name === rule || name.includes(rule))
 }
 
 function formatYear(value: Date | string | null | undefined) {
@@ -97,7 +73,7 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
   const manualPauseUntilRef = useRef(0)
   const dragRef = useRef<{ pointerId: number; startAngle: number; startRotation: number; moved: boolean } | null>(null)
   const suppressClickRef = useRef(false)
-  const displayedTours = tours.slice(0, 7)
+  const displayedTours = tours
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -108,11 +84,12 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
       const width = stage.clientWidth
       const height = stage.clientHeight
       const mobile = window.innerWidth < 768
-      const orbitCount = mobile ? Math.min(displayedTours.length, 4) : displayedTours.length
+      const orbitCount = displayedTours.length
       const cardSize = cardsRef.current.get(0)?.offsetWidth || (mobile ? 112 : 220)
       const centerX = (width - cardSize) / 2
       const centerY = (height - cardSize) / 2
       const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 4 : 10))
+      const crowdScale = mobile && orbitCount > 6 ? Math.max(.68, 6.5 / orbitCount) : 1
       const delta = Math.min(48, now - previousTime)
       previousTime = now
       if (!paused && !dragRef.current && now > manualPauseUntilRef.current) {
@@ -131,7 +108,7 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
         const sine = Math.sin(angle)
         const x = centerX + cosine * radius
         const y = centerY + sine * radius
-        element.style.transform = `translate3d(${x}px, ${y}px, 0)`
+        element.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${crowdScale})`
         element.style.opacity = '1'
         element.style.zIndex = '20'
         element.style.pointerEvents = ''
@@ -202,25 +179,25 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
         else cardsRef.current.delete(index)
       }} />)}
     </div>
-    {!displayedTours.length ? <p className="music-concert-gallery-empty">暂无收录</p> : null}
+    {!displayedTours.length ? <p className="music-concert-gallery-empty">暂未收录</p> : null}
   </div>
 }
 
 function MyLiveCenter({ data }: Readonly<{ data?: ConcertArchiveMyLive }>) {
+  const favorites = data?.favoriteConcerts?.filter(Boolean).slice(0, 3) ?? []
   return <section className="music-concert-gallery-my-live" aria-labelledby="concert-gallery-my-live-title">
-    <div className="music-concert-gallery-my-live-head">
-      <p>PRIVATE LIVE COLLECTION</p>
-      <span aria-hidden="true">EC</span>
-    </div>
+    <span className="music-concert-gallery-corner is-top" aria-hidden="true" />
+    <span className="music-concert-gallery-corner is-bottom" aria-hidden="true" />
+    <p>PRIVATE LIVE COLLECTION</p>
     <h2 id="concert-gallery-my-live-title">MY LIVE</h2>
     <strong>我的现场收藏</strong>
-    <div className="music-concert-gallery-collection-count">
-      <b>{data?.attendedCount ?? '--'}</b>
-      <span>观看现场数量</span>
+    <div className="music-concert-gallery-live-stats">
+      <div><b>{data?.attendedCount ?? '--'}</b><span>观看现场数</span></div>
+      <div><b>{data?.tourCount ?? '--'}</b><span>观看巡演数</span></div>
     </div>
-    <div className="music-concert-gallery-collection-details">
-      <div><span>收藏巡演数量</span><b>{data?.tourCount ?? '--'}</b></div>
+    <div className="music-concert-gallery-live-records">
       <div><span>最近观看</span><b>{data?.recentConcert || '--'}</b></div>
+      <div><span>收藏演唱会</span><b>{favorites.length ? favorites.join(' · ') : '--'}</b></div>
     </div>
     <Link href="/music/live/me">进入我的现场 <span aria-hidden="true">→</span></Link>
   </section>
@@ -250,9 +227,9 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
   const [interactionPaused, setInteractionPaused] = useState(false)
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
   const switchTimerRef = useRef<number | null>(null)
-  const guestConcerts = tours.filter((tour) => matchesRules(tour, guestConcertNameRules))
-  const specialProjects = tours.filter((tour) => !matchesRules(tour, guestConcertNameRules) && matchesRules(tour, smallConcertNameRules))
-  const mainConcerts = tours.filter((tour) => !matchesRules(tour, guestConcertNameRules) && !matchesRules(tour, smallConcertNameRules))
+  const mainConcerts = tours.filter((tour) => tour.category === 'MAIN')
+  const specialProjects = tours.filter((tour) => tour.category === 'SMALL')
+  const guestConcerts = tours.filter((tour) => tour.category === 'GUEST')
   const categoryTours: Record<ConcertCategory, ConcertTimelineTour[]> = { main: mainConcerts, special: specialProjects, guest: guestConcerts }
   const activeLabel = CATEGORY_LABELS[activeCategory]
 

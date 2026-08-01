@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { parseLiveDate, parseLiveInteger, parsePublicationStatus } from '@/lib/music-live'
+import { parseConcertCategory, parseLiveDate, parseLiveInteger, parsePublicationStatus } from '@/lib/music-live'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -23,10 +23,12 @@ export async function POST(request: Request) {
   const startDate = parseLiveDate(body?.startDate)
   const endDate = parseLiveDate(body?.endDate)
   const sortOrder = parseLiveInteger(body?.sortOrder)
+  const category = parseConcertCategory(body?.category, 'MAIN')
   if (!name) return NextResponse.json({ message: '请填写巡演名称' }, { status: 400 })
   if (startDate === undefined || endDate === undefined) return NextResponse.json({ message: '巡演日期无效' }, { status: 400 })
   if (startDate && endDate && startDate > endDate) return NextResponse.json({ message: '结束日期不能早于开始日期' }, { status: 400 })
   if (sortOrder === undefined) return NextResponse.json({ message: '排序必须是非负整数' }, { status: 400 })
+  if (!category) return NextResponse.json({ message: '演唱会分类无效' }, { status: 400 })
   const tour = await prisma.musicTour.create({
     data: {
       name,
@@ -35,6 +37,7 @@ export async function POST(request: Request) {
       posterUrl: sanitizeText(body?.coverUrl ?? body?.posterUrl, 1000) || null,
       startDate,
       endDate,
+      category,
       sortOrder,
       status: parsePublicationStatus(body?.status),
     },

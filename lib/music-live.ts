@@ -1,5 +1,7 @@
 export const MUSIC_SETLIST_SECTIONS = ['OPENING', 'MAIN', 'TALK', 'REQUEST', 'ENCORE', 'SPECIAL', 'OTHER'] as const
 export const MUSIC_HIGHLIGHT_TYPES = ['TALK', 'GUEST', 'SONG', 'STAGE', 'INTERACTION', 'MEMORIAL', 'OTHER'] as const
+export const CONCERT_CATEGORIES = ['MAIN', 'SMALL', 'GUEST'] as const
+export type ConcertCategoryValue = (typeof CONCERT_CATEGORIES)[number]
 export const MUSIC_SETLIST_SECTION_LABELS: Record<(typeof MUSIC_SETLIST_SECTIONS)[number], string> = {
   OPENING: '开场', MAIN: '正式歌单', TALK: '谈话环节', REQUEST: '点歌', ENCORE: 'Encore', SPECIAL: '特别环节', OTHER: '其他',
 }
@@ -53,6 +55,11 @@ export function parseLiveInteger(value: unknown, fallback = 0) {
 
 export function parsePublicationStatus(value: unknown) {
   return value === 'PUBLISHED' ? 'PUBLISHED' as const : 'DRAFT' as const
+}
+
+export function parseConcertCategory(value: unknown, fallback?: ConcertCategoryValue) {
+  if (value === undefined || value === null || value === '') return fallback
+  return CONCERT_CATEGORIES.includes(value as ConcertCategoryValue) ? value as ConcertCategoryValue : undefined
 }
 
 function optionalText(value: unknown, maxLength: number) {
