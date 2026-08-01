@@ -1304,6 +1304,62 @@ svg {
   }
 }
 
+/* Eason concert archive timeline. The axis stays central on desktop and
+   moves to the left edge of a single-column mobile stream. */
+.music-concert-timeline { position:relative; min-width:0; }
+.music-concert-timeline-track { position:absolute; z-index:0; top:14px; bottom:14px; left:50%; width:1px; background:linear-gradient(180deg,rgba(125,211,252,.58),rgba(125,211,252,.2) 70%,transparent); transform:translateX(-50%); }
+.music-concert-timeline-list { position:relative; z-index:1; display:grid; gap:24px; }
+.music-concert-timeline-node { position:relative; display:grid; min-height:154px; grid-template-columns:minmax(0,1fr) 48px minmax(0,1fr); align-items:center; }
+.music-concert-timeline-content { position:relative; width:100%; max-width:430px; grid-column:1; justify-self:end; }
+.music-concert-timeline-node[data-side='right'] .music-concert-timeline-content { grid-column:3; justify-self:start; }
+.music-concert-timeline-content::after { position:absolute; top:50%; width:24px; height:1px; background:rgba(125,211,252,.34); content:''; }
+.music-concert-timeline-node[data-side='left'] .music-concert-timeline-content::after { right:-24px; }
+.music-concert-timeline-node[data-side='right'] .music-concert-timeline-content::after { left:-24px; }
+.music-concert-timeline-dot { z-index:2; width:13px; height:13px; grid-column:2; grid-row:1; justify-self:center; border:2px solid #bae6fd; background:#07182d; box-shadow:0 0 24px rgba(125,211,252,.55); }
+.music-concert-timeline-card { display:grid; min-height:144px; grid-template-columns:108px minmax(0,1fr); align-items:center; gap:14px; border:1px solid rgba(255,255,255,.1); padding:12px; color:#fff; background:rgba(255,255,255,.055); text-decoration:none; transition:background 180ms ease,border-color 180ms ease,transform 180ms ease; }
+.music-concert-timeline-card:hover { border-color:rgba(125,211,252,.3); background:rgba(255,255,255,.09); transform:translateY(-2px); }
+.music-concert-timeline-node[data-side='right'] .music-concert-timeline-card { grid-template-columns:minmax(0,1fr) 108px; }
+.music-concert-timeline-node[data-side='right'] .music-concert-timeline-poster { grid-column:2; grid-row:1; }
+.music-concert-timeline-node[data-side='right'] .music-concert-timeline-body { grid-column:1; grid-row:1; text-align:left; }
+.music-concert-timeline-node[data-side='left'] .music-concert-timeline-body { text-align:right; }
+.music-concert-timeline-poster { position:relative; width:108px; aspect-ratio:3/4; overflow:hidden; background:#0b2038; }
+.music-concert-timeline-body { min-width:0; }
+.music-concert-timeline-body time { color:rgba(125,211,252,.72); font-size:10px; font-weight:900; letter-spacing:.18em; }
+.music-concert-timeline-body h3 { margin-top:8px; overflow-wrap:anywhere; color:#fff; font-size:clamp(18px,2.2vw,27px); font-weight:950; line-height:1.1; }
+.music-concert-timeline-body p { margin-top:10px; color:rgba(226,232,240,.68); font-size:12px; font-weight:900; }
+.music-concert-timeline.is-compact .music-concert-timeline-list { gap:16px; }
+.music-concert-timeline.is-compact .music-concert-timeline-node { min-height:118px; }
+.music-concert-timeline.is-compact .music-concert-timeline-card { min-height:108px; grid-template-columns:82px minmax(0,1fr); gap:10px; padding:9px; }
+.music-concert-timeline.is-compact .music-concert-timeline-node[data-side='right'] .music-concert-timeline-card { grid-template-columns:minmax(0,1fr) 82px; }
+.music-concert-timeline.is-compact .music-concert-timeline-poster { width:82px; }
+.music-concert-timeline.is-compact .music-concert-timeline-body h3 { font-size:17px; }
+
+@media (max-width:767px) {
+  .music-concert-timeline-track { top:10px; bottom:10px; left:14px; transform:none; }
+  .music-concert-timeline-list { gap:16px; }
+  .music-concert-timeline-node { min-height:0; grid-template-columns:28px minmax(0,1fr); align-items:start; }
+  .music-concert-timeline-content,
+  .music-concert-timeline-node[data-side='right'] .music-concert-timeline-content { width:100%; max-width:none; grid-column:2; justify-self:stretch; }
+  .music-concert-timeline-content::after,
+  .music-concert-timeline-node[data-side='right'] .music-concert-timeline-content::after { top:24px; right:auto; left:-14px; width:14px; }
+  .music-concert-timeline-dot { width:11px; height:11px; grid-column:1; margin-top:19px; }
+  .music-concert-timeline-card,
+  .music-concert-timeline-node[data-side='right'] .music-concert-timeline-card { display:block; min-height:0; padding:10px; }
+  .music-concert-timeline-poster,
+  .music-concert-timeline-node[data-side='right'] .music-concert-timeline-poster { width:clamp(104px,32vw,132px); margin:0; }
+  .music-concert-timeline-body,
+  .music-concert-timeline-node[data-side='left'] .music-concert-timeline-body,
+  .music-concert-timeline-node[data-side='right'] .music-concert-timeline-body { margin-top:10px; text-align:left; }
+  .music-concert-timeline-body h3 { font-size:clamp(17px,4.9vw,22px); line-height:1.15; }
+  .music-concert-timeline-body p { margin-top:7px; font-size:11px; }
+  .music-concert-timeline.is-compact .music-concert-timeline-node { min-height:0; }
+  .music-concert-timeline.is-compact .music-concert-timeline-card,
+  .music-concert-timeline.is-compact .music-concert-timeline-node[data-side='right'] .music-concert-timeline-card { display:block; min-height:0; padding:8px; }
+  .music-concert-timeline.is-compact .music-concert-timeline-poster,
+  .music-concert-timeline.is-compact .music-concert-timeline-node[data-side='right'] .music-concert-timeline-poster { width:96px; }
+  .music-concert-timeline.is-compact .music-concert-timeline-body h3 { font-size:16px; }
+}
+
 /* My Live archive mobile surface. Desktop keeps the existing card/grid
    treatment; the poster masonry is activated only below the app breakpoint. */
 .my-live-mobile-topbar { display:none; }
