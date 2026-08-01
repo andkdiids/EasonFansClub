@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { generateArchiveSlug } from '@/lib/music-slug'
 
 export type ConcertTimelineTour = {
@@ -63,37 +63,85 @@ function ArchivePoster({ tour, sizes, modal = false }: Readonly<{ tour: ConcertT
   </span>
 }
 
-function ConcertArchiveCard({ tour, side, duplicate, onOpen }: Readonly<{ tour: ConcertTimelineTour; side: ConcertArchiveSide; duplicate?: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
-  return <article className={`music-concert-archive-card music-concert-archive-card--${side}`} aria-hidden={duplicate || undefined}>
-    <button type="button" tabIndex={duplicate ? -1 : undefined} className="music-concert-archive-card-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
-      <ArchivePoster tour={tour} sizes="(max-width: 767px) 104px, 132px" />
-      <span className="music-concert-archive-card-copy">
-        <span className="music-concert-archive-card-year">{formatYear(tour.startDate)}</span>
+function ConcertOrbitPoster({ tour, side, duplicate, onOpen, cardRef }: Readonly<{ tour: ConcertTimelineTour; side: ConcertArchiveSide; duplicate?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void }>) {
+  const year = formatYear(tour.startDate)
+  return <article ref={cardRef} className={`music-concert-orbit-poster music-concert-orbit-poster--${side}`} aria-hidden={duplicate || undefined}>
+    <button type="button" tabIndex={duplicate ? -1 : undefined} className="music-concert-orbit-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
+      <ArchivePoster tour={tour} sizes="(max-width: 767px) 104px, 126px" />
+      <span className="music-concert-orbit-year">{year}</span>
+      <span className="music-concert-orbit-details">
+        <span>{year}</span>
         <strong>{tour.name}</strong>
-        <span className="music-concert-archive-card-meta">{tour.concertCount} 场 · CONCERT ARCHIVE</span>
+        <small>{tour.concertCount} 场</small>
       </span>
     </button>
   </article>
 }
 
-function ConcertArchiveCarousel({ tours, side, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; side: ConcertArchiveSide; onOpen: (tour: ConcertTimelineTour) => void }>) {
+function ConcertOrbit({ tours, side, paused, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; side: ConcertArchiveSide; paused: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
   const isLarge = side === 'large'
   const title = isLarge ? '大型演唱会' : '小型企划'
-  const repeatedTours = useMemo(() => {
-    if (tours.length === 0 || tours.length >= 3) return tours
-    return Array.from({ length: 3 }, (_, index) => tours[index % tours.length])
-  }, [tours])
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const cardsRef = useRef(new Map<number, HTMLElement>())
+  const travelRef = useRef(0)
+  const hoverPausedRef = useRef(false)
+  const frameRef = useRef(0)
+  const displayedTours = tours.length > 0 && tours.length < 4 ? Array.from({ length: 4 }, (_, index) => tours[index % tours.length]) : tours
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || displayedTours.length === 0) return undefined
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let previousTime = performance.now()
+
+    const paint = (now: number) => {
+      const width = viewport.clientWidth
+      const height = viewport.clientHeight
+      const mobile = window.innerWidth < 768
+      const posterWidth = mobile ? (window.innerWidth < 375 ? 92 : 104) : 126
+      const posterHeight = posterWidth * 4 / 3
+      const spacing = mobile ? 154 : 178
+      const pathLength = displayedTours.length * spacing
+      const baseX = mobile ? (width - posterWidth) / 2 : isLarge ? 0 : width - posterWidth
+      const direction = isLarge ? 1 : -1
+      const arcDepth = mobile ? Math.min(46, width * .13) : Math.min(132, width * .36)
+      const delta = Math.min(48, now - previousTime)
+      previousTime = now
+      if (!paused && !hoverPausedRef.current && !reduceMotion) travelRef.current = (travelRef.current + delta * .016) % pathLength
+
+      cardsRef.current.forEach((element, index) => {
+        const rawY = ((index * spacing - travelRef.current) % pathLength + pathLength) % pathLength
+        const y = rawY - posterHeight
+        const progress = Math.max(0, Math.min(1, (y + posterHeight) / (height + posterHeight)))
+        const arc = Math.sin(progress * Math.PI)
+        const x = baseX + direction * arcDepth * arc
+        const edgeDistance = Math.min(progress, 1 - progress) * 2
+        const opacity = Math.max(0, Math.min(1, edgeDistance * 2.4))
+        const scale = .82 + arc * .18
+        element.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
+        element.style.opacity = String(opacity)
+        element.style.zIndex = String(Math.max(1, Math.round(10 + arc * 20)))
+        element.style.pointerEvents = opacity < .18 ? 'none' : ''
+      })
+      frameRef.current = window.requestAnimationFrame(paint)
+    }
+
+    frameRef.current = window.requestAnimationFrame(paint)
+    return () => window.cancelAnimationFrame(frameRef.current)
+  }, [displayedTours.length, isLarge, paused])
 
   return <section className={`music-concert-archive-column music-concert-archive-column--${side}`} aria-labelledby={`concert-archive-${side}-title`}>
     <header className="music-concert-archive-heading">
       <p>{isLarge ? 'MAIN STAGES' : 'SPECIAL PROJECTS'}</p>
       <h2 id={`concert-archive-${side}-title`}>{title}</h2>
     </header>
-    {repeatedTours.length ? <div className="music-concert-archive-viewport">
-      <div className="music-concert-archive-track">
-        {[false, true].map((duplicate) => <div key={duplicate ? 'duplicate' : 'original'} className="music-concert-archive-set" aria-hidden={duplicate || undefined}>
-          {repeatedTours.map((tour, index) => <ConcertArchiveCard key={`${tour.id}-${index}-${duplicate ? 'copy' : 'source'}`} tour={tour} side={side} duplicate={duplicate || index >= tours.length} onOpen={onOpen} />)}
-        </div>)}
+    {displayedTours.length ? <div ref={viewportRef} className="music-concert-archive-viewport" onMouseEnter={() => { hoverPausedRef.current = true }} onMouseLeave={() => { hoverPausedRef.current = false }} onFocusCapture={() => { hoverPausedRef.current = true }} onBlurCapture={() => { hoverPausedRef.current = false }}>
+      <div className="music-concert-orbit-rail" aria-hidden="true" />
+      <div className="music-concert-orbit-stage">
+        {displayedTours.map((tour, index) => <ConcertOrbitPoster key={`${tour.id}-${index}`} tour={tour} side={side} duplicate={index >= tours.length} onOpen={onOpen} cardRef={(element) => {
+          if (element) cardsRef.current.set(index, element)
+          else cardsRef.current.delete(index)
+        }} />)}
       </div>
     </div> : <p className="music-concert-archive-empty">暂无收录</p>}
   </section>
@@ -161,11 +209,11 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
     }
   }, [expandedTour])
 
-  return <section className={`music-concert-archive${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会档案">
+  return <section className={`music-concert-archive${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会博物馆">
     <div className="music-concert-archive-layout">
-      <ConcertArchiveCarousel tours={largeConcerts} side="large" onOpen={setExpandedTour} />
+      <ConcertOrbit tours={largeConcerts} side="large" paused={Boolean(expandedTour)} onOpen={setExpandedTour} />
       <MyLivePanel data={myLive} />
-      <ConcertArchiveCarousel tours={smallConcerts} side="small" onOpen={setExpandedTour} />
+      <ConcertOrbit tours={smallConcerts} side="small" paused={Boolean(expandedTour)} onOpen={setExpandedTour} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} /> : null}
   </section>
