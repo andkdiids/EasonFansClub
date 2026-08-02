@@ -12,6 +12,7 @@ coverage/
 *.log
 tsconfig.tsbuildinfo
 public/uploads/
+tmp/easmusic-live-visual/
 supabase/.temp/
 .codex-start-8000.cmd
 .env.supabase.backup

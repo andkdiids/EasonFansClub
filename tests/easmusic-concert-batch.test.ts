@@ -93,9 +93,11 @@ test('创建、编辑与删除 API 均由系统维护场次序号', () => {
 
 test('后台多选日期可添加标签和删除且不再提供手填场次编号', () => {
   const manager = read('app/admin/music/concerts/AdminConcertManager.tsx')
+  const picker = read('components/music/live/MultiDatePicker.tsx')
   assert.match(manager, /concertDates/)
-  assert.match(manager, /演出日期（多选）/)
-  assert.match(manager, /删除日期/)
+  assert.match(manager, /演出日期（点击多选，可切换月份）/)
+  assert.match(manager, /<MultiDatePicker value={concertDates} onChange={setConcertDates}/)
+  assert.match(picker, /aria-label={`取消 \$\{date\}`}/)
   assert.match(manager, /使用上一场歌单/)
   assert.match(manager, /创建新歌单/)
   assert.doesNotMatch(manager, />场次编号<input/)

@@ -19,7 +19,7 @@ function inferIdentifierType(value: string): IdentifierType {
 }
 
 function safeRedirectPath(path?: string) {
-  if (path === '/welcome') return path
+  if (path && path.startsWith('/') && !path.startsWith('//') && !/[\r\n]/.test(path)) return path
   return '/welcome'
 }
 

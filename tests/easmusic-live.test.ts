@@ -91,7 +91,7 @@ test('巡演与场次搜索只返回已发布资料并保留歌词搜索', () =>
 })
 
 test('场次详情仅选择歌曲必要字段且不返回完整歌词', () => {
-  for (const path of ['app/api/music/live/concerts/[concertId]/route.ts', 'app/music/live/concerts/[concertId]/page.tsx']) {
+  for (const path of ['app/api/music/live/concerts/[concertId]/route.ts', 'app/music/live/tours/[tourId]/[city]/[date]/page.tsx']) {
     const source = read(path)
     assert.match(source, /MusicSong: \{ select: \{/)
     assert.doesNotMatch(source, /lyrics: true|story: true/)
@@ -108,19 +108,20 @@ test('Eason现场公开页面覆盖空状态、巡演和场次详情', () => {
 })
 
 test('未关联歌曲不生成链接，已关联歌曲复用现有详情路由', () => {
-  const page = read('app/music/live/concerts/[concertId]/page.tsx')
-  assert.match(page, /item\.MusicSong \? <Link href=\{`\/music\/song\/\$\{item\.MusicSong\.id\}`\}/)
-  assert.match(page, /: <span className=.*>\{name\}<\/span>/)
+  const page = read('components/music/live/SetlistBlock.tsx')
+  assert.match(page, /item\.MusicSong\?\.id \? \(/)
+  assert.match(page, /<Link href=\{`\/music\/song\/\$\{item\.MusicSong\.id\}`\}/)
+  assert.match(page, /<span className="[^"]*">\{name\}<\/span>/)
 })
 
 test('现场首页和详情继续使用 EasMusic 深蓝壳层并限制横向溢出', () => {
   const shell = read('components/music/MusicArchiveShell.tsx')
   assert.match(shell, /min-h-screen \[overflow-x:clip\] bg-\[#06101d\]/)
-  for (const path of ['app/music/live/page.tsx', 'app/music/live/tours/[tourId]/page.tsx', 'app/music/live/concerts/[concertId]/page.tsx']) assert.match(read(path), /MusicArchiveShell/)
+  for (const path of ['app/music/live/page.tsx', 'app/music/live/tours/[tourId]/page.tsx', 'app/music/live/tours/[tourId]/[city]/[date]/page.tsx']) assert.match(read(path), /MusicArchiveShell/)
 })
 
 test('320px 现场布局采用 min-w-0、移动歌单布局和无固定宽度主表', () => {
-  const sources = [read('app/music/live/page.tsx'), read('app/music/live/tours/[tourId]/page.tsx'), read('app/music/live/concerts/[concertId]/page.tsx'), read('components/music/live/LiveConcertList.tsx')].join('\n')
+  const sources = [read('app/music/live/page.tsx'), read('app/music/live/tours/[tourId]/page.tsx'), read('app/music/live/tours/[tourId]/[city]/[date]/page.tsx'), read('components/music/live/LiveConcertList.tsx'), read('components/music/live/SetlistBlock.tsx')].join('\n')
   assert.match(sources, /min-w-0/)
   assert.match(sources, /grid-cols-\[36px_minmax\(0,1fr\)\]/)
   assert.doesNotMatch(sources, /min-w-\[(?:8|9|10)\d\dpx\]/)

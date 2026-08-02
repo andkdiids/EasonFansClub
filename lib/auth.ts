@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
 
 export const authCookieName = 'eason_fans_session'
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 export type SessionUser = {
   id: string
@@ -45,7 +46,7 @@ export async function createSessionToken(user: SessionUser) {
   return new SignJWT(user)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('7d')
+    .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
     .sign(secret)
 }
 
@@ -140,11 +141,29 @@ export function getSessionCookieOptions(request?: Request) {
       : new URL(request.url).protocol === 'https:'
     : false
 
+  const requestUrl = request ? new URL(request.url) : null
+  const hostname = requestUrl?.hostname.toLowerCase() || ''
+  const localHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
+  const secure = localHost
+    ? false
+    : process.env.NODE_ENV === 'production'
+      ? true
+      : requestUsesHttps && process.env.COOKIE_SECURE === 'true'
+
   return {
     httpOnly: true,
     sameSite: 'lax' as const,
-    secure: requestUsesHttps || process.env.COOKIE_SECURE === 'true',
+    secure,
     path: '/',
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: SESSION_MAX_AGE_SECONDS,
+    expires: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
+  }
+}
+
+export function getSessionCookieDeletionOptions(request?: Request) {
+  return {
+    ...getSessionCookieOptions(request),
+    maxAge: 0,
+    expires: new Date(0),
   }
 }

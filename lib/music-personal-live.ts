@@ -78,6 +78,54 @@ export function normalizedCityKey(value: string | null | undefined) {
   return value?.trim().toLocaleLowerCase('zh-CN') || null
 }
 
+export type PersonalLiveSummary = {
+  attendedShowCount: number
+  attendedTourCount: number
+  attendedCityCount: number
+  latestAttendedShow: {
+    showId: string
+    tourId: string
+    tourName: string
+    city: string
+    date: Date
+  } | null
+}
+
+type PersonalLiveSummaryRow = {
+  MusicConcert: {
+    id: string
+    tourId: string
+    concertDate: Date
+    city: string
+    MusicTour: { id: string; name: string }
+  }
+}
+
+export function summarizePersonalLiveSummaryRows(rows: PersonalLiveSummaryRow[]): PersonalLiveSummary {
+  const uniqueShows = new Map<string, PersonalLiveSummaryRow['MusicConcert']>()
+  for (const row of rows) {
+    if (!uniqueShows.has(row.MusicConcert.id)) uniqueShows.set(row.MusicConcert.id, row.MusicConcert)
+  }
+
+  const shows = [...uniqueShows.values()]
+  const tours = new Set(shows.map((show) => show.tourId))
+  const cities = new Set(shows.map((show) => normalizedCityKey(show.city)).filter((city): city is string => Boolean(city)))
+  const latest = [...shows].sort((left, right) => right.concertDate.getTime() - left.concertDate.getTime() || right.id.localeCompare(left.id))[0]
+
+  return {
+    attendedShowCount: shows.length,
+    attendedTourCount: tours.size,
+    attendedCityCount: cities.size,
+    latestAttendedShow: latest ? {
+      showId: latest.id,
+      tourId: latest.tourId,
+      tourName: latest.MusicTour.name,
+      city: latest.city,
+      date: latest.concertDate,
+    } : null,
+  }
+}
+
 export type PersonalSetlistItem = {
   songId: string | null
   displayName: string | null
@@ -128,13 +176,26 @@ function isCountableSetlistItem(item: PersonalSetlistItem) {
 }
 
 export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
-  const availableRows = rows.filter(isPublishedRow)
+  const uniqueRows = [...new Map(rows.map((row) => [row.MusicConcert.id, row])).values()]
+  const summary = summarizePersonalLiveSummaryRows(uniqueRows.map((row) => ({
+    MusicConcert: {
+      id: row.MusicConcert.id,
+      tourId: row.MusicConcert.tourId,
+      concertDate: row.MusicConcert.concertDate,
+      city: row.MusicConcert.city,
+      MusicTour: {
+        id: row.MusicConcert.MusicTour.id,
+        name: row.MusicConcert.MusicTour.name,
+      },
+    },
+  })))
+  const availableRows = uniqueRows.filter(isPublishedRow)
   const tourIds = new Set<string>()
   const cities = new Map<string, { name: string; count: number }>()
   const songIds = new Set<string>()
   let totalLiveSongCount = 0
 
-  for (const row of availableRows) {
+  for (const row of uniqueRows) {
     tourIds.add(row.MusicConcert.tourId)
     const cityName = row.MusicConcert.city.trim()
     const cityKey = normalizedCityKey(cityName)
@@ -144,6 +205,7 @@ export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
     } else {
       console.warn('[music.live.me] ignored blank city', { concertId: row.MusicConcert.id })
     }
+    if (!isPublishedRow(row)) continue
     for (const item of row.MusicConcert.MusicConcertSetlistItem) {
       if (!isCountableSetlistItem(item)) continue
       totalLiveSongCount += 1
@@ -152,12 +214,13 @@ export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
   }
 
   return {
-    concertCount: availableRows.length,
+    concertCount: uniqueRows.length,
     tourCount: tourIds.size,
     cityCount: cities.size,
+    latestAttendedShow: summary.latestAttendedShow,
     unlockedSongCount: songIds.size,
     totalLiveSongCount,
-    unavailableCount: rows.length - availableRows.length,
+    unavailableCount: uniqueRows.length - availableRows.length,
     cities: [...cities.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN')),
   }
 }

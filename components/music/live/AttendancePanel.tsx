@@ -14,6 +14,7 @@ type Attendance = {
 }
 
 const emptyForm = { seatInfo: '', mood: '', note: '', isPublic: false }
+const ATTENDANCE_UPDATED_EVENT = 'music-live:attendance-updated'
 
 export function AttendancePanel({ concertId, loggedIn, initialAttendance }: Readonly<{
   concertId: string
@@ -69,28 +70,36 @@ export function AttendancePanel({ concertId, loggedIn, initialAttendance }: Read
     if (busy) return
     setBusy(true)
     setError('')
-    const response = await fetch(`/api/music/live/concerts/${concertId}/attendance`, {
-      method: attendance ? 'PATCH' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(attendance ? { ...form, updatedAt: attendance.updatedAt } : form),
-    })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) {
-      setError(data?.message || '保存失败，请稍后重试')
+    try {
+      const response = await fetch(`/api/music/live/concerts/${concertId}/attendance`, {
+        method: attendance ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify(attendance ? { ...form, updatedAt: attendance.updatedAt } : form),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.attendance) {
+        setError(data?.message || '保存失败，请稍后重试')
+        return
+      }
+      setAttendance(data.attendance)
+      setForm({
+        seatInfo: data.attendance.seatInfo || '',
+        mood: data.attendance.mood || '',
+        note: data.attendance.note || '',
+        isPublic: data.attendance.isPublic,
+      })
+      setMessage(data.message || (attendance ? '观演记录已更新' : '已加入我的现场'))
+      setOpen(false)
+      window.dispatchEvent(new CustomEvent(ATTENDANCE_UPDATED_EVENT))
+      router.refresh()
+    } catch (error) {
+      console.error('[music.live.attendance.save]', error)
+      setError('保存失败，请稍后重试')
+    } finally {
       setBusy(false)
-      return
     }
-    setAttendance(data.attendance)
-    setForm({
-      seatInfo: data.attendance.seatInfo || '',
-      mood: data.attendance.mood || '',
-      note: data.attendance.note || '',
-      isPublic: data.attendance.isPublic,
-    })
-    setMessage(data.message || (attendance ? '观演记录已更新' : '已加入我的现场'))
-    setOpen(false)
-    setBusy(false)
-    router.refresh()
   }
 
   async function remove() {
@@ -98,18 +107,24 @@ export function AttendancePanel({ concertId, loggedIn, initialAttendance }: Read
     if (!window.confirm('取消后，该场演唱会将从你的观演记录和歌曲解锁统计中移除。是否继续？')) return
     setBusy(true)
     setError('')
-    const response = await fetch(`/api/music/live/concerts/${concertId}/attendance`, { method: 'DELETE' })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) {
-      setError(data?.message || '取消失败，请稍后重试')
+    try {
+      const response = await fetch(`/api/music/live/concerts/${concertId}/attendance`, { method: 'DELETE', credentials: 'same-origin', cache: 'no-store' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setError(data?.message || '取消失败，请稍后重试')
+        return
+      }
+      setAttendance(null)
+      setForm(emptyForm)
+      setMessage(data.message || '已从我的现场移除')
+      window.dispatchEvent(new CustomEvent(ATTENDANCE_UPDATED_EVENT))
+      router.refresh()
+    } catch (error) {
+      console.error('[music.live.attendance.remove]', error)
+      setError('取消失败，请稍后重试')
+    } finally {
       setBusy(false)
-      return
     }
-    setAttendance(null)
-    setForm(emptyForm)
-    setMessage(data.message || '已从我的现场移除')
-    setBusy(false)
-    router.refresh()
   }
 
   if (!loggedIn) {

@@ -12,6 +12,8 @@ import { getSiteAppearance } from '@/lib/site-config'
 import './globals.css'
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://ecfc.fans'),
+  alternates: { canonical: '/' },
   title: '私家E院 | Eason Fans Club',
   description: '陈奕迅中文粉丝社区',
 }

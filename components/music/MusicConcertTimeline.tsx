@@ -1,8 +1,9 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { usePathname } from 'next/navigation'
+import { ConcertCover } from '@/components/music/ConcertCover'
 import { generateArchiveSlug } from '@/lib/music-slug'
 
 export type ConcertTimelineTour = {
@@ -19,11 +20,19 @@ export type ConcertTimelineTour = {
 }
 
 export type ConcertArchiveMyLive = {
-  attendedCount?: number | null
-  tourCount?: number | null
-  recentConcert?: string | null
-  favoriteConcerts?: string[]
+  attendedShowCount: number
+  attendedTourCount: number
+  attendedCityCount: number
+  latestAttendedShow: {
+    showId: string
+    tourId: string
+    tourName: string
+    city: string
+    date: string
+  } | null
 }
+
+type MyLiveStatus = 'loading' | 'ready' | 'anonymous' | 'error'
 
 type ConcertCategory = 'main' | 'special' | 'guest'
 
@@ -43,16 +52,19 @@ function archiveHref(tour: ConcertTimelineTour) {
   return `/music/live/tours/${generateArchiveSlug(tour.name)}`
 }
 
-function ArchivePoster({ tour, sizes, square = false }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
-  return <span className={`music-concert-gallery-image${square ? ' is-square' : ''}`}>
-    {tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill sizes={sizes} className="object-contain" /> : <span className="music-concert-gallery-image-fallback">LIVE</span>}
-  </span>
+function ArchivePoster({ tour, sizes, square = true }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
+  return <ConcertCover
+    src={tour.posterUrl}
+    alt={`${tour.name}演唱会海报`}
+    sizes={sizes}
+    className={`music-concert-gallery-image${square ? ' is-square' : ''}`}
+  />
 }
 
 function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: ConcertTimelineTour; hidden?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void }>) {
   const year = formatYear(tour.startDate)
   return <article ref={cardRef} className="music-concert-gallery-poster" aria-hidden={hidden || undefined}>
-    <button type="button" tabIndex={hidden ? -1 : undefined} className="music-concert-gallery-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
+    <button data-testid="concert-orbit-card" type="button" tabIndex={hidden ? -1 : undefined} className="music-concert-gallery-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
       <ArchivePoster tour={tour} sizes="(max-width: 767px) 132px, 220px" square />
       <span className="music-concert-gallery-year">{year}</span>
       <span className="music-concert-gallery-caption">
@@ -88,7 +100,7 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
       const cardSize = cardsRef.current.get(0)?.offsetWidth || (mobile ? 112 : 220)
       const centerX = (width - cardSize) / 2
       const centerY = (height - cardSize) / 2
-      const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 4 : 10))
+      const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 4 : 10) + (mobile ? 18 : 0))
       const crowdScale = mobile && orbitCount > 6 ? Math.max(.68, 6.5 / orbitCount) : 1
       const delta = Math.min(48, now - previousTime)
       previousTime = now
@@ -183,31 +195,45 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
   </div>
 }
 
-function MyLiveCenter({ data }: Readonly<{ data?: ConcertArchiveMyLive }>) {
-  const favorites = data?.favoriteConcerts?.filter(Boolean).slice(0, 3) ?? []
-  return <section className="music-concert-gallery-my-live" aria-labelledby="concert-gallery-my-live-title">
+function MyLiveCenter({ data, status, onRetry, loginHref }: Readonly<{ data: ConcertArchiveMyLive | null; status: MyLiveStatus; onRetry: () => void; loginHref: string }>) {
+  const isReady = status === 'ready' && data
+  const isAnonymous = status === 'anonymous'
+  const value = (number: number | undefined) => isReady ? number : isAnonymous ? '登录' : status === 'error' ? '失败' : '…'
+  const latest = isReady && data.latestAttendedShow
+    ? `${data.latestAttendedShow.tourName} · ${data.latestAttendedShow.city}`
+    : isReady
+      ? '暂无观看记录'
+      : isAnonymous
+        ? '登录后查看'
+        : status === 'error'
+          ? '加载失败'
+          : '加载中'
+  const actionHref = isAnonymous ? loginHref : '/music/live/me'
+
+  return <section data-testid="my-live-card" className={`music-concert-gallery-my-live${status === 'error' ? ' is-error' : ''}`} aria-labelledby="concert-gallery-my-live-title">
     <span className="music-concert-gallery-corner is-top" aria-hidden="true" />
     <span className="music-concert-gallery-corner is-bottom" aria-hidden="true" />
     <p>PRIVATE LIVE COLLECTION</p>
     <h2 id="concert-gallery-my-live-title">MY LIVE</h2>
     <strong>我的现场收藏</strong>
     <div className="music-concert-gallery-live-stats">
-      <div><b>{data?.attendedCount ?? '--'}</b><span>观看现场数</span></div>
-      <div><b>{data?.tourCount ?? '--'}</b><span>观看巡演数</span></div>
+      <div><b>{value(data?.attendedShowCount)}</b><span>观看现场数</span></div>
+      <div><b>{value(data?.attendedTourCount)}</b><span>观看巡演数</span></div>
     </div>
     <div className="music-concert-gallery-live-records">
-      <div><span>最近观看</span><b>{data?.recentConcert || '--'}</b></div>
-      <div><span>收藏演唱会</span><b>{favorites.length ? favorites.join(' · ') : '--'}</b></div>
+      <div><span>最近观看</span><b title={latest}>{latest}</b></div>
+      <div><span>看过城市数</span><b>{value(data?.attendedCityCount)}</b></div>
     </div>
-    <Link href="/music/live/me">进入我的现场 <span aria-hidden="true">→</span></Link>
+    {status === 'error' ? <button type="button" className="music-concert-gallery-live-retry" onClick={onRetry}>加载失败 · 重试</button> : null}
+    <Link href={actionHref}>进入我的现场 <span aria-hidden="true">→</span></Link>
   </section>
 }
 
 function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour; onClose: () => void }>) {
-  return <div className="music-concert-gallery-modal" role="presentation" onClick={onClose}>
-    <div className="music-concert-gallery-modal-panel" role="dialog" aria-modal="true" aria-labelledby="concert-gallery-modal-title" onClick={(event) => event.stopPropagation()}>
-      <button type="button" className="music-concert-gallery-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
-      <div className="music-concert-gallery-modal-grid">
+  return <div data-testid="concert-detail-modal" className="music-concert-gallery-modal" role="presentation" onClick={onClose}>
+    <div className="music-concert-gallery-modal-panel" role="dialog" aria-modal="true" aria-labelledby="concert-gallery-modal-title">
+      <button data-testid="concert-detail-close" type="button" className="music-concert-gallery-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
+      <div className="music-concert-gallery-modal-grid" onClick={(event) => event.stopPropagation()}>
         <ArchivePoster tour={tour} sizes="(max-width: 767px) 58vw, 270px" />
         <div className="music-concert-gallery-modal-copy">
           <time>{formatYear(tour.startDate)}</time>
@@ -226,7 +252,14 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
   const [switching, setSwitching] = useState(false)
   const [interactionPaused, setInteractionPaused] = useState(false)
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
+  const initialMyLiveData = myLive || null
+  const [myLiveData, setMyLiveData] = useState<ConcertArchiveMyLive | null>(initialMyLiveData)
+  const [myLiveStatus, setMyLiveStatus] = useState<MyLiveStatus>('loading')
   const switchTimerRef = useRef<number | null>(null)
+  const myLiveDataRef = useRef<ConcertArchiveMyLive | null>(initialMyLiveData)
+  const myLiveRequestRef = useRef<AbortController | null>(null)
+  const myLiveInFlightRef = useRef(false)
+  const pathname = usePathname()
   const mainConcerts = tours.filter((tour) => tour.category === 'MAIN')
   const specialProjects = tours.filter((tour) => tour.category === 'SMALL')
   const guestConcerts = tours.filter((tour) => tour.category === 'GUEST')
@@ -246,16 +279,106 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
     if (switchTimerRef.current !== null) window.clearTimeout(switchTimerRef.current)
   }, [])
 
+  const loadMyLive = useCallback(async (showLoading = false) => {
+    if (myLiveInFlightRef.current) return
+    myLiveInFlightRef.current = true
+    if (showLoading || !myLiveDataRef.current) setMyLiveStatus('loading')
+    myLiveRequestRef.current?.abort()
+    const controller = new AbortController()
+    myLiveRequestRef.current = controller
+    let timedOut = false
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, 10000)
+
+    try {
+      const response = await fetch('/api/music/live/me', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        signal: controller.signal,
+      })
+      if (response.status === 401) {
+        myLiveDataRef.current = null
+        setMyLiveData(null)
+        setMyLiveStatus('anonymous')
+        return
+      }
+      if (!response.ok) throw new Error(`My Live summary failed: ${response.status}`)
+      const payload = await response.json() as {
+        stats?: {
+          concertCount?: number
+          tourCount?: number
+          cityCount?: number
+          latestAttendedShow?: ConcertArchiveMyLive['latestAttendedShow'] | null
+        }
+      }
+      const stats = payload.stats
+      if (!stats || typeof stats.concertCount !== 'number' || typeof stats.tourCount !== 'number' || typeof stats.cityCount !== 'number') {
+        throw new Error('My Live overview response is invalid')
+      }
+      const nextData: ConcertArchiveMyLive = {
+        attendedShowCount: stats.concertCount,
+        attendedTourCount: stats.tourCount,
+        attendedCityCount: stats.cityCount,
+        latestAttendedShow: stats.latestAttendedShow || null,
+      }
+      myLiveDataRef.current = nextData
+      setMyLiveData(nextData)
+      setMyLiveStatus('ready')
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError' && !timedOut) return
+      console.error('[music.live.summary]', error)
+      setMyLiveStatus('error')
+    } finally {
+      window.clearTimeout(timeoutId)
+      if (myLiveRequestRef.current === controller) myLiveRequestRef.current = null
+      myLiveInFlightRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadMyLive(true)
+    const refresh = () => void loadMyLive(false)
+    window.addEventListener('music-live:attendance-updated', refresh)
+    return () => {
+      window.removeEventListener('music-live:attendance-updated', refresh)
+      myLiveRequestRef.current?.abort()
+    }
+  }, [loadMyLive])
+
   useEffect(() => {
     if (!expandedTour) return undefined
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setExpandedTour(null)
     }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const root = document.documentElement
+    const body = document.body
+    const scrollX = window.scrollX
+    const scrollY = window.scrollY
+    const previousRootOverflow = root.style.overflow
+    const previousBodyOverflow = body.style.overflow
+    const previousBodyPosition = body.style.position
+    const previousBodyTop = body.style.top
+    const previousBodyLeft = body.style.left
+    const previousBodyWidth = body.style.width
+    root.dataset.easonConcertModalOpen = 'true'
+    root.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.left = `-${scrollX}px`
+    body.style.width = '100%'
     window.addEventListener('keydown', closeOnEscape)
     return () => {
-      document.body.style.overflow = previousOverflow
+      root.style.overflow = previousRootOverflow
+      body.style.overflow = previousBodyOverflow
+      body.style.position = previousBodyPosition
+      body.style.top = previousBodyTop
+      body.style.left = previousBodyLeft
+      body.style.width = previousBodyWidth
+      delete root.dataset.easonConcertModalOpen
+      window.scrollTo({ left: scrollX, top: scrollY, behavior: 'auto' })
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [expandedTour])
@@ -269,7 +392,7 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
     </header>
     <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`} onMouseEnter={() => setInteractionPaused(true)} onMouseLeave={() => setInteractionPaused(false)} onFocusCapture={() => setInteractionPaused(true)} onBlurCapture={() => setInteractionPaused(false)}>
       <MuseumWheel key={activeCategory} tours={categoryTours[activeCategory]} paused={Boolean(expandedTour) || switching || interactionPaused} onOpen={setExpandedTour} />
-      <MyLiveCenter data={myLive} />
+      <MyLiveCenter data={myLiveData} status={myLiveStatus} onRetry={() => void loadMyLive(true)} loginHref={`/login?redirect=${encodeURIComponent(pathname || '/music/concerts')}`} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} /> : null}
   </section>
