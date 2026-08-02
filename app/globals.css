@@ -586,6 +586,31 @@ flex-direction:column;
 :root[data-theme='midnight'] .notification-center :where(p, time) { color: var(--text-secondary) !important; }
 :root[data-theme='midnight'] .notification-center .notification-list-item { color: var(--text-primary); border-color: var(--ui-border); background: var(--card-bg) !important; }
 
+/* Check-in guide and comment threads use semantic surfaces so dark mode never
+   leaves a light gradient shell around an otherwise dark panel. */
+.checkin-growth-guide { color:var(--foreground); border-color:var(--border); background:var(--surface); }
+.checkin-growth-guide-summary { background:var(--surface); }
+.checkin-growth-guide-summary:hover { background:var(--surface-subtle); }
+.checkin-growth-guide-toggle { color:var(--primary); background:var(--navigation-active); }
+.checkin-growth-guide > summary + div { border-top-color:var(--border); }
+.checkin-growth-guide-intro,.checkin-growth-guide-section { background:var(--surface-elevated); }
+.checkin-growth-guide-section { border-color:var(--border); }
+.checkin-growth-guide-section > div { border-bottom-color:var(--border); }
+.checkin-growth-guide-callout { border-color:var(--border); background:var(--navigation-active); }
+.checkin-growth-guide-note { background:var(--surface-subtle); color:var(--foreground-muted); }
+.checkin-messages-panel { color:var(--foreground); border-color:var(--border); background:var(--surface); }
+.checkin-messages-panel .checkin-message-card { border-color:var(--border); background:var(--surface-elevated); }
+.checkin-messages-panel .checkin-comment-thread { background:var(--surface-subtle); }
+.checkin-messages-panel .checkin-comment-card { border:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
+.checkin-messages-panel .checkin-reply-thread { border-left-color:var(--border-strong); }
+.checkin-messages-empty { background:var(--surface-subtle); }
+.post-replies-section .post-reply-card,.post-reply-form { border-color:var(--border); color:var(--foreground); background:var(--surface-elevated); }
+.post-replies-section .post-reply-thread { border-left-color:var(--border-strong); }
+.post-replies-hot-list { border:1px solid var(--border); color:var(--foreground); background:var(--surface-subtle); }
+.post-replies-hot-link { display:inline-block; border:1px solid var(--border); color:var(--primary); background:var(--surface); }
+.post-replies-empty,.post-replies-login { border:1px solid var(--border); color:var(--foreground-muted); background:var(--surface-elevated); }
+.post-reply-form-target { color:var(--primary); background:var(--navigation-active); }
+
 @media (max-width: 767px) {
   .community-content { padding: 24px 16px; }
 }

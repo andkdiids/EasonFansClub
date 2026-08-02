@@ -197,7 +197,7 @@ export function CheckInMessagesPanel({
   }, [loadMessages, maxDate, previewMode, sort])
 
   return (
-    <div className={`${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex h-full flex-col rounded-[24px] border border-sky-100 bg-white/85 shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
+    <div className={`checkin-messages-panel ${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex h-full flex-col rounded-[24px] border shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{anonymous ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
@@ -270,7 +270,7 @@ export function CheckInMessagesPanel({
             return result
           }
           return (
-            <article key={item.id} id={`message-${item.id}`} className={`${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border border-sky-100 bg-white shadow-sm`}>
+            <article key={item.id} id={`message-${item.id}`} className={`checkin-message-card ${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border shadow-sm`}>
               <div className={isMinimal ? 'flex gap-2' : 'flex gap-3'}>
                 {anonymous ? (
                   <div className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
@@ -295,7 +295,7 @@ export function CheckInMessagesPanel({
                   </div>
                   <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
                   {rootComments.length && !isMinimal ? (
-                    <div className="mt-2 space-y-2 rounded-2xl bg-sky-50/70 p-2">
+                    <div className="checkin-comment-thread mt-2 space-y-2 rounded-2xl p-2">
                       {rootComments.map((comment) => {
                         const commentIdentity = 'uid' in comment.author ? comment.author : null
                         const commentName = getCommentAuthorName(comment.author)
@@ -304,7 +304,7 @@ export function CheckInMessagesPanel({
                         const showAll = Boolean(expandedReplies[comment.id])
                         const visibleChildren = showAll ? children : children.slice(0, 3)
                         return (
-                          <div key={comment.id} id={`comment-${comment.id}`} className="rounded-xl bg-white/70 p-2 text-sm leading-6 text-slate-600">
+                          <div key={comment.id} id={`comment-${comment.id}`} className="checkin-comment-card rounded-xl p-2 text-sm leading-6 text-slate-600">
                             <div className="flex items-start gap-2">
                               {anonymous || !commentIdentity ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} uid={commentIdentity.uid} className="h-full w-full" textClassName="text-xs" /></a>}
                               <div className="min-w-0 flex-1">
@@ -328,7 +328,7 @@ export function CheckInMessagesPanel({
                                 </div>
 
                                 {visibleChildren.length ? (
-                                  <div className="mt-2 space-y-1 border-l-2 border-sky-100 pl-3 sm:pl-4">
+                                  <div className="checkin-reply-thread mt-2 space-y-1 border-l-2 pl-3 sm:pl-4">
                                     {visibleChildren.map(({ comment: child, replyToName }) => {
                                       const childIdentity = 'uid' in child.author ? child.author : null
                                       const childName = getCommentAuthorName(child.author)
@@ -399,7 +399,7 @@ export function CheckInMessagesPanel({
             </article>
           )
         }) : (
-          <div className="rounded-2xl bg-sky-50/80 p-8 text-center font-bold text-slate-500">{emptyText || '这一天还没有 E友留言。'}</div>
+          <div className="checkin-messages-empty rounded-2xl p-8 text-center font-bold text-slate-500">{emptyText || '这一天还没有 E友留言。'}</div>
         )}
       </div>
       {messages.length > previewPageSize ? (

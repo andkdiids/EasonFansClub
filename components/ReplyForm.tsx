@@ -72,9 +72,9 @@ export function ReplyForm({
   }
 
   return (
-    <form onSubmit={submitReply} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
+    <form onSubmit={submitReply} className="post-reply-form rounded-xl border p-5 shadow-sm">
       {replyTo ? (
-        <div className="mb-3 flex items-center justify-between rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
+        <div className="post-reply-form-target mb-3 flex items-center justify-between rounded-xl px-4 py-2 text-sm font-black text-brand-700">
           <span>正在回复 {replyTo.name}</span>
           <button type="button" onClick={onReplyCancel} className="text-slate-500">取消</button>
         </div>

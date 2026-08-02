@@ -236,7 +236,7 @@ export function PostRepliesSection({
 
     return (
       <article key={reply.id} id={`reply-${reply.id}`} className="scroll-mt-20">
-        <div className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
+        <div className="post-reply-card rounded-xl border p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3 text-sm font-bold text-slate-500">
             <Link href={`/user/${formatUid(reply.author.uid)}`} className="flex items-center gap-2 text-brand-950">
               <span className="grid h-8 w-8 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
@@ -267,7 +267,7 @@ export function PostRepliesSection({
           </div>
         </div>
         {visibleChildren.length ? (
-          <div className="mt-2 ml-3 space-y-1 border-l-2 border-sky-100 pl-3 sm:ml-4 sm:pl-4">
+          <div className="post-reply-thread mt-2 ml-3 space-y-1 border-l-2 pl-3 sm:ml-4 sm:pl-4">
             {visibleChildren.map((child) => renderCompactReply(child))}
             {children.length > 3 ? (
               <button
@@ -285,25 +285,25 @@ export function PostRepliesSection({
   }
 
   return (
-    <section className="space-y-3">
+    <section className="post-replies-section space-y-3">
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
       {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
       {hotReplyIds?.length ? (
-        <div className="border border-sky-100 bg-sky-50/75 p-4">
+        <div className="post-replies-hot-list p-4">
           <h3 className="font-black text-brand-950">热门评论</h3>
           <div className="mt-2 flex flex-wrap gap-2">
             {hotReplyIds.map((id, index) => {
               const reply = replyMap.get(id)
               if (!reply) return null
               const name = reply.author.profile?.displayName || reply.author.nickname
-              return <a key={id} href={`#reply-${id}`} className="border border-sky-100 bg-white px-3 py-2 text-xs font-black text-brand-700">热度最高 #{index + 1} · {name} · {reply.likeCount} 赞</a>
+              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热度最高 #{index + 1} · {name} · {reply.likeCount} 赞</a>
             })}
           </div>
         </div>
       ) : null}
       {focusId && !replyMap.has(focusId) ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
       {rootReplies.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-sky-200 bg-white/65 p-8 text-center text-slate-500">还没有回复。</div>
+        <div className="post-replies-empty rounded-xl border-dashed p-8 text-center text-slate-500">还没有回复。</div>
       ) : (
         <div className="space-y-3">
           {rootReplies.map((reply, index) => renderReply(reply, index))}
@@ -318,7 +318,7 @@ export function PostRepliesSection({
           onReplyCreated={addReply}
         />
       ) : (
-        <div className="rounded-xl border border-sky-100 bg-white/82 p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
+        <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
       )}
     </section>
   )
