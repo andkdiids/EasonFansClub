@@ -3,15 +3,15 @@ import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import {
+  GUESS_SONG_BASE_SCORE,
+  GUESS_SONG_ENDLESS_COMBO_BONUS,
+  GUESS_SONG_ENDLESS_COMBO_INTERVAL,
   GUESS_SONG_MODE_CONFIG,
   calculateGuessSongScore,
-  getEndlessDurationMultiplier,
-  getPlaybackRatio,
-  getStreakMultiplier,
 } from '../lib/guess-song-config'
 import { getFfmpegPath, processGuessSongAudio } from '../lib/guess-song-audio'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '../lib/guess-song-period'
-import { canEnableGuessSongQuestion, parseGuessSongQuestionInput } from '../lib/guess-song-questions'
+import { canEnableGuessSongQuestion, getRequiredGuessSongDurations, parseGuessSongQuestionInput } from '../lib/guess-song-questions'
 import {
   createGuessSongStorageAdapter,
   getGuessSongObjectMetadata,
@@ -101,22 +101,76 @@ test('每道题通过 answeredAt 与 selectedOptionKey 条件只能提交一次'
   assert.match(service, /duplicate: true/)
 })
 
-test('播放次数扣分比例正确', () => {
-  assert.deepEqual([1, 2, 3, 4, 5].map(getPlaybackRatio), [1, 0.9, 0.8, 0.7, 0.6])
-})
-
-test('连击倍率边界正确', () => {
-  assert.deepEqual([1, 2, 3, 5, 6, 9, 10].map(getStreakMultiplier), [1, 1, 1.2, 1.2, 1.5, 1.5, 2])
-})
-
-test('无尽模式音频长度倍率正确', () => {
-  assert.deepEqual([2, 3, 4, 5, 6, 7].map(getEndlessDurationMultiplier), [2.5, 2, 1.5, 1.2, 1, 1])
-})
-
-test('服务端综合计分会取整数并组合播放与连击倍率', () => {
-  assert.equal(calculateGuessSongScore({ mode: 'HARD', playCount: 2, streak: 3, durationSeconds: 2, correct: true }), 324)
-  assert.equal(calculateGuessSongScore({ mode: 'ENDLESS', playCount: 1, streak: 10, durationSeconds: 2, correct: true }), 600)
+test('所有模式答对均获得固定基础分且不受播放次数和试听长度影响', () => {
+  for (const mode of ['EASY', 'ADVANCED', 'HARD', 'ENDLESS'] as const) {
+    assert.equal(calculateGuessSongScore({ mode, playCount: 5, streak: 1, durationSeconds: 2, correct: true }), GUESS_SONG_BASE_SCORE)
+  }
   assert.equal(calculateGuessSongScore({ mode: 'EASY', playCount: 1, streak: 1, durationSeconds: 7, correct: false }), 0)
+})
+
+function calculateEndlessTotal(correctCount: number) {
+  return Array.from({ length: correctCount }, (_, index) => calculateGuessSongScore({
+    mode: 'ENDLESS',
+    playCount: (index % 5) + 1,
+    streak: index + 1,
+    durationSeconds: index % 2 === 0 ? 2 : 7,
+    correct: true,
+  })).reduce((total, score) => total + score, 0)
+}
+
+test('无尽模式连续10题正确固定获得1270分', () => {
+  assert.equal(GUESS_SONG_ENDLESS_COMBO_INTERVAL, 10)
+  assert.equal(GUESS_SONG_ENDLESS_COMBO_BONUS, 270)
+  assert.equal(calculateEndlessTotal(10), 1270)
+})
+
+test('无尽模式连续20题正确固定获得2540分', () => {
+  assert.equal(calculateEndlessTotal(20), 2540)
+})
+
+test('无尽模式答错后连击归零并从基础分重新累计', () => {
+  const session = source('lib/guess-song-session.ts')
+  assert.match(session, /const nextStreak = correct \? question\.GuessSongSession\.currentStreak \+ 1 : 0/)
+  assert.equal(calculateGuessSongScore({ mode: 'ENDLESS', playCount: 1, streak: 0, durationSeconds: 7, correct: false }), 0)
+  assert.equal(calculateGuessSongScore({ mode: 'ENDLESS', playCount: 1, streak: 1, durationSeconds: 7, correct: true }), 100)
+})
+
+test('相同无尽模式答题结果在多次场次计算中分数一致', () => {
+  assert.deepEqual(Array.from({ length: 5 }, () => calculateEndlessTotal(10)), [1270, 1270, 1270, 1270, 1270])
+})
+
+test('困难和无尽模式使用固定试听时长', () => {
+  assert.equal(GUESS_SONG_MODE_CONFIG.EASY.durationSeconds, 7)
+  assert.equal(GUESS_SONG_MODE_CONFIG.ADVANCED.durationSeconds, 5)
+  assert.equal(GUESS_SONG_MODE_CONFIG.HARD.durationSeconds, 3)
+  assert.equal(GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds, 7)
+})
+
+test('题目校验跟随模式时长并且无尽模式只要求7秒变体', () => {
+  assert.deepEqual(getRequiredGuessSongDurations('ADVANCED', true), [5, 7])
+  assert.deepEqual(getRequiredGuessSongDurations('HARD', true), [3, 7])
+  assert.deepEqual(getRequiredGuessSongDurations('EASY', true), [7])
+  assert.equal(canEnableGuessSongQuestion({
+    processingStatus: 'READY',
+    difficulty: 'ADVANCED',
+    allowEndless: true,
+    variantDurations: [4, 5, 7],
+  }), true)
+  assert.equal(canEnableGuessSongQuestion({
+    processingStatus: 'READY',
+    difficulty: 'ADVANCED',
+    allowEndless: true,
+    variantDurations: [4],
+  }), false)
+})
+
+test('无尽模式会话始终选择7秒音频且排行榜保存服务端场次分数', () => {
+  const session = source('lib/guess-song-session.ts')
+  const leaderboard = source('lib/guess-song-leaderboard.ts')
+  assert.match(session, /durationSeconds: GUESS_SONG_MODE_CONFIG\.ENDLESS\.durationSeconds/)
+  assert.doesNotMatch(session, /durations\[randomInt/)
+  assert.match(leaderboard, /score: session\.score/)
+  assert.doesNotMatch(leaderboard, /Math\.random/)
 })
 
 test('无尽答错扣除机会且归零完成场次', () => {
@@ -238,7 +292,7 @@ test('题目启用前必须音频就绪且包含模式所需变体', () => {
     difficulty: 'EASY',
     allowEndless: true,
     variantDurations: [7],
-  }), false)
+  }), true)
 })
 
 test('同一用户同模式进行中场次由 activeKey 唯一约束防并发创建', () => {

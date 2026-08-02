@@ -2,7 +2,6 @@ import { randomInt } from 'node:crypto'
 import { Prisma, type GuessSongMode } from '@prisma/client'
 import {
   GUESS_SONG_ANSWER_SECONDS,
-  GUESS_SONG_AUDIO_DURATIONS,
   GUESS_SONG_INITIAL_LIVES,
   GUESS_SONG_MODE_CONFIG,
   calculateGuessSongScore,
@@ -128,7 +127,7 @@ async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) 
           allowEndless: true,
           processingStatus: 'READY',
           OR: eligibleSourceFilter(mode, autoEnabled),
-          GuessSongAudioVariant: { some: { durationSeconds: { in: [...GUESS_SONG_AUDIO_DURATIONS] } } },
+          GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds } },
         }
       : {
           enabled: true,
@@ -161,7 +160,7 @@ async function createNextEndlessQuestion(
       allowEndless: true,
       processingStatus: 'READY',
       OR: eligibleSourceFilter('ENDLESS', autoEnabled),
-      GuessSongAudioVariant: { some: { durationSeconds: { in: [...GUESS_SONG_AUDIO_DURATIONS] } } },
+      GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds } },
     },
     select: {
       id: true,
@@ -177,15 +176,11 @@ async function createNextEndlessQuestion(
   const withoutPrevious = candidates.filter((question) => question.id !== previousQuestionId)
   const pool = withoutPrevious.length > 0 ? withoutPrevious : candidates
   const question = pool[randomInt(pool.length)]
-  const durations = question.GuessSongAudioVariant
-    .map((variant) => variant.durationSeconds)
-    .filter((duration) => GUESS_SONG_AUDIO_DURATIONS.includes(duration as typeof GUESS_SONG_AUDIO_DURATIONS[number]))
-  const durationSeconds = durations[randomInt(durations.length)]
   return createSessionQuestion(tx, {
     sessionId,
     question,
     position,
-    durationSeconds,
+    durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds,
     maxPlayCount: GUESS_SONG_MODE_CONFIG.ENDLESS.maxPlayCount,
   })
 }

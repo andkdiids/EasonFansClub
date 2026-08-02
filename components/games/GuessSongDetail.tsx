@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { GameCatalogItem } from '@/lib/game-catalog'
+import { GUESS_SONG_INITIAL_LIVES, GUESS_SONG_MODE_CONFIG } from '@/lib/guess-song-config'
 import { GameDetailLayout } from './GameDetailLayout'
 
 type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
@@ -20,10 +21,10 @@ type LobbySummary = {
 }
 
 const modes: Array<{ mode: Mode; label: string; detail: string }> = [
-  { mode: 'EASY', label: '简单', detail: '7 秒片段 · 最多播放 2 次' },
-  { mode: 'ADVANCED', label: '进阶', detail: '4 秒片段 · 最多播放 3 次' },
-  { mode: 'HARD', label: '困难', detail: '2 秒片段 · 最多播放 5 次' },
-  { mode: 'ENDLESS', label: '无尽', detail: '随机片段 · 3 次失误机会' },
+  { mode: 'EASY', label: GUESS_SONG_MODE_CONFIG.EASY.label, detail: `${GUESS_SONG_MODE_CONFIG.EASY.durationSeconds} 秒片段 · 最多播放 ${GUESS_SONG_MODE_CONFIG.EASY.maxPlayCount} 次` },
+  { mode: 'ADVANCED', label: GUESS_SONG_MODE_CONFIG.ADVANCED.label, detail: `${GUESS_SONG_MODE_CONFIG.ADVANCED.durationSeconds} 秒片段 · 最多播放 ${GUESS_SONG_MODE_CONFIG.ADVANCED.maxPlayCount} 次` },
+  { mode: 'HARD', label: GUESS_SONG_MODE_CONFIG.HARD.label, detail: `${GUESS_SONG_MODE_CONFIG.HARD.durationSeconds} 秒片段 · 最多播放 ${GUESS_SONG_MODE_CONFIG.HARD.maxPlayCount} 次` },
+  { mode: 'ENDLESS', label: GUESS_SONG_MODE_CONFIG.ENDLESS.label, detail: `${GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds} 秒片段 · ${GUESS_SONG_INITIAL_LIVES} 次失误机会` },
 ]
 
 async function request<T>(url: string, init?: RequestInit) {

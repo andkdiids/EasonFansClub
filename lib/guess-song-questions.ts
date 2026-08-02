@@ -1,5 +1,5 @@
 import type { GuessSongDifficulty, GuessSongProcessingStatus } from '@prisma/client'
-import { GUESS_SONG_AUDIO_DURATIONS, GUESS_SONG_MODE_CONFIG } from '@/lib/guess-song-config'
+import { GUESS_SONG_MODE_CONFIG } from '@/lib/guess-song-config'
 import { sanitizeText } from '@/lib/security'
 
 const difficulties: GuessSongDifficulty[] = ['EASY', 'ADVANCED', 'HARD']
@@ -66,7 +66,7 @@ export function getRequiredGuessSongDurations(
   allowEndless: boolean,
 ) {
   const required = new Set<number>([GUESS_SONG_MODE_CONFIG[difficulty].durationSeconds])
-  if (allowEndless) GUESS_SONG_AUDIO_DURATIONS.forEach((duration) => required.add(duration))
+  if (allowEndless) required.add(GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds)
   return [...required].sort((left, right) => left - right)
 }
 
