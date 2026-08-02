@@ -103,12 +103,24 @@ test('guess UI keeps one Audio instance at a time and leaves all core APIs uncha
   assert.match(game, /\/api\/entertainment\/guess-song\/sessions\/\$\{session\.id\}\/abandon/)
 })
 
-test('mobile immersive UI uses safe areas, 100dvh and fixed bottom answer controls', () => {
+test('mobile immersive UI keeps answers in normal flow below the cassette', () => {
   assert.match(styles, /top:max\(18px,env\(safe-area-inset-top\)\)/)
   assert.match(styles, /min-height:100dvh/)
-  assert.match(styles, /\.guess-answer-zone \{ position:fixed/)
+  assert.match(styles, /\.guess-answer-zone \{ position:static/)
+  assert.doesNotMatch(styles, /\.guess-answer-zone \{ position:fixed/)
+  assert.match(game, /<CassettePlayer[\s\S]*<section className="guess-answer-zone answer-section"/)
+  assert.match(styles, /\.guess-answer-suggestions \{ position:static/)
+  assert.match(styles, /\.guess-result-overlay \{ position:static/)
   assert.match(styles, /env\(safe-area-inset-bottom\)/)
   assert.match(styles, /\.game-exit-button[\s\S]*min-height:44px/)
+})
+
+test('answer options use a two-column mobile grid and confirm follows the options', () => {
+  const answer = read('components/games/GuessAnswerInput.tsx')
+  assert.match(answer, /className="guess-song-options answer-grid" data-testid="answer-grid"/)
+  assert.match(answer, /answer-grid[\s\S]*className="guess-confirm-button"/)
+  assert.match(styles, /\.guess-song-options \{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(styles, /\.guess-option-text \{ display:block;[^}]*white-space:normal/)
 })
 
 test('no Prisma schema, migration or API implementation is introduced by the UI test contract', () => {

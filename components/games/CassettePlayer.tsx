@@ -25,7 +25,7 @@ export function CassettePlayer({
   onToggle: () => void
 }>) {
   return (
-    <section className={`cassette-stage ${playing ? 'is-playing' : ''}`}>
+    <section className={`cassette-stage ${playing ? 'is-playing' : ''}`} data-testid="cassette-player">
       <WaveformBackground active={playing} />
       <div className="cassette-player">
         <header>

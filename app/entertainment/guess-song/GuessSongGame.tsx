@@ -428,7 +428,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           disabled={audioLoading || Boolean(answerResult) || (question.remainingPlayCount <= 0 && !audioRef.current)}
           onToggle={() => void toggleAudio()}
         />
-        <section className="guess-answer-zone">
+        <section className="guess-answer-zone answer-section" aria-label="回答区域">
 <GuessAnswerInput
   key={question.publicId}
 mode="CHOICE"

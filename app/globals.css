@@ -2388,11 +2388,12 @@ body:has(.immersive-game-layout) {
   .cassette-window { grid-template-columns:74px minmax(0,1fr) 74px; gap:10px; padding:16px; }
   .cassette-controls { grid-template-columns:minmax(0,1fr); }
   .cassette-controls>b { display:none; }
-  .guess-answer-zone { position:fixed; z-index:30; right:0; bottom:0; left:0; border-top:1px solid rgba(139,174,202,.24); padding:12px 14px max(12px,env(safe-area-inset-bottom)); background:rgba(6,14,23,.96); backdrop-filter:blur(16px); }
+  /* Answer controls stay in the page flow below the cassette on touch screens. */
+  .guess-answer-zone { position:static; z-index:auto; width:min(980px,100%); margin-inline:auto; border-top:1px solid rgba(139,174,202,.24); padding:16px 14px max(16px,env(safe-area-inset-bottom)); background:transparent; backdrop-filter:none; }
   .guess-answer-input { grid-template-columns:minmax(0,1fr) 104px; }
-  .guess-answer-suggestions { right:113px; max-height:180px; }
-  .guess-play-footer { display:none; }
-  .guess-result-overlay { position:fixed; inset:0; }
+  .guess-answer-suggestions { position:static; right:auto; bottom:auto; left:auto; max-height:180px; }
+  .guess-play-footer { display:flex; }
+  .guess-result-overlay { position:static; z-index:auto; inset:auto; min-height:190px; margin:16px auto 0; background:#0c1827; backdrop-filter:none; }
   .guess-settlement-grid { grid-template-columns:repeat(3,1fr); }
   .guess-settlement-grid div { border-bottom:1px solid rgba(139,174,202,.2); }
 }
@@ -2448,9 +2449,9 @@ body:has(.immersive-game-layout) {
   /* 五、我的记录移动端：隐藏桌面「我的记录」aside（排行榜已承担数据展示），移动端不再展示任何记录条 */
   .guess-detail-dashboard>aside { display:none; }
 
-  /* 八、答题固定条限高 + 底部安全区（选项网格见文件下方 max-width:767px 区块，用于覆盖 max-width:800px 的 1 列规则） */
-  .guess-answer-zone { max-height:62vh; overflow-y:auto; }
-  .guess-play-page { padding-bottom:calc(64vh + 16px + env(safe-area-inset-bottom)); }
+  /* 八、答题区域随内容自然展开，并为系统安全区保留底部空间。 */
+  .guess-answer-zone { max-height:none; overflow:visible; }
+  .guess-play-page { padding-bottom:max(18px,env(safe-area-inset-bottom)); }
 
   /* 三、移动端隐藏页面下方「玩法说明 / 奖励与积分」模块（内容已在规则弹窗） */
   .game-detail-sections { display:none; }
@@ -2674,9 +2675,9 @@ text-align:center;
 
 /* 听听答题：仅手机（≤767px）覆盖 max-width:800px 的 1 列规则，保持 2 列自适应；选项/按钮尺寸自适应，永不被播放器遮挡 */
 @media (max-width:767px) {
-  .guess-song-options { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; max-height:45vh; overflow-y:auto; }
-  .guess-song-options button { min-height:40px; max-height:52px; padding:8px 12px; font-size:clamp(14px,3.8vw,18px); gap:6px; }
-  .guess-song-options .guess-option-text { display:block; min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .guess-song-options { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; max-height:none; overflow:visible; }
+  .guess-song-options button { min-height:52px; max-height:none; min-width:0; padding:8px 10px; font-size:clamp(14px,3.8vw,18px); gap:6px; }
+  .guess-song-options .guess-option-text { display:block; min-width:0; max-width:100%; overflow-wrap:anywhere; text-overflow:clip; white-space:normal; }
 }
 
 @media (prefers-reduced-motion:reduce) {

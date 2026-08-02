@@ -76,9 +76,9 @@ export function GuessAnswerInput({ mode, options, disabled, played, wrongPulse, 
 
       {/* 普通模式四选一 */}
       {mode === 'CHOICE' && played && !disabled ? (
-        <div className="guess-song-options">
+        <div className="guess-song-options answer-grid" data-testid="answer-grid">
 
-{options.map((option, index) => (
+{options.map((option) => (
   <button
     key={option.key}
     type="button"
@@ -124,6 +124,7 @@ export function GuessAnswerInput({ mode, options, disabled, played, wrongPulse, 
 
       <button
         type="button"
+        className="guess-confirm-button"
         disabled={
           disabled ||
           !played ||
