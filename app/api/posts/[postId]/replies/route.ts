@@ -244,7 +244,6 @@ export async function POST(request: Request, { params }: Params) {
     return {
       createdReply,
       rewardPoints: feeAward?.awardedAmount || 0,
-      registrationFeeLimitReached: Boolean(feeAward?.capped),
     }
   })
 
@@ -255,7 +254,7 @@ export async function POST(request: Request, { params }: Params) {
     }, { status: 409 })
   }
 
-  const { createdReply, rewardPoints, registrationFeeLimitReached } = reply
+  const { createdReply, rewardPoints } = reply
   const { User: replyAuthor, ...serializedReply } = createdReply
   const mentionUserById = new Map(mentionedFriends.map((friend) => [friend.id, friend]))
   return NextResponse.json({
@@ -285,6 +284,5 @@ export async function POST(request: Request, { params }: Params) {
       }),
     },
     rewardPoints,
-    registrationFeeLimitReached,
   }, { status: 201 })
 }

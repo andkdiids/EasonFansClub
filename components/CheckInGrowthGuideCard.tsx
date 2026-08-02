@@ -34,7 +34,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
           <GuideSection eyebrow="每日奖励" title="如何获取挂号费">
             <GuideFact label="每日挂号" value="每日首次完成挂号，获得 3～7 挂号费。" />
             <GuideFact label="连续挂号奖励" value="连续挂号达到 7 天后解锁“长期患者奖励”，之后每日额外获得 +7 挂号费。" />
-            <p className="border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-800">连续挂号额外奖励独立计算，不占用每日 30 挂号费获取上限；中断后需重新连续挂号 7 天。</p>
+            <p className="border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-800">中断后需重新连续挂号 7 天，奖励会按各自规则完整发放。</p>
           </GuideSection>
 
           <GuideSection eyebrow="更多途径" title="其他获取方式">
@@ -45,23 +45,6 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
               '官方活动：根据活动规则发放',
             ]} />
             <p className="text-xs text-slate-500">具体奖励以任务页面和活动页面显示为准。</p>
-          </GuideSection>
-
-          <GuideSection eyebrow="每日额度" title="每日获取限制" wide>
-            <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
-              <div className="grid min-h-28 place-items-center border border-sky-200 bg-sky-50 p-4 text-center">
-                <span>
-                  <span className="block text-xs font-black text-slate-500">每日普通获取上限</span>
-                  <strong className="mt-1 block text-3xl font-black text-brand-950">30</strong>
-                  <span className="text-xs font-black text-brand-700">挂号费</span>
-                </span>
-              </div>
-              <div>
-                <GuideList title="计算范围" items={['每日签到奖励', '每日任务', '社区互动', '娱乐天空普通奖励']} />
-                <p className="mt-2">普通奖励达到 30 后不再增加；连续挂号额外奖励不受该上限影响。</p>
-              </div>
-            </div>
-            <FeeExample />
           </GuideSection>
 
           <GuideSection eyebrow="长期档案" title="特别成就" wide>
@@ -91,29 +74,4 @@ function GuideFact({ label, value }: Readonly<{ label: string; value: string }>)
 
 function GuideList({ title, items }: Readonly<{ title?: string; items: string[] }>) {
   return <div>{title ? <p className="text-xs font-black text-slate-500">{title}</p> : null}<ul className="mt-1 list-disc space-y-1 pl-5">{items.map((item) => <li key={item}>{item}</li>)}</ul></div>
-}
-
-function FeeExample() {
-  const items = [
-    ['签到', '5'],
-    ['任务', '15'],
-    ['娱乐', '10'],
-    ['普通获取', '30'],
-    ['连续挂号奖励', '+7'],
-    ['今日实际获得', '37 挂号费'],
-  ]
-
-  return (
-    <div className="border-t border-sky-100 pt-3">
-      <p className="text-xs font-black text-slate-500">计算示例</p>
-      <div className="mt-2 grid grid-cols-2 gap-px border border-sky-100 bg-sky-100 sm:grid-cols-3">
-        {items.map(([label, value]) => (
-          <div key={label} className="bg-sky-50 px-3 py-2">
-            <span className="block text-xs font-bold text-slate-500">{label}</span>
-            <strong className="text-brand-950">{value}</strong>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
 }

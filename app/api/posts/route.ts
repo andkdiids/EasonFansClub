@@ -171,14 +171,10 @@ export async function POST(request: Request) {
         postId: post.id,
       })
 
-      return { post, rewardPoints: feeAward.awardedAmount, registrationFeeLimitReached: feeAward.capped }
+      return { post, rewardPoints: feeAward.awardedAmount }
     })
 
-    const detailQuery = result.rewardPoints
-      ? `?reward=${result.rewardPoints}`
-      : result.registrationFeeLimitReached
-        ? '?registrationFeeLimit=1'
-        : ''
+    const detailQuery = result.rewardPoints ? `?reward=${result.rewardPoints}` : ''
     const detailUrl = `/posts/${result.post.id}${detailQuery}`
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)
@@ -188,7 +184,6 @@ export async function POST(request: Request) {
       post: { ...result.post, detailUrl },
       detailUrl,
       rewardPoints: result.rewardPoints,
-      registrationFeeLimitReached: result.registrationFeeLimitReached,
     }, { status: 201 })
   } catch (error) {
     console.error('[post:create:error]', { userId: user.id, boardId: input.boardId, error })

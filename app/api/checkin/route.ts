@@ -8,7 +8,7 @@ import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
 import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { awardRegistrationFee, REGISTRATION_FEE_LIMIT_MESSAGE } from '@/lib/registration-fee'
+import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 export async function GET() {
@@ -170,7 +170,6 @@ export async function POST(request: Request) {
           reason: bonus.label,
           businessKey: `checkin-streak:${createdCheckIn.id}`,
           checkInId: createdCheckIn.id,
-          countsTowardDailyLimit: false,
           now: checkedAt,
         })
       : null
@@ -231,7 +230,6 @@ export async function POST(request: Request) {
       bonus,
       ordinaryRegistrationFee: ordinaryFeeAward.awardedAmount,
       streakBonusRegistrationFee: streakFeeAward?.awardedAmount || 0,
-      registrationFeeLimitReached: ordinaryFeeAward.capped,
       dailyMessageId,
       streaks,
     }
@@ -378,7 +376,7 @@ postCheckinResults.forEach((item, index) => {
   })
 
 return NextResponse.json({
-    message: result.registrationFeeLimitReached ? REGISTRATION_FEE_LIMIT_MESSAGE : '今日挂号成功',
+    message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
     todayCheckIn: verifyCheckIn,
@@ -388,7 +386,6 @@ return NextResponse.json({
     bonus: result.bonus,
     ordinaryRegistrationFee: result.ordinaryRegistrationFee,
     streakBonusRegistrationFee: result.streakBonusRegistrationFee,
-    registrationFeeLimitReached: result.registrationFeeLimitReached,
     dailyMessageId: result.dailyMessageId,
     consecutiveDays: result.streaks.currentStreak,
     currentStreak: result.streaks.currentStreak,

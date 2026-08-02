@@ -120,6 +120,8 @@ test('挂号时间按北京时间显示真实创建分钟', () => {
 test('每日挂号费与经验区域提供成长体系说明', () => {
   const button = readFileSync('components/CheckInButton.tsx', 'utf8')
   const guide = readFileSync('components/CheckInGrowthGuideCard.tsx', 'utf8')
+  const layout = readFileSync('components/CheckInLayoutSurface.tsx', 'utf8')
+  const feePanel = readFileSync('components/TodayRegistrationFeePanel.tsx', 'utf8')
   assert.match(button, /<CheckInGrowthGuideCard compact=\{isCompact\} \/>/)
   assert.match(guide, /🏥 挂号费获取指南/)
   assert.match(guide, /title="经验值 EXP"/)
@@ -127,11 +129,16 @@ test('每日挂号费与经验区域提供成长体系说明', () => {
   assert.match(guide, /title="如何获取挂号费"/)
   assert.match(guide, /经验值 EXP ≠ 挂号费/)
   assert.match(guide, /粉丝活动报名/)
-  assert.match(guide, /每日普通获取上限/)
-  assert.match(guide, /今日实际获得', '37 挂号费'/)
   assert.match(guide, /长期患者奖励/)
-  assert.match(guide, /不占用每日 30 挂号费获取上限/)
+  assert.doesNotMatch(guide, /每日普通获取上限|今日实际获得|每日 30 挂号费获取上限/)
   assert.match(guide, /百日病历/)
+  assert.match(layout, /TodayRegistrationFeePanel/)
+  assert.match(feePanel, /今日挂号费/)
+  assert.match(feePanel, /今日共获取/)
+  assert.match(feePanel, /今日获取记录/)
+  assert.match(feePanel, /record\.sourceLabel/)
+  assert.match(feePanel, /record\.amount/)
+  assert.match(feePanel, /record\.displayTime/)
 })
 
 test('移动端资料卡与布局编辑器使用独立尺寸和显式网格', () => {

@@ -4,6 +4,7 @@ import { BeijingClock } from '@/components/BeijingClock'
 import { useCallback, useEffect, useState } from 'react'
 import { CheckInButton, type CheckInStateChange, type CheckInStats, type TodayCheckIn } from '@/components/CheckInButton'
 import { CheckInMessagesPanel } from '@/components/CheckInMessagesPanel'
+import { TodayRegistrationFeePanel } from '@/components/TodayRegistrationFeePanel'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import type {
   PageLayoutModuleDensity,
@@ -157,6 +158,7 @@ function CheckInStatusContent({
           onStateChange={handleStateChange}
         />
       </div>
+      <TodayRegistrationFeePanel initialBalance={stats.points} previewMode={previewMode} />
     </section>
   )
 }

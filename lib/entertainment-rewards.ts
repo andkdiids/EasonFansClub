@@ -1,21 +1,15 @@
 import { randomInt } from 'node:crypto'
 
-export const ENTERTAINMENT_REWARD_POOL = [
-  { points: 1, weight: 35 },
-  { points: 3, weight: 30 },
-  { points: 5, weight: 20 },
-  { points: 7, weight: 10 },
-  { points: 10, weight: 5 },
-] as const
+import {
+  DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT,
+  drawDailyPrescriptionRewardFromRoll,
+  type RandomInteger,
+} from '@/lib/daily-prescription-reward'
 
-export function selectEntertainmentReward(roll = randomInt(100)) {
-  const normalizedRoll = Math.max(0, Math.min(99, Math.floor(roll)))
-  let upperBound = 0
+export * from '@/lib/daily-prescription-reward'
 
-  for (const reward of ENTERTAINMENT_REWARD_POOL) {
-    upperBound += reward.weight
-    if (normalizedRoll < upperBound) return reward.points
-  }
+const secureRandomInteger: RandomInteger = (maxExclusive) => randomInt(maxExclusive)
 
-  return ENTERTAINMENT_REWARD_POOL[0].points
+export function drawDailyPrescriptionReward(randomInteger: RandomInteger = secureRandomInteger) {
+  return drawDailyPrescriptionRewardFromRoll(randomInteger(DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT))
 }

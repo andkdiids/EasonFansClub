@@ -143,31 +143,32 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
       continue
     }
 
-    await prisma.userAchievement.upsert({
-      where: { userId_achievementId: { userId, achievementId: achievement.id } },
-      update: {
-        progress,
-        unlocked,
-        unlockedAt,
-      },
-      create: {
-        userId,
-        achievementId: achievement.id,
-        progress,
-        unlocked,
-        unlockedAt,
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.userAchievement.upsert({
+        where: { userId_achievementId: { userId, achievementId: achievement.id } },
+        update: {
+          progress,
+          unlocked,
+          unlockedAt,
+        },
+        create: {
+          userId,
+          achievementId: achievement.id,
+          progress,
+          unlocked,
+          unlockedAt,
+        },
+      })
+      if (achievement.slug === 'checkin-streak-100' && shouldUnlock) {
+        await awardRegistrationFee(tx, {
+          userId,
+          requestedAmount: HUNDRED_DAY_RECORD_REWARD,
+          action: 'ACTIVITY_REWARD',
+          reason: '“百日病历”成就一次性奖励',
+          businessKey: `achievement-reward:${userId}:${achievement.id}`,
+        })
+      }
     })
-    if (achievement.slug === 'checkin-streak-100' && shouldUnlock) {
-      await prisma.$transaction((tx) => awardRegistrationFee(tx, {
-        userId,
-        requestedAmount: HUNDRED_DAY_RECORD_REWARD,
-        action: 'ACTIVITY_REWARD',
-        reason: '“百日病历”成就一次性奖励',
-        businessKey: `achievement-reward:${userId}:${achievement.id}`,
-        countsTowardDailyLimit: false,
-      }))
-    }
   }
 
   if (categories?.length) {

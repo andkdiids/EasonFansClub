@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { MAX_DAILY_PRESCRIPTION_REWARD, MIN_DAILY_PRESCRIPTION_REWARD } from '@/lib/daily-prescription-reward'
 
 type DrawResult = {
   dateKey: string
@@ -15,6 +16,13 @@ type DrawStatus = {
   remainingCount: number
   totalPoints: number
   draw: DrawResult | null
+}
+
+type IssueDrawResult = {
+  created: boolean
+  draw: DrawResult
+  hasDrawn: true
+  remainingCount: 0
 }
 
 async function request<T>(init?: RequestInit) {
@@ -40,14 +48,16 @@ export function DailyPrescriptionDetail() {
     setLoading(true)
     setError('')
     try {
-      const data = await request<{ draw: DrawResult; hasDrawn: true; remainingCount: 0 }>({ method: 'POST' })
+      const data = await request<IssueDrawResult>({ method: 'POST' })
       setStatus({
         hasDrawn: true,
         remainingCount: 0,
         totalPoints: data.draw.totalPoints,
         draw: data.draw,
       })
-      window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { points: data.draw.totalPoints, gainedPoints: data.draw.points } }))
+      window.dispatchEvent(new CustomEvent('user:points-updated', {
+        detail: { points: data.draw.totalPoints, gainedPoints: data.created ? data.draw.points : 0 },
+      }))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '领取失败')
     } finally {
@@ -67,6 +77,7 @@ export function DailyPrescriptionDetail() {
         <article>
           <span>{status.draw.dateKey}</span>
           <strong>+{status.draw.points} 挂号费</strong>
+          <small>每日随机获得 {MIN_DAILY_PRESCRIPTION_REWARD}～{MAX_DAILY_PRESCRIPTION_REWARD} 挂号费，数值越高越稀有。</small>
           {status.draw.lyric ? <blockquote>“{status.draw.lyric.text}”<cite>《{status.draw.lyric.songTitle}》</cite></blockquote> : null}
           <small>处方编号：{status.draw.prescriptionCode}</small>
         </article>

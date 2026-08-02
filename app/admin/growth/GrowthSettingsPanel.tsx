@@ -71,9 +71,8 @@ export function GrowthSettingsPanel({
       {message ? <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
       {error ? <p className="mt-4 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4"><span className="text-xs font-black text-slate-500">签到奖励挂号费</span><strong className="mt-1 block text-xl text-brand-950">随机 3～7</strong></div>
-        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4"><span className="text-xs font-black text-slate-500">普通挂号费日上限</span><strong className="mt-1 block text-xl text-brand-950">30</strong></div>
         <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4"><span className="text-xs font-black text-slate-500">长期患者额外奖励</span><strong className="mt-1 block text-xl text-brand-950">第 7 天起 +7</strong></div>
       </div>
 

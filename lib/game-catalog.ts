@@ -1,3 +1,5 @@
+import { MAX_DAILY_PRESCRIPTION_REWARD, MIN_DAILY_PRESCRIPTION_REWARD } from '@/lib/daily-prescription-reward'
+
 export type GameCategory = '音乐' | '挑战' | '休闲' | '多人'
 
 export type GameCatalogItem = {
@@ -47,7 +49,7 @@ export const gameCatalog: GameCatalogItem[] = [
     title: '每日处方',
     eyebrow: 'DAILY PRESCRIPTION',
     description: '每天领取一次属于你的歌词处方与挂号费惊喜。',
-    longDescription: '每日零点按北京时间刷新。领取结果仍完全沿用娱乐天空原有服务端规则。',
+    longDescription: '每日零点按北京时间刷新。每位用户每天领取一次，奖励由服务端按递减权重随机决定。',
     categories: ['休闲'],
     difficulty: '轻松',
     players: '单人',
@@ -57,8 +59,8 @@ export const gameCatalog: GameCatalogItem[] = [
     featured: true,
     accent: 'blue',
     coverLabel: 'ONE A DAY',
-    rules: ['每天只能领取一次。', '歌词和奖励结果由现有服务端逻辑决定。'],
-    rewards: ['沿用现有每日处方挂号费奖励与每日上限规则。'],
+    rules: ['每天只能领取一次，按北京时间自然日判断。', `每日随机获得 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD} 挂号费，数值越高越稀有。`],
+    rewards: [`挂号费奖励范围固定为 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD}，同一天刷新不会重新抽取。`],
   },
   {
     slug: 'lyrics-chain',

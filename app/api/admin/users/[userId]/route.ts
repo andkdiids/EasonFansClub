@@ -3,6 +3,7 @@ import type { UserRole, UserStatus } from '@prisma/client'
 import { deleteUserPermanently, getUserDeletionPreview } from '@/lib/admin-user-deletion'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
+import { adjustRegistrationFeeBalance } from '@/lib/registration-fee'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -77,7 +78,6 @@ export async function PATCH(request: Request, context: RouteContext) {
     status?: UserStatus
     level?: number
     exp?: number
-    points?: number
     isDeleted?: boolean
     deletedAt?: Date | null
     nicknameChangedAt?: Date | null
@@ -86,7 +86,10 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (body?.role) data.role = body.role
   if (body?.level !== undefined) data.level = Number(body.level)
   if (body?.exp !== undefined) data.exp = Number(body.exp)
-  if (body?.points !== undefined) data.points = Number(body.points)
+  const targetPoints = body?.points === undefined ? undefined : Number(body.points)
+  if (targetPoints !== undefined && (!Number.isSafeInteger(targetPoints) || targetPoints < 0)) {
+    return NextResponse.json({ message: '挂号费余额必须是非负整数' }, { status: 400 })
+  }
 
   if (action === 'ban') {
     data.status = 'BANNED'
@@ -114,6 +117,15 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     if (!existing) {
       throw new Error('USER_NOT_FOUND')
+    }
+
+    if (targetPoints !== undefined) {
+      await adjustRegistrationFeeBalance(tx, {
+        userId,
+        targetPoints,
+        reason: sanitizeText(body?.reason, 180) || '管理员调整挂号费',
+        businessKey: sanitizeText(body?.idempotencyKey, 120) || undefined,
+      })
     }
 
     const updated = await tx.user.update({
@@ -148,7 +160,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         targetUserId: userId,
         action: data.status === 'DELETED' ? 'DELETE_USER' : data.status === 'BANNED' ? 'BAN_USER' : 'UPDATE_USER_POINTS',
         reason: sanitizeText(body?.reason, 180) || '管理员更新用户状态',
-        metadata: { action, data },
+        metadata: { action, data, ...(targetPoints !== undefined ? { targetPoints } : {}) },
       },
     })
 

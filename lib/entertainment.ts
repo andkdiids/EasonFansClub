@@ -1,7 +1,7 @@
 import { randomBytes, randomInt } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute, getBeijingDateKey, shiftBeijingDateKey } from '@/lib/beijing-time'
-import { selectEntertainmentReward } from '@/lib/entertainment-rewards'
+import { drawDailyPrescriptionReward } from '@/lib/entertainment-rewards'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 
@@ -118,12 +118,12 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
         .filter((id): id is string => Boolean(id)),
     )
     const lyric = selectLyricCandidate(candidates, recentIds)
-    const requestedPoints = selectEntertainmentReward()
+    const requestedPoints = drawDailyPrescriptionReward()
     const createdDraw = await tx.entertainmentDailyDraw.create({
       data: {
         userId,
         dateKey,
-        points: 0,
+        points: requestedPoints,
         prescriptionCode: createPrescriptionCode(),
         lyricPrescriptionId: lyric?.id ?? null,
         lyricText: lyric?.text ?? null,
@@ -142,6 +142,9 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
       dailyDrawId: createdDraw.id,
       now,
     })
+    if (feeAward.awardedAmount !== requestedPoints) {
+      throw new Error('DAILY_PRESCRIPTION_REWARD_AMOUNT_MISMATCH')
+    }
     const draw = await tx.entertainmentDailyDraw.update({
       where: { id: createdDraw.id },
       data: { points: feeAward.awardedAmount },
@@ -157,7 +160,6 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
 
     return {
       ...serializeDailyDraw(draw, feeAward.totalPoints),
-      registrationFeeLimitReached: feeAward.capped,
     }
   })
 }

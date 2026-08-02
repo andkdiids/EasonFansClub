@@ -54,11 +54,7 @@ export function ReplyForm({
       setImageUrls([])
       onReplyCancel?.()
       onReplyCreated?.(data.reply)
-      setSuccess(data.rewardPoints
-        ? `评论成功，获得 +${data.rewardPoints} 挂号费`
-        : data.registrationFeeLimitReached
-          ? '评论成功。今日挂号费获取已达到上限，明日继续努力。'
-          : '评论成功')
+      setSuccess(data.rewardPoints ? `评论成功，获得 +${data.rewardPoints} 挂号费` : '评论成功')
       if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
       if (!onReplyCreated) {
         try {

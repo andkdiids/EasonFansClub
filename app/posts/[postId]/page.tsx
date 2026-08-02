@@ -218,7 +218,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; reward?: string; registrationFeeLimit?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; reward?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
   const focusId = query.focus?.slice(0, 80)
@@ -340,7 +340,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         <BackButton fallbackHref="/forum" />
         {rewardPoints ? <p className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">发布成功，今日首次发帖获得 +{rewardPoints} 挂号费</p> : null}
-        {query.registrationFeeLimit === '1' ? <p className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-700">发布成功。今日挂号费获取已达到上限，明日继续努力。</p> : null}
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}

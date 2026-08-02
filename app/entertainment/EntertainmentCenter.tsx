@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { UiIcon } from '@/components/UiIcon'
+import { MAX_DAILY_PRESCRIPTION_REWARD, MIN_DAILY_PRESCRIPTION_REWARD } from '@/lib/daily-prescription-reward'
 
 type DrawResult = {
   id: string
@@ -11,7 +12,6 @@ type DrawResult = {
   totalPoints: number
   prescriptionCode: string
   issuedAtBeijing: string
-  registrationFeeLimitReached?: boolean
   lyric: {
     id: string | null
     text: string
@@ -148,7 +148,7 @@ export function EntertainmentCenter() {
 
           {!loading && !drawResult ? (
             <div className="daily-draw-action">
-              <p>今天的幸运处方尚未开具。挂号费奖励与歌词处方均由服务端随机决定。</p>
+              <p>每日随机获得 {MIN_DAILY_PRESCRIPTION_REWARD}～{MAX_DAILY_PRESCRIPTION_REWARD} 挂号费，数值越高越稀有。奖励与歌词处方均由服务端随机决定。</p>
               <button type="button" onClick={issueDraw} disabled={drawing}>
                 {drawing ? '正在开具处方……' : '抽取今日处方'}
               </button>
@@ -165,7 +165,6 @@ export function EntertainmentCenter() {
                 <span>获得奖励</span>
                 <strong>+{drawResult.points} 挂号费</strong>
                 <small>当前挂号费 {drawResult.totalPoints}</small>
-                {drawResult.registrationFeeLimitReached || drawResult.points === 0 ? <small className="text-amber-700">今日挂号费获取已达到上限，明日继续努力。</small> : null}
               </div>
               <div className="prescription-lyric">
                 <span>今日歌词处方</span>
