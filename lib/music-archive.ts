@@ -60,6 +60,7 @@ export async function resolveConcertBySlug(
   if (!city) return null
   const concerts = await prisma.musicConcert.findMany({
     where: { tourId: tour.id, city, status: 'PUBLISHED' },
+    orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: { id: true, concertDate: true },
   })
   const match = concerts.find((c) => generateDateSlug(c.concertDate) === dateSlug)

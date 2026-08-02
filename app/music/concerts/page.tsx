@@ -15,7 +15,7 @@ export default async function MusicConcertsPage() {
       include: {
         MusicConcert: {
           where: { status: 'PUBLISHED' },
-          orderBy: [{ concertDate: 'asc' }],
+          orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: { city: true },
         },
         _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } },

@@ -17,7 +17,7 @@ const newItem = (position: number): SetlistItem => ({ songId: null, displayName:
 export function AdminConcertEditor({ concertId }: { concertId: string }) {
   const [concert, setConcert] = useState<Concert | null>(null)
   const [tours, setTours] = useState<Tour[]>([])
-  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '中国', venue: '', description: '', status: 'DRAFT' as Concert['status'] })
+  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '中国', venue: '', posterUrl: '', description: '', status: 'DRAFT' as Concert['status'] })
   const [setlist, setSetlist] = useState<SetlistItem[]>([])
   const [highlights, setHighlights] = useState<Highlight[]>([])
   const [searches, setSearches] = useState<Record<number, SongOption[]>>({})
@@ -35,7 +35,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
     if (!concertResponse.ok) return setError(data?.message || '场次加载失败')
     const item = data.concert as Concert
     setConcert(item)
-    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0,10), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', description: item.description || '', status: item.status })
+    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0,10), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', posterUrl: item.posterUrl || '', description: item.description || '', status: item.status })
     setSetlist(item.setlist.map((row, index) => ({ ...row, position: index + 1, displayName: row.displayName || '', versionName: row.versionName || '', note: row.note || '' })))
     setHighlights(item.highlights.map((row, index) => ({ ...row, sortOrder: index })))
     if (toursResponse.ok) setTours(((await toursResponse.json()).tours || []).map((tour: Tour) => ({ id: tour.id, name: tour.name })))
@@ -77,7 +77,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
     const response = await fetch(`/api/admin/music/concerts/${copyId}`); const data = await response.json().catch(() => null)
     if (!response.ok) return setError(data?.message || '复制来源加载失败')
     setSetlist(data.concert.setlist.map((row: SetlistItem, index: number) => ({ ...row, id: undefined, position: index + 1, displayName: row.displayName || '', versionName: row.versionName || '', note: row.note || '' })))
-    setForm((current) => ({ ...current, tourId: data.concert.tourId, countryOrRegion: data.concert.countryOrRegion || current.countryOrRegion, description: data.concert.description || current.description }))
+    setForm((current) => ({ ...current, tourId: data.concert.tourId, countryOrRegion: data.concert.countryOrRegion || current.countryOrRegion, posterUrl: data.concert.posterUrl || current.posterUrl, description: data.concert.description || current.description }))
     setMessage('歌单已复制到当前编辑器，尚未写入数据库；请确认后保存。'); setDirty(true)
   }
   async function save(event?: FormEvent, nextStatus?: Concert['status']) {
@@ -104,7 +104,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
         <div className="text-sm font-black">系统场次编号<div className={`${field} mt-1 bg-sky-50 text-brand-800`}>第 {concert.sessionNumber || concert.sortOrder || 1} 场（自动排序）</div></div>
         <label className="text-sm font-black">自定义标题<input value={form.title} onChange={(e) => updateForm('title', e.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black sm:col-span-2 lg:col-span-4">介绍<textarea value={form.description} onChange={(e) => updateForm('description', e.target.value)} className={`${field} mt-1 min-h-28`} /></label>
-      </div><div className="mt-6"><MusicCoverUploader entityType="concert" entityId={concertId} currentUrl={concert.posterUrl} onUploaded={(posterUrl) => setConcert((current) => current ? { ...current, posterUrl } : current)} /></div></section>
+      </div><div className="mt-6"><MusicCoverUploader entityType="concert" entityId={concertId} currentUrl={form.posterUrl || concert.posterUrl} onUploaded={(posterUrl) => { setConcert((current) => current ? { ...current, posterUrl } : current); setForm((current) => ({ ...current, posterUrl })); setDirty(true) }} /></div></section>
       <section className="border border-sky-100 bg-white/90 p-5 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-2xl font-black text-brand-950">现场歌单</h2><button type="button" onClick={() => { setSetlist((current) => [...current, newItem(current.length + 1)]); setDirty(true) }} className="bg-brand-950 px-4 py-2 text-sm font-black text-white">新增一行</button></div>
         <div className="mt-5 grid gap-3 border border-sky-100 bg-sky-50/50 p-4 lg:grid-cols-[minmax(0,1fr)_auto]"><textarea aria-label="批量粘贴歌单" value={bulkText} onChange={(e) => setBulkText(e.target.value)} placeholder={'批量粘贴歌单，每行一首\n1. 任我行\n2. 人来人往'} className={`${field} min-h-24`} /><button type="button" onClick={() => void bulkAdd()} disabled={!bulkText.trim()} className="bg-brand-700 px-4 py-2 font-black text-white disabled:opacity-50">解析并加入</button></div>
         <div className="mt-4 flex flex-wrap gap-2"><select aria-label="选择复制来源场次" value={copyId} onChange={(e) => setCopyId(e.target.value)} className={`${field} max-w-md`}><option value="">从已有场次复制歌单</option>{allConcerts.map((row) => <option key={row.id} value={row.id}>{row.concertDate.slice(0,10)} · {row.city} · {row.tour.name}</option>)}</select><button type="button" onClick={() => void copySetlist()} disabled={!copyId} className="bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">复制到编辑器</button></div>

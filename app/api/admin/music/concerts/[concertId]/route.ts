@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { buildConcertSequenceUpdates, DEFAULT_CONCERT_COUNTRY } from '@/lib/music-concert-admin'
+import { buildConcertSequenceUpdates, cloneSetlistItems, DEFAULT_CONCERT_COUNTRY } from '@/lib/music-concert-admin'
 import { parseHighlights, parseLiveDate, parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -10,7 +10,7 @@ type Context = { params: Promise<{ concertId: string }> }
 async function normalizeTourConcerts(tx: Prisma.TransactionClient, tourId: string) {
   const concerts = await tx.musicConcert.findMany({
     where: { tourId },
-    select: { id: true, city: true, concertDate: true, createdAt: true },
+    select: { id: true, city: true, concertDate: true, createdAt: true, sortOrder: true },
   })
   for (const sequence of buildConcertSequenceUpdates(concerts)) {
     await tx.musicConcert.update({
@@ -23,7 +23,7 @@ async function normalizeTourConcerts(tx: Prisma.TransactionClient, tourId: strin
 const concertInclude = {
   MusicTour: { select: { id: true, name: true } },
   MusicConcertSetlistItem: {
-    orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }],
+    orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
     include: { MusicSong: { select: { id: true, title: true, releaseYear: true, MusicAlbum: { select: { name: true } } } } },
   },
   MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }] },
@@ -45,6 +45,7 @@ export async function PATCH(request: Request, { params }: Context) {
   if (!guard.user) return guard.response
   const { concertId } = await params
   const body = await request.json().catch(() => null)
+  const hasPosterUrl = Boolean(body && typeof body === 'object' && 'posterUrl' in body)
   const tourId = sanitizeText(body?.tourId, 100)
   const city = sanitizeText(body?.city, 100)
   const concertDate = parseLiveDate(body?.concertDate, true)
@@ -74,13 +75,13 @@ export async function PATCH(request: Request, { params }: Context) {
           title: sanitizeText(body?.title, 160) || null,
           countryOrRegion: sanitizeText(body?.countryOrRegion, 100) || DEFAULT_CONCERT_COUNTRY,
           venue: sanitizeText(body?.venue, 200) || null,
-          posterUrl: sanitizeText(body?.posterUrl, 1000) || null,
+          ...(hasPosterUrl ? { posterUrl: sanitizeText(body?.posterUrl, 1000) || null } : {}),
           description: sanitizeText(body?.description, 20_000) || null,
           status: parsePublicationStatus(body?.status),
         },
       })
       await tx.musicConcertSetlistItem.deleteMany({ where: { concertId } })
-      if (setlistItems.length) await tx.musicConcertSetlistItem.createMany({ data: setlistItems.map((item) => ({ ...item, concertId })) })
+      if (setlistItems.length) await tx.musicConcertSetlistItem.createMany({ data: cloneSetlistItems(setlistItems, concertId) })
       await tx.musicConcertHighlight.deleteMany({ where: { concertId } })
       if (highlightItems.length) await tx.musicConcertHighlight.createMany({ data: highlightItems.map((item) => ({ ...item, concertId })) })
       await normalizeTourConcerts(tx, tourId)

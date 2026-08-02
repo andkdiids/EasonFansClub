@@ -1,6 +1,6 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import { notFound, permanentRedirect } from 'next/navigation'
+import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
@@ -58,13 +58,13 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
     prisma.musicTour.findFirst({
       where: { id: tourMatch.id, status: 'PUBLISHED' },
       select: {
-        id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true,
+        id: true, name: true, subtitle: true, posterUrl: true,
         MusicConcert: {
           where: { status: 'PUBLISHED', city: dbCity },
-          orderBy: [{ concertDate: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+          orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           include: {
             MusicConcertSetlistItem: {
-              orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+              orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
               select: {
                 id: true, displayName: true, section: true, position: true, versionName: true, note: true,
                 isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true,
@@ -101,18 +101,20 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   const allSame = cityConcerts.length > 0 && cityConcerts.every((concert) => concert.signature === cityConcerts[0].signature)
   const baseNormal = cityConcerts[0]?.normal ?? []
   const cityPoster = cityConcerts[0]?.posterUrl ?? meta.posterUrl
+  const cityStartDate = cityConcerts[0]?.concertDate ?? null
+  const cityEndDate = cityConcerts.at(-1)?.concertDate ?? cityStartDate
   // 从该城市所有场次提取第一个非空场馆作为「主要场馆」展示（仅展示用，不改数据库）
   const primaryVenue = cityConcerts.map((concert) => concert.venue).find((venue) => venue && venue.trim()) ?? null
 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href={`/music/live/tours/${canonicalTourSlug}`} className="text-sm font-black text-sky-300/80">← 返回 {meta.name}</Link>
     <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[200px_minmax(0,1fr)] md:items-center">
-      <div className="relative mx-auto aspect-[3/4] w-full max-w-[200px] border border-white/15 bg-[#0b2038]">{cityPoster ? <Image src={cityPoster} alt={`${dbCity}演唱会海报`} fill sizes="200px" className="object-cover" /> : <div className="grid h-full place-items-center text-4xl text-sky-200/25">LIVE</div>}</div>
+      <div className="relative mx-auto aspect-square w-full max-w-[200px] border border-white/15 bg-[#0b2038]"><ConcertCover src={cityPoster} alt={`${dbCity}演唱会海报`} sizes="200px" className="h-full w-full" /></div>
       <div className="min-w-0">
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE · {canonicalCitySlug}</p>
         <h1 className="mt-4 break-words text-4xl font-black tracking-tight text-white sm:text-6xl">{dbCity}站</h1>
         <p className="mt-4 break-words text-xl font-black text-slate-200">{meta.name}</p>
-        <p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(meta.startDate, meta.endDate)}</p>
+        <p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(cityStartDate, cityEndDate)}</p>
         <dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">本城市场次</dt><dd className="mt-1 text-xl font-black">{cityConcerts.length} 场</dd></div><div><dt className="text-xs text-slate-400">主要场馆</dt><dd className="mt-1 text-xl font-black">{primaryVenue ?? '场馆待整理'}</dd></div></dl>
       </div>
     </section>

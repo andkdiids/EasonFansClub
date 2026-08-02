@@ -55,7 +55,7 @@ export async function GET(request: Request) {
   }
   const concerts = await prisma.musicConcert.findMany({
     where,
-    orderBy: [{ concertDate: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
+    orderBy: [{ sortOrder: 'asc' }, { concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     include: { MusicTour: { select: { id: true, name: true } }, _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true, UserMusicConcert: true } } },
     // city 级查询（三级浏览第三级）不限制条数，避免单城市场次被截断；平铺模式保留 200 上限
     ...(city ? {} : { take: 200 }),
@@ -97,8 +97,8 @@ export async function POST(request: Request) {
     if (setlistSource === 'PREVIOUS') {
       const previous = await tx.musicConcert.findFirst({
         where: { tourId },
-        orderBy: [{ concertDate: 'desc' }, { sortOrder: 'desc' }, { createdAt: 'desc' }],
-        include: { MusicConcertSetlistItem: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } },
+        orderBy: [{ concertDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        include: { MusicConcertSetlistItem: { orderBy: [{ position: 'asc' }] } },
       })
       if (!previous) return { message: '当前巡演还没有上一场歌单，请选择“创建新歌单”' }
       inheritedItems = previous.MusicConcertSetlistItem.map((item) => ({
@@ -142,7 +142,7 @@ export async function POST(request: Request) {
     }
     const allConcerts = await tx.musicConcert.findMany({
       where: { tourId },
-      select: { id: true, city: true, concertDate: true, createdAt: true },
+      select: { id: true, city: true, concertDate: true, createdAt: true, sortOrder: true },
     })
     for (const sequence of buildConcertSequenceUpdates(allConcerts)) {
       await tx.musicConcert.update({
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
     }
     const concerts = await tx.musicConcert.findMany({
       where: { id: { in: createdIds } },
-      orderBy: [{ concertDate: 'asc' }],
+      orderBy: [{ sortOrder: 'asc' }, { concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     })
     return { concerts }
   })

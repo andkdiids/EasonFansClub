@@ -9,6 +9,7 @@ type Tour = { id: string; name: string }
 type BrowseConcert = {
   id: string
   concertDate: string
+  createdAt?: string
   city: string
   venue?: string | null
   sessionNumber?: string | null
@@ -28,11 +29,19 @@ const empty = {
 }
 const field = 'w-full rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-400'
 
+function compareBrowseConcerts(left: BrowseConcert, right: BrowseConcert) {
+  return left.sortOrder - right.sortOrder
+    || left.concertDate.localeCompare(right.concertDate)
+    || (left.createdAt || '').localeCompare(right.createdAt || '')
+    || left.id.localeCompare(right.id)
+}
+
 export function AdminConcertManager() {
   const [tours, setTours] = useState<Tour[]>([])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [reorderingId, setReorderingId] = useState<string | null>(null)
 
   // 创建表单
   const [form, setForm] = useState(empty)
@@ -106,7 +115,7 @@ export function AdminConcertManager() {
   }
 
   const openCityConcerts = useMemo(
-    () => (openCity ? [...cityConcerts].sort((left, right) => left.concertDate.localeCompare(right.concertDate)) : []),
+    () => (openCity ? [...cityConcerts].sort(compareBrowseConcerts) : []),
     [openCity, cityConcerts],
   )
 
@@ -155,6 +164,20 @@ export function AdminConcertManager() {
       setSelectedIds((current) => current.filter((id) => id !== concert.id))
       await refresh()
     }
+  }
+
+  async function moveConcert(concert: BrowseConcert, direction: 'up' | 'down') {
+    if (!browseTourId || reorderingId) return
+    setReorderingId(concert.id)
+    const response = await fetch('/api/admin/music/concerts/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tourId: browseTourId, concertId: concert.id, direction }),
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok) addError(data?.message || '调整排序失败')
+    else { addMessage(direction === 'up' ? '场次已上移，前台顺序已同步' : '场次已下移，前台顺序已同步'); await refresh() }
+    setReorderingId(null)
   }
 
   function toggleSelect(id: string) {
@@ -300,13 +323,13 @@ export function AdminConcertManager() {
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="bg-sky-50 text-xs font-black"><tr>{['日期', '城市', '场馆', '排序', '状态', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead>
             <tbody>
-              {browseConcerts.map((concert) => <tr key={concert.id} className="border-t border-sky-100">
+              {browseConcerts.map((concert, index) => <tr key={concert.id} className="border-t border-sky-100">
                 <td className="p-3">{concert.concertDate.slice(0, 10)}</td>
                 <td className="p-3 font-black">{concert.city}</td>
                 <td className="max-w-52 break-words p-3">{concert.venue || '—'}</td>
                 <td className="p-3 font-black">{String(Number(concert.sessionNumber || concert.sortOrder || 1)).padStart(2, '0')}</td>
                 <td className="p-3">{concert.status === 'PUBLISHED' ? '已发布' : '草稿'}</td>
-                <td className="p-3"><div className="flex gap-2"><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td>
+                <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" aria-label="上移场次" disabled={index === 0 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'up')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↑</button><button type="button" aria-label="下移场次" disabled={index === browseConcerts.length - 1 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'down')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↓</button><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td>
               </tr>)}
             </tbody>
           </table>
@@ -351,13 +374,13 @@ export function AdminConcertManager() {
                       {['日期', '场馆', '排序', '状态', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}
                     </tr></thead>
                     <tbody>
-                      {openCityConcerts.map((concert) => <tr key={concert.id} className="border-t border-sky-100">
+                      {openCityConcerts.map((concert, index) => <tr key={concert.id} className="border-t border-sky-100">
                         <td className="p-3"><input type="checkbox" checked={selectedIds.includes(concert.id)} onChange={() => toggleSelect(concert.id)} aria-label={`选择 ${concert.concertDate.slice(0, 10)}`} /></td>
                         <td className="p-3">{concert.concertDate.slice(0, 10)}</td>
                         <td className="max-w-52 break-words p-3">{concert.venue || '—'}</td>
                         <td className="p-3 font-black">{String(Number(concert.sessionNumber || concert.sortOrder || 1)).padStart(2, '0')}</td>
                         <td className="p-3">{concert.status === 'PUBLISHED' ? '已发布' : '草稿'}</td>
-                        <td className="p-3"><div className="flex gap-2"><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td>
+                        <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" aria-label="上移场次" disabled={index === 0 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'up')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↑</button><button type="button" aria-label="下移场次" disabled={index === openCityConcerts.length - 1 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'down')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↓</button><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td>
                       </tr>)}
                     </tbody>
                   </table>

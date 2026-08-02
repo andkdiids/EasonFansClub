@@ -19,32 +19,56 @@ export function parseConcertDates(value: unknown) {
 }
 
 export function buildConcertSequenceUpdates(
-  concerts: Array<{ id: string; city?: string; concertDate: Date | string; createdAt?: Date | string }>,
+  concerts: Array<{ id: string; city?: string; concertDate: Date | string; createdAt?: Date | string; sortOrder?: number }>,
 ) {
+  const chronological = [...concerts].sort((left, right) => {
+    const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
+    if (dateDifference) return dateDifference
+    const createdDifference = new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime()
+    return createdDifference || left.id.localeCompare(right.id)
+  })
+  const hasExplicitOrder = concerts.some((concert) => Number.isFinite(concert.sortOrder) && (concert.sortOrder || 0) > 0)
+  const ordered = hasExplicitOrder
+    ? [...concerts].sort((left, right) => {
+      const leftOrder = (left.sortOrder || 0) > 0 ? left.sortOrder! : Number.MAX_SAFE_INTEGER
+      const rightOrder = (right.sortOrder || 0) > 0 ? right.sortOrder! : Number.MAX_SAFE_INTEGER
+      return leftOrder - rightOrder || new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime() || new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime() || left.id.localeCompare(right.id)
+    })
+    : chronological
   const citySequence = new Map<string, number>()
-  return [...concerts]
-    .sort((left, right) => {
-      const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
-      if (dateDifference) return dateDifference
-      const createdDifference = new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime()
-      return createdDifference || left.id.localeCompare(right.id)
-    })
-    .map((concert, index) => {
-      const groupKey = concert.city || '__all__'
-      const sessionNumber = (citySequence.get(groupKey) || 0) + 1
-      citySequence.set(groupKey, sessionNumber)
-      return {
-        id: concert.id,
-        sessionNumber: String(sessionNumber),
-        sortOrder: index + 1,
-      }
-    })
+  const chronologicalSessionNumbers = new Map<string, string>()
+  for (const concert of chronological) {
+    const groupKey = concert.city || '__all__'
+    const sessionNumber = (citySequence.get(groupKey) || 0) + 1
+    citySequence.set(groupKey, sessionNumber)
+    chronologicalSessionNumbers.set(concert.id, String(sessionNumber))
+  }
+  return ordered.map((concert, index) => {
+    return {
+      id: concert.id,
+      sessionNumber: chronologicalSessionNumbers.get(concert.id) || String(index + 1),
+      sortOrder: index + 1,
+    }
+  })
 }
 
 export function cloneSetlistItems(items: ParsedSetlistItem[], concertId: string) {
-  return items.map((item, index) => ({
-    ...item,
-    concertId,
-    position: index + 1,
-  }))
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => left.item.position - right.item.position || left.index - right.index)
+    .map(({ item }, index) => ({
+      songId: item.songId,
+      displayName: item.displayName,
+      section: item.section,
+      versionName: item.versionName,
+      note: item.note,
+      isEncore: item.isEncore,
+      isRequest: item.isRequest,
+      isDebut: item.isDebut,
+      isGuest: item.isGuest,
+      isMedley: item.isMedley,
+      isSpecial: item.isSpecial,
+      concertId,
+      position: index + 1,
+    }))
 }

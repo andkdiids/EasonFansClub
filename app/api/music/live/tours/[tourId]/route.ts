@@ -16,28 +16,30 @@ export async function GET(request: Request, { params }: Context) {
         id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true, category: true,
         MusicConcert: {
           where: { status: 'PUBLISHED' },
-          orderBy: [{ concertDate: 'asc' }],
-          select: { city: true, concertDate: true },
+          orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          select: { city: true, concertDate: true, posterUrl: true },
         },
       },
     })
     if (!tour) return NextResponse.json({ message: '巡演不存在' }, { status: 404 })
     const { MusicConcert, ...data } = tour
-    const groups = new Map<string, { city: string; count: number; dates: Date[] }>()
+    const groups = new Map<string, { city: string; count: number; dates: Date[]; posterUrl: string | null }>()
     for (const concert of MusicConcert) {
-      const group = groups.get(concert.city) || { city: concert.city, count: 0, dates: [] as Date[] }
+      const group = groups.get(concert.city) || { city: concert.city, count: 0, dates: [] as Date[], posterUrl: concert.posterUrl }
       group.count += 1
       group.dates.push(concert.concertDate)
+      if (!group.posterUrl && concert.posterUrl) group.posterUrl = concert.posterUrl
       groups.set(concert.city, group)
     }
     const cities = [...groups.values()]
       .map((group) => ({
         city: group.city,
         count: group.count,
+        posterUrl: group.posterUrl,
         firstDate: group.dates[0].toISOString().slice(0, 10),
         lastDate: group.dates[group.dates.length - 1].toISOString().slice(0, 10),
       }))
-      .sort((left, right) => left.city.localeCompare(right.city, 'zh-CN'))
+      .sort((left, right) => left.firstDate.localeCompare(right.firstDate) || left.city.localeCompare(right.city, 'zh-CN'))
     return NextResponse.json({ tour: data, cities })
   }
 
@@ -47,7 +49,7 @@ export async function GET(request: Request, { params }: Context) {
       id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true, category: true,
       MusicConcert: {
         where: { status: 'PUBLISHED', ...(cityParam ? { city: cityParam } : {}) },
-        orderBy: [{ concertDate: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         select: {
           id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true,
           _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },

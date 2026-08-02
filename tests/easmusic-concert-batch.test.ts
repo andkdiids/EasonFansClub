@@ -49,6 +49,18 @@ test('同一巡演按城市分别编号，同时保留全局日期排序', () =>
   ])
 })
 
+test('已有 sortOrder 时保留手动顺序，新场次排在现有顺序之后', () => {
+  assert.deepEqual(buildConcertSequenceUpdates([
+    { id: 'date-first', city: '澳门', concertDate: '2024-01-01', sortOrder: 2 },
+    { id: 'date-later', city: '澳门', concertDate: '2024-02-01', sortOrder: 1 },
+    { id: 'new', city: '澳门', concertDate: '2023-12-01', sortOrder: 0 },
+  ]), [
+    { id: 'date-later', sessionNumber: '3', sortOrder: 1 },
+    { id: 'date-first', sessionNumber: '2', sortOrder: 2 },
+    { id: 'new', sessionNumber: '1', sortOrder: 3 },
+  ])
+})
+
 test('继承歌单为新场次创建独立副本', () => {
   const source = [{
     songId: 'song-1',
@@ -70,6 +82,91 @@ test('继承歌单为新场次创建独立副本', () => {
   assert.equal(source[0].displayName, '十年')
 })
 
+test('继承歌单保留曲序、段落、版本、备注和所有现场标记', () => {
+  const source = [
+    { songId: 'song-2', displayName: 'Encore', section: 'ENCORE' as const, position: 20, versionName: 'Live', note: '尾声', isEncore: true, isRequest: false, isDebut: false, isGuest: true, isMedley: false, isSpecial: true },
+    { songId: 'song-1', displayName: '主歌', section: 'MAIN' as const, position: 10, versionName: 'Acoustic', note: '开场', isEncore: false, isRequest: true, isDebut: true, isGuest: false, isMedley: true, isSpecial: false },
+  ]
+  assert.deepEqual(cloneSetlistItems(source, 'concert-2'), [
+    { ...source[1], concertId: 'concert-2', position: 1 },
+    { ...source[0], concertId: 'concert-2', position: 2 },
+  ])
+})
+
+test('重复 position 保持原输入先后且不按 createdAt 或 id 重新排序', () => {
+  const base = {
+    songId: null,
+    section: 'MAIN' as const,
+    position: 3,
+    versionName: null,
+    note: null,
+    isEncore: false,
+    isRequest: false,
+    isDebut: false,
+    isGuest: false,
+    isMedley: false,
+    isSpecial: false,
+  }
+  const result = cloneSetlistItems([
+    { ...base, displayName: '第三首' },
+    { ...base, displayName: '第二首' },
+    { ...base, displayName: '第一首' },
+  ], 'concert-new')
+  assert.deepEqual(result.map((item) => [item.displayName, item.position]), [
+    ['第三首', 1],
+    ['第二首', 2],
+    ['第一首', 3],
+  ])
+  const helper = read('lib/music-concert-admin.ts')
+  assert.doesNotMatch(helper, /sortableTimestamp|item\.createdAt|item\.id/)
+})
+
+test('创建、编辑与复制歌单统一归一化 position 并保留稳定查询顺序', () => {
+  const createRoute = read('app/api/admin/music/concerts/route.ts')
+  const editRoute = read('app/api/admin/music/concerts/[concertId]/route.ts')
+  const copyRoute = read('app/api/admin/music/concerts/copy-city/route.ts')
+  assert.match(createRoute, /cloneSetlistItems\(inheritedItems, concert\.id\)/)
+  assert.match(editRoute, /cloneSetlistItems\(setlistItems, concertId\)/)
+  assert.match(copyRoute, /cloneSetlistItems\(source\.MusicConcertSetlistItem/)
+  assert.match(createRoute, /MusicConcertSetlistItem: \{ orderBy: \[\{ position: 'asc' \}\] \}/)
+  assert.match(copyRoute, /MusicConcertSetlistItem: \{ orderBy: \[\{ position: 'asc' \}\] \}/)
+  assert.match(editRoute, /position: 'asc'[\s\S]{0,100}createdAt: 'asc'[\s\S]{0,100}id: 'asc'/)
+})
+
+test('城市详情日期范围来自当前城市场次而不是巡演起止时间', () => {
+  const cityPage = read('app/music/live/tours/[tourId]/[city]/page.tsx')
+  assert.match(cityPage, /const cityStartDate = cityConcerts\[0\]\?\.concertDate \?\? null/)
+  assert.match(cityPage, /const cityEndDate = cityConcerts\.at\(-1\)\?\.concertDate \?\? cityStartDate/)
+  assert.match(cityPage, /formatLiveDateRange\(cityStartDate, cityEndDate\)/)
+  assert.doesNotMatch(cityPage, /formatLiveDateRange\(meta\.startDate, meta\.endDate\)/)
+  assert.doesNotMatch(cityPage, /posterUrl: true, startDate: true, endDate: true/)
+})
+
+test('前台场次始终按日期、创建时间和 id 排序且不受后台 sortOrder 污染', () => {
+  const publicSources = [
+    'app/music/concerts/page.tsx',
+    'app/music/concerts/[concertId]/page.tsx',
+    'app/music/live/tours/[tourId]/page.tsx',
+    'app/music/live/tours/[tourId]/[city]/page.tsx',
+    'app/api/music/live/tours/[tourId]/route.ts',
+    'lib/music-archive.ts',
+  ].map(read)
+  for (const source of publicSources) {
+    assert.match(source, /orderBy: \[\{ concertDate: 'asc' \}, \{ createdAt: 'asc' \}, \{ id: 'asc' \}\]/)
+    assert.doesNotMatch(source, /orderBy: \[\{ sortOrder: 'asc' \}, \{ concertDate: 'asc' \}/)
+  }
+})
+
+test('巡演城市聚合结果按每个城市第一场演出日期排序', () => {
+  const page = read('app/music/live/tours/[tourId]/page.tsx')
+  const route = read('app/api/music/live/tours/[tourId]/route.ts')
+  for (const source of [page, route]) {
+    assert.match(source, /firstDate:/)
+    assert.match(source, /\.sort\(\(left, right\) => left\.firstDate\.localeCompare\(right\.firstDate\)/)
+    assert.doesNotMatch(source, /\.sort\(\(left, right\) => left\.city\.localeCompare/)
+  }
+})
+
 test('国家地区默认值为中国', () => {
   assert.equal(DEFAULT_CONCERT_COUNTRY, '中国')
   const route = read('app/api/admin/music/concerts/route.ts')
@@ -89,6 +186,20 @@ test('创建、编辑与删除 API 均由系统维护场次序号', () => {
   assert.match(itemRoute, /normalizeTourConcerts\(tx, concert\.tourId\)/)
   assert.doesNotMatch(itemRoute, /sessionNumber: sanitizeText\(body/)
   assert.doesNotMatch(itemRoute, /sortOrder = parseLiveInteger/)
+})
+
+test('后台排序使用现有 sortOrder，海报保存不会被编辑请求清空', () => {
+  const reorder = read('app/api/admin/music/concerts/reorder/route.ts')
+  const itemRoute = read('app/api/admin/music/concerts/[concertId]/route.ts')
+  const editor = read('app/admin/music/concerts/[concertId]/AdminConcertEditor.tsx')
+  const coverRoute = read('app/api/admin/music/covers/route.ts')
+  assert.match(reorder, /data: \{ sortOrder: sortIndex \+ 1 \}/)
+  assert.match(reorder, /direction === 'down'/)
+  assert.match(editor, /posterUrl: ''/)
+  assert.match(editor, /posterUrl: item\.posterUrl \|\| ''/)
+  assert.match(editor, /setForm\(\(current\) => \(\{ \.\.\.current, posterUrl \}\)\)/)
+  assert.match(itemRoute, /hasPosterUrl/)
+  assert.match(coverRoute, /musicConcert\.update\(\{ where: \{ id: entityId \}, data: \{ posterUrl: url \} \}\)/)
 })
 
 test('后台多选日期可添加标签和删除且不再提供手填场次编号', () => {

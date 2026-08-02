@@ -1,6 +1,6 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
@@ -18,10 +18,10 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
       include: {
         MusicConcert: {
           where: { status: 'PUBLISHED' },
-          orderBy: [{ concertDate: 'asc' }, { sortOrder: 'asc' }],
+          orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           include: {
             MusicConcertSetlistItem: {
-              orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+              orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
               select: { id: true, position: true, displayName: true, MusicSong: { select: { title: true } } },
             },
             _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
@@ -37,7 +37,7 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
     <Link href="/music/concerts" className="text-sm font-black text-sky-300/80">← 返回 Eason in Concert</Link>
     <div className="mt-6"><MusicSectionNavigation /></div>
     <section className="mt-10 grid gap-8 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
-      <div className="relative aspect-[3/4] overflow-hidden rounded-[28px] border border-white/10 bg-[#0b2038] shadow-[0_30px_90px_rgba(0,0,0,.35)]">{tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}演唱会海报`} fill priority sizes="(max-width: 1024px) 100vw, 320px" className="object-cover" /> : <div className="grid h-full place-items-center text-5xl text-sky-200/20">LIVE</div>}</div>
+      <div className="relative aspect-square overflow-hidden rounded-[28px] border border-white/10 bg-[#0b2038] shadow-[0_30px_90px_rgba(0,0,0,.35)]"><ConcertCover src={tour.posterUrl} alt={`${tour.name}演唱会海报`} sizes="(max-width: 1024px) 100vw, 320px" className="h-full w-full" /></div>
       <div>
         <p className="text-xs font-black tracking-[0.24em] text-sky-300/65">CONCERT ARCHIVE · {tour.startDate ? new Date(tour.startDate).getUTCFullYear() : 'YEAR UNKNOWN'}</p>
         <h1 className="mt-3 text-4xl font-black leading-tight text-white sm:text-6xl">{tour.name}</h1>

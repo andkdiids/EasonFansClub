@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { usePathname } from 'next/navigation'
+import { createPortal } from 'react-dom'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { generateArchiveSlug } from '@/lib/music-slug'
 
@@ -230,11 +231,12 @@ function MyLiveCenter({ data, status, onRetry, loginHref }: Readonly<{ data: Con
 }
 
 function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour; onClose: () => void }>) {
-  return <div data-testid="concert-detail-modal" className="music-concert-gallery-modal" role="presentation" onClick={onClose}>
-    <div className="music-concert-gallery-modal-panel" role="dialog" aria-modal="true" aria-labelledby="concert-gallery-modal-title">
-      <button data-testid="concert-detail-close" type="button" className="music-concert-gallery-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
-      <div className="music-concert-gallery-modal-grid" onClick={(event) => event.stopPropagation()}>
-        <ArchivePoster tour={tour} sizes="(max-width: 767px) 58vw, 270px" />
+  const content = <div data-testid="concert-detail-modal" className="music-concert-gallery-modal-root" role="presentation" onClick={onClose}>
+    <div className="music-concert-gallery-modal-backdrop" aria-hidden="true" />
+    <div className="music-concert-gallery-modal-scroll">
+      <div className="music-concert-gallery-modal-card" role="dialog" aria-modal="true" aria-labelledby="concert-gallery-modal-title" onClick={(event) => event.stopPropagation()}>
+        <button data-testid="concert-detail-close" type="button" className="music-concert-gallery-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
+        <ArchivePoster tour={tour} sizes="(max-width: 767px) 160px, 240px" />
         <div className="music-concert-gallery-modal-copy">
           <time>{formatYear(tour.startDate)}</time>
           <h2 id="concert-gallery-modal-title">{tour.name}</h2>
@@ -245,6 +247,7 @@ function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour
       </div>
     </div>
   </div>
+  return typeof document === 'undefined' ? null : createPortal(content, document.body)
 }
 
 export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive }>) {

@@ -331,7 +331,7 @@ const personalConcertSelect = {
       tourId: true,
       MusicTour: { select: { id: true, name: true, posterUrl: true, status: true } },
       MusicConcertSetlistItem: {
-        orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }],
+        orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
         select: {
           songId: true,
           displayName: true,

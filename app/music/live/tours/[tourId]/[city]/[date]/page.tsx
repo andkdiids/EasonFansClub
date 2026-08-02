@@ -1,6 +1,6 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import { notFound, permanentRedirect } from 'next/navigation'
+import { ConcertCover } from '@/components/music/ConcertCover'
 import { BackButton } from '@/components/BackButton'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { AttendancePanel } from '@/components/music/live/AttendancePanel'
@@ -42,10 +42,10 @@ export default async function MusicConcertBySlugPage({
         id: true, title: true, concertDate: true, city: true, countryOrRegion: true, venue: true, sessionNumber: true, posterUrl: true, description: true,
         MusicTour: { select: { id: true, name: true } },
         MusicConcertSetlistItem: {
-          orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+          orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: { id: true, displayName: true, section: true, position: true, versionName: true, note: true, isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true, MusicSong: { select: { id: true, title: true } } },
         },
-        MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], select: { id: true, title: true, content: true, type: true } },
+        MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true, title: true, content: true, type: true } },
       },
     }),
     getSiteAppearance(),
@@ -63,7 +63,7 @@ export default async function MusicConcertBySlugPage({
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <div className="my-live-concert-detail-page">
     <div className="flex flex-wrap items-center gap-4"><BackButton fallbackHref={cityPageHref} label="返回上一页" /><Link href={cityPageHref} className="text-sm font-black text-sky-300/80">返回城市：{concert.city}站</Link></div>
-    <section className="my-live-concert-detail-hero mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="my-live-concert-detail-poster relative mx-auto aspect-[3/4] w-full max-w-[260px] border border-white/15 bg-[#0b2038]">{concert.posterUrl ? <Image src={concert.posterUrl} alt={`${concert.city}演唱会海报`} fill sizes="(max-width: 767px) 100vw, 260px" className="object-cover" /> : <div className="grid h-full place-items-center text-4xl text-sky-200/25">LIVE</div>}</div><div className="my-live-concert-detail-info min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{concert.MusicTour.name}</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{concert.title || concert.city}</h1><dl className="my-live-concert-detail-meta mt-6 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-2"><div><dt className="text-xs text-slate-400">日期</dt><dd className="mt-1 font-black">{formatLiveDate(concert.concertDate)}</dd></div><div><dt className="text-xs text-slate-400">城市 / 地区</dt><dd className="mt-1 break-words font-black">{concert.city}{concert.countryOrRegion ? ` · ${concert.countryOrRegion}` : ''}</dd></div><div><dt className="text-xs text-slate-400">场馆</dt><dd className="mt-1 break-words font-black">{concert.venue || '待整理'}</dd></div><div><dt className="text-xs text-slate-400">场次编号</dt><dd className="mt-1 break-words font-black">{concert.sessionNumber || '—'}</dd></div><div><dt className="text-xs text-slate-400">分类</dt><dd className="mt-1 break-words font-black">{concert.MusicTour.name}</dd></div><div><dt className="text-xs text-slate-400">座位</dt><dd className="mt-1 break-words font-black">{attendance?.seatInfo || '未记录'}</dd></div></dl>{concert.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{concert.description}</p> : null}<AttendancePanel concertId={concert.id} loggedIn={Boolean(currentUser)} initialAttendance={attendance} /></div></section>
+    <section className="my-live-concert-detail-hero mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="my-live-concert-detail-poster relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover src={concert.posterUrl} alt={`${concert.city}演唱会海报`} sizes="(max-width: 767px) 100vw, 260px" className="h-full w-full" /></div><div className="my-live-concert-detail-info min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{concert.MusicTour.name}</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{concert.title || concert.city}</h1><dl className="my-live-concert-detail-meta mt-6 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-2"><div><dt className="text-xs text-slate-400">日期</dt><dd className="mt-1 font-black">{formatLiveDate(concert.concertDate)}</dd></div><div><dt className="text-xs text-slate-400">城市 / 地区</dt><dd className="mt-1 break-words font-black">{concert.city}{concert.countryOrRegion ? ` · ${concert.countryOrRegion}` : ''}</dd></div><div><dt className="text-xs text-slate-400">场馆</dt><dd className="mt-1 break-words font-black">{concert.venue || '待整理'}</dd></div><div><dt className="text-xs text-slate-400">场次编号</dt><dd className="mt-1 break-words font-black">{concert.sessionNumber || '—'}</dd></div><div><dt className="text-xs text-slate-400">分类</dt><dd className="mt-1 break-words font-black">{concert.MusicTour.name}</dd></div><div><dt className="text-xs text-slate-400">座位</dt><dd className="mt-1 break-words font-black">{attendance?.seatInfo || '未记录'}</dd></div></dl>{concert.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{concert.description}</p> : null}<AttendancePanel concertId={concert.id} loggedIn={Boolean(currentUser)} initialAttendance={attendance} /></div></section>
     {concert.MusicConcertSetlistItem.length ? (
       <>
         <div className="md:hidden">

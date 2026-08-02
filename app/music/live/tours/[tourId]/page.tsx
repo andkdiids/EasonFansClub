@@ -1,6 +1,6 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import { notFound, permanentRedirect } from 'next/navigation'
+import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { formatLiveDateRange } from '@/lib/music-live'
 import { generateArchiveSlug, generateCitySlug } from '@/lib/music-slug'
@@ -24,7 +24,7 @@ export default async function MusicTourPage({ params }: { params: Promise<{ tour
         id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true,
         MusicConcert: {
           where: { status: 'PUBLISHED' },
-          orderBy: [{ concertDate: 'asc' }],
+          orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: { city: true, concertDate: true, posterUrl: true },
         },
       },
@@ -49,18 +49,18 @@ export default async function MusicTourPage({ params }: { params: Promise<{ tour
       firstDate: group.firstDate.toISOString().slice(0, 10),
       lastDate: group.lastDate.toISOString().slice(0, 10),
     }))
-    .sort((left, right) => left.city.localeCompare(right.city, 'zh-CN'))
+    .sort((left, right) => left.firstDate.localeCompare(right.firstDate) || left.city.localeCompare(right.city, 'zh-CN'))
 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music/concerts" className="text-sm font-black text-sky-300/80">← 返回 Eason in Concert</Link>
-    <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="relative mx-auto aspect-[3/4] w-full max-w-[260px] border border-white/15 bg-[#0b2038]">{tour.posterUrl ? <Image src={tour.posterUrl} alt={`${tour.name}巡演海报`} fill sizes="260px" className="object-cover" /> : <div className="grid h-full place-items-center text-4xl text-sky-200/25">LIVE</div>}</div><div className="min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{tour.name}</h1>{tour.subtitle ? <p className="mt-4 break-words text-xl font-black text-slate-200">{tour.subtitle}</p> : null}<p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(tour.startDate, tour.endDate)}</p>{tour.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{tour.description}</p> : null}<dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">场次</dt><dd className="mt-1 text-xl font-black">{tour.MusicConcert.length}</dd></div><div><dt className="text-xs text-slate-400">城市</dt><dd className="mt-1 text-xl font-black">{cities.length}</dd></div></dl></div></section>
+    <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover src={tour.posterUrl} alt={`${tour.name}巡演海报`} sizes="260px" className="h-full w-full" /></div><div className="min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{tour.name}</h1>{tour.subtitle ? <p className="mt-4 break-words text-xl font-black text-slate-200">{tour.subtitle}</p> : null}<p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(tour.startDate, tour.endDate)}</p>{tour.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{tour.description}</p> : null}<dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">场次</dt><dd className="mt-1 text-xl font-black">{tour.MusicConcert.length}</dd></div><div><dt className="text-xs text-slate-400">城市</dt><dd className="mt-1 text-xl font-black">{cities.length}</dd></div></dl></div></section>
 
     <section className="mt-14" aria-labelledby="tour-cities-title">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE</p>
       <h2 id="tour-cities-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">巡演城市</h2>
       <div className="tour-city-archive-grid mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cities.map((item) => <Link key={item.city} href={`/music/live/tours/${canonicalSlug}/${generateCitySlug(item.city)}`} className="tour-city-archive-card min-w-0 overflow-hidden border border-white/10 bg-white/[0.055] p-0 transition hover:border-sky-300/30 hover:bg-white/[0.09] sm:p-5">
-          <div className="tour-city-archive-card-media relative aspect-[4/3] w-full border-b border-white/15 bg-[#0b2038] sm:aspect-[3/4] sm:border-b-0">{item.posterUrl ? <Image src={item.posterUrl} alt={`${item.city}演唱会海报`} fill sizes="(max-width:767px) 25vw, 320px" className="object-contain md:object-cover" /> : <div className="grid h-full place-items-center text-3xl text-sky-200/25">LIVE</div>}</div>
+          <div className="tour-city-archive-card-media relative aspect-square w-full border-b border-white/15 bg-[#0b2038] sm:border-b-0"><ConcertCover src={item.posterUrl} alt={`${item.city}演唱会海报`} sizes="(max-width:767px) 50vw, 320px" className="h-full w-full" /></div>
           <div className="tour-city-archive-card-body p-4 sm:p-0">
             <h3 className="break-words text-xl font-black text-white">{item.city}</h3>
             <p className="mt-2 text-sm font-bold text-slate-300/65">{item.count} 场 · {item.firstDate.slice(0, 7)} ~ {item.lastDate.slice(0, 7)}</p>

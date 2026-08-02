@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { buildConcertSequenceUpdates, DEFAULT_CONCERT_COUNTRY, parseConcertDates } from '@/lib/music-concert-admin'
+import { buildConcertSequenceUpdates, cloneSetlistItems, DEFAULT_CONCERT_COUNTRY, parseConcertDates } from '@/lib/music-concert-admin'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -30,10 +30,10 @@ export async function POST(request: Request) {
 
   const sourceConcerts = await prisma.musicConcert.findMany({
     where: { tourId, city: sourceCity },
-    orderBy: [{ concertDate: 'asc' }],
+    orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     include: {
       MusicConcertSetlistItem: { orderBy: [{ position: 'asc' }] },
-      MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' }] },
+      MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] },
     },
   })
   if (!sourceConcerts.length) {
@@ -75,11 +75,11 @@ export async function POST(request: Request) {
         })
         createdIds.push(concert.id)
         if (options.setlist) {
-          const items = source.MusicConcertSetlistItem.map((item, position) => ({
+          const items = cloneSetlistItems(source.MusicConcertSetlistItem.map((item) => ({
             songId: item.songId,
             displayName: item.displayName,
             section: item.section,
-            position: position + 1,
+            position: item.position,
             versionName: item.versionName,
             note: item.note,
             isEncore: item.isEncore,
@@ -88,9 +88,9 @@ export async function POST(request: Request) {
             isGuest: item.isGuest,
             isMedley: item.isMedley,
             isSpecial: item.isSpecial,
-          }))
+          })), concert.id)
           if (items.length) {
-            await tx.musicConcertSetlistItem.createMany({ data: items.map((item) => ({ ...item, concertId: concert.id })) })
+            await tx.musicConcertSetlistItem.createMany({ data: items })
           }
         }
         if (options.highlights) {
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
       }
       const allConcerts = await tx.musicConcert.findMany({
         where: { tourId },
-        select: { id: true, city: true, concertDate: true, createdAt: true },
+        select: { id: true, city: true, concertDate: true, createdAt: true, sortOrder: true },
       })
       for (const sequence of buildConcertSequenceUpdates(allConcerts)) {
         await tx.musicConcert.update({
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
           data: { sessionNumber: sequence.sessionNumber, sortOrder: sequence.sortOrder },
         })
       }
-      return tx.musicConcert.findMany({ where: { id: { in: createdIds } }, orderBy: [{ concertDate: 'asc' }] })
+      return tx.musicConcert.findMany({ where: { id: { in: createdIds } }, orderBy: [{ sortOrder: 'asc' }, { concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] })
     })
     return NextResponse.json(
       { concerts: created, message: `已将 ${sourceCity} 各场次按日期顺序复制到 ${targetCity}，生成 ${created.length} 个草稿场次` },
