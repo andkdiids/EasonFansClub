@@ -127,13 +127,13 @@ async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) 
           allowEndless: true,
           processingStatus: 'READY',
           OR: eligibleSourceFilter(mode, autoEnabled),
-          GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds } },
+          GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds, purpose: 'GAME' } },
         }
       : {
           enabled: true,
           processingStatus: 'READY',
           OR: eligibleSourceFilter(mode, autoEnabled),
-          GuessSongAudioVariant: { some: { durationSeconds: config.durationSeconds ?? undefined } },
+          GuessSongAudioVariant: { some: { durationSeconds: config.durationSeconds ?? undefined, purpose: 'GAME' } },
         },
     select: {
       id: true,
@@ -142,7 +142,7 @@ async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) 
       wrongOption1: true,
       wrongOption2: true,
       wrongOption3: true,
-      GuessSongAudioVariant: { select: { id: true, durationSeconds: true, storagePath: true } },
+      GuessSongAudioVariant: { where: { purpose: 'GAME' }, select: { id: true, durationSeconds: true, storagePath: true } },
     },
   })
 }
@@ -160,7 +160,7 @@ async function createNextEndlessQuestion(
       allowEndless: true,
       processingStatus: 'READY',
       OR: eligibleSourceFilter('ENDLESS', autoEnabled),
-      GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds } },
+      GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds, purpose: 'GAME' } },
     },
     select: {
       id: true,
@@ -169,7 +169,7 @@ async function createNextEndlessQuestion(
       wrongOption1: true,
       wrongOption2: true,
       wrongOption3: true,
-      GuessSongAudioVariant: { select: { id: true, durationSeconds: true, storagePath: true } },
+      GuessSongAudioVariant: { where: { purpose: 'GAME' }, select: { id: true, durationSeconds: true, storagePath: true } },
     },
   })
   if (candidates.length === 0) throw new GuessSongServiceError('无尽模式题库暂不可用', 409, 'QUESTION_POOL_EMPTY')
@@ -339,7 +339,7 @@ async function getPlayableVariant(userId: string, sessionId: string, publicQuest
     throw new GuessSongServiceError('本题答题时间已结束', 409, 'QUESTION_TIMED_OUT')
   }
   const variant = sessionQuestion.GuessSongQuestion.GuessSongAudioVariant.find(
-    (item) => item.durationSeconds === sessionQuestion.playbackDurationSeconds,
+    (item) => item.purpose === 'GAME' && item.durationSeconds === sessionQuestion.playbackDurationSeconds,
   )
   if (!variant) throw new GuessSongServiceError('当前题目的音频文件缺失', 503, 'AUDIO_MISSING')
   return { sessionQuestion, variant }

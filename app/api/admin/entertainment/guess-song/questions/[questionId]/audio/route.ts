@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: Context) {
       extension || 'audio',
     )
     const { GuessSongAudioVariant, ...questionData } = question
-    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } })
+    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant.filter((variant) => variant.purpose === 'GAME') } })
   } catch (error) {
     return handleGuessSongError(error, 'admin.audio.upload')
   }

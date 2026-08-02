@@ -35,7 +35,7 @@ export async function GET(request: Request) {
               MusicAlbum: { select: { name: true } },
             },
           },
-          GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } },
+          GuessSongAudioVariant: { where: { purpose: 'GAME' }, orderBy: { durationSeconds: 'asc' } },
         },
         orderBy: { createdAt: 'desc' },
         take: 500,

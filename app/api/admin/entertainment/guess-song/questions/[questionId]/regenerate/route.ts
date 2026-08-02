@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: Context) {
   try {
     const question = await regenerateGuessSongAudio(questionId)
     const { GuessSongAudioVariant, ...questionData } = question
-    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } })
+    return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant.filter((variant) => variant.purpose === 'GAME') } })
   } catch (error) {
     return handleGuessSongError(error, 'admin.audio.regenerate')
   }

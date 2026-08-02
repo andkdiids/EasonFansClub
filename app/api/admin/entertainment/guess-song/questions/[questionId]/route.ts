@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: Context) {
   try {
     const current = await prisma.guessSongQuestion.findUnique({
       where: { id: questionId },
-      include: { GuessSongAudioVariant: { select: { durationSeconds: true, storagePath: true } } },
+      include: { GuessSongAudioVariant: { where: { purpose: 'GAME' }, select: { durationSeconds: true, storagePath: true } } },
     })
     if (!current) return guessSongError('题目不存在', 404)
     if (parsed.data.musicSongId) {
@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const question = await prisma.guessSongQuestion.update({
       where: { id: questionId },
       data: parsed.data,
-      include: { GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } }, MusicSong: true },
+      include: { GuessSongAudioVariant: { where: { purpose: 'GAME' }, orderBy: { durationSeconds: 'asc' } }, MusicSong: true },
     })
     const { GuessSongAudioVariant, ...questionData } = question
     return guessSongOk({ question: { ...questionData, audioVariants: GuessSongAudioVariant } })

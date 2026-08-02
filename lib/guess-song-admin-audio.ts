@@ -104,7 +104,7 @@ export async function uploadAndProcessGuessSongAudio(
     })
     return prisma.guessSongQuestion.findUniqueOrThrow({
       where: { id: questionId },
-      include: { GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } } },
+      include: { GuessSongAudioVariant: { where: { purpose: 'GAME' }, orderBy: { durationSeconds: 'asc' } } },
     })
   } catch (error) {
     await prisma.guessSongQuestion.updateMany({
@@ -186,7 +186,7 @@ const processed = await processGuessSongAudio(source, 'mp3')
     return prisma.guessSongQuestion.findUniqueOrThrow({
       where: { id: questionId },
       include: {
-        GuessSongAudioVariant: { orderBy: { durationSeconds: 'asc' } },
+        GuessSongAudioVariant: { where: { purpose: 'GAME' }, orderBy: { durationSeconds: 'asc' } },
         MusicSong: true,
       },
     })

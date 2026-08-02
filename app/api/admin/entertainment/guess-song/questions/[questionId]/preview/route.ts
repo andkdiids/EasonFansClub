@@ -21,7 +21,7 @@ export async function GET(request: Request, { params }: Context) {
   }
   try {
     const variant = await prisma.guessSongAudioVariant.findUnique({
-      where: { questionId_durationSeconds: { questionId, durationSeconds: duration } },
+      where: { questionId_durationSeconds_purpose: { questionId, durationSeconds: duration, purpose: 'GAME' } },
       select: { storagePath: true },
     })
     if (!variant) return guessSongError('该音频变体不存在', 404)
