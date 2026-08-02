@@ -99,8 +99,11 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   })
 
   const allSame = cityConcerts.length > 0 && cityConcerts.every((concert) => concert.signature === cityConcerts[0].signature)
-  const baseNormal = cityConcerts[0]?.normal ?? []
-  const cityPoster = cityConcerts[0]?.posterUrl ?? meta.posterUrl
+  const firstWithSetlist = cityConcerts.find((concert) => concert.full.length > 0)
+  const baseNormal = firstWithSetlist?.normal ?? []
+  const setlistItems = allSame ? (cityConcerts[0]?.full ?? []) : baseNormal
+  const hasSetlist = cityConcerts.some((concert) => concert.full.length > 0)
+  const cityPoster = cityConcerts.map((concert) => concert.posterUrl).find((posterUrl) => posterUrl?.trim()) || meta.posterUrl || null
   const cityStartDate = cityConcerts[0]?.concertDate ?? null
   const cityEndDate = cityConcerts.at(-1)?.concertDate ?? cityStartDate
   // 从该城市所有场次提取第一个非空场馆作为「主要场馆」展示（仅展示用，不改数据库）
@@ -119,10 +122,17 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
       </div>
     </section>
 
-    {allSame ? (
-      <SetlistBlock items={baseNormal} excludeEncore layout="columns" title={`${dbCity}站统一歌单`} eyebrow="UNIFIED SETLIST" idPrefix="unified" />
+    {hasSetlist ? (
+      allSame ? (
+        <SetlistBlock items={setlistItems} excludeEncore={baseNormal.length > 0} layout="columns" title={`${dbCity}站统一歌单`} eyebrow="UNIFIED SETLIST" idPrefix="unified" />
+      ) : (
+        <SetlistBlock items={setlistItems} title={`${dbCity}站基础歌单`} eyebrow="BASE SETLIST" idPrefix="base" />
+      )
     ) : (
-      <SetlistBlock items={baseNormal} title={`${dbCity}站基础歌单`} eyebrow="BASE SETLIST" idPrefix="base" />
+      <section className="mt-14 border border-white/10 bg-white/[0.05] p-6" aria-label="歌单资料">
+        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SETLIST</p>
+        <p className="mt-2 text-sm font-bold text-slate-300">暂无歌单资料</p>
+      </section>
     )}
 
     <section className="mt-14" aria-labelledby="city-concerts-title">

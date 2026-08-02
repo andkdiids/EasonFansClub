@@ -30,7 +30,13 @@ export async function resolveCitySlugToCity(tourId: string, citySlug: string): P
     select: { city: true },
     orderBy: { city: 'asc' },
   })
-  const decoded = decodeURIComponent(citySlug)
+  let decoded = citySlug
+  try {
+    decoded = decodeURIComponent(citySlug)
+  } catch {
+    // Malformed percent-encoding should behave like an unknown city instead
+    // of throwing out of the route and producing a client-side error page.
+  }
   // 兼容三种输入：中文原始城市（香港）、规范大写 slug（HONG-KONG）、小写 slug（hong-kong）
   const target = citySlug.toLowerCase()
   const match = rows.find(

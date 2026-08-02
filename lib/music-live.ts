@@ -118,6 +118,7 @@ export function parseBulkSetlist(text: string) {
 
 export function formatLiveDate(value: Date | string) {
   const date = typeof value === 'string' ? new Date(value) : value
+  if (Number.isNaN(date.getTime())) return '时间待整理'
   return new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
 }
 
