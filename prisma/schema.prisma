@@ -614,6 +614,85 @@ model EmailVerification {
   @@index([expiresAt])
 }
 
+model EHospitalCheckConfig {
+  id            String   @id @default(cuid())
+  enabled       Boolean  @default(true)
+  questionCount Int      @default(10)
+  audioSeconds  Int      @default(7)
+  passScore     Int      @default(60)
+  dailyLimit    Int      @default(3)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model EHospitalCheckSession {
+  id                     String                    @id @default(cuid())
+  questions              Json
+  answers                Json?
+  score                  Int?
+  status                 String
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  expiresAt              DateTime
+  registrationDraftId    String
+  RegistrationDraft      RegistrationDraft         @relation(fields: [registrationDraftId], references: [id], onDelete: Cascade)
+  EHospitalCheckAttempt  EHospitalCheckAttempt?
+
+  @@index([registrationDraftId, status, createdAt])
+  @@index([status, expiresAt])
+}
+
+model EHospitalCheckAttempt {
+  id                  String                    @id @default(cuid())
+  sessionId           String                    @unique
+  score               Int
+  passed              Boolean
+  ip                  String?
+  identityHash        String?
+  userId              String?
+  registrationDraftId String
+  createdAt           DateTime                  @default(now())
+  EHospitalCheckSession EHospitalCheckSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  RegistrationDraft   RegistrationDraft         @relation(fields: [registrationDraftId], references: [id], onDelete: Cascade)
+  User                User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([identityHash, createdAt])
+  @@index([registrationDraftId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model RegistrationDraft {
+  id                       String                    @id @default(cuid())
+  tokenHash                String                    @unique
+  registrationType         String
+  username                 String
+  usernameNormalized       String
+  nickname                 String
+  email                    String
+  phone                    String
+  passwordHash             String
+  securityQuestions        Json?
+  acceptedAgreement        Boolean                   @default(false)
+  identityHash             String
+  phoneCodeHash            String?
+  phoneCodeExpiresAt       DateTime?
+  phoneVerifiedAt          DateTime?
+  emailCodeHash            String?
+  emailCodeExpiresAt       DateTime?
+  emailVerifiedAt          DateTime?
+  completedAt              DateTime?
+  expiresAt                DateTime
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  EHospitalCheckSession    EHospitalCheckSession[]
+  EHospitalCheckAttempt   EHospitalCheckAttempt[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([identityHash, createdAt])
+  @@index([expiresAt])
+}
+
 model EntertainmentDailyDraw {
   id                  String             @id @default(cuid())
   dateKey             String
@@ -786,13 +865,14 @@ model GuessSongAudioVariant {
   durationSeconds      Int
   storagePath          String
   fileSize             Int
+  purpose              GuessSongAudioPurpose  @default(GAME)
   createdAt            DateTime               @default(now())
   questionId           String
   GuessSongQuestion    GuessSongQuestion      @relation(fields: [questionId], references: [id], onDelete: Cascade)
   GuessSongPlayRequest GuessSongPlayRequest[]
 
-  @@unique([questionId, durationSeconds])
-  @@index([questionId])
+  @@unique([questionId, durationSeconds, purpose])
+  @@index([questionId, purpose])
 }
 
 model GuessSongLeaderboardEntry {
@@ -1946,6 +2026,7 @@ model User {
   UserBadge                                              UserBadge[]
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
+  EHospitalCheckAttempt                                  EHospitalCheckAttempt[]
 
   @@index([createdAt])
   @@index([email])
@@ -2162,6 +2243,11 @@ enum GuessSongDifficulty {
   EASY
   ADVANCED
   HARD
+}
+
+enum GuessSongAudioPurpose {
+  GAME
+  REGISTER_CHECK
 }
 
 enum GuessSongMode {

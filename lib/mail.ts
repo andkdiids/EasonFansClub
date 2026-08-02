@@ -117,3 +117,17 @@ export async function sendPasswordResetCode(email: string, code: string): Promis
     },
   })
 }
+
+export async function sendRegistrationVerificationCode(email: string, code: string): Promise<SendMailResult> {
+  return sendMail({
+    to: email,
+    subject: 'EasonFansClub 注册验证码',
+    template: {
+      title: '完成私家E院入院验证',
+      intro: `你的注册邮箱验证码是 ${code}，10 分钟内有效。验证码只能使用一次。`,
+      actionText: '返回注册页面',
+      actionUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/register`,
+      note: '请勿向任何人透露验证码。如果不是你本人操作，请忽略这封邮件。',
+    },
+  })
+}

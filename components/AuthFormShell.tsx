@@ -12,6 +12,7 @@ export function AuthFormShell({
   backgroundUrl,
   heroVisual,
   logoUrl,
+  pageClassName,
   children,
   footer,
 }: Readonly<{
@@ -21,11 +22,12 @@ export function AuthFormShell({
   backgroundUrl?: string | null
   heroVisual?: SiteHeroVisualConfig | null
   logoUrl?: string | null
+  pageClassName?: string
   children: React.ReactNode
   footer: React.ReactNode
 }>) {
   return (
-<main className="auth-page">     <HeroBackground 
+<main className={`auth-page${pageClassName ? ` ${pageClassName}` : ''}`}>     <HeroBackground
   visual={heroVisual}
   priority
 />

@@ -17,6 +17,7 @@ export default async function RegisterPage() {
       siteName={config.text.siteName}
       backgroundUrl={config.images.registerBackgroundUrl}
       logoUrl={config.images.navLogoUrl || config.images.logoUrl}
+      pageClassName="register-auth-page"
       footer={
         <>
           已经有账号？{' '}
@@ -33,11 +34,12 @@ export default async function RegisterPage() {
           registrationModeLabel: policy.registrationModeLabel,
           allowPhoneRegistration: policy.allowPhoneRegistration,
           allowEmailRegistration: policy.allowEmailRegistration,
-          registrationClosed: policy.registrationClosed,
+          registrationClosed: policy.registrationClosed || !policy.allowEmailRegistration,
           enableTurnstile: policy.enableTurnstile,
           turnstileSiteKey: policy.turnstileSiteKey,
           envForcedClosed: policy.envForcedClosed,
           requireSecurityQuestionsForNewUsers: policy.requireSecurityQuestionsForNewUsers,
+          ehospitalCheckEnabled: policy.ehospitalCheckEnabled,
         }}
       />
     </AuthFormShell>

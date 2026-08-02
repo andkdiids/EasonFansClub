@@ -1,0 +1,128 @@
+import { Prisma } from '@prisma/client'
+import { NextResponse } from 'next/server'
+import { hashSecurityQuestions, parseSecurityQuestions, validateSecurityQuestions } from '@/lib/account-security'
+import { hashPassword } from '@/lib/password'
+import { prisma } from '@/lib/prisma'
+import { getRegistrationIdentityHash, REGISTRATION_DRAFT_TTL_MS } from '@/lib/registration-draft'
+import { getRegistrationPolicy } from '@/lib/registration'
+import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
+import { verifyTurnstileToken } from '@/lib/turnstile'
+import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
+import { createPlainToken, hashToken } from '@/lib/tokens'
+import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
+import { normalizeText } from '@/lib/validators'
+
+const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
+
+function errorResponse(message: string, status: number, code: string, errors: Record<string, string> = {}) {
+  return NextResponse.json({ message, code, errors }, { status, headers: noStoreHeaders })
+}
+
+function unicodeLength(value: string) {
+  return Array.from(value).length
+}
+
+export async function POST(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+
+  const body = await request.json().catch(() => null)
+  const policy = await getRegistrationPolicy()
+  const clientIp = getClientIp(request)
+
+  // The registration flow now always uses email verification. Phone remains an
+  // optional login/recovery field and is deliberately not a verification channel.
+  if (policy.registrationClosed || !policy.allowEmailRegistration) {
+    return errorResponse('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
+  }
+
+  const rate = await consumeRateLimit(`ip:${clientIp}`, 'register:prepare', 10, 30 * 60)
+  if (rate.limited) {
+    return NextResponse.json({ message: '操作过于频繁，请稍后再试', retryAfter: rate.retryAfter }, { status: 429, headers: noStoreHeaders })
+  }
+
+  const nickname = getLoginAccountDisplay(body?.nickname || body?.username)
+  const accountValidation = validateLoginAccountValue(nickname)
+  const usernameNormalized = accountValidation.usernameNormalized
+  const email = normalizeText(body?.email).toLowerCase()
+  const phone = normalizeText(body?.phone).replace(/\s+/g, '')
+  const password = normalizeText(body?.password)
+  const confirmPassword = normalizeText(body?.confirmPassword)
+  const acceptedAgreement = Boolean(body?.acceptedAgreement)
+  const securityQuestions = parseSecurityQuestions(body?.securityQuestions)
+  const errors: Record<string, string> = {}
+
+  if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error) {
+    errors.nickname = '用户名 / 昵称需要 2-16 个字符'
+  }
+  if (phone && !/^1\d{10}$/.test(phone)) errors.phone = '请输入 11 位中国大陆手机号，或留空'
+  if (!email) errors.email = '请填写邮箱'
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = '请输入有效邮箱'
+  if (!password || password.length < 8) errors.password = '密码至少需要 8 位'
+  if (confirmPassword !== password) errors.confirmPassword = '两次输入的密码不一致'
+  if (!acceptedAgreement) errors.acceptedAgreement = '请先勾选用户协议'
+  if (policy.requireSecurityQuestionsForNewUsers) {
+    const securityError = validateSecurityQuestions(securityQuestions)
+    if (securityError) errors.securityQuestions = securityError
+  }
+  if (Object.keys(errors).length) return errorResponse('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
+
+  const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
+  if (!turnstile.success) return errorResponse(turnstile.message || '人机验证失败', 400, 'TURNSTILE_FAILED', { turnstileToken: turnstile.message || '人机验证失败' })
+
+  const phoneFilter = phone ? [{ phone }] : []
+  const pendingDraftFilter = [{ email }, ...phoneFilter]
+  const [duplicate, accountDuplicate, pendingDraft] = await Promise.all([
+    findActiveConflict({ phone: phone || null, email }),
+    findLoginAccountConflict(usernameNormalized),
+    prisma.registrationDraft.findFirst({
+      where: { completedAt: null, expiresAt: { gt: new Date() }, OR: pendingDraftFilter },
+      select: { id: true },
+    }),
+  ])
+  if (duplicate?.phone && duplicate.phone === phone) return errorResponse('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
+  if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
+  if (accountDuplicate) return errorResponse('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
+  if (pendingDraft) return errorResponse('该邮箱或手机号已有未完成的注册验证，请稍后重试', 409, 'REGISTRATION_DRAFT_EXISTS')
+
+  const draftToken = createPlainToken(32)
+  const passwordHash = await hashPassword(password)
+  const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
+    ? await hashSecurityQuestions(securityQuestions)
+    : []
+  const now = new Date()
+  const draft = await prisma.registrationDraft.create({
+    data: {
+      tokenHash: hashToken(draftToken),
+      registrationType: 'EMAIL',
+      username: nickname,
+      usernameNormalized,
+      nickname,
+      email,
+      phone,
+      passwordHash,
+      securityQuestions: hashedSecurityQuestions.length ? hashedSecurityQuestions : Prisma.JsonNull,
+      acceptedAgreement,
+      identityHash: getRegistrationIdentityHash(email, phone),
+      emailCodeHash: null,
+      emailCodeExpiresAt: null,
+      emailVerifiedAt: null,
+      expiresAt: new Date(now.getTime() + REGISTRATION_DRAFT_TTL_MS),
+    },
+  })
+
+  console.info('[auth.register.prepare] draft created', {
+    draftId: draft.id,
+    tokenExists: Boolean(draftToken),
+    expiresAt: draft.expiresAt.toISOString(),
+  })
+
+  return NextResponse.json({
+    registrationToken: draftToken,
+    expiresAt: draft.expiresAt.toISOString(),
+    email: draft.email,
+    phone: draft.phone,
+    emailVerified: false,
+    message: '注册资料已保存，请开始 E院体检',
+  }, { headers: noStoreHeaders })
+}
