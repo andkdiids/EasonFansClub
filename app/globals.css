@@ -602,10 +602,10 @@ flex-direction:column;
 .checkin-messages-panel .checkin-message-card { border-color:var(--border); background:var(--surface-elevated); }
 .checkin-messages-panel .checkin-comment-thread { background:var(--surface-subtle); }
 .checkin-messages-panel .checkin-comment-card { border:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
-.checkin-messages-panel .checkin-reply-thread { border-left-color:var(--border-strong); }
+.checkin-messages-panel .checkin-reply-thread,
+.post-replies-section .post-reply-thread { background:transparent; border:0; box-shadow:none; outline:none; }
 .checkin-messages-empty { background:var(--surface-subtle); }
 .post-replies-section .post-reply-card,.post-reply-form { border-color:var(--border); color:var(--foreground); background:var(--surface-elevated); }
-.post-replies-section .post-reply-thread { border-left-color:var(--border-strong); }
 .post-replies-hot-list { border:1px solid var(--border); color:var(--foreground); background:var(--surface-subtle); }
 .post-replies-hot-link { display:inline-block; border:1px solid var(--border); color:var(--primary); background:var(--surface); }
 .post-replies-empty,.post-replies-login { border:1px solid var(--border); color:var(--foreground-muted); background:var(--surface-elevated); }

@@ -328,7 +328,7 @@ export function CheckInMessagesPanel({
                                 </div>
 
                                 {visibleChildren.length ? (
-                                  <div className="checkin-reply-thread mt-2 space-y-1 border-l-2 pl-3 sm:pl-4">
+                                  <div className="checkin-reply-thread mt-2 space-y-1 pl-3 sm:pl-4">
                                     {visibleChildren.map(({ comment: child, replyToName }) => {
                                       const childIdentity = 'uid' in child.author ? child.author : null
                                       const childName = getCommentAuthorName(child.author)

@@ -267,7 +267,7 @@ export function PostRepliesSection({
           </div>
         </div>
         {visibleChildren.length ? (
-          <div className="post-reply-thread mt-2 ml-3 space-y-1 border-l-2 pl-3 sm:ml-4 sm:pl-4">
+          <div className="post-reply-thread mt-2 ml-3 space-y-1 pl-3 sm:ml-4 sm:pl-4">
             {visibleChildren.map((child) => renderCompactReply(child))}
             {children.length > 3 ? (
               <button
