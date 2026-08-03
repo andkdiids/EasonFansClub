@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react'
 import { usePathname } from 'next/navigation'
 import { MusicMiniPlayer } from '@/components/music/MusicMiniPlayer'
 
@@ -12,6 +12,61 @@ export type MusicPreviewTrack = {
   coverUrl?: string | null
   previewUrl: string
   previewDuration?: number | null
+  isFullPlayback?: boolean
+}
+
+type AudioAnalysis = {
+  context: AudioContext
+  source: MediaElementAudioSourceNode
+  analyser: AnalyserNode
+}
+
+// A media element can only have one MediaElementSourceNode for its lifetime.
+// Keeping this cache at module scope makes that invariant explicit even if a
+// provider is mounted through a development-only Strict Mode pass.
+const audioAnalysisCache = new WeakMap<HTMLAudioElement, AudioAnalysis>()
+
+function getAudioContextConstructor() {
+  return window.AudioContext
+    || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+}
+
+function createAudioAnalysis(audio: HTMLAudioElement): AudioAnalysis | null {
+  const cached = audioAnalysisCache.get(audio)
+  if (cached) return cached
+
+  const AudioContextClass = getAudioContextConstructor()
+  if (!AudioContextClass) {
+    console.warn('[EasMusic waveform] Web Audio API is unavailable; showing the idle baseline.')
+    return null
+  }
+
+  let context: AudioContext | null = null
+  try {
+    const createdContext = new AudioContextClass()
+    context = createdContext
+    const source = createdContext.createMediaElementSource(audio)
+    const analyser = createdContext.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.65
+    source.connect(analyser)
+    analyser.connect(createdContext.destination)
+    const analysis = { context: createdContext, source, analyser }
+    audioAnalysisCache.set(audio, analysis)
+    return analysis
+  } catch (error) {
+    if (context) void context.close().catch(() => undefined)
+    console.warn('[EasMusic waveform] Could not connect the existing audio element; showing the idle baseline.', error)
+    return null
+  }
+}
+
+function disposeAudioAnalysis(audio: HTMLAudioElement, analysis: AudioAnalysis | null) {
+  if (!analysis) return
+  analysis.source.disconnect()
+  analysis.analyser.disconnect()
+  if (audioAnalysisCache.get(audio) === analysis) audioAnalysisCache.delete(audio)
+  void analysis.context.close().catch(() => undefined)
 }
 
 type PlayerContextValue = {
@@ -23,11 +78,14 @@ type PlayerContextValue = {
   muted: boolean
   elapsed: number
   duration: number
+  audioRef: RefObject<HTMLAudioElement | null>
+  analyserNode: AnalyserNode | null
   prepareTrack: (track: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>
   playTrack: (track: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>
   pause: () => void
   eject: () => void
   toggleMuted: () => void
+  playInsertionSound: () => void
   previous: () => Promise<void>
   next: () => Promise<void>
 }
@@ -38,11 +96,14 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const pathname = usePathname()
   const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const analysisRef = useRef<AudioAnalysis | null>(null)
   const queueRef = useRef<MusicPreviewTrack[]>([])
   const durationRef = useRef(60)
+  const fullPlaybackRef = useRef(false)
   const prepareGenerationRef = useRef(0)
   const loadingTimeoutRef = useRef<number | null>(null)
   const loadingTimedOutRef = useRef(false)
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null)
   const [track, setTrack] = useState<MusicPreviewTrack | null>(null)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -72,6 +133,15 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     }, 15_000)
   }
 
+  function resumeAudioContext() {
+    const context = analysisRef.current?.context
+    if (context && context.state === 'suspended') {
+      void context.resume().catch(() => {
+        console.warn('[EasMusic waveform] AudioContext could not be resumed; showing the idle baseline.')
+      })
+    }
+  }
+
   function stop(resetTrack = false) {
     prepareGenerationRef.current += 1
     clearLoadingTimeout()
@@ -81,6 +151,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       audio.removeAttribute('src')
       audio.load()
     }
+    fullPlaybackRef.current = false
     setPlaying(false)
     setLoading(false)
     setEnded(false)
@@ -91,16 +162,29 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
 
   useEffect(() => {
     const audio = new Audio()
+    // Set CORS before any src assignment. Direct COS URLs must answer with a
+    // matching Access-Control-Allow-Origin header for analyser data to exist.
+    audio.crossOrigin = 'anonymous'
     audio.preload = 'metadata'
     audioRef.current = audio
+
+    const analysis = createAudioAnalysis(audio)
+    analysisRef.current = analysis
+    setAnalyserNode(analysis?.analyser || null)
+
     const onTimeUpdate = () => {
-      const cappedTime = Math.min(audio.currentTime, durationRef.current)
+      const cappedTime = fullPlaybackRef.current ? audio.currentTime : Math.min(audio.currentTime, durationRef.current)
       setElapsed(cappedTime)
-      if (audio.currentTime >= durationRef.current) {
+      if (!fullPlaybackRef.current && audio.currentTime >= durationRef.current) {
         audio.pause()
         audio.currentTime = durationRef.current
         setEnded(true)
       }
+    }
+    const onLoadedMetadata = () => {
+      if (!fullPlaybackRef.current || !Number.isFinite(audio.duration) || audio.duration <= 0) return
+      durationRef.current = audio.duration
+      setDuration(audio.duration)
     }
     const onPlaying = () => {
       clearLoadingTimeout()
@@ -111,7 +195,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     }
     const onPause = () => setPlaying(false)
     const onEnded = () => {
-      setElapsed(durationRef.current)
+      setElapsed(fullPlaybackRef.current && Number.isFinite(audio.duration) ? audio.duration : durationRef.current)
       setPlaying(false)
       setEnded(true)
     }
@@ -119,19 +203,35 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       clearLoadingTimeout()
       setLoading(false)
       setPlaying(false)
-      setError('这盘磁带暂时无法播放，请换一首试试。')
+      setError('这盘磁带暂时无法播放，请换一首试听。')
+      console.warn('[EasMusic audio] Playback failed. If this is a direct COS URL, check CORS for https://ecfc.fans and the local development origin.', {
+        mediaErrorCode: audio.error?.code,
+        crossOrigin: audio.crossOrigin,
+      })
     }
     const onPauseAll = () => audio.pause()
     audio.addEventListener('timeupdate', onTimeUpdate)
+    audio.addEventListener('loadedmetadata', onLoadedMetadata)
     audio.addEventListener('playing', onPlaying)
     audio.addEventListener('pause', onPause)
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('error', onError)
     window.addEventListener('easmusic:pause-all', onPauseAll)
+
     return () => {
       clearLoadingTimeout()
       window.removeEventListener('easmusic:pause-all', onPauseAll)
+      audio.removeEventListener('timeupdate', onTimeUpdate)
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('playing', onPlaying)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('error', onError)
       audio.pause()
+      fullPlaybackRef.current = false
+      disposeAudioAnalysis(audio, analysis)
+      if (analysisRef.current === analysis) analysisRef.current = null
+      setAnalyserNode((current) => current === analysis?.analyser ? null : current)
       audioRef.current = null
     }
   }, [])
@@ -151,6 +251,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         setError(null)
         setLoading(true)
         startLoadingTimeout()
+        resumeAudioContext()
         try {
           await audio.play()
         } catch {
@@ -171,7 +272,10 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     setElapsed(0)
     setEnded(false)
     setError(null)
-    const nextDuration = Math.max(1, Math.min(60, nextTrack.previewDuration || 60))
+    fullPlaybackRef.current = nextTrack.isFullPlayback === true
+    const nextDuration = fullPlaybackRef.current
+      ? Math.max(1, nextTrack.previewDuration || 60)
+      : Math.max(1, Math.min(60, nextTrack.previewDuration || 60))
     durationRef.current = nextDuration
     setDuration(nextDuration)
     setLoading(true)
@@ -179,6 +283,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audio.src = nextTrack.previewUrl
     audio.currentTime = 0
     audio.load()
+    resumeAudioContext()
     try {
       await audio.play()
     } catch {
@@ -202,6 +307,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audio.load()
     const intendedMuted = muted
     audio.muted = true
+    resumeAudioContext()
     try {
       await audio.play()
       if (prepareGenerationRef.current !== generation) return
@@ -211,6 +317,29 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       // The visible play control remains available if a browser declines priming.
     } finally {
       if (prepareGenerationRef.current === generation) audio.muted = intendedMuted
+    }
+  }
+
+  function playInsertionSound() {
+    const analysis = analysisRef.current
+    if (!analysis || analysis.context.state === 'closed') return
+    const { context } = analysis
+    resumeAudioContext()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = 'triangle'
+    oscillator.frequency.setValueAtTime(220, context.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(92, context.currentTime + 0.24)
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.28)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.3)
+    oscillator.onended = () => {
+      oscillator.disconnect()
+      gain.disconnect()
     }
   }
 
@@ -231,6 +360,8 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     muted,
     elapsed,
     duration,
+    audioRef,
+    analyserNode,
     prepareTrack,
     playTrack,
     pause: () => audioRef.current?.pause(),
@@ -240,6 +371,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       if (audioRef.current) audioRef.current.muted = nextMuted
       setMuted(nextMuted)
     },
+    playInsertionSound,
     previous: () => move(-1),
     next: () => move(1),
   }

@@ -5,6 +5,8 @@ import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicAlbumTrackList } from '@/components/music/MusicAlbumTrackList'
 import { formatMusicReleaseDate, formatTrackCount } from '@/lib/music-display'
+import { getCurrentUser } from '@/lib/auth'
+import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 
@@ -12,6 +14,10 @@ export const dynamic = 'force-dynamic'
 
 export default async function MusicAlbumPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const currentUser = await getCurrentUser().catch((error) => {
+    console.warn('[music-album.auth]', error)
+    return null
+  })
   const [album, config] = await Promise.all([
     prisma.musicAlbum.findFirst({ where: { id, status: 'PUBLISHED' }, include: { MusicSong: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } } }),
     getSiteAppearance(),
@@ -67,8 +73,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
           artist: song.artist,
           albumName: album.name,
           coverUrl: song.coverUrl || album.coverUrl,
-          previewUrl: song.previewUrl || '',
-          previewDuration: song.previewDuration,
+          ...resolveMusicPlayback(song, currentUser),
           trackNumber: song.trackNumber,
           lyricist: song.lyricist,
           composer: song.composer,

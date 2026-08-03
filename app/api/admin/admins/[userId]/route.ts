@@ -21,7 +21,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   if (target.role === 'SUPER_ADMIN') return NextResponse.json({ message: '不能移除超级管理员' }, { status: 400 })
 
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: target.id }, data: { role: 'USER' } })
+    await tx.user.update({ where: { id: target.id }, data: { role: 'USER', canPlayFullMusic: false } })
     await tx.adminPermission.deleteMany({ where: { userId: target.id } })
     await tx.adminAction.create({
       data: {

@@ -29,7 +29,7 @@ export function CassetteField({
         const layout = cassetteLayoutFor(song.id, index)
         return (
           <CassetteTape
-            key={song.id}
+            key={`cassette-slot-${index}`}
             song={song}
             index={index}
             selected={selectedId === song.id}

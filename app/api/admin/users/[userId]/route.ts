@@ -75,6 +75,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const data: {
     role?: UserRole
+    canPlayFullMusic?: boolean
     status?: UserStatus
     level?: number
     exp?: number
@@ -83,7 +84,10 @@ export async function PATCH(request: Request, context: RouteContext) {
     nicknameChangedAt?: Date | null
   } = {}
 
-  if (body?.role) data.role = body.role
+  if (body?.role) {
+    data.role = body.role
+    if (body.role !== 'ADMIN' && body.role !== 'SUPER_ADMIN') data.canPlayFullMusic = false
+  }
   if (body?.level !== undefined) data.level = Number(body.level)
   if (body?.exp !== undefined) data.exp = Number(body.exp)
   const targetPoints = body?.points === undefined ? undefined : Number(body.points)

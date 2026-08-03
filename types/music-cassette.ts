@@ -9,6 +9,7 @@ export type CassetteSong = {
   coverUrl?: string | null
   previewUrl: string
   previewDuration: number
+  isFullPlayback?: boolean
 }
 
 export type CassetteMachinePhase =

@@ -6,6 +6,8 @@ import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
+import { getCurrentUser } from '@/lib/auth'
+import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -13,6 +15,10 @@ import { getSiteAppearance } from '@/lib/site-config'
 export const dynamic = 'force-dynamic'
 
 export default async function MusicPage() {
+  const currentUser = await getCurrentUser().catch((error) => {
+    console.warn('[music-page.auth]', error)
+    return null
+  })
   const [albums, tours, cassetteSourceSongs, layoutConfig, config] = await Promise.all([
     prisma.musicAlbum.findMany({ where: { status: 'PUBLISHED' }, orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }], include: { _count: { select: { MusicSong: true } } } }),
     prisma.musicTour.findMany({
@@ -39,6 +45,7 @@ export default async function MusicPage() {
         coverUrl: true,
         previewUrl: true,
         previewDuration: true,
+        sourceAudioDurationMs: true,
         MusicAlbum: {
           select: {
             id: true,
@@ -54,18 +61,20 @@ export default async function MusicPage() {
   const carouselAlbums = albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl!, songCount: album._count.MusicSong, releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear) }))
   const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl, songCount: album._count.MusicSong }))
   const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({ ...tour, concertCount: _count.MusicConcert, cities: [...new Set(MusicConcert.map((concert) => concert.city))] }))
-  const cassetteSongs = cassetteSourceSongs.flatMap((song) => song.previewUrl ? [{
-    id: song.id,
-    title: song.title,
-    artist: song.artist,
-    albumId: song.MusicAlbum.id,
-    albumTitle: song.MusicAlbum.name,
-    releaseYear: song.releaseYear,
-    language: song.language,
-    coverUrl: song.coverUrl || song.MusicAlbum.coverUrl,
-    previewUrl: song.previewUrl,
-    previewDuration: Math.min(60, song.previewDuration || 60),
-  }] : [])
+  const cassetteSongs = cassetteSourceSongs.flatMap((song) => {
+    if (!song.previewUrl) return []
+    return [{
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      albumId: song.MusicAlbum.id,
+      albumTitle: song.MusicAlbum.name,
+      releaseYear: song.releaseYear,
+      language: song.language,
+      coverUrl: song.coverUrl || song.MusicAlbum.coverUrl,
+      ...resolveMusicPlayback(song, currentUser),
+    }]
+  })
 
   const musicMain = <div className="space-y-14 sm:space-y-20">
     <EasMusicCassetteHero songs={cassetteSongs} />

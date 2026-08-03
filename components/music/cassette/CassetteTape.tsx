@@ -1,7 +1,12 @@
 'use client'
 
-import type { CSSProperties, PointerEventHandler } from 'react'
+import Image from 'next/image'
+import { memo, type CSSProperties, type PointerEventHandler } from 'react'
+import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import type { CassetteSong } from '@/types/music-cassette'
+
+const CASSETTE_IMAGE_SRC = '/images/cassette/cassette-transparent.png'
+const CASSETTE_IMAGE_SIZES = '(max-width: 768px) 42vw, (max-width: 1100px) 155px, 240px'
 
 type CassetteTapeProps = {
   song: CassetteSong
@@ -18,19 +23,37 @@ type CassetteTapeProps = {
   onPointerCancel?: PointerEventHandler<HTMLButtonElement>
 }
 
-export function CassetteTapeVisual({ song, index }: Readonly<{ song: CassetteSong; index: number }>) {
+export const CassetteTapeVisual = memo(function CassetteTapeVisual({ song, index, priority = index === 0 }: Readonly<{ song: CassetteSong; index: number; priority?: boolean }>) {
+  const albumCover = song.coverUrl || null
+
   return (
     <>
     <span className="easmusic-tape-shell">
 
-  <img
-    src="/images/cassette/cassette-transparent.png"
+  <Image
+    src={CASSETTE_IMAGE_SRC}
     alt=""
+    fill
+    priority={priority}
+    sizes={CASSETTE_IMAGE_SIZES}
     className="easmusic-tape-image"
+    draggable={false}
   />
 
+{albumCover ? (
+  <span className="easmusic-tape-cover">
+    <Image
+      src={albumCover}
+      alt={`${song.title}专辑封面`}
+      fill
+      sizes="(max-width: 768px) 20px, (max-width: 1100px) 24px, 32px"
+      className="easmusic-tape-cover-image"
+    />
+  </span>
+) : null}
+
 <span className="easmusic-tape-copy">
-  <strong>{song.title}</strong>
+  <strong><LedMarqueeText text={song.title} /></strong>
 </span>
 
 
@@ -49,7 +72,7 @@ export function CassetteTapeVisual({ song, index }: Readonly<{ song: CassetteSon
 </span>
     </>
   )
-}
+})
 
 
 export function CassetteTape({

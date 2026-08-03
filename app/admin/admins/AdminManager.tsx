@@ -13,6 +13,7 @@ type AdminUser = {
   role: string
   createdAt: string | Date
   permissions: string[]
+  canPlayFullMusic: boolean
 }
 
 type SearchUser = {
@@ -46,14 +47,14 @@ export function AdminManager({
   const [error, setError] = useState('')
   const [submittingId, setSubmittingId] = useState('')
 
-  async function saveAdmin(userId: string, permissions: string[]) {
+  async function saveAdmin(userId: string, permissions: string[], canPlayFullMusic: boolean) {
     setSubmittingId(userId)
     setMessage('')
     setError('')
     const response = await fetch('/api/admin/admins', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, permissions }),
+      body: JSON.stringify({ userId, permissions, canPlayFullMusic }),
     })
     const data = await response.json().catch(() => ({}))
     setSubmittingId('')
@@ -119,6 +120,7 @@ export function AdminManager({
                   role: user.role,
                   createdAt: new Date(),
                   permissions: [],
+                  canPlayFullMusic: false,
                 }}
                 onSave={saveAdmin}
                 isSubmitting={submittingId === user.id}
@@ -171,13 +173,14 @@ function PermissionCard({
   actionLabel,
 }: Readonly<{
   user: AdminUser
-  onSave: (userId: string, permissions: string[]) => void
+  onSave: (userId: string, permissions: string[], canPlayFullMusic: boolean) => void
   onRemove?: (userId: string) => void
   isSubmitting: boolean
   actionLabel: string
 }>) {
   const [selected, setSelected] = useState(() => new Set(user.permissions))
   const isSuperAdmin = user.role === 'SUPER_ADMIN'
+  const [fullMusicEnabled, setFullMusicEnabled] = useState(user.canPlayFullMusic)
 
   function toggle(key: string) {
     setSelected((current) => {
@@ -202,7 +205,7 @@ function PermissionCard({
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => onSave(user.id, Array.from(selected))}
+            onClick={() => onSave(user.id, Array.from(selected), fullMusicEnabled)}
             disabled={isSubmitting || isSuperAdmin}
             className="min-h-11 rounded-full bg-brand-950 px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -219,6 +222,24 @@ function PermissionCard({
           ) : null}
         </div>
       </div>
+
+      <label className={`mt-4 block rounded-xl border p-3 ${isSuperAdmin ? 'border-sky-100 bg-white/70 opacity-75' : 'border-white bg-white/80'}`}>
+        <span className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={isSuperAdmin || fullMusicEnabled}
+            disabled={isSuperAdmin}
+            onChange={() => setFullMusicEnabled((current) => !current)}
+            className="mt-1 h-4 w-4"
+          />
+          <span>
+            <span className="block text-sm font-black text-brand-950">允许完整播放音乐</span>
+            <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">
+              {isSuperAdmin ? '超级管理员默认拥有完整音频播放权限。' : '开启后，该管理员可播放 EasMusic 完整音频。'}
+            </span>
+          </span>
+        </span>
+      </label>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {adminPermissionGroups.map((permission) => (

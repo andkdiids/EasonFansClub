@@ -15,6 +15,7 @@ type MusicPlayerProps = {
   sourceType?: string | null
   previewUrl?: string | null
   previewDuration?: number | null
+  isFullPlayback?: boolean
   queue?: MusicPreviewTrack[]
 }
 
@@ -27,10 +28,13 @@ export function MusicPlayer({
   sourceType,
   previewUrl,
   previewDuration = 60,
+  isFullPlayback = false,
   queue,
 }: Readonly<MusicPlayerProps>) {
   const player = useMusicPlayer()
-  const duration = Math.max(1, Math.min(60, previewDuration || 60))
+  const duration = isFullPlayback
+    ? Math.max(1, previewDuration || 60)
+    : Math.max(1, Math.min(60, previewDuration || 60))
   const active = player.track?.id === id
   const elapsed = active ? player.elapsed : 0
   const playing = active && player.playing
@@ -45,6 +49,7 @@ export function MusicPlayer({
       coverUrl,
       previewUrl,
       previewDuration: duration,
+      isFullPlayback,
     }, queue)
   }
 

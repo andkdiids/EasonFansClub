@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
+import Image from 'next/image'
 import { CassetteField } from '@/components/music/cassette/CassetteField'
 import { CassetteRecorder } from '@/components/music/cassette/CassetteRecorder'
 import { CassetteTapeVisual } from '@/components/music/cassette/CassetteTape'
@@ -12,27 +13,7 @@ import type { CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
 
 const INSERT_DURATION_MS = 820
 const EJECT_DURATION_MS = 360
-
-function playCassetteInsertSound() {
-  // Original in-browser synthesis: no sampled or third-party audio asset is used.
-  const AudioContextClass = window.AudioContext
-    || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!AudioContextClass) return
-  const context = new AudioContextClass()
-  const oscillator = context.createOscillator()
-  const gain = context.createGain()
-  oscillator.type = 'triangle'
-  oscillator.frequency.setValueAtTime(220, context.currentTime)
-  oscillator.frequency.exponentialRampToValueAtTime(92, context.currentTime + 0.24)
-  gain.gain.setValueAtTime(0.0001, context.currentTime)
-  gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.015)
-  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.28)
-  oscillator.connect(gain)
-  gain.connect(context.destination)
-  oscillator.start()
-  oscillator.stop(context.currentTime + 0.3)
-  oscillator.onended = () => void context.close()
-}
+const INITIAL_CASSETTE_SEED = 20260803
 
 function toCassetteSong(track: MusicPreviewTrack, knownSongs: readonly CassetteSong[]): CassetteSong {
   return knownSongs.find((song) => song.id === track.id) || {
@@ -40,7 +21,8 @@ function toCassetteSong(track: MusicPreviewTrack, knownSongs: readonly CassetteS
     albumId: '',
     albumTitle: track.albumName || 'EasMusic',
     releaseYear: 0,
-    previewDuration: Math.min(60, track.previewDuration || 60),
+    previewDuration: track.isFullPlayback ? track.previewDuration || 60 : Math.min(60, track.previewDuration || 60),
+    isFullPlayback: track.isFullPlayback,
   }
 }
 
@@ -48,16 +30,20 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
   const player = useMusicPlayer()
   const deckRef = useRef<HTMLElement | null>(null)
   const timersRef = useRef<Set<number>>(new Set())
-  const [seed, setSeed] = useState(() => createCassetteSeed())
+  // Keep the first render deterministic for SSR hydration, then restore the
+  // original random cassette selection once the client has mounted.
+  const [seed, setSeed] = useState(INITIAL_CASSETTE_SEED)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null)
   const [overDeck, setOverDeck] = useState(false)
   const [transition, setTransition] = useState<'idle' | 'inserting' | 'ejecting'>('idle')
-  const [pendingTrack, setPendingTrack] = useState<CassetteSong | null>(null)
   const tapes = useMemo(() => selectCassetteSongs(songs, 8, seed), [seed, songs])
   const selectedTrack = tapes.find((song) => song.id === selectedId) || null
   const activeTrack = player.track ? toCassetteSong(player.track, songs) : null
+  const activeTapeIndex = activeTrack ? tapes.findIndex((song) => song.id === activeTrack.id) : -1
+  const previousDisabled = activeTapeIndex <= 0
+  const nextDisabled = activeTapeIndex < 0 || activeTapeIndex >= tapes.length - 1
   const draggingIndex = draggingId ? tapes.findIndex((song) => song.id === draggingId) : -1
   const draggingTrack = draggingIndex >= 0 ? tapes[draggingIndex] : null
 
@@ -69,29 +55,30 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
     timersRef.current.add(timer)
   }, [])
 
-  useEffect(() => () => {
-    for (const timer of timersRef.current) window.clearTimeout(timer)
-    timersRef.current.clear()
+  useEffect(() => {
+    setSeed(createCassetteSeed())
+    const timers = timersRef.current
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer)
+      timers.clear()
+    }
   }, [])
 
   const runInsertion = useCallback((song: CassetteSong) => {
     setTransition('inserting')
-    setPendingTrack(song)
     setSelectedId(song.id)
     schedule(() => {
       setTransition('idle')
-      setPendingTrack(null)
       void player.playTrack(song, tapes)
     }, INSERT_DURATION_MS)
   }, [player, schedule, tapes])
 
   const insertSong = useCallback((song: CassetteSong) => {
     if (transition !== 'idle' || player.loading) return
-    playCassetteInsertSound()
+    player.playInsertionSound()
     void player.prepareTrack(song, tapes)
     if (player.track) {
       setTransition('ejecting')
-      setPendingTrack(song)
       player.pause()
       schedule(() => {
         player.eject()
@@ -115,17 +102,6 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
     onDragPoint: setDragPoint,
   })
 
-  const eject = useCallback(() => {
-    if (!player.track || transition !== 'idle') return
-    setTransition('ejecting')
-    player.pause()
-    schedule(() => {
-      player.eject()
-      setTransition('idle')
-      setSelectedId(null)
-    }, EJECT_DURATION_MS)
-  }, [player, schedule, transition])
-
   let phase: CassetteMachinePhase = 'idle'
   if (transition === 'inserting') phase = 'inserting'
   else if (transition === 'ejecting') phase = 'ejecting'
@@ -139,12 +115,13 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
   return (
     <section className="easmusic-cassette-hero" aria-labelledby="easmusic-cassette-title">
       <header className="easmusic-cassette-heading">
-        <div>
+         <div className="easmusic-cassette-heading-copy">
           <span>CASSETTE SAMPLER · 60 SEC</span>
           <h1 id="easmusic-cassette-title">把一首歌，放进今晚</h1>
           <p>拖动一盘随机歌曲磁带到中央录音机，试听公开的 60 秒片段。</p>
         </div>
-        <button
+         <button
+           className="easmusic-cassette-refresh-button"
           type="button"
           onClick={() => {
             cancelDrag()
@@ -170,33 +147,45 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
               ref={deckRef}
               phase={phase}
               track={activeTrack}
-              pendingTrack={pendingTrack}
               overDeck={overDeck}
-              elapsed={player.elapsed}
-              duration={player.duration}
-              muted={player.muted}
               error={player.error}
+              audioRef={player.audioRef}
+              analyserNode={player.analyserNode}
+              previousDisabled={previousDisabled}
+              nextDisabled={nextDisabled}
               onTogglePlayback={() => {
                 if (player.track) void player.playTrack(player.track)
               }}
-              onEject={eject}
-              onToggleMuted={player.toggleMuted}
+              onPrevious={() => void player.previous()}
+              onNext={() => void player.next()}
             />
           </div>
-          <div className="easmusic-cassette-selection" aria-live="polite">
-            {selectedTrack ? (
-              <>
-                <span>已选择</span>
-                <strong>{selectedTrack.title}</strong>
-                <small>{selectedTrack.albumTitle} · {selectedTrack.releaseYear || selectedTrack.language}</small>
+          {selectedTrack ? (
+            <div
+              className="easmusic-cassette-selection"
+              data-has-cover={selectedTrack.coverUrl ? 'true' : 'false'}
+              aria-live="polite"
+            >
+                <span className="easmusic-cassette-selection-label">已选择</span>
+                {selectedTrack.coverUrl ? (
+                  <Image
+                    src={selectedTrack.coverUrl}
+                    alt={`${selectedTrack.albumTitle} 专辑封面`}
+                    width={44}
+                    height={44}
+                    sizes="44px"
+                    className="easmusic-selected-album-cover"
+                  />
+                ) : null}
+                <div className="easmusic-cassette-selection-copy">
+                  <strong>{selectedTrack.title}</strong>
+                  <small>{selectedTrack.albumTitle} · {selectedTrack.releaseYear || selectedTrack.language}</small>
+                </div>
                 <button type="button" onClick={() => insertSong(selectedTrack)} disabled={transition !== 'idle' || player.loading}>
                   {activeTrack ? '更换为这盘磁带' : '放入录音机'}
                 </button>
-              </>
-            ) : (
-              <p>桌面端可直接拖入；触屏与键盘用户可先选择磁带，再点击“放入录音机”。</p>
-            )}
-          </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <div className="easmusic-cassette-empty">
@@ -214,7 +203,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
               className="easmusic-tape easmusic-tape-float"
               style={{ '--float-x': `${dragPoint.x}px`, '--float-y': `${dragPoint.y}px` } as CSSProperties}
             >
-              <CassetteTapeVisual song={draggingTrack} index={draggingIndex} />
+              <CassetteTapeVisual song={draggingTrack} index={draggingIndex} priority />
             </div>
           </div>,
           document.body,

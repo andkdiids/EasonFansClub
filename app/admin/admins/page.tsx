@@ -95,6 +95,7 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
             role: user.role,
             createdAt: user.createdAt,
             permissions: user.AdminPermission.map((item) => item.permissionKey),
+            canPlayFullMusic: user.canPlayFullMusic,
           }))}
           searchUsers={searchUsers.map((user) => ({
             id: user.id,
@@ -105,6 +106,7 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
             role: user.role,
             status: user.status,
             profile: user.Profile ? { displayName: user.Profile.displayName, avatarUrl: user.Profile.avatarUrl } : null,
+            canPlayFullMusic: false,
           }))}
           logs={logs.map((log) => ({
             id: log.id,

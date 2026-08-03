@@ -1928,6 +1928,7 @@ model User {
   avatarUrl                                              String?
   bio                                                    String?
   role                                                   UserRole                    @default(USER)
+  canPlayFullMusic                                       Boolean                     @default(false)
   level                                                  Int                         @default(1)
   points                                                 Int                         @default(0)
   consecutiveDays                                        Int                         @default(0)

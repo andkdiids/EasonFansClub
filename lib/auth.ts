@@ -18,6 +18,7 @@ export type SessionUser = {
   level?: number
   experience?: number
   role: UserRole
+  canPlayFullMusic?: boolean
 }
 
 export class AuthServiceUnavailableError extends Error {
@@ -99,6 +100,7 @@ export async function getCurrentUser() {
             level: true,
             experience: true,
             role: true,
+            canPlayFullMusic: true,
             status: true,
             isDeleted: true,
             Profile: { select: { id: true, avatarUrl: true } },
@@ -118,6 +120,7 @@ export async function getCurrentUser() {
         level: user.level,
         experience: user.experience,
         role: user.role,
+        canPlayFullMusic: user.canPlayFullMusic,
       }
     })
 
