@@ -1,9 +1,10 @@
 'use client'
 
-import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type RefObject } from 'react'
 import { usePathname } from 'next/navigation'
 import { MusicMiniPlayer } from '@/components/music/MusicMiniPlayer'
 import type { MusicPlaybackResponse } from '@/lib/music-playback'
+import type { AudioAnalysisMode } from '@/types/music-cassette'
 
 export type MusicPreviewTrack = {
   id: string
@@ -21,6 +22,10 @@ type AudioAnalysis = {
   context: AudioContext
   source: MediaElementAudioSourceNode
   analyser: AnalyserNode
+}
+
+type AudioAnalysisModeDetails = {
+  analyserAllZero?: boolean
 }
 
 type PlaybackResolution = MusicPlaybackResponse & {
@@ -144,10 +149,7 @@ function createAudioAnalysis(audio: HTMLAudioElement): AudioAnalysis | null {
   if (cached) return cached
 
   const AudioContextClass = getAudioContextConstructor()
-  if (!AudioContextClass) {
-    console.warn('[EasMusic waveform] Web Audio API is unavailable; showing the idle baseline.')
-    return null
-  }
+  if (!AudioContextClass) return null
 
   let context: AudioContext | null = null
   try {
@@ -164,7 +166,6 @@ function createAudioAnalysis(audio: HTMLAudioElement): AudioAnalysis | null {
     return analysis
   } catch {
     if (context) void context.close().catch(() => undefined)
-    console.warn('[EasMusic waveform] Could not connect the existing audio element; showing the idle baseline.')
     return null
   }
 }
@@ -188,6 +189,8 @@ type PlayerContextValue = {
   duration: number
   audioRef: RefObject<HTMLAudioElement | null>
   analyserNode: AnalyserNode | null
+  audioAnalysisMode: AudioAnalysisMode
+  reportAudioAnalysisMode: (mode: AudioAnalysisMode, details?: AudioAnalysisModeDetails) => void
   prepareTrack: (track: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>
   playTrack: (track: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>
   pause: () => void
@@ -213,7 +216,10 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const prepareGenerationRef = useRef(0)
   const loadingTimeoutRef = useRef<number | null>(null)
   const loadingTimedOutRef = useRef(false)
+  const audioAnalysisModeRef = useRef<AudioAnalysisMode>('idle')
+  const analysisFallbackLoggedRef = useRef(false)
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null)
+  const [audioAnalysisMode, setAudioAnalysisMode] = useState<AudioAnalysisMode>('idle')
   const [track, setTrack] = useState<MusicPreviewTrack | null>(null)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -225,6 +231,29 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const [expanded, setExpanded] = useState(false)
 
   trackRef.current = track
+
+  const reportAudioAnalysisMode = useCallback((mode: AudioAnalysisMode, details: AudioAnalysisModeDetails = {}) => {
+    const previousMode = audioAnalysisModeRef.current
+    if (previousMode === mode) return
+    audioAnalysisModeRef.current = mode
+    setAudioAnalysisMode(mode)
+
+    if (process.env.NODE_ENV !== 'production' && mode === 'fallback' && !analysisFallbackLoggedRef.current) {
+      analysisFallbackLoggedRef.current = true
+      console.info('[EasMusic waveform] fallback visualization enabled', {
+        previousMode,
+        audioAnalysisMode: mode,
+        audioContextState: analysisRef.current?.context.state ?? null,
+        analyserAvailable: Boolean(analysisRef.current?.analyser),
+        analyserAllZero: details.analyserAllZero ?? false,
+      })
+    }
+  }, [])
+
+  const resetAudioAnalysisMode = useCallback(() => {
+    analysisFallbackLoggedRef.current = false
+    reportAudioAnalysisMode('idle')
+  }, [reportAudioAnalysisMode])
 
   function clearLoadingTimeout() {
     if (loadingTimeoutRef.current !== null) {
@@ -344,6 +373,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       sameOrigin = false
     }
 
+    resetAudioAnalysisMode()
     const previousAnalysis = analysisRef.current
     if (previousAnalysis) {
       disposeAudioAnalysis(audio, previousAnalysis)
@@ -364,9 +394,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   function resumeAudioContext() {
     const context = analysisRef.current?.context
     if (context && context.state === 'suspended') {
-      void context.resume().catch(() => {
-        console.warn('[EasMusic waveform] AudioContext could not be resumed; showing the idle baseline.')
-      })
+      void context.resume().catch(() => undefined)
     }
   }
 
@@ -379,6 +407,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       audio.removeAttribute('src')
       audio.load()
     }
+    resetAudioAnalysisMode()
     fullPlaybackRef.current = false
     setPlaying(false)
     setLoading(false)
@@ -394,6 +423,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audioRef.current = audio
     analysisRef.current = null
     setAnalyserNode(null)
+    resetAudioAnalysisMode()
 
     const onTimeUpdate = () => {
       const cappedTime = fullPlaybackRef.current ? audio.currentTime : Math.min(audio.currentTime, durationRef.current)
@@ -416,16 +446,21 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       setEnded(false)
       setError(null)
     }
-    const onPause = () => setPlaying(false)
+    const onPause = () => {
+      setPlaying(false)
+      reportAudioAnalysisMode('idle')
+    }
     const onEnded = () => {
       setElapsed(fullPlaybackRef.current && Number.isFinite(audio.duration) ? audio.duration : durationRef.current)
       setPlaying(false)
       setEnded(true)
+      reportAudioAnalysisMode('idle')
     }
     const onError = () => {
       clearLoadingTimeout()
       setLoading(false)
       setPlaying(false)
+      reportAudioAnalysisMode('idle')
       const currentTrack = trackRef.current
       const mediaError = audio.error?.code === 1
         ? new DOMException('Playback was aborted', 'AbortError')
@@ -455,13 +490,14 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       audio.removeEventListener('error', onError)
       audio.pause()
       fullPlaybackRef.current = false
+      reportAudioAnalysisMode('idle')
       const analysis = analysisRef.current
       disposeAudioAnalysis(audio, analysis)
       analysisRef.current = null
       setAnalyserNode(null)
       audioRef.current = null
     }
-  }, [])
+  }, [reportAudioAnalysisMode, resetAudioAnalysisMode])
 
   async function playResolvedTrack(nextTrack: MusicPreviewTrack, queue = queueRef.current) {
     const audio = audioRef.current
@@ -667,6 +703,8 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     duration,
     audioRef,
     analyserNode,
+    audioAnalysisMode,
+    reportAudioAnalysisMode,
     prepareTrack,
     playTrack,
     pause: () => audioRef.current?.pause(),

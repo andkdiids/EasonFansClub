@@ -23,3 +23,5 @@ export type CassetteMachinePhase =
   | 'ended'
   | 'ejecting'
   | 'error'
+
+export type AudioAnalysisMode = 'real' | 'fallback' | 'idle'

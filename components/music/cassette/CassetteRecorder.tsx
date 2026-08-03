@@ -4,7 +4,7 @@ import Image from 'next/image'
 import { forwardRef } from 'react'
 import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import { RecorderWaveform } from '@/components/music/cassette/RecorderWaveform'
-import type { CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
+import type { AudioAnalysisMode, CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
 
 type CassettePlayerProps = {
   phase: CassetteMachinePhase
@@ -13,6 +13,8 @@ type CassettePlayerProps = {
   error: string | null
   audioRef: { readonly current: HTMLAudioElement | null }
   analyserNode: AnalyserNode | null
+  analysisMode: AudioAnalysisMode
+  onAnalysisModeChange: (mode: AudioAnalysisMode, details?: { analyserAllZero?: boolean }) => void
   previousDisabled: boolean
   nextDisabled: boolean
   onTogglePlayback: () => void
@@ -27,6 +29,8 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
   error,
   audioRef,
   analyserNode,
+  analysisMode,
+  onAnalysisModeChange,
   previousDisabled,
   nextDisabled,
   onTogglePlayback,
@@ -61,7 +65,13 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
         />
       </div>
 
-      <RecorderWaveform analyser={analyserNode} audioRef={audioRef} playing={playing} />
+      <RecorderWaveform
+        analyser={analyserNode}
+        audioRef={audioRef}
+        playing={playing}
+        analysisMode={analysisMode}
+        onAnalysisModeChange={onAnalysisModeChange}
+      />
 
       <div className="easmusic-recorder-controls">
         <button
