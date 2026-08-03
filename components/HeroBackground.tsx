@@ -17,7 +17,7 @@ type HeroBackgroundStyle = CSSProperties & {
 
 export function HeroBackground({ visual, fallbackImageUrl, className = '', priority = false, positionMode = 'responsive' }: Readonly<HeroBackgroundProps>) {
   if (visual && !visual.enabled) return null
-  const imageUrl = publicImageUrl(visual?.imageUrl)
+  const imageUrl = publicImageUrl(visual?.imageUrl || fallbackImageUrl)
   if (!imageUrl) return null
   const desktopPosition = `${visual?.desktopPositionX ?? 50}% ${visual?.desktopPositionY ?? 50}%`
   const mobilePosition = `${visual?.mobilePositionX ?? 50}% ${visual?.mobilePositionY ?? 50}%`

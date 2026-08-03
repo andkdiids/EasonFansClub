@@ -5,9 +5,9 @@ import { defaultSiteAppearance, mergeSiteAppearanceConfig } from '../lib/site-co
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('视觉管理复用 site.appearance JSON 且提供五个可扩展视觉位', () => {
+test('视觉管理复用 site.appearance JSON 且提供六个可扩展视觉位', () => {
   const config = mergeSiteAppearanceConfig({})
-  assert.deepEqual(Object.keys(config.heroVisuals), ['login', 'home', 'activities', 'birthday', 'music'])
+  assert.deepEqual(Object.keys(config.heroVisuals), ['login', 'register', 'home', 'activities', 'birthday', 'music'])
   for (const visual of Object.values(config.heroVisuals)) {
     assert.equal(visual.desktopPositionX, 50)
     assert.equal(visual.desktopPositionY, 50)
@@ -19,6 +19,22 @@ test('视觉管理复用 site.appearance JSON 且提供五个可扩展视觉位'
   assert.match(api, /key: 'site\.appearance'/)
   assert.match(api, /requireAdmin\('site_config_manage'\)/)
   assert.ok(defaultSiteAppearance.heroVisuals.login.enabled)
+  assert.ok(defaultSiteAppearance.heroVisuals.register.enabled)
+})
+
+test('注册视觉兼容旧配置并按注册图、登录视觉、登录图顺序回退', () => {
+  const registerImage = mergeSiteAppearanceConfig({ images: { registerBackgroundUrl: 'register-image' } })
+  assert.equal(registerImage.heroVisuals.register.imageUrl, 'register-image')
+
+  const loginVisual = mergeSiteAppearanceConfig({
+    images: { loginBackgroundUrl: 'login-image' },
+    heroVisuals: { login: { imageUrl: 'login-visual', desktopPositionY: 32 } },
+  })
+  assert.equal(loginVisual.heroVisuals.register.imageUrl, 'login-visual')
+  assert.equal(loginVisual.heroVisuals.register.desktopPositionY, 32)
+
+  const legacyLoginImage = mergeSiteAppearanceConfig({ images: { loginBackgroundUrl: 'login-image' } })
+  assert.equal(legacyLoginImage.heroVisuals.register.imageUrl, 'login-image')
 })
 
 test('HeroBackground 用 CSS 变量统一桌面与移动端 position', () => {
@@ -44,6 +60,7 @@ test('后台视觉编辑器支持上传、双预览、滑块、拖拽与独立�
 
 test('登录、首页、活动和 EasMusic 接入视觉配置且旧生日页关闭', () => {
   assert.match(read('app/login/page.tsx'), /heroVisual=\{config\.heroVisuals\.login\}/)
+  assert.match(read('app/register/page.tsx'), /heroVisual=\{config\.heroVisuals\.register\}/)
   assert.match(read('components/HomeLayoutSurface.tsx'), /siteConfig\.heroVisuals\.home/)
   assert.match(read('app/activities/page.tsx'), /heroVisuals\.activities/)
   assert.match(read('app/birthday/page.tsx'), /redirect\('\/activities'\)/)

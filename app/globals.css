@@ -3051,3 +3051,76 @@ body:has(.games-full-width) .app-shell main {
     0 0 8px rgba(255,255,255,.7),
     0 0 18px rgba(255,255,255,.35);
 }
+
+/* Authentication visual and registration density refinements. */
+@media (min-width: 769px) {
+  .auth-page .auth-hero-background {
+    /* Reveal more of the uploaded portrait without changing its aspect ratio. */
+    background-position: center 35%;
+  }
+
+  .register-auth-page {
+    height: auto;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .register-auth-page .auth-form-panel {
+    padding-top: 15px;
+    padding-bottom: 15px;
+  }
+
+  .register-auth-page .auth-form-heading {
+    padding-bottom: 9px;
+  }
+
+  .register-auth-page .auth-form-content {
+    margin-top: 9px;
+  }
+
+  .register-auth-page .auth-form-footer {
+    margin-top: 9px;
+    padding-top: 8px;
+  }
+
+  .register-auth-page .register-form {
+    gap: .4rem;
+  }
+
+  .register-auth-page .register-form > label,
+  .register-auth-page .register-form > fieldset {
+    margin-top: .2rem;
+  }
+
+  .register-auth-page .register-form input:not([type='checkbox']) {
+    min-height: 38px;
+  }
+
+  .register-auth-page .register-form > section {
+    padding: 10px;
+  }
+
+  .register-auth-page .register-form > section > :is(button, p) {
+    margin-top: .45rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .auth-page .auth-hero-background {
+    /* Keep the existing admin-controlled mobile crop. */
+    background-position: var(--hero-position-mobile);
+  }
+
+  .register-auth-page .auth-form-panel {
+    padding: 16px 14px;
+  }
+
+  .register-auth-page .register-form {
+    gap: .45rem;
+  }
+
+  .register-auth-page .register-form > section {
+    padding: 10px;
+  }
+}

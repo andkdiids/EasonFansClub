@@ -15,7 +15,8 @@ export default async function RegisterPage() {
       title="创建账号"
       subtitle={config.text.registerHint}
       siteName={config.text.siteName}
-      backgroundUrl={config.images.registerBackgroundUrl}
+      backgroundUrl={config.images.registerBackgroundUrl || config.images.loginBackgroundUrl}
+      heroVisual={config.heroVisuals.register}
       logoUrl={config.images.navLogoUrl || config.images.logoUrl}
       pageClassName="register-auth-page"
       footer={

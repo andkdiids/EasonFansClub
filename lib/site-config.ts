@@ -164,8 +164,8 @@ function percentage(value: unknown, fallback = 50) {
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : fallback
 }
 
-function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUrl: string): SiteHeroVisualConfig {
-  const fallback = defaultSiteAppearance.heroVisuals[key]
+function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUrl: string, fallbackVisual = defaultSiteAppearance.heroVisuals[key]): SiteHeroVisualConfig {
+  const fallback = fallbackVisual
   const partial = value && typeof value === 'object' ? value as Partial<SiteHeroVisualConfig> : {}
   const focusPoint = partial.focusPoint && typeof partial.focusPoint === 'object'
     ? { x: percentage(partial.focusPoint.x), y: percentage(partial.focusPoint.y) }
@@ -193,6 +193,10 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
   ))
   const firstHeroImage = heroSlides.filter((item) => item.isVisible && item.imageUrl).sort((a, b) => a.sortOrder - b.sortOrder)[0]?.imageUrl || images.checkinBackgroundUrl || images.loginBackgroundUrl
   const visualInput = partial.heroVisuals as Partial<Record<HeroVisualKey, Partial<SiteHeroVisualConfig>>> | undefined
+  const loginVisual = normalizeHeroVisual('login', visualInput?.login, images.loginBackgroundUrl)
+  const registerVisualFallback = images.registerBackgroundUrl
+    ? defaultSiteAppearance.heroVisuals.register
+    : { ...loginVisual, key: 'register' as const, title: defaultSiteAppearance.heroVisuals.register.title }
   return {
     text: { ...defaultSiteAppearance.text, ...(partial.text || {}) },
     colors: { ...defaultSiteAppearance.colors, ...(partial.colors || {}) },
@@ -211,7 +215,8 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
       radius: enumValue(partial.heroStyle?.radius, heroRadiusSizes, defaultSiteAppearance.heroStyle.radius),
     },
     heroVisuals: {
-      login: normalizeHeroVisual('login', visualInput?.login, images.loginBackgroundUrl),
+      login: loginVisual,
+      register: normalizeHeroVisual('register', visualInput?.register, images.registerBackgroundUrl || loginVisual.imageUrl, registerVisualFallback),
       home: normalizeHeroVisual('home', visualInput?.home, firstHeroImage),
       activities: normalizeHeroVisual('activities', visualInput?.activities, images.activityCoverUrl),
       birthday: normalizeHeroVisual('birthday', visualInput?.birthday, images.activityCoverUrl),

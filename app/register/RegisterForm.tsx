@@ -133,6 +133,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed
   const isRegistrationComplete = Object.keys(validateRegistrationFields()).length === 0
   const canStartHospitalCheck = isRegistrationComplete && !hospitalPassed && !hospitalLoading && !isPreparing
+  const hospitalQuestionId = hospitalState?.question?.questionId || ''
+  const hospitalAudioUrl = hospitalState?.question?.audioUrl || ''
 
   useEffect(() => {
     mountedRef.current = true
@@ -752,9 +754,41 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const audio = audioRef.current
+    let disposed = false
+
+    if (!hospitalQuestionId || !hospitalAudioUrl || !audio) {
+      setHasPlayed(false)
+      audio?.pause()
+      return
+    }
+
+    const autoPlay = () => {
+      if (disposed || audioRef.current !== audio) return
+      setHasPlayed(true)
+      void audio.play().catch(() => {
+        if (!disposed) setHasPlayed(false)
+      })
+    }
+
     setHasPlayed(false)
-    audioRef.current?.pause()
-  }, [hospitalState?.question?.questionId])
+    audio.pause()
+    audio.src = hospitalAudioUrl
+    audio.currentTime = 0
+    audio.load()
+
+    if (audio.readyState >= 3) {
+      autoPlay()
+    } else {
+      audio.addEventListener('canplay', autoPlay, { once: true })
+    }
+
+    return () => {
+      disposed = true
+      audio.removeEventListener('canplay', autoPlay)
+      audio.pause()
+    }
+  }, [hospitalQuestionId, hospitalAudioUrl])
 
   if (policy.registrationClosed || !policy.allowEmailRegistration) {
     return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">网站当前暂未开放邮箱验证注册，请关注后续公告。</div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
@@ -886,30 +920,36 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
                     </button>
                   ))}
                 </div>
-                {!hospitalAnswerResult ? (
-                  <button type="button" onClick={() => void answerHospitalQuestion()} disabled={!selectedAnswer || answering} className="mt-4 w-full rounded-sm border border-blue-300/60 bg-blue-400/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-400/20 disabled:cursor-not-allowed disabled:opacity-40">
-                    {answering ? '提交中…' : '确认答案'}
-                  </button>
-                ) : (
-                  <div className={hospitalAnswerResult.correct
-                    ? 'mt-4 border border-emerald-300/30 bg-emerald-950/30 p-4'
-                    : 'mt-4 border border-rose-300/30 bg-rose-950/30 p-4'}
-                  >
-                    <p className={hospitalAnswerResult.correct ? 'text-base font-black text-emerald-100' : 'text-base font-black text-rose-100'}>
-                      {hospitalAnswerResult.correct ? '回答正确' : '回答错误'}
-                    </p>
-                    <p className="mt-1 text-sm font-bold text-white/80">
-                      {hospitalAnswerResult.correct ? '获得 ' : '本题获得 '}
-                      {hospitalAnswerResult.scoreEarned} 分
-                    </p>
-                    {!hospitalAnswerResult.correct ? <p className="mt-1 text-sm font-bold text-rose-100/90">正确答案：{hospitalAnswerResult.correctAnswer}</p> : null}
-                    <button type="button" onClick={advanceHospitalQuestion} className="mt-4 w-full rounded-sm border border-white/20 bg-white/[0.08] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.14]">
-                      {hospitalNextState?.status === 'STARTED' ? '下一题' : '完成体检'}
-                    </button>
-                  </div>
-                )}
+                {!hospitalAnswerResult ? <button type="button" onClick={() => void answerHospitalQuestion()} disabled={!selectedAnswer || answering} className="mt-4 w-full rounded-sm border border-blue-300/60 bg-blue-400/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-400/20 disabled:cursor-not-allowed disabled:opacity-40">
+                  {answering ? '提交中…' : '确认答案'}
+                </button> : null}
               </>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {hospitalModalOpen && hospitalAnswerResult && hospitalNextState ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="presentation">
+          <div
+            className={hospitalAnswerResult.correct
+              ? 'w-full max-w-sm border border-emerald-300/40 bg-emerald-950/95 p-6 text-center text-white shadow-[0_24px_80px_rgba(0,0,0,0.6)]'
+              : 'w-full max-w-sm border border-rose-300/40 bg-rose-950/95 p-6 text-center text-white shadow-[0_24px_80px_rgba(0,0,0,0.6)]'}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hospital-result-title"
+          >
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-white/60">E院体检结果</p>
+            <h2 id="hospital-result-title" className={hospitalAnswerResult.correct ? 'mt-2 text-2xl font-black text-emerald-100' : 'mt-2 text-2xl font-black text-rose-100'}>
+              {hospitalAnswerResult.correct ? '回答正确' : '回答错误'}
+            </h2>
+            <p className="mt-3 text-base font-bold text-white/90">
+              {hospitalAnswerResult.correct ? `获得 ${hospitalAnswerResult.scoreEarned} 分` : '本题获得 0 分'}
+            </p>
+            <p className="mt-2 text-sm font-bold text-white/75">正确答案：{hospitalAnswerResult.correctAnswer}</p>
+            <button type="button" onClick={advanceHospitalQuestion} className="mt-6 w-full border border-white/25 bg-white/[0.1] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.18]">
+              下一题
+            </button>
           </div>
         </div>
       ) : null}

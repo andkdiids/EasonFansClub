@@ -54,9 +54,19 @@ export default async function UserAgreementPage() {
           <p className="mt-2">用户发布的文字、图片、音频及其他内容应保证来源合法，并承担相应的版权与法律责任。</p>
         </section>
 
-        <section>
-          <h2 className="text-base font-black text-white">5. 管理权限</h2>
+        <section className="border-b border-white/10 pb-4">
+          <h2 className="text-base font-black text-white">5. 隐私说明</h2>
+          <p className="mt-2">本站仅在提供账号注册、登录、社区服务及安全验证所需范围内处理用户信息，并会采取合理措施保护相关信息。</p>
+        </section>
+
+        <section className="border-b border-white/10 pb-4">
+          <h2 className="text-base font-black text-white">6. 管理权限</h2>
           <p className="mt-2">管理员有权根据协议和社区规范，对违规内容进行删除、限制展示、限制账号功能等处理。</p>
+        </section>
+
+        <section>
+          <h2 className="text-base font-black text-white">7. 免责声明</h2>
+          <p className="mt-2">本站为粉丝交流平台，用户应自行判断并承担使用社区内容及互动服务所产生的风险；法律法规另有规定的，从其规定。</p>
         </section>
       </article>
     </AuthFormShell>
