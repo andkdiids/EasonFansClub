@@ -3060,10 +3060,14 @@ body:has(.games-full-width) .app-shell main {
   }
 
   .register-auth-page {
-    height: auto;
+    height: 100vh;
+    height: 100dvh;
     min-height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
     overflow-x: hidden;
     overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 
   .register-auth-page .auth-form-panel {
@@ -3122,5 +3126,41 @@ body:has(.games-full-width) .app-shell main {
 
   .register-auth-page .register-form > section {
     padding: 10px;
+  }
+}
+
+/* Keep the authentication backdrop independent from dynamic form height. */
+.auth-page {
+  isolation: isolate;
+}
+
+.auth-page > .auth-hero-background,
+.auth-page > .auth-page-overlay {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+.auth-page > .auth-hero-background {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.auth-page > .auth-page-overlay {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.auth-page > .auth-page-layout {
+  z-index: 2;
+}
+
+@supports (height: 100dvh) {
+  .auth-page > .auth-hero-background,
+  .auth-page > .auth-page-overlay {
+    height: 100dvh;
+    min-height: 100dvh;
   }
 }
