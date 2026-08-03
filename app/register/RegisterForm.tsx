@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { FormError } from '@/components/FormError'
 import type { RegistrationMode } from '@/lib/registration'
 
@@ -84,6 +85,8 @@ function logHospitalClient(event: string, details?: unknown) {
   console.info(`[ehospital][client] ${new Date().toISOString()} ${event}`, details ?? {})
 }
 
+let registerPageVisitedInDocument = false
+
 export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [form, setForm] = useState({
     nickname: '',
@@ -124,11 +127,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const submitLockedRef = useRef(false)
   const mountedRef = useRef(true)
   const automaticEmailKeyRef = useRef('')
+  const registrationRestoreInitializedRef = useRef(false)
   const shouldRenderTurnstile = policy.enableTurnstile && Boolean(policy.turnstileSiteKey) && !policy.registrationClosed
   const hospitalPassed = !policy.ehospitalCheckEnabled || hospitalState?.status === 'PASSED'
   const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed
+  const registrationDetailsComplete = Object.keys(validateClientForm(false)).length === 0
 
   useEffect(() => {
+    mountedRef.current = true
     const audio = audioRef.current
     return () => {
       mountedRef.current = false
@@ -199,7 +205,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setErrors((current) => ({ ...current, securityQuestions: undefined }))
   }
 
-  function validateClientForm() {
+  function validateClientForm(includeTurnstile = true) {
     const nextErrors: RegisterErrors = {}
     if (!form.nickname.trim() || unicodeLength(form.nickname.trim()) < 2 || unicodeLength(form.nickname.trim()) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
     if (form.phone.trim() && !/^1\d{10}$/.test(form.phone.trim().replace(/\s+/g, ''))) nextErrors.phone = '请输入 11 位中国大陆手机号，或留空'
@@ -208,7 +214,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     if (form.confirmPassword !== form.password) nextErrors.confirmPassword = '两次输入的密码不一致'
     if (!form.acceptedAgreement) nextErrors.acceptedAgreement = '请先勾选用户协议'
     if (policy.requireSecurityQuestionsForNewUsers && (!form.securityQuestions[0].question.trim() || !form.securityQuestions[0].answer.trim())) nextErrors.securityQuestions = '请完整填写密保问题和答案'
-    if (shouldRenderTurnstile && !turnstileToken) nextErrors.turnstileToken = '请先完成人机验证'
+    if (includeTurnstile && shouldRenderTurnstile && !turnstileToken) nextErrors.turnstileToken = '请先完成人机验证'
     return nextErrors
   }
 
@@ -267,6 +273,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           nickname: data.draft.nickname || current.nickname,
           phone: data.draft.phone || current.phone,
           email: preparedEmail,
+          acceptedAgreement: typeof data.draft.acceptedAgreement === 'boolean' ? data.draft.acceptedAgreement : current.acceptedAgreement,
         }))
       }
       if (recoveredHospitalPassed) {
@@ -357,6 +364,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function startHospitalCheck() {
     logHospitalClient('start hospital check clicked')
+    const clientErrors = validateClientForm()
+    if (Object.keys(clientErrors).length) {
+      setErrors(clientErrors)
+      focusFirstError(clientErrors)
+      return
+    }
     setErrors({})
     setHospitalLoading(true)
     try {
@@ -534,6 +547,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     if (isSubmitting || submitLockedRef.current) return
     if (!draftToken) return setErrors({ form: '请先完成 E院体检' })
     if (!hospitalPassed) return setErrors({ hospitalCheck: '请先完成并通过 E院体检' })
+    if (!form.acceptedAgreement) return setErrors({ acceptedAgreement: '请先勾选用户协议' })
     if (!afterEmailVerification && !emailVerified) return setErrors({ emailCode: '请先完成邮箱验证码验证' })
 
     setErrors({})
@@ -654,12 +668,33 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
   }
 
-  // Restore the one-time registration draft from sessionStorage on mount.
+  // Restore only after a hard reload of /register. A later visit in the same
+  // document is a new registration flow and must not inherit old state.
   useEffect(() => {
+    if (registrationRestoreInitializedRef.current) return
+    registrationRestoreInitializedRef.current = true
+    const navigation = window.performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+    const initialPathname = navigation?.name ? new URL(navigation.name, window.location.href).pathname : ''
+    const isRegisterReload = navigation?.type === 'reload' && initialPathname === '/register'
+    const shouldRestore = !registerPageVisitedInDocument && isRegisterReload
+    registerPageVisitedInDocument = true
+
     try {
       const savedToken = window.sessionStorage.getItem('eason.register.draftToken') || ''
       const savedSessionId = window.sessionStorage.getItem('eason.register.hospitalSessionId') || ''
-      if (!savedToken) return
+      if (!shouldRestore) {
+        if (savedToken || savedSessionId) {
+          clearRegistrationDraftToken()
+          setHospitalState(null)
+          setHospitalStage('intro')
+          setHospitalModalOpen(false)
+        }
+        return
+      }
+      if (!savedToken) {
+        if (savedSessionId) window.sessionStorage.removeItem('eason.register.hospitalSessionId')
+        return
+      }
       setDraftToken(savedToken)
       draftTokenRef.current = savedToken
       logHospitalClient('draftToken value exists', { source: 'sessionStorage', exists: Boolean(savedToken) })
@@ -671,7 +706,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       }).then(async (response) => {
         const data = await response.json().catch(() => ({}))
         if (!response.ok || !mountedRef.current) return
-        if (data.draft) setForm((current) => ({ ...current, nickname: data.draft.nickname || current.nickname, phone: data.draft.phone || current.phone, email: data.draft.email || current.email }))
+        if (data.draft) setForm((current) => ({ ...current, nickname: data.draft.nickname || current.nickname, phone: data.draft.phone || current.phone, email: data.draft.email || current.email, acceptedAgreement: typeof data.draft.acceptedAgreement === 'boolean' ? data.draft.acceptedAgreement : current.acceptedAgreement }))
         setEmailVerified(Boolean(data.emailVerified))
         setEmailCodeSent(Boolean(data.emailVerified))
         if (data.hospital?.status === 'STARTED' && savedSessionId && data.hospital.sessionId === savedSessionId) {
@@ -752,13 +787,13 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
             {policy.requireSecurityQuestionsForNewUsers ? <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-2 rounded-xl border border-white/20 bg-white/10 p-3"><p className="text-sm font-black text-white">设置密保问题</p><div className="grid gap-2 sm:grid-cols-2"><input value={form.securityQuestions[0].question} onChange={(event) => updateSecurityQuestion('question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="密保问题" /><input value={form.securityQuestions[0].answer} onChange={(event) => updateSecurityQuestion('answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="答案" /></div><FormError message={errors.securityQuestions} /></fieldset> : null}
             {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[52px]" /> : null}<FormError message={errors.turnstileToken} />
-            <label className="flex items-start gap-2 rounded-xl bg-white/10 p-3 text-xs font-bold text-white"><input type="checkbox" checked={form.acceptedAgreement} onChange={(event) => updateField('acceptedAgreement', event.target.checked)} data-register-field="acceptedAgreement" className="mt-1" /><span className="leading-5">我已阅读并同意《私家E院用户协议》和社区管理规范。</span></label><FormError message={errors.acceptedAgreement} />
+            <label className="flex items-start gap-2 rounded-xl bg-white/10 p-3 text-xs font-bold text-white"><input type="checkbox" checked={form.acceptedAgreement} onChange={(event) => updateField('acceptedAgreement', event.target.checked)} data-register-field="acceptedAgreement" className="mt-1" /><span className="leading-5">我已阅读并同意<Link href="/user-agreement" target="_blank" rel="noopener noreferrer" className="font-black underline underline-offset-2">《私家E院用户协议》</Link>和社区管理规范。</span></label><FormError message={errors.acceptedAgreement} />
           </>
         )}
 
         <section className="rounded-xl border border-white/25 bg-white/10 p-3" aria-labelledby="ehospital-title">
           <div className="flex items-center justify-between gap-3"><div><h2 id="ehospital-title" className="text-base font-black text-white">🏥 E院体检</h2><p className="mt-1 text-xs font-bold leading-5 text-white/80">为了确认你是真正了解 Eason 的粉丝，注册前需要完成一次 E院体检。</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${hospitalPassed ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-brand-700'}`}>{hospitalLabel}</span></div>
-          {policy.ehospitalCheckEnabled ? <button type="button" onClick={() => void startHospitalCheck()} disabled={hospitalPassed || hospitalLoading || isPreparing} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{hospitalLoading || isPreparing ? '准备中…' : hospitalState?.status === 'STARTED' ? '继续体检' : hospitalState?.status === 'FAILED' ? '重新体检' : '开始体检'}</button> : <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white/80">管理员已关闭 E院体检，本次注册将直接进入邮箱验证。</p>}
+          {policy.ehospitalCheckEnabled ? <><button type="button" onClick={() => void startHospitalCheck()} disabled={hospitalPassed || hospitalLoading || isPreparing || !registrationDetailsComplete} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{hospitalLoading || isPreparing ? '准备中…' : registrationDetailsComplete && hospitalState?.status === 'STARTED' ? '继续体检' : registrationDetailsComplete && hospitalState?.status === 'FAILED' ? '重新体检' : '开始体检'}</button>{!registrationDetailsComplete ? <p className="mt-2 text-xs font-bold text-amber-200">请填写完整注册信息后开始 E院体检。</p> : null}</> : <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white/80">管理员已关闭 E院体检，本次注册将直接进入邮箱验证。</p>}
           <FormError message={errors.hospitalCheck} />
         </section>
 
@@ -771,7 +806,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           <FormError message={errors.emailCode} />
         </section> : null}
 
-        <button type="submit" disabled={isSubmitting || !emailVerified} className="auth-submit-button w-full disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '注册中…' : emailVerified ? '完成注册' : '完成注册（等待邮箱验证）'}</button>
+        <button type="submit" disabled={isSubmitting || !emailVerified || !form.acceptedAgreement} className="auth-submit-button w-full disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? '注册中…' : emailVerified ? '完成注册' : '完成注册（等待邮箱验证）'}</button>
         {message ? <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">{message}</p> : null}
       </form>
 

@@ -127,6 +127,7 @@ export async function POST(request: Request) {
           nickname: recoverableDraft.nickname,
           email: recoverableDraft.email,
           phone: recoverableDraft.phone,
+          acceptedAgreement: true,
         },
         hospital: {
           sessionId: hospital.id,

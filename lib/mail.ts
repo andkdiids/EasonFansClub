@@ -1,5 +1,13 @@
 import { createHash, createHmac } from 'node:crypto'
 
+type MailTemplateInput = {
+  title: string
+  intro: string
+  actionText: string
+  actionUrl: string
+  note?: string
+}
+
 export type SendMailResult =
   | { sent: true }
   | { sent: false; reason: 'missing_tencent_email_config' }
@@ -261,6 +269,88 @@ async function sendTencentTemplateMail({
 
   return {
     sent: true,
+  }
+}
+
+function getCompatibilityTemplateId() {
+  return Number.parseInt(
+    process.env.TENCENT_EMAIL_VERIFICATION_TEMPLATE_ID ||
+    process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID ||
+    '',
+    10,
+  )
+}
+
+/**
+ * 兼容旧的通用邮件调用方，实际仍通过腾讯云 SES 模板发送。
+ */
+export async function sendMail({
+  to,
+  subject,
+  template,
+}: {
+  to: string
+  subject: string
+  template: MailTemplateInput
+}): Promise<SendMailResult> {
+  try {
+    return await sendTencentTemplateMail({
+      to,
+      subject,
+      templateId: getCompatibilityTemplateId(),
+      templateData: {
+        title: template.title,
+        intro: template.intro,
+        actionText: template.actionText,
+        actionUrl: template.actionUrl,
+        note: template.note || '',
+      },
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
+      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
+    }
+    throw error
+  }
+}
+
+export function verificationMailTemplate(
+  verificationUrl: string,
+  reason: 'register' | 'change-email' | 'resend' = 'register',
+) {
+  const title = reason === 'change-email' ? '验证你的新邮箱' : '验证你的私家E院邮箱'
+  const intro =
+    reason === 'resend'
+      ? '你申请重新发送邮箱验证邮件。请点击按钮完成验证，链接 24 小时内有效。'
+      : reason === 'change-email'
+        ? '你正在修改私家E院账号邮箱。请点击按钮完成新邮箱验证，链接 24 小时内有效。'
+        : '欢迎加入私家E院。请点击按钮完成邮箱验证，验证后即可使用邮箱登录。链接 24 小时内有效。'
+
+  return {
+    title,
+    intro,
+    actionText: '验证邮箱',
+    actionUrl: verificationUrl,
+    note: '如果不是你本人操作，请忽略这封邮件。你的密码不会因此改变。',
+  }
+}
+
+/**
+ * 忘记密码验证码兼容入口，继续使用现有腾讯云 SES 重置模板。
+ */
+export async function sendPasswordResetCode(email: string, code: string): Promise<SendMailResult> {
+  try {
+    return await sendTencentTemplateMail({
+      to: email,
+      subject: 'EasonFansClub 密码重置验证码',
+      templateId: Number.parseInt(process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID || '', 10),
+      templateData: { code },
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
+      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
+    }
+    throw error
   }
 }
 

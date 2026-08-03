@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       nickname: true,
       email: true,
       phone: true,
+      acceptedAgreement: true,
       expiresAt: true,
       completedAt: true,
       emailVerifiedAt: true,
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
 
   const session = draft.EHospitalCheckSession[0] || null
   return NextResponse.json({
-    draft: { nickname: draft.nickname, email: draft.email, phone: draft.phone },
+    draft: { nickname: draft.nickname, email: draft.email, phone: draft.phone, acceptedAgreement: draft.acceptedAgreement },
     emailVerified: Boolean(draft.emailVerifiedAt),
     completed: Boolean(draft.completedAt),
     expired: draft.expiresAt <= new Date(),
