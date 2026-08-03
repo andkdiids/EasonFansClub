@@ -29,7 +29,7 @@ export async function requireUser(): Promise<GuardResult> {
   if (!user) {
     return {
       user: null,
-      response: NextResponse.json({ message: '请先登录后再操作' }, { status: 401 }),
+      response: NextResponse.json({ ok: false, code: 'UNAUTHORIZED', message: '请先登录' }, { status: 401 }),
     }
   }
 

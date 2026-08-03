@@ -56,7 +56,8 @@ export async function verifySessionToken(token?: string) {
   if (!token) return null
 
   try {
-    const { payload } = await jwtVerify(token, secret)
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] })
+    if (typeof payload.id !== 'string' || !payload.id.trim()) return null
     return payload as SessionUser
   } catch {
     return null
