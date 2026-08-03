@@ -11,7 +11,7 @@ import { normalizeText } from '@/lib/validators'
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
 function errorResponse(message: string, status: number, code: string, errors: Record<string, string> = {}) {
-  return NextResponse.json({ message, code, errors }, { status, headers: noStoreHeaders })
+  return NextResponse.json({ ok: false, message, code, errors }, { status, headers: noStoreHeaders })
 }
 
 export async function POST(request: Request) {
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 
   const rate = await consumeRateLimit(`registration-draft:${draft.id}`, 'register:email-code', 6, 10 * 60)
   if (rate.limited) {
-    return NextResponse.json({ message: '验证码发送过于频繁，请稍后再试', retryAfter: rate.retryAfter }, { status: 429, headers: noStoreHeaders })
+    return NextResponse.json({ ok: false, message: '验证码发送过于频繁，请稍后再试', retryAfter: rate.retryAfter }, { status: 429, headers: noStoreHeaders })
   }
 
   const code = createRegistrationCode()
@@ -68,7 +68,11 @@ export async function POST(request: Request) {
 
   try {
     const mailResult = await sendRegistrationVerificationCode(email, code)
+    if (!mailResult.sent) {
+      return errorResponse('邮件服务尚未配置，暂时无法发送验证码', 503, 'EMAIL_SERVICE_NOT_CONFIGURED')
+    }
     return NextResponse.json({
+      ok: true,
       email: updated.email,
       emailVerified: Boolean(updated.emailVerifiedAt),
       emailSent: mailResult.sent,
@@ -77,7 +81,8 @@ export async function POST(request: Request) {
       message: `验证码已发送至：${email}`,
     }, { headers: noStoreHeaders })
   } catch (error) {
-    if (error instanceof Error && error.message === 'EMAIL_SEND_NOT_CONFIGURED') {
+    console.error('[send-email-code]', error)
+    if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
       return errorResponse('邮件服务尚未配置，暂时无法发送验证码', 503, 'EMAIL_SERVICE_NOT_CONFIGURED')
     }
     return errorResponse('验证码发送失败，请稍后重试', 502, 'EMAIL_SEND_FAILED')

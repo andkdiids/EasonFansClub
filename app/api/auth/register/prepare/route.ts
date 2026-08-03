@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { hashSecurityQuestions, parseSecurityQuestions, validateSecurityQuestions } from '@/lib/account-security'
-import { hashPassword } from '@/lib/password'
+import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, REGISTRATION_DRAFT_TTL_MS } from '@/lib/registration-draft'
 import { getRegistrationPolicy } from '@/lib/registration'
@@ -72,9 +72,34 @@ export async function POST(request: Request) {
 
   const phoneFilter = phone ? [{ phone }] : []
   const pendingDraftFilter = [{ email }, ...phoneFilter]
-  const [duplicate, accountDuplicate, pendingDraft] = await Promise.all([
+  const [duplicate, accountDuplicate, recoverableDraft, pendingDraft] = await Promise.all([
     findActiveConflict({ phone: phone || null, email }),
     findLoginAccountConflict(usernameNormalized),
+    prisma.registrationDraft.findFirst({
+      where: {
+        email,
+        completedAt: null,
+        expiresAt: { gt: new Date() },
+        EHospitalCheckSession: { some: { status: 'PASSED' } },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        tokenHash: true,
+        nickname: true,
+        email: true,
+        phone: true,
+        passwordHash: true,
+        expiresAt: true,
+        emailVerifiedAt: true,
+        EHospitalCheckSession: {
+          where: { status: 'PASSED' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { id: true, status: true, score: true, expiresAt: true },
+        },
+      },
+    }),
     prisma.registrationDraft.findFirst({
       where: { completedAt: null, expiresAt: { gt: new Date() }, OR: pendingDraftFilter },
       select: { id: true },
@@ -83,6 +108,36 @@ export async function POST(request: Request) {
   if (duplicate?.phone && duplicate.phone === phone) return errorResponse('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
   if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
   if (accountDuplicate) return errorResponse('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
+  if (recoverableDraft && (await verifyPassword(password, recoverableDraft.passwordHash)).valid) {
+    const recoveredToken = createPlainToken(32)
+    const rotated = await prisma.registrationDraft.updateMany({
+      where: { id: recoverableDraft.id, tokenHash: recoverableDraft.tokenHash, completedAt: null, expiresAt: { gt: new Date() } },
+      data: { tokenHash: hashToken(recoveredToken) },
+    })
+    const hospital = recoverableDraft.EHospitalCheckSession[0]
+    if (rotated.count === 1 && hospital) {
+      return NextResponse.json({
+        registrationToken: recoveredToken,
+        expiresAt: recoverableDraft.expiresAt.toISOString(),
+        email: recoverableDraft.email,
+        phone: recoverableDraft.phone,
+        emailVerified: Boolean(recoverableDraft.emailVerifiedAt),
+        recovered: true,
+        draft: {
+          nickname: recoverableDraft.nickname,
+          email: recoverableDraft.email,
+          phone: recoverableDraft.phone,
+        },
+        hospital: {
+          sessionId: hospital.id,
+          status: hospital.status,
+          score: hospital.score,
+          expiresAt: hospital.expiresAt.toISOString(),
+        },
+        message: '已恢复此前通过的 E院体检，请继续邮箱验证',
+      }, { headers: noStoreHeaders })
+    }
+  }
   if (pendingDraft) return errorResponse('该邮箱或手机号已有未完成的注册验证，请稍后重试', 409, 'REGISTRATION_DRAFT_EXISTS')
 
   const draftToken = createPlainToken(32)

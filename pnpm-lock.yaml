@@ -60,6 +60,9 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3.3.5
         version: 3.3.5
+      '@next/eslint-plugin-next':
+        specifier: 15.5.20
+        version: 15.5.20
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.0

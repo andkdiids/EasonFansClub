@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
+    "@next/eslint-plugin-next": "15.5.20",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.0.0",

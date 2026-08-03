@@ -59,6 +59,13 @@ type HospitalAnswerResponse = HospitalState & {
   message?: string
 }
 
+type PreparedRegistration = {
+  token: string
+  email: string
+  emailVerified: boolean
+  hospitalPassed: boolean
+}
+
 const errorFieldOrder: Array<keyof RegisterErrors> = [
   'nickname', 'phone', 'password', 'confirmPassword', 'email', 'securityQuestions', 'acceptedAgreement', 'turnstileToken', 'hospitalCheck', 'emailCode', 'form',
 ]
@@ -93,7 +100,6 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [emailCodeSent, setEmailCodeSent] = useState(false)
   const [emailVerified, setEmailVerified] = useState(false)
   const [emailEditing, setEmailEditing] = useState(false)
-  const [devEmailCode, setDevEmailCode] = useState('')
   const [hospitalState, setHospitalState] = useState<HospitalState | null>(null)
   const [hospitalModalOpen, setHospitalModalOpen] = useState(false)
   const [hospitalStage, setHospitalStage] = useState<'intro' | 'quiz'>('intro')
@@ -108,6 +114,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [isPreparing, setIsPreparing] = useState(false)
   const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [registrationDetailsExpanded, setRegistrationDetailsExpanded] = useState(true)
   const turnstileRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef('')
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -119,6 +126,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const automaticEmailKeyRef = useRef('')
   const shouldRenderTurnstile = policy.enableTurnstile && Boolean(policy.turnstileSiteKey) && !policy.registrationClosed
   const hospitalPassed = !policy.ehospitalCheckEnabled || hospitalState?.status === 'PASSED'
+  const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed
 
   useEffect(() => {
     const audio = audioRef.current
@@ -128,6 +136,10 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       audio?.pause()
     }
   }, [])
+
+  useEffect(() => {
+    if (registrationReadyToCollapse) setRegistrationDetailsExpanded(false)
+  }, [registrationReadyToCollapse])
 
   useEffect(() => {
     if (!shouldRenderTurnstile || !turnstileRef.current || widgetIdRef.current) return
@@ -206,7 +218,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       draftTokenRef.current = existingDraftToken
       if (draftToken !== existingDraftToken) setDraftToken(existingDraftToken)
       logHospitalClient('draftToken value exists', { source: draftTokenRef.current === draftToken ? 'state' : 'ref', exists: true })
-      return existingDraftToken
+      return {
+        token: existingDraftToken,
+        email: form.email.trim().toLowerCase(),
+        emailVerified,
+        hospitalPassed,
+      } satisfies PreparedRegistration
     }
     setErrors({})
     const clientErrors = validateClientForm()
@@ -239,13 +256,48 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       const token = String(data.registrationToken || '')
       rememberDraftToken(token, 'prepareRegistration')
       logHospitalClient('draft created', { exists: Boolean(token), expiresAt: data.expiresAt || null })
-      setEmailVerified(false)
-      setEmailCodeSent(false)
+      const recoveredHospitalPassed = data.hospital?.status === 'PASSED'
+      const recoveredEmailVerified = Boolean(data.emailVerified)
+      const preparedEmail = String(data.draft?.email || data.email || form.email).trim().toLowerCase()
+      setEmailVerified(recoveredEmailVerified)
+      setEmailCodeSent(recoveredEmailVerified)
+      if (data.draft) {
+        setForm((current) => ({
+          ...current,
+          nickname: data.draft.nickname || current.nickname,
+          phone: data.draft.phone || current.phone,
+          email: preparedEmail,
+        }))
+      }
+      if (recoveredHospitalPassed) {
+        const score = Number(data.hospital.score || 0)
+        setHospitalState({
+          sessionId: data.hospital.sessionId,
+          status: 'PASSED',
+          expiresAt: data.hospital.expiresAt,
+          currentPosition: 10,
+          totalQuestions: 10,
+          audioSeconds: 7,
+          score,
+          correctCount: Math.floor(score / 10),
+          answeredCount: 10,
+          remainingAttempts: 0,
+          question: null,
+        })
+        setHospitalStage('intro')
+        setHospitalModalOpen(false)
+        try { window.sessionStorage.setItem('eason.register.hospitalSessionId', data.hospital.sessionId) } catch { /* optional */ }
+      }
       setMessage(data.message || '注册资料已保存')
       try { window.sessionStorage.setItem('eason.register.draftToken', token) } catch { /* optional */ }
       window.turnstile?.reset(widgetIdRef.current)
       setTurnstileToken('')
-      return token || null
+      return token ? {
+        token,
+        email: preparedEmail,
+        emailVerified: recoveredEmailVerified,
+        hospitalPassed: recoveredHospitalPassed,
+      } satisfies PreparedRegistration : null
     } catch (error) {
       setErrors({ form: error instanceof Error && error.name === 'AbortError' ? '请求超时，请稍后重试' : '网络连接失败，请稍后重试' })
       return null
@@ -291,7 +343,6 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       setEmailCodeSent(true)
       setEmailVerified(Boolean(data.emailVerified))
       setEmailCode('')
-      setDevEmailCode(data.devEmailCode || '')
       setEmailEditing(false)
       setMessage(data.message || `验证码已发送至：${data.email || email}`)
       return true
@@ -309,9 +360,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setErrors({})
     setHospitalLoading(true)
     try {
-      const token = await prepareRegistration()
+      const preparation = await prepareRegistration()
+      const token = preparation?.token || ''
       logHospitalClient('start hospital check token check', { exists: Boolean(token), refExists: Boolean(draftTokenRef.current) })
-      if (!token) return
+      if (!preparation) return
+      if (preparation.hospitalPassed) {
+        if (!preparation.emailVerified) await sendEmailCode(token, preparation.email, true)
+        return
+      }
       if (!policy.ehospitalCheckEnabled) {
         await sendEmailCode(token, form.email, true)
         return
@@ -327,7 +383,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
   }
 
-  async function beginHospitalQuiz() {
+  async function beginHospitalQuiz(retryCount = 0) {
     const registrationToken = draftTokenRef.current || draftToken
     logHospitalClient('beginHospitalQuiz token check', {
       stateExists: Boolean(draftToken),
@@ -336,11 +392,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     })
     if (!registrationToken) {
       logHospitalClient('begin hospital quiz skipped; registration token missing')
+      setErrors({ hospitalCheck: '注册验证已过期，请重新点击开始体检' })
       return
     }
+    setHospitalLoading(true)
     const fetchStartedAt = Date.now()
     logHospitalClient('hospital-check fetch started', { endpoint: '/api/auth/hospital-check' })
-    setHospitalLoading(true)
     setErrors((current) => ({ ...current, hospitalCheck: undefined }))
     try {
       const response = await fetch('/api/auth/hospital-check', {
@@ -355,19 +412,29 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       const data = await response.json().catch(() => ({}))
       logHospitalClient('hospital-check response json', data)
       if (!response.ok) {
-        if (data.code === 'REGISTRATION_DRAFT_EXPIRED' || data.code === 'REGISTRATION_DRAFT_NOT_FOUND') {
+        if (response.status === 410 || data.code === 'REGISTRATION_DRAFT_EXPIRED' || data.code === 'REGISTRATION_DRAFT_NOT_FOUND') {
           clearRegistrationDraftToken()
           setHospitalState(null)
           setHospitalStage('intro')
-          setHospitalModalOpen(false)
-          const refreshedToken = await prepareRegistration(true)
-          if (refreshedToken) {
-            setErrors({ hospitalCheck: '注册验证已过期，已自动准备新的注册验证，请再次点击开始体检。' })
-          } else {
-            setErrors({ hospitalCheck: '注册验证已过期，暂时无法重新准备，请检查注册资料后重试。' })
+
+          const refreshed = await prepareRegistration(true)
+          if (!refreshed || retryCount >= 1) {
+            setHospitalModalOpen(false)
+            setErrors({ hospitalCheck: '注册验证已过期，请重新点击开始体检' })
+            return
           }
+
+          if (refreshed.hospitalPassed) {
+            setHospitalModalOpen(false)
+            if (!refreshed.emailVerified) await sendEmailCode(refreshed.token, refreshed.email, true)
+            return
+          }
+
+          setHospitalModalOpen(true)
+          await beginHospitalQuiz(retryCount + 1)
           return
         }
+
         setErrors({ hospitalCheck: data.message || '体检暂时无法开始' })
         return
       }
@@ -512,6 +579,81 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
   }
 
+  async function restoreHospitalSession(registrationToken: string, sessionId: string, retryCount = 0) {
+    const endpoint = `/api/auth/hospital-check?registrationToken=${encodeURIComponent(registrationToken)}&sessionId=${encodeURIComponent(sessionId)}`
+    setHospitalLoading(true)
+    logHospitalClient('hospital-check GET started', {
+      endpoint: '/api/auth/hospital-check',
+      hasRegistrationToken: Boolean(registrationToken),
+      hasSessionId: Boolean(sessionId),
+      retryCount,
+    })
+    try {
+      console.log('before hospital GET fetch')
+      const response = await fetch(endpoint, { cache: 'no-store' })
+      console.log('after hospital GET fetch', {
+        status: response.status,
+        ok: response.ok,
+      })
+      logHospitalClient('hospital-check GET response', { status: response.status, ok: response.ok })
+      console.log('hospital check token response', { status: response.status, ok: response.ok })
+      console.log('before hospital GET response.json')
+      const data = await response.json().catch(() => null) as (HospitalState & { message?: string; code?: string }) | null
+      logHospitalClient('hospital-check GET response json', data)
+      console.log('hospital check response json', data)
+
+      if (!response.ok) {
+        if (response.status === 410) {
+          clearRegistrationDraftToken()
+          setHospitalState(null)
+          setHospitalStage('intro')
+
+          const refreshed = await prepareRegistration(true)
+          if (!refreshed || retryCount >= 1) {
+            setHospitalModalOpen(false)
+            setErrors({ hospitalCheck: '注册验证已过期，请重新点击开始体检' })
+            return null
+          }
+
+          if (refreshed.hospitalPassed) {
+            setHospitalModalOpen(false)
+            if (!refreshed.emailVerified) await sendEmailCode(refreshed.token, refreshed.email, true)
+            return null
+          }
+
+          return restoreHospitalSession(refreshed.token, sessionId, retryCount + 1)
+        }
+
+        setHospitalModalOpen(false)
+        setErrors({ hospitalCheck: data?.message || '体检场次加载失败，请重新点击开始体检' })
+        return null
+      }
+
+      if (!data) {
+        setHospitalModalOpen(false)
+        setErrors({ hospitalCheck: '体检场次加载失败，请重新点击开始体检' })
+        return null
+      }
+
+      if (mountedRef.current) {
+        setHospitalStage('intro')
+        setHospitalState(data)
+        setHospitalModalOpen(true)
+      }
+      return data
+    } catch (error) {
+      logHospitalClient('hospital-check GET error', { message: error instanceof Error ? error.message : String(error) })
+      if (mountedRef.current) {
+        setHospitalModalOpen(false)
+        setErrors({ hospitalCheck: error instanceof Error && error.name === 'AbortError' ? '体检场次加载超时，请重新点击开始体检' : '体检场次加载失败，请重新点击开始体检' })
+      }
+      return null
+    } finally {
+      if (mountedRef.current) setHospitalLoading(false)
+      logHospitalClient('hospital-check GET cleanup; clear hospitalLoading', { mounted: mountedRef.current })
+    }
+  }
+
   // Restore the one-time registration draft from sessionStorage on mount.
   useEffect(() => {
     try {
@@ -533,12 +675,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         setEmailVerified(Boolean(data.emailVerified))
         setEmailCodeSent(Boolean(data.emailVerified))
         if (data.hospital?.status === 'STARTED' && savedSessionId && data.hospital.sessionId === savedSessionId) {
-          const sessionResponse = await fetch(`/api/auth/hospital-check?registrationToken=${encodeURIComponent(savedToken)}&sessionId=${encodeURIComponent(savedSessionId)}`, { cache: 'no-store' })
-          const sessionData = await sessionResponse.json().catch(() => null)
-          if (sessionResponse.ok && sessionData && mountedRef.current) {
-            setHospitalStage('quiz')
-            setHospitalState(sessionData)
-          }
+          await restoreHospitalSession(savedToken, savedSessionId)
         } else if (data.hospital?.status === 'PASSED' || data.hospital?.status === 'FAILED') {
           const score = Number(data.hospital.score || 0)
           const summary: HospitalState = {
@@ -589,17 +726,35 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       <form className="register-form space-y-3" onSubmit={(event) => { event.preventDefault(); void completeRegistration() }}>
         <div data-register-field="form" tabIndex={-1}><FormError message={errors.form} /></div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block"><span className="text-sm font-bold text-white">用户名 / 昵称</span><input value={form.nickname} onChange={(event) => updateField('nickname', event.target.value)} data-register-field="nickname" autoComplete="nickname" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="2-16 个字符" /><FormError message={errors.nickname} /></label>
-          <label className="block"><span className="text-sm font-bold text-white">手机号 <small className="font-normal text-white/60">（选填）</small></span><input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} type="tel" autoComplete="tel" data-register-field="phone" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="可选，用于登录和找回账号" /><FormError message={errors.phone} /></label>
-          <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="至少 8 位" /><FormError message={errors.password} /></label>
-          <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="再次输入密码" /><FormError message={errors.confirmPassword} /></label>
-          <label className="block sm:col-span-2"><span className="text-sm font-bold text-white">邮箱 <small className="font-normal text-white/60">（必填）</small></span><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" autoComplete="email" data-register-field="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 disabled:bg-emerald-50" placeholder="用于最终验证码验证" /><FormError message={errors.email} /></label>
-        </div>
+        {registrationReadyToCollapse && !registrationDetailsExpanded ? (
+          <section className="rounded-xl border border-emerald-100/40 bg-emerald-50/10 p-3" aria-labelledby="registration-summary-title">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 id="registration-summary-title" className="text-sm font-black text-white">注册资料已确认</h2>
+                <p className="mt-1 text-xs font-bold text-emerald-100">{hospitalLabel}</p>
+              </div>
+              <button type="button" onClick={() => setRegistrationDetailsExpanded(true)} className="rounded-lg border border-white/30 bg-white px-3 py-2 text-xs font-black text-brand-700">修改资料</button>
+            </div>
+            <dl className="mt-3 grid gap-2 text-xs font-bold text-white/85 sm:grid-cols-2">
+              <div><dt className="text-white/55">用户名</dt><dd className="mt-0.5 truncate">{form.nickname || '—'}</dd></div>
+              <div><dt className="text-white/55">邮箱</dt><dd className="mt-0.5 truncate">{form.email || '—'}</dd></div>
+            </dl>
+          </section>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block"><span className="text-sm font-bold text-white">用户名 / 昵称</span><input value={form.nickname} onChange={(event) => updateField('nickname', event.target.value)} data-register-field="nickname" autoComplete="nickname" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="2-16 个字符" /><FormError message={errors.nickname} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">手机号 <small className="font-normal text-white/60">（选填）</small></span><input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} type="tel" autoComplete="tel" data-register-field="phone" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="可选，用于登录和找回账号" /><FormError message={errors.phone} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="至少 8 位" /><FormError message={errors.password} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="再次输入密码" /><FormError message={errors.confirmPassword} /></label>
+              <label className="block sm:col-span-2"><span className="text-sm font-bold text-white">邮箱 <small className="font-normal text-white/60">（必填）</small></span><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" autoComplete="email" data-register-field="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 disabled:bg-emerald-50" placeholder="用于最终验证码验证" /><FormError message={errors.email} /></label>
+            </div>
 
-        {policy.requireSecurityQuestionsForNewUsers ? <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-2 rounded-xl border border-white/20 bg-white/10 p-3"><p className="text-sm font-black text-white">设置密保问题</p><div className="grid gap-2 sm:grid-cols-2"><input value={form.securityQuestions[0].question} onChange={(event) => updateSecurityQuestion('question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="密保问题" /><input value={form.securityQuestions[0].answer} onChange={(event) => updateSecurityQuestion('answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="答案" /></div><FormError message={errors.securityQuestions} /></fieldset> : null}
-        {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[52px]" /> : null}<FormError message={errors.turnstileToken} />
-        <label className="flex items-start gap-2 rounded-xl bg-white/10 p-3 text-xs font-bold text-white"><input type="checkbox" checked={form.acceptedAgreement} onChange={(event) => updateField('acceptedAgreement', event.target.checked)} data-register-field="acceptedAgreement" className="mt-1" /><span className="leading-5">我已阅读并同意《私家E院用户协议》和社区管理规范。</span></label><FormError message={errors.acceptedAgreement} />
+            {policy.requireSecurityQuestionsForNewUsers ? <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-2 rounded-xl border border-white/20 bg-white/10 p-3"><p className="text-sm font-black text-white">设置密保问题</p><div className="grid gap-2 sm:grid-cols-2"><input value={form.securityQuestions[0].question} onChange={(event) => updateSecurityQuestion('question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="密保问题" /><input value={form.securityQuestions[0].answer} onChange={(event) => updateSecurityQuestion('answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="答案" /></div><FormError message={errors.securityQuestions} /></fieldset> : null}
+            {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[52px]" /> : null}<FormError message={errors.turnstileToken} />
+            <label className="flex items-start gap-2 rounded-xl bg-white/10 p-3 text-xs font-bold text-white"><input type="checkbox" checked={form.acceptedAgreement} onChange={(event) => updateField('acceptedAgreement', event.target.checked)} data-register-field="acceptedAgreement" className="mt-1" /><span className="leading-5">我已阅读并同意《私家E院用户协议》和社区管理规范。</span></label><FormError message={errors.acceptedAgreement} />
+          </>
+        )}
 
         <section className="rounded-xl border border-white/25 bg-white/10 p-3" aria-labelledby="ehospital-title">
           <div className="flex items-center justify-between gap-3"><div><h2 id="ehospital-title" className="text-base font-black text-white">🏥 E院体检</h2><p className="mt-1 text-xs font-bold leading-5 text-white/80">为了确认你是真正了解 Eason 的粉丝，注册前需要完成一次 E院体检。</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${hospitalPassed ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-brand-700'}`}>{hospitalLabel}</span></div>
@@ -613,7 +768,6 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="min-w-0 flex-1 rounded-lg border border-sky-100 bg-white px-3 py-2 text-sm text-slate-900 outline-none disabled:bg-emerald-50" placeholder="邮箱地址" /><button type="button" onClick={() => { setEmailEditing(true); setEmailVerified(false); setEmailCodeSent(false); setEmailCode(''); setMessage('请填写新的邮箱后重新发送验证码') }} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-brand-700">修改邮箱</button></div>
           {emailEditing || !emailCodeSent ? <button type="button" onClick={() => void sendEmailCode()} disabled={isSendingEmail} className="mt-2 rounded-full bg-white px-4 py-2 text-xs font-black text-brand-700 disabled:opacity-50">{isSendingEmail ? '发送中…' : emailCodeSent ? '重新发送验证码' : '发送验证码'}</button> : <button type="button" onClick={() => void sendEmailCode()} disabled={isSendingEmail || emailVerified} className="mt-2 rounded-full border border-white/40 px-4 py-2 text-xs font-black text-white disabled:opacity-50">{isSendingEmail ? '发送中…' : '重新发送验证码'}</button>}
           {emailCodeSent && !emailVerified ? <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input value={emailCode} onChange={(event) => setEmailCode(event.target.value)} data-register-field="emailCode" inputMode="numeric" maxLength={6} className="min-w-0 flex-1 rounded-lg border border-sky-100 bg-white px-3 py-2 text-sm text-slate-900 outline-none" placeholder="输入 6 位验证码" /><button type="button" onClick={() => void verifyEmailCode()} className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-black text-white">验证并完成注册</button></div> : null}
-          {devEmailCode ? <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">开发环境验证码：{devEmailCode}</p> : null}
           <FormError message={errors.emailCode} />
         </section> : null}
 
