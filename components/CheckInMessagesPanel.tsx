@@ -295,7 +295,7 @@ export function CheckInMessagesPanel({
                   </div>
                   <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
                   {rootComments.length && !isMinimal ? (
-                    <div className="checkin-comment-thread mt-2 space-y-2 rounded-2xl p-2">
+                    <div className="checkin-comment-thread mt-2 space-y-2">
                       {rootComments.map((comment) => {
                         const commentIdentity = 'uid' in comment.author ? comment.author : null
                         const commentName = getCommentAuthorName(comment.author)

@@ -600,7 +600,6 @@ flex-direction:column;
 .checkin-growth-guide-note { background:var(--surface-subtle); color:var(--foreground-muted); }
 .checkin-messages-panel { color:var(--foreground); border-color:var(--border); background:var(--surface); }
 .checkin-messages-panel .checkin-message-card { border-color:var(--border); background:var(--surface-elevated); }
-.checkin-messages-panel .checkin-comment-thread { background:var(--surface-subtle); }
 .checkin-messages-panel .checkin-comment-card { border:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
 .checkin-messages-panel .checkin-reply-thread,
 .post-replies-section .post-reply-thread { background:transparent; border:0; box-shadow:none; outline:none; }

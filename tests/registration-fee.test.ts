@@ -153,7 +153,18 @@ test('前台移除全局挂号费上限展示和废弃字段', () => {
     'components/ReplyForm.tsx',
   ].map(read).join('\n')
   assert.doesNotMatch(frontend, /每日普通获取上限|今日挂号费获取已达到上限|registrationFeeLimit|remainingPoints|xx\/30|达到上限后不再增加/)
-  assert.match(read('components/TodayRegistrationFeePanel.tsx'), /\+\{record\.amount\} 挂号费/)
+  const feePanel = read('components/TodayRegistrationFeePanel.tsx')
+  assert.match(feePanel, /\+\{record\.amount\} 挂号费/)
+  assert.match(feePanel, /医保余额/)
+  assert.doesNotMatch(feePanel, /收入流水|今日挂号费/)
+  assert.match(feePanel, /grid grid-cols-2 gap-2\.5/)
+  assert.match(feePanel, /aria-expanded=\{expanded\}/)
+  assert.match(feePanel, /aria-controls=\{recordsId\}/)
+  assert.match(feePanel, /useId/)
+  assert.match(feePanel, /const \[expanded, setExpanded\] = useState\(false\)/)
+  assert.match(feePanel, /if \(!previewMode\) void loadSummary\(\)/)
+  assert.match(feePanel, /\{expanded \? <div id=\{recordsId\}/)
+  assert.doesNotMatch(feePanel, /fixed|absolute|createPortal|<dialog/)
 })
 
 test('每日经验上限仍保留且与挂号费统计分离', () => {
