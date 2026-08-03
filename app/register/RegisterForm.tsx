@@ -131,7 +131,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const shouldRenderTurnstile = policy.enableTurnstile && Boolean(policy.turnstileSiteKey) && !policy.registrationClosed
   const hospitalPassed = !policy.ehospitalCheckEnabled || hospitalState?.status === 'PASSED'
   const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed
-  const registrationDetailsComplete = Object.keys(validateClientForm(false)).length === 0
+  const isRegistrationComplete = Object.keys(validateRegistrationFields()).length === 0
+  const canStartHospitalCheck = isRegistrationComplete && !hospitalPassed && !hospitalLoading && !isPreparing
 
   useEffect(() => {
     mountedRef.current = true
@@ -205,15 +206,28 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setErrors((current) => ({ ...current, securityQuestions: undefined }))
   }
 
-  function validateClientForm(includeTurnstile = true) {
+  function validateRegistrationFields() {
     const nextErrors: RegisterErrors = {}
-    if (!form.nickname.trim() || unicodeLength(form.nickname.trim()) < 2 || unicodeLength(form.nickname.trim()) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
+    const username = form.nickname.trim()
+    const password = form.password
+    const confirmPassword = form.confirmPassword
+    const email = form.email.trim().toLowerCase()
+    const securityQuestion = form.securityQuestions[0]?.question.trim() || ''
+    const securityAnswer = form.securityQuestions[0]?.answer.trim() || ''
+    const agreementAccepted = form.acceptedAgreement
+
+    if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
     if (form.phone.trim() && !/^1\d{10}$/.test(form.phone.trim().replace(/\s+/g, ''))) nextErrors.phone = '请输入 11 位中国大陆手机号，或留空'
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim().toLowerCase())) nextErrors.email = '请输入有效邮箱'
-    if (!form.password || form.password.length < 8) nextErrors.password = '密码至少需要 8 位'
-    if (form.confirmPassword !== form.password) nextErrors.confirmPassword = '两次输入的密码不一致'
-    if (!form.acceptedAgreement) nextErrors.acceptedAgreement = '请先勾选用户协议'
-    if (policy.requireSecurityQuestionsForNewUsers && (!form.securityQuestions[0].question.trim() || !form.securityQuestions[0].answer.trim())) nextErrors.securityQuestions = '请完整填写密保问题和答案'
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '请输入有效邮箱'
+    if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
+    if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
+    if (!agreementAccepted) nextErrors.acceptedAgreement = '请先勾选用户协议'
+    if (policy.requireSecurityQuestionsForNewUsers && (!securityQuestion || !securityAnswer)) nextErrors.securityQuestions = '请完整填写密保问题和答案'
+    return nextErrors
+  }
+
+  function validateClientForm(includeTurnstile = true) {
+    const nextErrors = validateRegistrationFields()
     if (includeTurnstile && shouldRenderTurnstile && !turnstileToken) nextErrors.turnstileToken = '请先完成人机验证'
     return nextErrors
   }
@@ -364,7 +378,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function startHospitalCheck() {
     logHospitalClient('start hospital check clicked')
-    const clientErrors = validateClientForm()
+    const clientErrors = validateRegistrationFields()
     if (Object.keys(clientErrors).length) {
       setErrors(clientErrors)
       focusFirstError(clientErrors)
@@ -793,7 +807,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
         <section className="rounded-xl border border-white/25 bg-white/10 p-3" aria-labelledby="ehospital-title">
           <div className="flex items-center justify-between gap-3"><div><h2 id="ehospital-title" className="text-base font-black text-white">🏥 E院体检</h2><p className="mt-1 text-xs font-bold leading-5 text-white/80">为了确认你是真正了解 Eason 的粉丝，注册前需要完成一次 E院体检。</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${hospitalPassed ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-brand-700'}`}>{hospitalLabel}</span></div>
-          {policy.ehospitalCheckEnabled ? <><button type="button" onClick={() => void startHospitalCheck()} disabled={hospitalPassed || hospitalLoading || isPreparing || !registrationDetailsComplete} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{hospitalLoading || isPreparing ? '准备中…' : registrationDetailsComplete && hospitalState?.status === 'STARTED' ? '继续体检' : registrationDetailsComplete && hospitalState?.status === 'FAILED' ? '重新体检' : '开始体检'}</button>{!registrationDetailsComplete ? <p className="mt-2 text-xs font-bold text-amber-200">请填写完整注册信息后开始 E院体检。</p> : null}</> : <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white/80">管理员已关闭 E院体检，本次注册将直接进入邮箱验证。</p>}
+          {policy.ehospitalCheckEnabled ? <><button type="button" onClick={() => void startHospitalCheck()} disabled={!canStartHospitalCheck} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{hospitalLoading || isPreparing ? '准备中…' : isRegistrationComplete && hospitalState?.status === 'STARTED' ? '继续体检' : isRegistrationComplete && hospitalState?.status === 'FAILED' ? '重新体检' : '开始体检'}</button>{!isRegistrationComplete ? <p className="mt-2 text-xs font-bold text-amber-200">请填写完整注册信息后开始 E院体检。</p> : null}</> : <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white/80">管理员已关闭 E院体检，本次注册将直接进入邮箱验证。</p>}
           <FormError message={errors.hospitalCheck} />
         </section>
 

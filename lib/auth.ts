@@ -144,10 +144,10 @@ export function getSessionCookieOptions(request?: Request) {
   const requestUrl = request ? new URL(request.url) : null
   const hostname = requestUrl?.hostname.toLowerCase() || ''
   const localHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
-  const secure = localHost
-    ? false
-    : process.env.NODE_ENV === 'production'
-      ? true
+  const secure = process.env.NODE_ENV === 'production'
+    ? true
+    : localHost
+      ? false
       : requestUsesHttps && process.env.COOKIE_SECURE === 'true'
 
   return {
