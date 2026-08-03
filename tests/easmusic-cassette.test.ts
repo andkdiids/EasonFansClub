@@ -31,7 +31,8 @@ test('EasMusic 首页仅查询公开试听所需字段并过滤已发布专辑',
   assert.match(query, /previewUrl: \{ not: null \}/)
   assert.match(query, /MusicAlbum: \{ status: 'PUBLISHED' \}/)
   assert.match(query, /take: 60/)
-  assert.doesNotMatch(query, /sourceAudioPath|sourceAudioRevision|GuessSong/)
+  assert.match(query, /sourceAudioPath: true/)
+  assert.doesNotMatch(query, /sourceAudioRevision|GuessSong/)
 })
 
 test('互动录音机复用全局播放器且没有创建第二个 Audio', () => {

@@ -43,6 +43,7 @@ export function MusicPlayer({
     if (!previewUrl) return
     await player.playTrack({
       id,
+      songId: id,
       title,
       artist,
       albumName,

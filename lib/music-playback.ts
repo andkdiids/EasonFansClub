@@ -4,7 +4,14 @@ export type MusicPlaybackSource = {
   id: string
   previewUrl?: string | null
   previewDuration?: number | null
+  sourceAudioPath?: string | null
   sourceAudioDurationMs?: number | null
+}
+
+export type MusicPlaybackResponse = {
+  ok: true
+  url: string
+  isFullPlayback: boolean
 }
 
 export function canPlayFullMusic(user?: Pick<SessionUser, 'role' | 'canPlayFullMusic'> | null) {
@@ -16,7 +23,7 @@ export function getMusicPlaybackUrl(songId: string) {
 }
 
 export function resolveMusicPlayback(source: MusicPlaybackSource, user?: Pick<SessionUser, 'role' | 'canPlayFullMusic'> | null) {
-  const fullPlayback = canPlayFullMusic(user) && Boolean(source.sourceAudioDurationMs && source.sourceAudioDurationMs > 0)
+  const fullPlayback = canPlayFullMusic(user) && Boolean(source.sourceAudioPath)
   const playbackAvailable = fullPlayback || Boolean(source.previewUrl)
   const previewDuration = Math.max(1, Math.min(60, source.previewDuration || 60))
   const fullDuration = source.sourceAudioDurationMs && source.sourceAudioDurationMs > 0
@@ -24,6 +31,7 @@ export function resolveMusicPlayback(source: MusicPlaybackSource, user?: Pick<Se
     : previewDuration
 
   return {
+    songId: source.id,
     previewUrl: playbackAvailable ? getMusicPlaybackUrl(source.id) : '',
     previewDuration: fullPlayback ? fullDuration : previewDuration,
     isFullPlayback: fullPlayback,

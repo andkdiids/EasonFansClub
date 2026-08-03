@@ -1,5 +1,6 @@
 export type CassetteSong = {
   id: string
+  songId?: string
   title: string
   artist: string
   albumId: string

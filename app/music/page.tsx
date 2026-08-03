@@ -31,7 +31,10 @@ export default async function MusicPage() {
     }),
     prisma.musicSong.findMany({
       where: {
-        previewUrl: { not: null },
+        OR: [
+          { previewUrl: { not: null } },
+          { sourceAudioPath: { not: null } },
+        ],
         MusicAlbum: { status: 'PUBLISHED' },
       },
       orderBy: [{ releaseYear: 'desc' }, { trackNumber: 'asc' }, { createdAt: 'asc' }],
@@ -45,6 +48,7 @@ export default async function MusicPage() {
         coverUrl: true,
         previewUrl: true,
         previewDuration: true,
+        sourceAudioPath: true,
         sourceAudioDurationMs: true,
         MusicAlbum: {
           select: {
@@ -62,7 +66,8 @@ export default async function MusicPage() {
   const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl, songCount: album._count.MusicSong }))
   const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({ ...tour, concertCount: _count.MusicConcert, cities: [...new Set(MusicConcert.map((concert) => concert.city))] }))
   const cassetteSongs = cassetteSourceSongs.flatMap((song) => {
-    if (!song.previewUrl) return []
+    const playback = resolveMusicPlayback(song, currentUser)
+    if (!playback.previewUrl) return []
     return [{
       id: song.id,
       title: song.title,
@@ -72,7 +77,7 @@ export default async function MusicPage() {
       releaseYear: song.releaseYear,
       language: song.language,
       coverUrl: song.coverUrl || song.MusicAlbum.coverUrl,
-      ...resolveMusicPlayback(song, currentUser),
+      ...playback,
     }]
   })
 
