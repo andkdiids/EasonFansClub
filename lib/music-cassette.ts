@@ -24,16 +24,11 @@ export function createCassetteSeed() {
   return Date.now() >>> 0
 }
 
-export function selectCassetteSongs(songs: readonly CassetteSong[], count: number, seed: number) {
-  const random = randomFromSeed(seed)
-  const shuffled = [...songs]
-    .map((song) => ({ song, rank: random() + hashSeed(song.id) / 0xffffffff / 1000 }))
-    .sort((left, right) => left.rank - right.rank)
-    .map(({ song }) => song)
-
-  const selected: CassetteSong[] = []
+function pickCassetteSongs(candidates: readonly CassetteSong[], count: number, initial: readonly CassetteSong[] = []) {
+  const selected = [...initial]
   const deferred: CassetteSong[] = []
-  for (const song of shuffled) {
+  for (const song of candidates) {
+    if (selected.some((item) => item.id === song.id)) continue
     const lastAlbum = selected.at(-1)?.albumId
     if (lastAlbum && lastAlbum === song.albumId) deferred.push(song)
     else selected.push(song)
@@ -44,6 +39,24 @@ export function selectCassetteSongs(songs: readonly CassetteSong[], count: numbe
     if (selected.length === count) break
   }
   return selected
+}
+
+export function selectCassetteSongs(
+  songs: readonly CassetteSong[],
+  count: number,
+  seed: number,
+  excludedIds: ReadonlySet<string> = new Set(),
+) {
+  const random = randomFromSeed(seed)
+  const shuffled = [...songs]
+    .map((song) => ({ song, rank: random() + hashSeed(song.id) / 0xffffffff / 1000 }))
+    .sort((left, right) => left.rank - right.rank)
+    .map(({ song }) => song)
+  const freshSongs = shuffled.filter((song) => !excludedIds.has(song.id))
+  const fallbackSongs = shuffled.filter((song) => excludedIds.has(song.id))
+  const selectedFreshSongs = pickCassetteSongs(freshSongs, count)
+  if (selectedFreshSongs.length === count) return selectedFreshSongs
+  return pickCassetteSongs(fallbackSongs, count, selectedFreshSongs)
 }
 
 export function cassetteLayoutFor(songId: string, index: number) {

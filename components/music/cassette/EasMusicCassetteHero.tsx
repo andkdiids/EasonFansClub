@@ -30,6 +30,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
   const player = useMusicPlayer()
   const deckRef = useRef<HTMLElement | null>(null)
   const timersRef = useRef<Set<number>>(new Set())
+  const previousBatchIdsRef = useRef<ReadonlySet<string>>(new Set())
   // Keep the first render deterministic for SSR hydration, then restore the
   // original random cassette selection once the client has mounted.
   const [seed, setSeed] = useState(INITIAL_CASSETTE_SEED)
@@ -38,7 +39,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
   const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null)
   const [overDeck, setOverDeck] = useState(false)
   const [transition, setTransition] = useState<'idle' | 'inserting' | 'ejecting'>('idle')
-  const tapes = useMemo(() => selectCassetteSongs(songs, 8, seed), [seed, songs])
+  const tapes = useMemo(() => selectCassetteSongs(songs, 8, seed, previousBatchIdsRef.current), [seed, songs])
   const selectedTrack = tapes.find((song) => song.id === selectedId) || null
   const activeTrack = player.track ? toCassetteSong(player.track, songs) : null
   const activeTapeIndex = activeTrack ? tapes.findIndex((song) => song.id === activeTrack.id) : -1
@@ -126,6 +127,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
           onClick={() => {
             cancelDrag()
             setSelectedId(null)
+            previousBatchIdsRef.current = new Set(tapes.map((song) => song.id))
             setSeed(createCassetteSeed())
           }}
           disabled={!songs.length || transition !== 'idle'}

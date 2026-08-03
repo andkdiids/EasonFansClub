@@ -8,6 +8,7 @@ import { isCompleteActiveUser } from '@/lib/users'
 
 export const authCookieName = 'eason_fans_session'
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+const authCookieDomain = 'ecfc.fans'
 
 export type SessionUser = {
   id: string
@@ -152,12 +153,16 @@ export function getSessionCookieOptions(request?: Request) {
     : localHost
       ? false
       : requestUsesHttps && process.env.COOKIE_SECURE === 'true'
+  const domain = hostname === authCookieDomain || hostname.endsWith(`.${authCookieDomain}`)
+    ? authCookieDomain
+    : undefined
 
   return {
     httpOnly: true,
     sameSite: 'lax' as const,
     secure,
     path: '/',
+    ...(domain ? { domain } : {}),
     maxAge: SESSION_MAX_AGE_SECONDS,
     expires: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
   }

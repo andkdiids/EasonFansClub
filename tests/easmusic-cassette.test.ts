@@ -25,12 +25,29 @@ test('随机磁带同一会话稳定、去重并尽量分散专辑', () => {
   assert.ok(first.every((song, index) => index === 0 || song.albumId !== first[index - 1].albumId))
 })
 
+test('consecutive cassette batches exclude the previous batch when enough songs exist', () => {
+  const manySongs = Array.from({ length: 24 }, (_, index) => ({
+    ...songs[index % songs.length],
+    id: `many-song-${index}`,
+    albumId: `many-album-${Math.floor(index / 3)}`,
+  }))
+  const first = selectCassetteSongs(manySongs, 8, 20260730)
+  const second = selectCassetteSongs(manySongs, 8, 20260731, new Set(first.map((song) => song.id)))
+  assert.equal(new Set(second.map((song) => song.id)).size, second.length)
+  assert.equal(second.filter((song) => first.some((item) => item.id === song.id)).length, 0)
+
+  const smallFirst = selectCassetteSongs(songs, 8, 20260730)
+  const smallSecond = selectCassetteSongs(songs, 8, 20260731, new Set(smallFirst.map((song) => song.id)))
+  assert.equal(smallSecond.length, 8)
+  assert.equal(smallSecond.filter((song) => smallFirst.some((item) => item.id === song.id)).length, 4)
+})
+
 test('EasMusic 首页仅查询公开试听所需字段并过滤已发布专辑', () => {
   const page = read('app/music/page.tsx')
   const query = page.slice(page.indexOf('prisma.musicSong.findMany'), page.lastIndexOf('getPublishedPageLayoutConfig'))
   assert.match(query, /previewUrl: \{ not: null \}/)
   assert.match(query, /MusicAlbum: \{ status: 'PUBLISHED' \}/)
-  assert.match(query, /take: 60/)
+  assert.doesNotMatch(query, /take:\s*60/)
   assert.match(query, /sourceAudioPath: true/)
   assert.doesNotMatch(query, /sourceAudioRevision|GuessSong/)
 })

@@ -38,7 +38,6 @@ export default async function MusicPage() {
         MusicAlbum: { status: 'PUBLISHED' },
       },
       orderBy: [{ releaseYear: 'desc' }, { trackNumber: 'asc' }, { createdAt: 'asc' }],
-      take: 60,
       select: {
         id: true,
         title: true,
