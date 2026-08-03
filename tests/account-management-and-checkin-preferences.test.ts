@@ -69,11 +69,14 @@ test('新密码规则拒绝不一致、过短和相同密码由服务端验证',
   assert.match(source('app/api/account/security/password/change/route.ts'), /samePassword\.valid/)
 })
 
-test('邮箱重置仅展示禁用入口且没有对应提交 API', () => {
+test('邮箱链接重置新增独立 API 并保留原有安全设置入口', () => {
   const component = source('components/PasswordManagement.tsx')
   assert.match(component, /暂未开放/)
   assert.match(component, /type="button" disabled/)
   assert.match(source('app/settings/security/page.tsx'), /enableEmailPasswordReset/)
+  assert.match(source('app/api/auth/password/request/route.ts'), /TENCENT_EMAIL_NOT_CONFIGURED/)
+  assert.match(source('app/api/auth/password/reset/route.ts'), /type: 'EMAIL_LINK'/)
+  assert.match(source('app/forgot-password/page.tsx'), /EmailPasswordLinkForm/)
 })
 
 test('签到偏好只能修改本人并由签到 API 依据数据库值判断 mood', () => {

@@ -1309,6 +1309,7 @@ model PasswordResetToken {
   @@index([expiresAt])
   @@index([userId, type, stage, createdAt])
   @@index([codeHash])
+  @@index([type, stage, expiresAt])
 }
 
 model UserSecurityQuestion {
@@ -2045,6 +2046,7 @@ enum FriendRequestStatus {
 enum PasswordResetType {
   SECURITY_QUESTION
   EMAIL
+  EMAIL_LINK
 }
 
 enum PasswordResetStage {

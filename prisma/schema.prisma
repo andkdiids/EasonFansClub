@@ -1493,6 +1493,7 @@ model PasswordResetToken {
   @@index([codeHash])
   @@index([expiresAt])
   @@index([userId, type, stage, createdAt])
+  @@index([type, stage, expiresAt])
 }
 
 model PointLog {
@@ -2346,6 +2347,7 @@ enum PasswordResetStage {
 enum PasswordResetType {
   SECURITY_QUESTION
   EMAIL
+  EMAIL_LINK
 }
 
 enum PointActionType {

@@ -18,11 +18,11 @@ export async function POST(request: Request) {
   if (!token || password.length < 8 || password.length > 128 || password !== confirmPassword) {
     return NextResponse.json({ message: '重置凭证无效，或新密码不符合要求' }, { status: 400 })
   }
-  const reset = await prisma.passwordResetToken.findFirst({ where: { tokenHash: hashToken(token), stage: 'RESET_TOKEN', consumedAt: null, expiresAt: { gt: new Date() } }, select: { id: true, userId: true, type: true } })
+  const reset = await prisma.passwordResetToken.findFirst({ where: { tokenHash: hashToken(token), type: { not: 'EMAIL_LINK' }, stage: 'RESET_TOKEN', consumedAt: null, expiresAt: { gt: new Date() } }, select: { id: true, userId: true, type: true } })
   if (!reset) return NextResponse.json({ message: '重置凭证无效或已过期' }, { status: 400 })
   const passwordHash = await hashPassword(password)
   const committed = await prisma.$transaction(async (tx) => {
-    const consumed = await tx.passwordResetToken.updateMany({ where: { id: reset.id, consumedAt: null, expiresAt: { gt: new Date() } }, data: { consumedAt: new Date() } })
+    const consumed = await tx.passwordResetToken.updateMany({ where: { id: reset.id, type: { not: 'EMAIL_LINK' }, consumedAt: null, expiresAt: { gt: new Date() } }, data: { consumedAt: new Date() } })
     if (consumed.count !== 1) return false
     await tx.user.update({ where: { id: reset.userId }, data: { passwordHash } })
     await tx.passwordResetToken.updateMany({ where: { userId: reset.userId, consumedAt: null }, data: { consumedAt: new Date() } })
