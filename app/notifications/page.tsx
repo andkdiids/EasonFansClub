@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { getCurrentUser } from '@/lib/auth'
-import { getUnreadSummary, listUnifiedNotifications } from '@/lib/notifications'
+import { listUnifiedNotifications } from '@/lib/notifications'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { NotificationsClient } from './NotificationsClient'
 
@@ -11,9 +11,8 @@ export default async function NotificationsPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const [notifications, unreadSummary, layoutConfig] = await Promise.all([
+  const [notifications, layoutConfig] = await Promise.all([
     listUnifiedNotifications(user.id, { limit: 50 }),
-    getUnreadSummary(user.id),
     getPublishedPageLayoutConfig('message'),
   ])
 
@@ -24,7 +23,7 @@ export default async function NotificationsPage() {
           pageKey="message"
           config={layoutConfig}
           modules={{
-            'message.main': <NotificationsClient initialNotifications={notifications} initialUnreadSummary={unreadSummary} />,
+            'message.main': <NotificationsClient initialNotifications={notifications} />,
           }}
         />
       </main>

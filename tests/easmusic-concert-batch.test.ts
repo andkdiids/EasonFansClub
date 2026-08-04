@@ -82,14 +82,14 @@ test('继承歌单为新场次创建独立副本', () => {
   assert.equal(source[0].displayName, '十年')
 })
 
-test('继承歌单保留曲序、段落、版本、备注和所有现场标记', () => {
+test('继承歌单保留曲序、段落、版本、备注和所有现场标记，并独立编号 Encore', () => {
   const source = [
     { songId: 'song-2', displayName: 'Encore', section: 'ENCORE' as const, position: 20, versionName: 'Live', note: '尾声', isEncore: true, isRequest: false, isDebut: false, isGuest: true, isMedley: false, isSpecial: true },
     { songId: 'song-1', displayName: '主歌', section: 'MAIN' as const, position: 10, versionName: 'Acoustic', note: '开场', isEncore: false, isRequest: true, isDebut: true, isGuest: false, isMedley: true, isSpecial: false },
   ]
   assert.deepEqual(cloneSetlistItems(source, 'concert-2'), [
     { ...source[1], concertId: 'concert-2', position: 1 },
-    { ...source[0], concertId: 'concert-2', position: 2 },
+    { ...source[0], concertId: 'concert-2', position: 1 },
   ])
 })
 
@@ -224,7 +224,14 @@ test('后台多选日期可添加标签和删除且不再提供手填场次编�
   assert.match(createRoute, /posterUrl: sanitizeText\(body\?\.posterUrl, 1000\)/)
   assert.match(editor, /mode=copy-options/)
   assert.match(editor, /sessionNumber\?: string \| null/)
-  assert.match(editor, /选择其他场次复制歌单/)
+  assert.match(editor, /选择当前巡演其他场次复制歌单/)
+  assert.match(editor, /Encore 编辑器/)
+  assert.match(editor, /setEncoreSetlist/)
+  assert.match(editor, /normalizeSetlistRows\(item\.setlist, false\)/)
+  assert.match(editor, /normalizeSetlistRows\(item\.setlist, true\)/)
+  assert.match(manager, /setlistSource: 'SOURCE'/)
+  assert.match(manager, /sourceConcertId/)
+  assert.match(manager, /mode=copy-options&tourId=/)
   assert.doesNotMatch(manager, />场次编号<input/)
 })
 
@@ -236,8 +243,12 @@ test('任意场次歌单复制选项不受后台 200 条平铺上限影响', () 
   assert.match(route, /sessionNumber: true/)
   assert.match(route, /sortOrder: true/)
   assert.match(route, /excludeId \? \{ id: \{ not: excludeId \} \} : \{\}/)
+  assert.match(route, /where: \{ id: sourceConcertId, tourId \}/)
+  assert.match(route, /setlistSource === 'SOURCE'/)
+  assert.match(editor, /sourceConcertId/)
+  assert.match(read('app/admin/music/concerts/AdminConcertManager.tsx'), /sourceConcertId: form\.sourceConcertId/)
   assert.match(editor, /excludeId=\$\{encodeURIComponent\(concertId\)\}/)
-  assert.match(editor, /row\.tour\.name\} · \{row\.city\} · \{row\.concertDate\.slice\(0,10\)\}/)
+  assert.match(editor, /row\.tour\.name\} · \{row\.city\} · \{row\.concertDate\.slice\(0, 10\)\}/)
 })
 
 test('前台巡演详情展示地区、场次序号、场馆和歌单', () => {

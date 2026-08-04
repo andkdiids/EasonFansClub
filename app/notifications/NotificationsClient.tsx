@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
 import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 
@@ -44,15 +45,15 @@ function getInitial(uid?: number | null) {
 
 export function NotificationsClient({
   initialNotifications,
-  initialUnreadSummary,
 }: {
   initialNotifications: UnifiedNotification[]
-  initialUnreadSummary: UnreadSummary
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { summary: sharedSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
   const [notifications, setNotifications] = useState(initialNotifications)
-  const [unreadSummary, setUnreadSummary] = useState(initialUnreadSummary)
+  const [summaryOverride, setSummaryOverride] = useState<UnreadSummary | null>(null)
+  const unreadSummary = summaryOverride || sharedSummary
   const unreadCount = unreadSummary.total
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all')
   const [isUpdating, setIsUpdating] = useState(false)
@@ -60,6 +61,10 @@ export function NotificationsClient({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [replyStatus, setReplyStatus] = useState<Record<string, string>>({})
   const [sendingReply, setSendingReply] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSummaryOverride(null)
+  }, [sharedSummary])
 
   useEffect(() => {
     const saved = window.sessionStorage.getItem('notifications:return-state')
@@ -80,11 +85,11 @@ export function NotificationsClient({
     const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !item.isRead)
     setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
     if (!hiddenUnread.length) return
-    setUnreadSummary((summary) => ({
-      ...summary,
-      notifications: Math.max(0, summary.notifications - hiddenUnread.length),
-      system: Math.max(0, summary.system - hiddenUnread.length),
-      total: Math.max(0, summary.total - hiddenUnread.length),
+    setSummaryOverride((current) => ({
+      ...(current || sharedSummary),
+      notifications: Math.max(0, (current || sharedSummary).notifications - hiddenUnread.length),
+      system: Math.max(0, (current || sharedSummary).system - hiddenUnread.length),
+      total: Math.max(0, (current || sharedSummary).total - hiddenUnread.length),
     }))
     void fetch('/api/notifications', {
       method: 'PATCH',
@@ -114,22 +119,10 @@ export function NotificationsClient({
     return notifications.filter((item) => item.category === activeCategory)
   }, [activeCategory, notifications])
 
-  async function refreshUnreadSummary() {
-    const response = await fetch('/api/notifications/unread-summary', { cache: 'no-store' })
-    if (!response.ok) return
-    setUnreadSummary(await response.json() as UnreadSummary)
-  }
-
   useEffect(() => {
     const requestedCategory = searchParams.get('category') as NotificationCategory | null
     if (requestedCategory && requestedCategory in categoryLabels) setActiveCategory(requestedCategory)
   }, [searchParams])
-
-  useEffect(() => {
-    const refresh = () => void refreshUnreadSummary()
-    window.addEventListener('unread-summary:refresh', refresh)
-    return () => window.removeEventListener('unread-summary:refresh', refresh)
-  }, [])
 
   async function markRead(item: UnifiedNotification) {
     if (item.isRead) return

@@ -14,6 +14,7 @@ export type ConcertTimelineTour = {
   subtitle?: string | null
   description?: string | null
   posterUrl?: string | null
+  resolvedPosterUrl?: string | null
   startDate?: Date | string | null
   endDate?: Date | string | null
   concertCount: number
@@ -55,7 +56,7 @@ function archiveHref(tour: ConcertTimelineTour) {
 
 function ArchivePoster({ tour, sizes, square = true }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
   return <ConcertCover
-    src={tour.posterUrl}
+    resolvedPosterUrl={tour.resolvedPosterUrl}
     alt={`${tour.name}演唱会海报`}
     sizes={sizes}
     className={`music-concert-gallery-image${square ? ' is-square' : ''}`}

@@ -8,6 +8,7 @@ import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
+import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -25,7 +26,7 @@ export default async function MusicPage() {
       where: { status: 'PUBLISHED' },
       orderBy: [{ sortOrder: 'asc' }, { startDate: 'asc' }, { createdAt: 'asc' }],
       include: {
-        MusicConcert: { where: { status: 'PUBLISHED' }, select: { city: true } },
+        MusicConcert: { where: { status: 'PUBLISHED' }, orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { city: true, posterUrl: true } },
         _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } },
       },
     }),
@@ -63,7 +64,12 @@ export default async function MusicPage() {
   ])
   const carouselAlbums = albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl!, songCount: album._count.MusicSong, releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear) }))
   const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl, songCount: album._count.MusicSong }))
-  const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({ ...tour, concertCount: _count.MusicConcert, cities: [...new Set(MusicConcert.map((concert) => concert.city))] }))
+  const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({
+    ...tour,
+    ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
+    concertCount: _count.MusicConcert,
+    cities: [...new Set(MusicConcert.map((concert) => concert.city))],
+  }))
   const cassetteSongs = cassetteSourceSongs.flatMap((song) => {
     const playback = resolveMusicPlayback(song, currentUser)
     if (!playback.previewUrl) return []

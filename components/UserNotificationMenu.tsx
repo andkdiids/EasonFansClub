@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import type { UnreadSummary } from '@/lib/notifications'
+import { useState } from 'react'
+import { useNotificationSummary } from '@/components/NotificationProvider'
 import { SafeAvatar } from '@/components/SafeAvatar'
 
 function Badge({ count }: { count: number }) {
@@ -15,17 +15,15 @@ export function UserNotificationMenu({
   uid,
   avatarUrl,
   isAdmin,
-  initialSummary,
   currentUserId,
 }: {
   displayName: string
   uid: number
   avatarUrl?: string | null
   isAdmin: boolean
-  initialSummary: UnreadSummary
   currentUserId: string
 }) {
-  const [summary, setSummary] = useState(initialSummary)
+  const { summary } = useNotificationSummary()
   const [loggingOut, setLoggingOut] = useState(false)
 
   async function handleLogout() {
@@ -53,32 +51,6 @@ export function UserNotificationMenu({
     window.alert('退出登录失败，请稍后重试')
   }
 }
-
-  useEffect(() => {
-    let controller: AbortController | null = null
-    const refresh = () => {
-      if (document.visibilityState === 'hidden') return Promise.resolve(null)
-      controller = new AbortController()
-      return fetch('/api/notifications/unread-summary', { cache: 'no-store', signal: controller.signal })
-      .then((response) => response.ok ? response.json() as Promise<UnreadSummary> : null)
-      .then((next) => { if (next) setSummary(next) })
-      .catch(() => null)
-    }
-    const listener = () => void refresh()
-    const channel = 'BroadcastChannel' in window
-      ? new BroadcastChannel(`eason-private-sync:${currentUserId}`)
-      : null
-    if (channel) {
-      channel.onmessage = (event) => {
-        if (event.data?.userId !== currentUserId) return
-        if (event.data?.type === 'logout') window.location.reload()
-        else void refresh()
-      }
-    }
-    window.addEventListener('unread-summary:refresh', listener)
-    const timer = window.setInterval(refresh, 5000)
-    return () => { controller?.abort(); channel?.close(); window.clearInterval(timer); window.removeEventListener('unread-summary:refresh', listener) }
-  }, [currentUserId])
 
   const itemClass = 'flex min-h-10 items-center rounded-sm px-3 py-2 text-sm font-bold text-slate-700 hover:bg-sky-50'
   return <details data-user-menu className="relative z-[var(--layer-popover)] shrink-0">

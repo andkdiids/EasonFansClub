@@ -24,8 +24,9 @@ type RecordItem = {
     venue: string | null
     sessionNumber: string | null
     posterUrl: string | null
+    resolvedPosterUrl: string | null
     setlistCount: number
-    tour: { id: string; name: string; posterUrl: string | null }
+    tour: { id: string; name: string; posterUrl: string | null; resolvedPosterUrl: string | null }
   }
 }
 type SongItem = {
@@ -42,6 +43,7 @@ type TourStat = {
   id: string
   name: string
   posterUrl: string | null
+  resolvedPosterUrl: string | null
   concertCount: number
   firstDate: string
   latestDate: string
@@ -139,7 +141,7 @@ export function MyLiveDashboard({ data }: Readonly<{ data: DashboardData }>) {
         <section><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-black tracking-[0.18em] text-sky-300/60">RECENT CONCERTS</p><h2 className="mt-2 text-3xl font-black text-white">最近观演记录</h2></div><button type="button" onClick={() => setTab('concerts')} className="text-sm font-black text-sky-200">查看全部场次</button></div><div className="my-live-poster-grid mt-5 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">{availableRecords.slice(0,6).map((record) => <ConcertCard key={record.id} record={record} onRemove={remove} />)}</div></section>
         <div className="grid min-w-0 gap-8 lg:grid-cols-2">
           <section><p className="text-xs font-black tracking-[0.18em] text-sky-300/60">CITY FOOTPRINT</p><h2 className="mt-2 text-3xl font-black text-white">城市足迹</h2><div className="mt-5 border-y border-white/10">{data.stats.cities.map((city) => <button key={city.name} type="button" onClick={() => { setConcertFilters((current) => ({ ...current, city: city.name })); setTab('concerts') }} className="flex w-full items-center justify-between border-b border-white/10 px-3 py-4 text-left last:border-b-0 hover:bg-white/[0.05]"><span className="break-words font-black text-white">{city.name}</span><span className="ml-4 shrink-0 text-sm font-bold text-sky-200">{city.count}场</span></button>)}</div></section>
-          <section><p className="text-xs font-black tracking-[0.18em] text-sky-300/60">TOUR HISTORY</p><h2 className="mt-2 text-3xl font-black text-white">巡演经历</h2><div className="mt-5 space-y-3">{data.tours.map((tour) => <Link key={tour.id} href={`/music/live/tours/${generateArchiveSlug(tour.name)}`} className="grid min-w-0 grid-cols-[64px_minmax(0,1fr)] gap-4 border border-white/10 bg-white/[0.035] p-3 hover:bg-white/[0.07]"><div className="relative aspect-square overflow-hidden bg-[#0b2038]"><ConcertCover src={tour.posterUrl} alt={`${tour.name}巡演海报`} sizes="64px" /></div><div className="min-w-0"><h3 className="break-words font-black text-white">{tour.name}</h3><p className="mt-2 text-xs text-slate-300/65">{tour.concertCount}场 · 解锁{tour.unlockedSongCount}首</p><p className="mt-1 text-xs text-slate-400">{dateLabel(tour.firstDate)} – {dateLabel(tour.latestDate)}</p></div></Link>)}</div></section>
+          <section><p className="text-xs font-black tracking-[0.18em] text-sky-300/60">TOUR HISTORY</p><h2 className="mt-2 text-3xl font-black text-white">巡演经历</h2><div className="mt-5 space-y-3">{data.tours.map((tour) => <Link key={tour.id} href={`/music/live/tours/${generateArchiveSlug(tour.name)}`} className="grid min-w-0 grid-cols-[64px_minmax(0,1fr)] gap-4 border border-white/10 bg-white/[0.035] p-3 hover:bg-white/[0.07]"><div className="relative aspect-square overflow-hidden bg-[#0b2038]"><ConcertCover resolvedPosterUrl={tour.resolvedPosterUrl} alt={`${tour.name}巡演海报`} sizes="64px" /></div><div className="min-w-0"><h3 className="break-words font-black text-white">{tour.name}</h3><p className="mt-2 text-xs text-slate-300/65">{tour.concertCount}场 · 解锁{tour.unlockedSongCount}首</p><p className="mt-1 text-xs text-slate-400">{dateLabel(tour.firstDate)} – {dateLabel(tour.latestDate)}</p></div></Link>)}</div></section>
         </div>
       </>}
       {data.stats.unavailableCount ? <p className="border border-amber-200/15 bg-amber-200/[0.06] p-4 text-sm font-bold text-amber-100">有 {data.stats.unavailableCount} 条记录对应的场次资料暂未公开，记录仍安全保留并已计入观看统计。</p> : null}
@@ -158,7 +160,7 @@ function ConcertCard({ record, onRemove }: { record: RecordItem; onRemove: (reco
   const concertHref = buildConcertSlugPath(concert.tour.name, concert.city, concert.concertDate)
   return <article className="my-live-concert-card min-w-0 border border-white/10 bg-white/[0.04] p-4">
     <Link href={concertHref} className="my-live-concert-poster relative block aspect-square overflow-hidden bg-[#0b2038]" aria-label={`${concert.city}现场海报`}>
-      <ConcertCover src={concert.posterUrl} alt={`${concert.city}现场海报`} sizes="(max-width: 767px) 50vw, 0px" />
+      <ConcertCover resolvedPosterUrl={concert.resolvedPosterUrl} alt={`${concert.city}现场海报`} sizes="(max-width: 767px) 50vw, 0px" />
     </Link>
     <div className="my-live-concert-card-body">
       <div className="flex items-start justify-between gap-3"><div className="min-w-0"><time className="text-xs font-black text-sky-200">{dateLabel(concert.concertDate)}</time><h3 className="mt-2 break-words text-xl font-black text-white">{concert.city}</h3></div><span className="shrink-0 border border-white/10 px-2 py-1 text-[10px] font-black text-slate-300">{record.isPublic ? '公开' : '仅自己'}</span></div><p className="mt-2 break-words text-sm text-slate-300/70">{concert.venue || '场馆待整理'} · {concert.tour.name}</p><p className="mt-3 text-xs text-slate-400">{concert.setlistCount} 首{record.seatInfo ? ` · ${record.seatInfo}` : ''}</p>{record.mood ? <p className="mt-2 break-words text-sm font-bold text-sky-200/75">心情：{record.mood}</p> : null}{record.note ? <p className="mt-2 line-clamp-2 break-words text-xs leading-5 text-slate-400">{record.note}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><Link href={concertHref} className="bg-sky-100 px-3 py-2 text-xs font-black text-[#06101d]">进入场次详情</Link><Link href={concertHref} className="border border-white/15 px-3 py-2 text-xs font-black text-white">编辑记录</Link><button type="button" onClick={() => onRemove(record)} className="border border-red-300/20 px-3 py-2 text-xs font-black text-red-200">取消标记</button></div>

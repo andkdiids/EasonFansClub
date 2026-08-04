@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
+import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 
@@ -16,7 +17,7 @@ export default async function MusicConcertsPage() {
         MusicConcert: {
           where: { status: 'PUBLISHED' },
           orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-          select: { city: true },
+          select: { city: true, posterUrl: true },
         },
         _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } },
       },
@@ -25,6 +26,7 @@ export default async function MusicConcertsPage() {
   ])
   const timeline = tours.map(({ MusicConcert, _count, ...tour }) => ({
     ...tour,
+    ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
     concertCount: _count.MusicConcert,
     cities: [...new Set(MusicConcert.map((concert) => concert.city))],
   }))

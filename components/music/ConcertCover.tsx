@@ -6,6 +6,7 @@ import { publicImageUrl } from '@/lib/images'
 
 type ConcertCoverProps = {
   src?: string | null
+  resolvedPosterUrl?: string | null
   alt: string
   sizes: string
   className?: string
@@ -17,9 +18,9 @@ type ConcertCoverProps = {
  * poster. The foreground fills the card and crops only the overflow, while
  * the blurred copy remains available as a visual fallback layer.
  */
-export function ConcertCover({ src, alt, sizes, className = '', fallbackLabel = '海报暂缺' }: Readonly<ConcertCoverProps>) {
+export function ConcertCover({ src, resolvedPosterUrl, alt, sizes, className = '', fallbackLabel = '海报暂缺' }: Readonly<ConcertCoverProps>) {
   const [failed, setFailed] = useState(false)
-  const imageSrc = getRenderableImageSource(src)
+  const imageSrc = getRenderableImageSource(resolvedPosterUrl !== undefined ? resolvedPosterUrl : src)
 
   return <span className={`concert-cover ${className}`.trim()}>
     {imageSrc && !failed ? <>

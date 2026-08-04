@@ -15,13 +15,14 @@ test('Topbar 用户菜单支持外部点击、Esc、路由变化和入口点击�
 
 test('AppShell 与消息中心共用真实统一未读计数', () => {
   const layout = read('app/layout.tsx')
-  const shell = read('components/layout/AppShell.tsx')
+  const provider = read('components/NotificationProvider.tsx')
   const notificationsPage = read('app/notifications/page.tsx')
   const notificationsClient = read('app/notifications/NotificationsClient.tsx')
   assert.match(layout, /getUnreadSummary/)
-  assert.match(shell, /\/api\/notifications\/unread-summary/)
-  assert.match(shell, /unread-summary:refresh/)
-  assert.match(notificationsPage, /getUnreadSummary/)
+  assert.match(layout, /<NotificationProvider/)
+  assert.match(provider, /\/api\/notifications\/unread-summary/)
+  assert.match(provider, /unread-summary:refresh/)
+  assert.doesNotMatch(notificationsPage, /getUnreadSummary/)
   assert.doesNotMatch(notificationsPage, /UserPersonalizationSettings|checkinMoodEnabled/)
   assert.doesNotMatch(notificationsClient, /UserPersonalizationSettings|initialCheckinMoodEnabled/)
   assert.match(notificationsClient, /source: 'system'/)

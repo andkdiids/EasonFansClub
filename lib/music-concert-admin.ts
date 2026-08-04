@@ -53,9 +53,11 @@ export function buildConcertSequenceUpdates(
 }
 
 export function cloneSetlistItems(items: ParsedSetlistItem[], concertId: string) {
-  return items
+  const ordered = items
     .map((item, index) => ({ item, index }))
     .sort((left, right) => left.item.position - right.item.position || left.index - right.index)
+  const cloneGroup = (isEncore: boolean) => ordered
+    .filter(({ item }) => item.isEncore === isEncore)
     .map(({ item }, index) => ({
       songId: item.songId,
       displayName: item.displayName,
@@ -71,4 +73,6 @@ export function cloneSetlistItems(items: ParsedSetlistItem[], concertId: string)
       concertId,
       position: index + 1,
     }))
+
+  return [...cloneGroup(false), ...cloneGroup(true)]
 }

@@ -95,6 +95,25 @@ export async function POST(request: Request) {
       })
     }
 
+    const administrators = await tx.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+      select: { id: true },
+    })
+    if (administrators.length) {
+      await tx.notification.createMany({
+        data: administrators.map((administrator) => ({
+          recipientId: administrator.id,
+          actorId: guard.user.id,
+          type: 'ADMIN' as const,
+          title: '收到新的用户反馈',
+          content: `用户昵称：${guard.user.nickname}\n反馈标题：${title}\n提交时间：${now.toISOString()}`,
+          link: '/admin/feedback',
+          key: `feedback-new:${created.id}`,
+        })),
+        skipDuplicates: true,
+      })
+    }
+
     return tx.feedback.findUniqueOrThrow({
       where: { id: created.id },
       include: feedbackInclude,

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { buildConcertSequenceUpdates, cloneSetlistItems, DEFAULT_CONCERT_COUNTRY } from '@/lib/music-concert-admin'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { parseHighlights, parseLiveDate, parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -21,7 +22,7 @@ async function normalizeTourConcerts(tx: Prisma.TransactionClient, tourId: strin
 }
 
 const concertInclude = {
-  MusicTour: { select: { id: true, name: true } },
+  MusicTour: { select: { id: true, name: true, posterUrl: true } },
   MusicConcertSetlistItem: {
     orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
     include: { MusicSong: { select: { id: true, title: true, releaseYear: true, MusicAlbum: { select: { name: true } } } } },
@@ -36,8 +37,23 @@ export async function GET(_request: Request, { params }: Context) {
   const { concertId } = await params
   const concert = await prisma.musicConcert.findUnique({ where: { id: concertId }, include: concertInclude })
   if (!concert) return NextResponse.json({ message: '演唱会场次不存在' }, { status: 404 })
+  const cityPoster = await prisma.musicConcert.findFirst({
+    where: { tourId: concert.tourId, city: concert.city, id: { not: concert.id }, posterUrl: { not: null } },
+    orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { posterUrl: true },
+  })
   const { MusicTour, MusicConcertSetlistItem, MusicConcertHighlight, ...data } = concert
-  return NextResponse.json({ concert: { ...data, tour: MusicTour, setlist: MusicConcertSetlistItem.map(({ MusicSong, ...item }) => ({ ...item, song: MusicSong ? { ...MusicSong, album: MusicSong.MusicAlbum.name, MusicAlbum: undefined } : null })), highlights: MusicConcertHighlight } })
+  const posterResolution = resolveConcertPoster({ posterUrl: concert.posterUrl, cityPosterUrl: cityPoster?.posterUrl, tourPosterUrl: MusicTour.posterUrl })
+  return NextResponse.json({ concert: {
+    ...data,
+    tour: MusicTour,
+    cityPosterUrl: cityPoster?.posterUrl || null,
+    tourPosterUrl: MusicTour.posterUrl,
+    resolvedPosterUrl: posterResolution.resolvedPosterUrl,
+    posterSource: posterResolution.posterSource,
+    setlist: MusicConcertSetlistItem.map(({ MusicSong, ...item }) => ({ ...item, song: MusicSong ? { ...MusicSong, album: MusicSong.MusicAlbum.name, MusicAlbum: undefined } : null })),
+    highlights: MusicConcertHighlight,
+  } })
 }
 
 export async function PATCH(request: Request, { params }: Context) {

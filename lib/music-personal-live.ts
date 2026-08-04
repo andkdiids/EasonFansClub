@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 
 export const PERSONAL_LIVE_NO_STORE_HEADERS = {
@@ -165,6 +166,20 @@ export type PersonalLiveRow = {
   }
 }
 
+type PersonalPosterFallbacks = {
+  city: ReadonlyMap<string, string>
+  tour: ReadonlyMap<string, string>
+}
+
+const EMPTY_PERSONAL_POSTER_FALLBACKS: PersonalPosterFallbacks = {
+  city: new Map(),
+  tour: new Map(),
+}
+
+function personalPosterKey(tourId: string, city: string) {
+  return `${tourId}::${normalizedCityKey(city) || ''}`
+}
+
 function isPublishedRow(row: PersonalLiveRow) {
   return row.MusicConcert.status === 'PUBLISHED' && row.MusicConcert.MusicTour.status === 'PUBLISHED'
 }
@@ -273,7 +288,7 @@ export function buildPersonalSongAtlas(rows: PersonalLiveRow[]) {
   })
 }
 
-export function buildTourStats(rows: PersonalLiveRow[]) {
+export function buildTourStats(rows: PersonalLiveRow[], fallbacks: PersonalPosterFallbacks = EMPTY_PERSONAL_POSTER_FALLBACKS) {
   const tours = new Map<string, {
     id: string
     name: string
@@ -302,6 +317,7 @@ export function buildTourStats(rows: PersonalLiveRow[]) {
       id: tour.id,
       name: tour.name,
       posterUrl: tour.posterUrl,
+      resolvedPosterUrl: resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: fallbacks.tour.get(tour.id) }).resolvedPosterUrl,
       concertCount: dates.length,
       firstDate: dates[0],
       latestDate: dates.at(-1)!,
@@ -361,7 +377,26 @@ export async function getPersonalLiveRows(userId: string) {
   return rows as PersonalLiveRow[]
 }
 
-export function serializePersonalRecord(row: PersonalLiveRow) {
+async function getPersonalPosterFallbacks(rows: PersonalLiveRow[]): Promise<PersonalPosterFallbacks> {
+  const tourIds = [...new Set(rows.map((row) => row.MusicConcert.tourId))]
+  if (!tourIds.length) return EMPTY_PERSONAL_POSTER_FALLBACKS
+  const candidates = await prisma.musicConcert.findMany({
+    where: { tourId: { in: tourIds }, status: 'PUBLISHED', posterUrl: { not: null } },
+    orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { tourId: true, city: true, posterUrl: true },
+  })
+  const city = new Map<string, string>()
+  const tour = new Map<string, string>()
+  for (const candidate of candidates) {
+    if (!candidate.posterUrl) continue
+    const cityKey = personalPosterKey(candidate.tourId, candidate.city)
+    if (!city.has(cityKey)) city.set(cityKey, candidate.posterUrl)
+    if (!tour.has(candidate.tourId)) tour.set(candidate.tourId, candidate.posterUrl)
+  }
+  return { city, tour }
+}
+
+export function serializePersonalRecord(row: PersonalLiveRow, fallbacks: PersonalPosterFallbacks = EMPTY_PERSONAL_POSTER_FALLBACKS) {
   const available = isPublishedRow(row)
   if (!available) {
     return {
@@ -373,6 +408,11 @@ export function serializePersonalRecord(row: PersonalLiveRow) {
     }
   }
   const concert = row.MusicConcert
+  const posterResolution = resolveConcertPoster({
+    posterUrl: concert.posterUrl,
+    cityPosterUrl: fallbacks.city.get(personalPosterKey(concert.tourId, concert.city)),
+    tourPosterUrl: concert.MusicTour.posterUrl,
+  })
   return {
     id: row.id,
     concertId: concert.id,
@@ -391,11 +431,14 @@ export function serializePersonalRecord(row: PersonalLiveRow) {
       venue: concert.venue,
       sessionNumber: concert.sessionNumber,
       posterUrl: concert.posterUrl,
+      resolvedPosterUrl: posterResolution.resolvedPosterUrl,
+      posterSource: posterResolution.posterSource,
       setlistCount: concert.MusicConcertSetlistItem.filter(isCountableSetlistItem).length,
       tour: {
         id: concert.MusicTour.id,
         name: concert.MusicTour.name,
         posterUrl: concert.MusicTour.posterUrl,
+        resolvedPosterUrl: resolveConcertPoster({ posterUrl: concert.MusicTour.posterUrl, cityPosterUrl: fallbacks.tour.get(concert.MusicTour.id) }).resolvedPosterUrl,
       },
     },
   }
@@ -403,12 +446,13 @@ export function serializePersonalRecord(row: PersonalLiveRow) {
 
 export async function getPersonalLiveOverview(userId: string) {
   const rows = await getPersonalLiveRows(userId)
+  const posterFallbacks = await getPersonalPosterFallbacks(rows)
   const stats = summarizePersonalLiveRows(rows)
   const songs = buildPersonalSongAtlas(rows)
-  const tours = buildTourStats(rows)
+  const tours = buildTourStats(rows, posterFallbacks)
   return {
     stats,
-    records: rows.map(serializePersonalRecord),
+    records: rows.map((row) => serializePersonalRecord(row, posterFallbacks)),
     songs,
     tours,
   }

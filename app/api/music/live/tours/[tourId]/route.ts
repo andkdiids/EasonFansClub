@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 
 type Context = { params: Promise<{ tourId: string }> }
@@ -36,6 +37,7 @@ export async function GET(request: Request, { params }: Context) {
         city: group.city,
         count: group.count,
         posterUrl: group.posterUrl,
+        resolvedPosterUrl: resolveConcertPoster({ cityPosterUrl: group.posterUrl, tourPosterUrl: data.posterUrl }).resolvedPosterUrl,
         firstDate: group.dates[0].toISOString().slice(0, 10),
         lastDate: group.dates[group.dates.length - 1].toISOString().slice(0, 10),
       }))
@@ -51,7 +53,7 @@ export async function GET(request: Request, { params }: Context) {
         where: { status: 'PUBLISHED', ...(cityParam ? { city: cityParam } : {}) },
         orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         select: {
-          id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true,
+          id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true,
           _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
         },
       },
@@ -59,8 +61,17 @@ export async function GET(request: Request, { params }: Context) {
   })
   if (!tour) return NextResponse.json({ message: '巡演不存在' }, { status: 404 })
   const { MusicConcert, ...data } = tour
+  const cityPosters = new Map<string, string>()
+  for (const concert of MusicConcert) {
+    if (concert.posterUrl && !cityPosters.has(concert.city)) cityPosters.set(concert.city, concert.posterUrl)
+  }
   return NextResponse.json({
     tour: data,
-    concerts: MusicConcert.map(({ _count, ...concert }) => ({ ...concert, songCount: _count.MusicConcertSetlistItem, hasHighlights: _count.MusicConcertHighlight > 0 })),
+    concerts: MusicConcert.map(({ _count, ...concert }) => ({
+      ...concert,
+      ...resolveConcertPoster({ posterUrl: concert.posterUrl, cityPosterUrl: cityPosters.get(concert.city), tourPosterUrl: data.posterUrl }),
+      songCount: _count.MusicConcertSetlistItem,
+      hasHighlights: _count.MusicConcertHighlight > 0,
+    })),
   })
 }

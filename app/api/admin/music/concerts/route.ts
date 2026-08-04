@@ -6,7 +6,8 @@ import {
   DEFAULT_CONCERT_COUNTRY,
   parseConcertDates,
 } from '@/lib/music-concert-admin'
-import { parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
+import { parseLiveDate, parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -23,6 +24,17 @@ export async function GET(request: Request) {
   const status = params.get('status')
   const keyword = sanitizeText(params.get('q'), 100)
   const year = Number(params.get('year'))
+  const startDate = parseLiveDate(params.get('startDate'))
+  const endDate = parseLiveDate(params.get('endDate'))
+  const pageValue = Number(params.get('page'))
+  const pageSizeValue = Number(params.get('pageSize'))
+  const page = Number.isInteger(pageValue) && pageValue > 0 ? Math.min(pageValue, 10_000) : 1
+  const pageSize = Number.isInteger(pageSizeValue) && pageSizeValue > 0 ? Math.min(pageSizeValue, 100) : 50
+  const idsOnly = params.get('idsOnly') === '1'
+
+  if (startDate && endDate && startDate.getTime() > endDate.getTime()) {
+    return NextResponse.json({ message: '开始日期不能晚于结束日期' }, { status: 400 })
+  }
 
   // 城市分组模式：仅返回该巡演下的城市及其场次计数（含首尾日期），不加载全部场次，
   // 避免未来单巡演超过 200 场时被截断。
@@ -35,12 +47,20 @@ export async function GET(request: Request) {
       _min: { concertDate: true },
       _max: { concertDate: true },
     })
+    const posterRows = await prisma.musicConcert.findMany({
+      where: { tourId, posterUrl: { not: null } },
+      orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: { city: true, posterUrl: true },
+    })
+    const cityPosters = new Map<string, string>()
+    for (const row of posterRows) if (row.posterUrl && !cityPosters.has(row.city)) cityPosters.set(row.city, row.posterUrl)
     const cities = grouped
       .map((group) => ({
         city: group.city,
         count: group._count._all,
         firstDate: group._min.concertDate ? group._min.concertDate.toISOString().slice(0, 10) : null,
         lastDate: group._max.concertDate ? group._max.concertDate.toISOString().slice(0, 10) : null,
+        posterUrl: cityPosters.get(group.city) || null,
       }))
       .sort((left, right) => left.city.localeCompare(right.city, 'zh-CN'))
     return NextResponse.json({ cities })
@@ -68,21 +88,49 @@ export async function GET(request: Request) {
   }
 
   const yearStart = Number.isInteger(year) && year >= 1900 && year <= 2100 ? new Date(`${year}-01-01T00:00:00.000Z`) : null
+  const dateFilter: Prisma.DateTimeFilter = {}
+  if (startDate) dateFilter.gte = startDate
+  if (endDate) dateFilter.lt = new Date(endDate.getTime() + 24 * 60 * 60 * 1000)
   const where: Prisma.MusicConcertWhereInput = {
     ...(tourId ? { tourId } : {}),
     ...(city ? { city } : {}),
     ...(excludeId ? { id: { not: excludeId } } : {}),
     ...(status === 'DRAFT' || status === 'PUBLISHED' ? { status: status as 'DRAFT' | 'PUBLISHED' } : {}),
     ...(yearStart ? { concertDate: { gte: yearStart, lt: new Date(`${year + 1}-01-01T00:00:00.000Z`) } } : {}),
+    ...(Object.keys(dateFilter).length ? { concertDate: dateFilter } : {}),
     ...(keyword ? { OR: [{ title: { contains: keyword } }, { city: { contains: keyword } }, { venue: { contains: keyword } }, { sessionNumber: { contains: keyword } }, { MusicTour: { name: { contains: keyword } } }] } : {}),
   }
-  const concerts = await prisma.musicConcert.findMany({
+  if (idsOnly) {
+    const ids = await prisma.musicConcert.findMany({ where, orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true } })
+    return NextResponse.json({ ids: ids.map((item) => item.id), total: ids.length })
+  }
+  const [total, concerts] = await Promise.all([
+    prisma.musicConcert.count({ where }),
+    prisma.musicConcert.findMany({
     where,
-    orderBy: [{ sortOrder: 'asc' }, { concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    include: { MusicTour: { select: { id: true, name: true } }, _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true, UserMusicConcert: true } } },
+      orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    include: { MusicTour: { select: { id: true, name: true, posterUrl: true } }, _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true, UserMusicConcert: true } } },
     // city 级查询（三级浏览第三级）不限制条数，避免单城市场次被截断；平铺模式保留 200 上限
-    ...(city ? {} : { take: 200 }),
-  })
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ])
+  const tourIds = [...new Set(concerts.map((concert) => concert.tourId))]
+  const posterCandidates = tourIds.length
+    ? await prisma.musicConcert.findMany({
+      where: { tourId: { in: tourIds }, posterUrl: { not: null } },
+      orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: { tourId: true, city: true, posterUrl: true },
+    })
+    : []
+  const cityPosters = new Map<string, string>()
+  const tourPosters = new Map<string, string>()
+  for (const candidate of posterCandidates) {
+    if (!candidate.posterUrl) continue
+    const cityKey = `${candidate.tourId}::${candidate.city}`
+    if (!cityPosters.has(cityKey)) cityPosters.set(cityKey, candidate.posterUrl)
+    if (!tourPosters.has(candidate.tourId)) tourPosters.set(candidate.tourId, candidate.posterUrl)
+  }
   return NextResponse.json({
     concerts: concerts.map(({ MusicTour, _count, ...concert }) => ({
       ...concert,
@@ -90,7 +138,13 @@ export async function GET(request: Request) {
       setlistCount: _count.MusicConcertSetlistItem,
       highlightCount: _count.MusicConcertHighlight,
       attendanceCount: _count.UserMusicConcert,
+      ...resolveConcertPoster({
+        posterUrl: concert.posterUrl,
+        cityPosterUrl: cityPosters.get(`${concert.tourId}::${concert.city}`),
+        tourPosterUrl: MusicTour.posterUrl || tourPosters.get(concert.tourId),
+      }),
     })),
+    pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
   })
 }
 
@@ -101,12 +155,14 @@ export async function POST(request: Request) {
   const tourId = sanitizeText(body?.tourId, 100)
   const city = sanitizeText(body?.city, 100)
   const dateResult = parseConcertDates(body?.concertDates ?? body?.concertDate)
-  const setlistSource = body?.setlistSource === 'NEW' ? 'NEW' : 'PREVIOUS'
+  const setlistSource = body?.setlistSource === 'NEW' || body?.setlistSource === 'SOURCE' ? body.setlistSource : 'PREVIOUS'
+  const sourceConcertId = sanitizeText(body?.sourceConcertId, 100)
   const setlistResult = parseSetlistItems(body?.setlist ?? [])
   if (!tourId || !await prisma.musicTour.findUnique({ where: { id: tourId }, select: { id: true } })) return NextResponse.json({ message: '请选择有效巡演' }, { status: 400 })
   if (!city) return NextResponse.json({ message: '请填写城市' }, { status: 400 })
   if (!('dates' in dateResult)) return NextResponse.json({ message: dateResult.message }, { status: 400 })
   if (!setlistResult.items) return NextResponse.json({ message: setlistResult.message }, { status: 400 })
+  if (setlistSource === 'SOURCE' && !sourceConcertId) return NextResponse.json({ message: '请选择当前巡演下的来源场次' }, { status: 400 })
   const concertDates = dateResult.dates!
   const initialSetlistItems = setlistResult.items
   const duplicate = await prisma.musicConcert.findFirst({
@@ -125,6 +181,27 @@ export async function POST(request: Request) {
       })
       if (!previous) return { message: '当前巡演还没有上一场歌单，请选择“创建新歌单”' }
       inheritedItems = previous.MusicConcertSetlistItem.map((item) => ({
+        songId: item.songId,
+        displayName: item.displayName,
+        section: item.section,
+        position: item.position,
+        versionName: item.versionName,
+        note: item.note,
+        isEncore: item.isEncore,
+        isRequest: item.isRequest,
+        isDebut: item.isDebut,
+        isGuest: item.isGuest,
+        isMedley: item.isMedley,
+        isSpecial: item.isSpecial,
+      }))
+    }
+    if (setlistSource === 'SOURCE') {
+      const source = await tx.musicConcert.findFirst({
+        where: { id: sourceConcertId, tourId },
+        include: { MusicConcertSetlistItem: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] } },
+      })
+      if (!source) return { message: '来源场次不存在或不属于当前巡演' }
+      inheritedItems = source.MusicConcertSetlistItem.map((item) => ({
         songId: item.songId,
         displayName: item.displayName,
         section: item.section,
@@ -184,7 +261,8 @@ export async function POST(request: Request) {
   return NextResponse.json({
     concerts: result.concerts,
     concert: result.concerts[0],
-    inherited: setlistSource === 'PREVIOUS',
-    message: `已创建 ${result.concerts.length} 个场次${setlistSource === 'PREVIOUS' ? '，并继承上一场歌单' : ''}`,
+    inherited: setlistSource !== 'NEW',
+    sourceConcertId: setlistSource === 'SOURCE' ? sourceConcertId : null,
+    message: `已创建 ${result.concerts.length} 个场次${setlistSource === 'PREVIOUS' ? '，并继承上一场歌单' : setlistSource === 'SOURCE' ? '，并复制来源场次歌单' : ''}`,
   }, { status: 201 })
 }

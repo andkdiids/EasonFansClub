@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { AppShell } from '@/components/layout/AppShell'
+import { NotificationProvider } from '@/components/NotificationProvider'
 import { NotificationToast } from '@/components/NotificationToast'
 import { MusicPlayerProvider } from '@/components/music/MusicPlayerProvider'
 import { VirtualKeyboardManager } from '@/components/VirtualKeyboardManager'
@@ -38,11 +39,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body>
         <VirtualKeyboardManager />
-        <MusicPlayerProvider>
-          <AppShell user={sessionUser} growth={growth} logoUrl={logoUrl} unreadSummary={unreadSummary} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
-            {children}
-          </AppShell>
-        </MusicPlayerProvider>
+        <NotificationProvider userId={sessionUser?.id || null} initialSummary={unreadSummary}>
+          <MusicPlayerProvider>
+            <AppShell user={sessionUser} growth={growth} logoUrl={logoUrl} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
+              {children}
+            </AppShell>
+          </MusicPlayerProvider>
+        </NotificationProvider>
         <NotificationToast enabled={Boolean(sessionUser)} />
       </body>
     </html>

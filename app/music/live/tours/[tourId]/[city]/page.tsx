@@ -4,6 +4,7 @@ import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { generateArchiveSlug, generateCitySlug, generateDateSlug } from '@/lib/music-slug'
 import { resolveTourByArchiveSlug, resolveCitySlugToCity } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
@@ -103,7 +104,8 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   const baseNormal = firstWithSetlist?.normal ?? []
   const setlistItems = allSame ? (cityConcerts[0]?.full ?? []) : baseNormal
   const hasSetlist = cityConcerts.some((concert) => concert.full.length > 0)
-  const cityPoster = cityConcerts.map((concert) => concert.posterUrl).find((posterUrl) => posterUrl?.trim()) || meta.posterUrl || null
+  const cityPoster = cityConcerts.map((concert) => concert.posterUrl).find((posterUrl) => posterUrl?.trim()) || null
+  const resolvedCityPosterUrl = resolveConcertPoster({ cityPosterUrl: cityPoster, tourPosterUrl: meta.posterUrl }).resolvedPosterUrl
   const cityStartDate = cityConcerts[0]?.concertDate ?? null
   const cityEndDate = cityConcerts.at(-1)?.concertDate ?? cityStartDate
   // 从该城市所有场次提取第一个非空场馆作为「主要场馆」展示（仅展示用，不改数据库）
@@ -112,7 +114,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href={`/music/live/tours/${canonicalTourSlug}`} className="text-sm font-black text-sky-300/80">← 返回 {meta.name}</Link>
     <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[200px_minmax(0,1fr)] md:items-center">
-      <div className="relative mx-auto aspect-square w-full max-w-[200px] border border-white/15 bg-[#0b2038]"><ConcertCover src={cityPoster} alt={`${dbCity}演唱会海报`} sizes="200px" className="h-full w-full" /></div>
+      <div className="relative mx-auto aspect-square w-full max-w-[200px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedCityPosterUrl} alt={`${dbCity}演唱会海报`} sizes="200px" className="h-full w-full" /></div>
       <div className="min-w-0">
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE · {canonicalCitySlug}</p>
         <h1 className="mt-4 break-words text-4xl font-black tracking-tight text-white sm:text-6xl">{dbCity}站</h1>

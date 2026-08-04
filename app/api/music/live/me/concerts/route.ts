@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { parsePersonalPageSize, parsePositivePage, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
+import { parsePersonalPageSize, parsePositivePage, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore, normalizedCityKey } from '@/lib/music-personal-live'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 import { requireUser, sanitizeText } from '@/lib/security'
 
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
         id: true, seatInfo: true, mood: true, note: true, isPublic: true, createdAt: true, updatedAt: true,
         MusicConcert: {
           select: {
-            id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true, status: true,
+            id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true, status: true, tourId: true,
             MusicTour: { select: { id: true, name: true, posterUrl: true, status: true } },
             _count: { select: { MusicConcertSetlistItem: true } },
           },
@@ -56,6 +57,20 @@ export async function GET(request: Request) {
       },
     }),
   ])
+  const tourIds = [...new Set(rows.map((row) => row.MusicConcert.tourId))]
+  const posterCandidates = tourIds.length ? await prisma.musicConcert.findMany({
+    where: { tourId: { in: tourIds }, status: 'PUBLISHED', posterUrl: { not: null } },
+    orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { tourId: true, city: true, posterUrl: true },
+  }) : []
+  const cityPosters = new Map<string, string>()
+  const tourPosters = new Map<string, string>()
+  for (const candidate of posterCandidates) {
+    if (!candidate.posterUrl) continue
+    const cityKey = `${candidate.tourId}::${normalizedCityKey(candidate.city) || ''}`
+    if (!cityPosters.has(cityKey)) cityPosters.set(cityKey, candidate.posterUrl)
+    if (!tourPosters.has(candidate.tourId)) tourPosters.set(candidate.tourId, candidate.posterUrl)
+  }
   return NextResponse.json({
     page,
     pageSize,
@@ -73,7 +88,21 @@ export async function GET(request: Request) {
         note: row.note,
         isPublic: row.isPublic,
         createdAt: row.createdAt,
-        concert: { ...row.MusicConcert, tour: row.MusicConcert.MusicTour, MusicTour: undefined, setlistCount: row.MusicConcert._count.MusicConcertSetlistItem, _count: undefined },
+        concert: {
+          ...row.MusicConcert,
+          ...resolveConcertPoster({
+            posterUrl: row.MusicConcert.posterUrl,
+            cityPosterUrl: cityPosters.get(`${row.MusicConcert.tourId}::${normalizedCityKey(row.MusicConcert.city) || ''}`),
+            tourPosterUrl: row.MusicConcert.MusicTour.posterUrl,
+          }),
+          tour: {
+            ...row.MusicConcert.MusicTour,
+            resolvedPosterUrl: resolveConcertPoster({ posterUrl: row.MusicConcert.MusicTour.posterUrl, cityPosterUrl: tourPosters.get(row.MusicConcert.tourId) }).resolvedPosterUrl,
+          },
+          MusicTour: undefined,
+          setlistCount: row.MusicConcert._count.MusicConcertSetlistItem,
+          _count: undefined,
+        },
       }
     }),
   }, { headers: PERSONAL_LIVE_NO_STORE_HEADERS })

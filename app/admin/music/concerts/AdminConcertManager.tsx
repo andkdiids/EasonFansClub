@@ -1,25 +1,36 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { MusicCoverUploader } from '@/app/admin/music/MusicCoverUploader'
 import { MultiDatePicker } from '@/components/music/live/MultiDatePicker'
+import { concertPosterSourceLabel, type ConcertPosterSource } from '@/lib/music-concert-poster'
 
 type Tour = { id: string; name: string }
+type ConcertStatus = 'DRAFT' | 'PUBLISHED'
 type BrowseConcert = {
   id: string
   concertDate: string
-  createdAt?: string
   city: string
   venue?: string | null
+  posterUrl?: string | null
+  resolvedPosterUrl?: string | null
+  posterSource?: ConcertPosterSource
   sessionNumber?: string | null
   sortOrder: number
-  status: 'DRAFT' | 'PUBLISHED'
+  status: ConcertStatus
+  attendanceCount?: number
+  setlistCount?: number
+  tour: Tour
 }
-type CityGroup = { city: string; count: number; firstDate: string | null; lastDate: string | null }
-type SetlistSource = 'PREVIOUS' | 'NEW'
-type ConcertStatus = 'DRAFT' | 'PUBLISHED'
+type CityGroup = { city: string; count: number; firstDate: string | null; lastDate: string | null; posterUrl?: string | null }
+type SourceConcert = { id: string; city: string; concertDate: string; sessionNumber?: string | null; sortOrder: number; tour: Tour }
+type BrowseFilters = { city: string; startDate: string; endDate: string; status: '' | ConcertStatus; page: number }
+type Pagination = { page: number; pageSize: number; total: number; totalPages: number }
+type BulkAction = 'publish' | 'draft' | 'poster' | 'delete' | 'copy-setlist'
 
+const PAGE_SIZE = 50
+const field = 'w-full rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-400'
 const empty = {
   tourId: '',
   countryOrRegion: '中国',
@@ -27,109 +38,138 @@ const empty = {
   venue: '',
   posterUrl: '',
   status: 'DRAFT' as ConcertStatus,
-  setlistSource: 'PREVIOUS' as SetlistSource,
+  setlistSource: 'PREVIOUS' as 'PREVIOUS' | 'NEW' | 'SOURCE',
+  sourceConcertId: '',
   setlistText: '',
 }
-const field = 'w-full rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-400'
 
-function compareBrowseConcerts(left: BrowseConcert, right: BrowseConcert) {
-  return left.sortOrder - right.sortOrder
-    || left.concertDate.localeCompare(right.concertDate)
-    || (left.createdAt || '').localeCompare(right.createdAt || '')
-    || left.id.localeCompare(right.id)
+function sessionLabel(row: { sessionNumber?: string | null; sortOrder?: number }) {
+  return `#${String(Number(row.sessionNumber || row.sortOrder || 1)).padStart(3, '0')}`
+}
+
+function formatDate(value?: string | null) {
+  return value ? value.slice(0, 10) : '—'
+}
+
+function buildBrowseQuery(tourId: string, filters: BrowseFilters, idsOnly = false) {
+  const params = new URLSearchParams({ tourId })
+  if (filters.city) params.set('city', filters.city)
+  if (filters.startDate) params.set('startDate', filters.startDate)
+  if (filters.endDate) params.set('endDate', filters.endDate)
+  if (filters.status) params.set('status', filters.status)
+  if (idsOnly) params.set('idsOnly', '1')
+  else {
+    params.set('page', String(filters.page))
+    params.set('pageSize', String(PAGE_SIZE))
+  }
+  return params
 }
 
 export function AdminConcertManager() {
   const [tours, setTours] = useState<Tour[]>([])
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [reorderingId, setReorderingId] = useState<string | null>(null)
+  const [browseTourId, setBrowseTourId] = useState('')
+  const [browseConcerts, setBrowseConcerts] = useState<BrowseConcert[]>([])
+  const [cities, setCities] = useState<CityGroup[]>([])
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 1 })
+  const [filters, setFilters] = useState<BrowseFilters>({ city: '', startDate: '', endDate: '', status: '', page: 1 })
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [bulkStatus, setBulkStatus] = useState<ConcertStatus>('PUBLISHED')
+  const [batchPosterUrl, setBatchPosterUrl] = useState('')
+  const [posterPanelOpen, setPosterPanelOpen] = useState(false)
+  const [copySetlistOpen, setCopySetlistOpen] = useState(false)
+  const [copySourceId, setCopySourceId] = useState('')
+  const [copySourceConcerts, setCopySourceConcerts] = useState<SourceConcert[]>([])
+  const [cityModalOpen, setCityModalOpen] = useState(false)
+  const [cityCopyOpen, setCityCopyOpen] = useState(false)
+  const [copyForm, setCopyForm] = useState({ sourceCity: '', targetCity: '', concertDates: [] as string[], options: { venue: true, poster: true, description: true, setlist: true, highlights: true } })
 
-  // 创建表单
+  const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState(empty)
   const [concertDates, setConcertDates] = useState<string[]>([])
+  const [sourceConcerts, setSourceConcerts] = useState<SourceConcert[]>([])
   const createFormRef = useRef<HTMLFormElement>(null)
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
 
-  // 三级浏览（懒加载：巡演 → 城市 → 场次）
-  const [browseTourId, setBrowseTourId] = useState('')
-  const [cities, setCities] = useState<CityGroup[]>([])                 // 二级：城市分组（来自 ?mode=cities，不加载全部场次）
-  const [openCity, setOpenCity] = useState<string | null>(null)
-  const [cityConcerts, setCityConcerts] = useState<BrowseConcert[]>([]) // 三级：某城市场次（来自 ?tourId&city）
-  const [browseConcerts, setBrowseConcerts] = useState<BrowseConcert[]>([]) // 平铺模式（showAll）仍受 200 上限约束
-  const [showAll, setShowAll] = useState(false)
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const selectedCount = selectedIds.length
+  const allFilteredSelected = pagination.total > 0 && selectedCount === pagination.total
+  const someFilteredSelected = selectedCount > 0 && !allFilteredSelected
 
-  // 批量海报
-  const [posterPanelOpen, setPosterPanelOpen] = useState(false)
-  const [batchPosterUrl, setBatchPosterUrl] = useState('')
-
-  // 复制城市
-  const [copyOpen, setCopyOpen] = useState(false)
-  const [copyForm, setCopyForm] = useState({ targetCity: '', concertDates: [] as string[], options: { venue: true, poster: true, description: true, setlist: true, highlights: true } })
+  const addMessage = useCallback((text: string) => { setMessage(text); setError('') }, [])
+  const addError = useCallback((text: string) => { setError(text); setMessage('') }, [])
 
   const loadTours = useCallback(async () => {
     const response = await fetch('/api/admin/music/tours')
     const data = await response.json().catch(() => null)
-    if (response.ok) {
-      const list = (data.tours || []).map((tour: Tour) => ({ id: tour.id, name: tour.name }))
-      setTours(list)
-    }
-  }, [])
-  useEffect(() => { void loadTours() }, [loadTours])
+    if (response.ok) setTours((data?.tours || []).map((tour: Tour) => ({ id: tour.id, name: tour.name })))
+    else addError(data?.message || '巡演加载失败')
+  }, [addError])
 
-  // 平铺模式：加载该巡演全部场次（上限 200，仅 showAll 时使用）
-  const loadBrowse = useCallback(async () => {
-    if (!browseTourId) { setBrowseConcerts([]); return }
-    const response = await fetch(`/api/admin/music/concerts?tourId=${encodeURIComponent(browseTourId)}`)
-    const data = await response.json().catch(() => null)
-    if (response.ok) setBrowseConcerts(data.concerts || [])
-    else setError(data?.message || '场次加载失败')
-  }, [browseTourId])
-
-  // 二级：城市分组（仅返回城市+计数，不加载全部场次，避免单巡演超 200 场被截断）
   const loadCities = useCallback(async () => {
     if (!browseTourId) { setCities([]); return }
     const response = await fetch(`/api/admin/music/concerts?mode=cities&tourId=${encodeURIComponent(browseTourId)}`)
     const data = await response.json().catch(() => null)
-    if (response.ok) setCities(data.cities || [])
-    else setError(data?.message || '城市加载失败')
-  }, [browseTourId])
+    if (response.ok) setCities(data?.cities || [])
+    else addError(data?.message || '城市加载失败')
+  }, [addError, browseTourId])
 
-  // 三级：某城市场次（city 级查询不限条数）
-  const loadCityConcerts = useCallback(async () => {
-    if (!browseTourId || !openCity) { setCityConcerts([]); return }
-    const response = await fetch(`/api/admin/music/concerts?tourId=${encodeURIComponent(browseTourId)}&city=${encodeURIComponent(openCity)}`)
+  const loadBrowse = useCallback(async () => {
+    if (!browseTourId) {
+      setBrowseConcerts([])
+      setPagination({ page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 1 })
+      return
+    }
+    const response = await fetch(`/api/admin/music/concerts?${buildBrowseQuery(browseTourId, filters)}`)
     const data = await response.json().catch(() => null)
-    if (response.ok) setCityConcerts(data.concerts || [])
-    else setError(data?.message || '场次加载失败')
-  }, [browseTourId, openCity])
+    if (!response.ok) return addError(data?.message || '场次加载失败')
+    setBrowseConcerts(data?.concerts || [])
+    setPagination(data?.pagination || { page: filters.page, pageSize: PAGE_SIZE, total: data?.concerts?.length || 0, totalPages: 1 })
+  }, [addError, browseTourId, filters])
 
+  const loadCreateSources = useCallback(async () => {
+    if (!form.tourId) { setSourceConcerts([]); return }
+    const response = await fetch(`/api/admin/music/concerts?mode=copy-options&tourId=${encodeURIComponent(form.tourId)}`)
+    const data = await response.json().catch(() => null)
+    if (response.ok) setSourceConcerts(data?.concerts || [])
+    else addError(data?.message || '来源场次加载失败')
+  }, [addError, form.tourId])
+
+  useEffect(() => { void loadTours() }, [loadTours])
+  useEffect(() => { void loadCities() }, [loadCities])
+  useEffect(() => { void loadBrowse() }, [loadBrowse])
+  useEffect(() => { void loadCreateSources() }, [loadCreateSources])
   useEffect(() => {
-    if (showAll) void loadBrowse()
-    else void loadCities()
-  }, [showAll, loadBrowse, loadCities])
-  useEffect(() => { void loadCityConcerts() }, [loadCityConcerts])
+    const element = selectAllRef.current
+    if (element) element.indeterminate = someFilteredSelected
+  }, [someFilteredSelected])
 
-  // 任意写操作后刷新当前视图（仅重载相关层级，不拉取全部场次）
-  async function refresh() {
-    await loadCities()
-    if (openCity) await loadCityConcerts()
-    if (showAll) await loadBrowse()
+  function updateFilter<K extends keyof Omit<BrowseFilters, 'page'>>(key: K, value: BrowseFilters[K]) {
+    setFilters((current) => ({ ...current, [key]: value, page: 1 }))
+    setSelectedIds([])
   }
 
-  const openCityConcerts = useMemo(
-    () => (openCity ? [...cityConcerts].sort(compareBrowseConcerts) : []),
-    [openCity, cityConcerts],
-  )
+  function chooseTour(value: string) {
+    setBrowseTourId(value)
+    setFilters({ city: '', startDate: '', endDate: '', status: '', page: 1 })
+    setSelectedIds([])
+    setCityModalOpen(false)
+    setCityCopyOpen(false)
+  }
 
-  function addMessage(text: string) { setMessage(text); setError('') }
-  function addError(text: string) { setError(text); setMessage('') }
+  function openCreateForm() {
+    setForm((current) => ({ ...current, tourId: browseTourId || current.tourId }))
+    setCreateOpen(true)
+    window.requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 
   function startCityConcert(city: string) {
-    setForm((current) => ({ ...current, tourId: browseTourId, city }))
+    setForm((current) => ({ ...current, tourId: browseTourId, city, setlistSource: 'PREVIOUS', sourceConcertId: '' }))
     setConcertDates([])
-    setCopyOpen(false)
+    setCityModalOpen(false)
+    setCityCopyOpen(false)
+    setCreateOpen(true)
     setError('')
     setMessage(`${city} 已带入新增场次表单`)
     window.requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
@@ -139,310 +179,133 @@ export function AdminConcertManager() {
     event.preventDefault()
     if (busy) return
     if (!concertDates.length) return addError('请至少选择一个演出日期')
-    setBusy(true)
-    setError('')
-    setMessage('')
+    setBusy(true); setError(''); setMessage('')
     const setlist = form.setlistSource === 'NEW'
-      ? form.setlistText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((displayName, index) => ({
-        songId: null, displayName, section: 'MAIN', position: index + 1, versionName: null, note: null,
-        isEncore: false, isRequest: false, isDebut: false, isGuest: false, isMedley: false, isSpecial: false,
-      }))
+      ? form.setlistText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((displayName, index) => ({ songId: null, displayName, section: 'MAIN', position: index + 1, versionName: null, note: null, isEncore: false, isRequest: false, isDebut: false, isGuest: false, isMedley: false, isSpecial: false }))
       : []
     const response = await fetch('/api/admin/music/concerts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tourId: form.tourId, countryOrRegion: form.countryOrRegion, city: form.city, venue: form.venue, posterUrl: form.posterUrl, status: form.status,
-        concertDates, setlistSource: form.setlistSource, setlist,
-      }),
+      body: JSON.stringify({ tourId: form.tourId, countryOrRegion: form.countryOrRegion, city: form.city, venue: form.venue, posterUrl: form.posterUrl, status: form.status, concertDates, setlistSource: form.setlistSource, sourceConcertId: form.sourceConcertId, setlist }),
     })
     const data = await response.json().catch(() => null)
     if (!response.ok) addError(data?.message || '创建失败')
     else {
       addMessage(data?.message || `已创建 ${concertDates.length} 个场次`)
       setConcertDates([])
-      setForm((current) => ({ ...current, setlistText: '' }))
-      await refresh()
+      setForm((current) => ({ ...current, setlistText: '', sourceConcertId: '' }))
+      setCreateOpen(false)
+      await loadBrowse(); await loadCities()
     }
     setBusy(false)
   }
 
   async function remove(concert: BrowseConcert) {
-    if (!window.confirm(`确定删除 ${concert.city} ${concert.concertDate.slice(0, 10)} 场次吗？其歌单和特别时刻会一并删除。`)) return
+    if (!window.confirm(`确定删除 ${concert.city} ${formatDate(concert.concertDate)} 场次吗？其歌单和特别时刻会一并删除。`)) return
     const response = await fetch(`/api/admin/music/concerts/${concert.id}`, { method: 'DELETE' })
     const data = await response.json().catch(() => null)
     if (!response.ok) addError(data?.message || '删除失败')
+    else { addMessage(data?.message || '场次已删除'); setSelectedIds((current) => current.filter((id) => id !== concert.id)); await loadBrowse(); await loadCities() }
+  }
+
+  async function toggleSelectAll() {
+    if (!browseTourId || !pagination.total) return
+    if (allFilteredSelected) return setSelectedIds([])
+    const response = await fetch(`/api/admin/music/concerts?${buildBrowseQuery(browseTourId, filters, true)}`)
+    const data = await response.json().catch(() => null)
+    if (!response.ok) return addError(data?.message || '全选场次加载失败')
+    setSelectedIds(data?.ids || [])
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  }
+
+  async function bulkAction(action: BulkAction, extra: Record<string, unknown> = {}) {
+    if (!selectedIds.length) return addError('请至少选择一个场次')
+    if (action === 'delete' && !window.confirm(`确定删除已选 ${selectedIds.length} 个场次吗？此操作不可恢复。`)) return
+    setBusy(true); setError(''); setMessage('')
+    const response = await fetch('/api/admin/music/concerts/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: selectedIds, action, ...extra }) })
+    const data = await response.json().catch(() => null)
+    if (!response.ok) addError(data?.message || '批量操作失败')
     else {
-      addMessage('场次已删除，其余场次已自动重新编号')
-      setSelectedIds((current) => current.filter((id) => id !== concert.id))
-      await refresh()
-    }
-  }
-
-  async function moveConcert(concert: BrowseConcert, direction: 'up' | 'down') {
-    if (!browseTourId || reorderingId) return
-    setReorderingId(concert.id)
-    const response = await fetch('/api/admin/music/concerts/reorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tourId: browseTourId, concertId: concert.id, direction }),
-    })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) addError(data?.message || '调整排序失败')
-    else { addMessage(direction === 'up' ? '场次已上移，前台顺序已同步' : '场次已下移，前台顺序已同步'); await refresh() }
-    setReorderingId(null)
-  }
-
-  function toggleSelect(id: string) {
-    setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
-  }
-
-  async function bulkAction(action: 'publish' | 'unpublish' | 'draft') {
-    const ids = [...selectedIds]
-    if (!ids.length) return
-    const response = await fetch('/api/admin/music/concerts/bulk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, action }),
-    })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) addError(data?.message || '操作失败')
-    else { addMessage(data.message); setSelectedIds([]); setPosterPanelOpen(false); setBatchPosterUrl(''); await refresh() }
-  }
-
-  async function applyPoster() {
-    if (!batchPosterUrl || !selectedIds.length) return
-    const response = await fetch('/api/admin/music/concerts/bulk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds, action: 'poster', posterUrl: batchPosterUrl }),
-    })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) addError(data?.message || '海报更新失败')
-    else { addMessage(data.message); setSelectedIds([]); setPosterPanelOpen(false); setBatchPosterUrl(''); await refresh() }
-  }
-
-  async function copyCity() {
-    if (!openCity || !copyForm.targetCity.trim() || !copyForm.concertDates.length) return addError('请填写目标城市并选择至少一个日期')
-    setBusy(true)
-    const response = await fetch('/api/admin/music/concerts/copy-city', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tourId: browseTourId, sourceCity: openCity, targetCity: copyForm.targetCity.trim(),
-        concertDates: copyForm.concertDates, options: copyForm.options,
-      }),
-    })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) addError(data?.message || '复制失败')
-    else {
-      addMessage(data.message)
-      setCopyOpen(false)
-      setCopyForm({ targetCity: '', concertDates: [], options: { venue: true, poster: true, description: true, setlist: true, highlights: true } })
-      await refresh()
+      addMessage(data?.message || '批量操作完成')
+      setSelectedIds([])
+      setPosterPanelOpen(false)
+      setCopySetlistOpen(false)
+      setCopySourceId('')
+      setFilters((current) => ({ ...current, page: 1 }))
+      await loadBrowse(); await loadCities()
     }
     setBusy(false)
   }
 
-  const selectedCount = selectedIds.length
+  function applyBulkStatus() { void bulkAction(bulkStatus === 'PUBLISHED' ? 'publish' : 'draft') }
 
-  // 当前展开城市场次的勾选派生状态（仅前端状态，不触达 API/DB）
-  const openCityIds = useMemo(() => openCityConcerts.map((concert) => concert.id), [openCityConcerts])
-  const allCitySelected = openCityIds.length > 0 && openCityIds.every((id) => selectedIds.includes(id))
-  const someCitySelected = openCityIds.some((id) => selectedIds.includes(id))
-  const selectAllRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    const element = selectAllRef.current
-    if (element) element.indeterminate = someCitySelected && !allCitySelected
-  }, [someCitySelected, allCitySelected])
+  async function openCopySetlist() {
+    if (!browseTourId || !selectedIds.length) return addError('请先选择目标场次')
+    const response = await fetch(`/api/admin/music/concerts?mode=copy-options&tourId=${encodeURIComponent(browseTourId)}`)
+    const data = await response.json().catch(() => null)
+    if (!response.ok) return addError(data?.message || '来源场次加载失败')
+    setCopySourceConcerts(data?.concerts || [])
+    setCopySourceId('')
+    setCopySetlistOpen(true)
+  }
 
-  function toggleSelectAll() {
-    if (allCitySelected) {
-      // 取消全选：仅清空当前城市场次的选择
-      setSelectedIds((current) => current.filter((id) => !openCityIds.includes(id)))
-    } else {
-      // 全选：选中当前城市已加载的全部场次（合并去重）
-      setSelectedIds((current) => [...new Set([...current, ...openCityIds])])
-    }
+  function openCityCopy(city: string) {
+    setCopyForm((current) => ({ ...current, sourceCity: city }))
+    setCityCopyOpen(true)
+    setCityModalOpen(true)
+  }
+
+  async function copyCity() {
+    if (!copyForm.sourceCity || !copyForm.targetCity.trim() || !copyForm.concertDates.length) return addError('请选择来源城市、目标城市和至少一个日期')
+    setBusy(true); setError(''); setMessage('')
+    const response = await fetch('/api/admin/music/concerts/copy-city', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tourId: browseTourId, sourceCity: copyForm.sourceCity, targetCity: copyForm.targetCity.trim(), concertDates: copyForm.concertDates, options: copyForm.options }) })
+    const data = await response.json().catch(() => null)
+    if (!response.ok) addError(data?.message || '复制城市失败')
+    else { addMessage(data?.message || '城市场次已复制'); setCityCopyOpen(false); setCopyForm((current) => ({ ...current, targetCity: '', concertDates: [] })); await loadBrowse(); await loadCities() }
+    setBusy(false)
   }
 
   return <main className="admin-mobile-page mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5">
-    <section className="border border-sky-100 bg-white/90 p-6 shadow-sm">
-      <Link href="/admin/music" className="text-sm font-black text-brand-700">← EasMusic 管理</Link>
-      <h1 className="mt-4 text-4xl font-black text-brand-950">演唱会管理</h1>
+    <section className="sticky top-4 z-20 border border-sky-100 bg-white/95 p-6 shadow-sm backdrop-blur">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div><Link href="/admin/music" className="text-sm font-black text-brand-700">← EasMusic 管理</Link><h1 className="mt-4 text-4xl font-black text-brand-950">演唱会场次管理</h1><p className="mt-2 text-sm font-bold text-slate-500">按日期查看当前巡演全部场次，筛选和批量操作均由服务端处理。</p></div>
+        <button type="button" onClick={openCreateForm} disabled={!browseTourId} className="rounded-xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-40"><span aria-hidden="true">+</span> <span>新增场次</span></button>
+      </div>
+      <div className="mt-5 flex flex-wrap items-end gap-4">
+        <label className="min-w-64 text-sm font-black text-slate-700">当前巡演<select aria-label="选择巡演" value={browseTourId} onChange={(event) => chooseTour(event.target.value)} className={`${field} mt-1`}><option value="">请选择巡演</option>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
+        <button type="button" onClick={() => browseTourId && setCityModalOpen(true)} disabled={!browseTourId} className="rounded-xl bg-sky-50 px-4 py-2.5 text-sm font-black text-brand-700 disabled:opacity-40">城市管理</button>
+      </div>
     </section>
     {message ? <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-black text-emerald-700">{message}</p> : null}
     {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-black text-red-700">{error}</p> : null}
 
-    {/* 创建巡演场次 */}
-    <form ref={createFormRef} onSubmit={create} className="scroll-mt-6 border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7">
-      <h2 className="text-2xl font-black text-brand-950">创建巡演场次</h2>
-      <p className="mt-2 text-sm font-bold text-slate-500">同一城市可一次添加多个日期，系统会按日期自动生成并重排场次编号。</p>
+    {createOpen ? <form ref={createFormRef} onSubmit={create} className="scroll-mt-24 border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black text-brand-950">创建巡演场次</h2><p className="mt-2 text-sm font-bold text-slate-500">城市不再依赖分组，直接在此选择并创建。</p></div><button type="button" onClick={() => setCreateOpen(false)} className="text-sm font-black text-slate-500">取消</button></div>
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <label className="text-sm font-black text-slate-700">所属巡演
-          <select required value={form.tourId} onChange={(event) => setForm({ ...form, tourId: event.target.value })} className={`${field} mt-1`}>
-            <option value="">请选择</option>
-            {tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}
-          </select>
-        </label>
-        <label className="text-sm font-black text-slate-700">国家地区
-          <input required list="concert-country-options" value={form.countryOrRegion} onChange={(event) => setForm({ ...form, countryOrRegion: event.target.value })} className={`${field} mt-1`} />
-          <datalist id="concert-country-options">{['中国', '澳门', '香港', '台湾', '新加坡', '美国'].map((value) => <option key={value} value={value} />)}</datalist>
-        </label>
-        <label className="text-sm font-black text-slate-700">城市
-          <input required value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} className={`${field} mt-1`} />
-        </label>
+        <label className="text-sm font-black text-slate-700">所属巡演<select required value={form.tourId} onChange={(event) => setForm((current) => ({ ...current, tourId: event.target.value, setlistSource: current.setlistSource === 'SOURCE' ? 'PREVIOUS' : current.setlistSource, sourceConcertId: '' }))} className={`${field} mt-1`}><option value="">请选择</option>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
+        <label className="text-sm font-black text-slate-700">国家地区<input required list="concert-country-options" value={form.countryOrRegion} onChange={(event) => setForm((current) => ({ ...current, countryOrRegion: event.target.value }))} className={`${field} mt-1`} /><datalist id="concert-country-options"><option value="中国" /><option value="澳门" /><option value="香港" /><option value="台湾" /><option value="新加坡" /><option value="美国" /></datalist></label>
+        <label className="text-sm font-black text-slate-700">城市<input required value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} className={`${field} mt-1`} /></label>
       </div>
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <div>
-          <span className="text-sm font-black text-slate-700">演出日期（点击多选，可切换月份）</span>
-          <div className="mt-1"><MultiDatePicker value={concertDates} onChange={setConcertDates} /></div>
-        </div>
-        <label className="text-sm font-black text-slate-700">场馆
-          <input value={form.venue} onChange={(event) => setForm({ ...form, venue: event.target.value })} className={`${field} mt-1`} />
-        </label>
-        <label className="text-sm font-black text-slate-700">海报地址
-          <input value={form.posterUrl} onChange={(event) => setForm({ ...form, posterUrl: event.target.value })} className={`${field} mt-1`} placeholder="可保存后在场次编辑页上传海报" />
-        </label>
-        <label className="text-sm font-black text-slate-700">状态
-          <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as ConcertStatus })} className={`${field} mt-1`}>
-            <option value="DRAFT">草稿</option>
-            <option value="PUBLISHED">已发布</option>
-          </select>
-        </label>
-      </div>
-
-      <fieldset className="mt-5 rounded-2xl border border-sky-100 p-4">
-        <legend className="px-1 text-sm font-black text-slate-700">歌单来源</legend>
-        <div className="flex flex-wrap gap-5">
-          <label className="flex items-center gap-2 text-sm font-black"><input type="radio" name="setlistSource" checked={form.setlistSource === 'PREVIOUS'} onChange={() => setForm({ ...form, setlistSource: 'PREVIOUS' })} />使用上一场歌单</label>
-          <label className="flex items-center gap-2 text-sm font-black"><input type="radio" name="setlistSource" checked={form.setlistSource === 'NEW'} onChange={() => setForm({ ...form, setlistSource: 'NEW' })} />创建新歌单</label>
-        </div>
-        {form.setlistSource === 'PREVIOUS'
-          ? <p className="mt-3 rounded-xl bg-sky-50 p-3 text-sm font-bold text-brand-700">保存后将继承该巡演上一场歌单；每个新场次都会保存独立副本，后续修改不会影响上一场。</p>
-          : <label className="mt-4 block text-sm font-black text-slate-700">歌单编辑器
-            <textarea value={form.setlistText} onChange={(event) => setForm({ ...form, setlistText: event.target.value })} placeholder={'每行一首歌\n孤勇者\n十年\nK歌之王'} className={`${field} mt-1 min-h-36`} />
-          </label>}
-      </fieldset>
-
+      <div className="mt-5 grid gap-4 lg:grid-cols-2"><div><span className="text-sm font-black text-slate-700">演出日期（点击多选，可切换月份）</span><div className="mt-1"><MultiDatePicker value={concertDates} onChange={setConcertDates} /></div></div><label className="text-sm font-black text-slate-700">场馆<input value={form.venue} onChange={(event) => setForm((current) => ({ ...current, venue: event.target.value }))} className={`${field} mt-1`} /></label><label className="text-sm font-black text-slate-700">海报地址<input value={form.posterUrl} onChange={(event) => setForm((current) => ({ ...current, posterUrl: event.target.value }))} className={`${field} mt-1`} placeholder="可保存后在场次编辑页上传海报" /></label><label className="text-sm font-black text-slate-700">状态<select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as ConcertStatus }))} className={`${field} mt-1`}><option value="DRAFT">草稿 / 待定</option><option value="PUBLISHED">已发布</option></select></label></div>
+      <fieldset className="mt-5 rounded-2xl border border-sky-100 p-4"><legend className="px-1 text-sm font-black text-slate-700">歌单来源</legend><div className="flex flex-wrap gap-5"><label className="flex items-center gap-2 text-sm font-black"><input type="radio" name="setlistSource" checked={form.setlistSource === 'NEW'} onChange={() => setForm((current) => ({ ...current, setlistSource: 'NEW', sourceConcertId: '' }))} />创建新歌单</label><label className="flex items-center gap-2 text-sm font-black"><input type="radio" name="setlistSource" checked={form.setlistSource === 'PREVIOUS'} onChange={() => setForm((current) => ({ ...current, setlistSource: 'PREVIOUS', sourceConcertId: '' }))} />使用上一场歌单</label><label className="flex items-center gap-2 text-sm font-black"><input type="radio" name="setlistSource" checked={form.setlistSource === 'SOURCE'} onChange={() => setForm((current) => ({ ...current, setlistSource: 'SOURCE' }))} />从当前巡演选择场次复制</label></div>{form.setlistSource === 'SOURCE' ? <div className="mt-4 space-y-3"><label className="block text-sm font-black text-slate-700">选择来源场次<select required aria-label="选择来源场次" value={form.sourceConcertId} onChange={(event) => setForm((current) => ({ ...current, sourceConcertId: event.target.value }))} className={`${field} mt-1`}><option value="">请选择当前巡演已有场次</option>{sourceConcerts.map((row) => <option key={row.id} value={row.id}>{row.tour.name} · {row.city} · {formatDate(row.concertDate)} · {sessionLabel(row)}</option>)}</select></label><p className="text-sm font-bold text-slate-500">来源场次不会被修改。</p></div> : form.setlistSource === 'PREVIOUS' ? <p className="mt-3 rounded-xl bg-sky-50 p-3 text-sm font-bold text-brand-700">保存后继承该巡演上一场歌单，每个新场次都会保存独立副本。</p> : <label className="mt-4 block text-sm font-black text-slate-700">歌单编辑器<textarea value={form.setlistText} onChange={(event) => setForm((current) => ({ ...current, setlistText: event.target.value }))} placeholder={'每行一首歌\n孤勇者\n十年\nK歌之王'} className={`${field} mt-1 min-h-36`} /></label>}</fieldset>
       <button disabled={busy || !concertDates.length} className="mt-5 rounded-xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{busy ? '创建中…' : `创建 ${concertDates.length || ''} 个场次`}</button>
-    </form>
+    </form> : null}
 
-    {/* 三级管理 */}
     <section className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-black text-brand-950">巡演场次管理</h2>
-        <label className="flex items-center gap-2 text-sm font-black text-slate-600"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />平铺显示全部场次</label>
-      </div>
-      <div className="mt-4">
-        <select aria-label="选择巡演" value={browseTourId} onChange={(event) => { setBrowseTourId(event.target.value); setOpenCity(null); setSelectedIds([]) }} className={`${field} max-w-md`}>
-          <option value="">请选择巡演</option>
-          {tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}
-        </select>
-      </div>
-
-      {!browseTourId ? <p className="mt-5 text-sm font-bold text-slate-500">请先选择一个巡演以查看其城市与场次。</p> : null}
-
-      {browseTourId && showAll ? (
-        <div className="mt-5 overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="bg-sky-50 text-xs font-black"><tr>{['日期', '城市', '场馆', '排序', '状态', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead>
-            <tbody>
-              {browseConcerts.map((concert, index) => <tr key={concert.id} className="border-t border-sky-100">
-                <td className="p-3">{concert.concertDate.slice(0, 10)}</td>
-                <td className="p-3 font-black">{concert.city}</td>
-                <td className="max-w-52 break-words p-3">{concert.venue || '—'}</td>
-                <td className="p-3 font-black">{String(Number(concert.sessionNumber || concert.sortOrder || 1)).padStart(2, '0')}</td>
-                <td className="p-3">{concert.status === 'PUBLISHED' ? '已发布' : '草稿'}</td>
-                <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" aria-label="上移场次" disabled={index === 0 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'up')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↑</button><button type="button" aria-label="下移场次" disabled={index === browseConcerts.length - 1 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'down')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↓</button><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td>
-              </tr>)}
-            </tbody>
-          </table>
-          {!browseConcerts.length ? <p className="mt-4 text-sm font-bold text-slate-500">该巡演暂无场次。</p> : null}
-        </div>
-      ) : null}
-
-      {browseTourId && !showAll ? (
-        <div className="mt-5 space-y-3">
-          {cities.map((group) => <div key={group.city} className="rounded-2xl border border-sky-100">
-            <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-              <button type="button" onClick={() => { setOpenCity((current) => (current === group.city ? null : group.city)); setSelectedIds([]) }} className="flex items-center gap-3 text-left">
-                <span className="text-lg font-black text-brand-950">{group.city}</span>
-                <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-black text-brand-800">{group.count} 场</span>
-                <span className="text-xs font-bold text-slate-400">{group.firstDate ?? ''} ~ {group.lastDate ?? ''}</span>
-                <span className="text-xs font-black text-slate-400">{openCity === group.city ? '▲' : '▼'}</span>
-              </button>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => startCityConcert(group.city)} className="rounded-lg bg-brand-950 px-3 py-2 text-sm font-black text-white">新增场次</button>
-                <button type="button" onClick={() => { setOpenCity(group.city); setSelectedIds([]); setCopyOpen(true) }} className="rounded-lg bg-sky-50 px-3 py-2 text-sm font-black text-brand-700">复制城市</button>
-              </div>
-            </div>
-            {openCity === group.city ? (
-              <div className="border-t border-sky-100 p-4">
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="text-sm font-black text-slate-600">已选择 {selectedCount} / {openCityConcerts.length} 个场次</span>
-                  <button type="button" onClick={() => bulkAction('publish')} disabled={!selectedCount} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量发布</button>
-                  <button type="button" onClick={() => bulkAction('unpublish')} disabled={!selectedCount} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量取消发布</button>
-                  <button type="button" onClick={() => bulkAction('draft')} disabled={!selectedCount} className="rounded-lg bg-slate-500 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量转草稿</button>
-                  <button type="button" onClick={() => setPosterPanelOpen((current) => !current)} disabled={!selectedCount} className="rounded-lg bg-brand-950 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量改海报</button>
-                </div>
-
-                {posterPanelOpen ? (
-                  <div className="mb-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-                    <p className="text-sm font-black text-brand-950">上传一张海报，应用到所选 {selectedCount} 个场次</p>
-                    <div className="mt-3 max-w-xs"><MusicCoverUploader entityType="concert" entityId={selectedIds[0]} currentUrl={batchPosterUrl || null} onUploaded={(url) => setBatchPosterUrl(url)} /></div>
-                    <button type="button" onClick={() => void applyPoster()} disabled={!batchPosterUrl} className="mt-3 rounded-lg bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-40">应用到所选场次</button>
-                  </div>
-                ) : null}
-
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-left text-sm">
-                    <thead className="bg-sky-50 text-xs font-black"><tr>
-                      <th className="w-10 p-3"><input ref={selectAllRef} type="checkbox" checked={allCitySelected} onChange={toggleSelectAll} aria-label="全选当前城市场次" /></th>
-                      {['日期', '场馆', '排序', '状态', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {openCityConcerts.map((concert, index) => <tr key={concert.id} className="border-t border-sky-100">
-                        <td className="p-3"><input type="checkbox" checked={selectedIds.includes(concert.id)} onChange={() => toggleSelect(concert.id)} aria-label={`选择 ${concert.concertDate.slice(0, 10)}`} /></td>
-                        <td className="p-3">{concert.concertDate.slice(0, 10)}</td>
-                        <td className="max-w-52 break-words p-3">{concert.venue || '—'}</td>
-                        <td className="p-3 font-black">{String(Number(concert.sessionNumber || concert.sortOrder || 1)).padStart(2, '0')}</td>
-                        <td className="p-3">{concert.status === 'PUBLISHED' ? '已发布' : '草稿'}</td>
-                        <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" aria-label="上移场次" disabled={index === 0 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'up')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↑</button><button type="button" aria-label="下移场次" disabled={index === openCityConcerts.length - 1 || Boolean(reorderingId)} onClick={() => void moveConcert(concert, 'down')} className="rounded-lg bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">↓</button><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td>
-                      </tr>)}
-                    </tbody>
-                  </table>
-                  {!openCityConcerts.length ? <p className="mt-4 text-sm font-bold text-slate-500">{group.city} 暂无场次。</p> : null}
-                </div>
-
-                {copyOpen ? (
-                  <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-                    <h3 className="text-lg font-black text-brand-950">复制「{group.city}」到新城市</h3>
-                    <p className="mt-1 text-sm font-bold text-slate-500">将 {group.city} 各场次按日期顺序一一对应到新城市的各个日期（如 12-09 → 新城市首个日期），管理员后续仅需微调城市、日期、场馆。</p>
-                    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                      <label className="text-sm font-black text-slate-700">目标城市
-                        <input value={copyForm.targetCity} onChange={(event) => setCopyForm((current) => ({ ...current, targetCity: event.target.value }))} className={`${field} mt-1`} />
-                      </label>
-                      <div>
-                        <span className="text-sm font-black text-slate-700">新城市演出日期</span>
-                        <div className="mt-1"><MultiDatePicker value={copyForm.concertDates} onChange={(dates) => setCopyForm((current) => ({ ...current, concertDates: dates }))} /></div>
-                      </div>
-                    </div>
-                    <fieldset className="mt-4 rounded-xl border border-sky-100 p-3">
-                      <legend className="px-1 text-sm font-black text-slate-700">复制内容（默认全部）</legend>
-                      <div className="flex flex-wrap gap-4">
-                        {([['venue', '场馆'], ['poster', '海报'], ['description', '描述'], ['setlist', '歌单'], ['highlights', '特别时刻']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={copyForm.options[key]} onChange={(event) => setCopyForm((current) => ({ ...current, options: { ...current.options, [key]: event.target.checked } }))} />{label}</label>)}
-                      </div>
-                    </fieldset>
-                    <div className="mt-4 flex gap-2">
-                      <button type="button" onClick={() => void copyCity()} disabled={busy} className="rounded-lg bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-50">生成新城市场次</button>
-                      <button type="button" onClick={() => setCopyOpen(false)} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">取消</button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>)}
-          {!cities.length ? <p className="mt-4 text-sm font-bold text-slate-500">该巡演暂无场次。</p> : null}
-        </div>
-      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black text-brand-950">全部场次列表</h2><p className="mt-2 text-sm font-bold text-slate-500">默认按演出日期升序，每页 {PAGE_SIZE} 条。</p></div>{browseTourId ? <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700">共 {pagination.total} 场</span> : null}</div>
+      {!browseTourId ? <p className="mt-5 text-sm font-bold text-slate-500">请先选择巡演。</p> : <>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label className="text-sm font-black text-slate-700">城市<select value={filters.city} onChange={(event) => updateFilter('city', event.target.value)} className={`${field} mt-1`}><option value="">全部城市</option>{cities.map((city) => <option key={city.city} value={city.city}>{city.city}</option>)}</select></label><label className="text-sm font-black text-slate-700">开始日期<input type="date" value={filters.startDate} onChange={(event) => updateFilter('startDate', event.target.value)} className={`${field} mt-1`} /></label><label className="text-sm font-black text-slate-700">结束日期<input type="date" value={filters.endDate} onChange={(event) => updateFilter('endDate', event.target.value)} className={`${field} mt-1`} /></label><label className="text-sm font-black text-slate-700">状态<select value={filters.status} onChange={(event) => updateFilter('status', event.target.value as BrowseFilters['status'])} className={`${field} mt-1`}><option value="">全部状态</option><option value="PUBLISHED">已发布</option><option value="DRAFT">草稿 / 待定</option></select></label><button type="button" onClick={() => { setFilters({ city: '', startDate: '', endDate: '', status: '', page: 1 }); setSelectedIds([]) }} className="self-end rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-black text-slate-700">清除筛选</button></div>
+        <div className="mt-5 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/50 p-3"><span className="mr-2 text-sm font-black text-slate-600">已选择 {selectedCount} 个</span><button type="button" onClick={() => void toggleSelectAll()} disabled={!pagination.total || busy} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-brand-700 disabled:opacity-40">{allFilteredSelected ? '取消全选' : '全选当前筛选结果'}</button><select aria-label="批量状态" value={bulkStatus} onChange={(event) => setBulkStatus(event.target.value as ConcertStatus)} className="rounded-lg border border-sky-100 bg-white px-3 py-2 text-xs font-black"><option value="PUBLISHED">已发布</option><option value="DRAFT">草稿 / 待定</option></select><button type="button" onClick={applyBulkStatus} disabled={!selectedCount || busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量修改状态</button><button type="button" onClick={() => setPosterPanelOpen((current) => !current)} disabled={!selectedCount || busy} className="rounded-lg bg-brand-950 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量设置海报</button><button type="button" onClick={() => void openCopySetlist()} disabled={!selectedCount || busy} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量复制歌单</button><button type="button" onClick={() => void bulkAction('delete')} disabled={!selectedCount || busy} className="rounded-lg bg-red-700 px-3 py-2 text-xs font-black text-white disabled:opacity-40">批量删除</button></div>
+        {posterPanelOpen ? <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><p className="text-sm font-black text-brand-950">上传一张海报并应用到已选 {selectedCount} 个场次</p><div className="mt-3 max-w-xs"><MusicCoverUploader key={selectedIds[0] || 'batch-poster'} entityType="concert" entityId={selectedIds[0] || 'batch'} currentUrl={batchPosterUrl || null} onUploaded={setBatchPosterUrl} /></div><button type="button" onClick={() => void bulkAction('poster', { posterUrl: batchPosterUrl })} disabled={!batchPosterUrl || busy} className="mt-3 rounded-lg bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-40">应用到所选场次</button></div> : null}
+        {copySetlistOpen ? <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm font-black text-brand-950">从当前巡演选择歌单来源</p><button type="button" onClick={() => setCopySetlistOpen(false)} className="text-xs font-black text-slate-500">取消</button></div><select aria-label="批量复制歌单来源" value={copySourceId} onChange={(event) => setCopySourceId(event.target.value)} className={`${field} mt-3`}><option value="">请选择来源场次</option>{copySourceConcerts.map((row) => <option key={row.id} value={row.id}>{row.tour.name} · {row.city} · {formatDate(row.concertDate)} · {sessionLabel(row)}</option>)}</select><button type="button" onClick={() => void bulkAction('copy-setlist', { sourceConcertId: copySourceId })} disabled={!copySourceId || busy} className="mt-3 rounded-lg bg-sky-700 px-4 py-2 text-sm font-black text-white disabled:opacity-40">复制到已选场次</button><p className="mt-2 text-xs font-bold text-slate-500">普通歌单、Encore、顺序和标记都会复制；来源场次不会修改。</p></div> : null}
+        <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-sky-50 text-xs font-black text-brand-950"><tr><th className="w-10 p-3"><input ref={selectAllRef} type="checkbox" checked={allFilteredSelected} onChange={() => void toggleSelectAll()} aria-label="全选当前筛选结果" /></th>{['编号', '日期', '城市', '场馆', '状态', '海报', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{browseConcerts.map((concert) => <tr key={concert.id} className="border-t border-sky-100"><td className="p-3"><input type="checkbox" checked={selectedIds.includes(concert.id)} onChange={() => toggleSelected(concert.id)} aria-label={`选择 ${formatDate(concert.concertDate)} ${concert.city}`} /></td><td className="p-3 font-black">{sessionLabel(concert)}</td><td className="p-3 whitespace-nowrap">{formatDate(concert.concertDate)}</td><td className="p-3 font-black">{concert.city}</td><td className="max-w-52 break-words p-3">{concert.venue || '—'}</td><td className="p-3">{concert.status === 'PUBLISHED' ? '已发布' : '草稿 / 待定'}</td><td className="p-3 text-xs">{concert.resolvedPosterUrl ? `有 · ${concertPosterSourceLabel(concert.posterSource || 'system')}` : '无'}</td><td className="p-3"><div className="flex flex-wrap gap-2"><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td></tr>)}</tbody></table>{!browseConcerts.length ? <p className="mt-4 text-sm font-bold text-slate-500">当前筛选没有场次。</p> : null}</div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm font-black text-slate-600"><span>第 {pagination.page} / {pagination.totalPages} 页</span><div className="flex gap-2"><button type="button" onClick={() => { setFilters((current) => ({ ...current, page: current.page - 1 })); setSelectedIds([]) }} disabled={pagination.page <= 1 || busy} className="rounded-lg bg-sky-50 px-4 py-2 text-brand-700 disabled:opacity-40">上一页</button><button type="button" onClick={() => { setFilters((current) => ({ ...current, page: current.page + 1 })); setSelectedIds([]) }} disabled={pagination.page >= pagination.totalPages || busy} className="rounded-lg bg-sky-50 px-4 py-2 text-brand-700 disabled:opacity-40">下一页</button></div></div>
+      </>}
     </section>
+
+    {cityModalOpen ? <div role="dialog" aria-modal="true" aria-label="城市管理" className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/45 p-4"><div className="mx-auto mt-10 max-w-3xl rounded-3xl bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between gap-3"><div><h2 className="text-2xl font-black text-brand-950">城市管理</h2><p className="mt-1 text-sm font-bold text-slate-500">城市作为筛选条件使用；默认海报仍按现有场次数据运行时继承。</p></div><button type="button" onClick={() => { setCityModalOpen(false); setCityCopyOpen(false) }} className="text-sm font-black text-slate-500">关闭</button></div><div className="mt-5 space-y-3">{cities.map((city) => <article key={city.city} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-100 p-4"><div><h3 className="font-black text-brand-950">{city.city}</h3><p className="mt-1 text-xs font-bold text-slate-500">{city.count} 场 · {city.firstDate || '—'} ~ {city.lastDate || '—'} · 默认海报：{city.posterUrl ? '有' : '无'}</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => startCityConcert(city.city)} className="rounded-lg bg-brand-950 px-3 py-2 text-xs font-black text-white">新增该城市场次</button><button type="button" onClick={() => openCityCopy(city.city)} className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-black text-brand-700">复制城市</button></div></article>)}{!cities.length ? <p className="text-sm font-bold text-slate-500">当前巡演暂无城市。</p> : null}</div>{cityCopyOpen ? <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><h3 className="font-black text-brand-950">复制「{copyForm.sourceCity}」到新城市</h3><p className="mt-1 text-sm font-bold text-slate-500">按日期顺序复制场次及所选内容，来源不会被修改。</p><div className="mt-4 grid gap-4 lg:grid-cols-2"><label className="text-sm font-black text-slate-700">目标城市<input value={copyForm.targetCity} onChange={(event) => setCopyForm((current) => ({ ...current, targetCity: event.target.value }))} className={`${field} mt-1`} /></label><div><span className="text-sm font-black text-slate-700">新城市演出日期</span><div className="mt-1"><MultiDatePicker value={copyForm.concertDates} onChange={(dates) => setCopyForm((current) => ({ ...current, concertDates: dates }))} /></div></div></div><fieldset className="mt-4 rounded-xl border border-sky-100 p-3"><legend className="px-1 text-sm font-black text-slate-700">复制内容</legend><div className="flex flex-wrap gap-4">{([['venue', '场馆'], ['poster', '海报'], ['description', '描述'], ['setlist', '歌单'], ['highlights', '特别时刻']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm font-black"><input type="checkbox" checked={copyForm.options[key]} onChange={(event) => setCopyForm((current) => ({ ...current, options: { ...current.options, [key]: event.target.checked } }))} />{label}</label>)}</div></fieldset><div className="mt-4 flex gap-2"><button type="button" onClick={() => void copyCity()} disabled={busy} className="rounded-lg bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-50">生成新城市场次</button><button type="button" onClick={() => setCityCopyOpen(false)} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">取消</button></div></div> : null}</div></div> : null}
   </main>
 }

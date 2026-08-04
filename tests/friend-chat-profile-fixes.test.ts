@@ -17,6 +17,7 @@ const readRoute = read('app/api/direct-conversations/[conversationId]/read/route
 const notifications = read('lib/notifications.ts')
 const notificationClient = read('app/notifications/NotificationsClient.tsx')
 const appShell = read('components/layout/AppShell.tsx')
+const notificationProvider = read('components/NotificationProvider.tsx')
 const css = read('app/globals.css')
 const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260730100000_add_direct_message_idempotency/migration.sql')
@@ -159,9 +160,9 @@ test('通知中心显示私信来源且总红点由统一汇总同步', () => {
   assert.match(notificationClient, /messages: '私信'/)
   assert.match(notificationClient, /未读私信 \{unreadSummary\.messages\} 条/)
   assert.match(notificationClient, /friend-dock:open/)
-  assert.match(appShell, /\/api\/notifications\/unread-summary/)
-  assert.match(appShell, /eason-private-sync:\$\{user\.id\}/)
-  assert.match(appShell, /window\.setInterval\(refreshUnreadCount, 5_000\)/)
+  assert.doesNotMatch(appShell, /\/api\/notifications\/unread-summary/)
+  assert.match(notificationProvider, /eason-private-sync:\$\{userId\}/)
+  assert.match(notificationProvider, /window\.setInterval\(\(\) => void refresh\(\), POLL_INTERVAL_MS\)/)
 })
 
 test('E院中心使用28px突出高度加10px间距避让中间按钮', () => {
