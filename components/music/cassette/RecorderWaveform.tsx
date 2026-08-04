@@ -25,8 +25,8 @@ export function getFallbackWaveTarget(index: number, timeMs: number) {
   const wave = Math.sin(time * 4.2 + index * 0.47) * 0.34
     + Math.sin(time * 2.45 + index * 0.23) * 0.2
   const normalizedWave = Math.max(0, Math.min(1, 0.52 + wave))
-  const minimumLift = 0.045
-  const amplitude = 0.1 + centerWeight * 0.48
+  const minimumLift = 0.025
+  const amplitude = 0.2 + centerWeight * 0.75
   return BASELINE_HEIGHT + minimumLift + amplitude * normalizedWave
 }
 
