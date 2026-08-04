@@ -9,6 +9,7 @@ type Props = {
 }
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
+const YEAR_OPTIONS = Array.from({ length: 201 }, (_, index) => 1900 + index)
 
 function toISO(year: number, month: number, day: number) {
   const mm = String(month + 1).padStart(2, '0')
@@ -52,7 +53,24 @@ export function MultiDatePicker({ value, onChange, max = 40 }: Props) {
     <div className="rounded-2xl border border-sky-100 p-4">
       <div className="flex items-center justify-between">
         <button type="button" onClick={() => shift(-1)} aria-label="上一月" className="rounded-lg bg-sky-100 px-3 py-1.5 text-sm font-black text-brand-800">‹</button>
-        <span className="text-sm font-black text-brand-950">{year} 年 {month + 1} 月</span>
+        <div className="flex items-center gap-1">
+          <select
+            aria-label="选择年份"
+            value={String(year)}
+            onChange={(event) => setCursor({ year: Number(event.target.value), month })}
+            className="rounded-lg bg-sky-50 px-2 py-1.5 text-sm font-black text-brand-950 outline-none focus:ring-2 focus:ring-brand-300"
+          >
+            {YEAR_OPTIONS.map((option) => <option key={option} value={option}>{option} 年</option>)}
+          </select>
+          <select
+            aria-label="选择月份"
+            value={String(month)}
+            onChange={(event) => setCursor({ year, month: Number(event.target.value) })}
+            className="rounded-lg bg-sky-50 px-2 py-1.5 text-sm font-black text-brand-950 outline-none focus:ring-2 focus:ring-brand-300"
+          >
+            {Array.from({ length: 12 }, (_, index) => <option key={index} value={index}>{index + 1} 月</option>)}
+          </select>
+        </div>
         <button type="button" onClick={() => shift(1)} aria-label="下一月" className="rounded-lg bg-sky-100 px-3 py-1.5 text-sm font-black text-brand-800">›</button>
       </div>
       <div className="mt-3 grid grid-cols-7 gap-1 text-center text-xs font-black text-slate-400">

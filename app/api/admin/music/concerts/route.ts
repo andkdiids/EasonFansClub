@@ -19,6 +19,7 @@ export async function GET(request: Request) {
   const tourId = sanitizeText(params.get('tourId'), 100)
   const city = sanitizeText(params.get('city'), 100)
   const mode = params.get('mode')
+  const excludeId = sanitizeText(params.get('excludeId'), 100)
   const status = params.get('status')
   const keyword = sanitizeText(params.get('q'), 100)
   const year = Number(params.get('year'))
@@ -45,10 +46,32 @@ export async function GET(request: Request) {
     return NextResponse.json({ cities })
   }
 
+  if (mode === 'copy-options') {
+    const concerts = await prisma.musicConcert.findMany({
+      where: {
+        ...(tourId ? { tourId } : {}),
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        city: true,
+        concertDate: true,
+        sessionNumber: true,
+        sortOrder: true,
+        MusicTour: { select: { id: true, name: true } },
+      },
+    })
+    return NextResponse.json({
+      concerts: concerts.map(({ MusicTour, ...concert }) => ({ ...concert, tour: MusicTour })),
+    })
+  }
+
   const yearStart = Number.isInteger(year) && year >= 1900 && year <= 2100 ? new Date(`${year}-01-01T00:00:00.000Z`) : null
   const where: Prisma.MusicConcertWhereInput = {
     ...(tourId ? { tourId } : {}),
     ...(city ? { city } : {}),
+    ...(excludeId ? { id: { not: excludeId } } : {}),
     ...(status === 'DRAFT' || status === 'PUBLISHED' ? { status: status as 'DRAFT' | 'PUBLISHED' } : {}),
     ...(yearStart ? { concertDate: { gte: yearStart, lt: new Date(`${year + 1}-01-01T00:00:00.000Z`) } } : {}),
     ...(keyword ? { OR: [{ title: { contains: keyword } }, { city: { contains: keyword } }, { venue: { contains: keyword } }, { sessionNumber: { contains: keyword } }, { MusicTour: { name: { contains: keyword } } }] } : {}),
@@ -127,6 +150,7 @@ export async function POST(request: Request) {
           title: sanitizeText(body?.title, 160) || `${city}站`,
           countryOrRegion: sanitizeText(body?.countryOrRegion, 100) || DEFAULT_CONCERT_COUNTRY,
           venue: sanitizeText(body?.venue, 200) || null,
+          posterUrl: sanitizeText(body?.posterUrl, 1000) || null,
           description: sanitizeText(body?.description, 20_000) || null,
           status: parsePublicationStatus(body?.status),
           sessionNumber: null,

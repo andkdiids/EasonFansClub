@@ -18,12 +18,15 @@ type BrowseConcert = {
 }
 type CityGroup = { city: string; count: number; firstDate: string | null; lastDate: string | null }
 type SetlistSource = 'PREVIOUS' | 'NEW'
+type ConcertStatus = 'DRAFT' | 'PUBLISHED'
 
 const empty = {
   tourId: '',
   countryOrRegion: '中国',
   city: '',
   venue: '',
+  posterUrl: '',
+  status: 'DRAFT' as ConcertStatus,
   setlistSource: 'PREVIOUS' as SetlistSource,
   setlistText: '',
 }
@@ -46,6 +49,7 @@ export function AdminConcertManager() {
   // 创建表单
   const [form, setForm] = useState(empty)
   const [concertDates, setConcertDates] = useState<string[]>([])
+  const createFormRef = useRef<HTMLFormElement>(null)
 
   // 三级浏览（懒加载：巡演 → 城市 → 场次）
   const [browseTourId, setBrowseTourId] = useState('')
@@ -122,6 +126,15 @@ export function AdminConcertManager() {
   function addMessage(text: string) { setMessage(text); setError('') }
   function addError(text: string) { setError(text); setMessage('') }
 
+  function startCityConcert(city: string) {
+    setForm((current) => ({ ...current, tourId: browseTourId, city }))
+    setConcertDates([])
+    setCopyOpen(false)
+    setError('')
+    setMessage(`${city} 已带入新增场次表单`)
+    window.requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+
   async function create(event: FormEvent) {
     event.preventDefault()
     if (busy) return
@@ -139,7 +152,7 @@ export function AdminConcertManager() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tourId: form.tourId, countryOrRegion: form.countryOrRegion, city: form.city, venue: form.venue,
+        tourId: form.tourId, countryOrRegion: form.countryOrRegion, city: form.city, venue: form.venue, posterUrl: form.posterUrl, status: form.status,
         concertDates, setlistSource: form.setlistSource, setlist,
       }),
     })
@@ -258,7 +271,7 @@ export function AdminConcertManager() {
     {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-black text-red-700">{error}</p> : null}
 
     {/* 创建巡演场次 */}
-    <form onSubmit={create} className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7">
+    <form ref={createFormRef} onSubmit={create} className="scroll-mt-6 border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7">
       <h2 className="text-2xl font-black text-brand-950">创建巡演场次</h2>
       <p className="mt-2 text-sm font-bold text-slate-500">同一城市可一次添加多个日期，系统会按日期自动生成并重排场次编号。</p>
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
@@ -284,6 +297,15 @@ export function AdminConcertManager() {
         </div>
         <label className="text-sm font-black text-slate-700">场馆
           <input value={form.venue} onChange={(event) => setForm({ ...form, venue: event.target.value })} className={`${field} mt-1`} />
+        </label>
+        <label className="text-sm font-black text-slate-700">海报地址
+          <input value={form.posterUrl} onChange={(event) => setForm({ ...form, posterUrl: event.target.value })} className={`${field} mt-1`} placeholder="可保存后在场次编辑页上传海报" />
+        </label>
+        <label className="text-sm font-black text-slate-700">状态
+          <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as ConcertStatus })} className={`${field} mt-1`}>
+            <option value="DRAFT">草稿</option>
+            <option value="PUBLISHED">已发布</option>
+          </select>
         </label>
       </div>
 
@@ -347,7 +369,10 @@ export function AdminConcertManager() {
                 <span className="text-xs font-bold text-slate-400">{group.firstDate ?? ''} ~ {group.lastDate ?? ''}</span>
                 <span className="text-xs font-black text-slate-400">{openCity === group.city ? '▲' : '▼'}</span>
               </button>
-              <button type="button" onClick={() => { setOpenCity(group.city); setSelectedIds([]); setCopyOpen(true) }} className="rounded-lg bg-sky-50 px-3 py-2 text-sm font-black text-brand-700">复制城市</button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => startCityConcert(group.city)} className="rounded-lg bg-brand-950 px-3 py-2 text-sm font-black text-white">新增场次</button>
+                <button type="button" onClick={() => { setOpenCity(group.city); setSelectedIds([]); setCopyOpen(true) }} className="rounded-lg bg-sky-50 px-3 py-2 text-sm font-black text-brand-700">复制城市</button>
+              </div>
             </div>
             {openCity === group.city ? (
               <div className="border-t border-sky-100 p-4">
