@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { resolveMusicPlayback } from '../lib/music-playback'
+import { canAnalyzeMusicPlaybackUrl, resolveMusicPlayback } from '../lib/music-playback'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -11,8 +11,22 @@ test('EasMusic playback API uses the JSON contract and never redirects the audio
   assert.match(route, /ok: true/)
   assert.match(route, /url: location/)
   assert.match(route, /isFullPlayback/)
+  assert.match(route, /canAnalyzeAudio: canAnalyzeMusicPlaybackUrl\(location, request\.url\)/)
   assert.match(route, /NextResponse\.json\(response/)
   assert.doesNotMatch(route, /NextResponse\.redirect/)
+})
+
+test('服务端只为同源或明确配置的 COS host 开启声纹分析', () => {
+  const previousHosts = process.env.AUDIO_ANALYSIS_CORS_HOSTS
+  process.env.AUDIO_ANALYSIS_CORS_HOSTS = 'media.example.com, https://audio.example.net'
+  try {
+    assert.equal(canAnalyzeMusicPlaybackUrl('/audio/song.mp3', 'https://ecfc.fans/api/playback'), true)
+    assert.equal(canAnalyzeMusicPlaybackUrl('https://media.example.com/audio/song.mp3', 'https://ecfc.fans/api/playback'), true)
+    assert.equal(canAnalyzeMusicPlaybackUrl('https://unknown.example.com/audio/song.mp3', 'https://ecfc.fans/api/playback'), false)
+  } finally {
+    if (previousHosts === undefined) delete process.env.AUDIO_ANALYSIS_CORS_HOSTS
+    else process.env.AUDIO_ANALYSIS_CORS_HOSTS = previousHosts
+  }
 })
 
 test('playback resolution keeps preview fallback and full permission separate', () => {

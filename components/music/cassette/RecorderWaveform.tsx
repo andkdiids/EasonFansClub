@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import type { AudioAnalysisMode } from '@/types/music-cassette'
+import type { AudioAnalysisMode, AudioAnalysisModeDetails } from '@/types/music-cassette'
 
 const COLUMN_COUNT = 12
 const BASELINE_HEIGHT = 0.12
@@ -9,7 +9,7 @@ const MAX_HEIGHT = 0.9
 const ZERO_DATA_FRAME_THRESHOLD = 20
 
 type AudioElementRef = { readonly current: HTMLAudioElement | null }
-type AnalysisModeChange = (mode: AudioAnalysisMode, details?: { analyserAllZero?: boolean }) => void
+type AnalysisModeChange = (mode: AudioAnalysisMode, details?: AudioAnalysisModeDetails) => void
 
 export function hasUsableFrequencyData(data: ArrayLike<number>, threshold = 2) {
   for (let index = 0; index < data.length; index += 1) {
@@ -38,12 +38,14 @@ export function RecorderWaveform({
   analyser,
   audioRef,
   playing,
+  canAnalyzeAudio,
   analysisMode,
   onAnalysisModeChange,
 }: Readonly<{
   analyser: AnalyserNode | null
   audioRef: AudioElementRef
   playing: boolean
+  canAnalyzeAudio: boolean
   analysisMode: AudioAnalysisMode
   onAnalysisModeChange: AnalysisModeChange
 }>) {
@@ -108,7 +110,7 @@ export function RecorderWaveform({
       frame = window.requestAnimationFrame(draw)
     }
 
-    const setAnalysisMode = (mode: AudioAnalysisMode, details?: { analyserAllZero?: boolean }) => {
+    const setAnalysisMode = (mode: AudioAnalysisMode, details?: AudioAnalysisModeDetails) => {
       if (reportedModeRef.current === mode) return
       reportedModeRef.current = mode
       onAnalysisModeChange(mode, details)
@@ -163,13 +165,13 @@ export function RecorderWaveform({
       const audio = audioRef.current
       const audioIsPlaying = Boolean(audio && playing && !audio.paused && !audio.ended)
       if (!audioIsPlaying || !audio) {
-        setAnalysisMode('idle')
+        setAnalysisMode('idle', { hasFrequencyData: false, canAnalyzeAudio })
         scheduleBaseline()
         return
       }
 
-      if (!analyser || !data) {
-        setAnalysisMode('fallback')
+      if (!canAnalyzeAudio || !analyser || !data) {
+        setAnalysisMode('fallback', { hasFrequencyData: false, canAnalyzeAudio })
         drawFallbackVisualization(time)
         schedule()
         return
@@ -178,7 +180,7 @@ export function RecorderWaveform({
       try {
         analyser.getByteFrequencyData(data)
       } catch {
-        setAnalysisMode('fallback')
+        setAnalysisMode('fallback', { hasFrequencyData: false, canAnalyzeAudio })
         drawFallbackVisualization(time)
         schedule()
         return
@@ -186,14 +188,14 @@ export function RecorderWaveform({
 
       if (hasUsableFrequencyData(data)) {
         zeroFrames = 0
-        setAnalysisMode('real')
+        setAnalysisMode('real', { hasFrequencyData: true, canAnalyzeAudio })
         drawRealWaveform()
       } else {
         const readyForZeroCheck = audio.currentTime > 0.25
           && audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
         zeroFrames = readyForZeroCheck ? zeroFrames + 1 : 0
         if (zeroFrames >= ZERO_DATA_FRAME_THRESHOLD) {
-          setAnalysisMode('fallback', { analyserAllZero: true })
+          setAnalysisMode('fallback', { analyserAllZero: true, hasFrequencyData: false, canAnalyzeAudio })
           drawFallbackVisualization(time)
         } else {
           drawBaselineFrame()
@@ -207,7 +209,7 @@ export function RecorderWaveform({
       visible = document.visibilityState !== 'hidden'
       cancelScheduledWork()
       if (!visible) {
-        setAnalysisMode('idle')
+        setAnalysisMode('idle', { hasFrequencyData: false, canAnalyzeAudio })
         setBaseline()
       } else if (playing) {
         schedule()
@@ -228,7 +230,7 @@ export function RecorderWaveform({
     motionQuery.addEventListener('change', onMotionChange)
 
     if (!playing) {
-      setAnalysisMode('idle')
+      setAnalysisMode('idle', { hasFrequencyData: false, canAnalyzeAudio })
       scheduleBaseline()
     } else {
       schedule()
@@ -240,7 +242,7 @@ export function RecorderWaveform({
       document.removeEventListener('visibilitychange', onVisibilityChange)
       motionQuery.removeEventListener('change', onMotionChange)
     }
-  }, [analyser, audioRef, onAnalysisModeChange, playing])
+  }, [analyser, audioRef, canAnalyzeAudio, onAnalysisModeChange, playing])
 
   return (
     <div className="easmusic-recorder-waveform" aria-hidden="true">

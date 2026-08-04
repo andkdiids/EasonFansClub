@@ -153,6 +153,7 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
               error={player.error}
               audioRef={player.audioRef}
               analyserNode={player.analyserNode}
+              canAnalyzeAudio={player.canAnalyzeAudio}
               analysisMode={player.audioAnalysisMode}
               onAnalysisModeChange={player.reportAudioAnalysisMode}
               previousDisabled={previousDisabled}

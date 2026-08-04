@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { usePathname } from 'next/navigation'
 import { MusicMiniPlayer } from '@/components/music/MusicMiniPlayer'
 import type { MusicPlaybackResponse } from '@/lib/music-playback'
-import type { AudioAnalysisMode } from '@/types/music-cassette'
+import type { AudioAnalysisMode, AudioAnalysisModeDetails } from '@/types/music-cassette'
 
 export type MusicPreviewTrack = {
   id: string
@@ -16,16 +16,13 @@ export type MusicPreviewTrack = {
   previewUrl: string
   previewDuration?: number | null
   isFullPlayback?: boolean
+  canAnalyzeAudio?: boolean
 }
 
 type AudioAnalysis = {
   context: AudioContext
   source: MediaElementAudioSourceNode
   analyser: AnalyserNode
-}
-
-type AudioAnalysisModeDetails = {
-  analyserAllZero?: boolean
 }
 
 type PlaybackResolution = MusicPlaybackResponse & {
@@ -190,6 +187,7 @@ type PlayerContextValue = {
   audioRef: RefObject<HTMLAudioElement | null>
   analyserNode: AnalyserNode | null
   audioAnalysisMode: AudioAnalysisMode
+  canAnalyzeAudio: boolean
   reportAudioAnalysisMode: (mode: AudioAnalysisMode, details?: AudioAnalysisModeDetails) => void
   prepareTrack: (track: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>
   playTrack: (track: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>
@@ -217,9 +215,10 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const loadingTimeoutRef = useRef<number | null>(null)
   const loadingTimedOutRef = useRef(false)
   const audioAnalysisModeRef = useRef<AudioAnalysisMode>('idle')
-  const analysisFallbackLoggedRef = useRef(false)
+  const canAnalyzeAudioRef = useRef(false)
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null)
   const [audioAnalysisMode, setAudioAnalysisMode] = useState<AudioAnalysisMode>('idle')
+  const [canAnalyzeAudio, setCanAnalyzeAudio] = useState(false)
   const [track, setTrack] = useState<MusicPreviewTrack | null>(null)
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -238,20 +237,22 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audioAnalysisModeRef.current = mode
     setAudioAnalysisMode(mode)
 
-    if (process.env.NODE_ENV !== 'production' && mode === 'fallback' && !analysisFallbackLoggedRef.current) {
-      analysisFallbackLoggedRef.current = true
-      console.info('[EasMusic waveform] fallback visualization enabled', {
-        previousMode,
-        audioAnalysisMode: mode,
-        audioContextState: analysisRef.current?.context.state ?? null,
+    if (process.env.NODE_ENV !== 'production') {
+      const hasFrequencyData = details.hasFrequencyData
+        ?? (details.analyserAllZero ? false : mode === 'real')
+      console.info('[Waveform]', {
+        mode,
         analyserAvailable: Boolean(analysisRef.current?.analyser),
-        analyserAllZero: details.analyserAllZero ?? false,
+        audioContextState: analysisRef.current?.context.state ?? null,
+        hasFrequencyData,
+        canAnalyzeAudio: details.canAnalyzeAudio ?? canAnalyzeAudioRef.current,
       })
+      if (mode === 'fallback') console.info('[Waveform] fallback activated')
+      if (mode === 'real') console.info('[Waveform] real analyser')
     }
   }, [])
 
   const resetAudioAnalysisMode = useCallback(() => {
-    analysisFallbackLoggedRef.current = false
     reportAudioAnalysisMode('idle')
   }, [reportAudioAnalysisMode])
 
@@ -286,6 +287,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         ok: true,
         url: nextTrack.previewUrl,
         isFullPlayback: nextTrack.isFullPlayback === true,
+        canAnalyzeAudio: nextTrack.canAnalyzeAudio === true,
         playbackApiStatus: null,
         responseHasUrl: true,
       }
@@ -322,6 +324,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         : null
       const responseHasUrl = typeof body?.url === 'string' && body.url.length > 0
       const isFullPlayback = typeof body?.isFullPlayback === 'boolean' ? body.isFullPlayback : null
+      const canAnalyzeAudio = typeof body?.canAnalyzeAudio === 'boolean' ? body.canAnalyzeAudio : null
       logPlaybackState('playback-api-response', nextTrack, audioRef.current, {
         playbackApiStatus: response.status,
         responseHasUrl,
@@ -336,7 +339,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
           typeof body?.code === 'string' ? body.code : null,
         )
       }
-      if (body?.ok !== true || !responseHasUrl || typeof isFullPlayback !== 'boolean') {
+      if (body?.ok !== true || !responseHasUrl || typeof isFullPlayback !== 'boolean' || typeof canAnalyzeAudio !== 'boolean') {
         throw new PlaybackRequestError('PLAYBACK_API_CONTRACT_ERROR', response.status, responseHasUrl, 'PLAYBACK_API_CONTRACT_ERROR')
       }
 
@@ -344,6 +347,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         ok: true as const,
         url: body.url as string,
         isFullPlayback,
+        canAnalyzeAudio,
         playbackApiStatus: response.status,
         responseHasUrl,
       }
@@ -362,10 +366,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     }
   }
 
-  function prepareAudioSource(audio: HTMLAudioElement, url: string) {
-    // The deployed COS objects currently do not send Access-Control-Allow-Origin.
-    // Do not force a cross-origin media element through MediaElementSourceNode:
-    // browsers reject the load or mute it before audio.play() can succeed.
+  function prepareAudioSource(audio: HTMLAudioElement, url: string, canAnalyzeAudio: boolean) {
     let sameOrigin = false
     try {
       sameOrigin = new URL(url, window.location.href).origin === window.location.origin
@@ -373,21 +374,23 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       sameOrigin = false
     }
 
+    const shouldAnalyzeAudio = sameOrigin || canAnalyzeAudio
+    canAnalyzeAudioRef.current = shouldAnalyzeAudio
+    setCanAnalyzeAudio(shouldAnalyzeAudio)
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
     resetAudioAnalysisMode()
-    const previousAnalysis = analysisRef.current
-    if (previousAnalysis) {
-      disposeAudioAnalysis(audio, previousAnalysis)
-      analysisRef.current = null
-      setAnalyserNode(null)
-    }
 
-    if (sameOrigin) {
+    if (shouldAnalyzeAudio) {
       audio.crossOrigin = 'anonymous'
       const analysis = createAudioAnalysis(audio)
       analysisRef.current = analysis
       setAnalyserNode(analysis?.analyser || null)
     } else {
       audio.removeAttribute('crossorigin')
+      analysisRef.current = null
+      setAnalyserNode(null)
     }
   }
 
@@ -408,6 +411,8 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       audio.load()
     }
     resetAudioAnalysisMode()
+    canAnalyzeAudioRef.current = false
+    setCanAnalyzeAudio(false)
     fullPlaybackRef.current = false
     setPlaying(false)
     setLoading(false)
@@ -422,7 +427,9 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audio.preload = 'metadata'
     audioRef.current = audio
     analysisRef.current = null
+    canAnalyzeAudioRef.current = false
     setAnalyserNode(null)
+    setCanAnalyzeAudio(false)
     resetAudioAnalysisMode()
 
     const onTimeUpdate = () => {
@@ -490,8 +497,10 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       audio.removeEventListener('error', onError)
       audio.pause()
       fullPlaybackRef.current = false
+      canAnalyzeAudioRef.current = false
+      setCanAnalyzeAudio(false)
       reportAudioAnalysisMode('idle')
-      const analysis = analysisRef.current
+      const analysis = analysisRef.current || audioAnalysisCache.get(audio) || null
       disposeAudioAnalysis(audio, analysis)
       analysisRef.current = null
       setAnalyserNode(null)
@@ -547,7 +556,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     setDuration(nextDuration)
     setLoading(true)
     startLoadingTimeout()
-    prepareAudioSource(audio, nextTrack.previewUrl)
+    prepareAudioSource(audio, nextTrack.previewUrl, nextTrack.canAnalyzeAudio === true)
     audio.src = nextTrack.previewUrl
     audio.currentTime = 0
     audio.load()
@@ -580,7 +589,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       : Math.max(1, Math.min(60, nextTrack.previewDuration || 60))
     durationRef.current = preparedDuration
     setDuration(preparedDuration)
-    prepareAudioSource(audio, nextTrack.previewUrl)
+    prepareAudioSource(audio, nextTrack.previewUrl, nextTrack.canAnalyzeAudio === true)
     audio.src = nextTrack.previewUrl
     audio.currentTime = 0
     audio.load()
@@ -624,6 +633,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         songId: nextTrack.songId || nextTrack.id,
         previewUrl: resolution.url,
         isFullPlayback: resolution.isFullPlayback,
+        canAnalyzeAudio: resolution.canAnalyzeAudio,
       }
       await playResolvedTrack(resolvedTrack, queue)
     } catch (playbackError) {
@@ -651,6 +661,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         songId: nextTrack.songId || nextTrack.id,
         previewUrl: resolution.url,
         isFullPlayback: resolution.isFullPlayback,
+        canAnalyzeAudio: resolution.canAnalyzeAudio,
       }, queue)
     } catch (prepareError) {
       logPlaybackState('prepare-failed', nextTrack, audioRef.current, {
@@ -662,6 +673,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   }
 
   function playInsertionSound() {
+    if (!canAnalyzeAudioRef.current) return
     const analysis = analysisRef.current
     if (!analysis || analysis.context.state === 'closed') return
     const { context } = analysis
@@ -704,6 +716,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audioRef,
     analyserNode,
     audioAnalysisMode,
+    canAnalyzeAudio,
     reportAudioAnalysisMode,
     prepareTrack,
     playTrack,

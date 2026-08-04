@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { canPlayFullMusic, type MusicPlaybackResponse } from '@/lib/music-playback'
+import { canAnalyzeMusicPlaybackUrl, canPlayFullMusic, type MusicPlaybackResponse } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { createGuessSongSignedUrl, guessSongObjectExists } from '@/lib/guess-song-storage'
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 type RouteContext = { params: Promise<{ songId: string }> }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const { songId } = await context.params
   const song = await prisma.musicSong.findFirst({
     where: {
@@ -59,6 +59,7 @@ export async function GET(_request: Request, context: RouteContext) {
     ok: true,
     url: location,
     isFullPlayback,
+    canAnalyzeAudio: canAnalyzeMusicPlaybackUrl(location, request.url),
   }
 
   return NextResponse.json(response, {

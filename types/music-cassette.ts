@@ -11,6 +11,7 @@ export type CassetteSong = {
   previewUrl: string
   previewDuration: number
   isFullPlayback?: boolean
+  canAnalyzeAudio?: boolean
 }
 
 export type CassetteMachinePhase =
@@ -25,3 +26,9 @@ export type CassetteMachinePhase =
   | 'error'
 
 export type AudioAnalysisMode = 'real' | 'fallback' | 'idle'
+
+export type AudioAnalysisModeDetails = {
+  analyserAllZero?: boolean
+  hasFrequencyData?: boolean
+  canAnalyzeAudio?: boolean
+}

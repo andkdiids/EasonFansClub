@@ -4,7 +4,7 @@ import Image from 'next/image'
 import { forwardRef } from 'react'
 import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import { RecorderWaveform } from '@/components/music/cassette/RecorderWaveform'
-import type { AudioAnalysisMode, CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
+import type { AudioAnalysisMode, AudioAnalysisModeDetails, CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
 
 type CassettePlayerProps = {
   phase: CassetteMachinePhase
@@ -13,8 +13,9 @@ type CassettePlayerProps = {
   error: string | null
   audioRef: { readonly current: HTMLAudioElement | null }
   analyserNode: AnalyserNode | null
+  canAnalyzeAudio: boolean
   analysisMode: AudioAnalysisMode
-  onAnalysisModeChange: (mode: AudioAnalysisMode, details?: { analyserAllZero?: boolean }) => void
+  onAnalysisModeChange: (mode: AudioAnalysisMode, details?: AudioAnalysisModeDetails) => void
   previousDisabled: boolean
   nextDisabled: boolean
   onTogglePlayback: () => void
@@ -29,6 +30,7 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
   error,
   audioRef,
   analyserNode,
+  canAnalyzeAudio,
   analysisMode,
   onAnalysisModeChange,
   previousDisabled,
@@ -69,6 +71,7 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
         analyser={analyserNode}
         audioRef={audioRef}
         playing={playing}
+        canAnalyzeAudio={canAnalyzeAudio}
         analysisMode={analysisMode}
         onAnalysisModeChange={onAnalysisModeChange}
       />

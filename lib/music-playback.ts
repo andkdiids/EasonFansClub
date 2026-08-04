@@ -12,6 +12,47 @@ export type MusicPlaybackResponse = {
   ok: true
   url: string
   isFullPlayback: boolean
+  canAnalyzeAudio: boolean
+}
+
+function normalizeAudioAnalysisHost(value: string) {
+  const candidate = value.trim()
+  if (!candidate) return null
+
+  try {
+    const url = new URL(candidate.includes('://') ? candidate : `https://${candidate}`)
+    return url.host.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+function getAudioAnalysisCorsHosts() {
+  return new Set(
+    (process.env.AUDIO_ANALYSIS_CORS_HOSTS || '')
+      .split(',')
+      .map(normalizeAudioAnalysisHost)
+      .filter((host): host is string => Boolean(host)),
+  )
+}
+
+export function canAnalyzeMusicPlaybackUrl(value: string, requestOrigin?: string) {
+  let url: URL
+  try {
+    url = new URL(value, requestOrigin || 'http://localhost')
+  } catch {
+    return false
+  }
+
+  if (requestOrigin) {
+    try {
+      if (url.origin === new URL(requestOrigin).origin) return true
+    } catch {
+      return false
+    }
+  }
+
+  return getAudioAnalysisCorsHosts().has(url.host.toLowerCase())
 }
 
 export function canPlayFullMusic(user?: Pick<SessionUser, 'role' | 'canPlayFullMusic'> | null) {
