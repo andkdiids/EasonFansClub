@@ -8,7 +8,8 @@ import { isCompleteActiveUser } from '@/lib/users'
 
 export const authCookieName = 'eason_fans_session'
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-const authCookieDomain = 'ecfc.fans'
+const authCookieDomain = '.ecfc.fans'
+const authCookieHost = authCookieDomain.slice(1)
 
 export type SessionUser = {
   id: string
@@ -138,6 +139,28 @@ export async function getCurrentUser() {
   }
 }
 
+function getRequestHostname(request?: Request) {
+  if (!request) return ''
+
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  const hostHeader = request.headers.get('host')?.split(',')[0]?.trim()
+  const hostCandidate = forwardedHost || hostHeader
+
+  if (hostCandidate) {
+    try {
+      return new URL(`http://${hostCandidate}`).hostname.toLowerCase()
+    } catch {
+      // Fall back to the URL below when a proxy sends a malformed host value.
+    }
+  }
+
+  try {
+    return new URL(request.url).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
 export function getSessionCookieOptions(request?: Request) {
   const forwardedProtocol = request?.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
   const requestUsesHttps = request
@@ -146,15 +169,14 @@ export function getSessionCookieOptions(request?: Request) {
       : new URL(request.url).protocol === 'https:'
     : false
 
-  const requestUrl = request ? new URL(request.url) : null
-  const hostname = requestUrl?.hostname.toLowerCase() || ''
+  const hostname = getRequestHostname(request)
   const localHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
   const secure = process.env.NODE_ENV === 'production'
     ? true
     : localHost
       ? false
       : requestUsesHttps && process.env.COOKIE_SECURE === 'true'
-  const domain = hostname === authCookieDomain || hostname.endsWith(`.${authCookieDomain}`)
+  const domain = hostname === authCookieHost || hostname.endsWith(`.${authCookieHost}`)
     ? authCookieDomain
     : undefined
 

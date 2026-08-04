@@ -154,7 +154,7 @@ test('Session JWT 和持久 Cookie 同为 30 天，退出使用匹配的删除�
   assert.equal(local.maxAge, SESSION_MAX_AGE_SECONDS)
   assert.ok(local.expires instanceof Date)
   const canonical = getSessionCookieOptions(new Request('https://ecfc.fans/api/auth/login'))
-  assert.equal(canonical.domain, 'ecfc.fans')
+  assert.equal(canonical.domain, '.ecfc.fans')
   assert.equal(canonical.httpOnly, true)
   assert.equal(canonical.sameSite, 'lax')
   const deletion = getSessionCookieDeletionOptions(new Request('https://ecfc.fans/api/auth/logout'))
