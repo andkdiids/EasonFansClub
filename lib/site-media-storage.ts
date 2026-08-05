@@ -27,12 +27,13 @@ function publicUrl(bucket: string, region: string, key: string) {
   return `${base}/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
-export async function uploadSiteImage(params: { key: string; body: Buffer }) {
+export async function uploadSiteImage(params: { key: string; body: Buffer; contentType?: string }) {
   const config = getConfig()
   const key = params.key.trim().replace(/^\/+/, '')
   if (!key || key.includes('..')) throw new SiteMediaStorageError('图片对象路径无效')
 
   const client = new COS({ SecretId: config.secretId, SecretKey: config.secretKey })
+  const contentType = params.contentType?.trim() || 'image/webp'
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([
@@ -42,7 +43,7 @@ export async function uploadSiteImage(params: { key: string; body: Buffer }) {
         Key: key,
         Body: params.body,
         ContentLength: params.body.byteLength,
-        ContentType: 'image/webp',
+        ContentType: contentType,
         CacheControl: 'public, max-age=31536000, immutable',
         ACL: 'public-read',
       }),

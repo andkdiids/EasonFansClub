@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs'
 import { before, test } from 'node:test'
 import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
+import { authCookieName } from '../lib/auth-cookie'
 
 const TEST_SECRET = 'middleware-test-secret'
-const AUTH_COOKIE = 'eason_fans_session'
 process.env.JWT_SECRET = TEST_SECRET
 
 let middleware: typeof import('../middleware').middleware
@@ -34,9 +34,9 @@ async function createToken({
     .sign(new TextEncoder().encode(secret))
 }
 
-function makeRequest(path: string, token?: string) {
-  return new NextRequest(`https://ecfc.fans${path}`, token
-    ? { headers: { cookie: `${AUTH_COOKIE}=${token}` } }
+function makeRequest(path: string, token?: string, host = 'ecfc.fans') {
+  return new NextRequest(`https://${host}${path}`, token
+    ? { headers: { cookie: `${authCookieName}=${token}` } }
     : undefined)
 }
 
@@ -83,6 +83,16 @@ test('有效 JWT 可以访问 EasMusic，JWT 必须包含有效 user id', async 
   const missingId = await createToken({ includeId: false })
   const missingIdResponse = await middleware(makeRequest('/music', missingId))
   assert.equal(getRedirect(missingIdResponse).searchParams.get('next'), '/music')
+})
+
+test('ecfc.fans 与 www.ecfc.fans 都读取同一个共享会话 Cookie', async () => {
+  const token = await createToken()
+
+  for (const host of ['ecfc.fans', 'www.ecfc.fans']) {
+    const response = await middleware(makeRequest('/music', token, host))
+    assert.equal(response.status, 200, host)
+    assert.equal(response.headers.get('location'), null, host)
+  }
 })
 
 test('过期、伪造和错误签名 JWT 都按未登录处理', async () => {

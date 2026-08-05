@@ -121,12 +121,13 @@ async function getCheckInMessagesUncached({
     where: {
       date: { gte: selectedDate, lt: nextDate },
       isDeleted: false,
+      moderationStatus: 'APPROVED',
       ...(userIds ? { userId: { in: userIds } } : {}),
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     orderBy: sort === 'hot'
-      ? [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { likeCount: 'desc' }, { commentCount: 'desc' }, { createdAt: 'desc' }]
-      : [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
+      ? [{ isAdminMessage: 'desc' }, { sort: 'asc' }, { isPinned: 'desc' }, { isFeatured: 'desc' }, { likeCount: 'desc' }, { commentCount: 'desc' }, { createdAt: 'desc' }]
+      : [{ isAdminMessage: 'desc' }, { sort: 'asc' }, { isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
     take: 30,
     include: {
       User: {

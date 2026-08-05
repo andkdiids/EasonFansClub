@@ -33,14 +33,19 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       return
     }
     const postId = typeof data?.post?.id === 'string' ? data.post.id : ''
-    const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : postId ? `/posts/${postId}` : ''
-    if (!postId || !detailUrl) {
+    const isPending = data?.moderationStatus === 'PENDING' || data?.post?.moderationStatus === 'PENDING'
+    if (!postId) {
       console.error('[post:create:invalid-response]', data)
       setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
       return
     }
     if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
-    router.push(detailUrl)
+    if (isPending) {
+      router.push(`/post/submitted?postId=${postId}&status=${data.moderationStatus}`)
+    } else {
+      const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : `/posts/${postId}`
+      router.push(detailUrl)
+    }
     router.refresh()
   }
 

@@ -5,10 +5,9 @@ import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
+import { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 
-export const authCookieName = 'eason_fans_session'
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-const authCookieDomain = '.ecfc.fans'
+export { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 
 export type SessionUser = {
   id: string
@@ -138,70 +137,4 @@ export async function getCurrentUser() {
   }
 }
 
-function getRequestHostname(request?: Request) {
-  if (!request) return ''
-
-  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
-  const hostHeader = request.headers.get('host')?.split(',')[0]?.trim()
-  const hostCandidate = forwardedHost || hostHeader
-
-  if (hostCandidate) {
-    try {
-      return new URL(`http://${hostCandidate}`).hostname.toLowerCase()
-    } catch {
-      // Fall back to the URL below when a proxy sends a malformed host value.
-    }
-  }
-
-  try {
-    return new URL(request.url).hostname.toLowerCase()
-  } catch {
-    return ''
-  }
-}
-
-export function getSessionCookieOptions(request?: Request) {
-  const forwardedProtocol = request?.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
-  const requestUsesHttps = request
-    ? forwardedProtocol
-      ? forwardedProtocol === 'https'
-      : new URL(request.url).protocol === 'https:'
-    : false
-
-  const hostname = getRequestHostname(request)
-  const localHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
-  // 关键修复（移动端 / 微信无法保持登录）：只要请求经由 HTTPS 到达——无论 NODE_ENV 是否为 production，
-  // 含 Cloudflare / 腾讯云反代转发的 x-forwarded-proto=https——会话 Cookie 就必须带 Secure + SameSite=None。
-  // 旧逻辑仅在 NODE_ENV==='production' 时强制 secure=true，否则依赖 requestUsesHttps && COOKIE_SECURE==='true'；
-  // 若部署环境未设 NODE_ENV='production' 或 COOKIE_SECURE，HTTPS 请求会生成 Secure=false / SameSite=Lax 的 Cookie，
-  // 这正是 iOS / 微信 WebView 在「关闭页面重开」后丢弃会话、需要重新登录的根因。localhost 仍保持 host-only、
-  // 非 Secure、Lax（开发友好，且 localhost 不允许设置 Domain）。
-  const secure = localHost ? false : process.env.NODE_ENV === 'production' || requestUsesHttps
-  // 微信内置浏览器（iOS WKWebView / Android X5）关闭网页重开后常丢弃 SameSite=Lax 的会话
-  // Cookie，导致需要重新登录。改用 SameSite=None 并配合 Secure（HTTPS 下 secure 恒为 true），
-  // 既保持跨浏览器/WebView 持久登录，又不降低安全性：HttpOnly 与 Secure 不变，仅放宽跨站发送策略。
-  const sameSite = secure ? ('none' as const) : ('lax' as const)
-  // Domain 固定为 .ecfc.fans：历史上依据 request host 匹配判定 Domain，会在非 ecfc.fans 的 host 下
-  // 写入 host-only Cookie；它与 Domain=.ecfc.fans 的正常 Cookie 同名并存，退出时只删 domain 版、
-  // 残留 host-only 版，表现为「退出登录无效」。现改为：仅 localhost 保持 host-only（localhost 不允许
-  // 设置 Domain），其余 host（含 ecfc.fans / www.ecfc.fans / 生产任意 host）一律 .ecfc.fans，使 set/delete 永远一致。
-  const domain = localHost ? undefined : authCookieDomain
-
-  return {
-    httpOnly: true,
-    sameSite,
-    secure,
-    path: '/',
-    ...(domain ? { domain } : {}),
-    maxAge: SESSION_MAX_AGE_SECONDS,
-    expires: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
-  }
-}
-
-export function getSessionCookieDeletionOptions(request?: Request) {
-  return {
-    ...getSessionCookieOptions(request),
-    maxAge: 0,
-    expires: new Date(0),
-  }
-}
+export { getSessionCookieOptions, getSessionCookieDeletionOptions } from '@/lib/auth-cookie'

@@ -10,6 +10,7 @@ import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { checkForbiddenWords } from '@/lib/content-filter'
 
 export async function GET() {
   const user = await getCurrentUser()
@@ -82,6 +83,9 @@ export async function POST(request: Request) {
   const rawMessage = sanitizeText(body?.message, 300)
   if (await containsSensitiveContent(rawMessage)) {
     return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
+  }
+  if (checkForbiddenWords(rawMessage).blocked) {
+    return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
   }
   const message = rawMessage
 

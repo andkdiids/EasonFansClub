@@ -55,6 +55,17 @@ function getInitial(uid?: number | null) {
   return uid ? String(uid).padStart(5, '0').slice(0, 1) : 'E'
 }
 
+type NotificationReadResponse = {
+  ok?: boolean
+  readAt?: string | null
+  notification?: {
+    id: string
+    source: UnifiedNotification['source']
+    isRead: boolean
+    readAt: string | null
+  }
+}
+
 export function NotificationsClient({
   initialNotifications,
   siteLogoUrl,
@@ -138,36 +149,68 @@ export function NotificationsClient({
     if (requestedCategory && requestedCategory in categoryLabels) setActiveCategory(requestedCategory)
   }, [searchParams])
 
-  async function markRead(item: UnifiedNotification) {
-    if (item.isRead) return
+  async function markRead(item: UnifiedNotification): Promise<boolean> {
+    if (item.isRead) return true
+
+    const matchesItem = (row: UnifiedNotification) => row.id === item.id && row.source === item.source
+    const optimisticReadAt = new Date()
+    // Update the card before waiting for the network. If the request fails,
+    // the exact optimistic row is restored below.
+    setNotifications((current) => current.map((row) => matchesItem(row)
+      ? { ...row, isRead: true, read: true, readAt: optimisticReadAt }
+      : row))
     setIsUpdating(true)
-    const response = await fetch(`/api/notifications/${item.id}/read`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: item.source }),
-    })
-    setIsUpdating(false)
-    if (!response.ok) return
-    setNotifications((current) => current.map((row) => row.id === item.id && row.source === item.source ? { ...row, isRead: true, readAt: new Date() } : row))
-    window.dispatchEvent(new Event('unread-summary:refresh'))
-    router.refresh()
+
+    try {
+      const response = await fetch(`/api/notifications/${item.id}/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: item.source }),
+        // Keep the write alive when a card immediately navigates away.
+        keepalive: true,
+      })
+      const data = await response.json().catch(() => null) as NotificationReadResponse | null
+      if (!response.ok || data?.ok === false) {
+        setNotifications((current) => current.map((row) => matchesItem(row) && row.readAt === optimisticReadAt
+          ? { ...row, isRead: item.isRead, read: item.read, readAt: item.readAt }
+          : row))
+        return false
+      }
+
+      const persistedReadAt = data?.readAt === null
+        ? null
+        : data?.readAt
+          ? new Date(data.readAt)
+          : optimisticReadAt
+      const safeReadAt = persistedReadAt && Number.isNaN(persistedReadAt.getTime()) ? optimisticReadAt : persistedReadAt
+      setNotifications((current) => current.map((row) => matchesItem(row)
+        ? { ...row, isRead: true, read: true, readAt: safeReadAt }
+        : row))
+      window.dispatchEvent(new Event('unread-summary:refresh'))
+      return true
+    } catch (reason) {
+      setNotifications((current) => current.map((row) => matchesItem(row) && row.readAt === optimisticReadAt
+        ? { ...row, isRead: item.isRead, read: item.read, readAt: item.readAt }
+        : row))
+      if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
+      return false
+    } finally {
+      setIsUpdating(false)
+    }
   }
 
   async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
     event.preventDefault()
     const target = getNotificationTarget(item)
     if (!target) return
-    try {
-      await markRead(item)
-    } catch (reason) {
-      if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
-    } finally {
-      window.sessionStorage.setItem('notifications:return-state', JSON.stringify({
-        category: activeCategory,
-        scrollY: window.scrollY,
-      }))
-      router.push(target)
-    }
+    // The optimistic update happens synchronously; navigation does not wait
+    // for a refresh (or the API round-trip) to make the card look read.
+    void markRead(item)
+    window.sessionStorage.setItem('notifications:return-state', JSON.stringify({
+      category: activeCategory,
+      scrollY: window.scrollY,
+    }))
+    router.push(target)
   }
 
   async function sendDirectReply(item: UnifiedNotification) {
@@ -213,7 +256,7 @@ export function NotificationsClient({
     const response = await fetch('/api/notifications/read-all', { method: 'POST' })
     setIsUpdating(false)
     if (!response.ok) return
-    setNotifications((current) => current.map((row) => ({ ...row, isRead: true, readAt: row.readAt || new Date() })))
+    setNotifications((current) => current.map((row) => ({ ...row, isRead: true, read: true, readAt: row.readAt || new Date() })))
     window.dispatchEvent(new Event('unread-summary:refresh'))
     await refreshUnreadSummary()
     router.refresh()
@@ -253,12 +296,8 @@ export function NotificationsClient({
     const systemLike = isSystemLikeNotification(item)
     const isBirthday = isBirthdayNotification(item)
     // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框 + 标题加粗（保持扁平简洁 Windows 风格）
-    const emphasisClass = isBirthday ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
-    const titleClass = isBirthday
-      ? 'font-black text-slate-950'
-      : item.isRead
-        ? 'font-bold text-slate-700'
-        : 'font-black text-slate-950'
+    const emphasisClass = isBirthday && !item.isRead ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
+    const titleClass = item.isRead ? 'font-bold text-slate-700' : 'font-black text-slate-950'
     // 生日通知分类文字显示为「今日」（仅前端展示，不动数据库枚举）
     const displayLabel = isBirthday ? '今日' : item.typeLabel
     const content = (
@@ -317,8 +356,27 @@ export function NotificationsClient({
         {target ? (
           <Link href={target} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
         ) : (
-          <div className="min-h-12 w-full cursor-default text-left" aria-disabled="true">{content}</div>
+          <div
+            className="min-h-12 w-full cursor-pointer text-left"
+            onClick={() => void markRead(item)}
+          >
+            {content}
+          </div>
         )}
+        {!item.isRead ? (
+          <button
+            type="button"
+            disabled={isUpdating}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void markRead(item)
+            }}
+            className="absolute right-20 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            已读
+          </button>
+        ) : null}
         <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600">清除</button>
         {item.replyTarget && !item.replyDisabledReason ? (
           <button

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { NextResponse } from 'next/server'
 import {
@@ -6,8 +7,13 @@ import {
   getSessionCookieDeletionOptions,
   getSessionCookieOptions,
   SESSION_MAX_AGE_SECONDS,
-} from '../lib/auth'
+} from '../lib/auth-cookie'
 import { POST as logoutPost } from '../app/api/auth/logout/route'
+import { appendLegacyHostCookieDeletion } from '../lib/auth-session-cookie'
+
+function source(path: string) {
+  return readFileSync(path, 'utf8')
+}
 
 function serializeSessionCookie(request: Request, value = 'session-token') {
   const response = NextResponse.json({ ok: true })
@@ -45,12 +51,6 @@ function withDevelopmentEnvironment<T>(callback: () => T) {
   }
 }
 
-// sameSite 必须与 secure 保持一致（auth.ts 的唯一规则，避免写死字面量）：
-// secure 为 true（生产/HTTPS）时使用 None（跨站/WebView 持久登录），否则使用 Lax。
-function expectedSameSite(secure: boolean): 'none' | 'lax' {
-  return secure ? 'none' : 'lax'
-}
-
 test('production proxy requests issue a persistent session cookie for both public hosts', () => {
   withProductionEnvironment(() => {
     for (const host of ['ecfc.fans', 'www.ecfc.fans']) {
@@ -68,9 +68,9 @@ test('production proxy requests issue a persistent session cookie for both publi
       assert.match(cookie, /Path=\//)
       assert.match(cookie, /HttpOnly/)
       assert.match(cookie, /Secure/)
-      // 生产环境恒为 secure，sameSite 必须为 None（不写死，跟随 secure 推导）
+      // Production retains Secure + Lax and the persistent 30-day lifetime.
       assert.equal(options.secure, true)
-      assert.equal(options.sameSite, expectedSameSite(options.secure))
+      assert.equal(options.sameSite, 'lax')
       assert.match(cookie, new RegExp(`Max-Age=${SESSION_MAX_AGE_SECONDS}(?:;|$)`))
       assert.match(cookie, /Expires=/)
     }
@@ -90,8 +90,8 @@ test('logout uses the same domain and path when clearing the session cookie', ()
 
     assert.match(cookie, /Domain=\.ecfc\.fans/)
     assert.match(cookie, /Path=\//)
-    // 删除 Cookie 沿用同一套 sameSite 规则（生产为 None）
-    assert.equal(options.sameSite, expectedSameSite(options.secure))
+    // Deletion uses the same Lax/domain/path attributes.
+    assert.equal(options.sameSite, 'lax')
     assert.match(cookie, /Max-Age=0(?:;|$)/)
     assert.match(cookie, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/)
   })
@@ -104,17 +104,24 @@ test('local development remains host-only, non-secure, and uses Lax SameSite', (
 
     assert.equal(options.domain, undefined)
     assert.equal(options.secure, false)
-    // 开发环境非 secure，sameSite 必须为 Lax（不写死，跟随 secure 推导）
-    assert.equal(options.sameSite, expectedSameSite(options.secure))
+    // Local development remains host-only, non-secure, and Lax.
+    assert.equal(options.sameSite, 'lax')
     assert.equal(options.path, '/')
     assert.equal(options.maxAge, SESSION_MAX_AGE_SECONDS)
   })
 })
 
-test('HTTPS request on a non-production environment still issues a Secure SameSite=None cookie', () => {
-  // 回归测试：移动端 / 微信无法保持登录的根因之一——部署环境未设 NODE_ENV='production' 时，
-  // 旧逻辑会把 HTTPS 请求生成 Secure=false / SameSite=Lax 的 Cookie，被 iOS / 微信丢弃。
-  // 修复后只要请求经 HTTPS 到达（x-forwarded-proto=https），无论 NODE_ENV 都必须 Secure + None。
+test('preview hosts remain host-only instead of receiving an invalid ecfc.fans Domain', () => {
+  const request = new Request('https://preview.example.workers.dev/api/auth/login')
+  const options = getSessionCookieOptions(request)
+
+  assert.equal(options.domain, undefined)
+  assert.equal(options.secure, true)
+  assert.equal(options.sameSite, 'lax')
+})
+
+test('HTTPS request on a non-production environment still issues a Secure SameSite=Lax cookie', () => {
+  // Regression coverage: HTTPS must not downgrade the persistent cookie attributes.
   withDevelopmentEnvironment(() => {
     const request = new Request('http://next-internal:3000/api/auth/login', {
       headers: {
@@ -126,11 +133,10 @@ test('HTTPS request on a non-production environment still issues a Secure SameSi
     const options = getSessionCookieOptions(request)
 
     assert.equal(options.secure, true)
-    assert.equal(options.sameSite, 'none')
+    assert.equal(options.sameSite, 'lax')
     assert.match(cookie, /Secure/)
-    // Next.js 将 sameSite:'none' 序列化为小写的 SameSite=none（符合规范），注销用的自定义
-    // 序列化器则输出 SameSite=None；两者等价，这里按 Next 的实际输出匹配。
-    assert.match(cookie, /SameSite=none/)
+    // Next serializes the Lax attribute case-insensitively.
+    assert.match(cookie, /SameSite=lax/i)
     assert.match(cookie, /Domain=\.ecfc\.fans/)
   })
 })
@@ -151,8 +157,7 @@ test('logout emits multiple Set-Cookie entries clearing domain, host-only and ww
     const response = await logoutPost(request)
     const setCookies = response.headers.getSetCookie()
 
-    // 退出必须同时下发多条 Set-Cookie，清理三类同名 Cookie：
-    // 正常 Domain=.ecfc.fans、历史 host-only、历史 www.ecfc.fans
+    // 退出时同时清理共享 domain、当前 host-only 和历史 www domain 变体。
     assert.ok(setCookies.length >= 3, `expected >=3 Set-Cookie on logout, got ${setCookies.length}: ${JSON.stringify(setCookies)}`)
 
     const hasDomainEcfc = setCookies.some((c) => /Domain=\.ecfc\.fans(?:;|$)/.test(c))
@@ -169,10 +174,46 @@ test('logout emits multiple Set-Cookie entries clearing domain, host-only and ww
       assert.match(cookie, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/)
       assert.match(cookie, /HttpOnly/)
       assert.match(cookie, /Secure/)
-      assert.match(cookie, /SameSite=None/)
+      assert.match(cookie, /SameSite=Lax/)
     }
   } finally {
     if (previousNodeEnv === undefined) delete environment.NODE_ENV
     else environment.NODE_ENV = previousNodeEnv
   }
+})
+
+test('login and registration share the persistent cookie options and heal legacy host-only cookies', () => {
+  for (const route of ['app/api/auth/login/route.ts', 'app/api/auth/register/route.ts']) {
+    const content = source(route)
+    assert.match(content, /getSessionCookieOptions/)
+    assert.match(content, /appendLegacyHostCookieDeletion/)
+    assert.doesNotMatch(content, /(?:login_token|auth_token)/)
+  }
+})
+
+test('legacy host-only cleanup keeps the domain cookie untouched', () => {
+  const request = new Request('https://ecfc.fans/api/auth/login')
+  const response = NextResponse.json({ ok: true })
+  response.cookies.set(authCookieName, 'new-session-token', getSessionCookieOptions(request))
+  appendLegacyHostCookieDeletion(response, request)
+
+  const headers = response.headers.getSetCookie()
+  assert.equal(headers.length, 2)
+  const persistent = headers.find((header) => /Domain=\.ecfc\.fans(?:;|$)/.test(header))
+  const legacyDeletion = headers.find((header) => !/Domain=/.test(header))
+
+  assert.ok(persistent)
+  assert.match(persistent, /^eason_fans_session=new-session-token/)
+  assert.match(persistent, new RegExp(`Max-Age=${SESSION_MAX_AGE_SECONDS}(?:;|$)`))
+  assert.ok(legacyDeletion)
+  assert.match(legacyDeletion, /^eason_fans_session=/)
+  assert.match(legacyDeletion, /Path=\//)
+  assert.match(legacyDeletion, /Max-Age=0(?:;|$)/)
+  assert.match(legacyDeletion, /SameSite=Lax/)
+})
+
+test('the client bootstrap validates the HttpOnly session with /api/auth/me', () => {
+  assert.match(source('app/api/auth/me/route.ts'), /getCurrentUser\(\)/)
+  assert.match(source('components/AuthSessionRestore.tsx'), /fetch\('\/api\/auth\/me'/)
+  assert.match(source('app/layout.tsx'), /<AuthSessionRestore initialUserId=/)
 })

@@ -1,7 +1,6 @@
 import { jwtVerify } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
-
-const authCookieName = 'eason_fans_session'
+import { authCookieName } from '@/lib/auth-cookie'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
 

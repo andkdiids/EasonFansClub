@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { authCookieName, getSessionCookieDeletionOptions } from '@/lib/auth'
+import { authCookieName, getSessionCookieDeletionOptions } from '@/lib/auth-cookie'
 
 const noStoreHeaders = {
   'Cache-Control': 'no-store, max-age=0',

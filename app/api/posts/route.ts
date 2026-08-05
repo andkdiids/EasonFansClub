@@ -7,6 +7,7 @@ import { getRandomPostRegistrationFee, POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { checkForbiddenWords } from '@/lib/content-filter'
 import { parseContentImageUrls } from '@/lib/content-images'
 import { getShanghaiDateKey } from '@/lib/checkin'
 
@@ -94,6 +95,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const rawTitle = sanitizeText(body?.title, 120)
   const rawContent = stripUnsafeHtml(sanitizeText(body?.content, 20000))
+  if (checkForbiddenWords(`${rawTitle}\n${rawContent}`).blocked) {
+    return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
+  }
   if (await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
     return NextResponse.json({ message: '帖子包含违禁词，无法发布', errors: { content: '请修改后重新发布' } }, { status: 400 })
   }

@@ -1,6 +1,8 @@
 import { Prisma, type UserRole } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { authCookieName, createSessionToken, getSessionCookieOptions } from '@/lib/auth'
+import { createSessionToken } from '@/lib/auth'
+import { authCookieName, getSessionCookieOptions } from '@/lib/auth-cookie'
+import { appendLegacyHostCookieDeletion } from '@/lib/auth-session-cookie'
 import { syncUserAchievements } from '@/lib/achievements'
 import { chooseDefaultAvatar } from '@/lib/default-avatars'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
@@ -52,7 +54,9 @@ async function authenticatedResponse(
   }
   const token = await createSessionToken(sessionUser)
   const response = NextResponse.json({ user: sessionUser, registrationType: 'EMAIL', ...extra }, { status, headers: noStoreHeaders })
-  response.cookies.set(authCookieName, token, getSessionCookieOptions(request))
+  const cookieOptions = getSessionCookieOptions(request)
+  response.cookies.set(authCookieName, token, cookieOptions)
+  if (cookieOptions.domain) appendLegacyHostCookieDeletion(response, request)
   return response
 }
 

@@ -146,8 +146,9 @@ test('所有用户现场歌单查询按 position、createdAt、id 稳定排序',
 test('Session JWT 和持久 Cookie 同为 30 天，退出使用匹配的删除配置', () => {
   assert.equal(SESSION_MAX_AGE_SECONDS, 60 * 60 * 24 * 30)
   const auth = read('lib/auth.ts')
+  const authCookie = read('lib/auth-cookie.ts')
   assert.match(auth, /setExpirationTime\(`\$\{SESSION_MAX_AGE_SECONDS\}s`\)/)
-  assert.match(auth, /expires: new Date\(Date\.now\(\) \+ SESSION_MAX_AGE_SECONDS \* 1000\)/)
+  assert.match(authCookie, /expires: new Date\(Date\.now\(\) \+ SESSION_MAX_AGE_SECONDS \* 1000\)/)
   const local = getSessionCookieOptions(new Request('http://localhost:3000/api/auth/login'))
   assert.equal(local.secure, false)
   assert.equal(local.domain, undefined)
@@ -164,11 +165,15 @@ test('Session JWT 和持久 Cookie 同为 30 天，退出使用匹配的删除�
   assert.match(read('app/api/auth/logout/route.ts'), /getSessionCookieDeletionOptions\(request\)/)
 })
 
-test('canonical host 固定为 ecfc.fans，并使用永久重定向', () => {
+test('ecfc.fans 与 www.ecfc.fans 共享会话域，HTTPS 升级保留原始 host', () => {
+  const apex = getSessionCookieOptions(new Request('https://ecfc.fans/api/auth/login'))
+  const www = getSessionCookieOptions(new Request('https://www.ecfc.fans/api/auth/login'))
+  assert.equal(apex.domain, '.ecfc.fans')
+  assert.equal(www.domain, '.ecfc.fans')
+
   const middleware = read('middleware.ts')
-  assert.match(middleware, /canonicalHost = 'ecfc\.fans'/)
-  assert.match(middleware, /requestHost === 'www\.ecfc\.fans'/)
-  assert.match(middleware, /NextResponse\.redirect\(canonicalUrl, 308\)/)
+  assert.match(middleware, /secureUrl\.hostname = requestHost/)
+  assert.doesNotMatch(middleware, /requestHost === 'www\.ecfc\.fans'/)
 })
 
 test('登录表单允许密码管理器识别账号和当前密码，redirect 只允许站内路径', () => {

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { authCookieName, createSessionToken, getSessionCookieOptions } from '@/lib/auth'
+import { createSessionToken } from '@/lib/auth'
+import { authCookieName, getSessionCookieOptions } from '@/lib/auth-cookie'
+import { appendLegacyHostCookieDeletion } from '@/lib/auth-session-cookie'
 import { DbTimeoutError, withDbTimeout } from '@/lib/db-timeout'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
@@ -121,7 +123,9 @@ const password = typeof body?.password === 'string' ? body.password : ''
 
     const token = await createSessionToken(sessionUser)
     const response = NextResponse.json({ user: sessionUser }, { headers: noStoreHeaders })
-    response.cookies.set(authCookieName, token, getSessionCookieOptions(request))
+    const cookieOptions = getSessionCookieOptions(request)
+    response.cookies.set(authCookieName, token, cookieOptions)
+    if (cookieOptions.domain) appendLegacyHostCookieDeletion(response, request)
     return response
   } catch (error) {
     if (isDatabaseTimeout(error)) return databaseUnavailableResponse()

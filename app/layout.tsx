@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { AppShell } from '@/components/layout/AppShell'
+import { AuthSessionRestore } from '@/components/AuthSessionRestore'
 import { NotificationProvider } from '@/components/NotificationProvider'
 import { NotificationToast } from '@/components/NotificationToast'
 import { MusicPlayerProvider } from '@/components/music/MusicPlayerProvider'
@@ -38,6 +39,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('ecfc-theme');if(t!=='day'&&t!=='midnight')t='day';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='midnight'?'dark':'light'}catch(e){}})()` }} />
       </head>
       <body>
+        <AuthSessionRestore initialUserId={sessionUser?.id || null} />
         <VirtualKeyboardManager />
         <NotificationProvider userId={sessionUser?.id || null} initialSummary={unreadSummary}>
           <MusicPlayerProvider>

@@ -347,26 +347,65 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
   })
 }
 
-export async function markUnifiedNotificationRead(userId: string, source: string, id: string) {
+export type MarkUnifiedNotificationReadResult = {
+  ok: boolean
+  readAt: Date | null
+}
+
+/**
+ * Mark one notification as read and return the persisted timestamp.
+ *
+ * Keep this separate from the boolean helper below so existing batch callers
+ * do not need to know about the response shape, while the single-item API can
+ * send the server value back to the client (rather than inventing a local
+ * timestamp).
+ */
+export async function markUnifiedNotificationReadWithState(userId: string, source: string, id: string): Promise<MarkUnifiedNotificationReadResult> {
   if (source === 'system') {
+    const existingRead = await prisma.systemNotificationRead.findUnique({
+      where: { notificationId_userId: { notificationId: id, userId } },
+      select: { readAt: true },
+    })
+    // An item can expire between the list response and the click. Preserve
+    // idempotence for a read row that already exists instead of returning 404.
+    if (existingRead) return { ok: true, readAt: existingRead.readAt }
+
     const notification = await prisma.systemNotification.findFirst({
       where: { id, ...effectiveSystemNotificationWhere(new Date()) },
       select: { id: true },
     })
-    if (!notification) return false
-    await prisma.systemNotificationRead.upsert({
+    if (!notification) return { ok: false, readAt: null }
+    const read = await prisma.systemNotificationRead.upsert({
       where: { notificationId_userId: { notificationId: id, userId } },
-      update: { readAt: new Date() },
+      // A repeated read is idempotent: preserve the original timestamp.
+      update: {},
       create: { notificationId: id, userId },
+      select: { readAt: true },
     })
-    return true
+    return { ok: true, readAt: read.readAt }
   }
 
+  const readAt = new Date()
   const result = await prisma.notification.updateMany({
     where: { id, recipientId: userId, isRead: false },
-    data: { isRead: true, readAt: new Date() },
+    data: { isRead: true, readAt },
   })
-  return result.count > 0
+
+  if (result.count > 0) return { ok: true, readAt }
+
+  // Marking an already-read row is idempotent. This also handles two tabs
+  // racing to read the same notification without turning a successful read
+  // into a misleading 404 response.
+  const existing = await prisma.notification.findFirst({
+    where: { id, recipientId: userId },
+    select: { isRead: true, readAt: true },
+  })
+  return existing?.isRead ? { ok: true, readAt: existing.readAt } : { ok: false, readAt: null }
+}
+
+/** Backwards-compatible boolean helper used by batch/read-all callers. */
+export async function markUnifiedNotificationRead(userId: string, source: string, id: string) {
+  return (await markUnifiedNotificationReadWithState(userId, source, id)).ok
 }
 
 export async function markAllUnifiedNotificationsRead(userId: string) {

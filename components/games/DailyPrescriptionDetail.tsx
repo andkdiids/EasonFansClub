@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MAX_DAILY_PRESCRIPTION_REWARD, MIN_DAILY_PRESCRIPTION_REWARD } from '@/lib/daily-prescription-reward'
 
 type DrawResult = {
   dateKey: string
@@ -77,7 +76,6 @@ export function DailyPrescriptionDetail() {
         <article>
           <span>{status.draw.dateKey}</span>
           <strong>+{status.draw.points} 挂号费</strong>
-          <small>每日随机获得 {MIN_DAILY_PRESCRIPTION_REWARD}～{MAX_DAILY_PRESCRIPTION_REWARD} 挂号费，数值越高越稀有。</small>
           {status.draw.lyric ? <blockquote>“{status.draw.lyric.text}”<cite>《{status.draw.lyric.songTitle}》</cite></blockquote> : null}
           <small>处方编号：{status.draw.prescriptionCode}</small>
         </article>

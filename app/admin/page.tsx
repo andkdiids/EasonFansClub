@@ -36,6 +36,8 @@ const adminModules = [
   { href: '/admin/layout-editor', title: '页面布局编辑器', desc: '调整首页、每日挂号和后台首页的模块顺序、宽度、间距和发布状态。' },
   { href: '/admin/growth', title: '成长系统管理', desc: '维护等级名称、升级经验和任务奖励基础配置。' },
   { href: '/admin/birthday-messages', title: '生日祝福文案', desc: '维护生日纪念通知文案池，发送时随机选择启用的文案。' },
+  { href: '/admin/stickers', title: '表情包审核', desc: '审核用户提交的表情包合集，预览表情、通过或拒绝。' },
+  { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '查看、删除用户挂号页留言，并发布管理员公告与活动提醒。' },
 ] as const
 
 export default async function AdminPage() {
