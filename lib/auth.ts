@@ -176,13 +176,17 @@ export function getSessionCookieOptions(request?: Request) {
     : localHost
       ? false
       : requestUsesHttps && process.env.COOKIE_SECURE === 'true'
+  // 微信内置浏览器（iOS WKWebView / Android X5）关闭网页重开后常丢弃 SameSite=Lax 的会话
+  // Cookie，导致需要重新登录。改用 SameSite=None 并配合 Secure（生产环境 secure 恒为 true），
+  // 既保持跨浏览器/WebView 持久登录，又不降低安全性：HttpOnly 与 Secure 不变，仅放宽跨站发送策略。
+  const sameSite = secure ? ('none' as const) : ('lax' as const)
   const domain = hostname === authCookieHost || hostname.endsWith(`.${authCookieHost}`)
     ? authCookieDomain
     : undefined
 
   return {
     httpOnly: true,
-    sameSite: 'lax' as const,
+    sameSite,
     secure,
     path: '/',
     ...(domain ? { domain } : {}),

@@ -79,6 +79,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const [error, setError] = useState('')
   const [exitOpen, setExitOpen] = useState(false)
   const [exiting, setExiting] = useState(false)
+  const [forceEnded, setForceEnded] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioGenerationRef = useRef(0)
   const timeoutSubmittedRef = useRef<string | null>(null)
@@ -121,6 +122,27 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       })
     return () => { active = false }
   }, [initialSessionId])
+
+  useEffect(() => {
+    if (!session || session.status !== 'IN_PROGRESS') return
+    const remaining = new Date(session.expiresAt).getTime() - Date.now()
+    if (remaining <= 0) {
+      setForceEnded(true)
+      return
+    }
+    const timer = window.setTimeout(() => setForceEnded(true), remaining + 500)
+    return () => window.clearTimeout(timer)
+  }, [session?.id, session?.status, session?.expiresAt])
+
+  useEffect(() => {
+    if (!session) return
+    const ended =
+      session.status === 'EXPIRED' ||
+      !session.question ||
+      (session.expiresAt ? new Date(session.expiresAt).getTime() <= Date.now() : false) ||
+      forceEnded
+    if (ended) stopAudio()
+  }, [session, forceEnded, stopAudio])
 
   useEffect(() => {
     stopAudio()
@@ -313,6 +335,14 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     setExitOpen(true)
   }
 
+  function handleForceExit() {
+    stopAudio()
+    if (session && session.status === 'IN_PROGRESS') {
+      api(`/api/entertainment/guess-song/sessions/${session.id}/abandon`, { method: 'POST' }).catch(() => undefined)
+    }
+    leaveGameRoute()
+  }
+
   function leaveGameRoute() {
     allowNavigationRef.current = true
     if (hasKnownOrigin && window.history.length > 2) {
@@ -399,7 +429,20 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   }
 
   const question = session.question
-  if (!question) return <main className="guess-play-error"><p>当前场次没有可用题目。</p><button onClick={requestExit}>退出游戏</button></main>
+  const expired = session.expiresAt ? new Date(session.expiresAt).getTime() <= Date.now() : false
+  const gameEnded = session.status === 'EXPIRED' || !question || expired || forceEnded
+  if (gameEnded) {
+    return (
+      <main className="guess-play-error">
+        <h1>本次游戏已结束</h1>
+        <p>{error || (session.status === 'EXPIRED' || expired ? '本场游戏已超时，请重新开始。' : '当前场次没有可用题目，请重新开始。')}</p>
+        <nav>
+          <button type="button" onClick={handleForceExit} disabled={exiting}>{exiting ? '正在退出…' : '退出游戏'}</button>
+          <button type="button" onClick={() => void restart()} disabled={exiting}>重新开始</button>
+        </nav>
+      </main>
+    )
+  }
   const progress = durationSeconds ? elapsedSeconds / durationSeconds * 100 : 0
 
   return (

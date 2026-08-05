@@ -32,6 +32,24 @@ function withProductionEnvironment<T>(callback: () => T) {
   }
 }
 
+function withDevelopmentEnvironment<T>(callback: () => T) {
+  const environment = process.env as Record<string, string | undefined>
+  const previousNodeEnv = environment.NODE_ENV
+  delete environment.NODE_ENV
+  try {
+    return callback()
+  } finally {
+    if (previousNodeEnv === undefined) delete environment.NODE_ENV
+    else environment.NODE_ENV = previousNodeEnv
+  }
+}
+
+// sameSite 必须与 secure 保持一致（auth.ts 的唯一规则，避免写死字面量）：
+// secure 为 true（生产/HTTPS）时使用 None（跨站/WebView 持久登录），否则使用 Lax。
+function expectedSameSite(secure: boolean): 'none' | 'lax' {
+  return secure ? 'none' : 'lax'
+}
+
 test('production proxy requests issue a persistent session cookie for both public hosts', () => {
   withProductionEnvironment(() => {
     for (const host of ['ecfc.fans', 'www.ecfc.fans']) {
@@ -42,13 +60,16 @@ test('production proxy requests issue a persistent session cookie for both publi
         },
       })
       const cookie = serializeSessionCookie(request)
+      const options = getSessionCookieOptions(request)
 
       assert.match(cookie, new RegExp(`^${authCookieName}=`))
       assert.match(cookie, /Domain=\.ecfc\.fans/)
       assert.match(cookie, /Path=\//)
       assert.match(cookie, /HttpOnly/)
       assert.match(cookie, /Secure/)
-      assert.match(cookie, /SameSite=lax/i)
+      // 生产环境恒为 secure，sameSite 必须为 None（不写死，跟随 secure 推导）
+      assert.equal(options.secure, true)
+      assert.equal(options.sameSite, expectedSameSite(options.secure))
       assert.match(cookie, new RegExp(`Max-Age=${SESSION_MAX_AGE_SECONDS}(?:;|$)`))
       assert.match(cookie, /Expires=/)
     }
@@ -64,21 +85,27 @@ test('logout uses the same domain and path when clearing the session cookie', ()
       },
     })
     const cookie = serializeDeletionCookie(request)
+    const options = getSessionCookieDeletionOptions(request)
 
     assert.match(cookie, /Domain=\.ecfc\.fans/)
     assert.match(cookie, /Path=\//)
+    // 删除 Cookie 沿用同一套 sameSite 规则（生产为 None）
+    assert.equal(options.sameSite, expectedSameSite(options.secure))
     assert.match(cookie, /Max-Age=0(?:;|$)/)
     assert.match(cookie, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/)
   })
 })
 
-test('local development remains host-only and does not use the production domain', () => {
-  const request = new Request('http://localhost:3000/api/auth/login')
-  const options = getSessionCookieOptions(request)
+test('local development remains host-only, non-secure, and uses Lax SameSite', () => {
+  withDevelopmentEnvironment(() => {
+    const request = new Request('http://localhost:3000/api/auth/login')
+    const options = getSessionCookieOptions(request)
 
-  assert.equal(options.domain, undefined)
-  assert.equal(options.secure, false)
-  assert.equal(options.path, '/')
-  assert.equal(options.sameSite, 'lax')
-  assert.equal(options.maxAge, SESSION_MAX_AGE_SECONDS)
+    assert.equal(options.domain, undefined)
+    assert.equal(options.secure, false)
+    // 开发环境非 secure，sameSite 必须为 Lax（不写死，跟随 secure 推导）
+    assert.equal(options.sameSite, expectedSameSite(options.secure))
+    assert.equal(options.path, '/')
+    assert.equal(options.maxAge, SESSION_MAX_AGE_SECONDS)
+  })
 })

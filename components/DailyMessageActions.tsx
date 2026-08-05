@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
 
@@ -25,7 +24,6 @@ export function DailyMessageActions({
   onReplyCancel?: () => void
   onCommentCreated?: (comment: unknown) => void
 }>) {
-  const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [comment, setComment] = useState('')
   const [error, setError] = useState('')
@@ -57,7 +55,6 @@ export function DailyMessageActions({
       setIsFavorited(Boolean(data.isFavorited))
       setFavorites(Math.max(Number(data.favoriteCount || 0), 0))
     }
-    router.refresh()
   }
 
   async function submitComment() {
