@@ -96,16 +96,26 @@ function isMusicPlaybackEndpoint(value: string) {
 
 function getPlaybackErrorMessage(error: unknown, audio: HTMLAudioElement | null) {
   if (error instanceof PlaybackRequestError) {
-    if (error.status === 403) return '音频地址已失效，请重新加载。'
-    if (error.code === 'FULL_AUDIO_UNAVAILABLE') return '音频加载失败，请检查网络后重试。'
-    if (error.code === 'PLAYBACK_API_NETWORK_ERROR') return '音频加载失败，请检查网络后重试。'
-    if (error.code === 'PLAYBACK_API_INVALID_JSON' || error.code === 'PLAYBACK_API_CONTRACT_ERROR') {
-      return '播放失败，请稍后重试。'
+    switch (error.code) {
+      case 'SONG_NOT_FOUND':
+      case 'AUDIO_NOT_FOUND':
+        return '音频文件不存在或已被移除。'
+      case 'AUDIO_EXPIRED':
+        return '音频地址已失效，请刷新页面后重试。'
+      case 'COS_ACCESS_FAILED':
+        return '音频服务暂时无法访问，请稍后重试。'
+      case 'FULL_AUDIO_UNAVAILABLE':
+      case 'PLAYBACK_API_NETWORK_ERROR':
+        return '音频加载失败，请检查网络后重试。'
+      case 'PLAYBACK_API_INVALID_JSON':
+      case 'PLAYBACK_API_CONTRACT_ERROR':
+        return '播放服务异常，请稍后重试。'
+      case 'AUDIO_NOT_CONFIGURED':
+      case 'NO_PLAYBACK_URL':
+        return '该歌曲暂未配置可播放音频。'
     }
-    if (error.code === 'AUDIO_NOT_CONFIGURED' || error.code === 'NO_PLAYBACK_URL') {
-      return '该歌曲暂未配置可播放音频。'
-    }
-    if (error.status === 404 || error.code === 'SONG_NOT_FOUND') return '音频文件不存在。'
+    if (error.status === 404 || error.status === 410) return '音频文件不存在或已被移除。'
+    if (error.status === 403 || error.status === 401) return '音频地址已失效，请刷新页面后重试。'
     if (error.status === null) return '音频加载失败，请检查网络后重试。'
   }
 
@@ -113,7 +123,7 @@ function getPlaybackErrorMessage(error: unknown, audio: HTMLAudioElement | null)
     case 'NotAllowedError':
       return '浏览器暂未允许播放，请再次点击播放按钮。'
     case 'NotSupportedError':
-      return '当前音频格式或地址无法播放。'
+      return '当前浏览器不支持该音频格式。'
     case 'AbortError':
       return '播放已取消，请重试。'
   }
@@ -124,8 +134,11 @@ function getPlaybackErrorMessage(error: unknown, audio: HTMLAudioElement | null)
     case MediaError.MEDIA_ERR_NETWORK:
       return '音频加载失败，请检查网络后重试。'
     case MediaError.MEDIA_ERR_DECODE:
+      return '当前音频格式不支持，浏览器无法解码该文件。'
     case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return '当前音频格式或地址无法播放。'
+      // A source-not-supported error can also mean a CORS/access problem when
+      // the element was asked for cross-origin analysis, so phrase it broadly.
+      return '当前音频无法加载：可能是格式不支持，或跨域访问受限。'
   }
 
   return '播放失败，请稍后重试。'

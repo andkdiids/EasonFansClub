@@ -18,7 +18,6 @@ type InitialProfile = {
 }
 
 type UploadKind = 'avatar' | 'background'
-type BackgroundUploadStage = 'idle' | 'processing' | 'uploading'
 type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
 type CropState = {
@@ -35,6 +34,11 @@ const allowedAvatarExtensions = new Set(['jpg', 'jpeg', 'png', 'webp'])
 const unsupportedAvatarExtensions = new Set(['heic', 'heif'])
 const avatarProcessTimeoutMs = 12000
 const avatarUploadTimeoutMs = 30000
+
+const maxBackgroundSourceSize = 10 * 1024 * 1024
+const backgroundUploadTimeoutMs = 30000
+const BACKGROUND_MAX_WIDTH = 1920
+const BACKGROUND_TARGET_ASPECT = 16 / 5
 
 function createCompatibleId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -187,6 +191,50 @@ async function cropAvatarToWebp(crop: CropState) {
   return { blob: output.blob, fileName: `avatar-${createCompatibleId()}.${extension}` }
 }
 
+async function cropBackgroundToWebp(crop: CropState, frameEl: HTMLElement, imageEl: HTMLElement) {
+  const image = await loadImage(crop.url)
+  const IW = image.naturalWidth
+  const IH = image.naturalHeight
+  if (!IW || !IH) throw new Error('图片尺寸异常，请重新选择图片')
+
+  const frameRect = frameEl.getBoundingClientRect()
+  const imageRect = imageEl.getBoundingClientRect()
+  if (!frameRect.width || !frameRect.height || !imageRect.width || !imageRect.height) {
+    throw new Error('裁切窗口未就绪，请重试')
+  }
+
+  const visLeft = Math.max(0, frameRect.left - imageRect.left)
+  const visTop = Math.max(0, frameRect.top - imageRect.top)
+  const visRight = Math.min(imageRect.right, frameRect.right)
+  const visBottom = Math.min(imageRect.bottom, frameRect.bottom)
+  const visW = Math.max(1, visRight - visLeft)
+  const visH = Math.max(1, visBottom - visTop)
+
+  const sx = IW / imageRect.width
+  const sy = IH / imageRect.height
+  const sourceX = visLeft * sx
+  const sourceY = visTop * sy
+  const sourceW = visW * sx
+  const sourceH = visH * sy
+
+  const outWidth = Math.min(BACKGROUND_MAX_WIDTH, Math.max(320, Math.round(sourceW)))
+  const outHeight = Math.max(120, Math.round(outWidth / BACKGROUND_TARGET_ASPECT))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = outWidth
+  canvas.height = outHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('浏览器暂时无法处理这张图片')
+
+  ctx.drawImage(image, sourceX, sourceY, sourceW, sourceH, 0, 0, outWidth, outHeight)
+
+  const output = await canvasToBlobWithFallback(canvas)
+  if (!output.blob.size) throw new Error('图片处理失败，请重新选择 JPG、PNG 或 WebP 图片')
+
+  const extension = output.type === 'image/webp' ? 'webp' : 'jpg'
+  return { blob: output.blob, fileName: `background-${createCompatibleId()}.${extension}` }
+}
+
 export function ProfileSettingsForm({
   initialProfile,
   onCancel,
@@ -201,13 +249,16 @@ export function ProfileSettingsForm({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState<UploadKind | null>(null)
-  const [backgroundStage, setBackgroundStage] = useState<BackgroundUploadStage>('idle')
   const [isSaving, setIsSaving] = useState(false)
   const [crop, setCrop] = useState<CropState | null>(null)
+  const [backgroundCrop, setBackgroundCrop] = useState<CropState | null>(null)
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
+  const backgroundDragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
   const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+  const bgFrameRef = useRef<HTMLDivElement>(null)
+  const bgImageRef = useRef<HTMLImageElement>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -222,6 +273,12 @@ export function ProfileSettingsForm({
     }
   }, [crop?.url])
 
+  useEffect(() => {
+    return () => {
+      if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
+    }
+  }, [backgroundCrop?.url])
+
   function update<K extends keyof InitialProfile>(key: K, value: InitialProfile[K]) {
     setForm((current) => ({ ...current, [key]: value }))
   }
@@ -230,6 +287,58 @@ export function ProfileSettingsForm({
     if (crop?.url) URL.revokeObjectURL(crop.url)
     setCrop(null)
     if (avatarInputRef.current) avatarInputRef.current.value = ''
+  }
+
+  function resetBackgroundCrop() {
+    if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
+    setBackgroundCrop(null)
+    if (backgroundInputRef.current) backgroundInputRef.current.value = ''
+  }
+
+  function openBackgroundCrop(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setMessage('')
+    setError('')
+
+    if (isUnsupportedAvatarFile(file)) {
+      setError('暂不支持 HEIC/HEIF 图片，请先在相册中导出为 JPG、PNG 或 WebP 后再上传。')
+      event.target.value = ''
+      return
+    }
+
+    if (!isAllowedAvatarFile(file)) {
+      setError('背景图仅支持 JPG、PNG 或 WebP。')
+      event.target.value = ''
+      return
+    }
+
+    if (file.size > maxBackgroundSourceSize) {
+      setError('原始背景图片不能超过 10MB。')
+      event.target.value = ''
+      return
+    }
+
+    if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
+    setBackgroundCrop({ file, url: URL.createObjectURL(file), scale: 1, x: 0, y: 0 })
+  }
+
+  function onBackgroundCropPointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (!backgroundCrop) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    backgroundDragRef.current = { x: event.clientX, y: event.clientY, startX: backgroundCrop.x, startY: backgroundCrop.y }
+  }
+
+  function onBackgroundCropPointerMove(event: PointerEvent<HTMLDivElement>) {
+    const drag = backgroundDragRef.current
+    if (!backgroundCrop || !drag) return
+    setBackgroundCrop({ ...backgroundCrop, x: drag.startX + event.clientX - drag.x, y: drag.startY + event.clientY - drag.y })
+  }
+
+  function onBackgroundCropPointerUp(event: PointerEvent<HTMLDivElement>) {
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    backgroundDragRef.current = null
   }
 
   function openAvatarCrop(event: ChangeEvent<HTMLInputElement>) {
@@ -316,39 +425,36 @@ export function ProfileSettingsForm({
     }
   }
 
-  async function uploadBackground(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    setMessage('')
-    setError('')
-    if (!allowedAvatarTypes.has(file.type)) {
-      setError('背景图仅支持 JPG、PNG 或 WebP。')
-      event.target.value = ''
-      return
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      setError('背景图不能超过 8MB。')
-      event.target.value = ''
+  async function confirmBackgroundUpload() {
+    if (!backgroundCrop || uploading) return
+    const frameEl = bgFrameRef.current
+    const imageEl = bgImageRef.current
+    if (!frameEl || !imageEl) {
+      setError('裁切窗口未就绪，请重试')
       return
     }
 
     setUploading('background')
-    setBackgroundStage('processing')
-    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-    setBackgroundStage('uploading')
+    setError('')
+    setMessage('')
 
-    const body = new FormData()
-    body.append('file', file)
-    body.append('kind', 'background')
     try {
-      const response = await fetchWithTimeout('/api/uploads/profile-image', { method: 'POST', body }, avatarUploadTimeoutMs)
+      const cropped = await cropBackgroundToWebp(backgroundCrop, frameEl, imageEl)
+      const body = new FormData()
+      body.append('file', cropped.blob, cropped.fileName)
+      body.append('kind', 'background')
+
+      const response = await fetchWithTimeout('/api/uploads/profile-image', { method: 'POST', body }, backgroundUploadTimeoutMs)
       const data = await response.json().catch(() => null)
       if (!response.ok) throw new Error(data?.message || '背景图上传失败，请换一张图片再试')
       if (!data?.url) throw new Error('背景图已上传，但服务器没有返回有效地址')
+
       setForm((current) => ({ ...current, backgroundUrl: data.url }))
       setMessage('背景图已更新。')
+      resetBackgroundCrop()
+      router.refresh()
     } catch (uploadError) {
+      if (!mountedRef.current) return
       const uploadMessage =
         uploadError instanceof DOMException && uploadError.name === 'AbortError'
           ? '背景图上传超时，请稍后重试'
@@ -357,11 +463,7 @@ export function ProfileSettingsForm({
             : uploadError instanceof Error ? uploadError.message : '背景图上传失败，请稍后重试'
       setError(uploadMessage)
     } finally {
-      if (mountedRef.current) {
-        setUploading(null)
-        setBackgroundStage('idle')
-      }
-      event.target.value = ''
+      if (mountedRef.current) setUploading(null)
     }
   }
 
@@ -449,15 +551,16 @@ export function ProfileSettingsForm({
                 aria-disabled={uploading !== null}
                 className={`mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm ${uploading !== null ? 'pointer-events-none opacity-60' : ''}`}
               >
-                {backgroundStage === 'processing' ? '处理中…' : backgroundStage === 'uploading' ? '上传中…' : '上传背景图'}
+                {uploading === 'background' ? '上传中…' : '上传背景图'}
               </label>
+              <p className="mt-2 text-xs font-bold leading-5 text-slate-500">选择后会进入裁切，可拖动位置、缩放调整显示区域，导出为 WebP（宽≤1920px）。</p>
               <input
                 id="profile-background-upload"
                 ref={backgroundInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 disabled={uploading !== null}
-                onChange={uploadBackground}
+                onChange={openBackgroundCrop}
                 className="sr-only"
               />
             </div>
@@ -608,6 +711,56 @@ export function ProfileSettingsForm({
               <button type="button" onClick={resetCrop} className="rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700">取消</button>
               <button type="button" onClick={confirmAvatarUpload} disabled={uploading === 'avatar'} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
                 {uploading === 'avatar' ? '上传中...' : '使用此头像'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {backgroundCrop ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">
+          <section className="profile-background-crop w-full max-w-lg rounded-[28px] p-5 shadow-2xl">
+            <h3 className="text-xl font-black text-brand-950">调整背景图</h3>
+            <p className="mt-1 text-sm font-bold text-slate-500">拖动图片调整显示区域，使用滑块缩放。建议把人物主体放在画面中央。</p>
+            <div
+              ref={bgFrameRef}
+              className="relative mx-auto mt-5 aspect-[16/5] w-full max-w-md touch-none overflow-hidden rounded-2xl bg-slate-900"
+              onPointerDown={onBackgroundCropPointerDown}
+              onPointerMove={onBackgroundCropPointerMove}
+              onPointerUp={onBackgroundCropPointerUp}
+            >
+              <img
+                ref={bgImageRef}
+                src={backgroundCrop.url}
+                alt="背景图裁剪"
+                className="pointer-events-none absolute left-1/2 top-1/2 max-w-none select-none"
+                style={{
+                  minWidth: '100%',
+                  minHeight: '100%',
+                  width: 'auto',
+                  height: 'auto',
+                  transform: `translate(-50%, -50%) translate(${backgroundCrop.x}px, ${backgroundCrop.y}px) scale(${backgroundCrop.scale})`,
+                }}
+                draggable={false}
+              />
+              <div className="pointer-events-none absolute inset-0 ring-2 ring-white/70" />
+            </div>
+            <label className="mt-5 block">
+              <span className="text-sm font-black text-slate-700">缩放</span>
+              <input
+                type="range"
+                min="1"
+                max="3"
+                step="0.01"
+                value={backgroundCrop.scale}
+                onChange={(event) => setBackgroundCrop({ ...backgroundCrop, scale: Number(event.target.value) })}
+                className="mt-2 w-full"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={resetBackgroundCrop} className="rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700">取消</button>
+              <button type="button" onClick={confirmBackgroundUpload} disabled={uploading === 'background'} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
+                {uploading === 'background' ? '上传中...' : '使用此背景图'}
               </button>
             </div>
           </section>

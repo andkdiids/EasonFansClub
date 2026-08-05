@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { canAnalyzeMusicPlaybackUrl, canPlayFullMusic, type MusicPlaybackResponse } from '@/lib/music-playback'
+import { canAnalyzeMusicPlaybackUrl, canPlayFullMusic, probeAudioUrl, type MusicPlaybackResponse } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { createGuessSongSignedUrl, guessSongObjectExists } from '@/lib/guess-song-storage'
 
@@ -55,6 +55,24 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   if (!location) return NextResponse.json({ ok: false, code: 'AUDIO_NOT_CONFIGURED', message: '暂无可播放音频' }, { status: 404 })
+
+  // The public preview is handed straight to the browser. Without a server-side
+  // probe the client cannot tell "file missing" from "link expired" from
+  // "storage down" — all collapse into one generic media error. Probing here
+  // lets us return a precise, actionable code. (Full-playback signed URLs are
+  // already validated by guessSongObjectExists above, so they are not probed.)
+  if (location === song.previewUrl) {
+    const probe = await probeAudioUrl(location)
+    if (!probe.reachable || (probe.status !== null && probe.status >= 500)) {
+      return NextResponse.json({ ok: false, code: 'COS_ACCESS_FAILED', message: '音频服务暂时无法访问，请稍后重试' }, { status: 502 })
+    }
+    if (probe.status === 404 || probe.status === 410) {
+      return NextResponse.json({ ok: false, code: 'AUDIO_NOT_FOUND', message: '音频文件不存在或已被移除' }, { status: 404 })
+    }
+    if (probe.status === 403 || probe.status === 401) {
+      return NextResponse.json({ ok: false, code: 'AUDIO_EXPIRED', message: '音频地址已失效，请刷新页面后重试' }, { status: 403 })
+    }
+  }
 
   const response: MusicPlaybackResponse = {
     ok: true,

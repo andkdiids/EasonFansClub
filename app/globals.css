@@ -599,7 +599,32 @@ flex-direction:column;
 :root[data-theme='midnight'] main:not([data-music-archive]) :where(button, [role='button'])[aria-pressed='true'] { color: var(--text-primary); background-color: var(--control-active); }
 :root[data-theme='midnight'] .notification-center :where(h1, h2, h3) { color: var(--text-primary) !important; }
 :root[data-theme='midnight'] .notification-center :where(p, time) { color: var(--text-secondary) !important; }
-:root[data-theme='midnight'] .notification-center .notification-list-item { color: var(--text-primary); border-color: var(--ui-border); background: var(--card-bg) !important; }
+
+/* Read/unread distinction must survive the midnight theme's global background
+   overrides. The previous `background: var(--card-bg) !important` on every
+   .notification-list-item flattened unread vs read, so read and unread looked
+   identical. These explicit, theme-aware rules restore a clear difference. */
+.notification-list-item.is-unread {
+  background-color: #eaf3ff;
+  border-color: #7cc1ff;
+  box-shadow: 0 1px 3px rgba(2, 12, 27, 0.10);
+}
+.notification-list-item.is-unread .notification-title { font-weight: 900; }
+.notification-list-item.is-read {
+  background-color: #ffffff;
+  border-color: #e2e8f0;
+  opacity: 0.82;
+}
+:root[data-theme='midnight'] .notification-list-item.is-unread {
+  background-color: #16324f !important;
+  border-color: #2f6db0 !important;
+  opacity: 1;
+}
+:root[data-theme='midnight'] .notification-list-item.is-read {
+  background-color: var(--card-bg) !important;
+  border-color: var(--ui-border) !important;
+  opacity: 0.62;
+}
 
 /* Check-in guide and comment threads use semantic surfaces so dark mode never
    leaves a light gradient shell around an otherwise dark panel. */

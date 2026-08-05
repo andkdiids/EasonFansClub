@@ -78,3 +78,40 @@ export function resolveMusicPlayback(source: MusicPlaybackSource, user?: Pick<Se
     isFullPlayback: fullPlayback,
   }
 }
+
+export type AudioProbeResult = {
+  reachable: boolean
+  status: number | null
+  contentType: string | null
+}
+
+// Probe a resolved audio URL server-side so we can tell the client precisely
+// whether the file is missing (404), the link expired/forbidden (403/401), or
+// the storage backend is down (5xx/network). The browser's <audio> element only
+// surfaces a generic MEDIA_ERR_SRC_NOT_SUPPORTED, so this is the only reliable
+// way to separate "file not found" from "address expired" from "service down".
+export async function probeAudioUrl(url: string, timeoutMs = 8000): Promise<AudioProbeResult> {
+  if (!/^https?:\/\//i.test(url)) {
+    return { reachable: false, status: null, contentType: null }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { Accept: '*/*' },
+    })
+    return {
+      reachable: true,
+      status: response.status,
+      contentType: response.headers.get('content-type'),
+    }
+  } catch {
+    return { reachable: false, status: null, contentType: null }
+  } finally {
+    clearTimeout(timer)
+  }
+}

@@ -239,9 +239,7 @@ export function NotificationsClient({
     const content = (
       <article
         className={`notification-list-item group relative overflow-hidden rounded-sm border p-4 transition sm:p-5 ${
-          item.isRead
-            ? `border-sky-100 bg-white/82 ${target ? 'hover:bg-white' : 'opacity-80'}`
-            : 'border-sky-200 bg-sky-50/88 shadow-sky-900/5'
+          item.isRead ? 'is-read' : 'is-unread'
         }`}
       >
         {!item.isRead ? <span className="absolute left-0 top-6 h-8 w-1.5 rounded-r-full bg-sky-500" /> : null}
@@ -261,7 +259,7 @@ export function NotificationsClient({
               {!target ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-500">暂无详情页</span> : null}
               <time className="text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
             </div>
-            <h2 className="mt-2 break-words text-base font-black text-slate-950 sm:text-lg">{item.title}</h2>
+            <h2 className={`notification-title mt-2 break-words text-base sm:text-lg ${item.isRead ? 'font-bold text-slate-700' : 'font-black text-slate-950'}`}>{item.title}</h2>
             {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
             {target ? <span className="mt-3 inline-flex text-xs font-black text-brand-700">查看详情 →</span> : null}
           </div>
