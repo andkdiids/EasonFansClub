@@ -155,6 +155,7 @@ export type PersonalLiveRow = {
     sessionNumber: string | null
     posterUrl: string | null
     status: 'DRAFT' | 'PUBLISHED'
+    stageType: 'NORMAL' | 'ENCORE' | 'FINAL'
     tourId: string
     MusicTour: {
       id: string
@@ -268,6 +269,7 @@ export function buildPersonalSongAtlas(rows: PersonalLiveRow[]) {
         venue: concert.venue,
         tourId: concert.MusicTour.id,
         tourName: concert.MusicTour.name,
+        stageType: concert.stageType,
       })
       songs.set(item.songId, current)
     }
@@ -335,16 +337,17 @@ const personalConcertSelect = {
   createdAt: true,
   updatedAt: true,
   MusicConcert: {
-    select: {
-      id: true,
-      title: true,
-      concertDate: true,
-      city: true,
-      venue: true,
-      sessionNumber: true,
-      posterUrl: true,
-      status: true,
-      tourId: true,
+      select: {
+        id: true,
+        title: true,
+        concertDate: true,
+        city: true,
+        venue: true,
+        sessionNumber: true,
+        posterUrl: true,
+        status: true,
+        stageType: true,
+        tourId: true,
       MusicTour: { select: { id: true, name: true, posterUrl: true, status: true } },
       MusicConcertSetlistItem: {
         orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
@@ -430,6 +433,7 @@ export function serializePersonalRecord(row: PersonalLiveRow, fallbacks: Persona
       city: concert.city,
       venue: concert.venue,
       sessionNumber: concert.sessionNumber,
+      stageType: concert.stageType,
       posterUrl: concert.posterUrl,
       resolvedPosterUrl: posterResolution.resolvedPosterUrl,
       posterSource: posterResolution.posterSource,

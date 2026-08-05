@@ -10,7 +10,7 @@ type SongOption = { id: string; title: string; album: string; releaseYear: numbe
 type SetlistItem = { id?: string; songId: string | null; displayName: string; section: string; position: number; versionName: string; note: string; isEncore: boolean; isRequest: boolean; isDebut: boolean; isGuest: boolean; isMedley: boolean; isSpecial: boolean; song?: SongOption | null; candidates?: SongOption[] }
 type Highlight = { id?: string; type: string; title: string; content: string; sortOrder: number }
 type ConcertOption = { id: string; city: string; concertDate: string; sessionNumber?: string | null; sortOrder: number; tour: Tour }
-type Concert = { id: string; tourId: string; title?: string | null; concertDate: string; city: string; countryOrRegion?: string | null; venue?: string | null; sessionNumber?: string | null; posterUrl?: string | null; cityPosterUrl?: string | null; tourPosterUrl?: string | null; resolvedPosterUrl?: string | null; posterSource?: ConcertPosterSource; description?: string | null; status: 'DRAFT' | 'PUBLISHED'; sortOrder: number; tour: Tour; setlist: SetlistItem[]; highlights: Highlight[]; _count?: { UserMusicConcert: number } }
+type Concert = { id: string; tourId: string; title?: string | null; concertDate: string; city: string; countryOrRegion?: string | null; venue?: string | null; sessionNumber?: string | null; posterUrl?: string | null; cityPosterUrl?: string | null; tourPosterUrl?: string | null; resolvedPosterUrl?: string | null; posterSource?: ConcertPosterSource; description?: string | null; status: 'DRAFT' | 'PUBLISHED'; stageType?: 'NORMAL' | 'ENCORE' | 'FINAL'; sortOrder: number; tour: Tour; setlist: SetlistItem[]; highlights: Highlight[]; _count?: { UserMusicConcert: number } }
 
 const sections = [['OPENING', '开场'], ['MAIN', '正式歌单'], ['TALK', '谈话环节'], ['REQUEST', '点歌'], ['ENCORE', 'Encore'], ['SPECIAL', '特别环节'], ['OTHER', '其他']]
 const highlightTypes = [['TALK', '谈话'], ['GUEST', '嘉宾'], ['SONG', '歌曲'], ['STAGE', '舞台'], ['INTERACTION', '互动'], ['MEMORIAL', '纪念'], ['OTHER', '其他']]
@@ -171,7 +171,7 @@ function SetlistEditor({
 export function AdminConcertEditor({ concertId }: { concertId: string }) {
   const [concert, setConcert] = useState<Concert | null>(null)
   const [tours, setTours] = useState<Tour[]>([])
-  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '中国', venue: '', posterUrl: '', description: '', status: 'DRAFT' as Concert['status'] })
+  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '中国', venue: '', posterUrl: '', description: '', status: 'DRAFT' as Concert['status'], stageType: 'NORMAL' as 'NORMAL' | 'ENCORE' | 'FINAL' })
   const [setlist, setSetlist] = useState<SetlistItem[]>([])
   const [encoreSetlist, setEncoreSetlist] = useState<SetlistItem[]>([])
   const [highlights, setHighlights] = useState<Highlight[]>([])
@@ -188,7 +188,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
     if (!concertResponse.ok) return setError(data?.message || '场次加载失败')
     const item = data.concert as Concert
     setConcert(item)
-    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0, 10), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', posterUrl: item.posterUrl || '', description: item.description || '', status: item.status })
+    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0, 10), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', posterUrl: item.posterUrl || '', description: item.description || '', status: item.status, stageType: item.stageType || 'NORMAL' })
     setSetlist(normalizeSetlistRows(item.setlist, false))
     setEncoreSetlist(normalizeSetlistRows(item.setlist, true))
     setHighlights(item.highlights.map((row, index) => ({ ...row, sortOrder: index })))
@@ -277,6 +277,11 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
         <label className="text-sm font-black">所属巡演<select required value={form.tourId} onChange={(event) => updateForm('tourId', event.target.value)} className={`${field} mt-1`}>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
         <label className="text-sm font-black">演出日期<input required type="date" value={form.concertDate} onChange={(event) => updateForm('concertDate', event.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black">城市<input required value={form.city} onChange={(event) => updateForm('city', event.target.value)} className={`${field} mt-1`} /></label>
+        <label className="text-sm font-black">场次类型<select value={form.stageType} onChange={(event) => updateForm('stageType', event.target.value)} className={`${field} mt-1`}>
+          <option value="NORMAL">普通场次</option>
+          <option value="ENCORE">返场</option>
+          <option value="FINAL">最终站</option>
+        </select></label>
         <label className="text-sm font-black">国家或地区<input value={form.countryOrRegion} onChange={(event) => updateForm('countryOrRegion', event.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black">场馆<input value={form.venue} onChange={(event) => updateForm('venue', event.target.value)} className={`${field} mt-1`} /></label>
         <div className="text-sm font-black">系统场次编号<div className={`${field} mt-1 bg-sky-50 text-brand-800`}>第 {concert.sessionNumber || concert.sortOrder || 1} 场（自动排序）</div></div>

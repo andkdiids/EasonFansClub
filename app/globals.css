@@ -1622,7 +1622,7 @@ svg {
 
 @media (max-width:768px) {
   .concert-setlist-block { margin-top:18px!important; }
-  .concert-setlist-items { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; margin-top:16px!important; columns:auto; }
+  .concert-setlist-items { margin-top:16px!important; }
   .concert-setlist-items>li { min-width:0; padding:6px 0; }
   .concert-setlist-items>li>div { align-items:center; gap:6px; }
   .concert-setlist-items>li>div>span:first-child { font-size:10px; }

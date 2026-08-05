@@ -111,6 +111,7 @@ async function loadAutomaticTodayEvents(month: number, day: number) {
           concertDate: true,
           city: true,
           venue: true,
+          stageType: true,
           posterUrl: true,
           MusicTour: { select: { name: true, posterUrl: true } },
         },
@@ -158,7 +159,7 @@ async function loadAutomaticTodayEvents(month: number, day: number) {
       source: 'AUTO',
       reference: 'MusicConcert',
       status: 'APPROVED',
-      href: buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate),
+      href: buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate, concert.stageType),
     }]
   })
 

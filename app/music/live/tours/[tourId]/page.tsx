@@ -4,10 +4,44 @@ import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { formatLiveDateRange } from '@/lib/music-live'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
-import { generateArchiveSlug, generateCitySlug } from '@/lib/music-slug'
+import { generateArchiveSlug, cityGroupSlug, effectiveCityGroup, type CityGroupType, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
 import { resolveTourByArchiveSlug } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+
+type CityGroupInfo = {
+  groupSlug: string
+  base: string
+  type: CityGroupType
+  count: number
+  firstDate: Date
+  lastDate: Date
+  posterUrl: string | null
+}
+
+// 城市卡片网格（复用既有卡片样式，仅对返场/最终站追加标签）
+function TourCityGrid({ tourSlug, tourPosterUrl, items }: { tourSlug: string; tourPosterUrl: string | null; items: CityGroupInfo[] }) {
+  return (
+    <div className="tour-city-archive-grid mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => {
+        const href = `/music/live/tours/${tourSlug}/${item.groupSlug}`
+        const resolvedPosterUrl = resolveConcertPoster({ posterUrl: item.posterUrl, tourPosterUrl }).resolvedPosterUrl
+        const label = CITY_GROUP_TYPE_LABEL[item.type]
+        return (
+          <Link key={item.groupSlug} href={href} className="tour-city-archive-card min-w-0 overflow-hidden border border-white/10 bg-white/[0.055] p-0 transition hover:border-sky-300/30 hover:bg-white/[0.09] sm:p-5">
+            <div className="tour-city-archive-card-media relative aspect-square w-full border-b border-white/15 bg-[#0b2038] sm:border-b-0"><ConcertCover resolvedPosterUrl={resolvedPosterUrl} alt={`${item.base}演唱会海报`} sizes="(max-width:767px) 50vw, 320px" className="h-full w-full" /></div>
+            <div className="tour-city-archive-card-body p-4 sm:p-0">
+              <h3 className="break-words text-xl font-black text-white">{item.base}</h3>
+              {label ? <p className="mt-2 inline-block border border-sky-300/20 px-2 py-1 text-[10px] font-black text-sky-100/75">{label}</p> : null}
+              <p className="mt-2 text-sm font-bold text-slate-300/65">{item.count} 场 · {item.firstDate.toISOString().slice(0, 7)} ~ {item.lastDate.toISOString().slice(0, 7)}</p>
+              <p className="mt-4 text-xs font-black text-sky-100/65">查看城市详情 →</p>
+            </div>
+          </Link>
+        )
+      })}
+    </div>
+  )
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -26,54 +60,65 @@ export default async function MusicTourPage({ params }: { params: Promise<{ tour
         MusicConcert: {
           where: { status: 'PUBLISHED' },
           orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-          select: { city: true, concertDate: true, posterUrl: true },
+          select: { city: true, stageType: true, concertDate: true, posterUrl: true },
         },
       },
     }),
     getSiteAppearance(),
   ])
   if (!tour) notFound()
-  const groups = new Map<string, { city: string; count: number; firstDate: Date; lastDate: Date; posterUrl: string | null }>()
+  const groups = new Map<string, CityGroupInfo>()
   for (const concert of tour.MusicConcert) {
-    const group = groups.get(concert.city) || { city: concert.city, count: 0, firstDate: concert.concertDate, lastDate: concert.concertDate, posterUrl: concert.posterUrl }
+    const { base, type } = effectiveCityGroup(concert.city, concert.stageType)
+    const key = cityGroupSlug(base, type)
+    const group = groups.get(key) || { groupSlug: key, base, type, count: 0, firstDate: concert.concertDate, lastDate: concert.concertDate, posterUrl: concert.posterUrl }
     group.count += 1
     if (concert.concertDate < group.firstDate) group.firstDate = concert.concertDate
     if (concert.concertDate > group.lastDate) group.lastDate = concert.concertDate
     if (!group.posterUrl && concert.posterUrl) group.posterUrl = concert.posterUrl
-    groups.set(concert.city, group)
+    groups.set(key, group)
   }
   const resolvedTourPosterUrl = resolveConcertPoster({
     posterUrl: tour.posterUrl,
     cityPosterUrl: firstPosterUrl(tour.MusicConcert.map((concert) => concert.posterUrl)),
   }).resolvedPosterUrl
-  const cities = [...groups.values()]
-    .map((group) => ({
-      city: group.city,
-      count: group.count,
-      resolvedPosterUrl: resolveConcertPoster({ posterUrl: group.posterUrl, tourPosterUrl: tour.posterUrl }).resolvedPosterUrl,
-      firstDate: group.firstDate.toISOString().slice(0, 10),
-      lastDate: group.lastDate.toISOString().slice(0, 10),
-    }))
-    .sort((left, right) => left.firstDate.localeCompare(right.firstDate) || left.city.localeCompare(right.city, 'zh-CN'))
+  // 城市分组排序：先按首演日期，再用规范分组 slug 作为稳定次级排序（不按城市名称排序）。
+  // slug 形如 HONG-KONG / HONG-KONG-ENCORE / MACAU-FINAL，字典序天然使「普通 < 返场 < 最终站」「同城市先于带后缀」。
+  const sortByDateThenSlug = (left: CityGroupInfo, right: CityGroupInfo) =>
+    left.firstDate.toISOString().slice(0, 10).localeCompare(right.firstDate.toISOString().slice(0, 10)) || left.groupSlug.localeCompare(right.groupSlug)
+  const normalGroups = [...groups.values()].filter((g) => g.type === 'normal').sort(sortByDateThenSlug)
+  const encoreGroups = [...groups.values()].filter((g) => g.type === 'encore').sort(sortByDateThenSlug)
+  const finalGroups = [...groups.values()].filter((g) => g.type === 'final').sort(sortByDateThenSlug)
+  const cityGroups = [...groups.values()]
 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music/concerts" className="text-sm font-black text-sky-300/80">← 返回 Eason in Concert</Link>
-    <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedTourPosterUrl} alt={`${tour.name}巡演海报`} sizes="260px" className="h-full w-full" /></div><div className="min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{tour.name}</h1>{tour.subtitle ? <p className="mt-4 break-words text-xl font-black text-slate-200">{tour.subtitle}</p> : null}<p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(tour.startDate, tour.endDate)}</p>{tour.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{tour.description}</p> : null}<dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">场次</dt><dd className="mt-1 text-xl font-black">{tour.MusicConcert.length}</dd></div><div><dt className="text-xs text-slate-400">城市</dt><dd className="mt-1 text-xl font-black">{cities.length}</dd></div></dl></div></section>
+    <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedTourPosterUrl} alt={`${tour.name}巡演海报`} sizes="260px" className="h-full w-full" /></div><div className="min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{tour.name}</h1>{tour.subtitle ? <p className="mt-4 break-words text-xl font-black text-slate-200">{tour.subtitle}</p> : null}<p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(tour.startDate, tour.endDate)}</p>{tour.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{tour.description}</p> : null}<dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">场次</dt><dd className="mt-1 text-xl font-black">{tour.MusicConcert.length}</dd></div><div><dt className="text-xs text-slate-400">城市</dt><dd className="mt-1 text-xl font-black">{cityGroups.length}</dd></div></dl></div></section>
 
-    <section className="mt-14" aria-labelledby="tour-cities-title">
-      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE</p>
-      <h2 id="tour-cities-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">巡演城市</h2>
-      <div className="tour-city-archive-grid mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {cities.map((item) => <Link key={item.city} href={`/music/live/tours/${canonicalSlug}/${generateCitySlug(item.city)}`} className="tour-city-archive-card min-w-0 overflow-hidden border border-white/10 bg-white/[0.055] p-0 transition hover:border-sky-300/30 hover:bg-white/[0.09] sm:p-5">
-          <div className="tour-city-archive-card-media relative aspect-square w-full border-b border-white/15 bg-[#0b2038] sm:border-b-0"><ConcertCover resolvedPosterUrl={item.resolvedPosterUrl} alt={`${item.city}演唱会海报`} sizes="(max-width:767px) 50vw, 320px" className="h-full w-full" /></div>
-          <div className="tour-city-archive-card-body p-4 sm:p-0">
-            <h3 className="break-words text-xl font-black text-white">{item.city}</h3>
-            <p className="mt-2 text-sm font-bold text-slate-300/65">{item.count} 场 · {item.firstDate.slice(0, 7)} ~ {item.lastDate.slice(0, 7)}</p>
-            <p className="mt-4 text-xs font-black text-sky-100/65">查看城市详情 →</p>
-          </div>
-        </Link>)}
-      </div>
-      {!cities.length ? <p className="mt-7 border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300">该巡演暂无已发布的场次。</p> : null}
-    </section>
+    {!cityGroups.length ? <p className="mt-7 border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300">该巡演暂无已发布的场次。</p> : null}
+
+    {normalGroups.length ? (
+      <section className="mt-14" aria-labelledby="tour-cities-title">
+        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE</p>
+        <h2 id="tour-cities-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">巡演城市</h2>
+        <TourCityGrid tourSlug={canonicalSlug} tourPosterUrl={tour.posterUrl} items={normalGroups} />
+      </section>
+    ) : null}
+
+    {encoreGroups.length ? (
+      <section className="mt-14" aria-labelledby="tour-cities-encore-title">
+        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ENCORE CITIES</p>
+        <h2 id="tour-cities-encore-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">返场城市</h2>
+        <TourCityGrid tourSlug={canonicalSlug} tourPosterUrl={tour.posterUrl} items={encoreGroups} />
+      </section>
+    ) : null}
+
+    {finalGroups.length ? (
+      <section className="mt-14" aria-labelledby="tour-cities-final-title">
+        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">FINAL STATION</p>
+        <h2 id="tour-cities-final-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">最终站</h2>
+        <TourCityGrid tourSlug={canonicalSlug} tourPosterUrl={tour.posterUrl} items={finalGroups} />
+      </section>
+    ) : null}
   </MusicArchiveShell>
 }

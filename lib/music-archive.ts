@@ -3,11 +3,14 @@
 // 解析规则（不新增数据库字段 / 不迁移 / 不修改数据）：
 // - 公开 URL 使用 generateArchiveSlug(MusicTour.name) 作为巡演段。
 // - 兼容旧的 CUID 直链：先按 id 精确匹配，再按 slug 匹配；访问旧 id 时由页面 308 跳转到 slug。
-// - 城市段使用 generateCitySlug(MusicConcert.city) 大写；同时兼容旧原始 city 直链。
+// - 城市段使用「城市分组 slug」：基础城市 + 类型后缀（-ENCORE / -FINAL），避免同一城市
+//   的首次/返场/最终站场次路由冲突。普通城市 slug 与原 generateCitySlug 一致（向后兼容）。
+//   同时兼容旧的原始 city 直链与旧版 city slug 直链。
 // - 单场段使用 generateDateSlug(MusicConcert.concertDate) 的 YYYYMMDD；兼容旧 concertId 直链。
 
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { generateArchiveSlug, generateCitySlug, generateDateSlug } from '@/lib/music-slug'
+import { generateArchiveSlug, generateCitySlug, generateDateSlug, cityGroupSlug, generateCityGroupSlug, effectiveCityGroup, type CityGroupType, type ConcertStageType } from '@/lib/music-slug'
 
 export async function resolveTourByArchiveSlug(slug: string): Promise<{ id: string; name: string } | null> {
   const byId = await prisma.musicTour.findFirst({
@@ -23,26 +26,61 @@ export async function resolveTourByArchiveSlug(slug: string): Promise<{ id: stri
   return match ? { id: match.id, name: match.name } : null
 }
 
-export async function resolveCitySlugToCity(tourId: string, citySlug: string): Promise<string | null> {
+export type ResolvedCityGroup = {
+  base: string
+  type: CityGroupType
+  // 精确匹配成员（原始 city 字符串 + stageType），用于详情查询时区分同城市不同场次类型。
+  // 新数据 city 为干净真实城市（如「香港」），普通场与返场场 city 相同、stageType 不同，
+  // 必须用（city, stageType）组合才能正确隔离；旧数据 city 带标签（如「香港（返场）」），
+  // stageType 默认 NORMAL，组合匹配同样有效。
+  members: { city: string; stageType: ConcertStageType }[]
+}
+
+// 由分组精确成员生成查询条件（区分同城市不同场次类型）。
+export function buildCityGroupWhere(group: ResolvedCityGroup): Prisma.MusicConcertWhereInput {
+  const pairs = group.members.map((member) => ({ city: member.city, stageType: member.stageType }))
+  if (pairs.length === 1) return { ...pairs[0] }
+  return { OR: pairs }
+}
+
+// 依据「城市分组 slug」解析分组（服务端专用）。
+// 兼容输入：新分组 slug（HONG-KONG / HONG-KONG-ENCORE / MACAU-FINAL）、
+// 旧版 city slug（例如 澳门最终站）、中文原始 city（香港 / 澳门（最终站））。
+export async function resolveCityGroupSlug(tourId: string, groupSlug: string): Promise<ResolvedCityGroup | null> {
   const rows = await prisma.musicConcert.findMany({
     where: { tourId, status: 'PUBLISHED' },
-    distinct: ['city'],
-    select: { city: true },
-    orderBy: { city: 'asc' },
+    distinct: ['city', 'stageType'],
+    select: { city: true, stageType: true },
+    orderBy: [{ city: 'asc' }, { stageType: 'asc' }],
   })
-  let decoded = citySlug
+  let decoded = groupSlug
   try {
-    decoded = decodeURIComponent(citySlug)
+    decoded = decodeURIComponent(groupSlug)
   } catch {
     // Malformed percent-encoding should behave like an unknown city instead
     // of throwing out of the route and producing a client-side error page.
   }
-  // 兼容三种输入：中文原始城市（香港）、规范大写 slug（HONG-KONG）、小写 slug（hong-kong）
-  const target = citySlug.toLowerCase()
-  const match = rows.find(
-    (row) => generateCitySlug(row.city).toLowerCase() === target || row.city === decoded,
-  )
-  return match ? match.city : null
+  const target = groupSlug.toLowerCase()
+  // 按（基础城市 + 类型）聚合为分组；类型由 stageType 优先、city 标签回退决定。
+  const groups = new Map<string, ResolvedCityGroup>()
+  for (const row of rows) {
+    const { base, type } = effectiveCityGroup(row.city, row.stageType)
+    const key = cityGroupSlug(base, type)
+    const member = { city: row.city, stageType: (row.stageType || 'NORMAL') as ConcertStageType }
+    const existing = groups.get(key)
+    if (existing) {
+      if (!existing.members.some((m) => m.city === member.city && m.stageType === member.stageType)) existing.members.push(member)
+    } else {
+      groups.set(key, { base, type, members: [member] })
+    }
+  }
+  for (const [key, group] of groups) {
+    const matchNew = key.toLowerCase() === target
+    const matchOld = group.members.some((m) => generateCitySlug(m.city).toLowerCase() === target)
+    const matchRaw = group.members.some((m) => m.city === decoded)
+    if (matchNew || matchOld || matchRaw) return group
+  }
+  return null
 }
 
 export type ResolvedConcertSlug = {
@@ -52,9 +90,9 @@ export type ResolvedConcertSlug = {
   dateSlug: string
 }
 
-// 依据 巡演slug + 城市slug + 日期slug 解析单场。
-// 兼容输入：tourSlug 可为 CUID 或 slug；citySlug 可为中文/大写 slug/小写 slug；dateSlug 为 YYYYMMDD。
-// 返回规范三段 slug（用于 308 跳转）与真实 concert id（用于查详情）。
+// 依据 巡演slug + 城市分组slug + 日期slug 解析单场。
+// 兼容输入：tourSlug 可为 CUID 或 slug；citySlug 可为新分组 slug / 旧 city slug / 中文原始 city；
+// dateSlug 为 YYYYMMDD。返回规范三段 slug（用于 308 跳转）与真实 concert id（用于查详情）。
 export async function resolveConcertBySlug(
   tourSlug: string,
   citySlug: string,
@@ -62,10 +100,10 @@ export async function resolveConcertBySlug(
 ): Promise<ResolvedConcertSlug | null> {
   const tour = await resolveTourByArchiveSlug(tourSlug)
   if (!tour) return null
-  const city = await resolveCitySlugToCity(tour.id, citySlug)
-  if (!city) return null
+  const group = await resolveCityGroupSlug(tour.id, citySlug)
+  if (!group) return null
   const concerts = await prisma.musicConcert.findMany({
-    where: { tourId: tour.id, city, status: 'PUBLISHED' },
+    where: { tourId: tour.id, ...buildCityGroupWhere(group), status: 'PUBLISHED' },
     orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: { id: true, concertDate: true },
   })
@@ -74,7 +112,7 @@ export async function resolveConcertBySlug(
   return {
     id: match.id,
     tourSlug: generateArchiveSlug(tour.name),
-    citySlug: generateCitySlug(city),
+    citySlug: cityGroupSlug(group.base, group.type),
     dateSlug,
   }
 }
@@ -88,13 +126,14 @@ export async function resolveConcertSlugPath(
     select: {
       concertDate: true,
       city: true,
+      stageType: true,
       MusicTour: { select: { id: true, name: true, status: true } },
     },
   })
   if (!concert || !concert.MusicTour || concert.MusicTour.status !== 'PUBLISHED') return null
   return {
     tourSlug: generateArchiveSlug(concert.MusicTour.name),
-    citySlug: generateCitySlug(concert.city),
+    citySlug: generateCityGroupSlug(concert.city, concert.stageType),
     dateSlug: generateDateSlug(concert.concertDate),
   }
 }

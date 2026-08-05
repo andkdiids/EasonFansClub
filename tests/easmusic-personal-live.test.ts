@@ -41,6 +41,7 @@ function row(overrides: {
       sessionNumber: null,
       posterUrl: null,
       status: overrides.status || 'PUBLISHED',
+      stageType: 'NORMAL',
       tourId: overrides.tourId || 'tour-1',
       MusicTour: { id: overrides.tourId || 'tour-1', name: '测试巡演', posterUrl: null, status: overrides.tourStatus || 'PUBLISHED' },
       MusicConcertSetlistItem: overrides.setlist || [],

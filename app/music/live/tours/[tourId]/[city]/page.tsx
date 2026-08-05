@@ -5,8 +5,8 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
-import { generateArchiveSlug, generateCitySlug, generateDateSlug } from '@/lib/music-slug'
-import { resolveTourByArchiveSlug, resolveCitySlugToCity } from '@/lib/music-archive'
+import { generateArchiveSlug, generateDateSlug, cityGroupSlug, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
+import { resolveTourByArchiveSlug, resolveCityGroupSlug, buildCityGroupWhere } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 
@@ -43,16 +43,22 @@ function normalSignature(items: SetlistItemForBlock[]): string {
     .join('##')
 }
 
+// 场次编号排序辅助：解析 "1" / "12" 等前缀整数；缺失或非数字排到末尾。
+function sessionNumberValue(value: string | null | undefined): number {
+  const parsed = Number(String(value ?? '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.MAX_SAFE_INTEGER
+}
+
 export default async function MusicTourCityPage({ params }: { params: Promise<{ tourId: string; city: string }> }) {
-  const { tourId, city } = await params
+  const { tourId, city: cityGroup } = await params
   const tourMatch = await resolveTourByArchiveSlug(tourId)
   if (!tourMatch) notFound()
   const canonicalTourSlug = generateArchiveSlug(tourMatch.name)
-  const dbCity = await resolveCitySlugToCity(tourMatch.id, city)
-  if (!dbCity) notFound()
-  const canonicalCitySlug = generateCitySlug(dbCity)
-  // 规范的公开地址：/music/live/tours/<slug>/<CITY>；旧的 id / 原始 city 直链 308 跳转
-  if (tourId !== canonicalTourSlug || city !== canonicalCitySlug) {
+  const group = await resolveCityGroupSlug(tourMatch.id, cityGroup)
+  if (!group) notFound()
+  const canonicalCitySlug = cityGroupSlug(group.base, group.type)
+  // 规范的公开地址：/music/live/tours/<slug>/<GROUP>；旧的 id / 原始 city / 旧版 city slug 直链 308 跳转
+  if (tourId !== canonicalTourSlug || cityGroup !== canonicalCitySlug) {
     permanentRedirect(`/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}`)
   }
   const [meta, config] = await Promise.all([
@@ -61,7 +67,7 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
       select: {
         id: true, name: true, subtitle: true, posterUrl: true,
         MusicConcert: {
-          where: { status: 'PUBLISHED', city: dbCity },
+          where: { status: 'PUBLISHED', ...buildCityGroupWhere(group) },
           orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           include: {
             MusicConcertSetlistItem: {
@@ -99,6 +105,13 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
     }
   })
 
+  // 场次排序：演出日期升序，其次按场次编号（sessionNumber）升序；不按城市名称排序。
+  cityConcerts.sort((left, right) => {
+    const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
+    if (dateDifference) return dateDifference
+    return sessionNumberValue(left.sessionNumber) - sessionNumberValue(right.sessionNumber)
+  })
+
   const allSame = cityConcerts.length > 0 && cityConcerts.every((concert) => concert.signature === cityConcerts[0].signature)
   const firstWithSetlist = cityConcerts.find((concert) => concert.full.length > 0)
   const baseNormal = firstWithSetlist?.normal ?? []
@@ -114,10 +127,11 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href={`/music/live/tours/${canonicalTourSlug}`} className="text-sm font-black text-sky-300/80">← 返回 {meta.name}</Link>
     <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[200px_minmax(0,1fr)] md:items-center">
-      <div className="relative mx-auto aspect-square w-full max-w-[200px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedCityPosterUrl} alt={`${dbCity}演唱会海报`} sizes="200px" className="h-full w-full" /></div>
+      <div className="relative mx-auto aspect-square w-full max-w-[200px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedCityPosterUrl} alt={`${group.base}演唱会海报`} sizes="200px" className="h-full w-full" /></div>
       <div className="min-w-0">
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE · {canonicalCitySlug}</p>
-        <h1 className="mt-4 break-words text-4xl font-black tracking-tight text-white sm:text-6xl">{dbCity}站</h1>
+        <h1 className="mt-4 break-words text-4xl font-black tracking-tight text-white sm:text-6xl">{group.base}站</h1>
+        {CITY_GROUP_TYPE_LABEL[group.type] ? <p className="mt-3 inline-block border border-sky-300/20 px-2 py-1 text-[11px] font-black text-sky-100/75">{CITY_GROUP_TYPE_LABEL[group.type]}</p> : null}
         <p className="mt-4 break-words text-xl font-black text-slate-200">{meta.name}</p>
         <p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(cityStartDate, cityEndDate)}</p>
         <dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">本城市场次</dt><dd className="mt-1 text-xl font-black">{cityConcerts.length} 场</dd></div><div><dt className="text-xs text-slate-400">主要场馆</dt><dd className="mt-1 text-xl font-black">{primaryVenue ?? '场馆待整理'}</dd></div></dl>
@@ -125,11 +139,14 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
     </section>
 
     {hasSetlist ? (
-      allSame ? (
-        <SetlistBlock items={setlistItems} excludeEncore={baseNormal.length > 0} layout="columns" title={`${dbCity}站统一歌单`} eyebrow="UNIFIED SETLIST" idPrefix="unified" />
-      ) : (
-        <SetlistBlock items={setlistItems} title={`${dbCity}站基础歌单`} eyebrow="BASE SETLIST" idPrefix="base" />
-      )
+      <SetlistBlock
+        items={setlistItems}
+        layout="columns"
+        title={`${group.base}站歌单`}
+        eyebrow="LIVE SETLIST"
+        idPrefix="city-setlist"
+        excludeEncore={baseNormal.length > 0}
+      />
     ) : (
       <section className="mt-14 border border-white/10 bg-white/[0.05] p-6" aria-label="歌单资料">
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SETLIST</p>

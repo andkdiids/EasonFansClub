@@ -1,4 +1,6 @@
 .next/
+.next_bak/
+.prisma-local/
 .open-next/
 .wrangler/
 node_modules/

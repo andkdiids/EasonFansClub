@@ -175,6 +175,7 @@ export async function getHomeConcerts() {
         concertDate: true,
         city: true,
         venue: true,
+        stageType: true,
         posterUrl: true,
         MusicTour: { select: { name: true, posterUrl: true } },
       },
@@ -188,7 +189,7 @@ export async function getHomeConcerts() {
         venue: concert.venue,
         tourName: concert.MusicTour.name,
         posterUrl: publicImageUrl(posterUrl),
-        href: buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate),
+        href: buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate, concert.stageType),
       }
     })),
     [],

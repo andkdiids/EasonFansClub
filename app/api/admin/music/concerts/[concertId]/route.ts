@@ -11,7 +11,7 @@ type Context = { params: Promise<{ concertId: string }> }
 async function normalizeTourConcerts(tx: Prisma.TransactionClient, tourId: string) {
   const concerts = await tx.musicConcert.findMany({
     where: { tourId },
-    select: { id: true, city: true, concertDate: true, createdAt: true, sortOrder: true },
+    select: { id: true, city: true, stageType: true, concertDate: true, createdAt: true, sortOrder: true },
   })
   for (const sequence of buildConcertSequenceUpdates(concerts)) {
     await tx.musicConcert.update({
@@ -64,6 +64,8 @@ export async function PATCH(request: Request, { params }: Context) {
   const hasPosterUrl = Boolean(body && typeof body === 'object' && 'posterUrl' in body)
   const tourId = sanitizeText(body?.tourId, 100)
   const city = sanitizeText(body?.city, 100)
+  const STAGE_TYPES = ['NORMAL', 'ENCORE', 'FINAL'] as const
+  const stageType = STAGE_TYPES.includes(body?.stageType) ? (body.stageType as 'NORMAL' | 'ENCORE' | 'FINAL') : 'NORMAL'
   const concertDate = parseLiveDate(body?.concertDate, true)
   const setlistResult = parseSetlistItems(body?.setlist ?? [])
   const highlightResult = parseHighlights(body?.highlights ?? [])
@@ -88,6 +90,7 @@ export async function PATCH(request: Request, { params }: Context) {
           tourId,
           concertDate,
           city,
+          stageType,
           title: sanitizeText(body?.title, 160) || null,
           countryOrRegion: sanitizeText(body?.countryOrRegion, 100) || DEFAULT_CONCERT_COUNTRY,
           venue: sanitizeText(body?.venue, 200) || null,

@@ -154,6 +154,8 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const tourId = sanitizeText(body?.tourId, 100)
   const city = sanitizeText(body?.city, 100)
+  const STAGE_TYPES = ['NORMAL', 'ENCORE', 'FINAL'] as const
+  const stageType = STAGE_TYPES.includes(body?.stageType) ? (body.stageType as 'NORMAL' | 'ENCORE' | 'FINAL') : 'NORMAL'
   const dateResult = parseConcertDates(body?.concertDates ?? body?.concertDate)
   const setlistSource = body?.setlistSource === 'NEW' || body?.setlistSource === 'SOURCE' ? body.setlistSource : 'PREVIOUS'
   const sourceConcertId = sanitizeText(body?.sourceConcertId, 100)
@@ -166,10 +168,10 @@ export async function POST(request: Request) {
   const concertDates = dateResult.dates!
   const initialSetlistItems = setlistResult.items
   const duplicate = await prisma.musicConcert.findFirst({
-    where: { tourId, city, concertDate: { in: concertDates } },
+    where: { tourId, city, stageType, concertDate: { in: concertDates } },
     select: { concertDate: true },
   })
-  if (duplicate) return NextResponse.json({ message: `${duplicate.concertDate.toISOString().slice(0, 10)} 已存在同城市场次` }, { status: 409 })
+  if (duplicate) return NextResponse.json({ message: `${duplicate.concertDate.toISOString().slice(0, 10)} 已存在同城市场次（同场次类型）` }, { status: 409 })
 
   const result = await prisma.$transaction(async (tx) => {
     let inheritedItems = initialSetlistItems
@@ -224,6 +226,7 @@ export async function POST(request: Request) {
           tourId,
           concertDate,
           city,
+          stageType,
           title: sanitizeText(body?.title, 160) || `${city}站`,
           countryOrRegion: sanitizeText(body?.countryOrRegion, 100) || DEFAULT_CONCERT_COUNTRY,
           venue: sanitizeText(body?.venue, 200) || null,
@@ -243,7 +246,7 @@ export async function POST(request: Request) {
     }
     const allConcerts = await tx.musicConcert.findMany({
       where: { tourId },
-      select: { id: true, city: true, concertDate: true, createdAt: true, sortOrder: true },
+      select: { id: true, city: true, stageType: true, concertDate: true, createdAt: true, sortOrder: true },
     })
     for (const sequence of buildConcertSequenceUpdates(allConcerts)) {
       await tx.musicConcert.update({

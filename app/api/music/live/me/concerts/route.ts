@@ -49,7 +49,7 @@ export async function GET(request: Request) {
         id: true, seatInfo: true, mood: true, note: true, isPublic: true, createdAt: true, updatedAt: true,
         MusicConcert: {
           select: {
-            id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true, status: true, tourId: true,
+            id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true, status: true, stageType: true, tourId: true,
             MusicTour: { select: { id: true, name: true, posterUrl: true, status: true } },
             _count: { select: { MusicConcertSetlistItem: true } },
           },

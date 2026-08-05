@@ -62,7 +62,7 @@ export async function GET(request: Request) {
       },
       orderBy: [{ concertDate: 'desc' }, { createdAt: 'desc' }],
       take: 20,
-      select: { id: true, title: true, concertDate: true, city: true, venue: true, MusicTour: { select: { id: true, name: true } } },
+      select: { id: true, title: true, concertDate: true, city: true, venue: true, stageType: true, MusicTour: { select: { id: true, name: true } } },
     }),
   ])
   return NextResponse.json({

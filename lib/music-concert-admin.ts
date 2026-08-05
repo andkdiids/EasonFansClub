@@ -19,7 +19,7 @@ export function parseConcertDates(value: unknown) {
 }
 
 export function buildConcertSequenceUpdates(
-  concerts: Array<{ id: string; city?: string; concertDate: Date | string; createdAt?: Date | string; sortOrder?: number }>,
+  concerts: Array<{ id: string; city?: string; stageType?: string; concertDate: Date | string; createdAt?: Date | string; sortOrder?: number }>,
 ) {
   const chronological = [...concerts].sort((left, right) => {
     const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
@@ -35,10 +35,11 @@ export function buildConcertSequenceUpdates(
       return leftOrder - rightOrder || new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime() || new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime() || left.id.localeCompare(right.id)
     })
     : chronological
+  // 场次编号按（城市 + 场次类型）分组：普通场与返场/最终站即使城市相同也各自独立编号。
   const citySequence = new Map<string, number>()
   const chronologicalSessionNumbers = new Map<string, string>()
   for (const concert of chronological) {
-    const groupKey = concert.city || '__all__'
+    const groupKey = `${concert.city || '__all__'}::${concert.stageType || 'NORMAL'}`
     const sessionNumber = (citySequence.get(groupKey) || 0) + 1
     citySequence.set(groupKey, sessionNumber)
     chronologicalSessionNumbers.set(concert.id, String(sessionNumber))

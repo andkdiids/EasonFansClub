@@ -1347,6 +1347,7 @@ model MusicConcert {
   concertDate             DateTime
   city                    String
   countryOrRegion         String?
+  stageType               ConcertStageType          @default(NORMAL)
   venue                   String?
   sessionNumber           String?
   posterUrl               String?                   @db.Text
@@ -2362,6 +2363,15 @@ enum MusicSetlistSection {
   ENCORE
   SPECIAL
   OTHER
+}
+
+// 演唱会场次类型：普通场次 / 返场 / 最终站。
+// 旧数据没有此字段（默认 NORMAL），且通过 city 字段带「城市（标签）」区分返场/最终站；
+// 新后台创建统一使用此字段，city 仅保存真实城市（香港 / 澳门）。
+enum ConcertStageType {
+  NORMAL
+  ENCORE
+  FINAL
 }
 
 enum MusicHighlightType {

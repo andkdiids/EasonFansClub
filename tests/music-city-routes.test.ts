@@ -22,7 +22,7 @@ test('城市详情对坏编码、空数据和非法日期提供受控状态', ()
 
   assert.match(page, /cityConcerts\.map\(\(concert\) => concert\.posterUrl\)/)
   assert.match(page, /暂无歌单资料/)
-  assert.match(archive, /try \{[\s\S]*decodeURIComponent\(citySlug\)[\s\S]*catch/)
+  assert.match(archive, /try \{[\s\S]*decodeURIComponent\(groupSlug\)[\s\S]*catch/)
   assert.match(cover, /publicImageUrl\(value\)/)
   assert.match(error, /重新加载/)
   assert.match(error, /返回巡演详情/)

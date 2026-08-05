@@ -21,7 +21,7 @@ export default async function MusicLivePage() {
       where: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
       orderBy: [{ createdAt: 'desc' }, { concertDate: 'desc' }],
       take: 8,
-      select: { id: true, title: true, concertDate: true, city: true, venue: true, MusicTour: { select: { name: true } }, _count: { select: { MusicConcertSetlistItem: true } } },
+      select: { id: true, title: true, concertDate: true, city: true, venue: true, stageType: true, MusicTour: { select: { name: true } }, _count: { select: { MusicConcertSetlistItem: true } } },
     }),
     getSiteAppearance(),
   ])
