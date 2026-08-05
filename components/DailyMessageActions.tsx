@@ -1,39 +1,48 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
 
 export function DailyMessageActions({
   messageId,
+  liked,
   likeCount,
   favoriteCount,
   commentCount,
-  initialLiked = false,
   initialFavorited = false,
   replyTo,
   onReplyCancel,
   onCommentCreated,
+  onLikeChange,
 }: Readonly<{
   messageId: string
+  liked: boolean
   likeCount: number
   favoriteCount: number
   commentCount: number
-  initialLiked?: boolean
   initialFavorited?: boolean
   replyTo?: { id: string; name: string } | null
   onReplyCancel?: () => void
   onCommentCreated?: (comment: unknown) => void
+  onLikeChange?: (value: { liked: boolean; likeCount: number }) => void
 }>) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [comment, setComment] = useState('')
   const [error, setError] = useState('')
   const [isOpen, setIsOpen] = useState(false)
-  const [isLiked, setIsLiked] = useState(initialLiked)
+  // 点赞状态以「服务端返回 + 共享上下文」为唯一可信源：props 变化（翻页重挂 / 另一面板同步）即同步展示，
+  // 不再依赖组件内部一次性初始化的临时 state，避免翻页后回退到旧状态或双面板不同步。
+  const [isLiked, setIsLiked] = useState(liked)
   const [likes, setLikes] = useState(Math.max(likeCount, 0))
   const [isFavorited, setIsFavorited] = useState(initialFavorited)
   const [favorites, setFavorites] = useState(Math.max(favoriteCount, 0))
   const [comments, setComments] = useState(Math.max(commentCount, 0))
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    setIsLiked(liked)
+    setLikes(Math.max(likeCount, 0))
+  }, [liked, likeCount])
 
   async function toggle(path: string, kind: 'like' | 'favorite') {
     if (isSubmitting) return
@@ -49,8 +58,12 @@ export function DailyMessageActions({
     }
 
     if (kind === 'like') {
-      setIsLiked(Boolean(data.isLiked))
-      setLikes(Math.max(Number(data.likeCount || 0), 0))
+      const nextLiked = Boolean(data.isLiked)
+      const nextCount = Math.max(Number(data.likeCount || 0), 0)
+      setIsLiked(nextLiked)
+      setLikes(nextCount)
+      // 通知父组件 / 共享上下文：翻页与「E友留言 / 好友留言」双面板实时同步。
+      onLikeChange?.({ liked: nextLiked, likeCount: nextCount })
     } else {
       setIsFavorited(Boolean(data.isFavorited))
       setFavorites(Math.max(Number(data.favoriteCount || 0), 0))

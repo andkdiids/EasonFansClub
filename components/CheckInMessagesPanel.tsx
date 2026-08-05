@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
+import { useCheckInLike } from '@/components/checkin-like-context'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
@@ -78,6 +79,8 @@ export function CheckInMessagesPanel({
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const [page, setPage] = useState(1)
   const [focusError, setFocusError] = useState('')
+  // 跨面板共享的点赞覆盖层（E友留言 / 好友留言 同步、翻页不丢失）。
+  const likeCtx = useCheckInLike()
   const isCompact = density !== 'normal'
   const isMinimal = density === 'minimal'
   const previewPageSize = previewMode ? (isMinimal ? 1 : isCompact ? 2 : messagesPerPage) : messagesPerPage
@@ -119,7 +122,15 @@ export function CheckInMessagesPanel({
 
       setDate(data.date || nextDate)
       setSort(data.sort === 'hot' ? 'hot' : 'latest')
-      setMessages(Array.isArray(data.messages) ? data.messages : [])
+      const incoming = Array.isArray(data.messages) ? data.messages : []
+      setMessages(incoming)
+      // 服务端重载后，用服务端最新 likeCount / liked 刷新共享覆盖层，
+      // 确保服务端数据成为权威源，避免旧缓存覆盖新数据（如他人点赞）。
+      likeCtx.reconcileLikes(incoming.map((item: CheckInDisplayMessageItem) => ({
+        id: item.id,
+        likeCount: item.likeCount,
+        liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
+      })))
       setPage(1)
       updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest')
     } catch (loadError) {
@@ -127,14 +138,20 @@ export function CheckInMessagesPanel({
     } finally {
       setIsLoading(false)
     }
-  }, [date, isLoading, scope, sort])
+  }, [date, isLoading, scope, sort, likeCtx])
 
   useEffect(() => {
     setDate(initialDate)
     setSort(initialSort)
     setMessages(initialMessages)
+    // 用服务端初始数据刷新覆盖层（首次挂载时覆盖层为空，属 no-op；父组件重渲染传入新初始数据时保持服务端权威）。
+    likeCtx.reconcileLikes(initialMessages.map((item) => ({
+      id: item.id,
+      likeCount: item.likeCount,
+      liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
+    })))
     setPage(1)
-  }, [initialDate, initialMessages, initialSort])
+  }, [initialDate, initialMessages, initialSort, likeCtx])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -256,6 +273,10 @@ export function CheckInMessagesPanel({
           const commentMap = buildCommentMap(item.comments)
           const rootComments = commentTree.get(null) || []
           const replyTarget = replyTargets[item.id] || null
+          // 点赞展示状态：优先用共享覆盖层（双面板同步 / 翻页保留），否则用服务端初始值。
+          const likeOverride = likeCtx.getLike(item.id)
+          const effectiveLiked = likeOverride ? likeOverride.liked : ('liked' in item ? item.liked : item.likes.length > 0)
+          const effectiveLikeCount = likeOverride ? likeOverride.likeCount : item.likeCount
           const collectThreadComments = (rootId: string) => {
             const result: Array<{ comment: DailyComment; replyToName: string }> = []
             const visit = (parentId: string) => {
@@ -385,14 +406,15 @@ export function CheckInMessagesPanel({
                   ) : null}
                   {!isMinimal ? <DailyMessageActions
                     messageId={item.id}
-                    likeCount={item.likeCount}
+                    liked={effectiveLiked}
+                    likeCount={effectiveLikeCount}
                     favoriteCount={item.favoriteCount}
                     commentCount={item.commentCount}
-                    initialLiked={'liked' in item ? item.liked : item.likes.length > 0}
                     initialFavorited={'favorited' in item ? item.favorited : item.favorites.length > 0}
                     replyTo={replyTarget}
                     onReplyCancel={() => setReplyTargets((current) => ({ ...current, [item.id]: null }))}
                     onCommentCreated={() => loadMessages(date, sort)}
+                    onLikeChange={(value) => likeCtx.setLike(item.id, value)}
                   /> : null}
                 </div>
               </div>

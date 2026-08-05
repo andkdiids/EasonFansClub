@@ -111,6 +111,30 @@ test('local development remains host-only, non-secure, and uses Lax SameSite', (
   })
 })
 
+test('HTTPS request on a non-production environment still issues a Secure SameSite=None cookie', () => {
+  // 回归测试：移动端 / 微信无法保持登录的根因之一——部署环境未设 NODE_ENV='production' 时，
+  // 旧逻辑会把 HTTPS 请求生成 Secure=false / SameSite=Lax 的 Cookie，被 iOS / 微信丢弃。
+  // 修复后只要请求经 HTTPS 到达（x-forwarded-proto=https），无论 NODE_ENV 都必须 Secure + None。
+  withDevelopmentEnvironment(() => {
+    const request = new Request('http://next-internal:3000/api/auth/login', {
+      headers: {
+        'x-forwarded-host': 'ecfc.fans',
+        'x-forwarded-proto': 'https',
+      },
+    })
+    const cookie = serializeSessionCookie(request)
+    const options = getSessionCookieOptions(request)
+
+    assert.equal(options.secure, true)
+    assert.equal(options.sameSite, 'none')
+    assert.match(cookie, /Secure/)
+    // Next.js 将 sameSite:'none' 序列化为小写的 SameSite=none（符合规范），注销用的自定义
+    // 序列化器则输出 SameSite=None；两者等价，这里按 Next 的实际输出匹配。
+    assert.match(cookie, /SameSite=none/)
+    assert.match(cookie, /Domain=\.ecfc\.fans/)
+  })
+})
+
 test('logout emits multiple Set-Cookie entries clearing domain, host-only and www legacy cookies', async () => {
   const environment = process.env as Record<string, string | undefined>
   const previousNodeEnv = environment.NODE_ENV

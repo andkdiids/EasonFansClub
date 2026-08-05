@@ -2,7 +2,6 @@ import { jwtVerify } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 
 const authCookieName = 'eason_fans_session'
-const canonicalHost = 'ecfc.fans'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
 
@@ -114,13 +113,20 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim().toLowerCase()
   const requestHost = normalizeHost(forwardedHost || request.nextUrl.hostname)
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase()
+  const isSecure = forwardedProto === 'https' || request.nextUrl.protocol === 'https:'
+  const isLocalHost = requestHost === 'localhost' || requestHost === '127.0.0.1' || requestHost.startsWith('127.0.0.1') || requestHost === '[::1]'
 
-  if (requestHost === 'www.ecfc.fans') {
-    const canonicalUrl = request.nextUrl.clone()
-    canonicalUrl.protocol = 'https:'
-    canonicalUrl.hostname = canonicalHost
-    canonicalUrl.port = ''
-    return withNoStoreHeaders(NextResponse.redirect(canonicalUrl, 308))
+  // 强制 HTTPS：非 localhost 的明文 http 请求一律 308 升级到 https，保留原始 host
+  // （ecfc.fans 升 ecfc.fans，www.ecfc.fans 升 www.ecfc.fans，不强制 www→apex）。
+  // 否则 Secure 会话 Cookie 无法被浏览器存储，移动端 / 微信「关闭重开」后会丢失登录态。
+  // （依赖反代转发的 x-forwarded-proto 判断真实协议，避免回源为 http 时误判。）
+  if (!isSecure && !isLocalHost) {
+    const secureUrl = request.nextUrl.clone()
+    secureUrl.protocol = 'https:'
+    secureUrl.hostname = requestHost
+    secureUrl.port = ''
+    return withNoStoreHeaders(NextResponse.redirect(secureUrl, 308))
   }
 
   if (isPublicPath(pathname)) return withNoStoreHeaders(NextResponse.next())
