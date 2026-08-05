@@ -17,6 +17,8 @@ import { getGrowthSummarySafe } from '@/lib/growth'
 
 export const dynamic = 'force-dynamic'
 
+export const metadata = { title: '个人病历' }
+
 type ProfilePageProps = {
   searchParams?: Promise<{ edit?: string }>
 }
@@ -127,6 +129,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     <>
       <ProfileEditorDrawer initialOpen={query?.edit === '1'} initialProfile={profileEditorInitialProfile} hideTrigger />
       <main className="site-page-main flat-page mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-5 sm:py-6">
+        <header className="rounded-sm border border-sky-100 bg-white/88 px-4 py-5 sm:px-5">
+          <h1 className="text-2xl font-black text-brand-950">个人病历</h1>
+          <p className="mt-1 text-sm font-bold text-slate-500">记录你在 E院的成长轨迹</p>
+        </header>
         <ProfileHeader
           displayName={displayName}
           uid={profile.uid}

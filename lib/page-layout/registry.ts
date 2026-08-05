@@ -26,7 +26,7 @@ export const pageLayoutPages: Record<PageLayoutPageKey, { name: string; descript
   announcement: { name: '公告', description: '公告板块页面基础布局', path: '/boards/announcements' },
   music: { name: '音乐馆', description: 'EasMusic 页面基础布局', path: '/music' },
   message: { name: '消息中心', description: '通知中心页面基础布局', path: '/notifications' },
-  profile: { name: '个人主页', description: '个人主页页面基础布局', path: '/profile' },
+  profile: { name: '个人病历', description: '个人病历页面基础布局', path: '/profile' },
   'admin-home': { name: '管理后台首页', description: '后台首页模块编排', path: '/admin' },
 }
 

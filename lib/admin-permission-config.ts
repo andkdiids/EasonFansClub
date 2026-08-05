@@ -50,6 +50,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/music/live': 'music_manage',
   '/admin/music/tours': 'music_manage',
   '/admin/music/concerts': 'music_manage',
+  '/admin/music/badges': 'music_manage',
   '/admin/music/reviews': 'music_manage',
   '/admin/entertainment/lyrics': 'entertainment_manage',
   '/admin/entertainment/guess-song': 'entertainment_manage',

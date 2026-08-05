@@ -73,7 +73,7 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
   {menuOpen ? (
     <div className="app-topbar-menu" data-user-menu-panel>
       <Link href="/profile" onClick={() => setMenuOpen(false)}>
-        我的主页
+        个人病历
       </Link>
       
 

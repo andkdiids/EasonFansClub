@@ -32,7 +32,7 @@ test('用户菜单、后台入口与布局编辑入口沿用权限结果', () =>
   const shell = read('components/layout/AppShell.tsx')
   const topbar = read('components/layout/Topbar.tsx')
   const sidebar = read('components/layout/Sidebar.tsx')
-  for (const label of ['我的主页', '消息中心', '我的收藏', '账号安全', '退出登录']) {
+  for (const label of ['个人病历', '消息中心', '我的收藏', '账号安全', '退出登录']) {
     assert.match(topbar, new RegExp(label))
   }
   assert.doesNotMatch(topbar + sidebar, /签到记录/)

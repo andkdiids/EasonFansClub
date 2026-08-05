@@ -65,7 +65,7 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
     </div>
     <div ref={menuRootRef} className="sidebar-user">
       {menuOpen ? <div className="sidebar-user-menu" role="menu">
-        <Link href="/profile" role="menuitem">我的主页</Link>
+        <Link href="/profile" role="menuitem">个人病历</Link>
         <Link href="/notifications" role="menuitem">消息中心</Link>
         <Link href="/profile?module=favorites#profile-modules" role="menuitem">我的收藏</Link>
         <Link href="/games" role="menuitem">娱乐天空</Link>

@@ -69,8 +69,8 @@ async function main() {
   // 生日纪念徽章：用户生日当天由 lib/birthday.ts 自动授予，不绑定年份、永久保留。
   await prisma.badge.upsert({
     where: { slug: 'birthday-commemorative' },
-    update: { name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true },
-    create: { slug: 'birthday-commemorative', name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true },
+    update: { name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, category: 'BIRTHDAY' },
+    create: { slug: 'birthday-commemorative', name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, category: 'BIRTHDAY' },
   })
 
   const settings = [

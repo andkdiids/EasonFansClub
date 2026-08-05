@@ -11,6 +11,7 @@ export default async function AdminMusicPage() {
     ['/admin/music/live', 'Live 版本管理', '维护演唱会和现场版本资料。'],
     ['/admin/music/tours', '巡演管理', '维护 Eason in Concert 的巡演档案、海报、发布状态与排序。'],
     ['/admin/music/concerts', '演唱会管理', '维护场次、现场歌单、特别时刻与复制录入。'],
+    ['/admin/music/badges', '演唱会徽章', '为巡演创建纪念徽章，用户看过对应场次后自动获得。'],
     ['/admin/music/reviews', '专辑鉴赏管理', '发布专辑幕后故事、制作资料、歌曲解析和多图深度档案。'],
   ] as const
   return <><SiteHeader user={user} /><main className="admin-mobile-page mx-auto max-w-6xl space-y-7 px-4 py-7 sm:px-5 sm:py-9">

@@ -64,7 +64,7 @@ export function UserNotificationMenu({
       <span className="site-user-menu-name hidden max-w-28 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block">{displayName}</span>
     </summary>
     <div data-user-menu-panel className="pointer-events-auto absolute right-0 z-[var(--layer-popover)] mt-2 w-60 rounded-sm border border-sky-100 bg-white p-2 shadow-sm">
-      <Link href="/profile" className={itemClass}>个人主页</Link>
+      <Link href="/profile" className={itemClass}>个人病历</Link>
       <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} /></Link>
       <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} /></Link>
       <Link href="/friends" className={itemClass}>我的好友<Badge count={summary.friendRequests} /></Link>

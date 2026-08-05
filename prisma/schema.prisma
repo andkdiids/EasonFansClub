@@ -160,20 +160,31 @@ model Announcement {
   @@index([isPublished, isPinned])
 }
 
+enum BadgeCategory {
+  SYSTEM
+  BIRTHDAY
+  CONCERT
+}
+
 model Badge {
-  id          String      @id @default(cuid())
-  name        String      @unique
-  slug        String      @unique
+  id          String         @id @default(cuid())
+  name        String         @unique
+  slug        String         @unique
   description String?
   iconUrl     String?
   pointsCost  Int?
-  isAutoGrant Boolean     @default(false)
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  category    BadgeCategory  @default(SYSTEM)
+  musicTourId String?
+  musicTour   MusicTour?     @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
+  isAutoGrant Boolean        @default(false)
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   UserBadge   UserBadge[]
 
   @@index([isActive])
+  @@index([category])
+  @@index([musicTourId])
 }
 
 model Banner {
@@ -1344,6 +1355,7 @@ model MusicTour {
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
   MusicConcert MusicConcert[]
+  badges       Badge[]
 
   @@index([status])
   @@index([sortOrder])

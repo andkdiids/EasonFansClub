@@ -559,7 +559,7 @@ export function ProfileSettingsForm({
             </div>
 
             <div className="rounded-2xl border border-white bg-white/78 p-4">
-              <p className="text-sm font-black text-slate-700">主页背景图</p>
+              <p className="text-sm font-black text-slate-700">个人病历背景图</p>
               <div className="mt-3 overflow-hidden rounded-2xl bg-white">
                 <div
                   className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400"
@@ -617,7 +617,7 @@ export function ProfileSettingsForm({
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">隐私设置</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">留言墙隐私</h3>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">选择谁可以查看你的个人主页留言墙并发布留言。</p>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">选择谁可以查看你的个人病历留言墙并发布留言。</p>
           </div>
           <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
             <span className="text-sm font-black text-slate-700">留言墙可见范围</span>

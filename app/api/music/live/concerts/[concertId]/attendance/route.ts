@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { parseAttendanceInput, parseAttendanceVersion, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
 import { prisma } from '@/lib/prisma'
+import { checkConcertBadge } from '@/lib/concert-badge'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -42,6 +43,12 @@ export async function POST(request: Request, { params }: Context) {
       data: { userId: guard.user.id, concertId, ...parsed.data },
       select: { id: true, seatInfo: true, mood: true, note: true, isPublic: true, createdAt: true, updatedAt: true },
     })
+    // 自动授予演唱会纪念徽章：失败绝不能影响「加入我的现场」主流程。
+    try {
+      await checkConcertBadge(guard.user.id, concertId)
+    } catch (error) {
+      console.error('[attendance.concertBadge]', error)
+    }
     return NextResponse.json({ attendance, message: '已加入我的现场' }, { status: 201, headers: PERSONAL_LIVE_NO_STORE_HEADERS })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
