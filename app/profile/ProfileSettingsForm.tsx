@@ -15,6 +15,9 @@ type InitialProfile = {
   emailVerifiedAt: string | null
   phoneVerifiedAt: string | null
   wallVisibility: ProfileWallVisibility
+  birthMonth: number | null
+  birthDay: number | null
+  birthdaySetAt: string | null
 }
 
 type UploadKind = 'avatar' | 'background'
@@ -163,6 +166,13 @@ function maskPhone(phone: string) {
 function maskEmail(email: string) {
   if (!email) return '未绑定'
   return email
+}
+
+function daysForMonth(month: number | null): number {
+  if (!month || month < 1 || month > 12) return 31
+  // 二月返回 29，允许闰年 2 月 29 日生日；由服务端最终校验日期合法性。
+  const days = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return days[month - 1]
 }
 
 async function cropAvatarToWebp(crop: CropState) {
@@ -476,7 +486,19 @@ export function ProfileSettingsForm({
     const response = await fetch('/api/users/me', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        nickname: form.nickname,
+        bio: form.bio,
+        avatarUrl: form.avatarUrl,
+        backgroundUrl: form.backgroundUrl,
+        email: form.email,
+        phone: form.phone,
+        wallVisibility: form.wallVisibility,
+        // 生日仅在未设置时提交；已设置则由服务端忽略。
+        ...(form.birthdaySetAt
+          ? {}
+          : { birthMonth: form.birthMonth, birthDay: form.birthDay }),
+      }),
     })
     const data = await response.json().catch(() => null)
 
@@ -609,6 +631,51 @@ export function ProfileSettingsForm({
               <option value="CLOSED">关闭</option>
             </select>
           </label>
+        </section>
+
+        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/45 p-4">
+          <div>
+            <p className="text-xs font-black tracking-[0.18em] text-sky-700">生日纪念</p>
+            <h3 className="mt-1 text-lg font-black text-brand-950">我的生日</h3>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计，填写后不可修改，不会向其他用户展示具体日期。</p>
+          </div>
+
+          {form.birthdaySetAt ? (
+            <div className="rounded-2xl border border-white bg-white/78 p-4">
+              <p className="text-sm font-black text-slate-700">生日已设置</p>
+              <p className="mt-2 text-2xl font-black text-brand-950">{form.birthMonth}月{form.birthDay}日</p>
+              <p className="mt-2 text-xs font-bold text-slate-500">已设置，不可再次修改。</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block rounded-2xl border border-white bg-white/78 p-4">
+                <span className="text-sm font-black text-slate-700">月份</span>
+                <select
+                  value={form.birthMonth ?? ''}
+                  onChange={(event) => update('birthMonth', event.target.value ? Number(event.target.value) : null)}
+                  className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+                >
+                  <option value="">请选择月份</option>
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                    <option key={month} value={month}>{month}月</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block rounded-2xl border border-white bg-white/78 p-4">
+                <span className="text-sm font-black text-slate-700">日期</span>
+                <select
+                  value={form.birthDay ?? ''}
+                  onChange={(event) => update('birthDay', event.target.value ? Number(event.target.value) : null)}
+                  className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+                >
+                  <option value="">请选择日期</option>
+                  {Array.from({ length: daysForMonth(form.birthMonth) }, (_, index) => index + 1).map((day) => (
+                    <option key={day} value={day}>{day}日</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </section>
 
         <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">

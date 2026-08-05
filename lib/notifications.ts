@@ -18,6 +18,7 @@ const personalTypeLabels: Record<string, string> = {
   ADMIN: '系统',
   FOLLOW: '关注',
   BADGE: '勋章',
+  BIRTHDAY_GREETING: '生日',
 }
 
 const systemTypeLabels: Record<string, string> = {

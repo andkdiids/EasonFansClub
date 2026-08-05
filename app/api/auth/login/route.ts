@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { findCompleteUserByLoginIdentifier } from '@/lib/users'
 import { normalizeText } from '@/lib/validators'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
+import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
 
 const loginUserQueryTimeoutMs = 4500
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -108,6 +109,14 @@ const password = typeof body?.password === 'string' ? body.password : ''
 
     await ensureSecurityQuestionNotification(user.id).catch((notificationError) => {
       console.error('[auth.login.security-question-notification]', notificationError)
+    })
+
+    // 登录成功后，若今天为该用户生日则自动授予「生日纪念」徽章并发送生日祝福（失败不影响登录）。
+    await ensureBirthdayBadge(user.id).catch((badgeError) => {
+      console.error('[auth.login.birthday-badge]', badgeError)
+    })
+    await sendBirthdayGreeting(user.id).catch((greetingError) => {
+      console.error('[auth.login.birthday-greeting]', greetingError)
     })
 
     const token = await createSessionToken(sessionUser)

@@ -7,6 +7,7 @@ import { getAdminPermissionSet, isSuperAdmin } from '@/lib/admin-permissions'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy } from '@/lib/registration'
+import { countTodayBirthdays, countBirthdayGreetingsSent, countBirthdayBadgesAwarded } from '@/lib/birthday'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +22,7 @@ const adminModules = [
   { href: '/admin/posts/review', title: '帖子审核中心', desc: '审核用户新帖，处理通过或拒绝，并设置精选与置顶。' },
   { href: '/admin/today', title: '今日管理', desc: '管理历史上的今天内容并审核用户提交。' },
   { href: '/admin/achievements', title: '成就 / 勋章', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
+  { href: '/admin/birthdays', title: '生日管理', desc: '查看今日过生日的用户（仅 UID、昵称、注册时间，保护隐私）。' },
   { href: '/admin/culture', title: 'Eason 文化馆', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },
   { href: '/admin/music', title: 'EasMusic 管理', desc: '维护陈奕迅音乐专辑、歌曲资料与播放来源预留信息。' },
   { href: '/admin/entertainment/lyrics', title: '歌词处方库', desc: '维护娱乐天空每日抽奖使用的短歌词处方。' },
@@ -47,13 +49,16 @@ export default async function AdminPage() {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const [users, posts, replies, checkIns, achievements, cultureItems, registrationPolicy, layoutConfig] = await Promise.all([
+  const [users, posts, replies, checkIns, achievements, cultureItems, todayBirthdays, birthdayGreetings, birthdayBadges, registrationPolicy, layoutConfig] = await Promise.all([
     prisma.user.count({ where: { isDeleted: false, status: 'ACTIVE' } }),
     prisma.post.count({ where: { isDeleted: false } }),
     prisma.reply.count({ where: { isDeleted: false } }),
     prisma.checkIn.count({ where: { createdAt: { gte: today } } }),
     prisma.achievement.count().catch(() => 0),
     prisma.cultureItem.count().catch(() => 0),
+    countTodayBirthdays(),
+    countBirthdayGreetingsSent(),
+    countBirthdayBadgesAwarded(),
     getRegistrationPolicy(),
     getPublishedPageLayoutConfig('admin-home'),
   ])
@@ -110,6 +115,9 @@ export default async function AdminPage() {
                     ['今日挂号', checkIns],
                     ['成就数量', achievements],
                     ['文化内容', cultureItems],
+                    ['今日生日', todayBirthdays],
+                    ['生日祝福', birthdayGreetings],
+                    ['生日徽章', birthdayBadges],
                   ].map(([label, value]) => (
                     <div key={label} className="layout-card rounded-2xl border border-sky-100 bg-white/80 shadow-sm">
                       <p className="text-sm font-bold text-slate-500">{label}</p>

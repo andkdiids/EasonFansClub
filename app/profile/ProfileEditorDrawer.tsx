@@ -15,6 +15,9 @@ type InitialProfile = {
   emailVerifiedAt: string | null
   phoneVerifiedAt: string | null
   wallVisibility: 'PUBLIC' | 'FRIENDS' | 'CLOSED'
+  birthMonth: number | null
+  birthDay: number | null
+  birthdaySetAt: string | null
 }
 
 export function ProfileEditorDrawer({

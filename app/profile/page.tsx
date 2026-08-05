@@ -5,6 +5,7 @@ import { ProfileRecentMessages } from '@/components/ProfileDeferredModules'
 import { ProfileHeader } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { getCurrentUser } from '@/lib/auth'
+import { ensureBirthdayBadge } from '@/lib/birthday'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
@@ -41,6 +42,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           phone: true,
           emailVerifiedAt: true,
           phoneVerifiedAt: true,
+          birthMonth: true,
+          birthDay: true,
+          birthdaySetAt: true,
           experience: true,
           createdAt: true,
           Profile: true,
@@ -59,6 +63,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   }
 
   if (!profile || !profile.Profile) redirect('/login')
+
+  // 访问本人资料时，若今天为生日则自动授予「生日纪念」徽章（幂等，失败不影响页面）。
+  await ensureBirthdayBadge(user.id).catch((error) => {
+    console.error('[profile.ensureBirthdayBadge]', error)
+  })
 
   const displayName = profile.Profile.displayName || profile.nickname
   const avatar = publicImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
@@ -92,6 +101,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     phone: profile.phone || '',
     emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
     phoneVerifiedAt: profile.phoneVerifiedAt ? profile.phoneVerifiedAt.toISOString() : null,
+    birthMonth: profile.birthMonth,
+    birthDay: profile.birthDay,
+    birthdaySetAt: profile.birthdaySetAt ? profile.birthdaySetAt.toISOString() : null,
     wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
   }
   const renderProfileActions = () => (

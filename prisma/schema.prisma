@@ -1996,6 +1996,9 @@ model User {
   status                                                 UserStatus                  @default(ACTIVE)
   verificationStatus                                     VerificationStatus          @default(NONE)
   nicknameChangedAt                                      DateTime?
+  birthMonth                                             Int?
+  birthDay                                               Int?
+  birthdaySetAt                                          DateTime?
   uid                                                    Int                         @unique @default(autoincrement())
   experience                                             Int                         @default(0)
   securityQuestionRecoveryEnabled                        Boolean                     @default(false)
@@ -2094,6 +2097,7 @@ model User {
   @@index([status])
   @@index([uid])
   @@index([username])
+  @@index([birthMonth, birthDay])
 }
 
 model UserAchievement {
@@ -2394,6 +2398,7 @@ enum NotificationType {
   FOLLOW
   BADGE
   FRIEND_REQUEST
+  BIRTHDAY_GREETING
 }
 
 enum PageLayoutRevisionSource {

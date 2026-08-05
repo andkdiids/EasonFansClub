@@ -33,6 +33,9 @@ export async function GET() {
       consecutiveDays: true,
       lastLoginAt: true,
       lastActiveAt: true,
+      birthMonth: true,
+      birthDay: true,
+      birthdaySetAt: true,
       Profile: true,
       UserBadge: {
         where: { isHidden: false },
@@ -82,6 +85,9 @@ export async function PATCH(request: Request) {
   const requestedWallVisibility = body?.wallVisibility === undefined ? undefined : sanitizeText(body.wallVisibility, 20)
   const wallVisibility = requestedWallVisibility as ProfileWallVisibility | undefined
 
+  const birthMonthRaw = body?.birthMonth === undefined || body?.birthMonth === null ? undefined : Number(body.birthMonth)
+  const birthDayRaw = body?.birthDay === undefined || body?.birthDay === null ? undefined : Number(body.birthDay)
+
   const data: {
     nickname?: string
     bio?: string
@@ -91,6 +97,9 @@ export async function PATCH(request: Request) {
     phone?: string | null
     emailVerifiedAt?: Date | null
     phoneVerifiedAt?: Date | null
+    birthMonth?: number
+    birthDay?: number
+    birthdaySetAt?: Date
   } = {}
 
   if (nickname) data.nickname = nickname
@@ -115,7 +124,7 @@ export async function PATCH(request: Request) {
 
   const current = await prisma.user.findUnique({
     where: { id: guard.user.id },
-    select: { nickname: true, nicknameChangedAt: true, email: true, phone: true },
+    select: { nickname: true, nicknameChangedAt: true, email: true, phone: true, birthMonth: true, birthDay: true, birthdaySetAt: true },
   })
 
   if (!current) return NextResponse.json({ message: '账号不存在' }, { status: 404 })
@@ -143,6 +152,26 @@ export async function PATCH(request: Request) {
   }
 
   const now = new Date()
+
+  // 生日：填写一次后不可修改。仅在尚未设置时接受首次填写。
+  const birthdayAlreadySet = Boolean(current?.birthdaySetAt)
+  if (!birthdayAlreadySet && birthMonthRaw !== undefined && birthDayRaw !== undefined) {
+    if (!Number.isInteger(birthMonthRaw) || birthMonthRaw < 1 || birthMonthRaw > 12) {
+      return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
+    }
+    if (!Number.isInteger(birthDayRaw) || birthDayRaw < 1 || birthDayRaw > 31) {
+      return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
+    }
+    // 校验该日期真实存在（含闰年 2 月 29 日，用闰年 2020 校验）。
+    const probe = new Date(2020, birthMonthRaw - 1, birthDayRaw)
+    if (probe.getMonth() !== birthMonthRaw - 1 || probe.getDate() !== birthDayRaw) {
+      return NextResponse.json({ message: '该日期不存在，请重新选择' }, { status: 400 })
+    }
+    data.birthMonth = birthMonthRaw
+    data.birthDay = birthDayRaw
+    data.birthdaySetAt = now
+  }
+
   const nicknameChanged = Boolean(nickname && current && nickname !== current.nickname)
   const canChangeNickname =
     !nicknameChanged ||
