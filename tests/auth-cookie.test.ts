@@ -7,6 +7,7 @@ import {
   getSessionCookieOptions,
   SESSION_MAX_AGE_SECONDS,
 } from '../lib/auth'
+import { POST as logoutPost } from '../app/api/auth/logout/route'
 
 function serializeSessionCookie(request: Request, value = 'session-token') {
   const response = NextResponse.json({ ok: true })
@@ -108,4 +109,46 @@ test('local development remains host-only, non-secure, and uses Lax SameSite', (
     assert.equal(options.path, '/')
     assert.equal(options.maxAge, SESSION_MAX_AGE_SECONDS)
   })
+})
+
+test('logout emits multiple Set-Cookie entries clearing domain, host-only and www legacy cookies', async () => {
+  const environment = process.env as Record<string, string | undefined>
+  const previousNodeEnv = environment.NODE_ENV
+  environment.NODE_ENV = 'production'
+  try {
+    const request = new Request('http://next-internal:3000/api/auth/logout', {
+      method: 'POST',
+      headers: {
+        'x-forwarded-host': 'ecfc.fans',
+        'x-forwarded-proto': 'https',
+        accept: 'application/json',
+      },
+    })
+    const response = await logoutPost(request)
+    const setCookies = response.headers.getSetCookie()
+
+    // 退出必须同时下发多条 Set-Cookie，清理三类同名 Cookie：
+    // 正常 Domain=.ecfc.fans、历史 host-only、历史 www.ecfc.fans
+    assert.ok(setCookies.length >= 3, `expected >=3 Set-Cookie on logout, got ${setCookies.length}: ${JSON.stringify(setCookies)}`)
+
+    const hasDomainEcfc = setCookies.some((c) => /Domain=\.ecfc\.fans(?:;|$)/.test(c))
+    const hasHostOnly = setCookies.some((c) => /^eason_fans_session=/.test(c) && !/Domain=/.test(c))
+    const hasWww = setCookies.some((c) => /Domain=www\.ecfc\.fans(?:;|$)/.test(c))
+
+    assert.ok(hasDomainEcfc, 'missing .ecfc.fans deletion')
+    assert.ok(hasHostOnly, 'missing host-only deletion')
+    assert.ok(hasWww, 'missing www.ecfc.fans deletion')
+
+    for (const cookie of setCookies) {
+      assert.match(cookie, /Path=\//)
+      assert.match(cookie, /Max-Age=0(?:;|$)/)
+      assert.match(cookie, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/)
+      assert.match(cookie, /HttpOnly/)
+      assert.match(cookie, /Secure/)
+      assert.match(cookie, /SameSite=None/)
+    }
+  } finally {
+    if (previousNodeEnv === undefined) delete environment.NODE_ENV
+    else environment.NODE_ENV = previousNodeEnv
+  }
 })

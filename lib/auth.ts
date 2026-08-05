@@ -9,7 +9,6 @@ import { isCompleteActiveUser } from '@/lib/users'
 export const authCookieName = 'eason_fans_session'
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 const authCookieDomain = '.ecfc.fans'
-const authCookieHost = authCookieDomain.slice(1)
 
 export type SessionUser = {
   id: string
@@ -180,9 +179,11 @@ export function getSessionCookieOptions(request?: Request) {
   // Cookie，导致需要重新登录。改用 SameSite=None 并配合 Secure（生产环境 secure 恒为 true），
   // 既保持跨浏览器/WebView 持久登录，又不降低安全性：HttpOnly 与 Secure 不变，仅放宽跨站发送策略。
   const sameSite = secure ? ('none' as const) : ('lax' as const)
-  const domain = hostname === authCookieHost || hostname.endsWith(`.${authCookieHost}`)
-    ? authCookieDomain
-    : undefined
+  // Domain 固定为 .ecfc.fans：历史上依据 request host 匹配判定 Domain，会在非 ecfc.fans 的 host 下
+  // 写入 host-only Cookie；它与 Domain=.ecfc.fans 的正常 Cookie 同名并存，退出时只删 domain 版、
+  // 残留 host-only 版，表现为「退出登录无效」。现改为：仅 localhost 保持 host-only（localhost 不允许
+  // 设置 Domain），其余 host（含 ecfc.fans / www.ecfc.fans / 生产任意 host）一律 .ecfc.fans，使 set/delete 永远一致。
+  const domain = localHost ? undefined : authCookieDomain
 
   return {
     httpOnly: true,
