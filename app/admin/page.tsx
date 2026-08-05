@@ -35,6 +35,7 @@ const adminModules = [
   { href: '/admin/visuals', title: '视觉管理 / Hero 管理', desc: '统一管理登录页、首页、活动、生日应援与 EasMusic 背景裁剪位置。' },
   { href: '/admin/layout-editor', title: '页面布局编辑器', desc: '调整首页、每日挂号和后台首页的模块顺序、宽度、间距和发布状态。' },
   { href: '/admin/growth', title: '成长系统管理', desc: '维护等级名称、升级经验和任务奖励基础配置。' },
+  { href: '/admin/birthday-messages', title: '生日祝福文案', desc: '维护生日纪念通知文案池，发送时随机选择启用的文案。' },
 ] as const
 
 export default async function AdminPage() {

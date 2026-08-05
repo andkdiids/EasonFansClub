@@ -9,11 +9,23 @@ import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 
 type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'messages' | 'feedback' | 'system'
 
+// 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
+const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
+
+function isSystemLikeNotification(item: UnifiedNotification) {
+  // 系统通知来源、无操作人，或显式的系统类型（含生日纪念）均视为系统类
+  return item.source === 'system' || item.actorUid === null || SYSTEM_LIKE_TYPES.has(item.type)
+}
+
+function isBirthdayNotification(item: UnifiedNotification) {
+  return item.type === 'BIRTHDAY_GREETING'
+}
+
 const categoryLabels: Record<NotificationCategory, string> = {
   all: '全部',
   reply: '回复',
   like: '点赞',
-  friend: '好友申请',
+  friend: '申请',
   messages: '私信',
   feedback: '反馈',
   system: '系统',
@@ -45,8 +57,10 @@ function getInitial(uid?: number | null) {
 
 export function NotificationsClient({
   initialNotifications,
+  siteLogoUrl,
 }: {
   initialNotifications: UnifiedNotification[]
+  siteLogoUrl?: string | null
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -236,30 +250,61 @@ export function NotificationsClient({
     const itemKey = `${item.source}:${item.id}`
     const category = (item.category || 'system') as NotificationCategory
     const target = getNotificationTarget(item)
+    const systemLike = isSystemLikeNotification(item)
+    const isBirthday = isBirthdayNotification(item)
+    // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框 + 标题加粗（保持扁平简洁 Windows 风格）
+    const emphasisClass = isBirthday ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
+    const titleClass = isBirthday
+      ? 'font-black text-slate-950'
+      : item.isRead
+        ? 'font-bold text-slate-700'
+        : 'font-black text-slate-950'
+    // 生日通知分类文字显示为「今日」（仅前端展示，不动数据库枚举）
+    const displayLabel = isBirthday ? '今日' : item.typeLabel
     const content = (
       <article
         className={`notification-list-item group relative overflow-hidden rounded-sm border p-4 transition sm:p-5 ${
           item.isRead ? 'is-read' : 'is-unread'
-        }`}
+        } ${emphasisClass}`}
       >
-        {!item.isRead ? <span className="absolute left-0 top-6 h-8 w-1.5 rounded-r-full bg-sky-500" /> : null}
+        {!item.isRead && !isBirthday ? <span className="absolute left-0 top-6 h-8 w-1.5 rounded-r-full bg-sky-500" /> : null}
         <div className="flex min-w-0 gap-3 sm:gap-4">
           <div className="relative shrink-0">
-            <span className="grid h-11 w-11 place-items-center overflow-hidden rounded-2xl bg-brand-950 text-sm font-black text-white sm:h-12 sm:w-12">
-              {item.actorAvatarUrl ? <img src={item.actorAvatarUrl} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
-            </span>
-            <span className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-sky-100 text-[11px] font-black text-brand-700">
-              {typeIcon[category] || 'i'}
-            </span>
+            {systemLike ? (
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-50 p-2 ring-1 ring-slate-200 sm:h-12 sm:w-12">
+                {siteLogoUrl ? (
+                  <img src={siteLogoUrl} alt="私家E院" className="h-full w-full object-contain" />
+                ) : (
+                  <span className="ecfc-brand-icon" aria-hidden>Ｅ</span>
+                )}
+              </span>
+            ) : (
+              <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl bg-brand-950 text-sm font-black text-white sm:h-12 sm:w-12">
+                {item.actorAvatarUrl ? <img src={item.actorAvatarUrl} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
+              </span>
+            )}
+            {!systemLike && !isBirthday ? (
+              <span className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-sky-100 text-[11px] font-black text-brand-700">
+                {typeIcon[category] || 'i'}
+              </span>
+            ) : null}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{item.typeLabel}</span>
-              {!item.isRead ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
-              {!target ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-500">暂无详情页</span> : null}
-              <time className="text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
-            </div>
-            <h2 className={`notification-title mt-2 break-words text-base sm:text-lg ${item.isRead ? 'font-bold text-slate-700' : 'font-black text-slate-950'}`}>{item.title}</h2>
+            {isBirthday || systemLike ? (
+              <div className="flex items-center gap-3">
+                <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
+                <time className="whitespace-nowrap text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
+                  {!item.isRead ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
+                </div>
+                <time className="shrink-0 text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
+              </div>
+            )}
+            <h2 className={`notification-title mt-2 break-words text-base sm:text-lg ${titleClass}`}>{item.title}</h2>
             {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
             {target ? <span className="mt-3 inline-flex text-xs font-black text-brand-700">查看详情 →</span> : null}
           </div>

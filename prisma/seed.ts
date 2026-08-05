@@ -108,6 +108,13 @@ async function main() {
     })
   }
 
+  // 默认生日祝福文案：生日当天随机池为空时的回退内容，确保开箱即用。
+  await prisma.birthdayMessage.upsert({
+    where: { id: 'default-birthday-greeting' },
+    update: { title: '🎂 生日纪念', content: '今天是你的生日，E院为你送上一份生日纪念。愿你继续听喜欢的歌，遇见喜欢的风景。', isActive: true },
+    create: { id: 'default-birthday-greeting', title: '🎂 生日纪念', content: '今天是你的生日，E院为你送上一份生日纪念。愿你继续听喜欢的歌，遇见喜欢的风景。', isActive: true },
+  })
+
   const tracks = [
     '富士山下',
     '十年',

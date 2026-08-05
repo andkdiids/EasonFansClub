@@ -12,6 +12,33 @@ const BIRTHDAY_GREETING_KEY_PREFIX = 'birthday-greeting'
 export const BIRTHDAY_BADGE_SLUG = 'birthday-commemorative'
 
 /**
+ * 从管理员维护的「启用」生日祝福文案池中随机选择一条。
+ * - 仅查询 isActive=true 的文案，停用的文案天然被排除在随机池之外。
+ * - 文案池为空，或数据库异常时，回退到硬编码的默认标题与内容（与下方常量一致）。
+ * - 不泄露用户名 / 生日日期 / 「祝 xxx 生日快乐」。
+ */
+async function pickBirthdayMessage(): Promise<{ title: string; content: string }> {
+  try {
+    const messages = await prisma.birthdayMessage.findMany({
+      where: { isActive: true },
+      select: { title: true, content: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+    })
+    if (messages.length > 0) {
+      const chosen = messages[Math.floor(Math.random() * messages.length)]
+      return {
+        title: chosen.title?.trim() || BIRTHDAY_GREETING_TITLE,
+        content: chosen.content?.trim() || BIRTHDAY_GREETING_CONTENT,
+      }
+    }
+  } catch (error) {
+    console.error('[birthday.pickMessage]', error)
+  }
+  return { title: BIRTHDAY_GREETING_TITLE, content: BIRTHDAY_GREETING_CONTENT }
+}
+
+/**
  * 统计今天过生日的有效用户数。
  * 仅使用 birthMonth / birthDay（月、日）匹配，不暴露任何具体用户。
  */
@@ -87,12 +114,14 @@ export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
     })
     if (existing) return false
 
+    const { title, content } = await pickBirthdayMessage()
+
     await prisma.notification.create({
       data: {
         recipientId: userId,
         type: 'BIRTHDAY_GREETING',
-        title: BIRTHDAY_GREETING_TITLE,
-        content: BIRTHDAY_GREETING_CONTENT,
+        title,
+        content,
         key,
         link: null,
         actorId: null,
