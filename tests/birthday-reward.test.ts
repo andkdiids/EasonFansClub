@@ -55,12 +55,16 @@ test('birthday greeting never leaks birthday date or user name (4: 不泄露生�
   // 创建通知时不写入生日月/日，也不带 actor（不泄露他人身份）
   assert.match(birthdayLib, /actorId:\s*null/)
   assert.match(birthdayLib, /link:\s*null/)
-  // 发送生日祝福的函数本体不得读取/写入生日月日（生日判断只发生在 grant/ensure 流程）
+  // 安全修复：发送前必须读取用户生日月/日并校验今天匹配，杜绝登录链路误发
   const greetFn = birthdayLib.slice(
     birthdayLib.indexOf('export async function sendBirthdayGreeting'),
     birthdayLib.indexOf('export async function grantTodayBirthdayRewards'),
   )
-  assert.doesNotMatch(greetFn, /birthMonth|birthDay/)
+  assert.match(greetFn, /prisma\.user\.findUnique/)
+  assert.match(greetFn, /user\?\.birthMonth == null \|\| user\?\.birthDay == null/)
+  assert.match(greetFn, /user\.birthMonth !== month \|\| user\.birthDay !== day/)
+  assert.match(greetFn, /getTodayMonthDay\(\)/)
+  assert.match(greetFn, /return false/)
 })
 
 test('multiple grant calls never duplicate UserBadge (5: 多次调用不重复 UserBadge)', () => {

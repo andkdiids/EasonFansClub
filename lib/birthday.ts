@@ -108,6 +108,18 @@ export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
   const year = getShanghaiYear()
   const key = `${BIRTHDAY_GREETING_KEY_PREFIX}-${year}`
   try {
+    // 前置强校验（安全修复）：仅当用户真正设置了生日且今天就是其生日，才允许发送。
+    // 根因：登录链路会无条件调用本函数（app/api/auth/login/route.ts），若此处不校验，
+    // 所有登录用户（含未设生日、非今日生日）都会收到生日通知。此处的校验对所有调用方兜底。
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { birthMonth: true, birthDay: true },
+    })
+    if (user?.birthMonth == null || user?.birthDay == null) return false
+
+    const { month, day } = getTodayMonthDay()
+    if (user.birthMonth !== month || user.birthDay !== day) return false
+
     const existing = await prisma.notification.findFirst({
       where: { recipientId: userId, type: 'BIRTHDAY_GREETING', key },
       select: { id: true },
