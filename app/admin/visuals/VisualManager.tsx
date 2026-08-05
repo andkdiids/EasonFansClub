@@ -104,7 +104,7 @@ export function VisualManager({ initialConfig }: Readonly<{ initialConfig: SiteA
           <aside className="space-y-4 border-l border-slate-200 pl-0 xl:pl-5">
             <label className="block text-xs font-black text-slate-500">图片 URL<input value={visual.imageUrl} onChange={(event) => updateVisual(key, { imageUrl: event.target.value })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://..." /></label>
             <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:bg-slate-50">{uploadingKey === key ? '上传中…' : '上传 JPG / PNG / WebP'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => upload(key, event)} className="hidden" /></label>
-            <p className="text-xs font-semibold leading-6 text-slate-400">沿用站点 Supabase Storage 上传接口。焦点字段已在配置中预留，当前版本以桌面/移动独立 position 为准。</p>
+            <p className="text-xs font-semibold leading-6 text-slate-400">图片会经腾讯云 COS 和 WebP 处理后再保存。焦点字段已在配置中预留，当前版本以桌面/移动独立 position 为准。</p>
             <button type="button" disabled={savingKey === key} onClick={() => save(key)} className="w-full bg-brand-950 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{savingKey === key ? '保存中…' : '保存当前位置'}</button>
           </aside>
         </div>

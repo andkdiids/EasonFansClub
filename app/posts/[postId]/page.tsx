@@ -57,8 +57,8 @@ function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR
 }
 
 function loadPost(postId: string, userId?: string) {
-  return prisma.post.findUnique({
-    where: { id: postId },
+  return prisma.post.findFirst({
+    where: { id: postId, moderationStatus: 'APPROVED' },
     include: {
       User: {
         select: {

@@ -28,7 +28,7 @@ export async function GET(request: Request, context: RouteContext) {
     const posts = await safeDb(
       'userModules.posts',
       prisma.post.findMany({
-        where: { authorId: target.id, isDeleted: false, status: 'PUBLISHED' },
+        where: { authorId: target.id, isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' },
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: {
@@ -51,7 +51,7 @@ export async function GET(request: Request, context: RouteContext) {
     const replies = await safeDb(
       'userModules.replies',
       prisma.reply.findMany({
-        where: { authorId: target.id, isDeleted: false, Post: { isDeleted: false, status: 'PUBLISHED' } },
+        where: { authorId: target.id, isDeleted: false, Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' } },
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: { id: true, content: true, createdAt: true, Post: { select: { id: true, title: true } } },
@@ -113,7 +113,7 @@ export async function GET(request: Request, context: RouteContext) {
       prisma.postFavorite.findMany({
         where: {
           userId: target.id,
-          Post: { isDeleted: false, status: 'PUBLISHED', User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
+          Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED', User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
         },
         orderBy: { createdAt: 'desc' },
         take: 20,

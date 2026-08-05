@@ -68,6 +68,7 @@ export async function POST(request: Request, { params }: Params) {
       isDeleted: false,
       isLocked: false,
       status: 'PUBLISHED',
+      moderationStatus: 'APPROVED',
       Board: { isActive: true },
     },
     select: { id: true, authorId: true },

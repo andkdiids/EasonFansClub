@@ -52,8 +52,8 @@ export async function GET(request: Request) {
       select: {
         id: true, uid: true, nickname: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
         Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
-        _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED' } } } },
-        Post: { where: { isDeleted: false, status: 'PUBLISHED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },
+        _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' } } } },
+        Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },
       },
       take: 10,
     }),
@@ -61,6 +61,7 @@ export async function GET(request: Request) {
       where: {
         isDeleted: false,
         status: 'PUBLISHED',
+        moderationStatus: 'APPROVED',
         OR: [
           { title: { contains: keyword } },
           { content: { contains: keyword } },

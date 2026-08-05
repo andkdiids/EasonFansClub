@@ -13,7 +13,7 @@ export async function POST(_request: Request, { params }: Params) {
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({
-      where: { id: postId, isDeleted: false, status: 'PUBLISHED' },
+      where: { id: postId, isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' },
       select: { id: true, authorId: true, likeCount: true },
     })
     if (!post) return null
@@ -60,7 +60,7 @@ export async function DELETE(_request: Request, { params }: Params) {
 
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {
-    const post = await tx.post.findUnique({ where: { id: postId }, select: { likeCount: true } })
+    const post = await tx.post.findFirst({ where: { id: postId, moderationStatus: 'APPROVED' }, select: { likeCount: true } })
     if (!post) return null
 
     await tx.like.deleteMany({ where: { postId, userId: user.id } })

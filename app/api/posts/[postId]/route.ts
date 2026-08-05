@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole, requireUser } from '@/lib/security'
 
@@ -13,6 +14,7 @@ export async function GET(_request: Request, { params }: Params) {
       id: postId,
       isDeleted: false,
       status: 'PUBLISHED',
+      moderationStatus: 'APPROVED',
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     include: {
@@ -90,7 +92,8 @@ export async function PATCH(request: Request, { params }: Params) {
   const isAdmin = isAdminRole(guard.user.role)
   const isOwner = existing.authorId === guard.user.id
   const changesModeration = data.isPinned !== undefined || data.isFeatured !== undefined
-  if (changesModeration && !isAdmin) {
+  const canManagePosts = changesModeration && await hasAdminPermission(guard.user, 'post_manage')
+  if (changesModeration && !canManagePosts) {
     return NextResponse.json({ message: '只有管理员可以置顶或精选帖子' }, { status: 403 })
   }
   if (data.isDeleted !== undefined) {

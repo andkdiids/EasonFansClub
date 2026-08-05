@@ -189,6 +189,48 @@ model Banner {
   @@index([isActive, sortOrder])
 }
 
+model TodayEvent {
+  id             String          @id @default(cuid())
+  date           DateTime        @db.Date
+  month          Int
+  day            Int
+  type           TodayEventType
+  title          String
+  content        String          @db.Text
+  imageUrl       String?
+  source         TodayEventSource @default(ADMIN)
+  reference      String?
+  status         TodayEventStatus @default(PENDING)
+  rejectionReason String?        @db.Text
+  reviewedAt     DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  submittedById  String?
+  reviewedById   String?
+  SubmittedBy    User?           @relation("TodayEventSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  ReviewedBy     User?           @relation("TodayEventReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([month, day, status])
+  @@index([status, createdAt])
+  @@index([submittedById, createdAt])
+}
+
+model UserDailyMusicRecommendation {
+  id            String     @id @default(cuid())
+  recommendDate String
+  anonymousId   String?
+  createdAt     DateTime   @default(now())
+  userId        String?
+  songId        String
+  User          User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicSong     MusicSong  @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, recommendDate])
+  @@unique([anonymousId, recommendDate])
+  @@index([recommendDate])
+  @@index([songId, recommendDate])
+}
+
 model Block {
   id                         String   @id @default(cuid())
   reason                     String?
@@ -1268,6 +1310,7 @@ model MusicSong {
   description             String?
   GuessSongQuestion       GuessSongQuestion[]
   MusicConcertSetlistItem MusicConcertSetlistItem[]
+  UserDailyMusicRecommendation UserDailyMusicRecommendation[]
   MusicAlbum              MusicAlbum                @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, title])
@@ -1585,6 +1628,10 @@ model Post {
   readUserCount Int             @default(0)
   shareCount    Int             @default(0)
   status        PostStatus      @default(PUBLISHED)
+  moderationStatus PostModerationStatus @default(APPROVED)
+  reviewedAt    DateTime?
+  reviewedById  String?
+  rejectionReason String?       @db.Text
   summary       String?
   AdminAction   AdminAction[]
   Like          Like[]
@@ -1611,6 +1658,7 @@ model Post {
   @@index([likeCount])
   @@index([replyCount])
   @@index([status])
+  @@index([moderationStatus, createdAt])
 }
 
 model PostFavorite {
@@ -2023,6 +2071,9 @@ model User {
   SearchHistory                                          SearchHistory[]
   SystemNotification                                     SystemNotification[]
   SystemNotificationRead                                 SystemNotificationRead[]
+  TodayEventSubmitted                                    TodayEvent[]              @relation("TodayEventSubmittedBy")
+  TodayEventReviewed                                     TodayEvent[]              @relation("TodayEventReviewedBy")
+  UserDailyMusicRecommendation                           UserDailyMusicRecommendation[]
   UserAchievement                                        UserAchievement[]
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
@@ -2150,7 +2201,9 @@ enum ActivityType {
 }
 
 enum AdminActionType {
+  APPROVE_POST
   DELETE_POST
+  REJECT_POST
   RESTORE_POST
   PIN_POST
   UNPIN_POST
@@ -2376,6 +2429,12 @@ enum PostContentType {
   ARTICLE
 }
 
+enum PostModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PostStatus {
   DRAFT
   PUBLISHED
@@ -2426,6 +2485,31 @@ enum SystemNotificationType {
   ACTIVITY
   MAINTENANCE
   SECURITY
+}
+
+enum TodayEventStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TodayEventSource {
+  AUTO
+  ADMIN
+}
+
+enum TodayEventType {
+  ALBUM
+  SONG
+  CAREER
+  CUSTOM
+  BIRTHDAY
+  DEBUT
+  ROOKIE_CONTEST
+  ALBUM_RELEASE
+  CONCERT
+  AWARD
+  OTHER
 }
 
 enum UserRole {

@@ -1,6 +1,13 @@
 import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
+import { publicImageUrl } from '@/lib/images'
+import { getGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
+import { resolveConcertPoster } from '@/lib/music-concert-poster'
+import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
+import { getTodayMonthDay } from '@/lib/today'
+import { getTodayEventRecords } from '@/lib/today-events'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -42,6 +49,8 @@ async function getHomePostsUncached() {
   const baseWhere = {
     isDeleted: false,
     status: 'PUBLISHED' as const,
+    moderationStatus: 'APPROVED' as const,
+    OR: [{ isFeatured: true }, { isPinned: true }],
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }
   const select = {
@@ -70,18 +79,18 @@ async function getHomePostsUncached() {
     'Post.findMany home.posts',
     prisma.post.findMany({
       where: baseWhere,
-      orderBy: [{ isFeatured: 'desc' }, { likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
       take: 18,
       select,
     }).then((candidates) => {
       const selected = new Map<string, (typeof candidates)[number]>()
       candidates
-        .filter((post) => post.isFeatured)
+        .filter((post) => post.isFeatured || post.isPinned)
         .slice(0, 4)
         .forEach((post) => selected.set(post.id, post))
 
       candidates.forEach((post) => {
-        if (selected.size < 4) selected.set(post.id, post)
+        if (selected.size < 4 && (post.isFeatured || post.isPinned)) selected.set(post.id, post)
       })
 
       return Array.from(selected.values()).slice(0, 4)
@@ -153,6 +162,40 @@ export async function getHomeActivities() {
   ))
 }
 
+export async function getHomeConcerts() {
+  return cachedHomeData('home.concerts', () => safeDb(
+    'MusicConcert.findMany home.concerts',
+    prisma.musicConcert.findMany({
+      where: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
+      orderBy: [{ concertDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      take: 4,
+      select: {
+        id: true,
+        title: true,
+        concertDate: true,
+        city: true,
+        venue: true,
+        posterUrl: true,
+        MusicTour: { select: { name: true, posterUrl: true } },
+      },
+    }).then((concerts) => concerts.map((concert) => {
+      const posterUrl = resolveConcertPoster({ posterUrl: concert.posterUrl, tourPosterUrl: concert.MusicTour.posterUrl }).resolvedPosterUrl
+      return {
+        id: concert.id,
+        title: concert.title?.trim() || concert.city,
+        concertDate: concert.concertDate.toISOString(),
+        city: concert.city,
+        venue: concert.venue,
+        tourName: concert.MusicTour.name,
+        posterUrl: publicImageUrl(posterUrl),
+        href: buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate),
+      }
+    })),
+    [],
+    5000,
+  ))
+}
+
 export async function getHomeTracks() {
   return cachedHomeData('home.tracks', () => safeDb(
     'MusicTrack.findMany home.music',
@@ -168,17 +211,59 @@ export async function getHomeTracks() {
 }
 
 export async function getHomeAlbums() {
-  return cachedHomeData('home.albums', () => safeDb(
+  const dateKey = getShanghaiDateKey(new Date())
+  return cachedHomeData(`home.albums:${dateKey}`, () => safeDb(
     'MusicAlbum.findMany home.albums',
     prisma.musicAlbum.findMany({
       where: { status: 'PUBLISHED', coverUrl: { not: null } },
-      orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }],
-      take: 5,
       select: { id: true, name: true, releaseYear: true, coverUrl: true },
-    }),
+    }).then((albums) => albums.sort((a, b) => dailyAlbumRank(a.id) - dailyAlbumRank(b.id)).slice(0, 6)),
     [],
     5000,
   ))
+}
+
+function dailyAlbumRank(id: string) {
+  const seed = getShanghaiDateKey(new Date())
+  let hash = 2166136261
+  for (const character of `${seed}:${id}`) {
+    hash ^= character.charCodeAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+export async function getHomeDailyMusicRecommendation(userId?: string, anonymousId?: string) {
+  const recommendation = await safeDb('UserDailyMusicRecommendation home.dailyMusic', getDailyMusicRecommendation(userId, anonymousId), null, 8000)
+  if (recommendation) return recommendation
+  return safeDb('MusicSong.findMany home.dailyMusic.fallback', getFallbackDailyMusicRecommendation(userId, anonymousId), null, 8000)
+}
+
+export async function getHomeTodayEvents() {
+  const { month, day } = getTodayMonthDay()
+  return cachedHomeData(`home.today:${month}-${day}`, () => getTodayEventRecords())
+}
+
+export async function getHomeEntertainmentRanking(userId?: string) {
+  const ranking = await safeDb(
+    'GuessSongLeaderboard home.ranking',
+    getGuessSongLeaderboard({ userId: userId || '', periodType: 'YEAR', mode: 'ENDLESS' }),
+    null,
+    8000,
+  )
+  if (!ranking) return null
+  return { periodType: ranking.periodType, periodKey: ranking.periodKey, mode: ranking.mode, rows: ranking.rows.slice(0, 5), currentUser: userId ? ranking.currentUser : null }
+}
+
+export async function getHomeSiteStats() {
+  const dateKey = getShanghaiDateKey(new Date())
+  const { month, day } = getTodayMonthDay()
+  const [memberCount, todayCheckIns, todayBirthdays] = await Promise.all([
+    safeDb('User.count home.siteStats.members', prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false } }), 0, 5000),
+    safeDb('CheckIn.count home.siteStats.today', prisma.checkIn.count({ where: { checkinDateKey: dateKey } }), 0, 5000),
+    safeDb('TodayEvent.count home.siteStats.birthdays', prisma.todayEvent.count({ where: { month, day, type: 'BIRTHDAY', status: 'APPROVED' } }), 0, 5000),
+  ])
+  return { memberCount, todayCheckIns, todayBirthdays }
 }
 
 export async function getHomeUserStats(userId?: string) {

@@ -73,6 +73,7 @@ export const getTrendingPosts = unstable_cache(
       WHERE
         p.createdAt >= ${cutoff}
         AND p.status = 'PUBLISHED'
+        AND p.moderationStatus = 'APPROVED'
         AND p.isDeleted = false
         AND u.status = 'ACTIVE'
         AND u.isDeleted = false

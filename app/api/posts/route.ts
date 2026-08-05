@@ -35,6 +35,7 @@ export async function GET(request: Request) {
       where: {
         isDeleted: false,
         status: 'PUBLISHED',
+        moderationStatus: 'APPROVED',
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
@@ -127,6 +128,8 @@ export async function POST(request: Request) {
       )
     }
 
+    const canPublishImmediately = await hasAdminPermission(user, 'post_manage')
+    const moderationStatus = canPublishImmediately ? 'APPROVED' as const : 'PENDING' as const
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
       await tx.user.findFirstOrThrow({
@@ -141,18 +144,43 @@ export async function POST(request: Request) {
           content: input.content,
           summary: createSummary(input.content),
           status: 'PUBLISHED',
+          moderationStatus,
         },
-        select: { id: true },
+        select: { id: true, moderationStatus: true },
       })
       if (imageUrls.length) {
         await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => ({ postId: post.id, type: 'IMAGE', url, sortOrder })) })
       }
-      await tx.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${post.id}` } })
+      if (moderationStatus === 'APPROVED') {
+        await tx.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${post.id}` } })
+      }
 
-      await tx.board.update({
-        where: { id: input.boardId },
-        data: { postCount: { increment: 1 } },
-      })
+      if (moderationStatus === 'PENDING') {
+        const admins = await tx.user.findMany({
+          where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+          select: { id: true },
+        })
+        if (admins.length) {
+          await tx.notification.createMany({
+            data: admins.map((admin) => ({
+              recipientId: admin.id,
+              type: 'ADMIN' as const,
+              title: '新帖子待审核',
+              content: input.title,
+              link: '/admin/posts/review',
+              key: `post-review:${post.id}`,
+            })),
+            skipDuplicates: true,
+          })
+        }
+      }
+
+      if (moderationStatus === 'APPROVED') {
+        await tx.board.update({
+          where: { id: input.boardId },
+          data: { postCount: { increment: 1 } },
+        })
+      }
 
       await awardExperience(tx, {
         userId: user.id,
@@ -184,6 +212,8 @@ export async function POST(request: Request) {
       post: { ...result.post, detailUrl },
       detailUrl,
       rewardPoints: result.rewardPoints,
+      moderationStatus,
+      message: moderationStatus === 'PENDING' ? '帖子已提交，等待管理员审核后公开' : '帖子发布成功',
     }, { status: 201 })
   } catch (error) {
     console.error('[post:create:error]', { userId: user.id, boardId: input.boardId, error })

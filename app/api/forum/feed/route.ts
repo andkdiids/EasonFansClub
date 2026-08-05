@@ -30,6 +30,7 @@ export async function GET(request: Request) {
   const where: Prisma.PostWhereInput = {
     isDeleted: false,
     status: 'PUBLISHED',
+    moderationStatus: 'APPROVED',
     User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     ...(selectedBoard ? { boardId: selectedBoard.id } : { Board: { isActive: true } }),
     ...(sort === 'featured' ? { isFeatured: true } : {}),

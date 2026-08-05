@@ -11,7 +11,7 @@ export async function POST(_request: Request, context: RouteContext) {
   const { postId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({
-      where: { id: postId, isDeleted: false, status: 'PUBLISHED' },
+      where: { id: postId, isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' },
       select: { id: true },
     })
     if (!post) return null
@@ -42,7 +42,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const { postId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({
-      where: { id: postId, isDeleted: false },
+      where: { id: postId, isDeleted: false, moderationStatus: 'APPROVED' },
       select: { id: true },
     })
     if (!post) return null

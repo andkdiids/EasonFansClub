@@ -12,6 +12,7 @@ export const primaryNavigation: AppNavigationItem[] = [
   { href: '/forum', label: 'E院广场', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
   { href: '/music', label: 'EasMusic', icon: 'music', activePrefixes: ['/music'], mobile: true },
   { href: '/activities', label: '活动中心', icon: 'calendar', activePrefixes: ['/activities'] },
+  { href: '/today', label: '今日', icon: 'archive', activePrefixes: ['/today'] },
   { href: '/games', label: '娱乐天空', icon: 'star', activePrefixes: ['/games', '/entertainment'] },
   { href: '/notifications', label: '消息', icon: 'bell', activePrefixes: ['/notifications'], showsUnread: true },
   { href: '/profile', label: '我的', icon: 'user', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },

@@ -18,6 +18,7 @@ const centerItems = [
   { href: '/checkin', label: '每日挂号', icon: 'check' as const },
   { href: '/games', label: '娱乐天空', icon: 'star' as const },
   { href: '/activities', label: '活动中心', icon: 'calendar' as const },
+  { href: '/today', label: '今日', icon: 'archive' as const },
   { href: '/notifications', label: '通知中心', icon: 'bell' as const, showsUnread: true },
   { href: '/friends/activity', label: '好友动态', icon: 'friends' as const },
   { href: '/trending', label: '热门帖子', icon: 'chart' as const },

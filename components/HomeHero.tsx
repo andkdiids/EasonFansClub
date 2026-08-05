@@ -1,45 +1,44 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { HeroBackground } from '@/components/HeroBackground'
+import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
 import type { SiteHeroSlide, SiteHeroStyle } from '@/lib/site-config'
 
-const titleClasses: Record<SiteHeroStyle['titleSize'], string> = {
-  small: 'text-3xl sm:text-4xl', medium: 'text-4xl sm:text-5xl', large: 'text-4xl sm:text-5xl md:text-6xl', 'extra-large': 'text-5xl sm:text-6xl md:text-7xl',
-}
-const descriptionClasses: Record<SiteHeroStyle['descriptionSize'], string> = {
-  small: 'text-sm leading-6', medium: 'text-base leading-7 sm:text-lg sm:leading-8', large: 'text-lg leading-8 sm:text-xl sm:leading-9',
-}
-const buttonClasses: Record<SiteHeroStyle['buttonSize'], string> = {
-  small: 'px-5 py-2.5 text-xs', medium: 'px-6 py-3 text-sm sm:px-7 sm:py-3.5', large: 'px-8 py-4 text-base',
-}
-const heightClasses: Record<SiteHeroStyle['height'], string> = {
-  compact: 'home-hero-compact px-6 py-8 sm:px-10', standard: 'home-hero-standard px-7 py-11 sm:px-12 sm:py-14', spacious: 'home-hero-spacious px-7 py-14 sm:px-14 sm:py-20',
-}
-const radiusClasses: Record<SiteHeroStyle['radius'], string> = {
-  small: 'rounded-[20px]', medium: 'rounded-[28px]', large: 'rounded-[36px]',
-}
+const defaultHeroTitle = '\u542c\u89c1 Eason\uff0c\u4e5f\u542c\u89c1\u81ea\u5df1'
+const defaultHeroButton = '\u6d4f\u89c8\u4eca\u65e5\u5185\u5bb9'
 
 export function HomeHero({
   slides,
   siteName,
   buttonColor,
   styleConfig,
+  fallbackImageUrl,
+  visual,
+  defaultTitle = defaultHeroTitle,
+  defaultSubtitle = 'NOW IS THE ONLY REALITY.',
 }: {
   slides: SiteHeroSlide[]
   siteName: string
   buttonColor: string
   styleConfig: SiteHeroStyle
+  fallbackImageUrl?: string | null
+  visual?: SiteHeroVisualConfig | null
+  defaultTitle?: string
+  defaultSubtitle?: string
 }) {
   const visibleSlides = useMemo(
     () => slides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder),
     [slides],
   )
   const [index, setIndex] = useState(0)
-  const active = visibleSlides[index] || visibleSlides[0]
-  const title = active?.title || '听见 Eason，也听见自己。'
-  const subtitle = active?.subtitle || '帖子、留言、音乐，慢慢说。'
-  const buttonText = active?.buttonText || '开始挂号'
+  const pointerStartX = useRef<number | null>(null)
+  const active = visibleSlides[index] || visibleSlides[0] || null
+
+  useEffect(() => {
+    setIndex((current) => Math.min(current, Math.max(visibleSlides.length - 1, 0)))
+  }, [visibleSlides.length])
 
   useEffect(() => {
     if (visibleSlides.length <= 1) return
@@ -49,7 +48,10 @@ export function HomeHero({
     return () => window.clearInterval(timer)
   }, [visibleSlides.length])
 
-  if (!active) return null
+  const title = active?.title || defaultTitle
+  const subtitle = active?.subtitle || defaultSubtitle
+  const buttonText = active?.buttonText || defaultHeroButton
+
   function previous() {
     setIndex((current) => (current - 1 + visibleSlides.length) % visibleSlides.length)
   }
@@ -58,38 +60,70 @@ export function HomeHero({
     setIndex((current) => (current + 1) % visibleSlides.length)
   }
 
+  function handlePointerDown(event: PointerEvent<HTMLElement>) {
+    pointerStartX.current = event.clientX
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLElement>) {
+    const startX = pointerStartX.current
+    pointerStartX.current = null
+    if (startX === null || visibleSlides.length <= 1) return
+    const distance = event.clientX - startX
+    if (Math.abs(distance) < 42) return
+    if (distance < 0) next()
+    else previous()
+  }
+
+  const backgroundVisual = active?.imageUrl
+    ? ({
+        ...visual,
+        key: 'home',
+        title: visual?.title || 'Home Hero',
+          imageUrl: active.imageUrl,
+        desktopPositionX: visual?.desktopPositionX ?? 50,
+        desktopPositionY: visual?.desktopPositionY ?? 50,
+        mobilePositionX: visual?.mobilePositionX ?? 50,
+        mobilePositionY: visual?.mobilePositionY ?? 50,
+        enabled: true,
+        focusPoint: visual?.focusPoint ?? null,
+        updatedAt: visual?.updatedAt || '',
+      } satisfies SiteHeroVisualConfig)
+    : visual
+  const hasBackground = Boolean((backgroundVisual?.enabled ?? true) && (backgroundVisual?.imageUrl || fallbackImageUrl))
+
   return (
-    <section data-hero-height={styleConfig.height} className={`home-hero ${radiusClasses[styleConfig.radius]} relative overflow-hidden bg-gradient-to-br from-sky-100 via-white to-cyan-50 shadow-2xl shadow-sky-900/10`}>
-      {active.imageUrl ? (
-        <img src={active.imageUrl} alt={title} className="absolute inset-0 h-full w-full object-cover" />
-      ) : (
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_35%,rgba(56,189,248,0.32),transparent_34%),linear-gradient(135deg,#eff9ff,#ffffff_48%,#dff5ff)]" />
-      )}
-      <div className="absolute inset-0 bg-gradient-to-r from-white/92 via-white/62 to-white/10" />
-      <div className={`${heightClasses[styleConfig.height]} relative z-10 flex h-full max-w-3xl flex-col justify-center pr-20 sm:pr-28`}>
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-sky-700 sm:text-sm sm:tracking-[0.28em]">{siteName}</p>
-        <h1 className={`${titleClasses[styleConfig.titleSize]} mt-3 text-balance font-black leading-tight text-slate-950 sm:mt-4`}>
-          {title}
-        </h1>
-        <p className={`${descriptionClasses[styleConfig.descriptionSize]} mt-3 max-w-xl text-balance font-bold text-slate-600 sm:mt-4`}>{subtitle}</p>
-        <div className="mt-6 sm:mt-7">
-          <Link
-            href={active.href || '/checkin'}
-            className={`${buttonClasses[styleConfig.buttonSize]} inline-flex rounded-full font-black text-white shadow-xl shadow-sky-900/10 transition hover:-translate-y-0.5`}
-            style={{ backgroundColor: buttonColor }}
-          >
-            {buttonText}
-          </Link>
-        </div>
+    <section
+      data-hero-height={styleConfig.height}
+      data-hero-title-size={styleConfig.titleSize}
+      aria-roledescription="carousel"
+      aria-label="Home Hero carousel"
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => { pointerStartX.current = null }}
+      className="community-hero"
+      style={{ touchAction: 'pan-y' }}
+    >
+      <HeroBackground visual={backgroundVisual} fallbackImageUrl={fallbackImageUrl} priority />
+      {!hasBackground ? <div className="community-hero-fallback" /> : null}
+      <div className="community-hero-overlay" />
+      <div aria-live="polite" className="community-hero-copy">
+        <p>WELCOME HOME</p>
+        <h1>{siteName}</h1>
+        <h2>{title}</h2>
+        <p className="hero-slogan">{subtitle}</p>
+        <em>C{String.fromCharCode(0x2019)}mon in~</em>
+        <Link
+          href={active?.href || '#community-content'}
+          className="hero-primary-button"
+          style={{ backgroundColor: buttonColor }}
+        >
+          {buttonText} <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
+        </Link>
       </div>
       {visibleSlides.length > 1 ? (
-        <div className="absolute bottom-5 right-5 z-20 flex gap-2 sm:bottom-8 sm:right-8 sm:gap-3">
-          <button type="button" aria-label="上一张" onClick={previous} className="grid h-10 w-10 place-items-center rounded-full bg-white/80 text-xl font-black text-brand-950 shadow-sm backdrop-blur sm:h-12 sm:w-12 sm:text-2xl">
-            &lt;
-          </button>
-          <button type="button" aria-label="下一张" onClick={next} className="grid h-10 w-10 place-items-center rounded-full bg-white/80 text-xl font-black text-brand-950 shadow-sm backdrop-blur sm:h-12 sm:w-12 sm:text-2xl">
-            &gt;
-          </button>
+        <div className="absolute bottom-5 right-5 z-10 flex gap-2 sm:bottom-8 sm:right-8" aria-label="Hero controls">
+          <button type="button" aria-label="Previous Hero" onClick={previous} className="hero-icon-button">{String.fromCharCode(0x2039)}</button>
+          <button type="button" aria-label="Next Hero" onClick={next} className="hero-icon-button">{String.fromCharCode(0x203a)}</button>
         </div>
       ) : null}
     </section>

@@ -31,9 +31,10 @@ export async function GET(request: Request, context: RouteContext) {
     return null
   })
 
+  const previewOnly = new URL(request.url).searchParams.get('preview') === '1'
   let location = song.previewUrl
   let isFullPlayback = false
-  if (canPlayFullMusic(user) && song.sourceAudioPath) {
+  if (!previewOnly && canPlayFullMusic(user) && song.sourceAudioPath) {
     try {
       // Check the private object before signing it. A missing full source must
       // fall back to the existing public preview instead of returning a dead
