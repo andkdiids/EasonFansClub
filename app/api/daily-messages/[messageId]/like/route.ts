@@ -32,7 +32,7 @@ export async function POST(_request: Request, context: RouteContext) {
             type: 'LIKE',
             title: '你的每日留言收到点赞',
             content: `${guard.user.nickname} 点赞了你的挂号留言`,
-            link: '/checkin',
+            link: `/checkin?message=${messageId}`,
           },
         })
       }

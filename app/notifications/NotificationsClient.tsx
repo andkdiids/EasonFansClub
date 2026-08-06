@@ -22,6 +22,41 @@ function isBirthdayNotification(item: UnifiedNotification) {
   return item.type === 'BIRTHDAY_GREETING'
 }
 
+/**
+ * 按通知类型提供「智能入口」：不同通知给出不同快捷入口与文案，而不是都进同一页面
+ * （账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动 等）。
+ * - 返回 { label, href } 时渲染为跳转链接；
+ * - 返回 { label, action: 'dock' } 时渲染为打开好友/私信 Dock 的按钮；
+ * - 返回 null 时该通知不展示智能入口（如无任何跳转目标的系统公告，仅可标记已读 / 清除）。
+ */
+function getSmartEntry(item: UnifiedNotification): { label: string; href?: string; action?: 'dock' } | null {
+  const target = getNotificationTarget(item)
+  switch (item.type) {
+    case 'LIKE':
+      return target ? { label: '查看点赞', href: target } : null
+    case 'REPLY':
+      return target ? { label: '查看回复', href: target } : null
+    case 'FRIEND_REQUEST':
+    case 'FOLLOW':
+      return { label: '去好友', href: '/friends#received-requests' }
+    case 'MESSAGE':
+      return { label: '打开私信', action: 'dock' }
+    case 'ADMIN':
+      return target ? { label: '查看帖子', href: target } : null
+    case 'BADGE':
+      return { label: '查看徽章', href: '/profile/badges' }
+    case 'BIRTHDAY_GREETING':
+      return { label: '编辑资料', href: '/profile/edit' }
+    case 'SYSTEM':
+    case 'ANNOUNCEMENT':
+    case 'MAINTENANCE':
+    case 'SECURITY':
+      return target ? { label: '前往详情', href: target } : null
+    default:
+      return target ? { label: '查看详情', href: target } : null
+  }
+}
+
 const categoryLabels: Record<NotificationCategory, string> = {
   all: '全部',
   reply: '回复',
@@ -230,18 +265,23 @@ export function NotificationsClient({
     }
   }
 
-  async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
-    event.preventDefault()
+  // 进入通知目标页：标记已读 + 记录返回状态 + 跳转。返回 false 表示该通知无跳转目标（仅标记已读）。
+  function navigateToNotification(item: UnifiedNotification): boolean {
     const target = getNotificationTarget(item)
-    if (!target) return
-    // The optimistic update happens synchronously; navigation does not wait
-    // for a refresh (or the API round-trip) to make the card look read.
+    // 乐观更新同步发生，不等待刷新或接口往返，卡片立即呈现已读态。
     void markRead(item)
+    if (!target) return false
     window.sessionStorage.setItem('notifications:return-state', JSON.stringify({
       category: activeCategory,
       scrollY: window.scrollY,
     }))
     router.push(target)
+    return true
+  }
+
+  async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
+    event.preventDefault()
+    navigateToNotification(item)
   }
 
   async function sendDirectReply(item: UnifiedNotification) {
@@ -349,19 +389,36 @@ export function NotificationsClient({
     const target = getNotificationTarget(item)
     const systemLike = isSystemLikeNotification(item)
     const isBirthday = isBirthdayNotification(item)
-    // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框 + 标题加粗（保持扁平简洁 Windows 风格）
+    const smartEntry = getSmartEntry(item)
+    // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框（保持扁平简洁 Windows 风格）
     const emphasisClass = isBirthday && !item.isRead ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
     const titleClass = item.isRead ? 'font-bold text-slate-700' : 'font-black text-slate-950'
     // 生日通知分类文字显示为「今日」（仅前端展示，不动数据库枚举）
     const displayLabel = isBirthday ? '今日' : item.typeLabel
-    const content = (
-      <article
-        className={`notification-list-item group relative overflow-hidden rounded-sm border p-4 transition sm:p-5 ${
-          item.isRead ? 'is-read' : 'is-unread'
-        } ${emphasisClass}`}
-      >
-        {!item.isRead && !isBirthday ? <span className="absolute left-0 top-6 h-8 w-1.5 rounded-r-full bg-sky-500" /> : null}
-        <div className="flex min-w-0 gap-3 sm:gap-4">
+
+    // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
+    function handleCardActivate() {
+      if (target) navigateToNotification(item)
+      else void markRead(item)
+    }
+
+    return (
+      <div key={itemKey} id={`notification-${item.id}`} className="relative scroll-mt-20">
+        <article
+          role={target ? 'link' : 'button'}
+          tabIndex={0}
+          onClick={handleCardActivate}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              handleCardActivate()
+            }
+          }}
+          className={`notification-list-item group flex min-w-0 gap-3 rounded-sm border p-4 transition sm:gap-4 sm:p-5 ${
+            item.isRead ? 'is-read' : 'is-unread'
+          } ${emphasisClass} ${target ? 'cursor-pointer' : ''}`}
+        >
+          {/* 头像区 */}
           <div className="relative shrink-0">
             {systemLike ? (
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-50 p-2 ring-1 ring-slate-200 sm:h-12 sm:w-12">
@@ -382,85 +439,97 @@ export function NotificationsClient({
               </span>
             ) : null}
           </div>
-          <div className="min-w-0 flex-1">
-            {isBirthday || systemLike ? (
-              <div className="flex items-center gap-3">
-                <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
-                <time className="whitespace-nowrap text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
-                  {!item.isRead ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
-                </div>
-                <time className="shrink-0 text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
-              </div>
-            )}
+
+          {/* 内容区：标题 + 正文 + 智能入口 */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
+              {!item.isRead ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
+            </div>
             <h2 className={`notification-title mt-2 break-words text-base sm:text-lg ${titleClass}`}>{item.title}</h2>
             {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
-            {target ? <span className="mt-3 inline-flex text-xs font-black text-brand-700">查看详情 →</span> : null}
-          </div>
-        </div>
-      </article>
-    )
 
-    return (
-      <div key={itemKey} id={`notification-${item.id}`} className="relative scroll-mt-20">
-        {target ? (
-          <Link href={target} onClick={(event) => void openNotification(event, item)} className="block min-h-12 w-full text-left">{content}</Link>
-        ) : (
-          <div
-            className="min-h-12 w-full cursor-pointer text-left"
-            onClick={() => void markRead(item)}
-          >
-            {content}
+            {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
+            {smartEntry?.action === 'dock' ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void markRead(item)
+                  window.dispatchEvent(new Event('friend-dock:open'))
+                }}
+                className="mt-3 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
+              >
+                {smartEntry.label} →
+              </button>
+            ) : smartEntry?.href ? (
+              <Link
+                href={smartEntry.href}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  openNotification(event, item)
+                }}
+                className="mt-3 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
+              >
+                {smartEntry.label} →
+              </Link>
+            ) : null}
+
+            {/* 时间区（固定内容区底部）+ 操作按钮（流式排布，移动端自动换行，无横向滚动） */}
+            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
+              <time className="text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {item.replyTarget && !item.replyDisabledReason ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setReplyingKey((current) => current === itemKey ? null : itemKey)
+                    }}
+                    className="min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700"
+                  >
+                    直接回复
+                  </button>
+                ) : null}
+                {!item.isRead ? (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void markRead(item)
+                    }}
+                    className="min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    已读
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  aria-label="清除这条通知"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setActionError('')
+                    setClearConfirm({
+                      title: '确认清除这条通知？',
+                      description: '清除后，这条通知将从通知中心移除，此操作无法撤销。',
+                      items: [item],
+                    })
+                  }}
+                  className="min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600"
+                >
+                  清除
+                </button>
+              </div>
+            </div>
           </div>
-        )}
-        {!item.isRead ? (
-          <button
-            type="button"
-            disabled={isUpdating}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              void markRead(item)
-            }}
-            className="absolute right-20 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            已读
-          </button>
-        ) : null}
-        <button
-          type="button"
-          aria-label="清除这条通知"
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            // 第一次点击只打开二次确认框，不调用删除接口、不触发通知跳转。
-            setActionError('')
-            setClearConfirm({
-              title: '确认清除这条通知？',
-              description: '清除后，这条通知将从通知中心移除，此操作无法撤销。',
-              items: [item],
-            })
-          }}
-          className="absolute right-3 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600"
-        >
-          清除
-        </button>
-        {item.replyTarget && !item.replyDisabledReason ? (
-          <button
-            type="button"
-            onClick={() => setReplyingKey((current) => current === itemKey ? null : itemKey)}
-            className="absolute right-3 top-12 z-10 min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700"
-          >
-            直接回复
-          </button>
-        ) : null}
-        {item.replyDisabledReason ? <p className="border border-t-0 border-sky-100 bg-white px-4 py-3 text-sm font-black text-slate-500">{item.replyDisabledReason}</p> : null}
+        </article>
+
+        {item.replyDisabledReason ? <p className="mt-2 rounded-sm border border-sky-100 bg-white px-4 py-3 text-sm font-black text-slate-500">{item.replyDisabledReason}</p> : null}
         {replyingKey === itemKey && item.replyTarget ? (
-          <div className="border border-t-0 border-sky-100 bg-white p-4">
+          <div className="mt-2 rounded-sm border border-sky-100 bg-white p-4">
             <label htmlFor={`notification-reply-${item.id}`} className="text-xs font-black text-brand-700">
               回复 @{item.actorName || '对方'}
             </label>
@@ -484,7 +553,7 @@ export function NotificationsClient({
             </div>
           </div>
         ) : null}
-        {replyStatus[itemKey] ? <p className={`px-4 py-2 text-sm font-black ${replyStatus[itemKey] === '回复成功' ? 'text-emerald-600' : 'text-red-600'}`}>{replyStatus[itemKey]}</p> : null}
+        {replyStatus[itemKey] ? <p className={`mt-2 px-1 py-2 text-sm font-black ${replyStatus[itemKey] === '回复成功' ? 'text-emerald-600' : 'text-red-600'}`}>{replyStatus[itemKey]}</p> : null}
       </div>
     )
   }

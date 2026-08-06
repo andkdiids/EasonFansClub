@@ -135,7 +135,7 @@ export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
         title,
         content,
         key,
-        link: null,
+        link: '/profile/edit',
         actorId: null,
       },
     })

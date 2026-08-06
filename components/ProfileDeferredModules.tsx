@@ -5,7 +5,16 @@ import { ModuleFallback } from '@/components/ModuleFallback'
 import { getMood } from '@/lib/daily'
 
 type CheckIn = { id: string; checkDate: string; mood: string | null; streakDay: number }
-type Message = { id: string; mood: string; content: string; createdAt: string }
+type ReplyItem = { id: string; content: string; createdAt: string; authorName: string; authorAvatarUrl: string | null }
+type Message = {
+  id: string
+  mood: string
+  content: string
+  createdAt: string
+  likeCount: number
+  commentCount: number
+  comments: ReplyItem[]
+}
 type LoadState<T> = { loading: boolean; failed: boolean; data: T }
 
 function initial<T>(data: T): LoadState<T> {
@@ -79,12 +88,17 @@ export function ProfileCheckInCalendar() {
 
 export function ProfileRecentMessages() {
   const [messages, setMessages] = useState<LoadState<Message[]>>(initial([]))
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     loadJson<{ messages: Message[] }>('/api/profile/messages')
       .then((data) => setMessages({ loading: false, failed: false, data: data.messages }))
       .catch(() => setMessages({ loading: false, failed: true, data: [] }))
   }, [])
+
+  function toggleExpand(id: string) {
+    setExpanded((current) => ({ ...current, [id]: !current[id] }))
+  }
 
   return (
 <div className="h-full  border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
@@ -94,12 +108,54 @@ export function ProfileRecentMessages() {
         {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
         {!messages.loading && !messages.failed && messages.data.length ? messages.data.map((item) => {
           const mood = getMood(item.mood)
+          const isExpanded = Boolean(expanded[item.id])
+          const hasReplies = item.commentCount > 0 || item.comments.length > 0
           return (
 <article
   key={item.id}
   className=" border border-[var(--border)] bg-[var(--surface-subtle)] p-4"
->              <p className="font-black text-brand-950">{mood?.icon || '🎵'} {new Date(item.createdAt).toLocaleString('zh-CN')}</p>
-              <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{item.content}</p>
+>
+              <div className="flex items-center gap-2 text-sm font-black text-brand-950">
+                <span className="text-base">{mood?.icon || '🎵'}</span>
+                <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString('zh-CN')}</time>
+              </div>
+              <p className="mt-2 line-clamp-3 break-words text-sm leading-6 text-slate-600">{item.content}</p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-black text-rose-600">
+                  ♥ {item.likeCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(item.id)}
+                  disabled={!hasReplies}
+                  className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  💬 回复 {item.commentCount}
+                  {hasReplies ? <span className="text-[10px]">{isExpanded ? '▲' : '▼'}</span> : null}
+                </button>
+              </div>
+
+              {isExpanded && hasReplies ? (
+                <ul className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
+                  {item.comments.length ? item.comments.map((reply) => (
+                    <li key={reply.id} className="flex gap-2">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
+                        {reply.authorAvatarUrl ? <img src={reply.authorAvatarUrl} alt={reply.authorName} className="h-full w-full object-cover" /> : (reply.authorName || '匿').slice(0, 1)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-black text-brand-950">{reply.authorName}</span>
+                          <time className="text-[11px] font-bold text-slate-400">{new Date(reply.createdAt).toLocaleString('zh-CN')}</time>
+                        </div>
+                        <p className="mt-0.5 break-words text-sm font-bold leading-5 text-slate-600">{reply.content}</p>
+                      </div>
+                    </li>
+                  )) : (
+                    <li className="text-xs font-bold text-slate-400">暂无回复内容</li>
+                  )}
+                </ul>
+              ) : null}
             </article>
           )
         }) : null}

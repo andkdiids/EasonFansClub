@@ -13,10 +13,50 @@ export async function GET() {
       where: { userId: user.id, isDeleted: false },
       orderBy: { createdAt: 'desc' },
       take: 5,
-      select: { id: true, mood: true, content: true, createdAt: true },
+      select: {
+        id: true,
+        mood: true,
+        content: true,
+        createdAt: true,
+        likeCount: true,
+        commentCount: true,
+        DailyMessageComment: {
+          where: { isDeleted: false },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            content: true,
+            createdAt: true,
+            User: {
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
+                Profile: { select: { displayName: true, avatarUrl: true } },
+              },
+            },
+          },
+        },
+      },
     }),
     [],
   )
 
-  return NextResponse.json({ messages })
+  const mapped = messages.map((message) => ({
+    id: message.id,
+    mood: message.mood,
+    content: message.content,
+    createdAt: message.createdAt,
+    likeCount: message.likeCount,
+    commentCount: message.commentCount,
+    comments: message.DailyMessageComment.map((comment) => ({
+      id: comment.id,
+      content: comment.content,
+      createdAt: comment.createdAt,
+      authorName: comment.User?.Profile?.displayName || comment.User?.nickname || '匿名用户',
+      authorAvatarUrl: comment.User?.Profile?.avatarUrl || comment.User?.avatarUrl || null,
+    })),
+  }))
+
+  return NextResponse.json({ messages: mapped })
 }

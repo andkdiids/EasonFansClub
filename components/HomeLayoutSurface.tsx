@@ -193,7 +193,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
 
   useEffect(() => {
     setTodayEventIndex((current) => data.todayEvents.length ? current % data.todayEvents.length : 0)
-    if (data.todayEvents.length <= 1) return
+    if (data.todayEvents.length <= 2) return
     const timer = window.setInterval(() => {
       setTodayEventIndex((current) => (current + 1) % data.todayEvents.length)
     }, 5000)
@@ -203,6 +203,70 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const checkedIn = Boolean(data.stats?.checkIns.length)
   const checkinStateClass = data.stats ? checkedIn ? 'is-checked' : 'is-not-checked' : 'is-loading'
   const todayEvent = data.todayEvents[todayEventIndex] || null
+
+  const renderDailyMusicPanel = () => (
+    <section className="community-panel music-panel home-daily-music-panel" aria-label="EasMusic 今日推荐">
+      <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'}>{homeText.viewDetails} →</Link></header>
+      {data.dailyMusic ? <div className="home-daily-music">
+        <div className="home-daily-music-cover">
+          {data.dailyMusic.coverUrl ? <Image src={data.dailyMusic.coverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" className="object-cover" /> : <span aria-hidden="true">♫</span>}
+        </div>
+        <div className="home-daily-music-copy">
+          <span>{data.dailyMusic.artist}</span>
+          <h3>{data.dailyMusic.title}</h3>
+          <p>{data.dailyMusic.album.name} · {data.dailyMusic.releaseYear}</p>
+          <div className="home-daily-music-lyrics">{data.dailyMusic.lyrics || homeText.noLyrics}</div>
+          <HomeDailyMusicPreview music={data.dailyMusic} />
+        </div>
+      </div> : <p className="community-empty">{homeText.noMusic}</p>}
+    </section>
+  )
+
+  const renderEntertainmentPanel = () => (
+    <section className="community-panel home-entertainment-panel" aria-label="Entertainment ranking">
+      <header><h2>{homeText.entertainment}</h2><Link href="/games">{homeText.rankingMore} →</Link></header>
+      <div className="home-entertainment-content">
+        {topRanking ? <>
+          <span>{homeText.endlessBest}</span>
+          <strong>{fmt(topRanking.score)} <small>分</small></strong>
+          <p>{topRanking.nickname}</p>
+          <small>{shortDate(topRanking.achievedAt)}</small>
+        </> : <p className="community-empty home-entertainment-empty">{homeText.noRanking}</p>}
+        <Link href="/games" className="hero-primary-button home-entertainment-button">{homeText.rankingMore} →</Link>
+      </div>
+    </section>
+  )
+
+  // 今日模块：≤2 条直接展开为普通列表（隐藏轮播箭头/圆点）；>2 条保持单卡轮播。
+  const renderTodayPanel = () => {
+    const events = data.todayEvents
+    return (
+      <section className="community-panel concert-panel home-today-panel" aria-label="Today in history">
+        <header><h2>{homeText.today}</h2><Link href="/today">{homeText.todayMore} →</Link></header>
+        {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
+        {events.length > 0 && events.length <= 2 ? (
+          <div className="home-today-list">
+            {events.map((event) => (
+              <Link key={event.id} href={event.href || '/today'}>
+                <time>{event.year}年{event.month}月{event.day}日</time>
+                <span><strong>{event.title}</strong><small>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small></span>
+                <b>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
+              </Link>
+            ))}
+          </div>
+        ) : events.length > 2 ? (
+          <div>
+            {todayEvent ? <Link href={todayEvent.href || '/today'}>
+              <time>{todayEvent.year}年{todayEvent.month}月{todayEvent.day}日</time>
+              <span><strong>{todayEvent.title}</strong><small>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small></span>
+              <b>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
+            </Link> : null}
+            <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + events.length) % events.length)} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % events.length)} aria-label="下一条">→</button></div>
+          </div>
+        ) : null}
+      </section>
+    )
+  }
 
   return (
     <div className="community-home">
@@ -231,48 +295,21 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         {announcement && visible('home.announcement') ? <Link href={announcement.link || announcement.buttonUrl || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
         {failed ? <p className="community-error">{homeText.loadError}</p> : null}
 
-        <div className="community-columns home-primary-columns">
-          <section className="community-panel music-panel home-daily-music-panel" aria-label="EasMusic 今日推荐">
-            <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'}>{homeText.viewDetails} →</Link></header>
-            {data.dailyMusic ? <div className="home-daily-music">
-              <div className="home-daily-music-cover">
-                {data.dailyMusic.coverUrl ? <Image src={data.dailyMusic.coverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" className="object-cover" /> : <span aria-hidden="true">♫</span>}
-              </div>
-              <div className="home-daily-music-copy">
-                <span>{data.dailyMusic.artist}</span>
-                <h3>{data.dailyMusic.title}</h3>
-                <p>{data.dailyMusic.album.name} · {data.dailyMusic.releaseYear}</p>
-                <div className="home-daily-music-lyrics">{data.dailyMusic.lyrics || homeText.noLyrics}</div>
-                <HomeDailyMusicPreview music={data.dailyMusic} />
-              </div>
-            </div> : <p className="community-empty">{homeText.noMusic}</p>}
-          </section>
-
-          <section className="community-panel concert-panel home-today-panel" aria-label="Today in history">
-            <header><h2>{homeText.today}</h2><Link href="/today">{homeText.todayMore} →</Link></header>
-            <div>
-              {todayEvent ? <Link href={todayEvent.href || '/today'}>
-                <time>{todayEvent.year}年{todayEvent.month}月{todayEvent.day}日</time>
-                <span><strong>{todayEvent.title}</strong><small>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small></span>
-                <b>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
-              </Link> : <p className="community-empty">{homeText.noToday}</p>}
-              {data.todayEvents.length > 1 ? <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + data.todayEvents.length) % data.todayEvents.length)} aria-label="上一条">←</button>{data.todayEvents.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % data.todayEvents.length)} aria-label="下一条">→</button></div> : null}
+        {device === 'mobile' ? (
+          <>
+            {renderTodayPanel()}
+            <div className="home-mobile-dual">
+              {renderEntertainmentPanel()}
+              {renderDailyMusicPanel()}
             </div>
-          </section>
-
-          <section className="community-panel home-entertainment-panel" aria-label="Entertainment ranking">
-            <header><h2>{homeText.entertainment}</h2><Link href="/games">{homeText.rankingMore} →</Link></header>
-            <div className="home-entertainment-content">
-              {topRanking ? <>
-                <span>{homeText.endlessBest}</span>
-                <strong>{fmt(topRanking.score)} <small>分</small></strong>
-                <p>{topRanking.nickname}</p>
-                <small>{shortDate(topRanking.achievedAt)}</small>
-              </> : <p className="community-empty home-entertainment-empty">{homeText.noRanking}</p>}
-              <Link href="/games" className="hero-primary-button home-entertainment-button">{homeText.rankingMore} →</Link>
-            </div>
-          </section>
-        </div>
+          </>
+        ) : (
+          <div className="community-columns home-primary-columns">
+            {renderDailyMusicPanel()}
+            {renderTodayPanel()}
+            {renderEntertainmentPanel()}
+          </div>
+        )}
 
         <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="Random albums">
           <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
