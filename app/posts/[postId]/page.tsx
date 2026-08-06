@@ -90,6 +90,8 @@ function loadPostReplies(postId: string, userId?: string) {
       content: true,
       parentId: true,
       likeCount: true,
+      stickerId: true,
+      sticker: { select: { url: true } },
       ReplyLike: userId ? { where: { userId }, select: { id: true } } : false,
       ReplyMention: {
         orderBy: { startIndex: 'asc' },
@@ -125,6 +127,8 @@ type FocusedReply = {
   parentId: string | null
   likeCount: number
   createdAt: Date
+  stickerId: string | null
+  sticker: { url: string } | null
   mentions: Array<{
     id: string
     startIndex: number
@@ -147,6 +151,8 @@ type FocusedReplyQueryRow = {
   parentId: string | null
   likeCount: number
   createdAt: Date
+  stickerId: string | null
+  sticker: { url: string } | null
   User: Omit<FocusedReply['author'], 'profile'> & {
     Profile: FocusedReply['author']['profile']
   }
@@ -175,6 +181,8 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
         parentId: true,
         likeCount: true,
         createdAt: true,
+        stickerId: true,
+        sticker: { select: { url: true } },
         User: {
           select: {
             id: true,
@@ -276,6 +284,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         parentId: reply.parentId,
         likeCount: reply.likeCount,
         createdAt: reply.createdAt,
+        stickerId: reply.stickerId,
+        sticker: reply.sticker,
         User: { ...reply.author, status: 'ACTIVE' as const, isDeleted: false, Profile: reply.author.profile },
         ReplyLike: [],
         ReplyMention: reply.mentions.map((mention) => ({
@@ -305,6 +315,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
   const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
     ...reply,
+    stickerId: reply.stickerId ?? null,
+    stickerUrl: reply.sticker?.url ?? null,
     author: User.status === 'ACTIVE' && !User.isDeleted
       ? { ...User, profile: User.Profile }
       : { id: '', uid: 0, nickname: '已注销用户', level: 0, avatarUrl: null, profile: null },

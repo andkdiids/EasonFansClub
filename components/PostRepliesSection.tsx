@@ -19,6 +19,8 @@ type ReplyItem = {
   likeCount: number
   liked: boolean
   createdAt: Date | string
+  stickerId?: string | null
+  stickerUrl?: string | null
   mentions: ReplyMentionView[]
   author: {
     id: string
@@ -51,6 +53,8 @@ function normalizeReply(value: unknown): ReplyItem | null {
     likeCount: Number(reply.likeCount) || 0,
     liked: Boolean(reply.liked),
     createdAt: typeof reply.createdAt === 'string' || reply.createdAt instanceof Date ? reply.createdAt : new Date().toISOString(),
+    stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
+    stickerUrl: typeof reply.stickerUrl === 'string' ? reply.stickerUrl : null,
     mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
     author: {
       ...unavailableAuthor,
@@ -203,6 +207,12 @@ export function PostRepliesSection({
               {replyToName ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}
               <MentionText text={replyBody.text} mentions={reply.mentions} />
             </p>
+            {reply.stickerUrl ? (
+              <div className="mt-1">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={reply.stickerUrl} alt="表情" className="h-16 w-16 rounded-lg bg-white object-contain" />
+              </div>
+            ) : null}
             {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               {replyLikeButton(reply)}
@@ -249,6 +259,12 @@ export function PostRepliesSection({
           <p className="whitespace-pre-wrap leading-7 text-slate-700">
             <MentionText text={replyBody.text} mentions={reply.mentions} />
           </p>
+          {reply.stickerUrl ? (
+            <div className="mt-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={reply.stickerUrl} alt="表情" className="h-20 w-20 rounded-lg bg-white object-contain" />
+            </div>
+          ) : null}
           {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {replyLikeButton(reply)}

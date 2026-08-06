@@ -7,6 +7,7 @@ import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
 import { getShanghaiDateKey } from '@/lib/checkin'
+import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -45,6 +46,76 @@ export async function POST(request: Request, { params }: Params) {
 
   const { postId } = await params
   const body = await request.json().catch(() => null)
+  const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''
+
+  // 表情评论：仅需校验表情可见性，无需文本内容
+  if (stickerId) {
+    if (!(await isStickerVisible(stickerId))) {
+      return NextResponse.json({ message: '该表情不可用或已被隐藏' }, { status: 400 })
+    }
+    const post = await prisma.post.findFirst({
+      where: { id: postId, isDeleted: false, isLocked: false, status: 'PUBLISHED', moderationStatus: 'APPROVED', Board: { isActive: true } },
+      select: { id: true, authorId: true },
+    })
+    if (!post) return NextResponse.json({ message: '帖子不存在或当前不允许回复' }, { status: 404 })
+
+    const reply = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
+      await tx.user.findFirstOrThrow({
+        where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+        select: { id: true },
+      })
+      const duplicateReply = await tx.reply.findFirst({
+        where: { postId, authorId: user.id, parentId: null, content: '', stickerId, isDeleted: false, createdAt: { gte: new Date(Date.now() - 8_000) } },
+        select: { id: true },
+      })
+      if (duplicateReply) return { duplicateReplyId: duplicateReply.id }
+
+      const createdReply = await tx.reply.create({
+        data: { postId, authorId: user.id, content: '', stickerId, parentId: null },
+        include: {
+          User: { select: { id: true, uid: true, nickname: true, level: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+          sticker: { select: { url: true } },
+        },
+      })
+      const replyRecipientId = post.authorId
+      if (replyRecipientId !== user.id) {
+        await tx.notification.create({
+          data: {
+            recipientId: replyRecipientId,
+            actorId: user.id,
+            type: 'REPLY',
+            title: '你的帖子有新回复',
+            content: `${user.nickname} 回复了你的帖子`,
+            link: `/posts/${postId}?focus=${createdReply.id}`,
+          },
+        })
+      }
+      await tx.post.update({ where: { id: postId }, data: { replyCount: { increment: 1 } } })
+      await tx.friendActivity.create({ data: { actorId: user.id, type: 'COMMENT', content: '[表情]', targetUrl: `/posts/${postId}?focus=${createdReply.id}` } })
+      return { createdReply }
+    })
+    if ('duplicateReplyId' in reply) {
+      return NextResponse.json({ message: '相同回复正在处理中，请勿重复提交', replyId: reply.duplicateReplyId }, { status: 409 })
+    }
+    const { createdReply } = reply
+    const { User: replyAuthor, sticker: replySticker, ...serializedReply } = createdReply
+    await recordStickerUsage(user.id, stickerId)
+    return NextResponse.json({
+      success: true,
+      reply: {
+        ...serializedReply,
+        createdAt: serializedReply.createdAt.toISOString(),
+        updatedAt: serializedReply.updatedAt.toISOString(),
+        stickerId: createdReply.stickerId,
+        stickerUrl: replySticker?.url ?? null,
+        author: { ...replyAuthor, profile: replyAuthor.Profile, Profile: undefined },
+        mentions: [],
+      },
+      rewardPoints: 0,
+    }, { status: 201 })
+  }
+
   const textContent = sanitizeText(body?.content, 5000)
   const imageUrls = parseContentImageUrls(body?.imageUrls)
   const content = appendContentImages(textContent, imageUrls)

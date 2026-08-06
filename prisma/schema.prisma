@@ -655,6 +655,8 @@ model DirectMessage {
   type            MessageType  @default(TEXT)
   content         String
   imageUrl        String?
+  stickerId       String?
+  sticker         Sticker?      @relation("DirectMessageSticker", fields: [stickerId], references: [id], onDelete: SetNull)
   isDeleted       Boolean      @default(false)
   createdAt       DateTime     @default(now())
   conversationId  String
@@ -666,6 +668,7 @@ model DirectMessage {
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
+  @@index([stickerId])
 }
 
 model EmailVerification {
@@ -1791,6 +1794,8 @@ model RateLimitLog {
 model Reply {
   id           String         @id @default(cuid())
   content      String
+  stickerId    String?
+  sticker      Sticker?        @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
   isDeleted    Boolean        @default(false)
   deletedAt    DateTime?
   createdAt    DateTime       @default(now())
@@ -1812,6 +1817,7 @@ model Reply {
   @@index([isDeleted])
   @@index([parentId])
   @@index([postId, createdAt])
+  @@index([stickerId])
 }
 
 model ReplyLike {
@@ -1946,25 +1952,40 @@ model StickerPack {
   reviewedAt      DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+  isOfficial      Boolean            @default(false)
+  category        String?
   creator         User              @relation("StickerPackCreator", fields: [creatorId], references: [id], onDelete: Cascade)
   stickers        Sticker[]
   UserStickerPack UserStickerPack[]
 
   @@index([creatorId, createdAt])
   @@index([status, createdAt])
+  @@index([isOfficial, status])
 }
 
 model Sticker {
-  id        String      @id @default(cuid())
-  packId    String
-  name      String?     @db.VarChar(32)
-  url       String
-  type      StickerType @default(STATIC)
-  sort      Int         @default(0)
-  createdAt DateTime    @default(now())
-  pack      StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  id           String      @id @default(cuid())
+  packId       String
+  name         String?     @db.VarChar(32)
+  url          String
+  type         StickerType @default(STATIC)
+  sort         Int         @default(0)
+  usageCount   Int         @default(0)
+  isHidden     Boolean     @default(false)
+  hiddenAt     DateTime?
+  hiddenReason String?
+  enabled      Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  pack         StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  favorites    StickerFavorite[]
+  usages       StickerUsage[]
+  reports      StickerReport[]
+  directMessages DirectMessage[] @relation("DirectMessageSticker")
+  replies      Reply[] @relation("ReplySticker")
 
   @@index([packId, sort])
+  @@index([isHidden])
+  @@index([enabled])
 }
 
 model UserStickerPack {
@@ -1978,6 +1999,61 @@ model UserStickerPack {
   @@unique([userId, packId])
   @@index([userId, createdAt])
   @@index([packId])
+}
+
+enum StickerReportReason {
+  PORN
+  ABUSE
+  VIOLATION
+  OTHER
+}
+
+enum StickerReportStatus {
+  PENDING
+  HIDDEN
+  DISMISSED
+}
+
+model StickerFavorite {
+  id        String   @id @default(cuid())
+  userId    String
+  stickerId String
+  createdAt DateTime @default(now())
+  sticker   Sticker  @relation(fields: [stickerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stickerId])
+  @@index([userId, createdAt])
+  @@index([stickerId])
+}
+
+model StickerUsage {
+  id         String   @id @default(cuid())
+  userId     String
+  stickerId  String
+  count      Int      @default(0)
+  lastUsedAt DateTime @default(now())
+  sticker    Sticker  @relation(fields: [stickerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stickerId])
+  @@index([userId, lastUsedAt])
+  @@index([stickerId])
+}
+
+model StickerReport {
+  id         String             @id @default(cuid())
+  userId     String
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stickerId  String
+  reason     StickerReportReason
+  status     StickerReportStatus @default(PENDING)
+  detail     String?
+  createdAt  DateTime           @default(now())
+  handledAt  DateTime?
+  sticker    Sticker            @relation(fields: [stickerId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([stickerId])
+  @@index([userId])
 }
 
 model SystemNotification {
@@ -2170,6 +2246,7 @@ model User {
   EHospitalCheckAttempt                                  EHospitalCheckAttempt[]
   StickerPack_StickerPackCreator                         StickerPack[]             @relation("StickerPackCreator")
   UserStickerPack_UserStickerPackUser                    UserStickerPack[]        @relation("UserStickerPackUser")
+  stickerReports                                         StickerReport[]
 
   @@index([createdAt])
   @@index([email])
@@ -2432,6 +2509,7 @@ enum MessageType {
   IMAGE
   EMOJI
   SYSTEM
+  STICKER
 }
 
 enum MusicPublicationStatus {

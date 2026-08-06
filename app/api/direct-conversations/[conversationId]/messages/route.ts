@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const messageSelect = {
@@ -12,6 +13,8 @@ const messageSelect = {
   senderId: true,
   createdAt: true,
   clientMessageId: true,
+  stickerId: true,
+  sticker: { select: { url: true } },
 } as const
 
 async function getConversation(userId: string, conversationId: string) {
@@ -82,7 +85,68 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     senderId = user.id
     const { conversationId } = await params
     const body = await request.json().catch(() => null)
+    const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''
     const rawContent = String(body?.content ?? '').trim()
+
+    // 表情消息：仅校验 stickerId 可见性，无需文本内容
+    if (stickerId) {
+      if (!(await isStickerVisible(stickerId))) {
+        return messageFailure(400, 'INVALID_STICKER', '该表情不可用或已被隐藏')
+      }
+      const clientMessageId = String(body?.clientMessageId || '').trim()
+      idempotencyKey = clientMessageId
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientMessageId)) {
+        return messageFailure(400, 'INVALID_CLIENT_MESSAGE_ID', '消息幂等标识无效')
+      }
+      const conversation = await getConversation(user.id, conversationId)
+      if (!conversation) return messageFailure(404, 'NOT_PARTICIPANT', '会话不存在或无权发送')
+      const otherUserId = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)?.userId
+      if (!otherUserId) return messageFailure(409, 'NOT_PARTICIPANT', '会话成员无效')
+      const recipient = await prisma.user.findFirst({
+        where: { id: otherUserId, status: 'ACTIVE', isDeleted: false },
+        select: { id: true },
+      })
+      if (!recipient) return messageFailure(404, 'NOT_PARTICIPANT', '接收用户不存在或不可用')
+      const [userAId, userBId] = normalizeFriendPair(user.id, otherUserId)
+      const friendship = await prisma.friendship.findUnique({
+        where: { userAId_userBId: { userAId, userBId } },
+        select: { id: true },
+      })
+      if (!friendship) return messageFailure(403, 'NOT_FRIEND', '只能给好友发送私信')
+
+      const existing = await prisma.directMessage.findUnique({
+        where: { senderId_clientMessageId: { senderId: user.id, clientMessageId } },
+        select: messageSelect,
+      })
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          duplicate: true,
+          message: serializeMessage(existing, user.id, null),
+        }, { headers: privateHeaders })
+      }
+
+      const now = new Date()
+      const message = await prisma.$transaction(async (tx) => {
+        const created = await tx.directMessage.create({
+          data: { conversationId, senderId: user.id, type: 'STICKER', content: '', stickerId, clientMessageId },
+          select: messageSelect,
+        })
+        await tx.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: now } })
+        await tx.conversationParticipant.updateMany({
+          where: { conversationId, userId: user.id },
+          data: { lastReadAt: now, isDeleted: false },
+        })
+        return created
+      })
+      await recordStickerUsage(user.id, stickerId)
+      return NextResponse.json({
+        success: true,
+        duplicate: false,
+        message: serializeMessage(message, user.id, null),
+      }, { status: 201, headers: privateHeaders })
+    }
+
     if (!rawContent) return messageFailure(400, 'INVALID_CONTENT', '消息不能为空')
     if (rawContent.length > 1000) return messageFailure(413, 'INVALID_CONTENT', '消息不能超过1000个字符')
     const content = sanitizeText(rawContent, 1000)
@@ -192,6 +256,8 @@ function serializeMessage(
     senderId: string
     createdAt: Date
     clientMessageId: string | null
+    stickerId: string | null
+    sticker: { url: string } | null
   },
   currentUserId: string,
   peerLastReadAt: Date | null,
@@ -201,6 +267,8 @@ function serializeMessage(
     content: message.content,
     senderId: message.senderId,
     clientMessageId: message.clientMessageId,
+    stickerId: message.stickerId,
+    stickerUrl: message.sticker?.url || null,
     createdAt: message.createdAt.toISOString(),
     readAt: message.senderId === currentUserId && peerLastReadAt && message.createdAt <= peerLastReadAt
       ? peerLastReadAt.toISOString()

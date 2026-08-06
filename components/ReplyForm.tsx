@@ -5,6 +5,7 @@ import { useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
+import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 
 export function ReplyForm({
   postId,
@@ -23,6 +24,8 @@ export function ReplyForm({
   const [content, setContent] = useState('')
   const [mentions, setMentions] = useState<MentionDraft[]>([])
   const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -30,6 +33,10 @@ export function ReplyForm({
   async function submitReply(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     if (submittingRef.current) return
+    if (!content.trim() && imageUrls.length === 0 && !pendingSticker) {
+      setError('回复内容不能为空')
+      return
+    }
     submittingRef.current = true
     setError('')
     setSuccess('')
@@ -38,7 +45,13 @@ export function ReplyForm({
       const response = await fetch(`/api/posts/${postId}/replies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, parentId: replyTo?.id, imageUrls, mentions }),
+        body: JSON.stringify({
+          content,
+          parentId: replyTo?.id,
+          imageUrls,
+          mentions,
+          stickerId: pendingSticker?.id || undefined,
+        }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -52,6 +65,8 @@ export function ReplyForm({
       setContent('')
       setMentions([])
       setImageUrls([])
+      setPendingSticker(null)
+      setPickerOpen(false)
       onReplyCancel?.()
       onReplyCreated?.(data.reply)
       setSuccess(data.rewardPoints ? `评论成功，获得 +${data.rewardPoints} 挂号费` : '评论成功')
@@ -79,6 +94,16 @@ export function ReplyForm({
           <button type="button" onClick={onReplyCancel} className="text-slate-500">取消</button>
         </div>
       ) : null}
+
+      {pendingSticker ? (
+        <div className="mb-3 flex items-center gap-3 rounded-xl border border-brand-100 bg-sky-50 px-3 py-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={pendingSticker.url} alt={pendingSticker.name || '表情'} className="h-10 w-10 rounded-lg bg-white object-contain" />
+          <span className="text-sm font-bold text-slate-600">已选择表情，点击发布发送</span>
+          <button type="button" onClick={() => setPendingSticker(null)} className="ml-auto text-sm font-black text-slate-400 hover:text-red-500">移除</button>
+        </div>
+      ) : null}
+
       <label className="block">
         <span className="text-sm font-black text-slate-700">{replyTo ? '楼中楼回复' : '回复帖子'}</span>
         <FriendMentionInput
@@ -92,13 +117,32 @@ export function ReplyForm({
       </label>
       <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
       <div className="mt-3 flex items-center justify-between gap-3">
-        <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
+        <div className="flex items-center gap-2">
+          <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="inline-flex h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"
+            aria-label="选择表情包"
+          >
+            😊 表情
+          </button>
+        </div>
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布回复'}
         </button>
       </div>
       {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
       {success ? <p className="mt-2 text-sm font-black text-emerald-600">{success}</p> : null}
+
+      <StickerPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(sticker) => {
+          setPendingSticker(sticker)
+          setPickerOpen(false)
+        }}
+      />
     </form>
   )
 }

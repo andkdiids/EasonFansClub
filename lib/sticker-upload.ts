@@ -35,20 +35,19 @@ export function sanitizeStickerName(value: unknown): string | null {
 }
 
 const STICKER_STATIC_MAX_WIDTH = 400
+const STICKER_GIF_MAX_WIDTH = 400
+const STICKER_GIF_MAX_FRAMES = 120
 
-/** 将静态表情转换为 WebP（保证只能是静态图，不保留动画）。 */
-export async function convertStaticStickerToWebp(input: Buffer): Promise<Buffer> {
+/** 将静态表情转换为 WebP。默认保留透明背景；封面可传 flatten 铺白底。 */
+export async function convertStaticStickerToWebp(input: Buffer, options?: { flatten?: boolean }): Promise<Buffer> {
   const image = sharp(input, { failOn: 'none', limitInputPixels: 20_000_000 })
   const metadata = await image.metadata()
   if (!metadata.format || !STICKER_STATIC_MIME_TYPES.includes(metadata.format as never)) {
     throw new Error('图片内容格式无效')
   }
-  return image
-    .rotate()
-    .flatten({ background: '#ffffff' })
-    .resize({ width: STICKER_STATIC_MAX_WIDTH, withoutEnlargement: true })
-    .webp({ quality: 85 })
-    .toBuffer()
+  let pipeline = image.rotate().resize({ width: STICKER_STATIC_MAX_WIDTH, withoutEnlargement: true })
+  if (options?.flatten) pipeline = pipeline.flatten({ background: '#ffffff' })
+  return pipeline.webp({ quality: 85 }).toBuffer()
 }
 
 /**
@@ -71,8 +70,17 @@ export async function uploadStickerImage(params: {
   if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new Error('表情文件不能超过 5MB')
 
   if (type === 'GIF') {
+    const image = sharp(buffer, { limitInputPixels: 20_000_000 })
+    const meta = await image.metadata()
+    if (typeof meta.pages === 'number' && meta.pages > STICKER_GIF_MAX_FRAMES) {
+      throw new Error(`动态表情帧数不能超过 ${STICKER_GIF_MAX_FRAMES} 帧`)
+    }
+    const processed = await image
+      .resize({ width: STICKER_GIF_MAX_WIDTH, withoutEnlargement: true })
+      .gif()
+      .toBuffer()
     const objectPath = `stickers/${ownerId}/${randomUUID()}.gif`
-    const url = await uploadSiteImage({ key: objectPath, body: buffer, contentType: 'image/gif' })
+    const url = await uploadSiteImage({ key: objectPath, body: processed, contentType: 'image/gif' })
     return { url, format: 'gif' }
   }
 
@@ -94,7 +102,7 @@ export async function uploadStickerPackCover(params: {
   if (!isStickerMimeAllowed(mime, 'STATIC')) throw new Error('封面只能是 JPG / PNG / WebP 静态图')
   if (buffer.byteLength === 0) throw new Error('封面文件不能为空')
   if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new Error('封面文件不能超过 5MB')
-  const output = await convertStaticStickerToWebp(buffer)
+  const output = await convertStaticStickerToWebp(buffer, { flatten: true })
   const objectPath = `stickers/covers/${ownerId}/${randomUUID()}.webp`
   return uploadSiteImage({ key: objectPath, body: output })
 }

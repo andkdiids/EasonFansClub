@@ -1,7 +1,7 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 import { SiteHeader } from '@/components/SiteHeader'
 import { prisma } from '@/lib/prisma'
-import { StickerReviewManager } from './StickerReviewManager'
+import { AdminStickersTabs } from '@/components/AdminStickersTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,7 +75,7 @@ export default async function AdminStickersPage() {
             审核用户提交的表情包合集。预览表情后通过或拒绝；静态合集仅含静态图，动态合集仅含 GIF 动图。
           </p>
         </section>
-        <StickerReviewManager initialPacks={initialPacks} />
+        <AdminStickersTabs initialPacks={initialPacks} />
       </main>
     </>
   )

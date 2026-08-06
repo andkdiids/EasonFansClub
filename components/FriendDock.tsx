@@ -14,6 +14,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
+import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
@@ -30,6 +31,8 @@ type Message = {
   clientMessageId: string | null
   readAt: string | null
   status?: MessageStatus
+  stickerId?: string | null
+  stickerUrl?: string | null
 }
 
 const emptySummary: UnreadSummary = {
@@ -89,6 +92,8 @@ export function FriendDock({
   const [chatFriend, setChatFriend] = useState<FriendDockUser | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [content, setContent] = useState('')
+  const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [newMessageNotice, setNewMessageNotice] = useState(false)
@@ -114,6 +119,8 @@ export function FriendDock({
     setConversationId('')
     setMessages([])
     setContent('')
+    setPendingSticker(null)
+    setPickerOpen(false)
     setSending(false)
     setError('')
     cursorRef.current = ''
@@ -453,7 +460,7 @@ export function FriendDock({
     window.requestAnimationFrame(() => scrollToBottom('auto'))
   }
 
-  async function sendMessage(input: { content: string; clientMessageId: string; optimisticId?: string }) {
+  async function sendMessage(input: { content: string; clientMessageId: string; optimisticId?: string; stickerId?: string; stickerUrl?: string | null }) {
     if (!conversationId || sendingMessageIdsRef.current.has(input.clientMessageId)) return false
     const chatSession = chatSessionRef.current
     sendingMessageIdsRef.current.add(input.clientMessageId)
@@ -467,6 +474,8 @@ export function FriendDock({
       clientMessageId: input.clientMessageId,
       readAt: null,
       status: 'SENDING',
+      stickerId: input.stickerId || null,
+      stickerUrl: input.stickerUrl || null,
     }
     setMessages((current) => current.some((item) => item.id === optimisticId)
       ? current.map((item) => item.id === optimisticId ? optimistic : item)
@@ -476,7 +485,11 @@ export function FriendDock({
       const response = await fetch(`/api/direct-conversations/${conversationId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: input.content, clientMessageId: input.clientMessageId }),
+        body: JSON.stringify({
+          content: input.content,
+          clientMessageId: input.clientMessageId,
+          ...(input.stickerId ? { stickerId: input.stickerId } : {}),
+        }),
       })
       let data: { success?: boolean; error?: string; message?: Message | string } | null = null
       try {
@@ -513,8 +526,7 @@ export function FriendDock({
 
   function submitMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
-    const trimmed = content.trim()
-    if (!trimmed || sending || sendingMessageIdsRef.current.size > 0) return
+    if (sending || sendingMessageIdsRef.current.size > 0) return
     setError('')
     let clientMessageId = ''
     try {
@@ -524,6 +536,15 @@ export function FriendDock({
       setError('发送失败，请稍后重试')
       return
     }
+    if (pendingSticker) {
+      const sticker = pendingSticker
+      void sendMessage({ content: '', clientMessageId, stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
+        if (success) { setPendingSticker(null); setContent('') }
+      })
+      return
+    }
+    const trimmed = content.trim()
+    if (!trimmed) return
     void sendMessage({ content: trimmed, clientMessageId }).then((success) => {
       if (success) setContent((current) => current.trim() === trimmed ? '' : current)
     })
@@ -663,12 +684,23 @@ export function FriendDock({
                           disabled={message.status !== 'FAILED'}
                           onClick={() => {
                             if (message.status === 'FAILED' && message.clientMessageId) {
-                              void sendMessage({ content: message.content, clientMessageId: message.clientMessageId, optimisticId: message.id })
+                              void sendMessage({
+                                content: message.content,
+                                clientMessageId: message.clientMessageId,
+                                optimisticId: message.id,
+                                stickerId: message.stickerId ?? undefined,
+                                stickerUrl: message.stickerUrl ?? null,
+                              })
                             }
                           }}
                           title={message.status === 'FAILED' ? '点击重试' : undefined}
                         >
-                          {message.content}
+                          {message.stickerUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={message.stickerUrl} alt={message.content || '表情'} className="friend-chat-sticker-img" />
+                          ) : (
+                            message.content
+                          )}
                         </button>
                         <div className="friend-chat-message-meta">
                           <time>{formatMessageTime(message.createdAt)}</time>
@@ -684,6 +716,30 @@ export function FriendDock({
             {newMessageNotice ? <button type="button" className="friend-chat-new-message" onClick={() => scrollToBottom('smooth')}>有新消息 ↓</button> : null}
             <form className="friend-chat-composer" onSubmit={submitMessage}>
               <EmojiPicker textareaRef={messageInputRef} value={content} onChange={setContent} maxLength={1000} disabled={sending} />
+              <button
+                type="button"
+                className="friend-chat-sticker-btn"
+                onClick={() => setPickerOpen(true)}
+                disabled={sending}
+                aria-label="选择表情包"
+                title="表情包"
+              >
+                😊
+              </button>
+              {pendingSticker ? (
+                <span className="friend-chat-sticker-preview">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={pendingSticker.url} alt={pendingSticker.name || '表情'} />
+                  <button
+                    type="button"
+                    className="friend-chat-sticker-remove"
+                    onClick={() => setPendingSticker(null)}
+                    aria-label="移除表情"
+                  >
+                    ×
+                  </button>
+                </span>
+              ) : null}
               <textarea
                 ref={messageInputRef}
                 value={content}
@@ -699,8 +755,16 @@ export function FriendDock({
                 placeholder="输入私信…"
                 aria-label="私信内容"
               />
-              <button type="submit" disabled={!content.trim() || sending}>{sending ? '发送中…' : '发送'}</button>
+              <button type="submit" disabled={(!content.trim() && !pendingSticker) || sending}>{sending ? '发送中…' : '发送'}</button>
             </form>
+            <StickerPicker
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onSelect={(sticker) => {
+                setPendingSticker(sticker)
+                setPickerOpen(false)
+              }}
+            />
             </div>
           ) : (
             <div className="friend-list-layout">
