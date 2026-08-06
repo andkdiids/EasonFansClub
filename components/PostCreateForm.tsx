@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
-import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 
@@ -19,6 +18,20 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
+  function insertEmoji(emoji: string) {
+    const input = textareaRef.current
+    const start = input?.selectionStart ?? content.length
+    const end = input?.selectionEnd ?? content.length
+    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`
+    const cursor = Math.min(start + emoji.length, next.length)
+    setContent(next)
+    window.requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(cursor, cursor)
+    })
+  }
 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -83,14 +96,15 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
           <button type="button" onClick={() => setPendingSticker(null)} className="ml-auto text-sm font-black text-slate-400 hover:text-red-500">移除</button>
         </div>
       ) : null}
-      <div className="flex items-center justify-between gap-3">
+      <div className="relative flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setPickerOpen((value) => !value)}
             className="inline-flex h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"
             aria-label="选择表情包"
+            aria-expanded={pickerOpen}
           >
             😊 表情
           </button>
@@ -98,16 +112,17 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布帖子'}
         </button>
+        <StickerPicker
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onSelectSticker={(sticker) => {
+            setPendingSticker(sticker)
+            setPickerOpen(false)
+          }}
+          onSelectEmoji={insertEmoji}
+          composerRef={textareaRef}
+        />
       </div>
-      <StickerPicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelectSticker={(sticker) => {
-          setPendingSticker(sticker)
-          setPickerOpen(false)
-        }}
-        composerRef={textareaRef}
-      />
     </form>
   )
 }

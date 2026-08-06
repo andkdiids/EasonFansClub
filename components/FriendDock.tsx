@@ -13,7 +13,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { EmojiPicker } from '@/components/EmojiPicker'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
@@ -111,6 +110,20 @@ export function FriendDock({
   const backdropCloseTimerRef = useRef(0)
   const sendingMessageIdsRef = useRef(new Set<string>())
   const chatSessionRef = useRef(0)
+
+  // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
+  const insertEmoji = useCallback((emoji: string) => {
+    const input = messageInputRef.current
+    const start = input?.selectionStart ?? content.length
+    const end = input?.selectionEnd ?? content.length
+    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`.slice(0, 1000)
+    const cursor = Math.min(start + emoji.length, next.length)
+    setContent(next)
+    window.requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(cursor, cursor)
+    })
+  }, [content])
 
   const resetChat = useCallback(() => {
     chatSessionRef.current += 1
@@ -715,13 +728,14 @@ export function FriendDock({
             </div>
             {newMessageNotice ? <button type="button" className="friend-chat-new-message" onClick={() => scrollToBottom('smooth')}>有新消息 ↓</button> : null}
             <form className="friend-chat-composer" onSubmit={submitMessage}>
-              <EmojiPicker textareaRef={messageInputRef} value={content} onChange={setContent} maxLength={1000} disabled={sending} />
               <button
                 type="button"
                 className="friend-chat-sticker-btn"
-                onClick={() => setPickerOpen(true)}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => setPickerOpen((value) => !value)}
                 disabled={sending}
                 aria-label="选择表情包"
+                aria-expanded={pickerOpen}
                 title="表情包"
               >
                 😊
@@ -757,15 +771,18 @@ export function FriendDock({
               />
               <button type="submit" disabled={(!content.trim() && !pendingSticker) || sending}>{sending ? '发送中…' : '发送'}</button>
             </form>
-            <StickerPicker
-              open={pickerOpen}
-              onClose={() => setPickerOpen(false)}
-              onSelectSticker={(sticker) => {
-                setPendingSticker(sticker)
-                setPickerOpen(false)
-              }}
-              composerRef={messageInputRef}
-            />
+            <div className="relative">
+              <StickerPicker
+                open={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                onSelectSticker={(sticker) => {
+                  setPendingSticker(sticker)
+                  setPickerOpen(false)
+                }}
+                onSelectEmoji={insertEmoji}
+                composerRef={messageInputRef}
+              />
+            </div>
             </div>
           ) : (
             <div className="friend-list-layout">

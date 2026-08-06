@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
-import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
@@ -29,6 +28,20 @@ export function ReplyForm({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
+  function insertEmoji(emoji: string) {
+    const input = textareaRef.current
+    const start = input?.selectionStart ?? content.length
+    const end = input?.selectionEnd ?? content.length
+    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`
+    const cursor = Math.min(start + emoji.length, next.length)
+    setContent(next)
+    window.requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(cursor, cursor)
+    })
+  }
 
   async function submitReply(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
@@ -116,14 +129,15 @@ export function ReplyForm({
         />
       </label>
       <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
-      <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="relative mt-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setPickerOpen((value) => !value)}
             className="inline-flex h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"
             aria-label="选择表情包"
+            aria-expanded={pickerOpen}
           >
             😊 表情
           </button>
@@ -131,19 +145,19 @@ export function ReplyForm({
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布回复'}
         </button>
+        <StickerPicker
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onSelectSticker={(sticker) => {
+            setPendingSticker(sticker)
+            setPickerOpen(false)
+          }}
+          onSelectEmoji={insertEmoji}
+          composerRef={textareaRef}
+        />
       </div>
       {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
       {success ? <p className="mt-2 text-sm font-black text-emerald-600">{success}</p> : null}
-
-      <StickerPicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelectSticker={(sticker) => {
-          setPendingSticker(sticker)
-          setPickerOpen(false)
-        }}
-        composerRef={textareaRef}
-      />
     </form>
   )
 }

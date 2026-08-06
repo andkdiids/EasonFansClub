@@ -1,10 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 
 /**
- * 微信式表情面板：
+ * 微信式表情面板（内联展开，非弹窗）：
+ *
+ * 由调用方放在输入区域附近的 relative 容器内，面板通过 absolute 定位
+ * 在输入区域上方展开，不使用全屏遮罩 / Modal / Dialog。
  *
  * 顶部：当前表情包区域 + 单张表情网格（不再是 4 个固定 tab）
  * 底部：搜索按钮 / 系统 emoji / 用户已添加表情包 icon + 「+」添加入口
@@ -65,6 +68,24 @@ export function StickerPicker({
   const [view, setView] = useState<PickerView>('emojis')
   const [activePackId, setActivePackId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  // 点击面板外部或按 Esc 关闭（内联面板，没有遮罩层可以点）
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) onClose()
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open, onClose])
 
   const handleEmojiClick = useCallback(
     (emoji: string) => {
@@ -100,15 +121,11 @@ export function StickerPicker({
         return
       }
       setData(json)
-      // 默认进入第一个已添加的表情包；如果没有任何表情包，回退到 emojis 视图
+      // 默认始终进入系统 Emoji 面板（微信式体验）。
+      // 记录第一个表情包 id 供用户主动点击 pack icon 时使用，但不自动切换到 pack 视图。
       const firstPack = json.packs[0]
-      if (firstPack) {
-        setActivePackId(firstPack.id)
-        setView('pack')
-      } else {
-        setActivePackId(null)
-        setView('emojis')
-      }
+      setActivePackId(firstPack ? firstPack.id : null)
+      setView('emojis')
     } catch {
       setError('网络错误，请稍后重试')
     } finally {
@@ -150,21 +167,13 @@ export function StickerPicker({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
-      onClick={onClose}
+      ref={rootRef}
+      className="sticker-wechat-panel absolute inset-x-0 bottom-full z-40 mb-2 flex h-[min(60vh,360px)] flex-col overflow-hidden rounded-[16px] bg-[#EDEDED] shadow-2xl ring-1 ring-black/10"
       role="dialog"
-      aria-modal="true"
       aria-label="表情面板"
     >
-      <div className="absolute inset-0 bg-slate-900/45" />
-
-      <div
-        className="sticker-wechat-panel relative flex w-full max-w-md flex-col overflow-hidden rounded-t-[20px] bg-[#EDEDED] shadow-2xl ring-1 ring-black/5 sm:rounded-[20px]"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: '70vh' }}
-      >
-        {/* 顶部标题栏：当前表情包 + 关闭 */}
-        <header className="flex items-center justify-between border-b border-black/5 bg-white px-4 py-2.5">
+      {/* 顶部标题栏：当前表情包 + 关闭 */}
+      <header className="flex items-center justify-between border-b border-black/5 bg-white px-4 py-2.5">
           <div className="min-w-0 flex-1">
             {view === 'pack' && currentPack ? (
               <button
@@ -240,41 +249,45 @@ export function StickerPicker({
                 )}
               </div>
             </div>
-          ) : view === 'pack' && currentPack ? (
-            // 当前表情包的表情网格
-            <div className="grid grid-cols-5 gap-1 px-2 py-2 sm:grid-cols-6">
-              {currentStickers.length === 0 ? (
-                <p className="col-span-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
-              ) : (
-                currentStickers.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => onSelectSticker(s)}
-                    className="flex aspect-square items-center justify-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={s.url} alt={s.name || ''} className="h-10 w-10 object-contain" loading="lazy" />
-                  </button>
-                ))
-              )}
-            </div>
-          ) : noPacks ? (
-            // 空态：暂无表情包 → 去添加表情包
-            <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-12 text-center">
-              <span className="grid h-16 w-16 place-items-center rounded-full bg-white text-3xl">😊</span>
-              <p className="text-sm font-bold text-slate-600">暂无表情包</p>
-              <p className="text-xs text-slate-400">去表情商店添加你喜欢的表情包即可使用</p>
-              <Link
-                href="/stickers"
-                onClick={onClose}
-                className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-700"
-              >
-                去添加表情包
-              </Link>
-            </div>
+          ) : view === 'pack' ? (
+            // 我的表情包视图：有选中表情包则展示其表情；没有添加任何表情包时才显示空状态
+            currentPack ? (
+              <div className="grid grid-cols-5 gap-1 px-2 py-2 sm:grid-cols-6">
+                {currentStickers.length === 0 ? (
+                  <p className="col-span-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
+                ) : (
+                  currentStickers.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => onSelectSticker(s)}
+                      className="flex aspect-square items-center justify-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={s.url} alt={s.name || ''} className="h-10 w-10 object-contain" loading="lazy" />
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : noPacks ? (
+              // 仅当用户主动进入「我的表情包」且确实没有添加任何表情包时显示空状态
+              <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+                <span className="grid h-16 w-16 place-items-center rounded-full bg-white text-3xl">😊</span>
+                <p className="text-sm font-bold text-slate-600">还没有添加表情包</p>
+                <p className="text-xs text-slate-400">去表情商店添加你喜欢的表情包即可使用</p>
+                <Link
+                  href="/stickers"
+                  onClick={onClose}
+                  className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-700"
+                >
+                  去添加表情包
+                </Link>
+              </div>
+            ) : (
+              <p className="py-10 text-center text-sm text-slate-400">请选择一个表情包</p>
+            )
           ) : (
-            // 默认 emoji 视图（如果没有添加任何表情包，也显示系统 emoji 兜底）
+            // 默认 emoji 视图（第一屏）：始终展示系统 Emoji + 最近使用，无论是否添加了表情包
               <EmojiGrid
                 emojis={data?.systemEmojis || []}
                 recent={data?.recent || []}
@@ -341,7 +354,6 @@ export function StickerPicker({
             +
           </Link>
         </nav>
-      </div>
     </div>
   )
 }

@@ -102,6 +102,11 @@ function shortDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
+// 历史上的今天日期格式化：YYYY年MM月DD日（月/日零填充，对齐用户要求）。
+function formatTodayDate(year: number, month: number, day: number) {
+  return `${year}年${String(month).padStart(2, '0')}月${String(day).padStart(2, '0')}日`
+}
+
 function yearsFromToday(value: string) {
   const eventDate = new Date(value)
   const today = new Date()
@@ -247,19 +252,25 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         {events.length > 0 && events.length <= 2 ? (
           <div className="home-today-list">
             {events.map((event) => (
-              <Link key={event.id} href={event.href || '/today'}>
-                <time>{event.year}年{event.month}月{event.day}日</time>
-                <span><strong>{event.title}</strong><small>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small></span>
-                <b>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
+              <Link key={event.id} href={event.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
+                <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(event.year, event.month, event.day)}</time>
+                  <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
+                </div>
+                <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{event.title}</strong>
+                <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small>
               </Link>
             ))}
           </div>
         ) : events.length > 2 ? (
           <div>
-            {todayEvent ? <Link href={todayEvent.href || '/today'} className="home-today-card">
-              <time>{todayEvent.year}年{todayEvent.month}月{todayEvent.day}日</time>
-              <span><strong>{todayEvent.title}</strong><small>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small></span>
-              <b>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
+            {todayEvent ? <Link href={todayEvent.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
+              <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(todayEvent.year, todayEvent.month, todayEvent.day)}</time>
+                <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
+              </div>
+              <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{todayEvent.title}</strong>
+              <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small>
             </Link> : null}
             <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + events.length) % events.length)} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % events.length)} aria-label="下一条">→</button></div>
           </div>

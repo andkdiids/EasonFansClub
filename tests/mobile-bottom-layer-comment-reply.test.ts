@@ -23,10 +23,10 @@ test('回复 API 返回前端可直接渲染且可序列化的 author 结构', (
 })
 
 test('回复、提及关系与通知在同一事务成功后一起返回', () => {
-  const transactionStart = replyRoute.indexOf('prisma.$transaction')
   const mentionCreate = replyRoute.indexOf('tx.replyMention.createMany')
   const notificationCreate = replyRoute.indexOf('tx.notification.createMany')
-  const transactionEnd = replyRoute.indexOf("if ('duplicateReplyId' in reply)")
+  const transactionStart = replyRoute.lastIndexOf('prisma.$transaction', mentionCreate)
+  const transactionEnd = replyRoute.indexOf("if ('duplicateReplyId' in reply)", notificationCreate)
   assert.ok(transactionStart > 0 && mentionCreate > transactionStart)
   assert.ok(notificationCreate > mentionCreate && transactionEnd > notificationCreate)
   assert.match(replyRoute, /key:\s*`reply-mention:\$\{createdReply\.id\}:\$\{mention\.userId\}`/)

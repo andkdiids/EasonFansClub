@@ -100,9 +100,12 @@ export function TodayPageClient({ month, day, initialEvents }: { month: number; 
       {events.map((item) => (
         <article key={item.id} className="today-poster-card overflow-hidden rounded-2xl border border-sky-100 bg-white/90 shadow-sm">
           {item.imageUrl ? (
-            <img src={item.imageUrl} alt={item.title} className="today-poster-image" loading="lazy" />
+            <div className="today-poster-image-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: '8px' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={item.imageUrl} alt={item.title} className="today-poster-image" style={{ display: 'block', maxWidth: '100%', maxHeight: '640px', width: 'auto', height: 'auto', objectFit: 'contain' }} loading="lazy" />
+            </div>
           ) : (
-            <div className="today-poster-image today-poster-image-empty" />
+            <div className="today-poster-image today-poster-image-empty" style={{ height: '240px', background: 'linear-gradient(135deg,#e0f2fe,#f1f5f9)' }} />
           )}
           <div className="today-poster-body">
             <div className="today-poster-row">

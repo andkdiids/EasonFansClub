@@ -27,11 +27,8 @@ test('Emoji 面板可滚动、靠近输入框且移动端不超过可用内容�
   assert.match(css, /\.friend-chat-composer \.emoji-picker-panel \{ width:calc\(80vw - 24px\); max-width:396px; \}/)
 })
 
-test('私信、帖子、评论回复、每日挂号与挂号留言全部复用唯一 EmojiPicker', () => {
+test('每日挂号与挂号留言复用唯一 EmojiPicker', () => {
   for (const path of [
-    'components/FriendDock.tsx',
-    'components/PostCreateForm.tsx',
-    'components/ReplyForm.tsx',
     'components/CheckInButton.tsx',
     'components/DailyMessageActions.tsx',
   ]) {
@@ -40,4 +37,30 @@ test('私信、帖子、评论回复、每日挂号与挂号留言全部复用�
     assert.match(source, /<EmojiPicker textareaRef=/)
     assert.doesNotMatch(source, /EmojiButton/)
   }
+})
+
+test('私信、帖子发布、评论回复统一使用 StickerPicker 单一表情入口，不重复挂载 EmojiPicker', () => {
+  for (const path of [
+    'components/FriendDock.tsx',
+    'components/PostCreateForm.tsx',
+    'components/ReplyForm.tsx',
+  ]) {
+    const source = read(path)
+    // 统一 StickerPicker（内部含系统 emoji / 我的表情包 / 最近使用 / 搜索 / 商店入口）
+    assert.match(source, /import \{ StickerPicker,?.*\} from '@\/components\/StickerPicker'/)
+    assert.match(source, /<StickerPicker\s/)
+    // 系统 emoji 经 onSelectEmoji 插入输入框
+    assert.match(source, /onSelectEmoji=\{insertEmoji\}/)
+    // 不再单独挂载 EmojiPicker，避免多个表情入口
+    assert.doesNotMatch(source, /import \{ EmojiPicker \} from '@\/components\/EmojiPicker'/)
+    assert.doesNotMatch(source, /<EmojiPicker /)
+  }
+})
+
+test('StickerPicker 为内联展开面板，不使用全屏遮罩或 Modal', () => {
+  const source = read('components/StickerPicker.tsx')
+  assert.doesNotMatch(source, /fixed inset-0/)
+  assert.doesNotMatch(source, /aria-modal/)
+  // 面板通过 absolute 定位在输入区域上方展开
+  assert.match(source, /absolute inset-x-0 bottom-full/)
 })

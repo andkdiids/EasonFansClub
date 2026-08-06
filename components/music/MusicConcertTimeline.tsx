@@ -279,6 +279,8 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
   ]
   const dbCategories = (categories && categories.length ? categories : fallbackCategories).filter((category) => category.enabled)
   const categoryById = new Map(dbCategories.map((category) => [category.id, category]))
+  // 以 slug 为索引：Tab 标签需要按 slug 解析分类 name（categoryId 是 CUID，slug 才是展示键）。
+  const categoryBySlug = new Map(dbCategories.map((category) => [category.slug, category]))
   // 每个巡演的有效分类 slug：优先 categoryId -> 关联分类 slug；回退到枚举映射；再回退 main。
   function tourSlug(tour: ConcertTimelineTour): string {
     const byId = tour.categoryId ? categoryById.get(tour.categoryId) : undefined
@@ -303,7 +305,8 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
       orderedSlugs.push(slug)
     }
   }
-  const tabLabel = (slug: string) => (categoryById.get(slug)?.name) || FALLBACK_CATEGORY_LABELS[slug]?.label || slug
+  // Tab 必须显示分类 name（如「Live拉阔音乐会」「专辑签售会」），绝不允许回退显示 slug 文本。
+  const tabLabel = (slug: string) => (categoryBySlug.get(slug)?.name) || FALLBACK_CATEGORY_LABELS[slug]?.label || slug
   const activeLabel = { eyebrow: FALLBACK_CATEGORY_LABELS[activeCategory]?.eyebrow || activeCategory.toUpperCase(), label: tabLabel(activeCategory) }
 
   function selectCategory(nextCategory: ConcertCategorySlug) {
