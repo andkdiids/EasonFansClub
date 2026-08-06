@@ -15,11 +15,11 @@ export async function GET(request: Request, { params }: Context) {
       where: { id: tourId, status: 'PUBLISHED' },
       select: {
         id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true, category: true,
-        MusicConcert: {
-          where: { status: 'PUBLISHED' },
-          orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-          select: { city: true, concertDate: true, posterUrl: true },
-        },
+      MusicConcert: {
+        where: { status: 'PUBLISHED' },
+        orderBy: [{ concertDate: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        select: { city: true, concertDate: true, startTime: true, endTime: true, posterUrl: true },
+      },
       },
     })
     if (!tour) return NextResponse.json({ message: '巡演不存在' }, { status: 404 })
@@ -51,11 +51,11 @@ export async function GET(request: Request, { params }: Context) {
       id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true, category: true,
       MusicConcert: {
         where: { status: 'PUBLISHED', ...(cityParam ? { city: cityParam } : {}) },
-        orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-        select: {
-          id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true,
-          _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
-        },
+          orderBy: [{ concertDate: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true, title: true, concertDate: true, startTime: true, endTime: true, city: true, venue: true, sessionNumber: true, posterUrl: true,
+            _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
+          },
       },
     },
   })

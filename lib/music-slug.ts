@@ -221,12 +221,23 @@ export function generateCityGroupSlug(city: string, stageType?: ConcertStageType
 // 单场日期 slug：数据库日期 2022-12-10 -> 20221210。
 // 注意：使用 UTC 提取日历日期，与 lib/music-live.ts 的 formatLiveDate（timeZone: 'UTC'）保持一致，
 // 确保 URL 中的日期与页面展示的日期完全相同。仅用于生成 URL，不写回数据库。
-export function generateDateSlug(date: Date | string): string {
+// 可选 startTime：同一天多场（如下午场/晚上场）时，slug 追加 -HHMM 以区分不同场次，
+// 避免详情链接互相覆盖；无 startTime 时退化为纯 YYYYMMDD（兼容旧 URL）。
+export function generateDateSlug(date: Date | string, startTime?: Date | string | null): string {
   const d = typeof date === 'string' ? new Date(date) : date
   const y = d.getUTCFullYear()
   const m = String(d.getUTCMonth() + 1).padStart(2, '0')
   const day = String(d.getUTCDate()).padStart(2, '0')
-  return `${y}${m}${day}`
+  const base = `${y}${m}${day}`
+  if (startTime) {
+    const t = typeof startTime === 'string' ? new Date(startTime) : startTime
+    if (!Number.isNaN(t.getTime())) {
+      const hh = String(t.getUTCHours()).padStart(2, '0')
+      const mm = String(t.getUTCMinutes()).padStart(2, '0')
+      return `${base}-${hh}${mm}`
+    }
+  }
+  return base
 }
 
 // 单场公开地址：/music/live/tours/<tourSlug>/<CITY_GROUP>/<YYYYMMDD>。

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import {
   buildConcertSequenceUpdates,
   cloneSetlistItems,
+  combineDateAndTime,
   DEFAULT_CONCERT_COUNTRY,
   parseConcertDates,
 } from '@/lib/music-concert-admin'
@@ -167,11 +168,10 @@ export async function POST(request: Request) {
   if (setlistSource === 'SOURCE' && !sourceConcertId) return NextResponse.json({ message: '请选择当前巡演下的来源场次' }, { status: 400 })
   const concertDates = dateResult.dates!
   const initialSetlistItems = setlistResult.items
-  const duplicate = await prisma.musicConcert.findFirst({
-    where: { tourId, city, stageType, concertDate: { in: concertDates } },
-    select: { concertDate: true },
-  })
-  if (duplicate) return NextResponse.json({ message: `${duplicate.concertDate.toISOString().slice(0, 10)} 已存在同城市场次（同场次类型）` }, { status: 409 })
+  // 同一天可创建多场（如下午场 18:00 / 晚上场 20:30），故不再按（城市, 场次类型, 日期）拦截重复。
+  // 开始/结束时间可选；缺失时该场次时间字段为 null，展示层回退到旧格式。
+  const startTime = sanitizeText(body?.startTime, 5)
+  const endTime = sanitizeText(body?.endTime, 5)
 
   const result = await prisma.$transaction(async (tx) => {
     let inheritedItems = initialSetlistItems
@@ -233,6 +233,8 @@ export async function POST(request: Request) {
           posterUrl: sanitizeText(body?.posterUrl, 1000) || null,
           description: sanitizeText(body?.description, 20_000) || null,
           status: parsePublicationStatus(body?.status),
+          startTime: combineDateAndTime(concertDate, startTime),
+          endTime: combineDateAndTime(concertDate, endTime),
           sessionNumber: null,
           sortOrder: 0,
         },
@@ -246,7 +248,7 @@ export async function POST(request: Request) {
     }
     const allConcerts = await tx.musicConcert.findMany({
       where: { tourId },
-      select: { id: true, city: true, stageType: true, concertDate: true, createdAt: true, sortOrder: true },
+      select: { id: true, city: true, stageType: true, concertDate: true, startTime: true, endTime: true, createdAt: true, sortOrder: true },
     })
     for (const sequence of buildConcertSequenceUpdates(allConcerts)) {
       await tx.musicConcert.update({

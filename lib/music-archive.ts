@@ -12,14 +12,15 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { generateArchiveSlug, generateCitySlug, generateDateSlug, cityGroupSlug, generateCityGroupSlug, effectiveCityGroup, type CityGroupType, type ConcertStageType } from '@/lib/music-slug'
 
-export async function resolveTourByArchiveSlug(slug: string): Promise<{ id: string; name: string } | null> {
+// includeDrafts: 仅管理员预览（?preview=1）时为 true，放宽 status 过滤，允许查看草稿巡演。
+export async function resolveTourByArchiveSlug(slug: string, includeDrafts = false): Promise<{ id: string; name: string } | null> {
   const byId = await prisma.musicTour.findFirst({
-    where: { id: slug, status: 'PUBLISHED' },
+    where: { id: slug, ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
     select: { id: true, name: true },
   })
   if (byId) return byId
   const candidates = await prisma.musicTour.findMany({
-    where: { status: 'PUBLISHED' },
+    where: { ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
     select: { id: true, name: true },
   })
   const match = candidates.find((tour) => generateArchiveSlug(tour.name) === slug)
@@ -46,9 +47,9 @@ export function buildCityGroupWhere(group: ResolvedCityGroup): Prisma.MusicConce
 // 依据「城市分组 slug」解析分组（服务端专用）。
 // 兼容输入：新分组 slug（HONG-KONG / HONG-KONG-ENCORE / MACAU-FINAL）、
 // 旧版 city slug（例如 澳门最终站）、中文原始 city（香港 / 澳门（最终站））。
-export async function resolveCityGroupSlug(tourId: string, groupSlug: string): Promise<ResolvedCityGroup | null> {
+export async function resolveCityGroupSlug(tourId: string, groupSlug: string, includeDrafts = false): Promise<ResolvedCityGroup | null> {
   const rows = await prisma.musicConcert.findMany({
-    where: { tourId, status: 'PUBLISHED' },
+    where: { tourId, ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
     distinct: ['city', 'stageType'],
     select: { city: true, stageType: true },
     orderBy: [{ city: 'asc' }, { stageType: 'asc' }],
@@ -97,17 +98,20 @@ export async function resolveConcertBySlug(
   tourSlug: string,
   citySlug: string,
   dateSlug: string,
+  includeDrafts = false,
 ): Promise<ResolvedConcertSlug | null> {
-  const tour = await resolveTourByArchiveSlug(tourSlug)
+  const tour = await resolveTourByArchiveSlug(tourSlug, includeDrafts)
   if (!tour) return null
-  const group = await resolveCityGroupSlug(tour.id, citySlug)
+  const group = await resolveCityGroupSlug(tour.id, citySlug, includeDrafts)
   if (!group) return null
   const concerts = await prisma.musicConcert.findMany({
-    where: { tourId: tour.id, ...buildCityGroupWhere(group), status: 'PUBLISHED' },
+    where: { tourId: tour.id, ...buildCityGroupWhere(group), ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
     orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: { id: true, concertDate: true },
+    select: { id: true, concertDate: true, startTime: true },
   })
-  const match = concerts.find((c) => generateDateSlug(c.concertDate) === dateSlug)
+  // 优先按「日期 + 开始时间」精确匹配（同一天多场），其次回退到纯日期（兼容旧 YYYYMMDD 直链）。
+  const match = concerts.find((c) => generateDateSlug(c.concertDate, c.startTime) === dateSlug)
+    || concerts.find((c) => generateDateSlug(c.concertDate) === dateSlug)
   if (!match) return null
   return {
     id: match.id,

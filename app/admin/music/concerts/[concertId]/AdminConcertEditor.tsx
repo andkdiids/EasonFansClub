@@ -4,13 +4,14 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState, type Dispatch, type DragEvent, type FormEvent, type SetStateAction } from 'react'
 import { MusicCoverUploader } from '@/app/admin/music/MusicCoverUploader'
 import { concertPosterSourceLabel, resolveConcertPoster, type ConcertPosterSource } from '@/lib/music-concert-poster'
+import { formatConcertTime } from '@/lib/music-concert-admin'
 
 type Tour = { id: string; name: string; posterUrl?: string | null }
 type SongOption = { id: string; title: string; album: string; releaseYear: number }
 type SetlistItem = { id?: string; songId: string | null; displayName: string; section: string; position: number; versionName: string; note: string; isEncore: boolean; isRequest: boolean; isDebut: boolean; isGuest: boolean; isMedley: boolean; isSpecial: boolean; song?: SongOption | null; candidates?: SongOption[] }
 type Highlight = { id?: string; type: string; title: string; content: string; sortOrder: number }
 type ConcertOption = { id: string; city: string; concertDate: string; sessionNumber?: string | null; sortOrder: number; tour: Tour }
-type Concert = { id: string; tourId: string; title?: string | null; concertDate: string; city: string; countryOrRegion?: string | null; venue?: string | null; sessionNumber?: string | null; posterUrl?: string | null; cityPosterUrl?: string | null; tourPosterUrl?: string | null; resolvedPosterUrl?: string | null; posterSource?: ConcertPosterSource; description?: string | null; status: 'DRAFT' | 'PUBLISHED'; stageType?: 'NORMAL' | 'ENCORE' | 'FINAL'; sortOrder: number; tour: Tour; setlist: SetlistItem[]; highlights: Highlight[]; _count?: { UserMusicConcert: number } }
+type Concert = { id: string; tourId: string; title?: string | null; concertDate: string; startTime?: string | null; endTime?: string | null; city: string; countryOrRegion?: string | null; venue?: string | null; sessionNumber?: string | null; posterUrl?: string | null; cityPosterUrl?: string | null; tourPosterUrl?: string | null; resolvedPosterUrl?: string | null; posterSource?: ConcertPosterSource; description?: string | null; status: 'DRAFT' | 'PUBLISHED'; stageType?: 'NORMAL' | 'ENCORE' | 'FINAL'; sortOrder: number; tour: Tour; setlist: SetlistItem[]; highlights: Highlight[]; _count?: { UserMusicConcert: number } }
 
 const sections = [['OPENING', '开场'], ['MAIN', '正式歌单'], ['TALK', '谈话环节'], ['REQUEST', '点歌'], ['ENCORE', 'Encore'], ['SPECIAL', '特别环节'], ['OTHER', '其他']]
 const highlightTypes = [['TALK', '谈话'], ['GUEST', '嘉宾'], ['SONG', '歌曲'], ['STAGE', '舞台'], ['INTERACTION', '互动'], ['MEMORIAL', '纪念'], ['OTHER', '其他']]
@@ -171,7 +172,7 @@ function SetlistEditor({
 export function AdminConcertEditor({ concertId }: { concertId: string }) {
   const [concert, setConcert] = useState<Concert | null>(null)
   const [tours, setTours] = useState<Tour[]>([])
-  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', city: '', countryOrRegion: '中国', venue: '', posterUrl: '', description: '', status: 'DRAFT' as Concert['status'], stageType: 'NORMAL' as 'NORMAL' | 'ENCORE' | 'FINAL' })
+  const [form, setForm] = useState({ tourId: '', title: '', concertDate: '', startTime: '', endTime: '', city: '', countryOrRegion: '中国', venue: '', posterUrl: '', description: '', status: 'DRAFT' as Concert['status'], stageType: 'NORMAL' as 'NORMAL' | 'ENCORE' | 'FINAL' })
   const [setlist, setSetlist] = useState<SetlistItem[]>([])
   const [encoreSetlist, setEncoreSetlist] = useState<SetlistItem[]>([])
   const [highlights, setHighlights] = useState<Highlight[]>([])
@@ -188,7 +189,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
     if (!concertResponse.ok) return setError(data?.message || '场次加载失败')
     const item = data.concert as Concert
     setConcert(item)
-    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0, 10), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', posterUrl: item.posterUrl || '', description: item.description || '', status: item.status, stageType: item.stageType || 'NORMAL' })
+    setForm({ tourId: item.tourId, title: item.title || '', concertDate: item.concertDate.slice(0, 10), startTime: formatConcertTime(item.startTime), endTime: formatConcertTime(item.endTime), city: item.city, countryOrRegion: item.countryOrRegion || '中国', venue: item.venue || '', posterUrl: item.posterUrl || '', description: item.description || '', status: item.status, stageType: item.stageType || 'NORMAL' })
     setSetlist(normalizeSetlistRows(item.setlist, false))
     setEncoreSetlist(normalizeSetlistRows(item.setlist, true))
     setHighlights(item.highlights.map((row, index) => ({ ...row, sortOrder: index })))
@@ -259,7 +260,7 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
     const response = await fetch(`/api/admin/music/concerts/${concertId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, status: nextStatus || form.status, setlist: setlistItems, highlights: highlights.map((item, index) => ({ ...item, sortOrder: index })) }),
+      body: JSON.stringify({ ...form, startTime: form.startTime || undefined, endTime: form.endTime || undefined, status: nextStatus || form.status, setlist: setlistItems, highlights: highlights.map((item, index) => ({ ...item, sortOrder: index })) }),
     })
     const data = await response.json().catch(() => null)
     if (!response.ok) setError(data?.message || '保存失败')
@@ -276,6 +277,8 @@ export function AdminConcertEditor({ concertId }: { concertId: string }) {
       <section className="border border-sky-100 bg-white/90 p-5 sm:p-7"><h2 className="text-2xl font-black text-brand-950">基本信息</h2><div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm font-black">所属巡演<select required value={form.tourId} onChange={(event) => updateForm('tourId', event.target.value)} className={`${field} mt-1`}>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
         <label className="text-sm font-black">演出日期<input required type="date" value={form.concertDate} onChange={(event) => updateForm('concertDate', event.target.value)} className={`${field} mt-1`} /></label>
+        <label className="text-sm font-black">开始时间<input type="time" value={form.startTime} onChange={(event) => updateForm('startTime', event.target.value)} className={`${field} mt-1`} /></label>
+        <label className="text-sm font-black">结束时间<input type="time" value={form.endTime} onChange={(event) => updateForm('endTime', event.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black">城市<input required value={form.city} onChange={(event) => updateForm('city', event.target.value)} className={`${field} mt-1`} /></label>
         <label className="text-sm font-black">场次类型<select value={form.stageType} onChange={(event) => updateForm('stageType', event.target.value)} className={`${field} mt-1`}>
           <option value="NORMAL">普通场次</option>

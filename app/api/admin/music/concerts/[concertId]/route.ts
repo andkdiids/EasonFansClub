@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { buildConcertSequenceUpdates, cloneSetlistItems, DEFAULT_CONCERT_COUNTRY } from '@/lib/music-concert-admin'
+import { buildConcertSequenceUpdates, cloneSetlistItems, combineDateAndTime, DEFAULT_CONCERT_COUNTRY } from '@/lib/music-concert-admin'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { parseHighlights, parseLiveDate, parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
 import { prisma } from '@/lib/prisma'
@@ -11,7 +11,7 @@ type Context = { params: Promise<{ concertId: string }> }
 async function normalizeTourConcerts(tx: Prisma.TransactionClient, tourId: string) {
   const concerts = await tx.musicConcert.findMany({
     where: { tourId },
-    select: { id: true, city: true, stageType: true, concertDate: true, createdAt: true, sortOrder: true },
+    select: { id: true, city: true, stageType: true, concertDate: true, startTime: true, endTime: true, createdAt: true, sortOrder: true },
   })
   for (const sequence of buildConcertSequenceUpdates(concerts)) {
     await tx.musicConcert.update({
@@ -94,6 +94,8 @@ export async function PATCH(request: Request, { params }: Context) {
           title: sanitizeText(body?.title, 160) || null,
           countryOrRegion: sanitizeText(body?.countryOrRegion, 100) || DEFAULT_CONCERT_COUNTRY,
           venue: sanitizeText(body?.venue, 200) || null,
+          startTime: combineDateAndTime(concertDate, body?.startTime),
+          endTime: combineDateAndTime(concertDate, body?.endTime),
           ...(hasPosterUrl ? { posterUrl: sanitizeText(body?.posterUrl, 1000) || null } : {}),
           description: sanitizeText(body?.description, 20_000) || null,
           status: parsePublicationStatus(body?.status),

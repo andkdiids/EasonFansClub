@@ -4,11 +4,13 @@ import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
+import { formatConcertTime } from '@/lib/music-concert-admin'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { generateArchiveSlug, generateDateSlug, cityGroupSlug, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
 import { resolveTourByArchiveSlug, resolveCityGroupSlug, buildCityGroupWhere } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { getCurrentUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +18,8 @@ type CityConcert = {
   id: string
   title: string | null
   concertDate: string
+  startTime: string | null
+  endTime: string | null
   venue: string | null
   sessionNumber: string | null
   posterUrl: string | null
@@ -49,12 +53,15 @@ function sessionNumberValue(value: string | null | undefined): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.MAX_SAFE_INTEGER
 }
 
-export default async function MusicTourCityPage({ params }: { params: Promise<{ tourId: string; city: string }> }) {
+export default async function MusicTourCityPage({ params, searchParams }: { params: Promise<{ tourId: string; city: string }>; searchParams: Promise<{ preview?: string }> }) {
   const { tourId, city: cityGroup } = await params
-  const tourMatch = await resolveTourByArchiveSlug(tourId)
+  const previewParam = (await searchParams).preview
+  const sessionUser = await getCurrentUser()
+  const isPreview = Boolean(previewParam) && Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
+  const tourMatch = await resolveTourByArchiveSlug(tourId, isPreview)
   if (!tourMatch) notFound()
   const canonicalTourSlug = generateArchiveSlug(tourMatch.name)
-  const group = await resolveCityGroupSlug(tourMatch.id, cityGroup)
+  const group = await resolveCityGroupSlug(tourMatch.id, cityGroup, isPreview)
   if (!group) notFound()
   const canonicalCitySlug = cityGroupSlug(group.base, group.type)
   // 规范的公开地址：/music/live/tours/<slug>/<GROUP>；旧的 id / 原始 city / 旧版 city slug 直链 308 跳转
@@ -63,11 +70,11 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
   }
   const [meta, config] = await Promise.all([
     prisma.musicTour.findFirst({
-      where: { id: tourMatch.id, status: 'PUBLISHED' },
+      where: { id: tourMatch.id, ...(isPreview ? {} : { status: 'PUBLISHED' }) },
       select: {
         id: true, name: true, subtitle: true, posterUrl: true,
         MusicConcert: {
-          where: { status: 'PUBLISHED', ...buildCityGroupWhere(group) },
+          where: { ...(isPreview ? {} : { status: 'PUBLISHED' }), ...buildCityGroupWhere(group) },
           orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           include: {
             MusicConcertSetlistItem: {
@@ -95,6 +102,8 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
       id: concert.id,
       title: concert.title,
       concertDate: concert.concertDate.toISOString(),
+      startTime: concert.startTime ? concert.startTime.toISOString() : null,
+      endTime: concert.endTime ? concert.endTime.toISOString() : null,
       venue: concert.venue,
       sessionNumber: concert.sessionNumber,
       posterUrl: concert.posterUrl,
@@ -105,12 +114,29 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
     }
   })
 
-  // 场次排序：演出日期升序，其次按场次编号（sessionNumber）升序；不按城市名称排序。
+  // 场次排序：演出日期升序，其次开始时间升序，再次场次编号（sessionNumber）升序；不按城市名称排序。
   cityConcerts.sort((left, right) => {
     const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
     if (dateDifference) return dateDifference
+    const timeDifference = new Date(left.startTime || 0).getTime() - new Date(right.startTime || 0).getTime()
+    if (timeDifference) return timeDifference
     return sessionNumberValue(left.sessionNumber) - sessionNumberValue(right.sessionNumber)
   })
+
+  // 同一天多场：按日期分桶，记录每场在当天的序号（用于「第 N 场」与显示时间）。
+  const dayCountMap = new Map<string, number>()
+  const dayIndexMap = new Map<string, number>()
+  const byDay = new Map<string, CityConcert[]>()
+  for (const concert of cityConcerts) {
+    const key = concert.concertDate.slice(0, 10)
+    const bucket = byDay.get(key)
+    if (bucket) bucket.push(concert)
+    else byDay.set(key, [concert])
+  }
+  for (const [key, bucket] of byDay) {
+    dayCountMap.set(key, bucket.length)
+    bucket.forEach((concert, index) => dayIndexMap.set(concert.id, index + 1))
+  }
 
   const allSame = cityConcerts.length > 0 && cityConcerts.every((concert) => concert.signature === cityConcerts[0].signature)
   const firstWithSetlist = cityConcerts.find((concert) => concert.full.length > 0)
@@ -159,13 +185,17 @@ export default async function MusicTourCityPage({ params }: { params: Promise<{ 
       <h2 id="city-concerts-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">演出场次</h2>
       <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cityConcerts.map((concert, index) => {
-          const sessionLabel = concert.sessionNumber || String(index + 1)
-          const concertHref = `/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}/${generateDateSlug(concert.concertDate)}`
+          const dateKey = concert.concertDate.slice(0, 10)
+          const sameDay = (dayCountMap.get(dateKey) || 0) > 1
+          const dayIndex = dayIndexMap.get(concert.id) || 1
+          const startTimeText = formatConcertTime(concert.startTime)
+          const sessionLabel = sameDay ? String(dayIndex) : (concert.sessionNumber || String(index + 1))
+          const concertHref = `/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}/${generateDateSlug(concert.concertDate, concert.startTime)}`
           return (
             <div key={concert.id} className="min-w-0 border border-white/10 bg-white/[0.055] p-5 transition hover:border-sky-300/30 hover:bg-white/[0.09]">
               <Link href={concertHref} className="block">
                 <div className="flex items-center justify-between gap-3">
-                  <time className="text-xs font-black text-sky-300/70">{formatLiveDate(concert.concertDate)}</time>
+                  <time className="text-xs font-black text-sky-300/70">{sameDay ? (dayIndex === 1 ? formatLiveDate(concert.concertDate) : '') : formatLiveDate(concert.concertDate)}{startTimeText ? ` ${startTimeText}` : ''}</time>
                   <span className="shrink-0 border border-sky-300/20 px-2 py-1 text-[10px] font-black text-sky-100/75">第 {sessionLabel} 场</span>
                 </div>
                 {concert.title ? <h3 className="mt-2 break-words text-xl font-black text-white">{concert.title}</h3> : null}

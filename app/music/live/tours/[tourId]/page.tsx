@@ -8,6 +8,7 @@ import { generateArchiveSlug, cityGroupSlug, effectiveCityGroup, type CityGroupT
 import { resolveTourByArchiveSlug } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { getCurrentUser } from '@/lib/auth'
 
 type CityGroupInfo = {
   groupSlug: string
@@ -45,20 +46,23 @@ function TourCityGrid({ tourSlug, tourPosterUrl, items }: { tourSlug: string; to
 
 export const dynamic = 'force-dynamic'
 
-export default async function MusicTourPage({ params }: { params: Promise<{ tourId: string }> }) {
+export default async function MusicTourPage({ params, searchParams }: { params: Promise<{ tourId: string }>; searchParams: Promise<{ preview?: string }> }) {
   const { tourId } = await params
-  const match = await resolveTourByArchiveSlug(tourId)
+  const previewParam = (await searchParams).preview
+  const sessionUser = await getCurrentUser()
+  const isPreview = Boolean(previewParam) && Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
+  const match = await resolveTourByArchiveSlug(tourId, isPreview)
   if (!match) notFound()
   // 旧的 CUID 直链跳转到规范的 slug 公开地址；slug 直链直接渲染
   const canonicalSlug = generateArchiveSlug(match.name)
   if (tourId !== canonicalSlug) permanentRedirect(`/music/live/tours/${canonicalSlug}`)
   const [tour, config] = await Promise.all([
     prisma.musicTour.findFirst({
-      where: { id: match.id, status: 'PUBLISHED' },
+      where: { id: match.id, ...(isPreview ? {} : { status: 'PUBLISHED' }) },
       select: {
         id: true, name: true, subtitle: true, description: true, posterUrl: true, startDate: true, endDate: true,
         MusicConcert: {
-          where: { status: 'PUBLISHED' },
+          where: { ...(isPreview ? {} : { status: 'PUBLISHED' }) },
           orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: { city: true, stageType: true, concertDate: true, posterUrl: true },
         },

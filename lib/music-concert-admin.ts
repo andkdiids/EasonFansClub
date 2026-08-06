@@ -19,11 +19,13 @@ export function parseConcertDates(value: unknown) {
 }
 
 export function buildConcertSequenceUpdates(
-  concerts: Array<{ id: string; city?: string; stageType?: string; concertDate: Date | string; createdAt?: Date | string; sortOrder?: number }>,
+  concerts: Array<{ id: string; city?: string; stageType?: string; concertDate: Date | string; startTime?: Date | string | null; createdAt?: Date | string; sortOrder?: number }>,
 ) {
   const chronological = [...concerts].sort((left, right) => {
     const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
     if (dateDifference) return dateDifference
+    const timeDifference = new Date(left.startTime || 0).getTime() - new Date(right.startTime || 0).getTime()
+    if (timeDifference) return timeDifference
     const createdDifference = new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime()
     return createdDifference || left.id.localeCompare(right.id)
   })
@@ -32,7 +34,7 @@ export function buildConcertSequenceUpdates(
     ? [...concerts].sort((left, right) => {
       const leftOrder = (left.sortOrder || 0) > 0 ? left.sortOrder! : Number.MAX_SAFE_INTEGER
       const rightOrder = (right.sortOrder || 0) > 0 ? right.sortOrder! : Number.MAX_SAFE_INTEGER
-      return leftOrder - rightOrder || new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime() || new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime() || left.id.localeCompare(right.id)
+      return leftOrder - rightOrder || new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime() || new Date(left.startTime || 0).getTime() - new Date(right.startTime || 0).getTime() || new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime() || left.id.localeCompare(right.id)
     })
     : chronological
   // 场次编号按（城市 + 场次类型）分组：普通场与返场/最终站即使城市相同也各自独立编号。
@@ -51,6 +53,30 @@ export function buildConcertSequenceUpdates(
       sortOrder: index + 1,
     }
   })
+}
+
+// 将「演出日期 + 开始/结束时间(HH:mm)」合并为 DateTime；时间缺失或格式非法返回 null。
+// 日期部分取自 concertDate（store 中以 12:00 UTC 存储），时间部分取自用户输入，保证排序与展示一致。
+export function combineDateAndTime(baseDate: Date, time?: string | null): Date | null {
+  if (!time || typeof time !== 'string') return null
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+  const result = new Date(baseDate)
+  result.setUTCHours(hours, minutes, 0, 0)
+  return result
+}
+
+// 从 DateTime 提取 HH:mm（UTC，与 formatLiveDate 一致）；缺失或非法返回空串。
+export function formatConcertTime(value?: Date | string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const hours = String(date.getUTCHours()).padStart(2, '0')
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
 }
 
 export function cloneSetlistItems(items: ParsedSetlistItem[], concertId: string) {

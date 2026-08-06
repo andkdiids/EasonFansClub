@@ -1375,6 +1375,8 @@ model MusicConcert {
   tourId                  String
   title                   String?
   concertDate             DateTime
+  startTime               DateTime?
+  endTime                 DateTime?
   city                    String
   countryOrRegion         String?
   stageType               ConcertStageType          @default(NORMAL)

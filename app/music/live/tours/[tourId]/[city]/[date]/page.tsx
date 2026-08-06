@@ -16,13 +16,18 @@ export const dynamic = 'force-dynamic'
 
 export default async function MusicConcertBySlugPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ tourId: string; city: string; date: string }>
+  searchParams: Promise<{ preview?: string }>
 }) {
   const { tourId, city, date } = await params
+  const previewParam = (await searchParams).preview
+  const sessionUser = await getCurrentUser()
+  const isPreview = Boolean(previewParam) && Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
 
   // 依据 巡演slug + 城市slug + 日期slug 解析单场（兼容旧 CUID / 中文 city 输入）
-  const resolved = await resolveConcertBySlug(tourId, city, date)
+  const resolved = await resolveConcertBySlug(tourId, city, date, isPreview)
   if (!resolved) notFound()
 
   // 规范的公开地址：/music/live/tours/<tourSlug>/<CITY>/<YYYYMMDD>
@@ -38,7 +43,7 @@ export default async function MusicConcertBySlugPage({
   const currentUser = await getCurrentUser()
   const [concert, config, attendance] = await Promise.all([
     prisma.musicConcert.findFirst({
-      where: { id: resolved.id, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
+      where: { id: resolved.id, ...(isPreview ? {} : { status: 'PUBLISHED' }), MusicTour: { ...(isPreview ? {} : { status: 'PUBLISHED' }) } },
       select: {
         id: true, title: true, concertDate: true, city: true, countryOrRegion: true, venue: true, sessionNumber: true, posterUrl: true, description: true,
         MusicTour: { select: { id: true, name: true, posterUrl: true } },
@@ -57,7 +62,7 @@ export default async function MusicConcertBySlugPage({
   ])
   if (!concert) notFound()
   const cityPoster = await prisma.musicConcert.findFirst({
-    where: { tourId: concert.MusicTour.id, city: concert.city, status: 'PUBLISHED', posterUrl: { not: null } },
+    where: { tourId: concert.MusicTour.id, city: concert.city, ...(isPreview ? {} : { status: 'PUBLISHED' }), posterUrl: { not: null } },
     orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: { posterUrl: true },
   })

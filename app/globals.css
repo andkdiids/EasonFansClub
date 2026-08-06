@@ -1470,7 +1470,7 @@ svg {
 .music-concert-gallery-poster-button:hover .music-concert-gallery-year,
 .music-concert-gallery-poster-button:focus-visible .music-concert-gallery-year { opacity:0; }
 .music-concert-gallery-caption>span { color:#7dd3fc; font-size:10px; font-weight:950; letter-spacing:.18em; }
-.music-concert-gallery-caption strong { display:-webkit-box; margin-top:8px; overflow:hidden; overflow-wrap:anywhere; color:#fff; font-size:clamp(18px,1.8vw,23px); font-weight:950; line-height:1.12; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+.music-concert-gallery-caption strong { display:-webkit-box; margin-top:8px; max-height:calc(2 * 1.12em); min-height:calc(2 * 1.12em); overflow:hidden; overflow-wrap:anywhere; color:#fff; font-size:clamp(18px,1.8vw,23px); font-weight:950; line-height:1.12; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .music-concert-gallery-caption small { margin-top:10px; color:rgba(226,232,240,.76); font-size:11px; font-weight:900; }
 .music-concert-gallery-caption>b { display:flex; align-items:center; justify-content:space-between; margin-top:13px; color:#e0f2fe; font-size:10px; font-weight:900; letter-spacing:.04em; }
 .music-concert-gallery-my-live { position:absolute; z-index:60; top:50%; left:50%; width:310px; min-height:365px; border:1px solid rgba(186,230,253,.22); border-radius:4px; padding:31px 28px 27px; color:#fff; background:rgba(5,25,43,.88); text-align:left; transform:translate3d(-50%,-50%,0); }
@@ -1528,7 +1528,7 @@ svg {
   .music-concert-gallery-poster-button { border-radius:18px; }
   .music-concert-gallery-image { border-radius:18px; }
   .music-concert-gallery-caption { border-radius:18px; padding:10px 8px; }
-  .music-concert-gallery-caption strong { font-size:14px; -webkit-line-clamp:2; }
+  .music-concert-gallery-caption strong { font-size:14px; -webkit-line-clamp:2; max-height:calc(2 * 1.12em); min-height:calc(2 * 1.12em); }
   .music-concert-gallery-caption small { margin-top:5px; font-size:8px; }
   .music-concert-gallery-caption>b { margin-top:6px; font-size:8px; }
   .music-concert-gallery-poster-button:hover,

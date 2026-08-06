@@ -28,7 +28,16 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   if (!sessionUser) redirect('/login')
 
   const params = await searchParams
-  const selectedDate = parseDate(params.date)
+  let selectedDate = parseDate(params.date)
+  // 通知点赞跳转到 /checkin?message=<id> 时，目标留言可能不在「今天」：
+  // 先按 id 查出其所属日期并作为选中日期加载，确保留言进入列表后能被定位高亮。
+  if (params.message) {
+    const targetMessage = await prisma.dailyMessage.findUnique({
+      where: { id: params.message.slice(0, 80) },
+      select: { date: true },
+    })
+    if (targetMessage) selectedDate = parseDate(formatBeijingDate(targetMessage.date))
+  }
   const nextDate = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000)
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey(today)
