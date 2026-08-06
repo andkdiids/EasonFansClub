@@ -38,17 +38,54 @@ export function DailyMessageActions({
   const [favorites, setFavorites] = useState(Math.max(favoriteCount, 0))
   const [comments, setComments] = useState(Math.max(commentCount, 0))
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // 点赞请求独立的 pending 标记（每条留言各自一个组件实例，天然按记录隔离），
+  // 不与评论提交 / 收藏共享，避免一个操作禁用全部按钮。
+  const [isLikePending, setIsLikePending] = useState(false)
 
   useEffect(() => {
     setIsLiked(liked)
     setLikes(Math.max(likeCount, 0))
   }, [liked, likeCount])
 
-  async function toggle(path: string, kind: 'like' | 'favorite') {
+  // 乐观更新：先本地切换，请求成功用接口权威值覆盖，失败完整回滚并提示。
+  async function toggleLike() {
+    if (isSubmitting || isLikePending) return
+    setError('')
+    const previousLiked = isLiked
+    const previousLikes = likes
+    const optimisticLiked = !previousLiked
+    const optimisticLikes = Math.max(previousLikes + (optimisticLiked ? 1 : -1), 0)
+    setIsLiked(optimisticLiked)
+    setLikes(optimisticLikes)
+    onLikeChange?.({ liked: optimisticLiked, likeCount: optimisticLikes })
+    setIsLikePending(true)
+    try {
+      const response = await fetch(`/api/daily-messages/${messageId}/like`, { method: 'POST' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(typeof data.message === 'string' ? data.message : '操作失败，请先登录')
+      }
+      const serverLiked = Boolean(data.isLiked)
+      const serverCount = Math.max(Number(data.likeCount || 0), 0)
+      setIsLiked(serverLiked)
+      setLikes(serverCount)
+      // 通知父组件 / 共享上下文：翻页与「E友留言 / 好友留言」双面板实时同步。
+      onLikeChange?.({ liked: serverLiked, likeCount: serverCount })
+    } catch (likeError) {
+      setIsLiked(previousLiked)
+      setLikes(previousLikes)
+      onLikeChange?.({ liked: previousLiked, likeCount: previousLikes })
+      setError(likeError instanceof Error ? likeError.message : '操作失败，请稍后再试')
+    } finally {
+      setIsLikePending(false)
+    }
+  }
+
+  async function toggleFavorite() {
     if (isSubmitting) return
     setError('')
     setIsSubmitting(true)
-    const response = await fetch(path, { method: 'POST' })
+    const response = await fetch(`/api/daily-messages/${messageId}/favorite`, { method: 'POST' })
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
 
@@ -57,17 +94,8 @@ export function DailyMessageActions({
       return
     }
 
-    if (kind === 'like') {
-      const nextLiked = Boolean(data.isLiked)
-      const nextCount = Math.max(Number(data.likeCount || 0), 0)
-      setIsLiked(nextLiked)
-      setLikes(nextCount)
-      // 通知父组件 / 共享上下文：翻页与「E友留言 / 好友留言」双面板实时同步。
-      onLikeChange?.({ liked: nextLiked, likeCount: nextCount })
-    } else {
-      setIsFavorited(Boolean(data.isFavorited))
-      setFavorites(Math.max(Number(data.favoriteCount || 0), 0))
-    }
+    setIsFavorited(Boolean(data.isFavorited))
+    setFavorites(Math.max(Number(data.favoriteCount || 0), 0))
   }
 
   async function submitComment() {
@@ -96,8 +124,8 @@ export function DailyMessageActions({
     <div className="mt-4 space-y-3">
       <div className="flex flex-wrap gap-2 text-sm font-black">
         <button
-          onClick={() => toggle(`/api/daily-messages/${messageId}/like`, 'like')}
-          disabled={isSubmitting}
+          onClick={() => void toggleLike()}
+          disabled={isSubmitting || isLikePending}
           className={`rounded-full px-3 py-2 transition disabled:opacity-60 ${isLiked ? 'bg-red-50 text-red-600' : 'bg-sky-50 text-brand-700'}`}
         >
           {isLiked ? '♥' : '♡'} {likes}
@@ -112,7 +140,7 @@ export function DailyMessageActions({
           {replyTo ? `回复 ${replyTo.name}` : '评论'} {comments}
         </button>
         <button
-          onClick={() => toggle(`/api/daily-messages/${messageId}/favorite`, 'favorite')}
+          onClick={() => void toggleFavorite()}
           disabled={isSubmitting}
           className={`rounded-full px-3 py-2 transition disabled:opacity-60 ${isFavorited ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-brand-700'}`}
         >

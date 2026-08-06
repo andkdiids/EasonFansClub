@@ -11,6 +11,15 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)
 
+  // 目标留言必须存在（含已软删的留言也视为存在，保证幂等），避免 prisma.update 抛 P2025 变成 500。
+  const existing = await prisma.dailyMessage.findUnique({
+    where: { id: messageId },
+    select: { id: true },
+  })
+  if (!existing) {
+    return NextResponse.json({ message: '留言不存在或已被删除' }, { status: 404 })
+  }
+
   if (body?.isFeatured) {
     const message = await prisma.dailyMessage.findUnique({
       where: { id: messageId },

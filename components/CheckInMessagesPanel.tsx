@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
 import { useCheckInLike } from '@/components/checkin-like-context'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
@@ -56,6 +57,7 @@ export function CheckInMessagesPanel({
   previewMode = false,
   focusMessageId,
   focusCommentId,
+  canManageMessages = false,
 }: Readonly<{
   title?: string
   density?: PageLayoutModuleDensity
@@ -69,6 +71,8 @@ export function CheckInMessagesPanel({
   previewMode?: boolean
   focusMessageId?: string
   focusCommentId?: string
+  /** 服务端根据当前登录用户角色计算的管理员标记：是否显示留言删除入口（接口侧仍独立鉴权）。 */
+  canManageMessages?: boolean
 }>) {
   const [date, setDate] = useState(initialDate)
   const [sort, setSort] = useState<CheckInMessageSort>(initialSort)
@@ -79,8 +83,17 @@ export function CheckInMessagesPanel({
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const [page, setPage] = useState(1)
   const [focusError, setFocusError] = useState('')
+  // 管理员删除留言：第一次点击只打开确认框，确认后才调用管理接口。
+  const [deleteTarget, setDeleteTarget] = useState<CheckInDisplayMessageItem | null>(null)
+  const [isDeletingMessage, setIsDeletingMessage] = useState(false)
   // 跨面板共享的点赞覆盖层（E友留言 / 好友留言 同步、翻页不丢失）。
   const likeCtx = useCheckInLike()
+  // likeCtx 的 value 在每次点赞后都会更换身份（覆盖层变化），同步 effect / loadMessages
+  // 只能通过 ref 访问它，否则点赞会反复触发「重置分页 + 用服务端旧值覆盖点赞状态」。
+  const likeCtxRef = useRef(likeCtx)
+  useEffect(() => {
+    likeCtxRef.current = likeCtx
+  })
   const isCompact = density !== 'normal'
   const isMinimal = density === 'minimal'
   const previewPageSize = previewMode ? (isMinimal ? 1 : isCompact ? 2 : messagesPerPage) : messagesPerPage
@@ -126,7 +139,7 @@ export function CheckInMessagesPanel({
       setMessages(incoming)
       // 服务端重载后，用服务端最新 likeCount / liked 刷新共享覆盖层，
       // 确保服务端数据成为权威源，避免旧缓存覆盖新数据（如他人点赞）。
-      likeCtx.reconcileLikes(incoming.map((item: CheckInDisplayMessageItem) => ({
+      likeCtxRef.current.reconcileLikes(incoming.map((item: CheckInDisplayMessageItem) => ({
         id: item.id,
         likeCount: item.likeCount,
         liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
@@ -138,20 +151,22 @@ export function CheckInMessagesPanel({
     } finally {
       setIsLoading(false)
     }
-  }, [date, isLoading, scope, sort, likeCtx])
+  }, [date, isLoading, scope, sort])
 
   useEffect(() => {
     setDate(initialDate)
     setSort(initialSort)
     setMessages(initialMessages)
     // 用服务端初始数据刷新覆盖层（首次挂载时覆盖层为空，属 no-op；父组件重渲染传入新初始数据时保持服务端权威）。
-    likeCtx.reconcileLikes(initialMessages.map((item) => ({
+    // 注意：不依赖 likeCtx——点赞会改变覆盖层导致 likeCtx 更换身份，若列入依赖会在每次点赞后
+    // 重跑本 effect，用过期的 initialMessages 覆盖刚写入的点赞状态并把分页重置回第一页。
+    likeCtxRef.current.reconcileLikes(initialMessages.map((item) => ({
       id: item.id,
       likeCount: item.likeCount,
       liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
     })))
     setPage(1)
-  }, [initialDate, initialMessages, initialSort, likeCtx])
+  }, [initialDate, initialMessages, initialSort])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -212,6 +227,33 @@ export function CheckInMessagesPanel({
       window.removeEventListener('checkin:dayChanged', handleDayChanged)
     }
   }, [loadMessages, maxDate, previewMode, sort])
+
+  // 管理员删除留言：复用后台既有软删除接口（服务端校验 daily_message_manage 权限），
+  // 成功后只从当前列表局部移除目标留言，不重新加载列表、不改动分页/筛选/滚动位置。
+  // 若删除后当前页恰好为空且页码大于 1，由下方 page > totalPages 的夹取 effect 退回上一有效页。
+  async function confirmDeleteMessage() {
+    if (!deleteTarget || isDeletingMessage) return
+    setIsDeletingMessage(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/admin/daily-messages/${deleteTarget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isDeleted: true, reason: '挂号页管理员删除留言' }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(typeof data.message === 'string' ? data.message : '删除失败，请稍后重试')
+      }
+      setMessages((current) => current.filter((message) => message.id !== deleteTarget.id))
+      setDeleteTarget(null)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除失败，请稍后重试')
+      setDeleteTarget(null)
+    } finally {
+      setIsDeletingMessage(false)
+    }
+  }
 
   return (
     <div className={`checkin-messages-panel ${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex h-full flex-col rounded-[24px] border shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
@@ -313,6 +355,20 @@ export function CheckInMessagesPanel({
                     {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood ? `${mood.icon} ${mood.label}` : '未填写心情'}</span> : mood ? <span className="text-xs">{mood.icon}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
+                    {canManageMessages && !previewMode && !isMinimal ? (
+                      <button
+                        type="button"
+                        aria-label="删除留言"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          setDeleteTarget(item)
+                        }}
+                        className="text-xs font-black text-red-600 transition hover:text-red-700"
+                      >
+                        删除
+                      </button>
+                    ) : null}
                   </div>
                   <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
                   {rootComments.length && !isMinimal ? (
@@ -465,6 +521,17 @@ export function CheckInMessagesPanel({
           </button>
         </nav>
       ) : null}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="确认删除这条留言？"
+        description="删除后，这条留言将从挂号页面移除，此操作无法撤销。"
+        confirmLabel="确认删除"
+        loading={isDeletingMessage}
+        onConfirm={() => void confirmDeleteMessage()}
+        onCancel={() => {
+          if (!isDeletingMessage) setDeleteTarget(null)
+        }}
+      />
     </div>
   )
 }

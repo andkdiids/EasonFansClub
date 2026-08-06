@@ -90,6 +90,21 @@ export async function PATCH(request: Request) {
           where: { boardId: current.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
         })
         await tx.board.update({ where: { id: current.boardId }, data: { postCount } })
+        // 仅在状态实际变化时通知作者（同事务保证不丢失；APPROVED→APPROVED / REJECTED→REJECTED 不重复通知）。
+        await tx.notification.create({
+          data: {
+            recipientId: current.authorId,
+            actorId: guard.user.id,
+            type: 'ADMIN',
+            title: status === 'APPROVED' ? '帖子审核通过' : '帖子未通过审核',
+            content: status === 'APPROVED'
+              ? `你发布的帖子《${current.title}》已通过审核，现在可以在 E院广场查看。`
+              : rejectionReason
+                ? `你发布的帖子《${current.title}》未通过审核。原因：${rejectionReason}`
+                : `你发布的帖子《${current.title}》未通过审核，请修改后重新提交。`,
+            link: `/posts/${current.id}`,
+          },
+        })
       }
       if (status === 'APPROVED' && current.moderationStatus !== 'APPROVED') {
         await tx.friendActivity.create({ data: { actorId: current.authorId, type: 'POST', content: current.title, targetUrl: `/posts/${current.id}` } })

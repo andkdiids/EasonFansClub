@@ -174,12 +174,15 @@ export function createCheckInLayoutModules({
   selectedDateValue,
   todayValue,
   sort,
+  sessionUserRole,
   stats,
   checkinMoodEnabled = true,
   previewMode = false,
   focusMessageId,
   focusCommentId,
 }: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
+  // 管理员（ADMIN / SUPER_ADMIN）可在挂号页删除留言；仅控制按钮展示，接口侧仍独立鉴权。
+  const canManageMessages = sessionUserRole === 'ADMIN' || sessionUserRole === 'SUPER_ADMIN'
   return {
         'checkin.header': (layoutItem, { density }) => (
           <CheckInStatusContent
@@ -207,6 +210,7 @@ export function createCheckInLayoutModules({
             previewMode={previewMode}
             focusMessageId={focusMessageId}
             focusCommentId={focusCommentId}
+            canManageMessages={canManageMessages}
           />
         ),
         'checkin.friendMessages': (layoutItem, { density }) => (
@@ -220,6 +224,7 @@ export function createCheckInLayoutModules({
             initialSort={sort}
             previewMode={previewMode}
             emptyText="暂无好友挂号留言"
+            canManageMessages={canManageMessages}
           />
         ),
 

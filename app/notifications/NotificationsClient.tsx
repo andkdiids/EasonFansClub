@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
 import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
@@ -66,6 +67,23 @@ type NotificationReadResponse = {
   }
 }
 
+// 本地即时递减未读数（分类角标同步），随后由 unread-summary:refresh 触发的服务端拉取校正为权威值。
+function decrementUnreadSummary(base: UnreadSummary, items: UnifiedNotification[]): UnreadSummary {
+  const next = { ...base }
+  for (const item of items) {
+    if (item.isRead) continue
+    next.total = Math.max(0, next.total - 1)
+    if (item.source === 'system') next.system = Math.max(0, next.system - 1)
+    else if (item.category === 'reply') next.replies = Math.max(0, next.replies - 1)
+    else if (item.category === 'like') next.likes = Math.max(0, next.likes - 1)
+    else if (item.category === 'friend') next.friendRequests = Math.max(0, next.friendRequests - 1)
+    else if (item.category === 'messages') next.messages = Math.max(0, next.messages - 1)
+    else if (item.category === 'feedback') next.feedback = Math.max(0, next.feedback - 1)
+    else next.notifications = Math.max(0, next.notifications - 1)
+  }
+  return next
+}
+
 export function NotificationsClient({
   initialNotifications,
   siteLogoUrl,
@@ -86,6 +104,12 @@ export function NotificationsClient({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [replyStatus, setReplyStatus] = useState<Record<string, string>>({})
   const [sendingReply, setSendingReply] = useState<string | null>(null)
+  // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
+  const markingReadRef = useRef<Set<string>>(new Set())
+  // 清除二次确认：第一次点击只打开确认框，确认后才真正调用删除接口。
+  const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[] } | null>(null)
+  const [isClearing, setIsClearing] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     setSummaryOverride(null)
@@ -153,6 +177,10 @@ export function NotificationsClient({
     if (item.isRead) return true
 
     const matchesItem = (row: UnifiedNotification) => row.id === item.id && row.source === item.source
+    const itemKey = `${item.source}:${item.id}`
+    // 同一条通知已读请求进行中时不重复发起（连点 / 双击只算一次）。
+    if (markingReadRef.current.has(itemKey)) return true
+    markingReadRef.current.add(itemKey)
     const optimisticReadAt = new Date()
     // Update the card before waiting for the network. If the request fails,
     // the exact optimistic row is restored below.
@@ -186,6 +214,8 @@ export function NotificationsClient({
       setNotifications((current) => current.map((row) => matchesItem(row)
         ? { ...row, isRead: true, read: true, readAt: safeReadAt }
         : row))
+      // 未读数立即减 1（本地），随后由 Provider 重新拉取的服务端汇总校正。
+      setSummaryOverride((current) => decrementUnreadSummary(current || sharedSummary, [item]))
       window.dispatchEvent(new Event('unread-summary:refresh'))
       return true
     } catch (reason) {
@@ -195,6 +225,7 @@ export function NotificationsClient({
       if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
       return false
     } finally {
+      markingReadRef.current.delete(itemKey)
       setIsUpdating(false)
     }
   }
@@ -262,7 +293,9 @@ export function NotificationsClient({
     router.refresh()
   }
 
-  async function clearNotifications(items: UnifiedNotification[]) {
+  // 只负责真正的删除请求与本地状态更新；调用前必须经过 clearConfirm 二次确认。
+  // 返回是否成功——失败时保留原列表与原未读数，并显示错误。
+  async function clearNotifications(items: UnifiedNotification[]): Promise<boolean> {
     const personalIds = items.filter((item) => item.source === 'personal').map((item) => item.id)
     if (personalIds.length) {
       const response = await fetch('/api/notifications', {
@@ -270,7 +303,7 @@ export function NotificationsClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: personalIds }),
       })
-      if (!response.ok) return
+      if (!response.ok) return false
     }
     const systemIds = items.filter((item) => item.source === 'system').map((item) => item.id)
     if (systemIds.length) {
@@ -279,14 +312,35 @@ export function NotificationsClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: systemIds.map((id) => ({ id, source: 'system' })) }),
       })
-      if (!response.ok) return
+      if (!response.ok) return false
       const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
       systemIds.forEach((id) => dismissed.add(id))
       window.localStorage.setItem('notifications:dismissed-system', JSON.stringify(Array.from(dismissed).slice(-500)))
     }
     const keys = new Set(items.map((item) => `${item.source}:${item.id}`))
     setNotifications((current) => current.filter((item) => !keys.has(`${item.source}:${item.id}`)))
+    // 删除未读通知时未读数同步减少（删除已读通知不影响），随后由服务端汇总校正。
+    setSummaryOverride((current) => decrementUnreadSummary(current || sharedSummary, items))
     window.dispatchEvent(new Event('unread-summary:refresh'))
+    return true
+  }
+
+  async function confirmClearNotifications() {
+    if (!clearConfirm || isClearing) return
+    setIsClearing(true)
+    setActionError('')
+    try {
+      const ok = await clearNotifications(clearConfirm.items)
+      if (ok) {
+        setClearConfirm(null)
+      } else {
+        setActionError('清除失败，请稍后重试')
+      }
+    } catch {
+      setActionError('清除失败，请稍后重试')
+    } finally {
+      setIsClearing(false)
+    }
   }
 
   function renderNotification(item: UnifiedNotification) {
@@ -377,7 +431,24 @@ export function NotificationsClient({
             已读
           </button>
         ) : null}
-        <button type="button" onClick={() => void clearNotifications([item])} className="absolute right-3 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600">清除</button>
+        <button
+          type="button"
+          aria-label="清除这条通知"
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            // 第一次点击只打开二次确认框，不调用删除接口、不触发通知跳转。
+            setActionError('')
+            setClearConfirm({
+              title: '确认清除这条通知？',
+              description: '清除后，这条通知将从通知中心移除，此操作无法撤销。',
+              items: [item],
+            })
+          }}
+          className="absolute right-3 top-3 z-10 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600"
+        >
+          清除
+        </button>
         {item.replyTarget && !item.replyDisabledReason ? (
           <button
             type="button"
@@ -434,8 +505,23 @@ export function NotificationsClient({
             className="inline-flex h-11 items-center justify-center rounded-xl bg-brand-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             全部已读
-          </button><button type="button" onClick={() => void clearNotifications(notifications)} disabled={isUpdating || notifications.length === 0} className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-slate-600 disabled:opacity-50">清除通知</button></div>
+          </button><button
+            type="button"
+            onClick={() => {
+              setActionError('')
+              setClearConfirm({
+                title: '确认清除全部通知？',
+                description: '全部通知将从通知中心移除，此操作无法撤销。',
+                items: notifications,
+              })
+            }}
+            disabled={isUpdating || notifications.length === 0}
+            className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-slate-600 disabled:opacity-50"
+          >
+            清除通知
+          </button></div>
         </div>
+        {actionError ? <p className="mt-3 rounded-sm border border-red-100 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{actionError}</p> : null}
       </div>
 
       <div className="flat-tabs flex overflow-x-auto border-b border-sky-100">
@@ -479,6 +565,17 @@ export function NotificationsClient({
       </div>
 
       <div className="sr-only" aria-live="polite">未读通知 {unreadCount}</div>
+      <ConfirmDialog
+        open={Boolean(clearConfirm)}
+        title={clearConfirm?.title || ''}
+        description={clearConfirm?.description}
+        confirmLabel={clearConfirm && clearConfirm.items.length > 1 ? '确认全部清除' : '确认清除'}
+        loading={isClearing}
+        onConfirm={() => void confirmClearNotifications()}
+        onCancel={() => {
+          if (!isClearing) setClearConfirm(null)
+        }}
+      />
     </section>
   )
 }

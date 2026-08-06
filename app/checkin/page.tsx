@@ -133,6 +133,8 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
             consecutiveDays: streaks.currentStreak,
           }}
           checkinMoodEnabled={user.checkinMoodEnabled}
+          sessionUserId={sessionUser.id}
+          sessionUserRole={sessionUser.role}
           focusMessageId={params.message?.slice(0, 80)}
           focusCommentId={params.focus?.slice(0, 80)}
         />
