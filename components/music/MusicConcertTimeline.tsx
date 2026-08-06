@@ -6,11 +6,13 @@ import { usePathname } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { generateArchiveSlug } from '@/lib/music-slug'
+import type { ConcertCategoryConfig } from '@/lib/music-concert-category'
 
 export type ConcertTimelineTour = {
   id: string
   name: string
   category: 'MAIN' | 'SMALL' | 'GUEST'
+  status?: string
   subtitle?: string | null
   description?: string | null
   posterUrl?: string | null
@@ -50,8 +52,9 @@ function formatYear(value: Date | string | null | undefined) {
   return Number.isNaN(date.getTime()) ? 'ARCHIVE' : String(date.getUTCFullYear())
 }
 
-function archiveHref(tour: ConcertTimelineTour) {
-  return `/music/live/tours/${generateArchiveSlug(tour.name)}`
+function archiveHref(tour: ConcertTimelineTour, isAdmin = false) {
+  const base = `/music/live/tours/${generateArchiveSlug(tour.name)}`
+  return isAdmin ? `${base}?preview=1` : base
 }
 
 function ArchivePoster({ tour, sizes, square = true }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
@@ -65,12 +68,13 @@ function ArchivePoster({ tour, sizes, square = true }: Readonly<{ tour: ConcertT
 
 function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: ConcertTimelineTour; hidden?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void }>) {
   const year = formatYear(tour.startDate)
+  const draft = tour.status && tour.status !== 'PUBLISHED'
   return <article ref={cardRef} className="music-concert-gallery-poster" aria-hidden={hidden || undefined}>
     <button data-testid="concert-orbit-card" type="button" tabIndex={hidden ? -1 : undefined} className="music-concert-gallery-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
       <ArchivePoster tour={tour} sizes="(max-width: 767px) 132px, 220px" square />
       <span className="music-concert-gallery-year">{year}</span>
       <span className="music-concert-gallery-caption">
-        <span>{year}</span>
+        <span>{year}{draft ? <em className="music-concert-gallery-draft">草稿</em> : null}</span>
         <strong>{tour.name}</strong>
         <small>{tour.concertCount} 场</small>
         <b>进入详情 <span aria-hidden="true">→</span></b>
@@ -231,7 +235,7 @@ function MyLiveCenter({ data, status, onRetry, loginHref }: Readonly<{ data: Con
   </section>
 }
 
-function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour; onClose: () => void }>) {
+function ExpandedConcert({ tour, onClose, isAdmin }: Readonly<{ tour: ConcertTimelineTour; onClose: () => void; isAdmin: boolean }>) {
   const content = <div data-testid="concert-detail-modal" className="music-concert-gallery-modal-root" role="presentation" onClick={onClose}>
     <div className="music-concert-gallery-modal-backdrop" aria-hidden="true" />
     <div className="music-concert-gallery-modal-scroll">
@@ -243,7 +247,7 @@ function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour
           <h2 id="concert-gallery-modal-title">{tour.name}</h2>
           <p className="music-concert-gallery-modal-count">{tour.concertCount} 场</p>
           <p className="music-concert-gallery-modal-description">{tour.description?.trim() || '简介暂未整理。'}</p>
-          <Link href={archiveHref(tour)}>查看完整巡演详情 <span aria-hidden="true">→</span></Link>
+          <Link href={archiveHref(tour, isAdmin)}>查看完整巡演详情 <span aria-hidden="true">→</span></Link>
         </div>
       </div>
     </div>
@@ -251,7 +255,7 @@ function ExpandedConcert({ tour, onClose }: Readonly<{ tour: ConcertTimelineTour
   return typeof document === 'undefined' ? null : createPortal(content, document.body)
 }
 
-export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive }>) {
+export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin = false, categories }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive; isAdmin?: boolean; categories?: ConcertCategoryConfig[] }>) {
   const [activeCategory, setActiveCategory] = useState<ConcertCategory>('main')
   const [switching, setSwitching] = useState(false)
   const [interactionPaused, setInteractionPaused] = useState(false)
@@ -268,7 +272,15 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
   const specialProjects = tours.filter((tour) => tour.category === 'SMALL')
   const guestConcerts = tours.filter((tour) => tour.category === 'GUEST')
   const categoryTours: Record<ConcertCategory, ConcertTimelineTour[]> = { main: mainConcerts, special: specialProjects, guest: guestConcerts }
-  const activeLabel = CATEGORY_LABELS[activeCategory]
+  // 分类顺序与名称优先读取后台配置（categories），回退到硬编码默认值。
+  const categorySlugByKey: Record<ConcertCategory, string> = { main: 'main', special: 'small', guest: 'guest' }
+  const categoryBySlug = new Map((categories || []).map((category) => [category.slug, category]))
+  const orderedTabs: ConcertCategory[] = (['main', 'special', 'guest'] as ConcertCategory[])
+    .map((key, index) => ({ key, order: categoryBySlug.get(categorySlugByKey[key])?.sortOrder ?? index + 1 }))
+    .sort((left, right) => left.order - right.order)
+    .map((item) => item.key)
+  const tabLabel = (key: ConcertCategory) => categoryBySlug.get(categorySlugByKey[key])?.name || CATEGORY_LABELS[key].label
+  const activeLabel = { eyebrow: CATEGORY_LABELS[activeCategory].eyebrow, label: tabLabel(activeCategory) }
 
   function selectCategory(nextCategory: ConcertCategory) {
     if (switching || nextCategory === activeCategory) return
@@ -391,13 +403,13 @@ export function MusicConcertTimeline({ tours, compact = false, myLive }: Readonl
     <header className="music-concert-gallery-switcher">
       <p>{activeLabel.eyebrow}</p>
       <div role="tablist" aria-label="演唱会分类">
-        {(Object.keys(CATEGORY_LABELS) as ConcertCategory[]).map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} disabled={switching} onClick={() => selectCategory(category)}>{CATEGORY_LABELS[category].label}</button>)}
+        {orderedTabs.map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} disabled={switching} onClick={() => selectCategory(category)}>{tabLabel(category)}</button>)}
       </div>
     </header>
     <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`} onMouseEnter={() => setInteractionPaused(true)} onMouseLeave={() => setInteractionPaused(false)} onFocusCapture={() => setInteractionPaused(true)} onBlurCapture={() => setInteractionPaused(false)}>
       <MuseumWheel key={activeCategory} tours={categoryTours[activeCategory]} paused={Boolean(expandedTour) || switching || interactionPaused} onOpen={setExpandedTour} />
       <MyLiveCenter data={myLiveData} status={myLiveStatus} onRetry={() => void loadMyLive(true)} loginHref={`/login?redirect=${encodeURIComponent(pathname || '/music/concerts')}`} />
     </div>
-    {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} /> : null}
+    {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} isAdmin={Boolean(isAdmin)} /> : null}
   </section>
 }

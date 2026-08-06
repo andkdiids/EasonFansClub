@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { ImageViewer } from '@/components/ImageViewer'
+import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { MentionText, type ReplyMentionView } from '@/components/MentionText'
 import { ReplyForm } from '@/components/ReplyForm'
 import { SafeAvatar } from '@/components/SafeAvatar'
@@ -18,6 +19,7 @@ type ReplyItem = {
   parentId: string | null
   likeCount: number
   liked: boolean
+  likers?: LikeAvatarUser[]
   createdAt: Date | string
   stickerId?: string | null
   stickerUrl?: string | null
@@ -52,6 +54,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     parentId: typeof reply.parentId === 'string' ? reply.parentId : null,
     likeCount: Number(reply.likeCount) || 0,
     liked: Boolean(reply.liked),
+    likers: Array.isArray(reply.likers) ? reply.likers : [],
     createdAt: typeof reply.createdAt === 'string' || reply.createdAt instanceof Date ? reply.createdAt : new Date().toISOString(),
     stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
     stickerUrl: typeof reply.stickerUrl === 'string' ? reply.stickerUrl : null,
@@ -210,7 +213,7 @@ export function PostRepliesSection({
             {reply.stickerUrl ? (
               <div className="mt-1">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={reply.stickerUrl} alt="表情" className="h-16 w-16 rounded-lg bg-white object-contain" />
+                <img src={reply.stickerUrl} alt="表情" className="max-h-20 max-w-20 object-contain" />
               </div>
             ) : null}
             {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
@@ -229,6 +232,12 @@ export function PostRepliesSection({
                 <DeleteCommentButton endpoint={`/api/replies/${reply.id}`} label="删除" variant="text" onDeleted={() => removeReply(reply.id)} />
               ) : null}
             </div>
+            <LikeAvatars
+              likers={reply.likers || []}
+              totalCount={reply.likeCount}
+              listUrl={`/api/replies/${reply.id}/like`}
+              className="mt-1.5"
+            />
           </div>
         </div>
       </div>
@@ -262,7 +271,7 @@ export function PostRepliesSection({
           {reply.stickerUrl ? (
             <div className="mt-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={reply.stickerUrl} alt="表情" className="h-20 w-20 rounded-lg bg-white object-contain" />
+              <img src={reply.stickerUrl} alt="表情" className="max-h-20 max-w-20 object-contain" />
             </div>
           ) : null}
           {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
@@ -281,6 +290,12 @@ export function PostRepliesSection({
               <DeleteCommentButton endpoint={`/api/replies/${reply.id}`} onDeleted={() => removeReply(reply.id)} />
             ) : null}
           </div>
+          <LikeAvatars
+            likers={reply.likers || []}
+            totalCount={reply.likeCount}
+            listUrl={`/api/replies/${reply.id}/like`}
+            className="mt-2"
+          />
         </div>
         {visibleChildren.length ? (
           <div className="post-reply-thread mt-2 ml-3 space-y-1 pl-3 sm:ml-4 sm:pl-4">

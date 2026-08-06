@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import type { LikeAvatarUser } from '@/components/LikeAvatars'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
@@ -19,6 +20,8 @@ export type AnonymousCheckInMessageItem = {
   liked: boolean
   favorited: boolean
   canDelete: boolean
+  /** 最新点赞用户（最多 10 个，朋友圈式头像展示）。 */
+  likers: LikeAvatarUser[]
   author: { type: 'anonymous'; name: '匿名E友' }
   comments: Array<{
     id: string
@@ -47,6 +50,7 @@ export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): Anonym
     liked: item.likes.length > 0,
     favorited: item.favorites.length > 0,
     canDelete: item.canDelete,
+    likers: item.likers,
     author: { type: 'anonymous', name: '匿名E友' },
     comments: item.comments.map((comment) => ({
       id: comment.id,
@@ -139,7 +143,21 @@ async function getCheckInMessagesUncached({
           Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-      DailyMessageLike: { where: { userId: viewerId }, select: { id: true } },
+      DailyMessageLike: {
+        orderBy: { createdAt: 'desc' as const },
+        take: 10,
+        select: {
+          userId: true,
+          User: {
+            select: {
+              uid: true,
+              nickname: true,
+              avatarUrl: true,
+              Profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
+      },
       DailyMessageFavorite: { where: { userId: viewerId }, select: { id: true } },
       DailyMessageComment: {
         where: { isDeleted: false },
@@ -161,13 +179,28 @@ async function getCheckInMessagesUncached({
     },
   })
 
+  // 当前用户对这些留言的点赞：一次批量查询（避免 N+1），保持 likes.length > 0 ⇔ 当前用户已点赞 的既有契约。
+  const viewerLikes = rows.length
+    ? await prisma.dailyMessageLike.findMany({
+        where: { userId: viewerId, messageId: { in: rows.map((row) => row.id) } },
+        select: { id: true, messageId: true },
+      })
+    : []
+  const viewerLikeIdByMessage = new Map(viewerLikes.map((like) => [like.messageId, like.id]))
+
   return rows.map((item) => ({
     ...item,
     author: {
       ...item.User,
       profile: item.User.Profile,
     },
-    likes: item.DailyMessageLike,
+    likes: viewerLikeIdByMessage.has(item.id) ? [{ id: viewerLikeIdByMessage.get(item.id)! }] : [],
+    likers: item.DailyMessageLike.map((like) => ({
+      uid: like.User.uid,
+      nickname: like.User.nickname,
+      displayName: like.User.Profile?.displayName || null,
+      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+    })),
     favorites: item.DailyMessageFavorite,
     canDelete: viewerCanModerate || item.userId === viewerId,
     date: item.date.toISOString(),

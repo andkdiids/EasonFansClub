@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
+import { LikeAvatars } from '@/components/LikeAvatars'
 import { useCheckInLike } from '@/components/checkin-like-context'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
@@ -472,6 +473,16 @@ export function CheckInMessagesPanel({
                     onCommentCreated={() => loadMessages(date, sort)}
                     onLikeChange={(value) => likeCtx.setLike(item.id, value)}
                   /> : null}
+                  {!isMinimal && !previewMode ? (
+                    // 朋友圈式点赞头像行：最多 10 个头像，超出 +N，点击展开全部点赞用户。
+                    // 头像列表以服务端数据为准（点赞动作本身只即时更新 likeCount / liked）。
+                    <LikeAvatars
+                      likers={item.likers || []}
+                      totalCount={effectiveLikeCount}
+                      listUrl={`/api/daily-messages/${item.id}/like`}
+                      className="mt-2"
+                    />
+                  ) : null}
                 </div>
               </div>
             </article>

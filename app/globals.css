@@ -1470,6 +1470,27 @@ svg {
 .music-concert-gallery-poster-button:hover .music-concert-gallery-year,
 .music-concert-gallery-poster-button:focus-visible .music-concert-gallery-year { opacity:0; }
 .music-concert-gallery-caption>span { color:#7dd3fc; font-size:10px; font-weight:950; letter-spacing:.18em; }
+.music-concert-gallery-draft { display:inline-block; margin-left:6px; border:1px solid rgba(251,191,36,.6); border-radius:999px; padding:1px 6px; color:#fde68a; background:rgba(120,53,15,.55); font-size:8px; font-weight:950; letter-spacing:.1em; vertical-align:middle; }
+
+/* 今日（历史上的今天）海报墙 */
+.today-poster-wall { columns:1; column-gap:20px; }
+.today-poster-card { break-inside:avoid; margin-bottom:20px; }
+.today-poster-image { display:block; width:100%; height:auto; object-fit:contain; background:#f1f5f9; }
+.today-poster-image-empty { aspect-ratio:1/1; background:linear-gradient(135deg,#e0f2fe,#f1f5f9); }
+.today-poster-body { padding:16px 18px 18px; }
+.today-poster-row { display:flex; align-items:flex-start; gap:12px; }
+.today-poster-date { flex:0 0 120px; color:#0ea5e9; font-size:12px; font-weight:950; letter-spacing:.04em; padding-top:2px; }
+.today-poster-title { flex:1 1 auto; min-width:0; }
+.today-poster-anniversary { flex:0 0 auto; align-self:flex-start; border:1px solid rgba(14,165,233,.35); border-radius:999px; padding:6px 12px; color:#0369a1; background:rgba(224,242,254,.6); font-size:12px; font-weight:950; white-space:nowrap; }
+@media (max-width:767px) {
+  .today-poster-wall { columns:1; }
+  .today-poster-row { flex-direction:column; gap:8px; }
+  .today-poster-date { flex:none; width:auto; }
+  .today-poster-anniversary { align-self:flex-start; }
+}
+@media (min-width:768px) {
+  .today-poster-wall { columns:2; }
+}
 .music-concert-gallery-caption strong { display:-webkit-box; margin-top:8px; max-height:calc(2 * 1.12em); min-height:calc(2 * 1.12em); overflow:hidden; overflow-wrap:anywhere; color:#fff; font-size:clamp(18px,1.8vw,23px); font-weight:950; line-height:1.12; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .music-concert-gallery-caption small { margin-top:10px; color:rgba(226,232,240,.76); font-size:11px; font-weight:900; }
 .music-concert-gallery-caption>b { display:flex; align-items:center; justify-content:space-between; margin-top:13px; color:#e0f2fe; font-size:10px; font-weight:900; letter-spacing:.04em; }

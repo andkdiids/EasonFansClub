@@ -67,7 +67,22 @@ export async function GET(request: Request) {
         orderBy: { createdAt: 'asc' },
         take: 20,
         include: {
-          ProfileWallLike: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
+          // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由下方批量查询判断。
+          ProfileWallLike: {
+            orderBy: { createdAt: 'desc' as const },
+            take: 10,
+            select: {
+              userId: true,
+              User: {
+                select: {
+                  uid: true,
+                  nickname: true,
+                  avatarUrl: true,
+                  Profile: { select: { displayName: true, avatarUrl: true } },
+                },
+              },
+            },
+          },
           User_ProfileWallMessage_senderIdToUser: {
             select: {
               id: true,
@@ -80,9 +95,43 @@ export async function GET(request: Request) {
           },
         },
       },
-      ProfileWallLike: viewer ? { where: { userId: viewer.id }, select: { id: true } } : false,
+      ProfileWallLike: {
+        orderBy: { createdAt: 'desc' as const },
+        take: 10,
+        select: {
+          userId: true,
+          User: {
+            select: {
+              uid: true,
+              nickname: true,
+              avatarUrl: true,
+              Profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
+      },
     },
   })
+
+  // 当前用户对这些留言的点赞：一次批量查询（避免 N+1），保持 liked ⇔ 当前用户已点赞 的既有契约。
+  const allMessageIds = rows.flatMap((item) => [item.id, ...item.other_ProfileWallMessage.map((child) => child.id)])
+  const viewerLikes = viewer && allMessageIds.length
+    ? await prisma.profileWallLike.findMany({
+        where: { userId: viewer.id, messageId: { in: allMessageIds } },
+        select: { messageId: true },
+      })
+    : []
+  const viewerLikedIds = new Set(viewerLikes.map((like) => like.messageId))
+
+  // 序列化为 LikeAvatars 的 LikeAvatarUser 结构（与每日留言 / 帖子点赞列表保持一致）。
+  function serializeWallLikers(likes: Array<{ User: { uid: number; nickname: string; avatarUrl: string | null; Profile: { displayName: string | null; avatarUrl: string | null } | null } }>) {
+    return likes.map((like) => ({
+      uid: like.User.uid,
+      nickname: like.User.nickname,
+      displayName: like.User.Profile?.displayName || null,
+      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+    }))
+  }
 
   return NextResponse.json({
     visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
@@ -96,7 +145,8 @@ export async function GET(request: Request) {
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
       canDelete: canManageWallMessage(viewer, item.senderId, item.receiverId),
-      liked: Array.isArray(item.ProfileWallLike) && item.ProfileWallLike.length > 0,
+      liked: viewerLikedIds.has(item.id),
+      likers: serializeWallLikers(item.ProfileWallLike),
       commentCount: item.other_ProfileWallMessage.length,
       children: item.other_ProfileWallMessage.map((child) => ({
         ...child,
@@ -108,7 +158,8 @@ export async function GET(request: Request) {
         createdAt: child.createdAt.toISOString(),
         updatedAt: child.updatedAt.toISOString(),
         canDelete: canManageWallMessage(viewer, child.senderId, child.receiverId),
-        liked: Array.isArray(child.ProfileWallLike) && child.ProfileWallLike.length > 0,
+        liked: viewerLikedIds.has(child.id),
+        likers: serializeWallLikers(child.ProfileWallLike),
         commentCount: 0,
       })),
     })),

@@ -22,6 +22,7 @@ type CityConcert = {
   endTime: string | null
   venue: string | null
   sessionNumber: string | null
+  createdAt: string
   posterUrl: string | null
   normal: SetlistItemForBlock[]
   encore: SetlistItemForBlock[]
@@ -45,12 +46,6 @@ function normalSignature(items: SetlistItemForBlock[]): string {
       ].join('|'),
     )
     .join('##')
-}
-
-// 场次编号排序辅助：解析 "1" / "12" 等前缀整数；缺失或非数字排到末尾。
-function sessionNumberValue(value: string | null | undefined): number {
-  const parsed = Number(String(value ?? '').trim())
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.MAX_SAFE_INTEGER
 }
 
 export default async function MusicTourCityPage({ params, searchParams }: { params: Promise<{ tourId: string; city: string }>; searchParams: Promise<{ preview?: string }> }) {
@@ -106,6 +101,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
       endTime: concert.endTime ? concert.endTime.toISOString() : null,
       venue: concert.venue,
       sessionNumber: concert.sessionNumber,
+      createdAt: concert.createdAt.toISOString(),
       posterUrl: concert.posterUrl,
       normal,
       encore,
@@ -114,13 +110,13 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
     }
   })
 
-  // 场次排序：演出日期升序，其次开始时间升序，再次场次编号（sessionNumber）升序；不按城市名称排序。
+  // 场次排序：演出日期升序，其次开始时间升序，再次创建时间升序；不再依赖手动场次编号。
   cityConcerts.sort((left, right) => {
     const dateDifference = new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime()
     if (dateDifference) return dateDifference
     const timeDifference = new Date(left.startTime || 0).getTime() - new Date(right.startTime || 0).getTime()
     if (timeDifference) return timeDifference
-    return sessionNumberValue(left.sessionNumber) - sessionNumberValue(right.sessionNumber)
+    return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
   })
 
   // 同一天多场：按日期分桶，记录每场在当天的序号（用于「第 N 场」与显示时间）。

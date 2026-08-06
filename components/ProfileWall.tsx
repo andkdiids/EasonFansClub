@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -19,6 +20,8 @@ type WallMessage = {
   canDelete: boolean
   liked: boolean
   likeCount: number
+  /** 最新点赞用户（最多 10 个，朋友圈式头像展示）。 */
+  likers?: LikeAvatarUser[]
   commentCount: number
   sender: WallSender
   children?: WallMessage[]
@@ -182,6 +185,12 @@ function WallMessageCard({ message, expanded, onToggleComments, onLike, onReply,
             <button onClick={() => onReply({ id: message.id, name })} className="text-xs font-black text-brand-700" type="button">回复</button>
             {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
           </div>
+          <LikeAvatars
+            likers={message.likers || []}
+            totalCount={message.likeCount}
+            listUrl={`/api/profile-wall/${message.id}/like`}
+            className="mt-1.5"
+          />
           {children.length && expanded[message.id] ? (
             <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
               {children.map((child) => <WallMessageCard key={child.id} message={child} expanded={{ ...expanded, [child.id]: true }} onToggleComments={onToggleComments} onLike={onLike} onReply={onReply} onDelete={onDelete} />)}

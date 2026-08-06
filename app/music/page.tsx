@@ -9,6 +9,7 @@ import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
+import { getEnabledConcertCategories } from '@/lib/music-concert-category'
 import { prisma } from '@/lib/prisma'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -20,14 +21,14 @@ export default async function MusicPage() {
     console.warn('[music-page.auth]', error)
     return null
   })
-  const [albums, tours, cassetteSourceSongs, layoutConfig, config] = await Promise.all([
+  const [albums, tours, cassetteSourceSongs, layoutConfig, config, categories] = await Promise.all([
     prisma.musicAlbum.findMany({ where: { status: 'PUBLISHED' }, orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }], include: { _count: { select: { MusicSong: true } } } }),
     prisma.musicTour.findMany({
-      where: { status: 'PUBLISHED' },
+      where: currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') ? {} : { status: 'PUBLISHED' },
       orderBy: [{ sortOrder: 'asc' }, { startDate: 'asc' }, { createdAt: 'asc' }],
       include: {
-        MusicConcert: { where: { status: 'PUBLISHED' }, orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { city: true, posterUrl: true } },
-        _count: { select: { MusicConcert: { where: { status: 'PUBLISHED' } } } },
+        MusicConcert: { where: currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') ? {} : { status: 'PUBLISHED' }, orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { city: true, posterUrl: true } },
+        _count: { select: { MusicConcert: currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') ? {} : { where: { status: 'PUBLISHED' } } } },
       },
     }),
     prisma.musicSong.findMany({
@@ -61,6 +62,7 @@ export default async function MusicPage() {
     }),
     getPublishedPageLayoutConfig('music'),
     getSiteAppearance(),
+    getEnabledConcertCategories().catch(() => []),
   ])
   const carouselAlbums = albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl!, songCount: album._count.MusicSong, releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear) }))
   const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: album.coverUrl, songCount: album._count.MusicSong }))
@@ -92,7 +94,7 @@ export default async function MusicPage() {
     <MusicSectionNavigation />
     <section aria-labelledby="eason-in-concert-title">
       <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-black tracking-[0.2em] text-sky-300/70">CONCERT ARCHIVE</p><h2 id="eason-in-concert-title" className="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">Eason in Concert</h2></div><Link href="/music/concerts" className="text-sm font-black text-sky-300 hover:text-white">进入完整档案 →</Link></div>
-      {timelineTours.length ? <div className="mt-8"><MusicConcertTimeline tours={timelineTours} compact /></div> : <p className="mt-7 rounded-3xl border border-white/10 bg-white/[0.06] p-7 text-sm font-bold text-slate-300">演唱会档案正在整理中。</p>}
+      {timelineTours.length ? <div className="mt-8"><MusicConcertTimeline tours={timelineTours} compact isAdmin={Boolean(currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN'))} categories={categories} /></div> : <p className="mt-7 rounded-3xl border border-white/10 bg-white/[0.06] p-7 text-sm font-bold text-slate-300">演唱会档案正在整理中。</p>}
     </section>
   </div>
 

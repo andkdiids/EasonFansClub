@@ -29,14 +29,9 @@ export function buildConcertSequenceUpdates(
     const createdDifference = new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime()
     return createdDifference || left.id.localeCompare(right.id)
   })
-  const hasExplicitOrder = concerts.some((concert) => Number.isFinite(concert.sortOrder) && (concert.sortOrder || 0) > 0)
-  const ordered = hasExplicitOrder
-    ? [...concerts].sort((left, right) => {
-      const leftOrder = (left.sortOrder || 0) > 0 ? left.sortOrder! : Number.MAX_SAFE_INTEGER
-      const rightOrder = (right.sortOrder || 0) > 0 ? right.sortOrder! : Number.MAX_SAFE_INTEGER
-      return leftOrder - rightOrder || new Date(left.concertDate).getTime() - new Date(right.concertDate).getTime() || new Date(left.startTime || 0).getTime() - new Date(right.startTime || 0).getTime() || new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime() || left.id.localeCompare(right.id)
-    })
-    : chronological
+  // 场次排序永远自动：演出日期升序 → 开始时间升序 → 创建时间升序（不再保留任何手动 sortOrder）。
+
+  const ordered = chronological
   // 场次编号按（城市 + 场次类型）分组：普通场与返场/最终站即使城市相同也各自独立编号。
   const citySequence = new Map<string, number>()
   const chronologicalSessionNumbers = new Map<string, string>()

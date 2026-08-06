@@ -4,6 +4,37 @@ import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
 
+// 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
+export async function GET(_request: Request, context: RouteContext) {
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+
+  const { replyId } = await context.params
+  const likes = await prisma.replyLike.findMany({
+    where: { replyId, Reply: { isDeleted: false } },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: {
+      User: {
+        select: {
+          uid: true,
+          nickname: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
+    },
+  })
+  return NextResponse.json({
+    likers: likes.map((like) => ({
+      uid: like.User.uid,
+      nickname: like.User.nickname,
+      displayName: like.User.Profile?.displayName || null,
+      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+    })),
+  })
+}
+
 export async function POST(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response

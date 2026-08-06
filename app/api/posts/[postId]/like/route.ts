@@ -6,6 +6,37 @@ import { awardRegistrationFee } from '@/lib/registration-fee'
 
 type Params = { params: Promise<{ postId: string }> }
 
+// 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
+export async function GET(_request: Request, { params }: Params) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+
+  const { postId } = await params
+  const likes = await prisma.like.findMany({
+    where: { postId, Post: { isDeleted: false } },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: {
+      User: {
+        select: {
+          uid: true,
+          nickname: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
+    },
+  })
+  return NextResponse.json({
+    likers: likes.map((like) => ({
+      uid: like.User.uid,
+      nickname: like.User.nickname,
+      displayName: like.User.Profile?.displayName || null,
+      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+    })),
+  })
+}
+
 export async function POST(_request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再点赞' }, { status: 401 })
@@ -43,6 +74,18 @@ export async function POST(_request: Request, { params }: Params) {
           reason: '帖子收到点赞',
           businessKey: `post-like-received:${postId}:${user.id}`,
           postId,
+        })
+        // 点赞通知：仅在「新建点赞」时生成一次（上面的 findUnique 已保证同一用户不会重复点赞），
+        // 格式与回复点赞 / 每日留言点赞一致；link 指向帖子详情。
+        await tx.notification.create({
+          data: {
+            recipientId: post.authorId,
+            actorId: user.id,
+            type: 'LIKE',
+            title: '你的帖子收到点赞',
+            content: `${user.nickname} 点赞了你的帖子`,
+            link: `/posts/${postId}`,
+          },
         })
       }
     }

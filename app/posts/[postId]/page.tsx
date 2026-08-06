@@ -4,6 +4,7 @@ import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
 import { ImageViewer } from '@/components/ImageViewer'
+import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
@@ -73,7 +74,22 @@ function loadPost(postId: string, userId?: string) {
         },
       },
       Board: { select: { name: true, slug: true } },
-      Like: userId ? { where: { userId }, select: { id: true } } : false,
+      // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由页面里的批量查询单独判断。
+      Like: {
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          userId: true,
+          User: {
+            select: {
+              uid: true,
+              nickname: true,
+              avatarUrl: true,
+              Profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
+      },
       PostFavorite: userId ? { where: { userId }, select: { id: true } } : false,
       PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' } },
     },
@@ -92,7 +108,22 @@ function loadPostReplies(postId: string, userId?: string) {
       likeCount: true,
       stickerId: true,
       sticker: { select: { url: true } },
-      ReplyLike: userId ? { where: { userId }, select: { id: true } } : false,
+      // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由批量查询单独判断。
+      ReplyLike: {
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          userId: true,
+          User: {
+            select: {
+              uid: true,
+              nickname: true,
+              avatarUrl: true,
+              Profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
+      },
       ReplyMention: {
         orderBy: { startIndex: 'asc' },
         select: {
@@ -306,7 +337,26 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     }
   }
 
-  const liked = Array.isArray(post.Like) && post.Like.length > 0
+  // 当前用户的点赞状态：两次恒定数量的批量查询（避免 N+1）；点赞用户头像列表由 Like / ReplyLike include 提供。
+  let viewerPostLiked = false
+  const viewerLikedReplyIds = new Set<string>()
+  if (user) {
+    try {
+      const [viewerPostLike, viewerReplyLikes] = await Promise.all([
+        prisma.like.findUnique({ where: { postId_userId: { postId, userId: user.id } }, select: { id: true } }),
+        prisma.replyLike.findMany({
+          where: { userId: user.id, replyId: { in: postReplies.map((reply) => reply.id) } },
+          select: { replyId: true },
+        }),
+      ])
+      viewerPostLiked = Boolean(viewerPostLike)
+      viewerReplyLikes.forEach((like) => viewerLikedReplyIds.add(like.replyId))
+    } catch (error) {
+      console.warn('[post:detail:viewer-likes-failed]', { postId, error })
+    }
+  }
+
+  const liked = viewerPostLiked
   const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
   const authorAvatar = publicImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl)
   const authorName = post.User.Profile.displayName || post.User.nickname
@@ -320,7 +370,15 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     author: User.status === 'ACTIVE' && !User.isDeleted
       ? { ...User, profile: User.Profile }
       : { id: '', uid: 0, nickname: '已注销用户', level: 0, avatarUrl: null, profile: null },
-    liked: Array.isArray(ReplyLike) && ReplyLike.length > 0,
+    liked: viewerLikedReplyIds.has(reply.id),
+    likers: Array.isArray(ReplyLike)
+      ? ReplyLike.map((like) => ({
+          uid: like.User.uid,
+          nickname: like.User.nickname,
+          displayName: like.User.Profile?.displayName || null,
+          avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+        }))
+      : [],
     mentions: ReplyMention.map(({ User_ReplyMention_mentionedUserIdToUser: mentionedUser, ...mention }) => ({
       ...mention,
       user: {
@@ -392,6 +450,17 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               <DeletePostButton postId={post.id} redirectTo={`/boards/${post.Board.slug}`} />
             ) : null}
           </div>
+          <LikeAvatars
+            likers={(post.Like || []).map((like) => ({
+              uid: like.User.uid,
+              nickname: like.User.nickname,
+              displayName: like.User.Profile?.displayName || null,
+              avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+            }))}
+            totalCount={post.likeCount}
+            listUrl={`/api/posts/${post.id}/like`}
+            className="mt-3"
+          />
         </article>
 
         <CommentSectionBoundary>

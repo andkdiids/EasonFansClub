@@ -1461,6 +1461,21 @@ model MusicConcertHighlight {
   @@index([concertId, sortOrder])
 }
 
+// 演唱会分类（后台可配置）。三大核心分类 slug 固定为 main / small / guest，
+// 与 MusicTour.category 枚举（MAIN / SMALL / GUEST）一一对应；其余为管理员扩展分类。
+// 旧数据无需迁移：MusicTour 仍使用 category 枚举，天然落在三大核心分类中。
+model MusicConcertCategory {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  sortOrder Int      @default(0)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+}
+
 model MusicTrack {
   id              String            @id @default(cuid())
   title           String

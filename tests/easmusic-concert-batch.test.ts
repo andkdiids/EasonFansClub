@@ -49,15 +49,15 @@ test('同一巡演按城市分别编号，同时保留全局日期排序', () =>
   ])
 })
 
-test('已有 sortOrder 时保留手动顺序，新场次排在现有顺序之后', () => {
+test('始终按演出日期自动排序，忽略手动 sortOrder', () => {
   assert.deepEqual(buildConcertSequenceUpdates([
     { id: 'date-first', city: '澳门', concertDate: '2024-01-01', sortOrder: 2 },
     { id: 'date-later', city: '澳门', concertDate: '2024-02-01', sortOrder: 1 },
     { id: 'new', city: '澳门', concertDate: '2023-12-01', sortOrder: 0 },
   ]), [
-    { id: 'date-later', sessionNumber: '3', sortOrder: 1 },
+    { id: 'new', sessionNumber: '1', sortOrder: 1 },
     { id: 'date-first', sessionNumber: '2', sortOrder: 2 },
-    { id: 'new', sessionNumber: '1', sortOrder: 3 },
+    { id: 'date-later', sessionNumber: '3', sortOrder: 3 },
   ])
 })
 
@@ -152,7 +152,7 @@ test('前台场次始终按日期、创建时间和 id 排序且不受后台 sor
     'lib/music-archive.ts',
   ].map(read)
   for (const source of publicSources) {
-    assert.match(source, /orderBy: \[\{ concertDate: 'asc' \}, \{ createdAt: 'asc' \}, \{ id: 'asc' \}\]/)
+    assert.match(source, /orderBy: \[\{ concertDate: 'asc' \}(?:, \{ startTime: 'asc' \})?, \{ createdAt: 'asc' \}, \{ id: 'asc' \}\]/)
     assert.doesNotMatch(source, /orderBy: \[\{ sortOrder: 'asc' \}, \{ concertDate: 'asc' \}/)
   }
 })
@@ -162,7 +162,7 @@ test('巡演城市聚合结果按每个城市第一场演出日期排序', () =>
   const route = read('app/api/music/live/tours/[tourId]/route.ts')
   for (const source of [page, route]) {
     assert.match(source, /firstDate:/)
-    assert.match(source, /\.sort\(\(left, right\) => left\.firstDate\.localeCompare\(right\.firstDate\)/)
+    assert.match(source, /left\.firstDate(?:\.toISOString\(\)\.slice\(0, 10\))?\.localeCompare\(right\.firstDate/)
     assert.doesNotMatch(source, /\.sort\(\(left, right\) => left\.city\.localeCompare/)
   }
 })

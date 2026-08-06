@@ -2,6 +2,37 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+// 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
+export async function GET(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const { messageId } = await params
+
+  const likes = await prisma.profileWallLike.findMany({
+    where: { messageId, ProfileWallMessage: { deletedAt: null } },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: {
+      User: {
+        select: {
+          uid: true,
+          nickname: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
+    },
+  })
+  return NextResponse.json({
+    likers: likes.map((like) => ({
+      uid: like.User.uid,
+      nickname: like.User.nickname,
+      displayName: like.User.Profile?.displayName || null,
+      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+    })),
+  })
+}
+
 export async function POST(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
