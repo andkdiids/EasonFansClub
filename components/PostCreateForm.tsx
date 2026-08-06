@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
+import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 
 type Board = { id: string; name: string; slug: string }
 
@@ -14,6 +15,8 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -24,7 +27,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
     const response = await fetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ boardId, title, content, imageUrls }),
+      body: JSON.stringify({ boardId, title, content, imageUrls, stickerId: pendingSticker?.id || undefined }),
     })
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
@@ -72,12 +75,39 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         <textarea ref={textareaRef} value={content} onChange={(event) => setContent(event.target.value)} rows={10} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2" placeholder="分享你的想法..." />
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
       </label>
+      {pendingSticker ? (
+        <div className="mb-3 flex items-center gap-3 rounded-xl border border-brand-100 bg-sky-50 px-3 py-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={pendingSticker.url} alt={pendingSticker.name || '表情'} className="h-10 w-10 rounded-lg bg-white object-contain" />
+          <span className="text-sm font-bold text-slate-600">已选择表情，点击发布发送</span>
+          <button type="button" onClick={() => setPendingSticker(null)} className="ml-auto text-sm font-black text-slate-400 hover:text-red-500">移除</button>
+        </div>
+      ) : null}
       <div className="flex items-center justify-between gap-3">
-        <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
+        <div className="flex items-center gap-2">
+          <EmojiPicker textareaRef={textareaRef} value={content} onChange={setContent} />
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="inline-flex h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"
+            aria-label="选择表情包"
+          >
+            😊 表情
+          </button>
+        </div>
         <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布帖子'}
         </button>
       </div>
+      <StickerPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelectSticker={(sticker) => {
+          setPendingSticker(sticker)
+          setPickerOpen(false)
+        }}
+        composerRef={textareaRef}
+      />
     </form>
   )
 }

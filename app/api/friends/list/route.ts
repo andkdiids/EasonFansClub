@@ -54,7 +54,7 @@ export async function GET(request: Request) {
         where: { isDeleted: false },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 1,
-        select: { id: true, content: true, createdAt: true, senderId: true },
+        select: { id: true, content: true, createdAt: true, senderId: true, type: true },
       },
     },
   }) : []

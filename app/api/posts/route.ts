@@ -10,6 +10,7 @@ import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { parseContentImageUrls } from '@/lib/content-images'
 import { getShanghaiDateKey } from '@/lib/checkin'
+import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -65,15 +66,17 @@ export async function GET(request: Request) {
           },
         },
         Board: { select: { name: true, slug: true } },
+        sticker: { select: { url: true } },
       },
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
-    const posts = pageRows.map(({ summary, content, User, Board, ...post }) => ({
+    const posts = pageRows.map(({ summary, content, User, Board, sticker, ...post }) => ({
       ...post,
       author: { ...User, profile: User.Profile },
       board: Board,
       content: summary || createSummary(content),
+      stickerUrl: sticker?.url || null,
     }))
 
     return NextResponse.json(
@@ -95,11 +98,15 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const rawTitle = sanitizeText(body?.title, 120)
   const rawContent = stripUnsafeHtml(sanitizeText(body?.content, 20000))
+  const rawStickerId = typeof body?.stickerId === 'string' && body.stickerId ? String(body.stickerId).trim().slice(0, 191) : null
   if (checkForbiddenWords(`${rawTitle}\n${rawContent}`).blocked) {
     return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
   }
   if (await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
     return NextResponse.json({ message: '帖子包含违禁词，无法发布', errors: { content: '请修改后重新发布' } }, { status: 400 })
+  }
+  if (rawStickerId && !(await isStickerVisible(rawStickerId))) {
+    return NextResponse.json({ message: '该表情不可用或已被隐藏', errors: { stickerId: '表情无效' } }, { status: 400 })
   }
   const input = {
     boardId: sanitizeText(body?.boardId, 80),
@@ -111,7 +118,8 @@ export async function POST(request: Request) {
   const errors: Record<string, string> = {}
   if (!input.boardId) errors.boardId = '请选择板块'
   if (input.title.length < 3) errors.title = '标题至少需要 3 个字符'
-  if (input.content.length < 5) errors.content = '正文至少需要 5 个字符'
+  // 纯表情帖（仅发送表情包、无正文）允许发布；其余情况正文至少 5 个字符
+  if (!rawStickerId && input.content.length < 5) errors.content = '正文至少需要 5 个字符'
 
   if (Object.keys(errors).length > 0) {
     return NextResponse.json({ message: '请检查帖子内容', errors }, { status: 400 })
@@ -149,6 +157,7 @@ export async function POST(request: Request) {
           summary: createSummary(input.content),
           status: 'PUBLISHED',
           moderationStatus,
+          stickerId: rawStickerId || undefined,
         },
         select: { id: true, moderationStatus: true },
       })
@@ -205,6 +214,12 @@ export async function POST(request: Request) {
 
       return { post, rewardPoints: feeAward.awardedAmount }
     })
+
+    if (rawStickerId) {
+      await recordStickerUsage(user.id, rawStickerId).catch((usageError) => {
+        console.error('[post:sticker:usage]', usageError)
+      })
+    }
 
     const detailQuery = result.rewardPoints ? `?reward=${result.rewardPoints}` : ''
     const detailUrl = `/posts/${result.post.id}${detailQuery}`

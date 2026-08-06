@@ -855,7 +855,7 @@ function FriendRow({
         </button>
         {!searching ? (
           <button type="button" className="friend-dock-conversation-preview" onClick={onChat}>
-            <span>{friend.lastMessage?.content || '暂无私信'}</span>
+            <span>{!friend.lastMessage ? '暂无私信' : (friend.lastMessage.type === 'STICKER' ? '[表情]' : friend.lastMessage.content)}</span>
             {friend.lastMessageAt ? <time>{formatConversationTime(friend.lastMessageAt)}</time> : null}
           </button>
         ) : <RelationshipActions status={status} onChat={onChat} onAdd={onAdd} onDecide={onDecide} />}

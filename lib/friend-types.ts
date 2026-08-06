@@ -32,5 +32,6 @@ export type FriendDockUser = {
     content: string
     createdAt: string
     senderId: string
+    type?: string | null
   } | null
 }

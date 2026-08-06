@@ -64,6 +64,7 @@ export async function GET(request: Request) {
         likeCount: true, replyCount: true, viewCount: true,
         isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
         Board: { select: { name: true, slug: true } },
+        sticker: { select: { url: true } },
         User: { select: { uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         Like: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
       },
@@ -76,11 +77,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
-    posts: rows.map(({ summary, content, Like, User, Board, ...post }) => ({
+    posts: rows.map(({ summary, content, Like, User, Board, sticker, ...post }) => ({
       ...post,
       author: { ...User, profile: User.Profile },
       board: Board,
       content: excerptForumPost(summary || content),
+      stickerUrl: sticker?.url || null,
       likedByMe: Like.length > 0,
     })),
     total,

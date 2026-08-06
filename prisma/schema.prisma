@@ -1695,6 +1695,8 @@ model Post {
   PostTag       PostTag[]
   Reply         Reply[]
   Report        Report[]
+  stickerId     String?
+  sticker       Sticker?      @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
 
   @@index([authorId, createdAt])
   @@index([boardId, createdAt])
@@ -1706,6 +1708,7 @@ model Post {
   @@index([isDeleted])
   @@index([isFeatured, createdAt])
   @@index([isPinned, createdAt])
+  @@index([stickerId])
   @@index([isRecommended, createdAt])
   @@index([likeCount])
   @@index([replyCount])
@@ -2003,6 +2006,7 @@ model Sticker {
   reports      StickerReport[]
   directMessages DirectMessage[] @relation("DirectMessageSticker")
   replies      Reply[] @relation("ReplySticker")
+  posts        Post[] @relation("PostSticker")
 
   @@index([packId, sort])
   @@index([isHidden])

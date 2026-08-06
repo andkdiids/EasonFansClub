@@ -74,6 +74,7 @@ function loadPost(postId: string, userId?: string) {
         },
       },
       Board: { select: { name: true, slug: true } },
+      sticker: { select: { url: true, name: true, type: true } },
       // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由页面里的批量查询单独判断。
       Like: {
         orderBy: { createdAt: 'desc' },
@@ -438,6 +439,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <span>回复 {post.replyCount}</span>
           </div>
           <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{post.content}</div>
+          {post.sticker?.url ? (
+            <div className="mt-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" />
+            </div>
+          ) : null}
           {post.PostMedia.length ? <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">{post.PostMedia.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />)}</div> : null}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
