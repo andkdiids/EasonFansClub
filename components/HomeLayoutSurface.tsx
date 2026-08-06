@@ -256,7 +256,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           </div>
         ) : events.length > 2 ? (
           <div>
-            {todayEvent ? <Link href={todayEvent.href || '/today'}>
+            {todayEvent ? <Link href={todayEvent.href || '/today'} className="home-today-card">
               <time>{todayEvent.year}年{todayEvent.month}月{todayEvent.day}日</time>
               <span><strong>{todayEvent.title}</strong><small>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small></span>
               <b>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>

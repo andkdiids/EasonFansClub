@@ -473,9 +473,10 @@ export function CheckInMessagesPanel({
                     onCommentCreated={() => loadMessages(date, sort)}
                     onLikeChange={(value) => likeCtx.setLike(item.id, value)}
                   /> : null}
-                  {!isMinimal && !previewMode ? (
+                  {!isMinimal && !previewMode && !anonymous ? (
                     // 朋友圈式点赞头像行：最多 10 个头像，超出 +N，点击展开全部点赞用户。
                     // 头像列表以服务端数据为准（点赞动作本身只即时更新 likeCount / liked）。
+                    // 匿名墙（anonymous）不展示点赞者身份，仅保留 DailyMessageActions 的 ♥ 数量。
                     <LikeAvatars
                       likers={item.likers || []}
                       totalCount={effectiveLikeCount}

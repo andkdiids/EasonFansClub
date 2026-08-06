@@ -8,6 +8,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
   const { messageId } = await params
 
+  const message = await prisma.profileWallMessage.findFirst({
+    where: { id: messageId, deletedAt: null },
+    select: { id: true, receiverId: true },
+  })
+  if (!message) return NextResponse.json({ message: '该留言已被删除或无法查看' }, { status: 404 })
+
+  // 仅墙主人（receiver）可查看点赞者具体身份；他人仅能点赞，不可枚举点赞者。
+  if (message.receiverId !== user.id) {
+    return NextResponse.json({ likers: [] })
+  }
+
   const likes = await prisma.profileWallLike.findMany({
     where: { messageId, ProfileWallMessage: { deletedAt: null } },
     orderBy: { createdAt: 'desc' },

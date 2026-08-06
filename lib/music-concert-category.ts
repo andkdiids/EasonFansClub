@@ -21,6 +21,19 @@ export const CONCERT_CATEGORY_ENUM_TO_SLUG: Record<string, string> = {
   GUEST: 'guest',
 }
 
+// 核心 slug → 枚举 映射（反向），用于把选中的分类回写 MusicTour.category 枚举（保持旧字段兼容）。
+export const MUSIC_CONCERT_CATEGORY_SLUG_TO_ENUM: Record<string, 'MAIN' | 'SMALL' | 'GUEST'> = {
+  main: 'MAIN',
+  small: 'SMALL',
+  guest: 'GUEST',
+}
+
+// 根据分类 slug 推导兼容枚举值；非核心分类（如音乐节）回退到 MAIN 作为粗分类桶。
+export function slugToConcertCategoryEnum(slug: string | null | undefined): 'MAIN' | 'SMALL' | 'GUEST' {
+  if (!slug) return 'MAIN'
+  return MUSIC_CONCERT_CATEGORY_SLUG_TO_ENUM[slug] ?? 'MAIN'
+}
+
 let cache: { value: ConcertCategoryConfig[]; at: number } | null = null
 const CACHE_TTL = 30_000
 

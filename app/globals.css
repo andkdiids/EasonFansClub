@@ -1475,8 +1475,9 @@ svg {
 /* 今日（历史上的今天）海报墙 */
 .today-poster-wall { columns:1; column-gap:20px; }
 .today-poster-card { break-inside:avoid; margin-bottom:20px; }
-.today-poster-image { display:block; width:100%; height:auto; object-fit:contain; background:#f1f5f9; }
-.today-poster-image-empty { aspect-ratio:1/1; background:linear-gradient(135deg,#e0f2fe,#f1f5f9); }
+/* 今日海报：限制最大高度并裁剪居中，整体缩小约 40-50%（竖版长海报不再占满整卡宽度）。 */
+.today-poster-image { display:block; width:100%; max-height:260px; object-fit:cover; background:#f1f5f9; }
+.today-poster-image-empty { aspect-ratio:16/9; background:linear-gradient(135deg,#e0f2fe,#f1f5f9); }
 .today-poster-body { padding:16px 18px 18px; }
 .today-poster-row { display:flex; align-items:flex-start; gap:12px; }
 .today-poster-date { flex:0 0 120px; color:#0ea5e9; font-size:12px; font-weight:950; letter-spacing:.04em; padding-top:2px; }
@@ -3484,8 +3485,9 @@ body:has(.games-full-width) .app-shell main {
 
 /* 今日模块：≤2 条展开为普通列表（隐藏轮播箭头/圆点） */
 .home-today-list { display:flex; flex-direction:column; gap:10px; }
-.home-today-list > a { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; padding:12px 14px; border:1px solid var(--border); border-radius:6px; background:var(--surface-subtle); color:var(--foreground); text-decoration:none; }
-.home-today-list > a:hover { border-color:var(--primary); }
+/* 今日卡片（列表与轮播单卡共用）：三列 grid 防止 time/标题/周年 挤成一行重叠。 */
+.home-today-list > a, .home-today-card { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; padding:12px 14px; border:1px solid var(--border); border-radius:6px; background:var(--surface-subtle); color:var(--foreground); text-decoration:none; }
+.home-today-list > a:hover, .home-today-card:hover { border-color:var(--primary); }
 .home-today-list time { font-size:11px; font-weight:700; color:var(--primary); white-space:nowrap; }
 .home-today-list strong { display:block; font-size:14px; line-height:1.3; }
 .home-today-list small { display:block; margin-top:3px; font-size:11px; color:var(--foreground-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

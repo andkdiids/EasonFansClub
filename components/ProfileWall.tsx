@@ -27,7 +27,7 @@ type WallMessage = {
   children?: WallMessage[]
 }
 
-export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; focusId?: string }) {
+export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receiverUid: number; focusId?: string; isOwner?: boolean }) {
   const [messages, setMessages] = useState<WallMessage[]>([])
   const [content, setContent] = useState('')
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
@@ -155,13 +155,13 @@ export function ProfileWall({ receiverUid, focusId }: { receiverUid: number; foc
       {!loading && !messages.length ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">暂无留言</p> : null}
 
       <div className="mt-4 space-y-3">
-        {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={setReplyTo} onDelete={remove} />)}
+        {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} isOwner={isOwner} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={setReplyTo} onDelete={remove} />)}
       </div>
     </section>
   )
 }
 
-function WallMessageCard({ message, expanded, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
+function WallMessageCard({ message, expanded, isOwner = false, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; isOwner?: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
   const name = message.sender.profile?.displayName || message.sender.nickname
   const avatar = publicImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   const children = message.children || []
@@ -185,12 +185,14 @@ function WallMessageCard({ message, expanded, onToggleComments, onLike, onReply,
             <button onClick={() => onReply({ id: message.id, name })} className="text-xs font-black text-brand-700" type="button">回复</button>
             {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
           </div>
-          <LikeAvatars
-            likers={message.likers || []}
-            totalCount={message.likeCount}
-            listUrl={`/api/profile-wall/${message.id}/like`}
-            className="mt-1.5"
-          />
+          {isOwner ? (
+            <LikeAvatars
+              likers={message.likers || []}
+              totalCount={message.likeCount}
+              listUrl={`/api/profile-wall/${message.id}/like`}
+              className="mt-1.5"
+            />
+          ) : null}
           {children.length && expanded[message.id] ? (
             <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
               {children.map((child) => <WallMessageCard key={child.id} message={child} expanded={{ ...expanded, [child.id]: true }} onToggleComments={onToggleComments} onLike={onLike} onReply={onReply} onDelete={onDelete} />)}

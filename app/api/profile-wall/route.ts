@@ -47,6 +47,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: '你没有权限查看该留言墙' }, { status: 403 })
   }
 
+  // 仅墙主人可查看点赞者具体身份；他人仅能看到点赞数量，不可枚举是谁点的赞。
+  const isOwner = viewer?.id === receiver.id
+
   const rows = await prisma.profileWallMessage.findMany({
     where: { receiverId: receiver.id, parentId: null, deletedAt: null },
     orderBy: { createdAt: 'desc' },
@@ -146,7 +149,7 @@ export async function GET(request: Request) {
       updatedAt: item.updatedAt.toISOString(),
       canDelete: canManageWallMessage(viewer, item.senderId, item.receiverId),
       liked: viewerLikedIds.has(item.id),
-      likers: serializeWallLikers(item.ProfileWallLike),
+      likers: isOwner ? serializeWallLikers(item.ProfileWallLike) : [],
       commentCount: item.other_ProfileWallMessage.length,
       children: item.other_ProfileWallMessage.map((child) => ({
         ...child,
@@ -159,7 +162,7 @@ export async function GET(request: Request) {
         updatedAt: child.updatedAt.toISOString(),
         canDelete: canManageWallMessage(viewer, child.senderId, child.receiverId),
         liked: viewerLikedIds.has(child.id),
-        likers: serializeWallLikers(child.ProfileWallLike),
+        likers: isOwner ? serializeWallLikers(child.ProfileWallLike) : [],
         commentCount: 0,
       })),
     })),

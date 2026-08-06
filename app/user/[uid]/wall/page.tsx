@@ -34,7 +34,7 @@ export default async function ProfileWallPage({ params, searchParams }: { params
           </div>
           <Link href={viewer?.uid === target.uid ? '/profile' : `/user/${formatUid(target.uid)}`} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">返回主页</Link>
         </div>
-        <ProfileWall receiverUid={target.uid} focusId={focusId} />
+        <ProfileWall receiverUid={target.uid} focusId={focusId} isOwner={Boolean(viewer && viewer.uid === target.uid)} />
       </main>
     </>
   )

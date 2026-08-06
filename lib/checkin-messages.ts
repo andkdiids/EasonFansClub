@@ -50,7 +50,8 @@ export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): Anonym
     liked: item.likes.length > 0,
     favorited: item.favorites.length > 0,
     canDelete: item.canDelete,
-    likers: item.likers,
+    // 匿名墙不返回点赞者身份，保护点赞者隐私（点赞数量仍通过 likeCount 公开）。
+    likers: [],
     author: { type: 'anonymous', name: '匿名E友' },
     comments: item.comments.map((comment) => ({
       id: comment.id,

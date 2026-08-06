@@ -7,11 +7,13 @@ import { createPortal } from 'react-dom'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { generateArchiveSlug } from '@/lib/music-slug'
 import type { ConcertCategoryConfig } from '@/lib/music-concert-category'
+import { CONCERT_CATEGORY_ENUM_TO_SLUG } from '@/lib/music-concert-category'
 
 export type ConcertTimelineTour = {
   id: string
   name: string
   category: 'MAIN' | 'SMALL' | 'GUEST'
+  categoryId?: string | null
   status?: string
   subtitle?: string | null
   description?: string | null
@@ -38,11 +40,11 @@ export type ConcertArchiveMyLive = {
 
 type MyLiveStatus = 'loading' | 'ready' | 'anonymous' | 'error'
 
-type ConcertCategory = 'main' | 'special' | 'guest'
+type ConcertCategorySlug = string
 
-const CATEGORY_LABELS: Record<ConcertCategory, { eyebrow: string; label: string }> = {
+const FALLBACK_CATEGORY_LABELS: Record<string, { eyebrow: string; label: string }> = {
   main: { eyebrow: 'MAIN CONCERTS', label: '大型演唱会' },
-  special: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划' },
+  small: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划' },
   guest: { eyebrow: 'GUEST APPEARANCES', label: '嘉宾现场' },
 }
 
@@ -256,7 +258,7 @@ function ExpandedConcert({ tour, onClose, isAdmin }: Readonly<{ tour: ConcertTim
 }
 
 export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin = false, categories }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive; isAdmin?: boolean; categories?: ConcertCategoryConfig[] }>) {
-  const [activeCategory, setActiveCategory] = useState<ConcertCategory>('main')
+  const [activeCategory, setActiveCategory] = useState<ConcertCategorySlug>('main')
   const [switching, setSwitching] = useState(false)
   const [interactionPaused, setInteractionPaused] = useState(false)
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
@@ -268,21 +270,43 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
   const myLiveRequestRef = useRef<AbortController | null>(null)
   const myLiveInFlightRef = useRef(false)
   const pathname = usePathname()
-  const mainConcerts = tours.filter((tour) => tour.category === 'MAIN')
-  const specialProjects = tours.filter((tour) => tour.category === 'SMALL')
-  const guestConcerts = tours.filter((tour) => tour.category === 'GUEST')
-  const categoryTours: Record<ConcertCategory, ConcertTimelineTour[]> = { main: mainConcerts, special: specialProjects, guest: guestConcerts }
-  // 分类顺序与名称优先读取后台配置（categories），回退到硬编码默认值。
-  const categorySlugByKey: Record<ConcertCategory, string> = { main: 'main', special: 'small', guest: 'guest' }
-  const categoryBySlug = new Map((categories || []).map((category) => [category.slug, category]))
-  const orderedTabs: ConcertCategory[] = (['main', 'special', 'guest'] as ConcertCategory[])
-    .map((key, index) => ({ key, order: categoryBySlug.get(categorySlugByKey[key])?.sortOrder ?? index + 1 }))
-    .sort((left, right) => left.order - right.order)
-    .map((item) => item.key)
-  const tabLabel = (key: ConcertCategory) => categoryBySlug.get(categorySlugByKey[key])?.name || CATEGORY_LABELS[key].label
-  const activeLabel = { eyebrow: CATEGORY_LABELS[activeCategory].eyebrow, label: tabLabel(activeCategory) }
 
-  function selectCategory(nextCategory: ConcertCategory) {
+  // 分类来源：优先后台配置（enabled=true，按 sortOrder 升序），无配置时回退到三大核心分类。
+  const fallbackCategories: ConcertCategoryConfig[] = [
+    { id: 'main', name: '大型演唱会', slug: 'main', sortOrder: 1, enabled: true },
+    { id: 'small', name: '小型企划', slug: 'small', sortOrder: 2, enabled: true },
+    { id: 'guest', name: '嘉宾现场', slug: 'guest', sortOrder: 3, enabled: true },
+  ]
+  const dbCategories = (categories && categories.length ? categories : fallbackCategories).filter((category) => category.enabled)
+  const categoryById = new Map(dbCategories.map((category) => [category.id, category]))
+  // 每个巡演的有效分类 slug：优先 categoryId -> 关联分类 slug；回退到枚举映射；再回退 main。
+  function tourSlug(tour: ConcertTimelineTour): string {
+    const byId = tour.categoryId ? categoryById.get(tour.categoryId) : undefined
+    if (byId) return byId.slug
+    return CONCERT_CATEGORY_ENUM_TO_SLUG[tour.category] ?? 'main'
+  }
+
+  const grouped: Record<string, ConcertTimelineTour[]> = {}
+  for (const tour of tours) {
+    const slug = tourSlug(tour)
+    if (!grouped[slug]) grouped[slug] = []
+    grouped[slug].push(tour)
+  }
+
+  // Tab 顺序：enabled 分类按 sortOrder；补充数据中出现但不在 enabled 列表中的 slug（避免遗漏）。
+  const orderedSlugs = [...dbCategories].sort((left, right) => left.sortOrder - right.sortOrder).map((category) => category.slug)
+  const slugSet = new Set(orderedSlugs)
+  for (const tour of tours) {
+    const slug = tourSlug(tour)
+    if (!slugSet.has(slug)) {
+      slugSet.add(slug)
+      orderedSlugs.push(slug)
+    }
+  }
+  const tabLabel = (slug: string) => (categoryById.get(slug)?.name) || FALLBACK_CATEGORY_LABELS[slug]?.label || slug
+  const activeLabel = { eyebrow: FALLBACK_CATEGORY_LABELS[activeCategory]?.eyebrow || activeCategory.toUpperCase(), label: tabLabel(activeCategory) }
+
+  function selectCategory(nextCategory: ConcertCategorySlug) {
     if (switching || nextCategory === activeCategory) return
     setSwitching(true)
     switchTimerRef.current = window.setTimeout(() => {
@@ -403,11 +427,11 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
     <header className="music-concert-gallery-switcher">
       <p>{activeLabel.eyebrow}</p>
       <div role="tablist" aria-label="演唱会分类">
-        {orderedTabs.map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} disabled={switching} onClick={() => selectCategory(category)}>{tabLabel(category)}</button>)}
+        {orderedSlugs.map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} disabled={switching} onClick={() => selectCategory(category)}>{tabLabel(category)}</button>)}
       </div>
     </header>
     <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`} onMouseEnter={() => setInteractionPaused(true)} onMouseLeave={() => setInteractionPaused(false)} onFocusCapture={() => setInteractionPaused(true)} onBlurCapture={() => setInteractionPaused(false)}>
-      <MuseumWheel key={activeCategory} tours={categoryTours[activeCategory]} paused={Boolean(expandedTour) || switching || interactionPaused} onOpen={setExpandedTour} />
+      <MuseumWheel key={activeCategory} tours={grouped[activeCategory] || []} paused={Boolean(expandedTour) || switching || interactionPaused} onOpen={setExpandedTour} />
       <MyLiveCenter data={myLiveData} status={myLiveStatus} onRetry={() => void loadMyLive(true)} loginHref={`/login?redirect=${encodeURIComponent(pathname || '/music/concerts')}`} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} isAdmin={Boolean(isAdmin)} /> : null}

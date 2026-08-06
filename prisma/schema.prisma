@@ -1357,6 +1357,8 @@ model MusicTour {
   startDate    DateTime?
   endDate      DateTime?
   category     ConcertCategory        @default(MAIN)
+  categoryId   String?
+  categoryRef  MusicConcertCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   status       MusicPublicationStatus @default(DRAFT)
   sortOrder    Int                    @default(0)
   createdAt    DateTime               @default(now())
@@ -1367,6 +1369,7 @@ model MusicTour {
   @@index([status])
   @@index([sortOrder])
   @@index([startDate])
+  @@index([categoryId])
   @@index([status, sortOrder, startDate, createdAt])
 }
 
@@ -1472,6 +1475,7 @@ model MusicConcertCategory {
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  musicTours MusicTour[]
 
   @@index([sortOrder])
 }

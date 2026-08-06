@@ -18,7 +18,7 @@ export default async function MusicLivePage() {
       where: isAdmin ? {} : { status: 'PUBLISHED' },
       orderBy: [{ sortOrder: 'asc' }, { startDate: 'desc' }, { createdAt: 'asc' }],
       take: 50,
-      select: { id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true, category: true, status: true, MusicConcert: { where: isAdmin ? {} : { status: 'PUBLISHED' }, orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { city: true, posterUrl: true } }, _count: { select: { MusicConcert: isAdmin ? {} : { where: { status: 'PUBLISHED' } } } } },
+      select: { id: true, name: true, subtitle: true, posterUrl: true, startDate: true, endDate: true, category: true, categoryId: true, status: true, MusicConcert: { where: isAdmin ? {} : { status: 'PUBLISHED' }, orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { city: true, posterUrl: true } }, _count: { select: { MusicConcert: isAdmin ? {} : { where: { status: 'PUBLISHED' } } } } },
     }),
     prisma.musicConcert.findMany({
       where: isAdmin ? { MusicTour: {} } : { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },

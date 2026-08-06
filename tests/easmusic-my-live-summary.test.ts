@@ -70,9 +70,8 @@ test('聚合 API 只使用当前 Session 用户且未登录返回 401', () => {
 test('看过场次使用 UserMusicConcert 的唯一关系，不新增 Prisma 表或 migration', () => {
   const schema = read('prisma/schema.prisma')
   assert.match(schema, /model UserMusicConcert \{[\s\S]*@@unique\(\[userId, concertId\]\)/)
-  assert.match(read('components/music/MusicConcertTimeline.tsx'), /tour\.category === 'MAIN'/)
-  assert.match(read('components/music/MusicConcertTimeline.tsx'), /tour\.category === 'SMALL'/)
-  assert.match(read('components/music/MusicConcertTimeline.tsx'), /tour\.category === 'GUEST'/)
+  assert.match(read('components/music/MusicConcertTimeline.tsx'), /categoryId/)
+  assert.match(read('components/music/MusicConcertTimeline.tsx'), /CONCERT_CATEGORY_ENUM_TO_SLUG/)
 })
 
 test('看过保存和取消只通知 My Live 重新从服务端读取', () => {
