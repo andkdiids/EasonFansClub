@@ -23,15 +23,53 @@ export type PickerSticker = {
   name: string | null
   url: string
   type: 'STATIC' | 'GIF'
+  packId?: string
 }
+
+export type StickerPackLite = {
+  id: string
+  name: string
+  iconUrl: string | null
+  coverUrl: string | null
+  type: 'STATIC' | 'GIF'
+}
+
+export type PickerData = {
+  packs: StickerPackLite[]
+  stickersByPack: Record<string, PickerSticker[]>
+  recent: PickerSticker[]
+  systemEmojis: string[]
+  searchIndex: PickerSticker[]
+}
+
+const SYSTEM_EMOJI_SET: readonly string[] = [
+  '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','😎','🤓','🧐','😕','😟','🙁','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖',
+  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','💌','💋','👄','💯','💢','💥','💫','💦','💨','🕳️','💣','🧨','🎉','🎊','🎁','🎂','🎈','🎀','🎐','🎑','🧧','🌹','🥀','🌺','🌻','🌼','🌷','🌸','💐',
+  '👍','👎','👌','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','✋','🤚','🖐️','🖖','👋','🤝','🙏','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤜','💪','🦾','🤳','💅','🦵','🦿','🦶','👂','🦻','👃','🧠','👀','👁️','👄','👅','💋','😶','🫦','🫥','🫧',
+  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🪰','🪲','🪳','🦟','🦗','🕷️','🕸️','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦣','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐫','🐪','🐭','🦥','🦦','🦨','🦘','🐁','🐀','🐿️','🦔',
+  '🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🌽','🥕','🫒','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🥨','🧀','🥚','🍳','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🥪','🥙','🧆','🌮','🌯','🥗','🥘','🫔','🥫','🍝','🍜','🍲','🍛','🍣','🥟','🦐','🍤','🍙','🍚','🍘','🍥','🥠','🥮','🍢','🍡','🍧','🍨','🍦','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🥛','🍼','☕','🍵','🍶','🍾','🍷','🍸','🍹','🍺','🍻','🥂','🥃','🥤','🧋','🧃','🧉','🧊',
+] as const
+
+const emojiSet = (() => {
+  const seen = new Set<string>()
+  for (const e of SYSTEM_EMOJI_SET) seen.add(e)
+  return [...seen]
+})()
 
 function toPicker(sticker: {
   id: string
   name: string | null
   url: string
   type: 'STATIC' | 'GIF'
+  packId?: string
 }): PickerSticker {
-  return { id: sticker.id, name: sticker.name, url: sticker.url, type: sticker.type }
+  return {
+    id: sticker.id,
+    name: sticker.name,
+    url: sticker.url,
+    type: sticker.type,
+    packId: sticker.packId,
+  }
 }
 
 /**
@@ -95,22 +133,81 @@ export async function getOfficialStickers(): Promise<PickerSticker[]> {
 }
 
 /**
- * 统一选择器数据：最近使用 / 收藏 / 官方 / 我的上传。
- * 排序规则：最近使用 > 使用次数 > 创建时间。
+ * 微信式选择器数据：用户已添加的表情包（UserStickerPack）+ 每个表情包的可见表情 + 最近使用 + 系统 emoji + 搜索索引。
+ *
+ * 与原 `getPickerData` 不同：
+ *  - 数据结构与微信对齐：按用户已添加的「表情包」分页。
+ *  - 搜索索引从「全站可见 + 我添加过的」合集合并。
  */
-export async function getPickerData(userId: string): Promise<{
-  recent: PickerSticker[]
-  favorites: PickerSticker[]
-  official: PickerSticker[]
-  myUploads: PickerSticker[]
-}> {
-  const [recent, favorites, official, myUploads] = await Promise.all([
-    getRecentStickers(userId),
-    getMyFavorites(userId),
-    getOfficialStickers(),
-    getMyUploadStickers(userId),
-  ])
-  return { recent, favorites, official, myUploads }
+export async function getPickerData(userId: string): Promise<PickerData> {
+  // 1. 用户的 UserStickerPack 列表（按最近添加时间倒序）
+  const addedRows = await prisma.userStickerPack.findMany({
+    where: { user: { id: userId }, pack: VISIBLE_STICKER_WHERE.pack },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      pack: {
+        select: {
+          id: true,
+          name: true,
+          coverUrl: true,
+          type: true,
+          stickers: {
+            where: { isHidden: false, enabled: true },
+            orderBy: { sort: 'asc' },
+            select: { id: true, name: true, url: true, type: true, packId: true, sort: true },
+          },
+        },
+      },
+    },
+  })
+
+  const packs: StickerPackLite[] = []
+  const stickersByPack: Record<string, PickerSticker[]> = {}
+  for (const row of addedRows) {
+    const pack = row.pack
+    packs.push({
+      id: pack.id,
+      name: pack.name,
+      coverUrl: pack.coverUrl,
+      iconUrl: pack.stickers[0]?.url ?? pack.coverUrl,
+      type: pack.type,
+    })
+    stickersByPack[pack.id] = pack.stickers.map(toPicker)
+  }
+
+  // 2. 最近使用表情（全部用户已可见的表情）
+  const recent = await getRecentStickers(userId, 8)
+
+  // 3. 搜索索引：用户已添加的合集 + 官方推荐合集（兜底，方便查找新表情）
+  const userStickerIds = new Set<string>()
+  for (const pack of packs) stickersByPack[pack.id]?.forEach((s) => userStickerIds.add(s.id))
+
+  const officialSample = await prisma.sticker.findMany({
+    where: { ...VISIBLE_STICKER_WHERE, pack: { ...VISIBLE_STICKER_WHERE.pack, isOfficial: true } },
+    orderBy: [{ usageCount: 'desc' }, { createdAt: 'desc' }],
+    take: 80,
+    select: { id: true, name: true, url: true, type: true, packId: true },
+  })
+  const officialList: PickerSticker[] = officialSample.map(toPicker)
+  // 把最近使用也合并进搜索索引
+  const indexMap = new Map<string, PickerSticker>()
+  for (const s of [...recent, ...officialList]) {
+    if (!indexMap.has(s.id)) indexMap.set(s.id, s)
+  }
+  for (const list of Object.values(stickersByPack)) {
+    for (const s of list) {
+      if (!indexMap.has(s.id)) indexMap.set(s.id, s)
+    }
+  }
+  const searchIndex = [...indexMap.values()]
+
+  return {
+    packs,
+    stickersByPack,
+    recent,
+    systemEmojis: emojiSet,
+    searchIndex,
+  }
 }
 
 /** 我的上传（选择器用，不含 usageCount）。 */
@@ -435,4 +532,433 @@ export async function createOfficialSticker(input: {
     reportCount: 0,
     createdAt: sticker.createdAt.toISOString(),
   }
+}
+
+// ===========================================================================
+// 微信式表情商店 / 用户表情库（UserStickerPack）
+// ===========================================================================
+
+export type StorePackItem = {
+  id: string
+  name: string
+  description: string | null
+  coverUrl: string | null
+  iconUrl: string | null
+  type: 'STATIC' | 'GIF'
+  category: string | null
+  isOfficial: boolean
+  creator: { id: string; nickname: string; uid: number } | null
+  stickerCount: number
+  downloadCount: number
+  addedByCount: number
+  added: boolean
+  createdAt: string
+}
+
+/**
+ * 获取表情包汇总计数：以 `usageCount` 字段汇总（含官方/用户表情包）。
+ * 由于 `usageCount` 是单个 Sticker 的全局发送次数总和，把它当作「下载/使用次数」展示。
+ */
+async function aggregatePackUsage(packIds: string[]): Promise<Map<string, { stickerCount: number; downloadCount: number; addedByCount: number }>> {
+  const result = new Map<string, { stickerCount: number; downloadCount: number; addedByCount: number }>()
+  if (packIds.length === 0) return result
+  const groups = await prisma.sticker.groupBy({
+    by: ['packId'],
+    where: { packId: { in: packIds }, isHidden: false, enabled: true, pack: { status: 'APPROVED' } },
+    _count: { _all: true },
+    _sum: { usageCount: true },
+  })
+  for (const g of groups) {
+    result.set(g.packId, {
+      stickerCount: g._count._all,
+      downloadCount: g._sum.usageCount ?? 0,
+      addedByCount: 0,
+    })
+  }
+  // 添加人数：UserStickerPack
+  const addedGroups = await prisma.userStickerPack.groupBy({
+    by: ['packId'],
+    where: { packId: { in: packIds } },
+    _count: { _all: true },
+  })
+  for (const g of addedGroups) {
+    const prev = result.get(g.packId) ?? { stickerCount: 0, downloadCount: 0, addedByCount: 0 }
+    result.set(g.packId, { ...prev, addedByCount: g._count._all })
+  }
+  return result
+}
+
+/**
+ * 表情商店列表：所有通过审核的表情包（官方 + 用户），按下载量排序。
+ */
+export async function getStorePacks(opts: {
+  userId: string
+  page?: number
+  pageSize?: number
+  sort?: 'hot' | 'new' | 'official'
+  category?: string | null
+}): Promise<{ packs: StorePackItem[]; total: number; page: number; pageSize: number }> {
+  const page = Math.max(1, opts.page ?? 1)
+  const pageSize = Math.min(60, Math.max(8, opts.pageSize ?? 24))
+  const sort = opts.sort ?? 'hot'
+
+  const where: { status: 'APPROVED'; category?: string; isOfficial?: boolean } = { status: 'APPROVED' }
+  if (opts.category) where.category = opts.category
+  if (sort === 'official') where.isOfficial = true
+
+  const [packs, total] = await Promise.all([
+    prisma.stickerPack.findMany({
+      where,
+      orderBy: sort === 'new' ? { createdAt: 'desc' } : { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        coverUrl: true,
+        type: true,
+        category: true,
+        isOfficial: true,
+        createdAt: true,
+        creator: { select: { id: true, nickname: true, uid: true } },
+      },
+    }),
+    prisma.stickerPack.count({ where }),
+  ])
+
+  const agg = await aggregatePackUsage(packs.map((p) => p.id))
+  const addedSet = await getUserAddedPackIds(opts.userId, packs.map((p) => p.id))
+
+  // 排序：hot / official 都按下载量降序；new 走时间倒序
+  let ordered = packs
+  if (sort !== 'new') {
+    ordered = [...packs].sort((a, b) => (agg.get(b.id)?.downloadCount ?? 0) - (agg.get(a.id)?.downloadCount ?? 0))
+  }
+
+  const items = ordered.map<StorePackItem>((pack) => ({
+    id: pack.id,
+    name: pack.name,
+    description: pack.description,
+    coverUrl: pack.coverUrl,
+    iconUrl: null,
+    type: pack.type,
+    category: pack.category,
+    isOfficial: pack.isOfficial,
+    creator: pack.creator,
+    stickerCount: agg.get(pack.id)?.stickerCount ?? 0,
+    downloadCount: agg.get(pack.id)?.downloadCount ?? 0,
+    addedByCount: agg.get(pack.id)?.addedByCount ?? 0,
+    added: addedSet.has(pack.id),
+    createdAt: pack.createdAt.toISOString(),
+  }))
+
+  return { packs: items, total, page, pageSize }
+}
+
+/** 用户已添加某个或多个表情包？返回命中 id Set。 */
+async function getUserAddedPackIds(userId: string, packIds: string[]): Promise<Set<string>> {
+  if (packIds.length === 0) return new Set()
+  const rows = await prisma.userStickerPack.findMany({
+    where: { userId, packId: { in: packIds } },
+    select: { packId: true },
+  })
+  return new Set(rows.map((r) => r.packId))
+}
+
+export type StorePackDetail = StorePackItem & {
+  copyright: string | null
+  stickers: PickerSticker[]
+}
+
+/**
+ * 表情包详情（含全部可见表情 + 用户是否已添加）。
+ */
+export async function getStorePackDetail(packId: string, userId: string | null): Promise<StorePackDetail | null> {
+  const pack = await prisma.stickerPack.findFirst({
+    where: { id: packId, status: 'APPROVED' },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      coverUrl: true,
+      type: true,
+      category: true,
+      isOfficial: true,
+      createdAt: true,
+      creator: { select: { id: true, nickname: true, uid: true } },
+      stickers: {
+        where: { isHidden: false, enabled: true },
+        orderBy: { sort: 'asc' },
+        select: { id: true, name: true, url: true, type: true, packId: true },
+      },
+    },
+  })
+  if (!pack) return null
+  const agg = await aggregatePackUsage([pack.id])
+  const addedSet = userId ? await getUserAddedPackIds(userId, [pack.id]) : new Set<string>()
+  return {
+    id: pack.id,
+    name: pack.name,
+    description: pack.description,
+    coverUrl: pack.coverUrl,
+    iconUrl: null,
+    type: pack.type,
+    category: pack.category,
+    isOfficial: pack.isOfficial,
+    creator: pack.creator,
+    copyright: null,
+    stickerCount: pack.stickers.length,
+    downloadCount: agg.get(pack.id)?.downloadCount ?? 0,
+    addedByCount: agg.get(pack.id)?.addedByCount ?? 0,
+    added: addedSet.has(pack.id),
+    createdAt: pack.createdAt.toISOString(),
+    stickers: pack.stickers.map(toPicker),
+  }
+}
+
+/**
+ * 表情包商店分类列表（去重）。
+ */
+export async function getStoreCategories(): Promise<string[]> {
+  const rows = await prisma.stickerPack.findMany({
+    where: { status: 'APPROVED' },
+    select: { category: true },
+    distinct: ['category'],
+  })
+  return rows.map((r) => r.category).filter((c): c is string => Boolean(c))
+}
+
+/**
+ * 添加表情包到用户表情库。已添加则幂等。
+ */
+export async function addPackToLibrary(userId: string, packId: string): Promise<{ added: boolean }> {
+  const exists = await prisma.userStickerPack.findUnique({
+    where: { userId_packId: { userId, packId } },
+    select: { id: true },
+  })
+  if (exists) return { added: true }
+  // 校验合集存在且通过审核
+  const pack = await prisma.stickerPack.findFirst({
+    where: { id: packId, status: 'APPROVED' },
+    select: { id: true },
+  })
+  if (!pack) throw new Error('表情包不存在或未上架')
+  await prisma.userStickerPack.create({ data: { userId, packId } })
+  return { added: true }
+}
+
+/**
+ * 取消添加表情包（不删除官方资源，仅取消本地添加）。
+ */
+export async function removePackFromLibrary(userId: string, packId: string): Promise<{ removed: boolean }> {
+  const exists = await prisma.userStickerPack.findUnique({
+    where: { userId_packId: { userId, packId } },
+    select: { id: true },
+  })
+  if (!exists) return { removed: false }
+  await prisma.userStickerPack.delete({ where: { userId_packId: { userId, packId } } })
+  return { removed: true }
+}
+
+/**
+ * 用户已添加的表情包（用于「我的表情库」页面）。
+ */
+export async function getMyLibraryPacks(userId: string): Promise<StorePackItem[]> {
+  const rows = await prisma.userStickerPack.findMany({
+    where: { userId, pack: { status: 'APPROVED' } },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      pack: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          coverUrl: true,
+          type: true,
+          category: true,
+          isOfficial: true,
+          createdAt: true,
+          creator: { select: { id: true, nickname: true, uid: true } },
+        },
+      },
+    },
+  })
+  const packs = rows.map((r) => r.pack)
+  const agg = await aggregatePackUsage(packs.map((p) => p.id))
+  const items = packs.map<StorePackItem>((pack) => ({
+    id: pack.id,
+    name: pack.name,
+    description: pack.description,
+    coverUrl: pack.coverUrl,
+    iconUrl: null,
+    type: pack.type,
+    category: pack.category,
+    isOfficial: pack.isOfficial,
+    creator: pack.creator,
+    stickerCount: agg.get(pack.id)?.stickerCount ?? 0,
+    downloadCount: agg.get(pack.id)?.downloadCount ?? 0,
+    addedByCount: agg.get(pack.id)?.addedByCount ?? 0,
+    added: true,
+    createdAt: pack.createdAt.toISOString(),
+  }))
+  // 按最近添加顺序
+  return items
+}
+
+// ===========================================================================
+// 用户上传表情包（提交审核）
+// ===========================================================================
+
+export type SubmitStickerPackInput = {
+  creatorId: string
+  name: string
+  description?: string | null
+  copyright?: string | null
+  coverUrl?: string | null
+  bannerUrl?: string | null
+  iconUrl?: string | null
+  type: 'STATIC' | 'GIF'
+  category?: string | null
+  stickers: Array<{ name: string | null; url: string; type: 'STATIC' | 'GIF' }>
+}
+
+/**
+ * 用户提交表情包：新建 Pack（status=PENDING）+ 多张 Sticker。返回 packId 与初审信息。
+ */
+export async function submitStickerPack(input: SubmitStickerPackInput): Promise<{ packId: string; status: 'PENDING' }> {
+  if (!input.name?.trim()) throw new Error('请填写表情包名称')
+  if (input.stickers.length < 6 || input.stickers.length > 60) {
+    throw new Error('一个表情包需要包含 6–60 张表情')
+  }
+  const result = await prisma.$transaction(async (tx) => {
+    const pack = await tx.stickerPack.create({
+      data: {
+        name: input.name.trim().slice(0, 40),
+        description: input.description?.slice(0, 200) || null,
+        coverUrl: input.coverUrl || null,
+        creatorId: input.creatorId,
+        type: input.type,
+        status: 'PENDING',
+        category: input.category?.slice(0, 40) || null,
+      },
+    })
+    await tx.sticker.createMany({
+      data: input.stickers.map((s, idx) => ({
+        packId: pack.id,
+        name: s.name?.slice(0, 4) || null,
+        url: s.url,
+        type: s.type,
+        sort: idx,
+        enabled: true,
+      })),
+    })
+    return pack
+  })
+  return { packId: result.id, status: 'PENDING' }
+}
+
+// ===========================================================================
+// 表情包审核（管理员）
+// ===========================================================================
+
+export type PendingPackRow = {
+  id: string
+  name: string
+  description: string | null
+  coverUrl: string | null
+  type: 'STATIC' | 'GIF'
+  category: string | null
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  rejectionReason: string | null
+  reviewedAt: string | null
+  creator: { id: string; nickname: string; uid: number }
+  stickerCount: number
+  sampleStickers: PickerSticker[]
+  createdAt: string
+}
+
+/**
+ * 列出待审核的表情包。带每包前 6 张样本图。
+ */
+export async function listReviewPacks(filter: 'PENDING' | 'APPROVED' | 'REJECTED' = 'PENDING'): Promise<PendingPackRow[]> {
+  const packs = await prisma.stickerPack.findMany({
+    where: { status: filter },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      coverUrl: true,
+      type: true,
+      category: true,
+      status: true,
+      rejectionReason: true,
+      reviewedAt: true,
+      createdAt: true,
+      creator: { select: { id: true, nickname: true, uid: true } },
+      stickers: {
+        orderBy: { sort: 'asc' },
+        select: { id: true, name: true, url: true, type: true, packId: true },
+      },
+    },
+  })
+  return packs.map<PendingPackRow>((p) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    coverUrl: p.coverUrl,
+    type: p.type,
+    category: p.category,
+    status: p.status as 'PENDING' | 'APPROVED' | 'REJECTED',
+    rejectionReason: p.rejectionReason,
+    reviewedAt: p.reviewedAt?.toISOString() ?? null,
+    creator: p.creator,
+    stickerCount: p.stickers.length,
+    sampleStickers: p.stickers.slice(0, 6).map(toPicker),
+    createdAt: p.createdAt.toISOString(),
+  }))
+}
+
+/**
+ * 审核表情包：approve 或 reject。通过会发送 ADMIN 通知，拒绝会附带原因。
+ */
+export async function reviewStickerPack(input: {
+  packId: string
+  reviewerId: string
+  action: 'APPROVE' | 'REJECT'
+  reason?: string | null
+}): Promise<{ status: 'APPROVED' | 'REJECTED'; packName: string }> {
+  const pack = await prisma.stickerPack.findUnique({
+    where: { id: input.packId },
+    select: { id: true, name: true, creatorId: true },
+  })
+  if (!pack) throw new Error('表情包不存在')
+  const now = new Date()
+  const newStatus: 'APPROVED' | 'REJECTED' = input.action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
+  await prisma.stickerPack.update({
+    where: { id: input.packId },
+    data: {
+      status: newStatus,
+      rejectionReason: input.action === 'REJECT' ? (input.reason?.slice(0, 500) || '内容不符合规范') : null,
+      reviewedAt: now,
+    },
+  })
+  const title = input.action === 'APPROVE' ? `你的表情包《${pack.name}》已通过审核` : `你的表情包《${pack.name}》未通过审核`
+  const content =
+    input.action === 'APPROVE'
+      ? '已经上架表情商店，快去查看吧！'
+      : `原因：${input.reason?.slice(0, 200) || '内容不符合规范'}`
+  await prisma.notification.create({
+    data: {
+      recipientId: pack.creatorId,
+      actorId: input.reviewerId,
+      type: 'ADMIN',
+      title,
+      content,
+      link: '/profile/stickers',
+      key: `sticker-pack-review:${input.packId}:${newStatus.toLowerCase()}`,
+    },
+  })
+  return { status: newStatus, packName: pack.name }
 }

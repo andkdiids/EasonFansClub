@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic'
 /**
  * 审核单个表情包合集：通过（APPROVED）或拒绝（REJECTED）。
  * 拒绝时记录原因（rejectionReason）；通过时清除历史原因。
+ * 审核结束向创作者发送一条 ADMIN 通知。
  */
 export async function PATCH(
   request: Request,
@@ -30,22 +31,20 @@ export async function PATCH(
 
   const existing = await prisma.stickerPack.findUnique({
     where: { id },
-    select: { id: true, status: true },
+    select: { id: true, status: true, name: true, creatorId: true },
   })
   if (!existing) return NextResponse.json({ message: '表情包不存在' }, { status: 404 })
 
   const reviewedAt = new Date()
-  const data =
-    action === 'approve'
-      ? { status: 'APPROVED' as const, reviewedAt, rejectionReason: null }
-      : {
-          status: 'REJECTED' as const,
-          reviewedAt,
-          rejectionReason: sanitizeText(body.rejectionReason, STICKER_MAX_DESCRIPTION_LENGTH),
-        }
+  const rejectionReason = action === 'reject'
+    ? sanitizeText(body.rejectionReason, STICKER_MAX_DESCRIPTION_LENGTH)
+    : null
+  const data = action === 'approve'
+    ? { status: 'APPROVED' as const, reviewedAt, rejectionReason: null }
+    : { status: 'REJECTED' as const, reviewedAt, rejectionReason }
 
   try {
-    const pack = await prisma.stickerPack.update({
+    const updated = await prisma.stickerPack.update({
       where: { id },
       data,
       select: {
@@ -54,12 +53,83 @@ export async function PATCH(
         status: true,
         rejectionReason: true,
         reviewedAt: true,
+        creatorId: true,
+      },
+    })
+    // 审核结果通知（仅当状态实际变化时）
+    if (existing.status !== updated.status) {
+      const isApprove = action === 'approve'
+      const title = isApprove
+        ? `你的表情包《${updated.name}》已通过审核`
+        : `你的表情包《${updated.name}》未通过审核`
+      const content = isApprove
+        ? '已经上架表情商店，可在「我的表情包 → 我创建的表情包」查看详情。'
+        : `原因：${updated.rejectionReason || '内容不符合规范'}`
+      await prisma.notification.create({
+        data: {
+          recipientId: updated.creatorId,
+          actorId: guard.user.id,
+          type: 'ADMIN',
+          title,
+          content,
+          link: '/profile/stickers',
+          key: `sticker-pack-review:${updated.id}:${updated.status.toLowerCase()}`,
+        },
+      })
+    }
+    // 返回完整的 pack 给前端以刷新本地状态
+    const pack = await prisma.stickerPack.findUnique({
+      where: { id: updated.id },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        coverUrl: true,
+        type: true,
+        status: true,
+        rejectionReason: true,
+        reviewedAt: true,
+        createdAt: true,
+        creator: { select: { id: true, nickname: true, uid: true } },
+        stickers: {
+          orderBy: { sort: 'asc' },
+          select: { id: true, name: true, url: true, type: true, sort: true },
+        },
       },
     })
     revalidatePath('/admin/stickers')
-    return NextResponse.json({ pack })
+    revalidatePath('/profile/stickers')
+    return NextResponse.json({ pack: pack ? serializePack(pack) : null })
   } catch (error) {
     console.error('[admin.sticker.review]', error)
     return NextResponse.json({ message: '审核失败，请稍后重试' }, { status: 500 })
+  }
+}
+
+function serializePack(p: {
+  id: string
+  name: string
+  description: string | null
+  coverUrl: string | null
+  type: 'STATIC' | 'GIF'
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  rejectionReason: string | null
+  reviewedAt: Date | null
+  createdAt: Date
+  creator: { id: string; nickname: string; uid: number }
+  stickers: { id: string; name: string | null; url: string; type: 'STATIC' | 'GIF'; sort: number }[]
+}) {
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    coverUrl: p.coverUrl,
+    type: p.type,
+    status: p.status,
+    rejectionReason: p.rejectionReason,
+    reviewedAt: p.reviewedAt ? p.reviewedAt.toISOString() : null,
+    createdAt: p.createdAt.toISOString(),
+    creator: p.creator,
+    stickers: p.stickers,
   }
 }

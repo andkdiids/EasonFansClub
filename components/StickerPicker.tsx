@@ -1,139 +1,407 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+
+/**
+ * 微信式表情面板：
+ *
+ * 顶部：当前表情包区域 + 单张表情网格（不再是 4 个固定 tab）
+ * 底部：搜索按钮 / 系统 emoji / 用户已添加表情包 icon + 「+」添加入口
+ *
+ * 空态：无任何已添加表情时显示「暂无表情包」+「去添加表情包」按钮（跳 /stickers）
+ *
+ * 后端数据模型：
+ *  - showData.packs = 用户已添加的表情包（UserStickerPack）
+ *  - showData.stickersByPack[packId] = 该表情包下所有可见 Sticker
+ *  - showData.systemEmojis = 最近使用 + 系统 emoji（保底）
+ *  - showData.searchIndex = 全站可见表情（用于搜索）
+ */
 
 export type PickerSticker = {
   id: string
   name: string | null
   url: string
   type: 'STATIC' | 'GIF'
+  packId?: string
 }
 
-type TabKey = 'recent' | 'favorites' | 'official' | 'myUploads'
+type StickerPackLite = {
+  id: string
+  name: string
+  iconUrl: string | null
+  coverUrl: string | null
+}
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'recent', label: '最近使用' },
-  { key: 'favorites', label: '收藏' },
-  { key: 'official', label: '官方' },
-  { key: 'myUploads', label: '我的上传' },
-]
+type PickerView = 'emojis' | 'pack' | 'search'
 
-function sortByUsageThenCreated(list: PickerSticker[]): PickerSticker[] {
-  // 使用次数无法直接在前端获取，这里 recent 已按使用时间排序；其余标签保持服务端返回顺序。
-  return list
+export type PickerDataResponse = {
+  success?: boolean
+  error?: string
+  packs: StickerPackLite[]
+  stickersByPack: Record<string, PickerSticker[]>
+  recent: PickerSticker[]
+  systemEmojis: string[]
+  searchIndex: PickerSticker[]
+  fetchedAt?: string
 }
 
 export function StickerPicker({
   open,
   onClose,
-  onSelect,
+  onSelectSticker,
+  onSelectEmoji,
+  composerRef,
 }: {
   open: boolean
   onClose: () => void
-  onSelect: (sticker: PickerSticker) => void
+  onSelectSticker: (sticker: PickerSticker) => void
+  onSelectEmoji?: (emoji: string) => void
+  composerRef?: React.RefObject<HTMLTextAreaElement | null>
 }) {
-  const [tab, setTab] = useState<TabKey>('recent')
-  const [data, setData] = useState<{
-    recent: PickerSticker[]
-    favorites: PickerSticker[]
-    official: PickerSticker[]
-    myUploads: PickerSticker[]
-  } | null>(null)
+  const [data, setData] = useState<PickerDataResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<PickerView>('emojis')
+  const [activePackId, setActivePackId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
-  useEffect(() => {
-    if (!open || data) return
-    let active = true
+  const handleEmojiClick = useCallback(
+    (emoji: string) => {
+      if (onSelectEmoji) {
+        onSelectEmoji(emoji)
+        return
+      }
+      // fallback: insert directly into textarea if no callback provided
+      const textarea = composerRef?.current
+      if (textarea) {
+        const start = textarea.selectionStart ?? textarea.value.length
+        const end = textarea.selectionEnd ?? textarea.value.length
+        const before = textarea.value.slice(0, start)
+        const after = textarea.value.slice(end)
+        textarea.value = `${before}${emoji}${after}`
+        textarea.dispatchEvent(new Event('input', { bubbles: true }))
+        textarea.focus()
+        const caret = start + emoji.length
+        textarea.setSelectionRange(caret, caret)
+      }
+    },
+    [composerRef, onSelectEmoji],
+  )
+
+  const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
-    fetch('/api/stickers/center?mode=picker')
-      .then((res) => res.json())
-      .then((json) => {
-        if (!active) return
-        if (json?.success) setData(json)
-        else setError(json?.message || '加载失败')
-      })
-      .catch(() => active && setError('网络错误，请稍后重试'))
-      .finally(() => active && setLoading(false))
-    return () => {
-      active = false
+    try {
+      const res = await fetch('/api/stickers/center?mode=picker', { cache: 'no-store' })
+      const json = (await res.json()) as PickerDataResponse
+      if (!res.ok || !json.success) {
+        setError(json.error || '加载失败，请稍后重试')
+        return
+      }
+      setData(json)
+      // 默认进入第一个已添加的表情包；如果没有任何表情包，回退到 emojis 视图
+      const firstPack = json.packs[0]
+      if (firstPack) {
+        setActivePackId(firstPack.id)
+        setView('pack')
+      } else {
+        setActivePackId(null)
+        setView('emojis')
+      }
+    } catch {
+      setError('网络错误，请稍后重试')
+    } finally {
+      setLoading(false)
     }
-  }, [open, data])
+  }, [])
 
-  const list = useMemo(() => {
+  useEffect(() => {
+    if (open && !data && !loading) {
+      void fetchData()
+    }
+    if (!open) {
+      // 关闭时重置搜索态，避免下次打开带着旧 query
+      setSearchQuery('')
+    }
+  }, [open, data, loading, fetchData])
+
+  const currentPack = useMemo(
+    () => data?.packs.find((p) => p.id === activePackId) || null,
+    [data, activePackId],
+  )
+
+  const currentStickers = useMemo(() => {
+    if (!data || !activePackId) return []
+    return data.stickersByPack[activePackId] || []
+  }, [data, activePackId])
+
+  const searchResults = useMemo(() => {
     if (!data) return []
-    if (tab === 'recent') return data.recent
-    if (tab === 'favorites') return sortByUsageThenCreated(data.favorites)
-    if (tab === 'official') return sortByUsageThenCreated(data.official)
-    return sortByUsageThenCreated(data.myUploads)
-  }, [data, tab])
+    const q = searchQuery.trim()
+    if (!q) return data.searchIndex.slice(0, 60)
+    const lower = q.toLowerCase()
+    return data.searchIndex.filter((s) => (s.name || '').toLowerCase().includes(lower)).slice(0, 60)
+  }, [data, searchQuery])
+
+  const noPacks = data && data.packs.length === 0
 
   if (!open) return null
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-label="表情面板"
     >
+      <div className="absolute inset-0 bg-slate-900/45" />
+
       <div
-        className="flex max-h-[70vh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] border border-sky-100 bg-white shadow-xl sm:rounded-[28px]"
+        className="sticker-wechat-panel relative flex w-full max-w-md flex-col overflow-hidden rounded-t-[20px] bg-[#EDEDED] shadow-2xl ring-1 ring-black/5 sm:rounded-[20px]"
         onClick={(e) => e.stopPropagation()}
+        style={{ maxHeight: '70vh' }}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-          <h3 className="text-base font-black text-brand-950">选择表情</h3>
+        {/* 顶部标题栏：当前表情包 + 关闭 */}
+        <header className="flex items-center justify-between border-b border-black/5 bg-white px-4 py-2.5">
+          <div className="min-w-0 flex-1">
+            {view === 'pack' && currentPack ? (
+              <button
+                type="button"
+                onClick={() => setView('emojis')}
+                className="flex items-center gap-2 text-[15px] font-bold text-slate-700"
+              >
+                <span aria-hidden>‹</span>
+                <span className="truncate">{currentPack.name}</span>
+              </button>
+            ) : view === 'search' ? (
+              <span className="text-[15px] font-bold text-slate-700">搜索表情</span>
+            ) : (
+              <span className="text-[15px] font-bold text-slate-700">表情</span>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-3 py-1 text-sm font-black text-slate-400 transition hover:bg-slate-100"
+            className="grid h-8 w-8 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100"
+            aria-label="关闭表情面板"
           >
-            关闭
+            ×
           </button>
+        </header>
+
+        {/* 主内容区 */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[#EDEDED]">
+          {loading ? (
+            <div className="flex h-full items-center justify-center py-12 text-sm text-slate-400">加载中…</div>
+          ) : error ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 py-12 text-sm">
+              <p className="text-red-500">{error}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setData(null)
+                  void fetchData()
+                }}
+                className="rounded-full bg-white px-4 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200"
+              >
+                重试
+              </button>
+            </div>
+          ) : view === 'search' ? (
+            // 搜索视图
+            <div className="flex flex-col">
+              <div className="sticky top-0 z-10 border-b border-black/5 bg-white px-3 py-2">
+                <input
+                  type="search"
+                  autoFocus
+                  placeholder="搜索表情名称"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full rounded-full bg-slate-100 px-4 py-2 text-sm outline-none placeholder:text-slate-400"
+                />
+              </div>
+              <div className="grid grid-cols-5 gap-1 px-2 py-2 sm:grid-cols-6">
+                {searchResults.length === 0 ? (
+                  <p className="col-span-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
+                ) : (
+                  searchResults.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => onSelectSticker(s)}
+                      className="flex aspect-square items-center justify-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={s.url} alt={s.name || ''} className="h-10 w-10 object-contain" loading="lazy" />
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : view === 'pack' && currentPack ? (
+            // 当前表情包的表情网格
+            <div className="grid grid-cols-5 gap-1 px-2 py-2 sm:grid-cols-6">
+              {currentStickers.length === 0 ? (
+                <p className="col-span-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
+              ) : (
+                currentStickers.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => onSelectSticker(s)}
+                    className="flex aspect-square items-center justify-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={s.url} alt={s.name || ''} className="h-10 w-10 object-contain" loading="lazy" />
+                  </button>
+                ))
+              )}
+            </div>
+          ) : noPacks ? (
+            // 空态：暂无表情包 → 去添加表情包
+            <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+              <span className="grid h-16 w-16 place-items-center rounded-full bg-white text-3xl">😊</span>
+              <p className="text-sm font-bold text-slate-600">暂无表情包</p>
+              <p className="text-xs text-slate-400">去表情商店添加你喜欢的表情包即可使用</p>
+              <Link
+                href="/stickers"
+                onClick={onClose}
+                className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-700"
+              >
+                去添加表情包
+              </Link>
+            </div>
+          ) : (
+            // 默认 emoji 视图（如果没有添加任何表情包，也显示系统 emoji 兜底）
+              <EmojiGrid
+                emojis={data?.systemEmojis || []}
+                recent={data?.recent || []}
+                onSelectSticker={onSelectSticker}
+                onSelectEmoji={handleEmojiClick}
+              />
+          )}
         </div>
 
-        <div className="flex flex-wrap gap-2 px-4 py-3">
-          {TABS.map((t) => (
+        {/* 底部导航：搜索 / emoji / 已添加表情包 icons / + 添加 */}
+        <nav className="flex items-center gap-1 border-t border-black/5 bg-white px-2 py-2" aria-label="表情包导航">
+          <button
+            type="button"
+            onClick={() => setView('search')}
+            className="grid h-9 w-9 flex-none place-items-center rounded-md text-slate-500 transition hover:bg-slate-100"
+            aria-label="搜索表情"
+            title="搜索"
+          >
+            <SearchIcon />
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('emojis')}
+            className={`grid h-9 w-9 flex-none place-items-center rounded-md text-xl transition ${view === 'emojis' ? 'bg-amber-100' : 'hover:bg-slate-100'}`}
+            aria-label="系统 emoji"
+            title="表情"
+          >
+            😀
+          </button>
+
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1" role="tablist">
+            {data?.packs.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                onClick={() => {
+                  setActivePackId(pack.id)
+                  setView('pack')
+                }}
+                className={`relative grid h-9 w-9 flex-none cursor-pointer place-items-center overflow-hidden rounded-md ring-1 transition ${activePackId === pack.id && view === 'pack' ? 'ring-2 ring-amber-400' : 'ring-slate-200 hover:ring-slate-300'}`}
+                aria-label={`表情包：${pack.name}`}
+                title={pack.name}
+              >
+                {pack.iconUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={pack.iconUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                ) : pack.coverUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={pack.coverUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                ) : (
+                  <span className="text-lg">😊</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <Link
+            href="/stickers"
+            onClick={onClose}
+            className="grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-md bg-amber-50 text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-100"
+            aria-label="去表情商店添加更多"
+            title="添加表情包"
+          >
+            +
+          </Link>
+        </nav>
+      </div>
+    </div>
+  )
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="2" fill="none" />
+      <path d="m20 20-3.6-3.6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function EmojiGrid({
+  emojis,
+  recent,
+  onSelectSticker,
+  onSelectEmoji,
+}: {
+  emojis: string[]
+  recent: PickerSticker[]
+  onSelectSticker: (sticker: PickerSticker) => void
+  onSelectEmoji: (emoji: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-3 px-3 py-3">
+      {recent.length > 0 ? (
+        <section>
+          <h3 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">最近使用</h3>
+          <div className="grid grid-cols-8 gap-1">
+            {recent.slice(0, 8).map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onSelectSticker(s)}
+                className="grid aspect-square place-items-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={s.url} alt={s.name || ''} className="h-8 w-8 object-contain" loading="lazy" />
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      <section>
+        <h3 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">默认表情</h3>
+        <div className="grid grid-cols-8 gap-1">
+          {emojis.map((em, idx) => (
             <button
-              key={t.key}
+              key={`${em}-${idx}`}
               type="button"
-              onClick={() => setTab(t.key)}
-              className={`rounded-full px-4 py-1.5 text-sm font-black transition ${
-                tab === t.key ? 'bg-brand-600 text-white' : 'bg-white/80 text-slate-600 ring-1 ring-slate-200 hover:bg-white'
-              }`}
+              onClick={() => onSelectEmoji(em)}
+              className="grid aspect-square place-items-center rounded-md bg-white text-2xl transition hover:bg-slate-50 active:scale-95"
+              aria-label={`emoji ${em}`}
             >
-              {t.label}
+              {em}
             </button>
           ))}
         </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
-          {loading ? (
-            <p className="py-10 text-center text-sm font-bold text-slate-400">加载中…</p>
-          ) : error ? (
-            <p className="py-10 text-center text-sm font-bold text-red-500">{error}</p>
-          ) : list.length === 0 ? (
-            <p className="py-10 text-center text-sm font-bold text-slate-400">
-              {tab === 'favorites' ? '还没有收藏的表情' : tab === 'myUploads' ? '你还没有上传表情' : '暂无表情'}
-            </p>
-          ) : (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-              {list.map((sticker) => (
-                <button
-                  key={sticker.id}
-                  type="button"
-                  onClick={() => onSelect(sticker)}
-                  className="flex items-center justify-center rounded-xl border border-slate-100 bg-white p-1.5 transition hover:border-brand-300 hover:bg-sky-50"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={sticker.url} alt={sticker.name || '表情'} className="h-14 w-14 object-contain" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      </section>
     </div>
   )
 }

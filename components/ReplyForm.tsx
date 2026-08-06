@@ -138,10 +138,11 @@ export function ReplyForm({
       <StickerPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onSelect={(sticker) => {
+        onSelectSticker={(sticker) => {
           setPendingSticker(sticker)
           setPickerOpen(false)
         }}
+        composerRef={textareaRef}
       />
     </form>
   )

@@ -1,8 +1,10 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { SiteHeader } from '@/components/SiteHeader'
 import { getCurrentUser } from '@/lib/auth'
-import { getMyStickers } from '@/lib/sticker-center'
-import { MyStickerManager } from './MyStickerManager'
+import { getMyLibraryPacks } from '@/lib/sticker-center'
+import { prisma } from '@/lib/prisma'
+import { MyStickerLibrary } from './MyStickerLibrary'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +12,36 @@ export default async function ProfileStickersPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const stickers = await getMyStickers(user.id)
+  const [myLibrary, myUploadsRaw] = await Promise.all([
+    getMyLibraryPacks(user.id),
+    prisma.stickerPack.findMany({
+      where: { creatorId: user.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        rejectionReason: true,
+        reviewedAt: true,
+        createdAt: true,
+        coverUrl: true,
+        type: true,
+        isOfficial: true,
+      },
+    }),
+  ])
+
+  const myUploads = myUploadsRaw.map((p) => ({
+    id: p.id,
+    name: p.name,
+    status: p.status as 'PENDING' | 'APPROVED' | 'REJECTED',
+    rejectionReason: p.rejectionReason,
+    reviewedAt: p.reviewedAt?.toISOString() ?? null,
+    createdAt: p.createdAt.toISOString(),
+    coverUrl: p.coverUrl,
+    type: p.type,
+    isOfficial: p.isOfficial,
+  }))
 
   return (
     <>
@@ -20,10 +51,15 @@ export default async function ProfileStickersPage() {
           <p className="text-sm font-black tracking-[0.2em] text-brand-700">表情包 · 个人中心</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">我的表情包</h1>
           <p className="mt-3 max-w-2xl text-sm font-bold leading-7 text-slate-600">
-            管理你上传的表情包。删除后将从评论与私信的表情选择器中立即移除。
+            管理你已添加到表情库的表情包。「取消添加」只移除你个人收藏，不会删除官方表情包本身。
           </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/stickers" className="flat-button-secondary">浏览表情商店</Link>
+            <Link href="/stickers/upload" className="flat-button-primary">上传表情包</Link>
+          </div>
         </section>
-        <MyStickerManager initialStickers={stickers} />
+
+        <MyStickerLibrary initialLibrary={myLibrary} initialUploads={myUploads} />
       </main>
     </>
   )

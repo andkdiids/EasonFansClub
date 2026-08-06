@@ -760,10 +760,11 @@ export function FriendDock({
             <StickerPicker
               open={pickerOpen}
               onClose={() => setPickerOpen(false)}
-              onSelect={(sticker) => {
+              onSelectSticker={(sticker) => {
                 setPendingSticker(sticker)
                 setPickerOpen(false)
               }}
+              composerRef={messageInputRef}
             />
             </div>
           ) : (
