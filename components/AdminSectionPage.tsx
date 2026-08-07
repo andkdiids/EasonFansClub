@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { adminModulePermissions } from '@/lib/admin-permissions'
 
 export async function AdminSectionPage({
@@ -12,7 +12,7 @@ export async function AdminSectionPage({
 
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm sm:p-8">
           <p className="text-sm font-black tracking-[0.18em] text-brand-700">管理后台</p>

@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { prisma } from '@/lib/prisma'
 import { RegistrationMessageManager } from './RegistrationMessageManager'
 
@@ -46,7 +46,7 @@ export default async function AdminRegistrationMessagesPage() {
 
   return (
     <>
-      <SiteHeader />
+      
       <main className="admin-mobile-page mx-auto max-w-6xl space-y-7 px-4 py-7 sm:px-5 sm:py-9">
         <section className="rounded-[32px] border border-sky-100 bg-white/90 p-7 shadow-sm sm:p-9">
           <p className="text-sm font-black tracking-[0.2em] text-brand-700">挂号页 · 留言管理</p>

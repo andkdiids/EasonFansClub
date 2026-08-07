@@ -1,6 +1,5 @@
 import { AdminChangelogPanel } from '@/app/admin/changelog/AdminChangelogPanel'
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +8,7 @@ export default async function AdminChangelogPage() {
 
   return (
     <>
-      <SiteHeader user={user} />
+      
       <AdminChangelogPanel />
     </>
   )

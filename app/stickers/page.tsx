@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { getCurrentUser } from '@/lib/auth'
 import { getStoreCategories, getStorePacks } from '@/lib/sticker-center'
 import { StickerStoreGrid } from './StickerStoreGrid'
@@ -26,7 +26,7 @@ export default async function StickerStorePage({ searchParams }: { searchParams:
 
   return (
     <>
-      <SiteHeader />
+      
       <main className="site-page-main flat-page mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
           <div className="flex items-start justify-between gap-3">

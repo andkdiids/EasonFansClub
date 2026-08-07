@@ -1,4 +1,4 @@
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { requireAdminPage } from '@/components/AdminAccess'
 import { getSiteAppearance } from '@/lib/site-config'
 import { AppearanceForm } from './AppearanceForm'
@@ -12,7 +12,7 @@ export default async function AdminAppearancePage() {
 
   return (
     <>
-      <SiteHeader user={user} config={config} />
+      
       <main className="mx-auto max-w-6xl px-5 py-8">
         <AppearanceForm initialConfig={config} />
       </main>

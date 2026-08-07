@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { getConcertCategories } from '@/lib/music-concert-category'
 import { ConcertCategoryManager } from './ConcertCategoryManager'
 
@@ -10,7 +10,7 @@ export default async function AdminConcertCategoriesPage() {
   const categories = await getConcertCategories().catch(() => [])
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="admin-mobile-page mx-auto max-w-6xl space-y-7 px-4 py-7 sm:px-5 sm:py-9">
         <section className="rounded-[32px] border border-sky-100 bg-white/90 p-7 shadow-sm sm:p-9">
           <p className="text-sm font-black tracking-[0.2em] text-brand-700">EasMusic · 演唱会分类</p>

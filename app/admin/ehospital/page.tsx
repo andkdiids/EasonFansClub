@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
 import { EHospitalCheckSettingsForm } from './EHospitalCheckSettingsForm'
 
@@ -10,7 +10,7 @@ export default async function EHospitalAdminPage() {
   const config = await getEHospitalCheckConfig()
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="mx-auto max-w-4xl space-y-6 px-5 py-8">
         <div>
           <p className="text-sm font-black uppercase tracking-[0.2em] text-brand-600">系统设置 / 入院管理</p>

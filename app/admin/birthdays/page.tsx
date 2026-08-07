@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { formatUid } from '@/lib/uid'
 import { getTodayMonthDay } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
@@ -28,7 +28,7 @@ export default async function AdminBirthdaysPage() {
 
   return (
     <>
-      <SiteHeader user={currentUser} />
+      
       <main className="mx-auto max-w-5xl space-y-5 px-4 py-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>

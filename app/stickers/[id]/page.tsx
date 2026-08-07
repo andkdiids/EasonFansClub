@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { getCurrentUser } from '@/lib/auth'
 import { getStorePackDetail } from '@/lib/sticker-center'
 import { StickerPackDetailView } from './StickerPackDetailView'
@@ -15,7 +15,7 @@ export default async function StickerPackDetailPage({ params }: { params: Promis
   if (!detail) {
     return (
       <>
-        <SiteHeader />
+        
         <main className="site-page-main flat-page mx-auto max-w-3xl px-4 py-12 sm:px-6">
           <div className="rounded-3xl border border-dashed border-slate-200 bg-white/70 p-10 text-center text-sm font-bold text-slate-400">
             表情包不存在或已下架
@@ -30,7 +30,7 @@ export default async function StickerPackDetailPage({ params }: { params: Promis
 
   return (
     <>
-      <SiteHeader />
+      
       <main className="site-page-main flat-page mx-auto max-w-4xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
         <div className="flex items-center gap-2 text-sm font-bold text-slate-500">
           <Link href="/stickers" className="hover:text-brand-700">← 返回商店</Link>

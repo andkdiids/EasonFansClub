@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { getDefaultAvatarPool } from '@/lib/default-avatars'
 import { DefaultAvatarManager } from './DefaultAvatarManager'
 
@@ -10,7 +10,7 @@ export default async function DefaultAvatarsAdminPage() {
   const avatars = await getDefaultAvatarPool()
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="mx-auto max-w-5xl px-5 py-8">
         <DefaultAvatarManager initialAvatars={avatars} />
       </main>

@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { categoryText, rarityText } from '@/lib/achievements'
 import { prisma } from '@/lib/prisma'
 
@@ -23,7 +23,7 @@ include: {
 
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Achievement Admin</p>

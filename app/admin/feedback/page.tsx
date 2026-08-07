@@ -1,6 +1,5 @@
 import { AdminFeedbackPanel } from '@/app/admin/feedback/AdminFeedbackPanel'
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +8,7 @@ export default async function AdminFeedbackPage() {
 
   return (
     <>
-      <SiteHeader user={user} />
+      
       <AdminFeedbackPanel />
     </>
   )

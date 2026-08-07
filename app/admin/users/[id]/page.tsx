@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { SuperAdminUserActions } from '@/components/SuperAdminUserActions'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
@@ -24,7 +24,7 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   const nickname = user.Profile?.displayName || user.nickname
   const details = [['UID', formatUid(user.uid)], ['用户名', user.username], ['角色', user.role], ['状态', user.status], ['邮箱', user.email || '未绑定'], ['手机', user.phone || '未绑定'], ['等级', `Lv.${user.level}`], ['挂号费', String(user.points)]]
 
-  return <><SiteHeader user={currentUser} /><main className="mx-auto max-w-5xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
+  return <><main className="mx-auto max-w-5xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
     <Link href="/admin/users" className="text-sm font-black text-brand-700">← 返回用户管理</Link>
     <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center"><div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">{user.Profile?.avatarUrl ? <img src={user.Profile.avatarUrl} alt="" className="size-full object-cover" /> : formatUid(user.uid).slice(0, 1)}</div><div><p className="text-xs font-black tracking-[0.18em] text-brand-700">USER DETAIL</p><h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">{nickname}</h1><p className="mt-2 text-sm font-bold text-slate-500">UID {formatUid(user.uid)} · 注册于 {user.createdAt.toLocaleString('zh-CN', { hour12: false })}</p></div></div>

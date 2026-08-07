@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { allAdminPermissionKeys, adminPermissionGroups, isSuperAdmin } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam, formatUid } from '@/lib/uid'
@@ -42,7 +42,7 @@ export default async function AdminDetailPage({ params }: PageProps) {
 
   return (
     <>
-      <SiteHeader user={currentUser} />
+      
       <main className="mx-auto max-w-5xl space-y-6 px-5 py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
           <Link href="/admin/admins" className="text-sm font-black text-brand-700">返回管理员管理</Link>

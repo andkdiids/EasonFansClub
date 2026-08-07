@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -34,7 +34,7 @@ export default async function AdminCulturePage() {
 
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5">
         <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Culture Admin</p>

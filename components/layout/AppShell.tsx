@@ -13,7 +13,8 @@ import { MobileNavigation } from './MobileNavigation'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
-const shelllessPrefixes = ['/login', '/register', '/forgot-password', '/welcome', '/admin']
+// 登录/注册/欢迎等独立页面不需要社区外壳；/admin 现统一复用前台 AppShell（Topbar+Sidebar+MobileNavigation）。
+const shelllessPrefixes = ['/login', '/register', '/forgot-password', '/welcome']
 
 export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean }>) {
   const pathname = usePathname()

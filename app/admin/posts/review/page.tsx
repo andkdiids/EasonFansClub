@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { PostReviewManager, type ReviewPost } from './PostReviewManager'
@@ -33,7 +33,7 @@ export default async function AdminPostReviewPage() {
   }))
 
   return <>
-    <SiteHeader user={user} />
+    
     <main className="mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
       <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
         <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post Moderation</p>

@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { prisma } from '@/lib/prisma'
 import { BirthdayMessageManager } from './BirthdayMessageManager'
 
@@ -22,7 +22,7 @@ export default async function BirthdayMessagesAdminPage() {
   }))
   return (
     <>
-      <SiteHeader user={user} />
+      
       <main className="mx-auto max-w-5xl px-5 py-8">
         <BirthdayMessageManager initialMessages={initialMessages} />
       </main>

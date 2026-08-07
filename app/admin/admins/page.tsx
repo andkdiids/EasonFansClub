@@ -1,5 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { adminModulePermissions } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { AdminManager } from './AdminManager'
@@ -82,7 +82,7 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
 
   return (
     <>
-      <SiteHeader user={currentUser} />
+      
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-5 sm:py-8">
         <AdminManager
           query={q}

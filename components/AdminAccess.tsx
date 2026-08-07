@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { type AdminPermissionKey, hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 
@@ -17,9 +17,7 @@ export async function requireAdminPage(path = '/admin', permissionKey?: AdminPer
 
 export function AdminNoAccess() {
   return (
-    <>
-      <SiteHeader />
-      <main className="mx-auto flex min-h-[70vh] max-w-3xl items-center px-5 py-10">
+    <main className="mx-auto flex min-h-[70vh] max-w-3xl items-center px-5 py-10">
         <section className="w-full rounded-[28px] border border-sky-100 bg-white/85 p-6 text-center shadow-sm sm:p-10">
           <p className="text-sm font-black uppercase tracking-[0.2em] text-brand-700">Admin</p>
           <h1 className="mt-3 text-3xl font-black text-brand-950 sm:text-4xl">无权限访问后台</h1>
@@ -31,6 +29,5 @@ export function AdminNoAccess() {
           </Link>
         </section>
       </main>
-    </>
   )
 }

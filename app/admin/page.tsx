@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
 import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
-import { SiteHeader } from '@/components/SiteHeader'
+
 import { adminModulePermissions } from '@/lib/admin-permission-config'
 import { getAdminPermissionSet, isSuperAdmin } from '@/lib/admin-permissions'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
@@ -69,7 +69,7 @@ export default async function AdminPage() {
 
   return (
     <>
-      <SiteHeader user={currentUser} />
+      
       <main className="mx-auto flex max-w-6xl flex-wrap gap-x-5 px-4 py-5 sm:px-5 sm:py-7">
         {layoutModules.map((layoutItem) => {
           if (layoutItem.key === 'admin.header') {

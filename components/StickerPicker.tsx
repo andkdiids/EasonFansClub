@@ -268,7 +268,7 @@ export function StickerPicker({
                   className="w-full rounded-full bg-slate-100 px-4 py-2 text-sm outline-none placeholder:text-slate-400"
                 />
               </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-2 px-2 py-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(56px,56px))] gap-2 px-2 py-2 md:grid-cols-[repeat(auto-fill,minmax(72px,72px))]">
                 {searchResults.length === 0 ? (
                   <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
                 ) : (
@@ -281,7 +281,7 @@ export function StickerPicker({
           ) : view === 'pack' ? (
             // 我的表情包视图：有选中表情包则展示其表情；没有添加任何表情包时才显示空状态
             currentPack ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-2 px-2 py-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(56px,56px))] gap-2 px-2 py-2 md:grid-cols-[repeat(auto-fill,minmax(72px,72px))]">
                 {currentStickers.length === 0 ? (
                   <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
                 ) : (
@@ -406,17 +406,17 @@ function EmojiGrid({
       {recent.length > 0 ? (
         <section>
           <h3 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">最近使用</h3>
-          <div className="grid grid-cols-8 gap-1">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(56px,56px))] gap-2 md:grid-cols-[repeat(auto-fill,minmax(72px,72px))]">
             {recent.slice(0, 8).map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => onSelectSticker(s)}
-                className="flex aspect-square h-[42px] w-[42px] items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95"
+                className="flex aspect-square h-[56px] w-full items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-[72px]"
                 aria-label={s.name || '表情'}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.url} alt={s.name || ''} className="h-[36px] w-[36px] object-contain" loading="lazy" />
+                <img src={s.url} alt={s.name || ''} className="h-[48px] w-[48px] object-contain md:h-[60px] md:w-[60px]" loading="lazy" />
               </button>
             ))}
           </div>
@@ -507,11 +507,11 @@ function StickerCell({
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerMove={handlePointerMove}
-      className="relative flex h-[42px] w-full items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-[56px]"
+      className="relative flex h-[56px] w-full items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-[72px]"
       aria-label={sticker.name || '表情'}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={sticker.url} alt={sticker.name || ''} className="h-[36px] w-[36px] rounded-md object-contain md:h-12 md:w-12" loading="lazy" />
+      <img src={sticker.url} alt={sticker.name || ''} className="h-[48px] w-[48px] rounded-md object-contain md:h-[60px] md:w-[60px]" loading="lazy" />
       {/* 微信式长按预览气泡：跟随当前表情按钮，移动端长按时出现，松手/移开即关闭 */}
       {previewing ? (
         <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-xl bg-white p-3 shadow-lg">
