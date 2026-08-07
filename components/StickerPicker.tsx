@@ -70,14 +70,38 @@ export function StickerPicker({
   const [searchQuery, setSearchQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
 
+  // 自定义表情大图预览（长按 / 悬停触发）
+  const [preview, setPreview] = useState<PickerSticker | null>(null)
+  const previewRef = useRef<PickerSticker | null>(null)
+  const previewSourceRef = useRef<'touch' | 'mouse' | null>(null)
+
+  const openPreview = useCallback((s: PickerSticker, source: 'touch' | 'mouse') => {
+    setPreview(s)
+    previewRef.current = s
+    previewSourceRef.current = source
+  }, [])
+  const closePreview = useCallback(() => {
+    setPreview(null)
+    previewRef.current = null
+    previewSourceRef.current = null
+  }, [])
+
   // 点击面板外部或按 Esc 关闭（内联面板，没有遮罩层可以点）
   useEffect(() => {
     if (!open) return
     const closeOnOutsidePointer = (event: PointerEvent) => {
+      // 大图预览展示时，点击遮罩不应关闭整个面板（预览优先关闭）
+      if (previewRef.current) return
       if (!rootRef.current?.contains(event.target as Node)) onClose()
     }
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        if (previewRef.current) {
+          closePreview()
+          return
+        }
+        onClose()
+      }
     }
     document.addEventListener('pointerdown', closeOnOutsidePointer)
     window.addEventListener('keydown', closeOnEscape)
@@ -85,7 +109,20 @@ export function StickerPicker({
       document.removeEventListener('pointerdown', closeOnOutsidePointer)
       window.removeEventListener('keydown', closeOnEscape)
     }
-  }, [open, onClose])
+  }, [open, onClose, closePreview])
+
+  // 移动端长按（touch）打开大图后，手指松开 / 取消即关闭
+  useEffect(() => {
+    if (preview && previewSourceRef.current === 'touch') {
+      const handler = () => closePreview()
+      document.addEventListener('pointerup', handler, { once: true })
+      document.addEventListener('pointercancel', handler, { once: true })
+      return () => {
+        document.removeEventListener('pointerup', handler)
+        document.removeEventListener('pointercancel', handler)
+      }
+    }
+  }, [preview, closePreview])
 
   const handleEmojiClick = useCallback(
     (emoji: string) => {
@@ -231,20 +268,12 @@ export function StickerPicker({
                   className="w-full rounded-full bg-slate-100 px-4 py-2 text-sm outline-none placeholder:text-slate-400"
                 />
               </div>
-              <div className="grid grid-cols-5 gap-1 px-2 py-2 sm:grid-cols-6">
+              <div className="flex flex-wrap gap-1 px-2 py-2">
                 {searchResults.length === 0 ? (
-                  <p className="col-span-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
+                  <p className="w-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
                 ) : (
                   searchResults.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => onSelectSticker(s)}
-                      className="flex aspect-square items-center justify-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={s.url} alt={s.name || ''} className="h-10 w-10 object-contain" loading="lazy" />
-                    </button>
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} />
                   ))
                 )}
               </div>
@@ -252,20 +281,12 @@ export function StickerPicker({
           ) : view === 'pack' ? (
             // 我的表情包视图：有选中表情包则展示其表情；没有添加任何表情包时才显示空状态
             currentPack ? (
-              <div className="grid grid-cols-5 gap-1 px-2 py-2 sm:grid-cols-6">
+              <div className="flex flex-wrap gap-1 px-2 py-2">
                 {currentStickers.length === 0 ? (
-                  <p className="col-span-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
+                  <p className="w-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
                 ) : (
                   currentStickers.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => onSelectSticker(s)}
-                      className="flex aspect-square items-center justify-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={s.url} alt={s.name || ''} className="h-10 w-10 object-contain" loading="lazy" />
-                    </button>
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} />
                   ))
                 )}
               </div>
@@ -356,6 +377,21 @@ export function StickerPicker({
             +
           </Link>
         </nav>
+        {preview ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={closePreview}
+            role="dialog"
+            aria-label="表情大图预览"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={preview.url}
+              alt={preview.name || '表情'}
+              className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain sm:max-w-[400px]"
+            />
+          </div>
+        ) : null}
     </div>
   )
 }
@@ -417,5 +453,88 @@ function EmojiGrid({
         </div>
       </section>
     </div>
+  )
+}
+
+/**
+ * 自定义表情格子（紧凑、无白色卡片背景）。
+ * 长按 / 悬停触发大图预览；短按发送；touch 预览触发后抑制本次 click 发送。
+ */
+function StickerCell({
+  sticker,
+  onSelect,
+  onPreview,
+}: {
+  sticker: PickerSticker
+  onSelect: () => void
+  onPreview: (sticker: PickerSticker, source: 'touch' | 'mouse') => void
+}) {
+  const timerRef = useRef<number | null>(null)
+  const startRef = useRef<{ x: number; y: number } | null>(null)
+  const didPreviewRef = useRef(false)
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'touch') {
+      startRef.current = { x: e.clientX, y: e.clientY }
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null
+        didPreviewRef.current = true
+        onPreview(sticker, 'touch')
+      }, 500)
+    }
+  }
+  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'touch') clearTimer()
+  }
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    // 滑动（>10px）取消长按，避免滚动时误触发预览
+    if (e.pointerType === 'touch' && startRef.current) {
+      const dx = Math.abs(e.clientX - startRef.current.x)
+      const dy = Math.abs(e.clientY - startRef.current.y)
+      if (dx > 10 || dy > 10) clearTimer()
+    }
+  }
+  const handlePointerEnter = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse') {
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null
+        onPreview(sticker, 'mouse')
+      }, 500)
+    }
+  }
+  const handlePointerLeave = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse') clearTimer()
+  }
+  const handleClick = () => {
+    // 长按已触发预览时，松开后的 click 不再发送该表情
+    if (didPreviewRef.current) {
+      didPreviewRef.current = false
+      return
+    }
+    onSelect()
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerMove={handlePointerMove}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+      className="flex h-[42px] w-[42px] items-center justify-center rounded-md p-1 transition hover:bg-slate-100 active:scale-95 sm:h-[52px] sm:w-[52px]"
+      aria-label={sticker.name || '表情'}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={sticker.url} alt={sticker.name || ''} className="h-full w-full rounded-md object-contain" loading="lazy" />
+    </button>
   )
 }

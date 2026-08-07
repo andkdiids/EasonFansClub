@@ -59,8 +59,8 @@ test('私信、帖子发布、评论回复统一使用 StickerPicker 单一表�
 
 test('StickerPicker 为内联展开面板，不使用全屏遮罩或 Modal', () => {
   const source = read('components/StickerPicker.tsx')
-  assert.doesNotMatch(source, /fixed inset-0/)
-  assert.doesNotMatch(source, /aria-modal/)
-  // 面板通过 absolute 定位在输入区域上方展开
+  // 面板本体通过 absolute 定位在输入区域上方展开，不使用全屏遮罩
   assert.match(source, /absolute inset-x-0 bottom-full/)
+  assert.doesNotMatch(source, /bg-slate-900\/45/)
+  assert.doesNotMatch(source, /aria-modal/)
 })

@@ -90,7 +90,7 @@ export function ProfileHeader({
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
       <div
-  className="relative isolate aspect-[9/2] w-full overflow-hidden bg-slate-900"
+  className="relative isolate h-[170px] w-full overflow-hidden bg-slate-900 sm:aspect-[9/2] sm:h-auto"
   style={{
     backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
     backgroundSize: 'cover',

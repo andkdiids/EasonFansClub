@@ -299,6 +299,7 @@ export function ProfileSettingsForm({
   const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+  const [backgroundPreview, setBackgroundPreview] = useState(initialProfile.backgroundUrl || '')
   
 
   useEffect(() => {
@@ -504,6 +505,7 @@ export function ProfileSettingsForm({
       if (!data?.url) throw new Error('背景图已上传，但服务器没有返回有效地址')
 
       setForm((current) => ({ ...current, backgroundUrl: data.url }))
+      setBackgroundPreview(data.url)
       setMessage('背景图已更新。')
       resetBackgroundCrop()
       router.refresh()
@@ -568,7 +570,6 @@ export function ProfileSettingsForm({
   }
 
   const avatarPreview = profileImageUrl(form.avatarUrl)
-  const backgroundPreview = profileImageUrl(form.backgroundUrl)
 
   // 预览裁剪框固定 450×100（9:2），与导出使用完全相同的坐标系，确保「所见即所得」。
   const backgroundLayout = backgroundCrop?.naturalWidth
@@ -596,11 +597,11 @@ export function ProfileSettingsForm({
             <h3 className="mt-1 text-lg font-black text-brand-950">个人资料</h3>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid items-start gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-white bg-white/78 p-4">
               <p className="text-sm font-black text-slate-700">头像</p>
               <div className="mt-3 flex items-center gap-4">
-                <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">
+                <span className="block h-20 w-20 shrink-0 overflow-hidden rounded-full border-2 border-slate-200 shadow">
                   <SafeAvatar src={avatarPreview} name={form.nickname} className="h-full w-full" textClassName="text-2xl" />
                 </span>
                 <div className="min-w-0">
@@ -615,13 +616,19 @@ export function ProfileSettingsForm({
 
             <div className="rounded-2xl border border-white bg-white/78 p-4">
               <p className="text-sm font-black text-slate-700">个人病历背景图</p>
-              <div className="mt-3 overflow-hidden rounded-2xl bg-white">
-                <div
-                  className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400"
-                  style={backgroundPreview ? { backgroundImage: `url(${backgroundPreview})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
-                >
-                  {backgroundPreview ? '' : '背景预览'}
-                </div>
+              <div className="mt-3 overflow-hidden rounded-2xl bg-slate-100">
+                {backgroundPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={backgroundPreview}
+                    alt="当前背景图预览"
+                    className="aspect-[16/7] w-full object-cover"
+                  />
+                ) : (
+                  <div className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400">
+                    背景预览
+                  </div>
+                )}
               </div>
               <label
                 htmlFor="profile-background-upload"
