@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
+import { ConcertCategoryCards } from '@/components/music/ConcertCategoryCards'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
@@ -43,6 +44,9 @@ export default async function MusicConcertsPage() {
       <h1 className="mt-4 text-5xl font-black tracking-tight text-white sm:text-7xl">Eason in Concert</h1>
       <p className="mt-5 max-w-3xl text-sm font-bold leading-7 text-slate-300/70 sm:text-base">以互动海报档案收录巡演、演出场次、现场歌单与特别时刻。</p>
     </header>
+    <section className="mt-10" aria-label="演唱会分类">
+      <ConcertCategoryCards categories={categories} />
+    </section>
     {timeline.length ? <MusicConcertTimeline tours={timeline} isAdmin={isAdmin} categories={categories} /> : <p className="rounded-[26px] border border-white/10 bg-white/[0.05] p-8 text-sm font-bold text-slate-300/65">演唱会档案正在整理中。</p>}
     <footer className="relative mt-16 overflow-hidden rounded-[28px] border border-sky-300/15 bg-[radial-gradient(circle_at_center,rgba(56,189,248,.13),transparent_70%)] px-6 py-12 text-center">
       <div className="mx-auto size-2 rounded-full bg-sky-200 shadow-[0_0_30px_rgba(125,211,252,.8)]" />

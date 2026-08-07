@@ -70,7 +70,7 @@ export function StickerPicker({
   const [searchQuery, setSearchQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // 自定义表情大图预览（长按 / 悬停触发）
+  // 自定义表情长按预览（仅移动端 touch 触发；桌面尺寸足够大，无需预览）
   const [preview, setPreview] = useState<PickerSticker | null>(null)
   const previewRef = useRef<PickerSticker | null>(null)
   const previewSourceRef = useRef<'touch' | 'mouse' | null>(null)
@@ -205,7 +205,7 @@ export function StickerPicker({
   return (
     <div
       ref={rootRef}
-      className="sticker-wechat-panel absolute inset-x-0 bottom-full z-40 mb-2 flex h-[min(60vh,360px)] flex-col overflow-hidden rounded-[16px] bg-[#EDEDED] shadow-2xl ring-1 ring-black/10"
+      className="sticker-wechat-panel absolute inset-x-0 bottom-full z-40 mb-2 flex h-[min(60vh,360px)] flex-col overflow-hidden rounded-[16px] bg-white shadow-2xl ring-1 ring-black/10"
       role="dialog"
       aria-label="表情面板"
     >
@@ -238,7 +238,7 @@ export function StickerPicker({
         </header>
 
         {/* 主内容区 */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-[#EDEDED]">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white">
           {loading ? (
             <div className="flex h-full items-center justify-center py-12 text-sm text-slate-400">加载中…</div>
           ) : error ? (
@@ -268,12 +268,12 @@ export function StickerPicker({
                   className="w-full rounded-full bg-slate-100 px-4 py-2 text-sm outline-none placeholder:text-slate-400"
                 />
               </div>
-              <div className="flex flex-wrap gap-1 px-2 py-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-2 px-2 py-2">
                 {searchResults.length === 0 ? (
-                  <p className="w-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
+                  <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
                 ) : (
                   searchResults.map((s) => (
-                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} />
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} />
                   ))
                 )}
               </div>
@@ -281,12 +281,12 @@ export function StickerPicker({
           ) : view === 'pack' ? (
             // 我的表情包视图：有选中表情包则展示其表情；没有添加任何表情包时才显示空状态
             currentPack ? (
-              <div className="flex flex-wrap gap-1 px-2 py-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-2 px-2 py-2">
                 {currentStickers.length === 0 ? (
-                  <p className="w-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
+                  <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
                 ) : (
                   currentStickers.map((s) => (
-                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} />
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} />
                   ))
                 )}
               </div>
@@ -377,21 +377,6 @@ export function StickerPicker({
             +
           </Link>
         </nav>
-        {preview ? (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-            onClick={closePreview}
-            role="dialog"
-            aria-label="表情大图预览"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={preview.url}
-              alt={preview.name || '表情'}
-              className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain sm:max-w-[400px]"
-            />
-          </div>
-        ) : null}
     </div>
   )
 }
@@ -427,10 +412,11 @@ function EmojiGrid({
                 key={s.id}
                 type="button"
                 onClick={() => onSelectSticker(s)}
-                className="grid aspect-square place-items-center rounded-md bg-white transition hover:bg-slate-50 active:scale-95"
+                className="flex aspect-square h-[42px] w-[42px] items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95"
+                aria-label={s.name || '表情'}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.url} alt={s.name || ''} className="h-8 w-8 object-contain" loading="lazy" />
+                <img src={s.url} alt={s.name || ''} className="h-[36px] w-[36px] object-contain" loading="lazy" />
               </button>
             ))}
           </div>
@@ -444,7 +430,7 @@ function EmojiGrid({
               key={`${em}-${idx}`}
               type="button"
               onClick={() => onSelectEmoji(em)}
-              className="grid aspect-square place-items-center rounded-md bg-white text-2xl transition hover:bg-slate-50 active:scale-95"
+              className="flex aspect-square h-[38px] w-[38px] items-center justify-center rounded-md text-[28px] leading-none transition hover:bg-slate-100 active:scale-95 md:h-[42px] md:w-[42px]"
               aria-label={`emoji ${em}`}
             >
               {em}
@@ -457,17 +443,20 @@ function EmojiGrid({
 }
 
 /**
- * 自定义表情格子（紧凑、无白色卡片背景）。
- * 长按 / 悬停触发大图预览；短按发送；touch 预览触发后抑制本次 click 发送。
+ * 自定义表情格子（紧凑、无白色卡片背景，响应式尺寸）。
+ * 仅移动端长按（touch）触发微信式气泡预览；短按发送；touch 预览触发后抑制本次 click 发送。
+ * 桌面尺寸已足够大，无需预览。
  */
 function StickerCell({
   sticker,
   onSelect,
   onPreview,
+  previewing,
 }: {
   sticker: PickerSticker
   onSelect: () => void
   onPreview: (sticker: PickerSticker, source: 'touch' | 'mouse') => void
+  previewing: boolean
 }) {
   const timerRef = useRef<number | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
@@ -481,6 +470,7 @@ function StickerCell({
   }
 
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    // 仅移动端（touch）需要长按预览；桌面尺寸已足够大，直接点击发送。
     if (e.pointerType === 'touch') {
       startRef.current = { x: e.clientX, y: e.clientY }
       timerRef.current = window.setTimeout(() => {
@@ -501,17 +491,6 @@ function StickerCell({
       if (dx > 10 || dy > 10) clearTimer()
     }
   }
-  const handlePointerEnter = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (e.pointerType === 'mouse') {
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null
-        onPreview(sticker, 'mouse')
-      }, 500)
-    }
-  }
-  const handlePointerLeave = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (e.pointerType === 'mouse') clearTimer()
-  }
   const handleClick = () => {
     // 长按已触发预览时，松开后的 click 不再发送该表情
     if (didPreviewRef.current) {
@@ -528,13 +507,18 @@ function StickerCell({
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerMove={handlePointerMove}
-      onPointerEnter={handlePointerEnter}
-      onPointerLeave={handlePointerLeave}
-      className="flex h-[42px] w-[42px] items-center justify-center rounded-md p-1 transition hover:bg-slate-100 active:scale-95 sm:h-[52px] sm:w-[52px]"
+      className="relative flex h-[42px] w-full items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-[56px]"
       aria-label={sticker.name || '表情'}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={sticker.url} alt={sticker.name || ''} className="h-full w-full rounded-md object-contain" loading="lazy" />
+      <img src={sticker.url} alt={sticker.name || ''} className="h-[36px] w-[36px] rounded-md object-contain md:h-12 md:w-12" loading="lazy" />
+      {/* 微信式长按预览气泡：跟随当前表情按钮，移动端长按时出现，松手/移开即关闭 */}
+      {previewing ? (
+        <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-xl bg-white p-3 shadow-lg">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={sticker.url} alt={sticker.name || '表情'} className="block h-[180px] w-[180px] rounded-md object-contain" />
+        </span>
+      ) : null}
     </button>
   )
 }

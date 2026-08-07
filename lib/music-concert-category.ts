@@ -75,3 +75,58 @@ export async function getEnabledConcertCategories(): Promise<ConcertCategoryConf
 export function isReservedCategorySlug(slug: string): boolean {
   return (RESERVED_CATEGORY_SLUGS as readonly string[]).includes(slug)
 }
+
+// 常见中文分类名 → 英文 slug 映射（避免引入拼音依赖，且更可控、更友好）。
+// 注意：核心分类（大型演唱会/小型企划/嘉宾现场）不在映射中，它们必须使用保留 slug（main/small/guest）。
+export const CATEGORY_NAME_SLUG_MAP: Record<string, string> = {
+  小型演出: 'small-show',
+  音乐节: 'music-festival',
+  电台节目: 'radio-show',
+  电台: 'radio-show',
+  其他企划: 'other-project',
+  演唱会: 'concert',
+  巡演: 'tour',
+  现场: 'live',
+  综艺: 'variety-show',
+  访谈: 'interview',
+  签售: 'fan-meeting',
+  见面会: 'fan-meeting',
+  颁奖: 'awards',
+  音乐剧: 'musical',
+  直播: 'live-stream',
+  线上演出: 'online-show',
+  商演: 'commercial-show',
+  公益: 'charity-show',
+}
+
+// 根据分类名生成 slug：优先使用映射表；否则保留中文/ASCII（与巡演 slug 约定一致），转小写并清理连字符。
+export function slugifyCategoryName(name: string): string {
+  const trimmed = String(name ?? '').trim()
+  if (!trimmed) return ''
+  if (CATEGORY_NAME_SLUG_MAP[trimmed]) return CATEGORY_NAME_SLUG_MAP[trimmed]
+  return trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+}
+
+// 校验分类 slug：允许小写字母、数字、中文与连字符，且以字母/数字/中文开头。
+// 与旧版仅允许 ASCII 不同，这里允许中文，使中文分类名也能拥有合法 slug。
+export function isValidCategorySlug(value: string): boolean {
+  return /^[a-z0-9一-龥][a-z0-9一-龥-]*$/.test(value)
+}
+
+// 保证 slug 唯一：命中已存在记录时自动追加 -2 / -3 … 直到可用（excludeId 用于更新时排除自身）。
+export async function ensureUniqueCategorySlug(baseSlug: string, excludeId?: string): Promise<string> {
+  let slug = baseSlug || 'category'
+  let attempt = 1
+  for (;;) {
+    const clash = await prisma.musicConcertCategory
+      .findUnique({ where: { slug } })
+      .catch(() => null)
+    if (!clash || clash.id === excludeId) return slug
+    attempt += 1
+    slug = `${baseSlug}-${attempt}`
+  }
+}

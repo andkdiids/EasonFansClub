@@ -1,22 +1,9 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { isReservedCategorySlug } from '@/lib/music-concert-category'
+import { isReservedCategorySlug, slugifyCategoryName, ensureUniqueCategorySlug } from '@/lib/music-concert-category'
 
 export const dynamic = 'force-dynamic'
-
-function slugify(value: string): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9一-龥]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-}
-
-function isValidSlug(value: string): boolean {
-  return /^[a-z0-9][a-z0-9-]*$/.test(value)
-}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ categoryId: string }> }) {
   const guard = await requireAdmin('music_manage')
@@ -33,16 +20,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ca
     data.name = name
   }
   if (body?.slug !== undefined) {
-    const nextSlug = slugify(sanitizeText(body.slug, 40) || current.slug)
-    if (!isValidSlug(nextSlug)) return NextResponse.json({ message: '分类标识（slug）只能包含小写字母、数字与连字符' }, { status: 400 })
+    const nextSlugBase = slugifyCategoryName(sanitizeText(body.slug, 40) || current.slug)
     // 核心分类的 slug 不可改为其它值（保持与 enum 的绑定）。
-    if (isReservedCategorySlug(current.slug) && nextSlug !== current.slug) {
+    if (isReservedCategorySlug(current.slug) && nextSlugBase !== current.slug) {
       return NextResponse.json({ message: '核心分类标识不可修改' }, { status: 400 })
     }
-    if (nextSlug !== current.slug) {
-      const clash = await prisma.musicConcertCategory.findUnique({ where: { slug: nextSlug } }).catch(() => null)
-      if (clash) return NextResponse.json({ message: '分类标识已存在' }, { status: 409 })
-      data.slug = nextSlug
+    // 不能把任意分类的标识改成核心分类占用的 slug。
+    if (isReservedCategorySlug(nextSlugBase) && nextSlugBase !== current.slug) {
+      return NextResponse.json({ message: '该标识为核心分类，不可占用' }, { status: 400 })
+    }
+    if (nextSlugBase !== current.slug) {
+      // 自动去重：命中已有记录时追加 -2 / -3 … 保证唯一（排除自身）。
+      data.slug = await ensureUniqueCategorySlug(nextSlugBase, current.id)
     }
   }
   if (body?.sortOrder !== undefined) {

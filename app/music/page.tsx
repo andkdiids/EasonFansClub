@@ -4,6 +4,7 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { EasMusicCassetteHero } from '@/components/music/cassette/EasMusicCassetteHero'
 import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
+import { ConcertCategoryCards } from '@/components/music/ConcertCategoryCards'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { getCurrentUser } from '@/lib/auth'
@@ -95,6 +96,9 @@ export default async function MusicPage() {
     <section aria-labelledby="eason-in-concert-title">
       <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-black tracking-[0.2em] text-sky-300/70">CONCERT ARCHIVE</p><h2 id="eason-in-concert-title" className="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">Eason in Concert</h2></div><Link href="/music/concerts" className="text-sm font-black text-sky-300 hover:text-white">进入完整档案 →</Link></div>
       {timelineTours.length ? <div className="mt-8"><MusicConcertTimeline tours={timelineTours} compact isAdmin={Boolean(currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN'))} categories={categories} /></div> : <p className="mt-7 rounded-3xl border border-white/10 bg-white/[0.06] p-7 text-sm font-bold text-slate-300">演唱会档案正在整理中。</p>}
+      <section className="mt-8" aria-label="演唱会分类">
+        <ConcertCategoryCards categories={categories} />
+      </section>
     </section>
   </div>
 
