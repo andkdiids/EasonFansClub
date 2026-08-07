@@ -689,32 +689,60 @@ export function FriendDock({
                   <div className="friend-chat-date">{group.label}</div>
                   {group.messages.map((message) => {
                     const mine = message.senderId === currentUserId
+                    // 表情包消息：直接展示图片，不套用文字气泡（无 border/background/白框/padding）。
+                    const stickerImg = message.stickerUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={message.stickerUrl}
+                        alt={message.content || '表情'}
+                        className="max-w-[120px] max-h-[120px] rounded-lg object-contain sm:max-w-[150px] sm:max-h-[150px]"
+                      />
+                    ) : null
                     return (
                       <div key={message.id} className={`friend-chat-message ${mine ? 'is-mine' : 'is-peer'}`}>
-                        <button
-                          type="button"
-                          className="friend-chat-bubble"
-                          disabled={message.status !== 'FAILED'}
-                          onClick={() => {
-                            if (message.status === 'FAILED' && message.clientMessageId) {
-                              void sendMessage({
-                                content: message.content,
-                                clientMessageId: message.clientMessageId,
-                                optimisticId: message.id,
-                                stickerId: message.stickerId ?? undefined,
-                                stickerUrl: message.stickerUrl ?? null,
-                              })
-                            }
-                          }}
-                          title={message.status === 'FAILED' ? '点击重试' : undefined}
-                        >
-                          {message.stickerUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={message.stickerUrl} alt={message.content || '表情'} className="friend-chat-sticker-img" />
+                        {message.stickerUrl ? (
+                          // 仅发送失败（FAILED）时才用无样式按钮包裹，点击重试；成功消息直接展示图片。
+                          message.status === 'FAILED' ? (
+                            <button
+                              type="button"
+                              className="friend-chat-sticker-message"
+                              onClick={() => {
+                                if (message.clientMessageId) {
+                                  void sendMessage({
+                                    content: message.content,
+                                    clientMessageId: message.clientMessageId,
+                                    optimisticId: message.id,
+                                    stickerId: message.stickerId ?? undefined,
+                                    stickerUrl: message.stickerUrl ?? null,
+                                  })
+                                }
+                              }}
+                              title="点击重试"
+                            >
+                              {stickerImg}
+                            </button>
                           ) : (
-                            message.content
-                          )}
-                        </button>
+                            stickerImg
+                          )
+                        ) : (
+                          <button
+                            type="button"
+                            className="friend-chat-bubble"
+                            disabled={message.status !== 'FAILED'}
+                            onClick={() => {
+                              if (message.status === 'FAILED' && message.clientMessageId) {
+                                void sendMessage({
+                                  content: message.content,
+                                  clientMessageId: message.clientMessageId,
+                                  optimisticId: message.id,
+                                })
+                              }
+                            }}
+                            title={message.status === 'FAILED' ? '点击重试' : undefined}
+                          >
+                            {message.content}
+                          </button>
+                        )}
                         <div className="friend-chat-message-meta">
                           <time>{formatMessageTime(message.createdAt)}</time>
                           {mine ? <MessageTicks status={message.status || (message.readAt ? 'READ' : 'SENT')} /> : null}

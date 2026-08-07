@@ -172,8 +172,8 @@ export function StickerPicker({
       role="dialog"
       aria-label="表情面板"
     >
-      {/* 顶部标题栏：当前表情包 + 关闭 */}
-      <header className="flex items-center justify-between border-b border-black/5 bg-white px-4 py-2.5">
+      {/* 顶部标题栏：当前表情包 + 关闭（压缩上下空白） */}
+      <header className="flex items-center justify-between border-b border-black/5 bg-white px-3 py-1.5">
           <div className="min-w-0 flex-1">
             {view === 'pack' && currentPack ? (
               <button
@@ -319,29 +319,31 @@ export function StickerPicker({
           </button>
 
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1" role="tablist">
-            {data?.packs.map((pack) => (
-              <button
-                key={pack.id}
-                type="button"
-                onClick={() => {
-                  setActivePackId(pack.id)
-                  setView('pack')
-                }}
-                className={`relative grid h-9 w-9 flex-none cursor-pointer place-items-center overflow-hidden rounded-md ring-1 transition ${activePackId === pack.id && view === 'pack' ? 'ring-2 ring-amber-400' : 'ring-slate-200 hover:ring-slate-300'}`}
-                aria-label={`表情包：${pack.name}`}
-                title={pack.name}
-              >
-                {pack.iconUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pack.iconUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-                ) : pack.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pack.coverUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-                ) : (
-                  <span className="text-lg">😊</span>
-                )}
-              </button>
-            ))}
+            {data?.packs.map((pack) => {
+              // 入口图标统一优先使用封面 coverUrl；封面为空再回退到该表情包的第一张表情。
+              // 不再使用 iconUrl（后端曾把它设为第一张表情 url，会覆盖封面）。
+              const packIcon = pack.coverUrl || data?.stickersByPack[pack.id]?.[0]?.url || ''
+              return (
+                <button
+                  key={pack.id}
+                  type="button"
+                  onClick={() => {
+                    setActivePackId(pack.id)
+                    setView('pack')
+                  }}
+                  className={`relative grid h-7 w-7 flex-none cursor-pointer place-items-center overflow-hidden rounded-md ring-1 transition sm:h-8 sm:w-8 ${activePackId === pack.id && view === 'pack' ? 'ring-2 ring-amber-400' : 'ring-slate-200 hover:ring-slate-300'}`}
+                  aria-label={`表情包：${pack.name}`}
+                  title={pack.name}
+                >
+                  {packIcon ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={packIcon} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <span className="text-base sm:text-lg">😊</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
           <Link
