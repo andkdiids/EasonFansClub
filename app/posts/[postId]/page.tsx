@@ -13,6 +13,7 @@ import { isSupabaseStorageUrl, profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
+import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
 
 export const dynamic = 'force-dynamic'
 
@@ -410,6 +411,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   return (
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
+        {user ? <MarkModerationReadOnMount /> : null}
         <BackButton fallbackHref="/forum" />
         {rewardPoints ? <p className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">发布成功，今日首次发帖获得 +{rewardPoints} 挂号费</p> : null}
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">

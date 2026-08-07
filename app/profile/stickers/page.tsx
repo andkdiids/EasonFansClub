@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getMyLibraryPacks } from '@/lib/sticker-center'
 import { prisma } from '@/lib/prisma'
 import { MyStickerLibrary } from './MyStickerLibrary'
+import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,7 @@ export default async function ProfileStickersPage() {
   return (
     <>
       <SiteHeader />
+      <MarkModerationReadOnMount />
       <main className="site-page-main flat-page mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-5 sm:py-8">
         <section className="rounded-[28px] border border-sky-100 bg-white/90 p-7 shadow-sm sm:p-9">
           <p className="text-sm font-black tracking-[0.2em] text-brand-700">表情包 · 个人中心</p>

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import {
-  isStickerMimeAllowed,
   STICKER_MAX_FILE_SIZE,
   uploadStickerImage,
   uploadStickerPackCover,
@@ -32,15 +31,6 @@ export async function POST(request: Request) {
     const typeRaw = String(formData.get('type') || 'STATIC').toUpperCase()
     const type = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
 
-    if (!isStickerMimeAllowed(file.type, type)) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: type === 'GIF' ? '动态表情包只能上传 GIF 动图' : '静态表情包只能上传 JPG / PNG / WebP 静态图',
-        },
-        { status: 400 },
-      )
-    }
     if (file.size === 0) return NextResponse.json({ success: false, message: '表情文件不能为空' }, { status: 400 })
     if (file.size > STICKER_MAX_FILE_SIZE) {
       return NextResponse.json({ success: false, message: '表情文件不能超过 5MB' }, { status: 413 })
@@ -50,10 +40,10 @@ export async function POST(request: Request) {
 
     try {
       if (kind === 'cover') {
-        const url = await uploadStickerPackCover({ ownerId: guard.user.id, mime: file.type, buffer })
+        const url = await uploadStickerPackCover({ ownerId: guard.user.id, buffer })
         return NextResponse.json({ success: true, url, format: 'webp' })
       }
-      const result = await uploadStickerImage({ ownerId: guard.user.id, type, mime: file.type, buffer })
+      const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
       return NextResponse.json({ success: true, url: result.url, format: result.format })
     } catch (error) {
       const message =

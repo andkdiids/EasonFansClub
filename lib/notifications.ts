@@ -431,3 +431,34 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
       : []),
   ])
 }
+
+/**
+ * 将当前用户所有"已完成审核结果"的通知标记为已读。
+ *
+ * 本项目里审核结果通知统一用 `type: 'ADMIN'` 存储，并通过 `link` 区分资源：
+ *   - 帖子审核结果：link 以 `/posts/` 开头（无 key）
+ *   - 表情包审核结果：link 为 `/profile/stickers`（key = `sticker-pack-review:*`）
+ *
+ * 因此本函数把更新范围严格限定为 `type: 'ADMIN'` 且 `link` 满足上述前缀，
+ * 不会触碰以下通知：点赞(LIKE)、评论回复(REPLY)、私信(MESSAGE)、好友(FRIEND_REQUEST/FOLLOW)、
+ * 系统(SYSTEM)、公告(ANNOUNCEMENT)、反馈提醒(/admin/feedback、/feedback/*)等。
+ *
+ * 幂等：仅更新 `isRead: false` 的行，重复调用安全，不会重置已读时间。
+ * 不修改数据库结构。
+ */
+export async function markModerationNotificationsRead(userId: string) {
+  const readAt = new Date()
+  const result = await prisma.notification.updateMany({
+    where: {
+      recipientId: userId,
+      isRead: false,
+      type: 'ADMIN',
+      OR: [
+        { link: { startsWith: '/posts/' } },
+        { link: { startsWith: '/profile/stickers' } },
+      ],
+    },
+    data: { isRead: true, readAt },
+  })
+  return { ok: true, count: result.count, readAt }
+}

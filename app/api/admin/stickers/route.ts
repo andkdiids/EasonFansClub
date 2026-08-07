@@ -6,8 +6,6 @@ import {
   uploadStickerImage,
   sanitizeStickerName,
   STICKER_MAX_FILE_SIZE,
-  STICKER_STATIC_MIME_TYPES,
-  STICKER_GIF_MIME_TYPE,
 } from '@/lib/sticker-upload'
 import type { StickerPackStatus, StickerType } from '@prisma/client'
 
@@ -95,14 +93,6 @@ export async function POST(request: Request) {
 
   const typeRaw = String(formData.get('type') || 'STATIC')
   const type: StickerType = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
-  const allowedStatic = (STICKER_STATIC_MIME_TYPES as readonly string[])
-  const allowed = type === 'GIF' ? file.type === STICKER_GIF_MIME_TYPE : allowedStatic.includes(file.type)
-  if (!allowed) {
-    return NextResponse.json(
-      { message: type === 'GIF' ? '动态表情只能上传 GIF 动图' : '静态表情只能上传 JPG / PNG / WebP' },
-      { status: 400 },
-    )
-  }
 
   let name: string | null = null
   try {
@@ -114,7 +104,7 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer())
   try {
-    const { url } = await uploadStickerImage({ ownerId: guard.user.id, type, mime: file.type, buffer })
+    const { url } = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
     const sticker = await createOfficialSticker({
       creatorId: guard.user.id,
       name,

@@ -7,7 +7,6 @@ import {
   STICKER_MAX_FILE_SIZE,
   STICKER_MAX_PACK_NAME_LENGTH,
   STICKER_MAX_DESCRIPTION_LENGTH,
-  isStickerMimeAllowed,
 } from '@/lib/sticker-upload'
 import { submitStickerPack } from '@/lib/sticker-center'
 
@@ -58,12 +57,6 @@ export async function POST(request: Request) {
     if (f.size > STICKER_MAX_FILE_SIZE) {
       return NextResponse.json({ success: false, message: '单个表情不能超过 5MB' }, { status: 413 })
     }
-    if (!isStickerMimeAllowed(f.type, type)) {
-      return NextResponse.json(
-        { success: false, message: type === 'GIF' ? '动态表情仅支持 GIF' : '静态表情仅支持 JPG/PNG/WebP' },
-        { status: 400 },
-      )
-    }
   }
 
   const coverFile = formData.get('cover')
@@ -72,7 +65,7 @@ export async function POST(request: Request) {
   try {
     if (coverFile instanceof File && coverFile.size > 0) {
       const buf = Buffer.from(await coverFile.arrayBuffer())
-      coverUrl = await uploadStickerPackCover({ ownerId: guard.user.id, mime: coverFile.type, buffer: buf })
+      coverUrl = await uploadStickerPackCover({ ownerId: guard.user.id, buffer: buf })
     }
 
     const uploadedStickers: Array<{ name: string | null; url: string; type: 'STATIC' | 'GIF' }> = []
@@ -83,7 +76,6 @@ export async function POST(request: Request) {
       const result = await uploadStickerImage({
         ownerId: guard.user.id,
         type,
-        mime: file.type,
         buffer: buf,
       })
       const rawName = stickerNamesRaw[i] || ''
