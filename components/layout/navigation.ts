@@ -1,7 +1,7 @@
 export type AppNavigationItem = {
   href: string
   label: string
-  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user'
+  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user' | 'sticker'
   activePrefixes?: string[]
   mobile?: boolean
   showsUnread?: boolean
@@ -11,6 +11,7 @@ export const primaryNavigation: AppNavigationItem[] = [
   { href: '/community', label: '首页', icon: 'home', mobile: true },
   { href: '/forum', label: 'E院广场', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
   { href: '/music', label: 'EasMusic', icon: 'music', activePrefixes: ['/music'], mobile: true },
+  { href: '/stickers', label: '表情包商店', icon: 'sticker', activePrefixes: ['/stickers', '/profile/stickers'], mobile: true },
   { href: '/activities', label: '活动中心', icon: 'calendar', activePrefixes: ['/activities'] },
   { href: '/today', label: '今日', icon: 'archive', activePrefixes: ['/today'] },
   { href: '/games', label: '娱乐天空', icon: 'star', activePrefixes: ['/games', '/entertainment'] },

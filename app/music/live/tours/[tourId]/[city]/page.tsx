@@ -1,7 +1,8 @@
 import Link from 'next/link'
-import { notFound, permanentRedirect } from 'next/navigation'
+import { permanentRedirect } from 'next/navigation'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
+import { ConcertNotFound } from '@/components/music/ConcertNotFound'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
 import { formatConcertTime } from '@/lib/music-concert-admin'
@@ -54,10 +55,10 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
   const sessionUser = await getCurrentUser()
   const isPreview = Boolean(previewParam) && Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
   const tourMatch = await resolveTourByArchiveSlug(tourId, isPreview)
-  if (!tourMatch) notFound()
+  if (!tourMatch) return <ConcertNotFound />
   const canonicalTourSlug = generateArchiveSlug(tourMatch.name)
   const group = await resolveCityGroupSlug(tourMatch.id, cityGroup, isPreview)
-  if (!group) notFound()
+  if (!group) return <ConcertNotFound />
   const canonicalCitySlug = cityGroupSlug(group.base, group.type)
   // 规范的公开地址：/music/live/tours/<slug>/<GROUP>；旧的 id / 原始 city / 旧版 city slug 直链 308 跳转
   if (tourId !== canonicalTourSlug || cityGroup !== canonicalCitySlug) {
@@ -87,7 +88,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
     }),
     getSiteAppearance(),
   ])
-  if (!meta) notFound()
+  if (!meta) return <ConcertNotFound />
 
   const cityConcerts: CityConcert[] = meta.MusicConcert.map((concert) => {
     const items = concert.MusicConcertSetlistItem as unknown as SetlistItemForBlock[]

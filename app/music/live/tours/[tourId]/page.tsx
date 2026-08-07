@@ -1,7 +1,8 @@
 import Link from 'next/link'
-import { notFound, permanentRedirect } from 'next/navigation'
+import { permanentRedirect } from 'next/navigation'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
+import { ConcertNotFound } from '@/components/music/ConcertNotFound'
 import { formatLiveDateRange } from '@/lib/music-live'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
 import { generateArchiveSlug, cityGroupSlug, effectiveCityGroup, type CityGroupType, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
@@ -52,7 +53,7 @@ export default async function MusicTourPage({ params, searchParams }: { params: 
   const sessionUser = await getCurrentUser()
   const isPreview = Boolean(previewParam) && Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
   const match = await resolveTourByArchiveSlug(tourId, isPreview)
-  if (!match) notFound()
+  if (!match) return <ConcertNotFound />
   // 旧的 CUID 直链跳转到规范的 slug 公开地址；slug 直链直接渲染
   const canonicalSlug = generateArchiveSlug(match.name)
   if (tourId !== canonicalSlug) permanentRedirect(`/music/live/tours/${canonicalSlug}`)
@@ -70,7 +71,7 @@ export default async function MusicTourPage({ params, searchParams }: { params: 
     }),
     getSiteAppearance(),
   ])
-  if (!tour) notFound()
+  if (!tour) return <ConcertNotFound />
   const groups = new Map<string, CityGroupInfo>()
   for (const concert of tour.MusicConcert) {
     const { base, type } = effectiveCityGroup(concert.city, concert.stageType)

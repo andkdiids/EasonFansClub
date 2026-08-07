@@ -1,4 +1,4 @@
-type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up'
+type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker'
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></>,
@@ -23,6 +23,7 @@ const paths: Record<IconName, React.ReactNode> = {
   menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
   user: <><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 3-8 8-8s8 3 8 8"/></>,
   'arrow-up': <><path d="m6 10 6-6 6 6"/><path d="M12 4v16"/></>,
+  sticker: <><rect x="4" y="4" width="16" height="16" rx="4"/><circle cx="9.5" cy="10" r="1"/><circle cx="14.5" cy="10" r="1"/><path d="M9 14.5a3.5 3.5 0 0 0 6 0"/></>,
 }
 
 export function UiIcon({ name, className = '' }: { name: IconName; className?: string }) {

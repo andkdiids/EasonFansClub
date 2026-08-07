@@ -1,5 +1,6 @@
 .next/
 .next_bak/
+.next_old_*/
 .prisma-local/
 .open-next/
 .wrangler/

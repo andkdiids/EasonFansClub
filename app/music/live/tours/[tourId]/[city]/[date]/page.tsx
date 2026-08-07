@@ -1,8 +1,9 @@
 import Link from 'next/link'
-import { notFound, permanentRedirect } from 'next/navigation'
+import { permanentRedirect } from 'next/navigation'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { BackButton } from '@/components/BackButton'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
+import { ConcertNotFound } from '@/components/music/ConcertNotFound'
 import { AttendancePanel } from '@/components/music/live/AttendancePanel'
 import { getCurrentUser } from '@/lib/auth'
 import { MUSIC_HIGHLIGHT_TYPE_LABELS, formatLiveDate } from '@/lib/music-live'
@@ -28,7 +29,7 @@ export default async function MusicConcertBySlugPage({
 
   // 依据 巡演slug + 城市slug + 日期slug 解析单场（兼容旧 CUID / 中文 city 输入）
   const resolved = await resolveConcertBySlug(tourId, city, date, isPreview)
-  if (!resolved) notFound()
+  if (!resolved) return <ConcertNotFound />
 
   // 规范的公开地址：/music/live/tours/<tourSlug>/<CITY>/<YYYYMMDD>
   // 旧的 CUID / 原始 city / 小写 slug 直链 308 跳转
@@ -60,7 +61,7 @@ export default async function MusicConcertBySlugPage({
       select: { id: true, seatInfo: true, mood: true, note: true, isPublic: true, updatedAt: true },
     }) : Promise.resolve(null),
   ])
-  if (!concert) notFound()
+  if (!concert) return <ConcertNotFound />
   const cityPoster = await prisma.musicConcert.findFirst({
     where: { tourId: concert.MusicTour.id, city: concert.city, ...(isPreview ? {} : { status: 'PUBLISHED' }), posterUrl: { not: null } },
     orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],

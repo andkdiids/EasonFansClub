@@ -154,6 +154,7 @@ export function ReplyForm({
           }}
           onSelectEmoji={insertEmoji}
           composerRef={textareaRef}
+          desktopColumns={8}
         />
       </div>
       {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}

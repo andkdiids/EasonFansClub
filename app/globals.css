@@ -257,9 +257,8 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .sticker-wechat-panel { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
 .sticker-wechat-panel header { flex: 0 0 auto; }
 .sticker-wechat-panel nav { flex: 0 0 auto; }
-.sticker-wechat-panel > .flex-1 { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-.sticker-wechat-panel::-webkit-scrollbar { width: 4px; }
-.sticker-wechat-panel::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 999px; }
+.sticker-wechat-panel > .flex-1 { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; }
+.sticker-wechat-panel > .flex-1::-webkit-scrollbar { display: none; }
 @media (min-width: 640px) {
   .sticker-wechat-panel { max-height: min(70vh, 540px) !important; }
 }
