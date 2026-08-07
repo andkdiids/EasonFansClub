@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { formatDate } from '@/lib/format'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { getTrendingPosts, type TrendingRange } from '@/lib/trending-posts'
 
@@ -44,7 +44,7 @@ export default async function TrendingPostsPage({
       {data.posts.length ? (
         <section className="space-y-3" aria-label={`近 ${range} 天热门帖子`}>
           {data.posts.map((post) => {
-            const avatar = publicImageUrl(post.authorAvatarUrl)
+            const avatar = profileImageUrl(post.authorAvatarUrl)
             const image = publicImageUrl(post.imageUrl)
             return (
               <article key={post.id} className="relative grid min-w-0 gap-4 border border-sky-100 bg-white/85 p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px] sm:p-5">

@@ -9,7 +9,7 @@ import { MentionText, type ReplyMentionView } from '@/components/MentionText'
 import { ReplyForm } from '@/components/ReplyForm'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { splitContentImages } from '@/lib/content-images'
 
@@ -189,7 +189,7 @@ export function PostRepliesSection({
   function renderCompactReply(item: { reply: ReplyItem; replyToName: string }) {
     const { reply, replyToName } = item
     const name = reply.author.profile?.displayName || reply.author.nickname
-    const avatar = publicImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
+    const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const canDelete = currentUserId === reply.author.id || isAdminRole(currentUserRole)
     const replyBody = splitContentImages(reply.content)
 
@@ -246,7 +246,7 @@ export function PostRepliesSection({
 
   function renderReply(reply: ReplyItem, index: number) {
     const name = reply.author.profile?.displayName || reply.author.nickname
-    const avatar = publicImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
+    const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const children = collectThreadReplies(reply.id)
     const showAll = Boolean(expandedReplies[reply.id])
     const visibleChildren = showAll ? children : children.slice(0, 3)

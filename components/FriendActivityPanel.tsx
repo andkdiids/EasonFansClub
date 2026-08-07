@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { getMood } from '@/lib/daily'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 type ActivityType = '' | 'CHECKIN' | 'POST'
@@ -139,7 +139,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
         {!loading && !failed ? activities.map((item) => {
           const mood = item.type === 'CHECKIN' ? getMood(item.mood || '') : null
           const name = item.actor.profile?.displayName || item.actor.nickname
-          const avatar = publicImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
+          const avatar = profileImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
           const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : '最近发帖'
           return (
             <article key={item.id} className="border border-sky-100 bg-sky-50/60 p-4">

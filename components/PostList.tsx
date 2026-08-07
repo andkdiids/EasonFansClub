@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 type PostItem = {
@@ -62,7 +62,7 @@ export function PostList({
       </p>
       {visiblePosts.map((post) => {
         const authorName = post.author.profile?.displayName || post.author.nickname
-        const authorAvatar = publicImageUrl(post.author.profile?.avatarUrl || post.author.avatarUrl)
+        const authorAvatar = profileImageUrl(post.author.profile?.avatarUrl || post.author.avatarUrl)
         const isArchivedAuthor = post.author.uid === 0
         const canDelete = canManage || Boolean(currentUserId && post.author.id === currentUserId)
         return (

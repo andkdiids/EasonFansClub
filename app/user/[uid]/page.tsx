@@ -7,7 +7,7 @@ import { PublicUserModules } from '@/components/PublicUserModules'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { normalizeFriendPair } from '@/lib/friends'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
 import { getGrowthSummarySafe } from '@/lib/growth'
@@ -101,8 +101,8 @@ export default async function PublicUserPage({ params }: PageProps) {
     }
   }
 
-  const avatar = publicImageUrl(user.Profile.avatarUrl || user.avatarUrl)
-  const background = publicImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
+  const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
+  const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const name = user.Profile.displayName || user.nickname
   const bio = user.Profile.bio || user.bio || '这个成员还没有填写个人简介。'
   const growth = await getGrowthSummarySafe(user.experience)

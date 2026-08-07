@@ -9,7 +9,7 @@ import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
@@ -359,7 +359,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
   const liked = viewerPostLiked
   const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
-  const authorAvatar = publicImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl)
+  const authorAvatar = profileImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl)
   const authorName = post.User.Profile.displayName || post.User.nickname
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))

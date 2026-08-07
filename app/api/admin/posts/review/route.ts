@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -30,7 +30,7 @@ function serializePost(post: ReviewPostRow) {
     ...post,
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
-    User: { ...post.User, Profile: post.User.Profile ? { ...post.User.Profile, avatarUrl: publicImageUrl(post.User.Profile.avatarUrl) } : null },
+    User: { ...post.User, Profile: post.User.Profile ? { ...post.User.Profile, avatarUrl: profileImageUrl(post.User.Profile.avatarUrl) } : null },
     PostMedia: post.PostMedia.map((media) => ({ ...media, url: publicImageUrl(media.url), thumbnail: publicImageUrl(media.thumbnail) })),
   }
 }

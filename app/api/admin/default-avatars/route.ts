@@ -6,7 +6,8 @@ import {
   getDefaultAvatarPool,
   saveDefaultAvatarPool,
 } from '@/lib/default-avatars'
-import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
+import { publicImageUrl } from '@/lib/images'
+import { describeCosError, getCosUrl, missingCosConfig, uploadToCos } from '@/lib/tencent-cos'
 import { requireAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -28,18 +29,19 @@ export async function POST(request: Request) {
   const guard = await guardAdmin()
   if (!guard.user) return guard.response
 
-  const formData = await request.formData().catch(() => null)
-  const file = formData?.get('file')
-  if (!(file instanceof File)) return NextResponse.json({ message: '请选择默认头像图片' }, { status: 400 })
-  if (!ALLOWED_TYPES.has(file.type)) return NextResponse.json({ message: '仅支持 JPG、PNG 或 WebP 图片' }, { status: 400 })
-  if (file.size > MAX_FILE_SIZE) return NextResponse.json({ message: '图片不能超过 8MB' }, { status: 413 })
-
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'eason-fans-club'
-  if (!supabaseUrl || !serviceRoleKey) {
-    return NextResponse.json({ message: 'Supabase Storage 尚未配置' }, { status: 500 })
+  // 提前检查 COS 配置，缺失时返回明确原因而不是静默 502
+  const missingConfig = missingCosConfig()
+  if (missingConfig.length) {
+    console.error('[default-avatar] COS config missing', missingConfig)
+    return NextResponse.json({ message: `腾讯云 COS 配置缺失：${missingConfig.join('、')}，请联系管理员检查服务器环境变量` }, { status: 500 })
   }
+
+  const formData = await request.formData().catch(() => null)
+  if (!formData) return NextResponse.json({ message: '表单解析失败，请使用 multipart/form-data 上传图片' }, { status: 400 })
+  const file = formData.get('file')
+  if (!(file instanceof File) || file.size === 0) return NextResponse.json({ message: '请选择默认头像图片（文件为空或未收到 file 字段）' }, { status: 400 })
+  if (!ALLOWED_TYPES.has(file.type)) return NextResponse.json({ message: `文件格式不支持（${file.type || '未知'}），仅支持 JPG、PNG 或 WebP 图片` }, { status: 400 })
+  if (file.size > MAX_FILE_SIZE) return NextResponse.json({ message: '图片不能超过 8MB' }, { status: 413 })
 
   let output: Buffer
   try {
@@ -51,34 +53,31 @@ export async function POST(request: Request) {
       .toBuffer()
   } catch (error) {
     console.error('[default-avatar] sharp conversion failed', error)
-    return NextResponse.json({ message: '头像转换失败，请检查图片文件后重试' }, { status: 422 })
+    const detail = error instanceof Error ? error.message : String(error)
+    return NextResponse.json({ message: `sharp 转换 WebP 失败：${detail}` }, { status: 422 })
   }
 
   const objectPath = `site/default-avatars/${randomUUID()}.webp`
-  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
-    method: 'POST',
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Cache-Control': '31536000',
-      'Content-Type': 'image/webp',
-      'x-upsert': 'false',
-    },
-    body: output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength) as ArrayBuffer,
-  })
-  if (!response.ok) {
-    console.error('[default-avatar] storage upload failed', await response.text().catch(() => ''))
-    return NextResponse.json({ message: '默认头像上传失败，请稍后重试' }, { status: 502 })
+  try {
+    await uploadToCos({ key: objectPath, body: output, contentType: 'image/webp' })
+  } catch (error) {
+    console.error('[default-avatar] COS upload failed', error)
+    return NextResponse.json({ message: `COS 上传失败：${describeCosError(error)}` }, { status: 502 })
   }
 
-  const url = publicImageUrl(supabasePublicObjectUrl(supabaseUrl, bucket, objectPath))
+  const url = publicImageUrl(getCosUrl(objectPath))
   if (!url) return NextResponse.json({ message: '默认头像地址无效' }, { status: 500 })
 
-  const avatars = await getDefaultAvatarPool(undefined, true)
-  avatars.push({ id: randomUUID(), url, enabled: true, createdAt: new Date().toISOString() })
-  await saveDefaultAvatarPool(avatars)
-  const assignedCount = await assignDefaultAvatarsToUnassignedUsers()
-  return NextResponse.json({ avatars: avatars.filter((item) => !item.retired), assignedCount, message: '默认头像已转换为 WebP 并启用' }, { status: 201 })
+  try {
+    const avatars = await getDefaultAvatarPool(undefined, true)
+    avatars.push({ id: randomUUID(), url, enabled: true, createdAt: new Date().toISOString() })
+    await saveDefaultAvatarPool(avatars)
+    const assignedCount = await assignDefaultAvatarsToUnassignedUsers()
+    return NextResponse.json({ avatars: avatars.filter((item) => !item.retired), assignedCount, message: '默认头像已转换为 WebP 并启用' }, { status: 201 })
+  } catch (error) {
+    console.error('[default-avatar] save avatar pool failed', error)
+    return NextResponse.json({ message: '头像已上传到 COS，但保存头像池失败，请刷新页面确认后重试' }, { status: 500 })
+  }
 }
 
 export async function PATCH(request: Request) {

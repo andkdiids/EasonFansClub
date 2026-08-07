@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser } from '@/lib/friend-types'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 export function FriendProfileCard({
@@ -18,7 +18,7 @@ export function FriendProfileCard({
   onNavigate: () => void
 }>) {
   const name = friend.profile?.displayName || friend.nickname
-  const avatar = publicImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
+  const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const bio = friend.profile?.bio || friend.bio || '这个成员还没有填写个人简介。'
 
   return (

@@ -7,7 +7,7 @@ import { PublicUserModules } from '@/components/PublicUserModules'
 import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
 import { withDbTimeout } from '@/lib/db-timeout'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
@@ -72,9 +72,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   })
 
   const displayName = profile.Profile.displayName || profile.nickname
-  const avatar = publicImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
+  const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   
-  const background = publicImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
+  const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
   const growth = await getGrowthSummarySafe(profile.experience)
   const layoutConfig = await getPublishedPageLayoutConfig('profile')

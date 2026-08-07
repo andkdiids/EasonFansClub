@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 type WallSender = {
@@ -163,7 +163,7 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
 
 function WallMessageCard({ message, expanded, isOwner = false, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; isOwner?: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
   const name = message.sender.profile?.displayName || message.sender.nickname
-  const avatar = publicImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
+  const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   const children = message.children || []
 
   return (

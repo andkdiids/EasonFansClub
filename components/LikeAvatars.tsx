@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 /**
@@ -85,7 +85,7 @@ export function LikeAvatars({
         {inlineLikers.map((liker) => (
           <span key={liker.uid} className="grid h-6 w-6 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
             <SafeAvatar
-              src={publicImageUrl(liker.avatarUrl)}
+              src={profileImageUrl(liker.avatarUrl)}
               name={liker.displayName || liker.nickname}
               uid={liker.uid}
               className="h-full w-full"
@@ -111,7 +111,7 @@ export function LikeAvatars({
                   >
                     <span className="grid h-5 w-5 place-items-center overflow-hidden rounded-full bg-brand-950 text-[9px] font-black text-white">
                       <SafeAvatar
-                        src={publicImageUrl(liker.avatarUrl)}
+                        src={profileImageUrl(liker.avatarUrl)}
                         name={liker.displayName || liker.nickname}
                         uid={liker.uid}
                         className="h-full w-full"

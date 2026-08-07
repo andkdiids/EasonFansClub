@@ -11,7 +11,7 @@ import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayou
 import type { CheckInDisplayMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { getMood } from '@/lib/daily'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 type DailyComment = CheckInDisplayMessageItem['comments'][number]
@@ -311,7 +311,7 @@ export function CheckInMessagesPanel({
           const mood = getMood(item.mood)
           const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null
           const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : '')
-          const avatar = publicImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
+          const avatar = profileImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
           const commentMap = buildCommentMap(item.comments)
           const rootComments = commentTree.get(null) || []
@@ -377,7 +377,7 @@ export function CheckInMessagesPanel({
                       {rootComments.map((comment) => {
                         const commentIdentity = 'uid' in comment.author ? comment.author : null
                         const commentName = getCommentAuthorName(comment.author)
-                        const commentAvatar = publicImageUrl(commentIdentity?.profile?.avatarUrl || commentIdentity?.avatarUrl)
+                        const commentAvatar = profileImageUrl(commentIdentity?.profile?.avatarUrl || commentIdentity?.avatarUrl)
                         const children = collectThreadComments(comment.id)
                         const showAll = Boolean(expandedReplies[comment.id])
                         const visibleChildren = showAll ? children : children.slice(0, 3)
@@ -410,7 +410,7 @@ export function CheckInMessagesPanel({
                                     {visibleChildren.map(({ comment: child, replyToName }) => {
                                       const childIdentity = 'uid' in child.author ? child.author : null
                                       const childName = getCommentAuthorName(child.author)
-                                      const childAvatar = publicImageUrl(childIdentity?.profile?.avatarUrl || childIdentity?.avatarUrl)
+                                      const childAvatar = profileImageUrl(childIdentity?.profile?.avatarUrl || childIdentity?.avatarUrl)
                                       return (
                                         <div key={child.id} id={`comment-${child.id}`} className="min-w-0 py-2">
                                           <div className="flex min-w-0 items-start gap-2">

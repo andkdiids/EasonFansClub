@@ -4,7 +4,7 @@ import { PageContainer } from '@/components/PageContainer'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { getCurrentUser } from '@/lib/auth'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
 
@@ -177,7 +177,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <div className="mt-3 space-y-2">
                   {users.map((item) => {
                     const name = item.Profile?.displayName || item.nickname
-                    const avatar = publicImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
+                    const avatar = profileImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
                     const growth = calculateGrowthSummary(item.experience, growthLevels)
                     const status = friendIds.has(item.id) ? 'FRIEND' : sentIds.has(item.id) ? 'PENDING' : receivedIds.has(item.id) ? 'RECEIVED' : 'NONE'
                     return (

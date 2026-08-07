@@ -1,9 +1,9 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 
 type InitialProfile = {
   nickname: string
@@ -523,8 +523,8 @@ export function ProfileSettingsForm({
     onSaved?.()
   }
 
-  const avatarPreview = publicImageUrl(form.avatarUrl)
-  const backgroundPreview = publicImageUrl(form.backgroundUrl)
+  const avatarPreview = profileImageUrl(form.avatarUrl)
+  const backgroundPreview = profileImageUrl(form.backgroundUrl)
 
   return (
     <>

@@ -17,7 +17,7 @@ import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 
@@ -647,7 +647,7 @@ export function FriendDock({
             <>
               <button type="button" onClick={leaveChat} aria-label="返回好友列表">←</button>
               <button type="button" className="friend-dock-chat-person" onClick={() => setProfileFriend(chatFriend)}>
-                <SafeAvatar src={publicImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.profile?.displayName || chatFriend.nickname} className="h-8 w-8" />
+                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.profile?.displayName || chatFriend.nickname} className="h-8 w-8" />
                 <span><strong>{chatFriend.profile?.displayName || chatFriend.nickname}</strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
@@ -857,7 +857,7 @@ function FriendRow({
   onDecide: (action: 'accept' | 'reject') => void
 }) {
   const name = friend.profile?.displayName || friend.nickname
-  const avatar = publicImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
+  const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const status = friend.relationshipStatus || 'FRIEND'
   const canOpenProfile = status === 'FRIEND'
   return (

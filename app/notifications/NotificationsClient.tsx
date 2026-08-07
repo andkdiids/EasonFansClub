@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
+import { profileImageUrl } from '@/lib/images'
 import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 
 type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'messages' | 'feedback' | 'system'
@@ -430,7 +431,7 @@ export function NotificationsClient({
               </span>
             ) : (
               <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl bg-brand-950 text-sm font-black text-white sm:h-12 sm:w-12">
-                {item.actorAvatarUrl ? <img src={item.actorAvatarUrl} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
+                {profileImageUrl(item.actorAvatarUrl) ? <img src={profileImageUrl(item.actorAvatarUrl)!} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
               </span>
             )}
             {!systemLike && !isBirthday ? (

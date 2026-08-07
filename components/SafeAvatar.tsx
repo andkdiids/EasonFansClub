@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 
 export function SafeAvatar({
   src,
@@ -17,7 +17,7 @@ export function SafeAvatar({
   textClassName?: string
 }) {
   const [failed, setFailed] = useState(false)
-  const url = failed ? null : publicImageUrl(src)
+  const url = failed ? null : profileImageUrl(src)
   const fallback = uid !== undefined && uid !== null
     ? String(uid).padStart(5, '0').slice(0, 1)
     : 'E'

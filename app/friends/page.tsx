@@ -7,7 +7,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 
@@ -129,7 +129,7 @@ function RequestCard({
   action?: ReactNode
 }) {
   const name = user.Profile?.displayName || user.nickname
-  const avatar = publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl)
+  const avatar = profileImageUrl(user.Profile?.avatarUrl || user.avatarUrl)
   return (
     <article className="rounded-sm border border-sky-100 bg-sky-50/60 p-4">
       <div className="flex items-start justify-between gap-3">

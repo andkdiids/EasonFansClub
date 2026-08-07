@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { isSupabaseStorageUrl } from '@/lib/images'
 
 export const DEFAULT_AVATAR_SETTING_KEY = 'users.defaultAvatarPool'
 
@@ -65,7 +66,8 @@ export async function saveDefaultAvatarPool(items: DefaultAvatarItem[], database
 }
 
 export async function chooseDefaultAvatar(database: DefaultAvatarDatabase = prisma) {
-  const enabled = (await getDefaultAvatarPool(database)).filter((item) => item.enabled)
+  // 旧 Supabase 头像已失效，不再参与分配
+  const enabled = (await getDefaultAvatarPool(database)).filter((item) => item.enabled && !isSupabaseStorageUrl(item.url))
   if (!enabled.length) return null
   return enabled[Math.floor(Math.random() * enabled.length)]?.url || null
 }
@@ -76,7 +78,7 @@ export async function isDefaultAvatarUrl(url?: string | null) {
 }
 
 export async function assignDefaultAvatarsToUnassignedUsers() {
-  const enabled = (await getDefaultAvatarPool()).filter((item) => item.enabled)
+  const enabled = (await getDefaultAvatarPool()).filter((item) => item.enabled && !isSupabaseStorageUrl(item.url))
   if (!enabled.length) return 0
 
   const users = await prisma.user.findMany({
