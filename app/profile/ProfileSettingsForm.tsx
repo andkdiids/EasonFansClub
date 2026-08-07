@@ -29,6 +29,8 @@ type CropState = {
   scale: number
   x: number
   y: number
+  naturalWidth?: number
+  naturalHeight?: number
 }
 
 const maxAvatarSourceSize = 10 * 1024 * 1024
@@ -41,7 +43,10 @@ const avatarUploadTimeoutMs = 30000
 const maxBackgroundSourceSize = 10 * 1024 * 1024
 const backgroundUploadTimeoutMs = 30000
 const BACKGROUND_MAX_WIDTH = 1920
-const BACKGROUND_TARGET_ASPECT = 16 / 5
+const BACKGROUND_TARGET_ASPECT = 4.5
+// 裁剪弹窗的固定像素尺寸（9:2 = 4.5:1），导出时按相同比例放大，保证预览与导出区域完全一致。
+const BACKGROUND_FRAME_WIDTH = 450
+const BACKGROUND_FRAME_HEIGHT = 100
 
 function createCompatibleId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -201,48 +206,75 @@ async function cropAvatarToWebp(crop: CropState) {
   return { blob: output.blob, fileName: `avatar-${createCompatibleId()}.${extension}` }
 }
 
-async function cropBackgroundToWebp(crop: CropState, frameEl: HTMLElement, imageEl: HTMLElement) {
+function computeBackgroundLayout(
+  crop: CropState,
+  imageWidth: number,
+  imageHeight: number,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  // 预览与导出共用的唯一坐标系：
+  // 1) 先按 cover 适配（scale=1 时铺满裁剪框，不拉伸变形）；
+  // 2) 再按 crop.scale 整体缩放；
+  // 3) 最后按 crop.x / crop.y 平移（单位与所在坐标系一致，未乘 scale，避免预览/导出偏移不一致）。
+  const baseScale = Math.max(frameWidth / imageWidth, frameHeight / imageHeight)
+  const drawWidth = imageWidth * baseScale * crop.scale
+  const drawHeight = imageHeight * baseScale * crop.scale
+  const translateX = (frameWidth - drawWidth) / 2 + crop.x
+  const translateY = (frameHeight - drawHeight) / 2 + crop.y
+  return { baseScale, drawWidth, drawHeight, translateX, translateY }
+}
+
+async function cropBackgroundToWebp(crop: CropState) {
   const image = await loadImage(crop.url)
+
   const IW = image.naturalWidth
   const IH = image.naturalHeight
-  if (!IW || !IH) throw new Error('图片尺寸异常，请重新选择图片')
 
-  const frameRect = frameEl.getBoundingClientRect()
-  const imageRect = imageEl.getBoundingClientRect()
-  if (!frameRect.width || !frameRect.height || !imageRect.width || !imageRect.height) {
-    throw new Error('裁切窗口未就绪，请重试')
+  if (!IW || !IH) {
+    throw new Error('图片尺寸异常，请重新选择图片')
   }
 
-  const visLeft = Math.max(0, frameRect.left - imageRect.left)
-  const visTop = Math.max(0, frameRect.top - imageRect.top)
-  const visRight = Math.min(imageRect.right, frameRect.right)
-  const visBottom = Math.min(imageRect.bottom, frameRect.bottom)
-  const visW = Math.max(1, visRight - visLeft)
-  const visH = Math.max(1, visBottom - visTop)
+  const targetWidth = Math.min(BACKGROUND_MAX_WIDTH, IW)
+  const targetHeight = Math.round(targetWidth / BACKGROUND_TARGET_ASPECT)
 
-  const sx = IW / imageRect.width
-  const sy = IH / imageRect.height
-  const sourceX = visLeft * sx
-  const sourceY = visTop * sy
-  const sourceW = visW * sx
-  const sourceH = visH * sy
+  // 预览裁剪框固定为 BACKGROUND_FRAME_WIDTH 像素，导出时按相同比例放大到 targetWidth，
+  // 保证「预览看到的区域 === 导出保存的区域」。因此 crop.x/y 需同步换算到导出坐标系。
+  const factor = targetWidth / BACKGROUND_FRAME_WIDTH
+  const canvasCrop: CropState = {
+    ...crop,
+    x: crop.x * factor,
+    y: crop.y * factor,
+  }
 
-  const outWidth = Math.min(BACKGROUND_MAX_WIDTH, Math.max(320, Math.round(sourceW)))
-  const outHeight = Math.max(120, Math.round(outWidth / BACKGROUND_TARGET_ASPECT))
+  const layout = computeBackgroundLayout(canvasCrop, IW, IH, targetWidth, targetHeight)
 
   const canvas = document.createElement('canvas')
-  canvas.width = outWidth
-  canvas.height = outHeight
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('浏览器暂时无法处理这张图片')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
 
-  ctx.drawImage(image, sourceX, sourceY, sourceW, sourceH, 0, 0, outWidth, outHeight)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('浏览器暂时无法处理这张图片')
+  }
+
+  ctx.drawImage(image, layout.translateX, layout.translateY, layout.drawWidth, layout.drawHeight)
 
   const output = await canvasToBlobWithFallback(canvas)
-  if (!output.blob.size) throw new Error('图片处理失败，请重新选择 JPG、PNG 或 WebP 图片')
 
-  const extension = output.type === 'image/webp' ? 'webp' : 'jpg'
-  return { blob: output.blob, fileName: `background-${createCompatibleId()}.${extension}` }
+  if (!output.blob.size) {
+    throw new Error('图片处理失败')
+  }
+
+  const extension =
+    output.type === 'image/webp'
+      ? 'webp'
+      : 'jpg'
+
+  return {
+    blob: output.blob,
+    fileName: `background-${createCompatibleId()}.${extension}`,
+  }
 }
 
 export function ProfileSettingsForm({
@@ -267,8 +299,7 @@ export function ProfileSettingsForm({
   const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
-  const bgFrameRef = useRef<HTMLDivElement>(null)
-  const bgImageRef = useRef<HTMLImageElement>(null)
+  
 
   useEffect(() => {
     mountedRef.current = true
@@ -305,7 +336,7 @@ export function ProfileSettingsForm({
     if (backgroundInputRef.current) backgroundInputRef.current.value = ''
   }
 
-  function openBackgroundCrop(event: ChangeEvent<HTMLInputElement>) {
+  async function openBackgroundCrop(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -331,7 +362,25 @@ export function ProfileSettingsForm({
     }
 
     if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
-    setBackgroundCrop({ file, url: URL.createObjectURL(file), scale: 1, x: 0, y: 0 })
+    const objectUrl = URL.createObjectURL(file)
+    let naturalWidth: number | undefined
+    let naturalHeight: number | undefined
+    try {
+      const loaded = await loadImage(objectUrl)
+      naturalWidth = loaded.naturalWidth
+      naturalHeight = loaded.naturalHeight
+    } catch {
+      // 自然尺寸获取失败时仍允许进入裁剪，导出时再读取。
+    }
+    setBackgroundCrop({
+  file,
+  url: objectUrl,
+  scale: 1.2,
+  x: 0,
+  y: 0,
+  naturalWidth,
+  naturalHeight,
+})
   }
 
   function onBackgroundCropPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -437,19 +486,14 @@ export function ProfileSettingsForm({
 
   async function confirmBackgroundUpload() {
     if (!backgroundCrop || uploading) return
-    const frameEl = bgFrameRef.current
-    const imageEl = bgImageRef.current
-    if (!frameEl || !imageEl) {
-      setError('裁切窗口未就绪，请重试')
-      return
-    }
+    
 
     setUploading('background')
     setError('')
     setMessage('')
 
     try {
-      const cropped = await cropBackgroundToWebp(backgroundCrop, frameEl, imageEl)
+      const cropped = await cropBackgroundToWebp(backgroundCrop)
       const body = new FormData()
       body.append('file', cropped.blob, cropped.fileName)
       body.append('kind', 'background')
@@ -525,6 +569,17 @@ export function ProfileSettingsForm({
 
   const avatarPreview = profileImageUrl(form.avatarUrl)
   const backgroundPreview = profileImageUrl(form.backgroundUrl)
+
+  // 预览裁剪框固定 450×100（9:2），与导出使用完全相同的坐标系，确保「所见即所得」。
+  const backgroundLayout = backgroundCrop?.naturalWidth
+    ? computeBackgroundLayout(
+        backgroundCrop,
+        backgroundCrop.naturalWidth,
+        backgroundCrop.naturalHeight ?? 0,
+        BACKGROUND_FRAME_WIDTH,
+        BACKGROUND_FRAME_HEIGHT,
+      )
+    : null
 
   return (
     <>
@@ -790,26 +845,25 @@ export function ProfileSettingsForm({
             <h3 className="text-xl font-black text-brand-950">调整背景图</h3>
             <p className="mt-1 text-sm font-bold text-slate-500">拖动图片调整显示区域，使用滑块缩放。建议把人物主体放在画面中央。</p>
             <div
-              ref={bgFrameRef}
-              className="relative mx-auto mt-5 aspect-[16/5] w-full max-w-md touch-none overflow-hidden rounded-2xl bg-slate-900"
+              className="relative mx-auto mt-5 touch-none overflow-hidden rounded-2xl bg-slate-900"
+              style={{ width: BACKGROUND_FRAME_WIDTH, height: BACKGROUND_FRAME_HEIGHT }}
               onPointerDown={onBackgroundCropPointerDown}
               onPointerMove={onBackgroundCropPointerMove}
               onPointerUp={onBackgroundCropPointerUp}
             >
-              <img
-                ref={bgImageRef}
-                src={backgroundCrop.url}
-                alt="背景图裁剪"
-                className="pointer-events-none absolute left-1/2 top-1/2 max-w-none select-none"
-                style={{
-                  minWidth: '100%',
-                  minHeight: '100%',
-                  width: 'auto',
-                  height: 'auto',
-                  transform: `translate(-50%, -50%) translate(${backgroundCrop.x}px, ${backgroundCrop.y}px) scale(${backgroundCrop.scale})`,
-                }}
-                draggable={false}
-              />
+              {backgroundLayout ? (
+                <div
+                  className="absolute left-0 top-0"
+                  style={{
+                    width: BACKGROUND_FRAME_WIDTH,
+                    height: BACKGROUND_FRAME_HEIGHT,
+                    backgroundImage: `url(${backgroundCrop.url})`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundSize: `${backgroundLayout.drawWidth}px ${backgroundLayout.drawHeight}px`,
+                    backgroundPosition: `${backgroundLayout.translateX}px ${backgroundLayout.translateY}px`,
+                  }}
+                />
+              ) : null}
               <div className="pointer-events-none absolute inset-0 ring-2 ring-white/70" />
             </div>
             <label className="mt-5 block">

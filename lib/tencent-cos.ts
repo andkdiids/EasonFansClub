@@ -80,6 +80,10 @@ export async function uploadToCos(params: {
         Key: key,
         Body: Buffer.from(body),
         ContentType: contentType,
+        // 头像/背景图/默认头像均为公开展示图片，必须显式设为 public-read，
+        // 否则对象默认私有，公开 URL 会被 403/404，前台加载不出图片。
+        ACL: 'public-read',
+        CacheControl: 'public, max-age=31536000, immutable',
       },
       (err) => {
         if (err) {

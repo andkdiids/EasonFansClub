@@ -9,7 +9,7 @@ import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
 import { formatDate } from '@/lib/format'
-import { profileImageUrl } from '@/lib/images'
+import { isSupabaseStorageUrl, profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
@@ -364,6 +364,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
+  const canEditPost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
   const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
     ...reply,
     stickerId: reply.stickerId ?? null,
@@ -445,17 +446,39 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               <img src={post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" />
             </div>
           ) : null}
-          {post.PostMedia.length ? <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">{post.PostMedia.map((item, index) => <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />)}</div> : null}
+          {post.PostMedia.length ? (
+            <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">
+              {post.PostMedia.map((item, index) =>
+                isSupabaseStorageUrl(item.url) ? (
+                  <div key={item.id} className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm font-bold text-slate-500">
+                    图片已失效，请重新编辑帖子上传
+                  </div>
+                ) : (
+                  <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />
+                ),
+              )}
+            </div>
+          ) : null}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
               <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
-            {canManagePost ? (
-              <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.Board.slug}`} />
-            ) : canDeletePost ? (
-              <DeletePostButton postId={post.id} redirectTo={`/boards/${post.Board.slug}`} />
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {canEditPost ? (
+                <Link
+                  href={`/posts/${post.id}/edit`}
+                  className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50"
+                >
+                  编辑
+                </Link>
+              ) : null}
+              {canManagePost ? (
+                <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.Board.slug}`} />
+              ) : canDeletePost ? (
+                <DeletePostButton postId={post.id} redirectTo={`/boards/${post.Board.slug}`} />
+              ) : null}
+            </div>
           </div>
           <LikeAvatars
             likers={(post.Like || []).map((like) => ({

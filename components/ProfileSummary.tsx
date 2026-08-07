@@ -90,9 +90,14 @@ export function ProfileHeader({
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
       <div
-        className="relative isolate h-[240px] overflow-hidden bg-slate-900 sm:h-[280px]"
-        style={backgroundUrl ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
-      >
+  className="relative isolate aspect-[9/2] w-full overflow-hidden bg-slate-900"
+  style={{
+    backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  }}
+>
         {!backgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
         <div className="absolute bottom-4 left-4 w-fit min-w-[190px] max-w-[calc(100%_-_2rem)] rounded-sm border border-white/20 bg-black/60 p-3 text-white sm:bottom-5 sm:left-5 sm:max-w-[380px]">
           <div className="flex min-w-0 items-center gap-3">
