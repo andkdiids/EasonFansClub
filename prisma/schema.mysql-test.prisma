@@ -2124,6 +2124,7 @@ enum GuessSongMode {
   EASY
   ADVANCED
   HARD
+  EXPERT
   ENDLESS
 }
 

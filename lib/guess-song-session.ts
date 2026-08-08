@@ -6,6 +6,8 @@ import {
   GUESS_SONG_MODE_CONFIG,
   calculateGuessSongScore,
   isGuessSongMode,
+  normalizeGuessSongAnswer,
+  toPublicGuessSongMode,
 } from '@/lib/guess-song-config'
 import { getGuessSongPeriod } from '@/lib/guess-song-period'
 import { getGuessSongRanks, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
@@ -27,6 +29,7 @@ type OptionSnapshot = { key: string; label: string }
 type EligibleQuestion = {
   id: string
   songTitle: string
+  musicSongId: string | null
   correctAnswer: string
   wrongOption1: string
   wrongOption2: string
@@ -67,6 +70,19 @@ function createOptions(question: EligibleQuestion) {
   }
 }
 
+function answerDeadlineAtToAvailableAt(deadline: Date | null) {
+  const availableAt = deadline
+    ? new Date(deadline.getTime() - GUESS_SONG_ANSWER_SECONDS * 1000)
+    : null
+  return availableAt?.toISOString() ?? null
+}
+
+function answerAvailableAt(deadline: Date | null) {
+  return deadline
+    ? new Date(deadline.getTime() - GUESS_SONG_ANSWER_SECONDS * 1000)
+    : null
+}
+
 function parseOptions(value: Prisma.JsonValue): OptionSnapshot[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item) => {
@@ -89,9 +105,16 @@ async function createSessionQuestion(
     position: number
     durationSeconds: number
     maxPlayCount: number
+    mode: GuessSongMode
   },
 ) {
-  const { options, correctOptionKey } = createOptions(input.question)
+  const expert = input.mode === 'EXPERT'
+  if (expert && !input.question.musicSongId) {
+    throw new GuessSongServiceError('专家模式题目必须关联 EasMusic 歌曲', 409, 'EXPERT_QUESTION_INVALID')
+  }
+  const { options, correctOptionKey } = expert
+    ? { options: [], correctOptionKey: input.question.musicSongId || '' }
+    : createOptions(input.question)
   return tx.guessSongSessionQuestion.create({
     data: {
       sessionId: input.sessionId,
@@ -109,35 +132,36 @@ async function createSessionQuestion(
 /** Manual questions keep their original rules; AUTO questions serve every mode
     but only while their album is published and auto generation is enabled. */
 function eligibleSourceFilter(mode: GuessSongMode, autoEnabled: boolean): Prisma.GuessSongQuestionWhereInput[] {
+  const expertSongFilter = mode === 'EXPERT' ? { musicSongId: { not: null } } : {}
   const autoBranch: Prisma.GuessSongQuestionWhereInput[] = autoEnabled
-    ? [{ questionType: GUESS_SONG_QUESTION_TYPE_AUTO, MusicSong: { MusicAlbum: { status: 'PUBLISHED' } } }]
+    ? [{ questionType: GUESS_SONG_QUESTION_TYPE_AUTO, ...expertSongFilter, MusicSong: { MusicAlbum: { status: 'PUBLISHED' } } }]
     : []
-  if (mode === 'ENDLESS') {
-    return [{ questionType: GUESS_SONG_QUESTION_TYPE_MANUAL }, ...autoBranch]
+  if (mode === 'ENDLESS' || mode === 'EXPERT') {
+    return [{ questionType: GUESS_SONG_QUESTION_TYPE_MANUAL, ...expertSongFilter }, ...autoBranch]
   }
   return [{ questionType: GUESS_SONG_QUESTION_TYPE_MANUAL, difficulty: mode }, ...autoBranch]
 }
 
-async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) {
+function eligibleQuestionWhere(mode: GuessSongMode, autoEnabled: boolean): Prisma.GuessSongQuestionWhereInput {
   const config = GUESS_SONG_MODE_CONFIG[mode]
+  return {
+    enabled: true,
+    processingStatus: 'READY',
+    ...(mode === 'ENDLESS' ? { allowEndless: true } : {}),
+    OR: eligibleSourceFilter(mode, autoEnabled),
+    GuessSongAudioVariant: {
+      some: { durationSeconds: config.durationSeconds, purpose: 'GAME' },
+    },
+  }
+}
+
+async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) {
   return prisma.guessSongQuestion.findMany({
-    where: mode === 'ENDLESS'
-      ? {
-          enabled: true,
-          allowEndless: true,
-          processingStatus: 'READY',
-          OR: eligibleSourceFilter(mode, autoEnabled),
-          GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds, purpose: 'GAME' } },
-        }
-      : {
-          enabled: true,
-          processingStatus: 'READY',
-          OR: eligibleSourceFilter(mode, autoEnabled),
-          GuessSongAudioVariant: { some: { durationSeconds: config.durationSeconds ?? undefined, purpose: 'GAME' } },
-        },
+    where: eligibleQuestionWhere(mode, autoEnabled),
     select: {
       id: true,
       songTitle: true,
+      musicSongId: true,
       correctAnswer: true,
       wrongOption1: true,
       wrongOption2: true,
@@ -147,24 +171,20 @@ async function findEligibleQuestions(mode: GuessSongMode, autoEnabled: boolean) 
   })
 }
 
-async function createNextEndlessQuestion(
+async function createNextInfiniteQuestion(
   tx: Prisma.TransactionClient,
   sessionId: string,
   position: number,
   previousQuestionId: string | undefined,
+  mode: GuessSongMode,
   autoEnabled: boolean,
 ) {
   const candidates = await tx.guessSongQuestion.findMany({
-    where: {
-      enabled: true,
-      allowEndless: true,
-      processingStatus: 'READY',
-      OR: eligibleSourceFilter('ENDLESS', autoEnabled),
-      GuessSongAudioVariant: { some: { durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds, purpose: 'GAME' } },
-    },
+    where: eligibleQuestionWhere(mode, autoEnabled),
     select: {
       id: true,
       songTitle: true,
+      musicSongId: true,
       correctAnswer: true,
       wrongOption1: true,
       wrongOption2: true,
@@ -172,7 +192,7 @@ async function createNextEndlessQuestion(
       GuessSongAudioVariant: { where: { purpose: 'GAME' }, select: { id: true, durationSeconds: true, storagePath: true } },
     },
   })
-  if (candidates.length === 0) throw new GuessSongServiceError('无尽模式题库暂不可用', 409, 'QUESTION_POOL_EMPTY')
+  if (candidates.length === 0) throw new GuessSongServiceError(`${GUESS_SONG_MODE_CONFIG[mode].label}模式题库暂不可用`, 409, 'QUESTION_POOL_EMPTY')
   const withoutPrevious = candidates.filter((question) => question.id !== previousQuestionId)
   const pool = withoutPrevious.length > 0 ? withoutPrevious : candidates
   const question = pool[randomInt(pool.length)]
@@ -180,8 +200,9 @@ async function createNextEndlessQuestion(
     sessionId,
     question,
     position,
-    durationSeconds: GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds,
-    maxPlayCount: GUESS_SONG_MODE_CONFIG.ENDLESS.maxPlayCount,
+    durationSeconds: GUESS_SONG_MODE_CONFIG[mode].durationSeconds,
+    maxPlayCount: GUESS_SONG_MODE_CONFIG[mode].maxPlayCount,
+    mode,
   })
 }
 
@@ -191,9 +212,15 @@ export async function createOrResumeGuessSongSession(
   now = new Date(),
 ) {
   if (!isGuessSongMode(requestedMode)) throw new GuessSongServiceError('请选择有效游戏模式')
-  const mode = requestedMode
+  // ENDLESS is kept only for old database rows and old deep links. A new start
+  // through that legacy value opens the replacement simple challenge instead.
+  const mode: GuessSongMode = requestedMode === 'ENDLESS' ? 'EASY' : requestedMode
   const active = await prisma.guessSongSession.findFirst({
-    where: { userId, mode, status: 'IN_PROGRESS' },
+    where: {
+      userId,
+      mode: mode === 'EASY' ? { in: ['EASY', 'ENDLESS'] } : mode,
+      status: 'IN_PROGRESS',
+    },
     orderBy: { createdAt: 'desc' },
   })
   if (active && active.expiresAt > now) {
@@ -204,19 +231,12 @@ export async function createOrResumeGuessSongSession(
   }
 
   const quizConfig = await getGuessSongQuizConfigOrDefault()
+  if (mode === 'EXPERT' && !quizConfig.expertEnabled) {
+    throw new GuessSongServiceError('专家模式当前未开放', 409, 'EXPERT_DISABLED')
+  }
   const candidates = await findEligibleQuestions(mode, quizConfig.enabled)
   const config = GUESS_SONG_MODE_CONFIG[mode]
-  const questionCount = mode === 'ENDLESS' ? null : quizConfig.questionCount ?? config.questionCount ?? 10
-  if (mode !== 'ENDLESS' && candidates.length < (questionCount ?? 10)) {
-    throw new GuessSongServiceError(
-      `${config.label}模式至少需要 ${questionCount} 道已启用且音频就绪的题目，当前只有 ${candidates.length} 道`,
-      409,
-      'QUESTION_POOL_INSUFFICIENT',
-    )
-  }
-  if (mode === 'ENDLESS' && candidates.length === 0) {
-    throw new GuessSongServiceError('无尽模式暂无可用题目', 409, 'QUESTION_POOL_EMPTY')
-  }
+  if (candidates.length === 0) throw new GuessSongServiceError(`${config.label}模式暂无可用题目`, 409, 'QUESTION_POOL_EMPTY')
 
   try {
     const session = await prisma.$transaction(async (tx) => {
@@ -225,27 +245,14 @@ export async function createOrResumeGuessSongSession(
           userId,
           activeKey: `${userId}:${mode}`,
           mode,
-          livesRemaining: mode === 'ENDLESS' ? GUESS_SONG_INITIAL_LIVES : 0,
-          questionCount,
+          livesRemaining: config.maxWrongCount || GUESS_SONG_INITIAL_LIVES,
+          questionCount: null,
           expiresAt: sessionExpiry(mode, now),
           startedAt: now,
         },
       })
 
-      if (mode === 'ENDLESS') {
-        await createNextEndlessQuestion(tx, created.id, 1, undefined, quizConfig.enabled)
-      } else {
-        const selected = shuffle(candidates).slice(0, questionCount ?? 10)
-        for (let index = 0; index < selected.length; index += 1) {
-          await createSessionQuestion(tx, {
-            sessionId: created.id,
-            question: selected[index],
-            position: index + 1,
-            durationSeconds: config.durationSeconds ?? 7,
-            maxPlayCount: config.maxPlayCount,
-          })
-        }
-      }
+      await createNextInfiniteQuestion(tx, created.id, 1, undefined, mode, quizConfig.enabled)
       return created
     })
     return { resumed: false, session: await getGuessSongSessionState(userId, session.id, now) }
@@ -279,10 +286,11 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     where: { sessionId_position: { sessionId, position: session.currentPosition } },
   })
   const config = GUESS_SONG_MODE_CONFIG[session.mode]
+  const publicMode = toPublicGuessSongMode(session.mode)
   return {
     id: session.id,
-    mode: session.mode,
-    modeLabel: config.label,
+    mode: publicMode,
+    modeLabel: GUESS_SONG_MODE_CONFIG[publicMode].label,
     status: session.status,
     score: session.score,
     correctCount: session.correctCount,
@@ -290,9 +298,10 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     currentStreak: session.currentStreak,
     maxStreak: session.maxStreak,
     livesRemaining: session.livesRemaining,
+    maxWrongCount: session.questionCount === null ? config.maxWrongCount : null,
     totalPlayCount: session.totalPlayCount,
     currentPosition: session.currentPosition,
-    totalQuestions: session.questionCount ?? config.questionCount,
+    totalQuestions: session.questionCount ?? null,
     expiresAt: session.expiresAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,
     question: session.status === 'IN_PROGRESS' && currentQuestion
@@ -303,8 +312,10 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
           maxPlayCount: currentQuestion.maxPlayCount,
           playCount: currentQuestion.playCount,
           remainingPlayCount: currentQuestion.maxPlayCount - currentQuestion.playCount,
+          answerMode: config.answerMode,
           options: parseOptions(currentQuestion.optionsSnapshot),
           answerDeadlineAt: currentQuestion.answerDeadlineAt?.toISOString() ?? null,
+          answerAvailableAt: answerDeadlineAtToAvailableAt(currentQuestion.answerDeadlineAt),
         }
       : null,
   }
@@ -380,6 +391,7 @@ export async function requestGuessSongPlayback(input: {
           playCount: existing.playCountAfter,
           remainingPlayCount: playable.sessionQuestion.maxPlayCount - existing.playCountAfter,
           answerDeadlineAt: playable.sessionQuestion.answerDeadlineAt?.toISOString() ?? null,
+          answerAvailableAt: answerDeadlineAtToAvailableAt(playable.sessionQuestion.answerDeadlineAt),
         }
       }
 
@@ -393,7 +405,11 @@ export async function requestGuessSongPlayback(input: {
         data: {
           playCount: { increment: 1 },
           answerDeadlineAt: playable.sessionQuestion.answerDeadlineAt
-            ?? new Date(now.getTime() + GUESS_SONG_ANSWER_SECONDS * 1000),
+            ?? new Date(now.getTime() + (
+              GUESS_SONG_MODE_CONFIG[playable.sessionQuestion.GuessSongSession.mode].answerMode === 'INPUT'
+                ? playable.sessionQuestion.playbackDurationSeconds
+                : 0
+            ) * 1000 + GUESS_SONG_ANSWER_SECONDS * 1000),
         },
       })
       if (updated.count !== 1) {
@@ -425,6 +441,7 @@ export async function requestGuessSongPlayback(input: {
         playCount: after.playCount,
         remainingPlayCount: after.maxPlayCount - after.playCount,
         answerDeadlineAt: after.answerDeadlineAt?.toISOString() ?? null,
+        answerAvailableAt: answerDeadlineAtToAvailableAt(after.answerDeadlineAt),
       }
     })
     return {
@@ -451,6 +468,7 @@ export async function requestGuessSongPlayback(input: {
           playCount: existing.playCountAfter,
           remainingPlayCount: playable.sessionQuestion.maxPlayCount - existing.playCountAfter,
           answerDeadlineAt: playable.sessionQuestion.answerDeadlineAt?.toISOString() ?? null,
+          answerAvailableAt: answerDeadlineAtToAvailableAt(playable.sessionQuestion.answerDeadlineAt),
         }
       }
     }
@@ -470,13 +488,18 @@ export async function answerGuessSongQuestion(input: {
   sessionId: string
   publicQuestionId: string
   optionKey: string | null
+  songId?: string | null
+  answerText?: string | null
   now?: Date
 }) {
   const now = input.now ?? new Date()
   const outcome = await prisma.$transaction<AnswerOutcome>(async (tx) => {
     const question = await tx.guessSongSessionQuestion.findUnique({
       where: { publicId: input.publicQuestionId },
-      include: { GuessSongSession: true, GuessSongQuestion: true },
+      include: {
+        GuessSongSession: true,
+        GuessSongQuestion: { include: { MusicSong: true } },
+      },
     })
     if (!question || question.sessionId !== input.sessionId || question.GuessSongSession.userId !== input.userId) {
       throw new GuessSongServiceError('当前题目不存在或不属于当前用户', 404, 'QUESTION_NOT_FOUND')
@@ -500,18 +523,39 @@ export async function answerGuessSongQuestion(input: {
       }
     }
 
-    const options = parseOptions(question.optionsSnapshot)
+    const expert = question.GuessSongSession.mode === 'EXPERT'
+    const availableAt = expert ? answerAvailableAt(question.answerDeadlineAt) : null
+    if (expert && availableAt && availableAt > now) {
+      throw new GuessSongServiceError('音频尚未播放完成', 409, 'QUESTION_NOT_AVAILABLE')
+    }
     const timedOut = Boolean(question.answerDeadlineAt && question.answerDeadlineAt <= now)
-    if (input.optionKey === null && !timedOut) {
-      throw new GuessSongServiceError('本题尚未超时', 409, 'QUESTION_NOT_TIMED_OUT')
-    }
-    if (input.optionKey !== null && !options.some((option) => option.key === input.optionKey)) {
-      throw new GuessSongServiceError('答案选项无效')
-    }
     if (question.playCount < 1) throw new GuessSongServiceError('请先播放音频再作答')
 
-    const selectedOptionKey = timedOut ? '__TIMEOUT__' : input.optionKey
-    const correct = !timedOut && selectedOptionKey === question.correctOptionKey
+    const options = parseOptions(question.optionsSnapshot)
+    let selectedOptionKey = '__TIMEOUT__'
+    let correct = false
+    if (!timedOut && expert) {
+      const answerText = input.answerText?.trim() || ''
+      const submittedSongId = input.songId?.trim() || ''
+      if (!answerText && !submittedSongId) {
+        throw new GuessSongServiceError('请输入或选择歌曲名称')
+      }
+      const targetSongId = question.GuessSongQuestion.musicSongId
+      const targetSongTitle = question.GuessSongQuestion.MusicSong?.title || question.GuessSongQuestion.songTitle
+      const normalizedText = normalizeGuessSongAnswer(answerText)
+      const titleMatches = Boolean(normalizedText && normalizedText === normalizeGuessSongAnswer(targetSongTitle))
+      selectedOptionKey = submittedSongId || normalizedText
+      correct = Boolean(targetSongId && (submittedSongId === targetSongId || titleMatches))
+    } else if (!timedOut) {
+      if (input.optionKey === null) {
+        throw new GuessSongServiceError('本题尚未超时', 409, 'QUESTION_NOT_TIMED_OUT')
+      }
+      if (!options.some((option) => option.key === input.optionKey)) {
+        throw new GuessSongServiceError('答案选项无效')
+      }
+      selectedOptionKey = input.optionKey
+      correct = selectedOptionKey === question.correctOptionKey
+    }
     const nextStreak = correct ? question.GuessSongSession.currentStreak + 1 : 0
     const awardedScore = calculateGuessSongScore({
       mode: question.GuessSongSession.mode,
@@ -520,12 +564,13 @@ export async function answerGuessSongQuestion(input: {
       durationSeconds: question.playbackDurationSeconds,
       correct,
     })
-    const livesRemaining = question.GuessSongSession.mode === 'ENDLESS' && !correct
+    const infiniteSession = question.GuessSongSession.questionCount === null
+    const livesRemaining = infiniteSession && !correct
       ? Math.max(0, question.GuessSongSession.livesRemaining - 1)
       : question.GuessSongSession.livesRemaining
-    const normalCompleted = question.GuessSongSession.mode !== 'ENDLESS'
-      && question.position >= (question.GuessSongSession.questionCount ?? GUESS_SONG_MODE_CONFIG[question.GuessSongSession.mode].questionCount ?? 10)
-    const completed = normalCompleted || (question.GuessSongSession.mode === 'ENDLESS' && livesRemaining === 0)
+    const fixedLengthCompleted = question.GuessSongSession.questionCount !== null
+      && question.position >= question.GuessSongSession.questionCount
+    const completed = fixedLengthCompleted || (infiniteSession && livesRemaining === 0)
 
     const claimed = await tx.guessSongSessionQuestion.updateMany({
       where: { id: question.id, selectedOptionKey: null, answeredAt: null },
@@ -572,13 +617,14 @@ export async function answerGuessSongQuestion(input: {
       }),
     ])
 
-    if (!completed && question.GuessSongSession.mode === 'ENDLESS') {
+    if (!completed && infiniteSession) {
       const quizConfig = await tx.guessSongQuizConfig.findUnique({ where: { id: GUESS_SONG_QUIZ_CONFIG_ID } })
-      await createNextEndlessQuestion(
+      await createNextInfiniteQuestion(
         tx,
         input.sessionId,
         question.position + 1,
         question.questionId,
+        question.GuessSongSession.mode,
         quizConfig?.enabled ?? true,
       )
     }
@@ -614,7 +660,7 @@ export async function abandonGuessSongSession(userId: string, sessionId: string)
 export async function getGuessSongLobbySummary(userId: string, now = new Date()) {
   const week = getGuessSongPeriod('WEEK', now)
   const month = getGuessSongPeriod('MONTH', now)
-  const [weeklyEntries, monthlyEntries, recentSession, activeSessions] = await Promise.all([
+  const [weeklyEntries, monthlyEntries, recentSessionRow, activeSessionRows, quizConfig] = await Promise.all([
     prisma.guessSongLeaderboardEntry.findMany({
       where: { userId, periodType: 'WEEK', periodKey: week.periodKey },
       orderBy: { score: 'desc' },
@@ -641,8 +687,17 @@ export async function getGuessSongLobbySummary(userId: string, now = new Date())
       where: { userId, status: 'IN_PROGRESS', expiresAt: { gt: now } },
       select: { id: true, mode: true, currentPosition: true, expiresAt: true },
     }),
+    getGuessSongQuizConfigOrDefault(),
   ])
+  const recentSession = recentSessionRow
+    ? { ...recentSessionRow, mode: toPublicGuessSongMode(recentSessionRow.mode) }
+    : null
+  const activeSessions = activeSessionRows.map((item) => ({
+    ...item,
+    mode: toPublicGuessSongMode(item.mode),
+  }))
   return {
+    expertEnabled: quizConfig.expertEnabled,
     weeklyBest: weeklyEntries[0]?.score ?? null,
     monthlyBest: monthlyEntries[0]?.score ?? null,
     recentSession,

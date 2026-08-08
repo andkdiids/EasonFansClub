@@ -1,6 +1,5 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -1080,6 +1079,7 @@ model GuessSongSessionQuestion {
 model GuessSongQuizConfig {
   id            String              @id @default("global")
   enabled       Boolean             @default(true)
+  expertEnabled Boolean             @default(true)
   sourceType    String              @default("ALL")
   albumId       String?
   year          Int?
@@ -2502,6 +2502,7 @@ enum GuessSongMode {
   EASY
   ADVANCED
   HARD
+  EXPERT
   ENDLESS
 }
 

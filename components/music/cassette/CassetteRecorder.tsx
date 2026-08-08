@@ -59,6 +59,16 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
         priority
         className="easmusic-recorder-shell-image"
       />
+     {track?.coverUrl ? (
+  <div className="easmusic-recorder-cover">
+    <Image
+      src={track.coverUrl}
+      alt={track.title}
+      fill
+      sizes="160px"
+    />
+  </div>
+) : null}
 
       <div className="easmusic-recorder-track-label" aria-live="polite">
         <LedMarqueeText

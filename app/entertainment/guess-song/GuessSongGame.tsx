@@ -4,13 +4,13 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CassettePlayer } from '@/components/games/CassettePlayer'
-import { GuessAnswerInput } from '@/components/games/GuessAnswerInput'
+import { GuessAnswerInput, type GuessAnswerSubmission, type GuessSongCandidate } from '@/components/games/GuessAnswerInput'
 import { GuessFooter } from '@/components/games/GuessFooter'
 import { GuessHeader } from '@/components/games/GuessHeader'
 import { GuessResultOverlay } from '@/components/games/GuessResultOverlay'
 import { createUUID } from '@/lib/utils/uuid'
 
-type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
+type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT'
 type AnswerMode = 'CHOICE' | 'INPUT'
 type SessionQuestion = {
   answerMode: AnswerMode
@@ -22,6 +22,7 @@ type SessionQuestion = {
   remainingPlayCount: number
   options: Array<{ key: string; label: string }>
   answerDeadlineAt: string | null
+  answerAvailableAt: string | null
 }
 type SessionState = {
   id: string
@@ -34,6 +35,7 @@ type SessionState = {
   currentStreak: number
   maxStreak: number
   livesRemaining: number
+  maxWrongCount: number | null
   totalPlayCount: number
   currentPosition: number
   totalQuestions: number | null
@@ -83,7 +85,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioGenerationRef = useRef(0)
   const timeoutSubmittedRef = useRef<string | null>(null)
-  const submitAnswerRef = useRef<(optionKey: string | null) => void>(() => undefined)
+  const submitAnswerRef = useRef<(answer: GuessAnswerSubmission) => void>(() => undefined)
   const startedAtRef = useRef(Date.now())
   const finalRanksRef = useRef<AnswerResult['ranks']>(null)
   const allowNavigationRef = useRef(false)
@@ -192,6 +194,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         playCount: number
         remainingPlayCount: number
         answerDeadlineAt: string | null
+        answerAvailableAt: string | null
       }>(`/api/entertainment/guess-song/sessions/${session.id}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,7 +208,8 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           ...current.question,
           playCount: data.playCount,
           remainingPlayCount: data.remainingPlayCount,
-          answerDeadlineAt: data.answerDeadlineAt,
+           answerDeadlineAt: data.answerDeadlineAt,
+           answerAvailableAt: data.answerAvailableAt,
         },
       } : current)
       const audio = new Audio()
@@ -263,7 +267,15 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     await requestFreshAudio()
   }
 
-  async function submitAnswer(optionKey: string | null) {
+  const searchCandidates = useCallback(async (query: string, signal: AbortSignal) => {
+    const data = await api<{ candidates: GuessSongCandidate[] }>(
+      `/api/entertainment/guess-song/search?q=${encodeURIComponent(query)}`,
+      { signal },
+    )
+    return data.candidates
+  }, [])
+
+  async function submitAnswer(answer: GuessAnswerSubmission) {
     const question = session?.question
     if (!session || !question || answering || answerResult) return
     stopAudio()
@@ -273,7 +285,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       const result = await api<AnswerResult>(`/api/entertainment/guess-song/sessions/${session.id}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionId: question.publicId, optionKey }),
+        body: JSON.stringify({ questionId: question.publicId, ...answer }),
       })
       setAnswerResult(result)
       setNextSession(result.session)
@@ -284,7 +296,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       setAnswering(false)
     }
   }
-  submitAnswerRef.current = (optionKey) => { void submitAnswer(optionKey) }
+  submitAnswerRef.current = (answer) => { void submitAnswer(answer) }
 
   useEffect(() => {
     const deadline = session?.question?.answerDeadlineAt
@@ -294,22 +306,29 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     const timer = window.setTimeout(() => {
       if (timeoutSubmittedRef.current === publicId) return
       timeoutSubmittedRef.current = publicId
-      submitAnswerRef.current(null)
+      submitAnswerRef.current({ optionKey: null, songId: null, answerText: null })
     }, Math.max(0, remaining + 100))
     return () => window.clearTimeout(timer)
   }, [answerResult, session?.question?.answerDeadlineAt, session?.question?.publicId])
 
   useEffect(() => {
     const deadline = session?.question?.answerDeadlineAt
+    const availableAt = session?.question?.answerAvailableAt
     if (!deadline || answerResult) {
       setDeadlineSeconds(null)
       return
     }
-    const update = () => setDeadlineSeconds(Math.max(0, Math.ceil((new Date(deadline).getTime() - Date.now()) / 1000)))
+    const update = () => {
+      if (availableAt && new Date(availableAt).getTime() > Date.now()) {
+        setDeadlineSeconds(null)
+        return
+      }
+      setDeadlineSeconds(Math.max(0, Math.ceil((new Date(deadline).getTime() - Date.now()) / 1000)))
+    }
     update()
     const timer = window.setInterval(update, 1000)
     return () => window.clearInterval(timer)
-  }, [answerResult, session?.question?.answerDeadlineAt])
+  }, [answerResult, session?.question?.answerAvailableAt, session?.question?.answerDeadlineAt])
 
   const continueGame = useCallback(() => {
     if (!nextSession) return
@@ -407,7 +426,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     return (
       <main className="guess-settlement">
         <span>SESSION COMPLETE</span>
-        <h1>{session.mode === 'ENDLESS' ? '无尽挑战结束' : '本局完成'}</h1>
+        <h1>本次挑战结束</h1>
         <strong>{session.score}<small>分</small></strong>
         <div className="guess-settlement-grid">
           <div><span>正确率</span><b>{accuracy}%</b></div>
@@ -444,6 +463,9 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     )
   }
   const progress = durationSeconds ? elapsedSeconds / durationSeconds * 100 : 0
+  const expertAnswerAvailable = question.answerMode !== 'INPUT'
+    || !question.answerAvailableAt
+    || deadlineSeconds !== null
 
   return (
   <main className="games-page games-center-background games-full-width immersive-game-layout guess-play-page">
@@ -456,7 +478,9 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           score={session.score}
           streak={session.currentStreak}
           remaining={session.totalQuestions ? Math.max(0, session.totalQuestions - question.position) : null}
-          lives={session.mode === 'ENDLESS' ? session.livesRemaining : undefined}
+           lives={session.livesRemaining}
+           wrongCount={session.wrongCount}
+           maxWrongCount={session.maxWrongCount ?? undefined}
           countdown={deadlineSeconds}
         />
         {error ? <p className="guess-play-message is-error" role="alert">{error}</p> : null}
@@ -472,15 +496,23 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           onToggle={() => void toggleAudio()}
         />
         <section className="guess-answer-zone answer-section" aria-label="回答区域">
+          {question.answerMode === 'INPUT' ? (
+            <div className="guess-expert-status" aria-live="polite">
+              <span>答题时间 {deadlineSeconds == null ? '音频结束后开始' : `${deadlineSeconds}s`}</span>
+              <span>播放 {question.playCount}/{question.maxPlayCount}</span>
+              <span>错误 {session.wrongCount}/{session.maxWrongCount}</span>
+            </div>
+          ) : null}
 <GuessAnswerInput
   key={question.publicId}
-mode="CHOICE"
+  mode={question.answerMode}
   options={question.options}
-  disabled={answering || Boolean(answerResult)}
+  disabled={answering || Boolean(answerResult) || !expertAnswerAvailable}
   played={question.playCount > 0}
   wrongPulse={answerResult && !answerResult.correct ? 1 : 0}
-  onSubmit={(key) => void submitAnswer(key)}
-/>
+  searchCandidates={question.answerMode === 'INPUT' ? searchCandidates : undefined}
+  onSubmit={(answer) => void submitAnswer(answer)}
+ />
           <GuessFooter played={question.playCount > 0} playCount={question.playCount} maxPlayCount={question.maxPlayCount} />
         </section>
         {answerResult ? (

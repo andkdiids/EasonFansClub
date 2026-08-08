@@ -33,9 +33,9 @@ const homeText = {
   todayMore: '与你常在',
   noToday: '今天还没有历史记录，先留下一个占位。',
   entertainment: '娱乐天空',
-  endlessBest: '无尽模式最高分',
+  simpleBest: '简单模式最高分',
   rankingMore: '进入游戏中心',
-  noRanking: '暂无无尽模式成绩，快去挑战吧。',
+  noRanking: '暂无简单模式成绩，快去挑战吧。',
   randomAlbums: '每日推荐专辑',
   albumsMore: '更多',
   featured: '精选',
@@ -232,7 +232,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       <header><h2>{homeText.entertainment}</h2><Link href="/games">{homeText.rankingMore} →</Link></header>
       <div className="home-entertainment-content">
         {topRanking ? <>
-          <span>{homeText.endlessBest}</span>
+          <span>{homeText.simpleBest}</span>
           <strong>{fmt(topRanking.score)} <small>分</small></strong>
           <p>{topRanking.nickname}</p>
           <small>{shortDate(topRanking.achievedAt)}</small>

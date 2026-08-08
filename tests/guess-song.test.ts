@@ -8,6 +8,7 @@ import {
   GUESS_SONG_ENDLESS_COMBO_INTERVAL,
   GUESS_SONG_MODE_CONFIG,
   calculateGuessSongScore,
+  normalizeGuessSongAnswer,
 } from '../lib/guess-song-config'
 import { getFfmpegPath, processGuessSongAudio } from '../lib/guess-song-audio'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '../lib/guess-song-period'
@@ -70,12 +71,15 @@ function createCosAdapter(client: GuessSongCosClient) {
   })
 }
 
-test('简单模式每题最多播放2次', () => assert.equal(GUESS_SONG_MODE_CONFIG.EASY.maxPlayCount, 2))
-test('进阶模式每题最多播放3次', () => assert.equal(GUESS_SONG_MODE_CONFIG.ADVANCED.maxPlayCount, 3))
-test('困难模式每题最多播放5次', () => assert.equal(GUESS_SONG_MODE_CONFIG.HARD.maxPlayCount, 5))
-test('无尽模式每题最多播放5次且初始规则不使用终极名称', () => {
-  assert.equal(GUESS_SONG_MODE_CONFIG.ENDLESS.maxPlayCount, 5)
-  assert.equal(GUESS_SONG_MODE_CONFIG.ENDLESS.label, '无尽')
+test('四种长期模式每题最多播放5次', () => {
+  for (const mode of ['EASY', 'ADVANCED', 'HARD', 'EXPERT'] as const) {
+    assert.equal(GUESS_SONG_MODE_CONFIG[mode].maxPlayCount, 5)
+    assert.equal(GUESS_SONG_MODE_CONFIG[mode].questionCount, null)
+  }
+  assert.equal(GUESS_SONG_MODE_CONFIG.EASY.maxWrongCount, 3)
+  assert.equal(GUESS_SONG_MODE_CONFIG.ADVANCED.maxWrongCount, 3)
+  assert.equal(GUESS_SONG_MODE_CONFIG.HARD.maxWrongCount, 3)
+  assert.equal(GUESS_SONG_MODE_CONFIG.EXPERT.maxWrongCount, 5)
 })
 
 test('并发播放由条件更新和唯一幂等键双重限制', () => {
@@ -101,8 +105,8 @@ test('每道题通过 answeredAt 与 selectedOptionKey 条件只能提交一次'
   assert.match(service, /duplicate: true/)
 })
 
-test('所有模式答对均获得固定基础分且不受播放次数和试听长度影响', () => {
-  for (const mode of ['EASY', 'ADVANCED', 'HARD', 'ENDLESS'] as const) {
+test('四种长期模式答对均获得固定基础分且不受播放次数和试听长度影响', () => {
+  for (const mode of ['EASY', 'ADVANCED', 'HARD', 'EXPERT'] as const) {
     assert.equal(calculateGuessSongScore({ mode, playCount: 5, streak: 1, durationSeconds: 2, correct: true }), GUESS_SONG_BASE_SCORE)
   }
   assert.equal(calculateGuessSongScore({ mode: 'EASY', playCount: 1, streak: 1, durationSeconds: 7, correct: false }), 0)
@@ -139,11 +143,11 @@ test('相同无尽模式答题结果在多次场次计算中分数一致', () =>
   assert.deepEqual(Array.from({ length: 5 }, () => calculateEndlessTotal(10)), [1270, 1270, 1270, 1270, 1270])
 })
 
-test('困难和无尽模式使用固定试听时长', () => {
+test('四种长期模式使用固定试听时长', () => {
   assert.equal(GUESS_SONG_MODE_CONFIG.EASY.durationSeconds, 7)
   assert.equal(GUESS_SONG_MODE_CONFIG.ADVANCED.durationSeconds, 5)
   assert.equal(GUESS_SONG_MODE_CONFIG.HARD.durationSeconds, 3)
-  assert.equal(GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds, 7)
+  assert.equal(GUESS_SONG_MODE_CONFIG.EXPERT.durationSeconds, 7)
 })
 
 test('题目校验跟随模式时长并且无尽模式只要求7秒变体', () => {
@@ -164,10 +168,11 @@ test('题目校验跟随模式时长并且无尽模式只要求7秒变体', () =
   }), false)
 })
 
-test('无尽模式会话始终选择7秒音频且排行榜保存服务端场次分数', () => {
+test('长期模式会话按模式选择固定音频且排行榜保存服务端场次分数', () => {
   const session = source('lib/guess-song-session.ts')
   const leaderboard = source('lib/guess-song-leaderboard.ts')
-  assert.match(session, /durationSeconds: GUESS_SONG_MODE_CONFIG\.ENDLESS\.durationSeconds/)
+  assert.match(session, /durationSeconds: GUESS_SONG_MODE_CONFIG\[mode\]\.durationSeconds/)
+  assert.match(session, /maxPlayCount: GUESS_SONG_MODE_CONFIG\[mode\]\.maxPlayCount/)
   assert.doesNotMatch(session, /durations\[randomInt/)
   assert.match(leaderboard, /score: session\.score/)
   assert.doesNotMatch(leaderboard, /Math\.random/)
@@ -179,10 +184,26 @@ test('无尽答错扣除机会且归零完成场次', () => {
   assert.match(service, /livesRemaining === 0/)
 })
 
-test('普通模式严格在第10题完成', () => {
-  assert.equal(GUESS_SONG_MODE_CONFIG.EASY.questionCount, 10)
-  assert.equal(GUESS_SONG_MODE_CONFIG.ADVANCED.questionCount, 10)
-  assert.equal(GUESS_SONG_MODE_CONFIG.HARD.questionCount, 10)
+test('普通模式不会在第10题自动完成，而是由错误次数结束', () => {
+  for (const mode of ['EASY', 'ADVANCED', 'HARD'] as const) {
+    assert.equal(GUESS_SONG_MODE_CONFIG[mode].questionCount, null)
+    assert.equal(GUESS_SONG_MODE_CONFIG[mode].maxWrongCount, 3)
+  }
+})
+
+test('专家模式使用手动输入并按规范化歌名比较', () => {
+  assert.equal(GUESS_SONG_MODE_CONFIG.EXPERT.answerMode, 'INPUT')
+  assert.equal(normalizeGuessSongAnswer(' Now Is — The Only One That Is Real '), 'nowistheonlyonethatisreal')
+  assert.equal(normalizeGuessSongAnswer('陈奕迅：DUO 2010'), '陈奕迅duo2010')
+  const session = source('lib/guess-song-session.ts')
+  assert.match(session, /question\.GuessSongQuestion\.musicSongId/)
+  assert.match(session, /normalizeGuessSongAnswer\(targetSongTitle\)/)
+})
+
+test('专家搜索接口只返回公开 EasMusic 曲目候选', () => {
+  const route = source('app/api/entertainment/guess-song/search/route.ts')
+  assert.match(route, /MusicAlbum: \{ status: 'PUBLISHED' \}/)
+  assert.match(route, /take: 12/)
 })
 
 test('未完成场次不写排行榜', () => {

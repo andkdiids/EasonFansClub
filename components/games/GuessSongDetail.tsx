@@ -4,11 +4,12 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { GameCatalogItem } from '@/lib/game-catalog'
-import { GUESS_SONG_INITIAL_LIVES, GUESS_SONG_MODE_CONFIG } from '@/lib/guess-song-config'
+import { GUESS_SONG_MODE_CONFIG, type GuessSongPublicMode } from '@/lib/guess-song-config'
 import { GameDetailLayout } from './GameDetailLayout'
 
-type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS'
+type Mode = GuessSongPublicMode
 type LobbySummary = {
+  expertEnabled: boolean
   weeklyBest: number | null
   monthlyBest: number | null
   recentSession: {
@@ -21,10 +22,10 @@ type LobbySummary = {
 }
 
 const modes: Array<{ mode: Mode; label: string; detail: string }> = [
-  { mode: 'EASY', label: GUESS_SONG_MODE_CONFIG.EASY.label, detail: `${GUESS_SONG_MODE_CONFIG.EASY.durationSeconds} 秒片段 · 最多播放 ${GUESS_SONG_MODE_CONFIG.EASY.maxPlayCount} 次` },
-  { mode: 'ADVANCED', label: GUESS_SONG_MODE_CONFIG.ADVANCED.label, detail: `${GUESS_SONG_MODE_CONFIG.ADVANCED.durationSeconds} 秒片段 · 最多播放 ${GUESS_SONG_MODE_CONFIG.ADVANCED.maxPlayCount} 次` },
-  { mode: 'HARD', label: GUESS_SONG_MODE_CONFIG.HARD.label, detail: `${GUESS_SONG_MODE_CONFIG.HARD.durationSeconds} 秒片段 · 最多播放 ${GUESS_SONG_MODE_CONFIG.HARD.maxPlayCount} 次` },
-  { mode: 'ENDLESS', label: GUESS_SONG_MODE_CONFIG.ENDLESS.label, detail: `${GUESS_SONG_MODE_CONFIG.ENDLESS.durationSeconds} 秒片段 · ${GUESS_SONG_INITIAL_LIVES} 次失误机会` },
+  { mode: 'EASY', label: GUESS_SONG_MODE_CONFIG.EASY.label, detail: '7秒听歌挑战 · 无限题目 · 5次播放' },
+  { mode: 'ADVANCED', label: GUESS_SONG_MODE_CONFIG.ADVANCED.label, detail: '5秒听歌挑战 · 无限题目 · 5次播放' },
+  { mode: 'HARD', label: GUESS_SONG_MODE_CONFIG.HARD.label, detail: '3秒听歌挑战 · 无限题目 · 5次播放' },
+  { mode: 'EXPERT', label: GUESS_SONG_MODE_CONFIG.EXPERT.label, detail: '歌名记忆挑战 · 手动输入 · 5次播放' },
 ]
 
 async function request<T>(url: string, init?: RequestInit) {
@@ -168,12 +169,13 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
           <div>
             {modes.map((item) => {
               const active = summary?.activeSessions.find((entry) => entry.mode === item.mode)
+              const unavailable = item.mode === 'EXPERT' && summary?.expertEnabled === false
               return (
-                <button key={item.mode} type="button" onClick={() => void start(item.mode)} disabled={Boolean(starting)}>
-                  <span>{item.mode}</span>
+                <button key={item.mode} type="button" onClick={() => void start(item.mode)} disabled={Boolean(starting) || unavailable}>
+                  <span>{item.label}挑战</span>
                   <strong>{item.label}</strong>
-                  <small>{item.detail}</small>
-                  <b>{active ? `继续第 ${active.currentPosition} 题` : '开始挑战'}</b>
+                  <small>{unavailable ? '当前暂未开放' : item.detail}</small>
+                  <b>{unavailable ? '暂未开放' : active ? `继续第 ${active.currentPosition} 题` : '开始挑战'}</b>
                 </button>
               )
             })}

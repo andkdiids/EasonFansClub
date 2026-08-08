@@ -1,4 +1,6 @@
 import type { GuessSongMode, GuessSongPeriodType } from '@prisma/client'
+import type { GuessSongPublicMode } from '@/lib/guess-song-config'
+import { toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { prisma } from '@/lib/prisma'
 
@@ -23,9 +25,15 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
       maxStreak: true,
       totalPlayCount: true,
       completedAt: true,
+      questionCount: true,
     },
   })
   if (!session || session.status !== 'COMPLETED' || !session.completedAt) return
+  // Historical ten-question EASY sessions remain in history but must not enter
+  // the replacement infinite simple leaderboard.
+  if (session.mode === 'EASY' && session.questionCount !== null) return
+
+  const leaderboardMode = toPublicGuessSongMode(session.mode) as GuessSongMode
 
   const score: ScoreRecord = {
     score: session.score,
@@ -40,7 +48,7 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
     const where = {
       userId_mode_periodType_periodKey: {
         userId: session.userId,
-        mode: session.mode,
+        mode: leaderboardMode,
         periodType,
         periodKey,
       },
@@ -51,7 +59,7 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
         data: {
           userId: session.userId,
           sessionId: session.id,
-          mode: session.mode,
+          mode: leaderboardMode,
           periodType,
           periodKey,
           ...score,
@@ -85,7 +93,7 @@ function serializeRow(row: LeaderboardRow, rank: number) {
     uid: row.User.uid,
     nickname: row.User.nickname || row.User.username,
     avatarUrl: row.User.Profile?.avatarUrl || row.User.avatarUrl,
-    mode: row.mode,
+    mode: row.mode ? toPublicGuessSongMode(row.mode) : undefined,
     score: row.score,
     correctCount: row.correctCount,
     maxStreak: row.maxStreak,
@@ -97,9 +105,13 @@ function serializeRow(row: LeaderboardRow, rank: number) {
 export async function getGuessSongLeaderboard(input: {
   userId: string
   periodType: GuessSongPeriodType | 'YEAR'
-  mode: GuessSongMode
+  mode: GuessSongPublicMode
   now?: Date
 }) {
+  const modeFilter: GuessSongMode[] = input.mode === 'EASY'
+    ? ['EASY', 'ENDLESS']
+    : [input.mode as GuessSongMode]
+  const legacySimpleFilter = input.mode === 'EASY' ? { questionCount: null } : {}
   let periodKey: string
   let rows: LeaderboardRow[]
 
@@ -110,7 +122,8 @@ export async function getGuessSongLeaderboard(input: {
       where: {
         status: 'COMPLETED',
         completedAt: { gte: start, lt: end },
-        mode: input.mode,
+        mode: { in: modeFilter },
+        ...legacySimpleFilter,
       },
       select: {
         userId: true,
@@ -136,7 +149,7 @@ export async function getGuessSongLeaderboard(input: {
     for (const session of sessions) {
       const candidate: LeaderboardRow = {
         userId: session.userId,
-        mode: session.mode,
+        mode: toPublicGuessSongMode(session.mode) as GuessSongMode,
         User: session.User,
         score: session.score,
         correctCount: session.correctCount,
@@ -157,7 +170,8 @@ export async function getGuessSongLeaderboard(input: {
       where: {
         periodType: input.periodType,
         periodKey,
-        mode: input.mode,
+        mode: { in: modeFilter },
+        ...(input.mode === 'EASY' ? { GuessSongSession: { questionCount: null } } : {}),
       },
       include: {
         User: {
@@ -173,7 +187,13 @@ export async function getGuessSongLeaderboard(input: {
       take: 1000,
     })
     // 周榜/月榜：guessSongLeaderboardEntry 已存储该用户该模式该周期的最高单局成绩，直接采用（非累计）
-    rows = entries.map((entry) => ({ ...entry, mode: entry.mode }))
+    const bestByUser = new Map<string, LeaderboardRow>()
+    for (const entry of entries) {
+      const candidate = { ...entry, mode: toPublicGuessSongMode(entry.mode) as GuessSongMode }
+      const current = bestByUser.get(candidate.userId)
+      if (!current || compareGuessSongScores(candidate, current) < 0) bestByUser.set(candidate.userId, candidate)
+    }
+    rows = [...bestByUser.values()]
   }
 
   rows.sort(compareGuessSongScores)
@@ -188,10 +208,11 @@ export async function getGuessSongLeaderboard(input: {
   }
 }
 
-export async function getGuessSongRanks(userId: string, mode: GuessSongMode, now = new Date()) {
+export async function getGuessSongRanks(userId: string, mode: GuessSongMode | GuessSongPublicMode, now = new Date()) {
+  const publicMode = toPublicGuessSongMode(mode as GuessSongMode)
   const [week, month] = await Promise.all([
-    getGuessSongLeaderboard({ userId, periodType: 'WEEK', mode, now }),
-    getGuessSongLeaderboard({ userId, periodType: 'MONTH', mode, now }),
+    getGuessSongLeaderboard({ userId, periodType: 'WEEK', mode: publicMode, now }),
+    getGuessSongLeaderboard({ userId, periodType: 'MONTH', mode: publicMode, now }),
   ])
   return {
     weekRank: week.currentUser?.rank ?? null,

@@ -48,15 +48,15 @@ export function LedMarqueeText({ text, className }: LedMarqueeTextProps) {
 
   const classes = ['easmusic-led-text', className].filter(Boolean).join(' ')
   const style = {
-    '--led-marquee-duration': '12s',
-    '--led-marquee-gap': '2.5em',
+    '--led-marquee-duration': '30s',
+    '--led-marquee-gap': '4em',
   } as CSSProperties
 
   return (
     <span ref={viewportRef} className={classes} data-overflowing={overflowing ? 'true' : 'false'} style={style} aria-label={text}>
       <span className="easmusic-led-text-run">
         <span ref={measureRef} className="easmusic-led-text-item">{text}</span>
-        {overflowing ? <span className="easmusic-led-text-item" aria-hidden="true">{text}</span> : null}
+        <span className="easmusic-led-text-item" aria-hidden="true">{text}</span>
       </span>
     </span>
   )

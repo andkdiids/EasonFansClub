@@ -7,6 +7,7 @@ export const GUESS_SONG_QUESTION_TYPE_MANUAL = 'MANUAL'
 
 const DEFAULT_CONFIG = {
   enabled: true,
+  expertEnabled: true,
   sourceType: 'ALL',
   albumId: null,
   year: null,
@@ -29,7 +30,7 @@ export async function getOrCreateGuessSongQuizConfig() {
 }
 
 export type GuessSongQuizConfigInput =
-  | { ok: true; data: Pick<GuessSongQuizConfig, 'enabled' | 'sourceType' | 'albumId' | 'year' | 'difficulty' | 'questionCount'> }
+  | { ok: true; data: Pick<GuessSongQuizConfig, 'enabled' | 'expertEnabled' | 'sourceType' | 'albumId' | 'year' | 'difficulty' | 'questionCount'> }
   | { ok: false; error: string }
 
 export function parseGuessSongQuizConfigInput(value: unknown): GuessSongQuizConfigInput {
@@ -52,6 +53,7 @@ export function parseGuessSongQuizConfigInput(value: unknown): GuessSongQuizConf
     ok: true,
     data: {
       enabled: Boolean(body.enabled),
+      expertEnabled: body.expertEnabled !== false,
       sourceType,
       albumId: sourceType === 'ALBUM' ? albumId : null,
       year: sourceType === 'YEAR' ? year : null,

@@ -249,7 +249,7 @@ export async function getHomeTodayEvents() {
 export async function getHomeEntertainmentRanking(userId?: string) {
   const ranking = await safeDb(
     'GuessSongLeaderboard home.ranking',
-    getGuessSongLeaderboard({ userId: userId || '', periodType: 'YEAR', mode: 'ENDLESS' }),
+    getGuessSongLeaderboard({ userId: userId || '', periodType: 'YEAR', mode: 'EASY' }),
     null,
     8000,
   )

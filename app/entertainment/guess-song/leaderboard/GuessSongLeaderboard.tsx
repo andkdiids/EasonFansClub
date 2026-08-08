@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 
 type Period = 'WEEK' | 'MONTH' | 'YEAR'
-type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'ENDLESS' | 'EXPERT'
+type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT'
 type Row = {
   rank: number
   userId: string
@@ -32,10 +32,8 @@ const modeLabels: Record<Mode, string> = {
   ADVANCED: '进阶',
   HARD: '困难',
   EXPERT: '专家',
-  ENDLESS: '无尽',
 }
-// 模式 Tab 固定顺序：简单 → 进阶 → 困难 → 专家（预留）→ 无尽
-const modeOrder: Mode[] = ['EASY', 'ADVANCED', 'HARD', 'EXPERT', 'ENDLESS']
+const modeOrder: Mode[] = ['EASY', 'ADVANCED', 'HARD', 'EXPERT']
 const periodLabels: Record<Period, string> = { WEEK: '周榜', MONTH: '月榜', YEAR: '年榜' }
 const periodTitles: Record<Period, string> = {
   WEEK: '本周听听挑战排名',
@@ -56,16 +54,14 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
   const [mode, setMode] = useState<Mode>(initialMode in modeLabels ? (initialMode as Mode) : 'EASY')
   // 始终保留「上一份数据」：切换周期时先显示旧榜单，避免空列表 / 骨架闪烁，数据返回后直接原地替换
   const [data, setData] = useState<Data | null>(initialData)
-  // 仅在「尚未加载过任何数据」且非专家模式时，首屏才进入 loading（服务端已预取，通常首屏即 data 就绪）
-  const [loading, setLoading] = useState<boolean>(!initialData && initialMode !== 'EXPERT')
+  // 仅在尚未加载过任何数据时进入 loading；专家模式也使用真实排行榜。
+  const [loading, setLoading] = useState<boolean>(!initialData)
   const [error, setError] = useState('')
   // 已加载数据缓存：period:mode -> Data。命中即秒切、不触发 loading 闪烁；未命中也保留旧列表仅显轻量 loading
   const cache = useRef<Map<string, Data>>(new Map())
   if (initialData) cache.current.set(`${initialPeriod}:${initialMode}`, initialData)
 
   useEffect(() => {
-    // 专家模式为预留入口，不请求排行榜 API
-    if (mode === 'EXPERT') return
     const key = `${period}:${mode}`
     // 命中缓存：直接替换，无需 loading，无闪烁
     const cached = cache.current.get(key)
@@ -102,7 +98,6 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
     }
   }, [mode, period])
 
-  const isExpert = mode === 'EXPERT'
   // 仅当「从未成功加载过任何数据」且仍在首次请求中，才显示骨架（切换时旧数据在场，永不显骨架）
   const firstLoad = !data && loading
   const ownRank = data && data.currentUser && data.currentUser.rank > 0 ? data.currentUser : null
@@ -163,13 +158,7 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
         <div>{modeOrder.map((item) => <button key={item} aria-pressed={mode === item} onClick={() => setMode(item)}>{modeLabels[item]}</button>)}</div>
       </div>
       {error ? <p className="guess-song-error">{error}</p> : null}
-      {isExpert ? (
-        <div className="guess-song-leaderboard-expert">
-          <strong>专家模式</strong>
-          <span>敬请期待</span>
-        </div>
-      ) : (
-        <div className="guess-song-board-wrap">
+      <div className="guess-song-board-wrap">
           {/* 轻量 loading 指示：仅细进度条，绝不替换内容，杜绝空列表 / 骨架闪现 */}
           {loading ? <div className="guess-song-loading-bar" aria-hidden="true" /> : null}
           {data ? (
@@ -188,8 +177,7 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
           ) : (
             <p className="guess-song-empty">当前榜单暂无成绩，完成一局后即可参与排名。</p>
           )}
-        </div>
-      )}
+      </div>
       <nav className="guess-song-back-links"><Link href="/games/guess-song">返回游戏详情</Link><Link href="/games">返回娱乐天空</Link></nav>
     </>
   )

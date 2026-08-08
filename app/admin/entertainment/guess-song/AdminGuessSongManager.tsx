@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { GUESS_SONG_MODE_CONFIG } from '@/lib/guess-song-config'
 
 type Difficulty = 'EASY' | 'ADVANCED' | 'HARD'
 type ProcessingStatus = 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED'
@@ -66,6 +67,16 @@ type FormState = {
   enabled: boolean
 }
 type UploadStage = 'uploading' | 'converting' | 'generating' | 'cos'
+type QuizConfig = {
+  id: string
+  enabled: boolean
+  expertEnabled: boolean
+  sourceType: string
+  albumId: string | null
+  year: number | null
+  difficulty: Difficulty
+  questionCount: number
+}
 
 const emptyForm: FormState = {
   songTitle: '',
@@ -96,7 +107,11 @@ const uploadStageLabels: Record<UploadStage, string> = {
   generating: '正在生成 2～7 秒片段',
   cos: '正在上传腾讯云 COS',
 }
-const requiredDuration: Record<Difficulty, number> = { EASY: 7, ADVANCED: 4, HARD: 2 }
+const requiredDuration: Record<Difficulty, number> = {
+  EASY: GUESS_SONG_MODE_CONFIG.EASY.durationSeconds,
+  ADVANCED: GUESS_SONG_MODE_CONFIG.ADVANCED.durationSeconds,
+  HARD: GUESS_SONG_MODE_CONFIG.HARD.durationSeconds,
+}
 const acceptedAudioTypes = new Set([
   'audio/mpeg',
   'audio/mp3',
@@ -204,6 +219,8 @@ export function AdminGuessSongManager() {
   const [playingKey, setPlayingKey] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [quizConfig, setQuizConfig] = useState<QuizConfig | null>(null)
+  const [configSaving, setConfigSaving] = useState(false)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const uploadRegionRef = useRef<HTMLDivElement | null>(null)
   const selectedMusicSong = musicSongs.find((song) => song.id === form.musicSongId) || null
@@ -242,6 +259,12 @@ export function AdminGuessSongManager() {
     const timer = window.setTimeout(() => void load(), 180)
     return () => window.clearTimeout(timer)
   }, [load])
+
+  useEffect(() => {
+    void api<{ config: QuizConfig }>('/api/admin/entertainment/guess-song/config')
+      .then((data) => setQuizConfig(data.config))
+      .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : '游戏配置加载失败'))
+  }, [])
 
   useEffect(() => () => {
     previewAudioRef.current?.pause()
@@ -522,6 +545,25 @@ export function AdminGuessSongManager() {
     }
   }
 
+  async function toggleExpertEnabled() {
+    if (!quizConfig || configSaving) return
+    setConfigSaving(true)
+    setError('')
+    try {
+      const data = await api<{ config: QuizConfig }>('/api/admin/entertainment/guess-song/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...quizConfig, expertEnabled: !quizConfig.expertEnabled }),
+      })
+      setQuizConfig(data.config)
+      setMessage(data.config.expertEnabled ? '专家模式已开启' : '专家模式已关闭')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '专家模式配置保存失败')
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
   const field = (key: keyof FormState, label: string, required = true) => (
     <label>
       <span>{label}</span>
@@ -543,6 +585,22 @@ export function AdminGuessSongManager() {
       </header>
       {message ? <p className="guess-song-admin-message" role="status">{message}</p> : null}
       {error ? <p className="guess-song-error" role="alert">{error}</p> : null}
+      <section className="guess-song-admin-config">
+        <div>
+          <small>CHALLENGE MODES</small>
+          <h2>长期挑战模式</h2>
+          <p>前台固定显示简单、进阶、困难、专家四种挑战；历史旧版场次仍由服务端兼容读取。</p>
+        </div>
+        <label>
+          <input
+            type="checkbox"
+            checked={Boolean(quizConfig?.expertEnabled)}
+            disabled={!quizConfig || configSaving}
+            onChange={() => void toggleExpertEnabled()}
+          />
+          启用专家模式
+        </label>
+      </section>
 
       <form onSubmit={save} className="guess-song-admin-form">
         <div className="guess-song-admin-form-heading">
@@ -663,7 +721,7 @@ export function AdminGuessSongManager() {
               checked={form.allowEndless}
               onChange={(event) => setForm({ ...form, allowEndless: event.target.checked })}
             />
-            允许进入无尽模式
+            用于长期挑战题库
           </label>
         </div>
         <button className="guess-song-admin-primary" disabled={saving}>
