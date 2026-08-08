@@ -395,13 +395,13 @@ export function StickerPicker({
                     setActivePackId(pack.id)
                     setView('pack')
                   }}
-                  className={`relative grid h-7 w-7 flex-none cursor-pointer place-items-center overflow-hidden rounded-md ring-1 transition sm:h-8 sm:w-8 ${activePackId === pack.id && view === 'pack' ? 'ring-2 ring-amber-400' : 'ring-slate-200 hover:ring-slate-300'}`}
+                  className={`relative box-border grid h-7 w-7 flex-none cursor-pointer place-items-center overflow-hidden rounded-md p-0.5 ring-1 transition sm:h-8 sm:w-8 ${activePackId === pack.id && view === 'pack' ? 'ring-2 ring-amber-400' : 'ring-slate-200 hover:ring-slate-300'}`}
                   aria-label={`表情包：${pack.name}`}
                   title={pack.name}
                 >
                   {packIcon ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={packIcon} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    <img src={packIcon} alt="" className="h-full w-full object-contain" loading="lazy" />
                   ) : (
                     <span className="text-base sm:text-lg">😊</span>
                   )}
