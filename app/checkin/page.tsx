@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { anonymizeCheckInMessages, getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
@@ -130,7 +130,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           totalCheckIns={streaks.totalDays}
           moodIndex={moodIndex}
           todayCheckIn={todayCheckInPayload}
-          selectedMessages={anonymizeCheckInMessages(selectedMessages)}
+          selectedMessages={selectedMessages}
           friendMessages={friendMessages}
           selectedDateValue={selectedDateValue}
           todayValue={todayValue}

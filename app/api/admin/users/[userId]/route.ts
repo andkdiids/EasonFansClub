@@ -1,12 +1,22 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import type { UserRole, UserStatus } from '@prisma/client'
 import { deleteUserPermanently, getUserDeletionPreview } from '@/lib/admin-user-deletion'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { invalidateCurrentUserCache } from '@/lib/auth'
+import { isValidEmail, normalizeEmail } from '@/lib/email-verification'
 import { prisma } from '@/lib/prisma'
 import { adjustRegistrationFeeBalance } from '@/lib/registration-fee'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
+
+function maskEmail(value: string | null) {
+  if (!value) return null
+  const [localPart, domain] = value.split('@')
+  if (!localPart || !domain) return '***'
+  return `${localPart.slice(0, 1)}***@${domain}`
+}
 
 async function requireUserDeletionPermission() {
   const guard = await requireAdmin()
@@ -54,6 +64,66 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { userId } = await context.params
   const body = await request.json().catch(() => null)
   const action = sanitizeText(body?.action, 40)
+
+  if (action === 'updateEmail') {
+    const email = normalizeEmail(sanitizeText(body?.email, 320))
+    if (!email || email.length > 254 || !isValidEmail(email)) {
+      return NextResponse.json({ message: '请输入有效邮箱地址' }, { status: 400 })
+    }
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const target = await tx.user.findUnique({
+          where: { id: userId },
+          select: { id: true, email: true, emailVerifiedAt: true },
+        })
+        if (!target) throw new Error('USER_NOT_FOUND')
+        if (target.email === email) {
+          return { changed: false, user: { id: target.id, email: target.email, emailVerifiedAt: target.emailVerifiedAt } }
+        }
+
+        const conflict = await tx.user.findFirst({
+          where: { email, isDeleted: false, NOT: { id: userId } },
+          select: { id: true },
+        })
+        if (conflict) throw new Error('EMAIL_ALREADY_EXISTS')
+
+        const user = await tx.user.update({
+          where: { id: userId },
+          data: { email, emailVerifiedAt: null },
+          select: { id: true, email: true, emailVerifiedAt: true },
+        })
+
+        await tx.adminActionLog.create({
+          data: {
+            adminId: guard.user.id,
+            targetUserId: userId,
+            action: 'UPDATE_USER_EMAIL',
+            detail: {
+              previousEmail: maskEmail(target.email),
+              newEmail: maskEmail(user.email),
+              reason: sanitizeText(body?.reason, 180) || null,
+            },
+          },
+        })
+
+        return { changed: true, user }
+      })
+
+      invalidateCurrentUserCache(userId)
+      return NextResponse.json({
+        user: result.user,
+        message: result.changed ? '绑定邮箱已修改' : '绑定邮箱未发生变化',
+      })
+    } catch (error) {
+      const code = error instanceof Error ? error.message : ''
+      if (code === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+      if (code === 'EMAIL_ALREADY_EXISTS' || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+        return NextResponse.json({ message: '该邮箱已被其他用户绑定' }, { status: 409 })
+      }
+      throw error
+    }
+  }
 
   if (action === 'delete') {
     const deleteGuard = await requireUserDeletionPermission()

@@ -3563,7 +3563,28 @@ body:has(.games-full-width) .app-shell main {
 }
 
 /* 今日模块：顶部分隔线(border-top)与标题之间留出间距，避免横线贴住「今日」标题 */
-.home-today-panel { padding-top: 16px; }
+/* 桌面端三列首页模块共享同一行高；今日模块的额外顶部留白只保留在移动端。 */
+@media (min-width:768px) {
+  .home-primary-columns > .community-panel {
+    display:flex;
+    min-height:0;
+    flex-direction:column;
+  }
+  .home-primary-columns > .community-panel > header { flex:none; }
+  .home-primary-columns .home-daily-music,
+  .home-primary-columns .home-today-content,
+  .home-primary-columns .home-entertainment-content {
+    flex:1 1 auto;
+  }
+  .home-primary-columns .home-today-content { padding-bottom:8px; }
+  .home-primary-columns .home-daily-music-copy { display:flex; flex-direction:column; }
+  .home-primary-columns .home-daily-music-button,
+  .home-primary-columns .home-entertainment-button { margin-top:auto; }
+}
+
+@media (max-width:767px) {
+  .home-today-panel { padding-top:16px; }
+}
 
 /* 表情包合集网格：列数与最大宽度通过 CSS 变量控制（inline style 可靠生效）。
    避免动态拼接 Tailwind 任意值类名导致 JIT 无法生成、grid-template-columns 实际未应用的 bug。

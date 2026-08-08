@@ -108,6 +108,7 @@ export function PostRepliesSection({
 }>) {
   const [replies, setReplies] = useState(() => initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
+  const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => buildReplyTree(replies), [replies])
   const replyMap = useMemo(() => buildReplyMap(replies), [replies])
@@ -154,10 +155,32 @@ export function PostRepliesSection({
     }
   }, [focusId, replies, replyMap])
 
+  useEffect(() => {
+    if (!activeReplyId) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`reply-form-${activeReplyId}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      target?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeReplyId])
+
+  function findRootReplyId(replyId: string) {
+    let current = replyMap.get(replyId)
+    const visited = new Set<string>()
+    while (current?.parentId && replyMap.has(current.parentId) && !visited.has(current.id)) {
+      visited.add(current.id)
+      current = replyMap.get(current.parentId)
+    }
+    return current?.id || null
+  }
+
   function addReply(reply: unknown) {
     const created = normalizeReply(reply)
     if (!created) return
     setReplies((current) => current.some((item) => item.id === created.id) ? current : [...current, created])
+    const rootId = created.parentId ? findRootReplyId(created.parentId) : null
+    if (rootId) setExpandedReplies((current) => ({ ...current, [rootId]: true }))
   }
 
   function removeReply(replyId: string) {
@@ -238,6 +261,16 @@ export function PostRepliesSection({
               listUrl={`/api/replies/${reply.id}/like`}
               className="mt-1.5"
             />
+            {currentUserId && replyTo?.id === reply.id ? (
+              <div id={`reply-form-${reply.id}`} className="mt-3">
+                <ReplyForm
+                  postId={postId}
+                  replyTo={replyTo}
+                  onReplyCancel={() => setReplyTo(null)}
+                  onReplyCreated={addReply}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -297,6 +330,16 @@ export function PostRepliesSection({
             className="mt-2"
           />
         </div>
+        {currentUserId && replyTo?.id === reply.id ? (
+          <div id={`reply-form-${reply.id}`} className="mt-3">
+            <ReplyForm
+              postId={postId}
+              replyTo={replyTo}
+              onReplyCancel={() => setReplyTo(null)}
+              onReplyCreated={addReply}
+            />
+          </div>
+        ) : null}
         {visibleChildren.length ? (
           <div className="post-reply-thread mt-2 ml-3 space-y-1 pl-3 sm:ml-4 sm:pl-4">
             {visibleChildren.map((child) => renderCompactReply(child))}
@@ -341,16 +384,15 @@ export function PostRepliesSection({
         </div>
       )}
 
-      {currentUserId ? (
+      {currentUserId && !replyTo ? (
         <ReplyForm
           postId={postId}
-          replyTo={replyTo}
           onReplyCancel={() => setReplyTo(null)}
           onReplyCreated={addReply}
         />
-      ) : (
+      ) : !currentUserId ? (
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
-      )}
+      ) : null}
     </section>
   )
 }

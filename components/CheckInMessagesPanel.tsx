@@ -282,7 +282,7 @@ export function CheckInMessagesPanel({
     <div className={`checkin-messages-panel ${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex h-full flex-col rounded-[24px] border shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
-          {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{anonymous ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
+          {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{scope === 'public' ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
           <h2 className={isMinimal ? 'text-base font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950'}>{title || '病友留言'}</h2>
         </div>
         {!isMinimal ? <form
@@ -374,7 +374,6 @@ export function CheckInMessagesPanel({
                     ) : (
                       fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>{name}</a> : null
                     )}
-                    {!anonymous && !isMinimal && fullIdentity ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(fullIdentity.uid)}</span> : null}
                     {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood ? `${mood.icon} ${mood.label}` : '未填写心情'}</span> : mood ? <span className="text-xs">{mood.icon}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
@@ -410,7 +409,6 @@ export function CheckInMessagesPanel({
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950">{commentName}</a>}
-                                  {!anonymous && commentIdentity ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-black text-brand-700">UID {formatUid(commentIdentity.uid)}</span> : null}
                                   <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
                                 </div>
                                 <p className="mt-1 whitespace-pre-wrap">{comment.content}</p>
@@ -440,7 +438,6 @@ export function CheckInMessagesPanel({
                                             <div className="min-w-0 flex-1">
                                               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                                                 {anonymous || !childIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="font-black text-brand-950">{childName}</a>}
-                                                {!anonymous && childIdentity ? <span className="font-bold text-slate-400">UID {formatUid(childIdentity.uid)}</span> : null}
                                                 {!anonymous && childIdentity ? <span className="font-bold text-slate-400">Lv.{childIdentity.level}</span> : null}
                                                 <span className="font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
                                               </div>

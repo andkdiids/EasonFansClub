@@ -89,6 +89,8 @@ export function ProfileCheckInCalendar() {
 export function ProfileRecentMessages() {
   const [messages, setMessages] = useState<LoadState<Message[]>>(initial([]))
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     loadJson<{ messages: Message[] }>('/api/profile/messages')
@@ -100,9 +102,28 @@ export function ProfileRecentMessages() {
     setExpanded((current) => ({ ...current, [id]: !current[id] }))
   }
 
+  async function deleteMessage(id: string) {
+    if (deletingId) return
+    if (!window.confirm('确认删除这条挂号留言吗？')) return
+
+    setDeletingId(id)
+    setDeleteError('')
+    try {
+      const response = await fetch(`/api/daily-messages/${id}`, { method: 'DELETE', credentials: 'same-origin' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.message || '留言删除失败')
+      setMessages((current) => ({ ...current, data: current.data.filter((item) => item.id !== id) }))
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : '留言删除失败')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
 <div className="h-full  border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
+      {deleteError ? <p className="mt-3 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{deleteError}</p> : null}
       <div className="mt-5 space-y-3">
         {messages.failed ? <ModuleFallback /> : null}
         {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
@@ -139,6 +160,14 @@ export function ProfileRecentMessages() {
                 >
                   💬 回复 {item.commentCount}
                   {hasReplies ? <span className="text-[10px]">{isExpanded ? '▲' : '▼'}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteMessage(item.id)}
+                  disabled={deletingId === item.id}
+                  className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-black text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deletingId === item.id ? '删除中…' : '删除'}
                 </button>
               </div>
 

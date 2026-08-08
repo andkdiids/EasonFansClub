@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { isSuperAdmin } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { requireUser, sanitizeText } from '@/lib/security'
@@ -34,21 +35,61 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '请填写有效日期、类型、标题和内容' }, { status: 400 })
   }
 
-  const event = await prisma.todayEvent.create({
-    data: {
-      date: date.date,
-      month: date.month,
-      day: date.day,
-      type,
-      title,
-      content,
-      imageUrl,
-      source: 'ADMIN',
-      reference: reference || null,
-      status: 'PENDING',
-      submittedById: guard.user.id,
-    },
-    select: { id: true, status: true, title: true },
+  const moderationStatus = isSuperAdmin(guard.user) ? 'APPROVED' as const : 'PENDING' as const
+  const event = await prisma.$transaction(async (tx) => {
+    const createdEvent = await tx.todayEvent.create({
+      data: {
+        date: date.date,
+        month: date.month,
+        day: date.day,
+        type,
+        title,
+        content,
+        imageUrl,
+        source: 'ADMIN',
+        reference: reference || null,
+        status: moderationStatus,
+        reviewedAt: moderationStatus === 'APPROVED' ? new Date() : null,
+        reviewedById: moderationStatus === 'APPROVED' ? guard.user.id : null,
+        submittedById: guard.user.id,
+      },
+      select: { id: true, status: true, title: true },
+    })
+
+    if (moderationStatus === 'PENDING') {
+      const admins = await tx.user.findMany({
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+          status: 'ACTIVE',
+          isDeleted: false,
+          OR: [
+            { role: 'SUPER_ADMIN' },
+            { AdminPermission: { some: { permissionKey: 'today_manage', enabled: true } } },
+          ],
+        },
+        select: { id: true },
+      })
+
+      if (admins.length) {
+        await tx.notification.createMany({
+          data: admins.map((admin) => ({
+            recipientId: admin.id,
+            type: 'ADMIN' as const,
+            title: '有新的今日内容等待审核',
+            content: createdEvent.title,
+            link: '/admin/today',
+            key: `today-review:${createdEvent.id}`,
+          })),
+          skipDuplicates: true,
+        })
+      }
+    }
+
+    return createdEvent
   })
-  return NextResponse.json({ event, message: '今日内容已提交，等待管理员审核' }, { status: 201 })
+
+  return NextResponse.json({
+    event,
+    message: moderationStatus === 'APPROVED' ? '今日内容已提交并直接发布' : '今日内容已提交，等待管理员审核',
+  }, { status: 201 })
 }

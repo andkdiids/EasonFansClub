@@ -64,7 +64,7 @@ function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
-export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccountSecurity: boolean }) {
+export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail }: { canManageAccountSecurity: boolean; canManageUserEmail: boolean }) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -76,6 +76,10 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
   const [deletePublicContent, setDeletePublicContent] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [securityBusyUserId, setSecurityBusyUserId] = useState<string | null>(null)
+  const [emailTarget, setEmailTarget] = useState<AdminUser | null>(null)
+  const [emailInput, setEmailInput] = useState('')
+  const [emailError, setEmailError] = useState('')
+  const [emailBusyUserId, setEmailBusyUserId] = useState<string | null>(null)
 
   async function loadUsers(search = query) {
     setLoading(true)
@@ -136,6 +140,42 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
       setError(err instanceof Error ? err.message : '删除失败')
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  function openEmailModal(user: AdminUser) {
+    setEmailTarget(user)
+    setEmailInput(user.email || '')
+    setEmailError('')
+    setError('')
+    setMessage('')
+  }
+
+  async function updateEmail() {
+    if (!emailTarget || emailBusyUserId || !emailInput.trim()) return
+
+    setEmailBusyUserId(emailTarget.id)
+    setEmailError('')
+    setError('')
+    setMessage('')
+    try {
+      const response = await fetch(`/api/admin/users/${emailTarget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'updateEmail', email: emailInput.trim() }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.message || '绑定邮箱修改失败')
+      setUsers((current) => current.map((item) => item.id === emailTarget.id
+        ? { ...item, email: data?.user?.email || emailInput.trim().toLowerCase(), emailVerifiedAt: data?.user?.emailVerifiedAt || null }
+        : item))
+      setEmailTarget(null)
+      setMessage(data?.message || '绑定邮箱已修改')
+    } catch (updateError) {
+      setEmailError(updateError instanceof Error ? updateError.message : '绑定邮箱修改失败')
+    } finally {
+      setEmailBusyUserId(null)
     }
   }
 
@@ -275,6 +315,15 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
                         {securityBusyUserId === user.id ? '处理中...' : user.securityQuestionRecoveryEnabled ? '停用密保找回' : '启用密保找回'}
                       </button>
                     ) : null}
+                    {canManageUserEmail ? (
+                      <button
+                        type="button"
+                        onClick={() => openEmailModal(user)}
+                        className="mb-2 ml-2 min-h-10 rounded-full border border-sky-200 bg-sky-50 px-4 text-sm font-black text-brand-700"
+                      >
+                        修改绑定邮箱
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => openDeleteModal(user)}
@@ -382,6 +431,60 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
             ) : (
               <div className="mt-6 rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">正在加载删除预览...</div>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {emailTarget ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[28px] border border-sky-100 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Account Email</p>
+                <h3 className="mt-2 text-2xl font-black text-brand-950">修改绑定邮箱</h3>
+                <p className="mt-2 text-sm font-bold leading-7 text-slate-500">为 {emailTarget.nickname}（UID {formatUid(emailTarget.uid)}）直接更新绑定邮箱，不需要原邮箱或新邮箱验证码。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmailTarget(null)}
+                disabled={emailBusyUserId === emailTarget.id}
+                className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700"
+              >
+                取消
+              </button>
+            </div>
+
+            <label className="mt-6 block text-sm font-black text-brand-950">
+              新绑定邮箱
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(event) => setEmailInput(event.target.value)}
+                placeholder="name@example.com"
+                autoFocus
+                className="mt-2 min-h-12 w-full rounded-2xl border border-sky-100 px-4 font-bold outline-none focus:border-brand-400"
+              />
+            </label>
+            {emailError ? <p className="mt-3 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{emailError}</p> : null}
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setEmailTarget(null)}
+                disabled={emailBusyUserId === emailTarget.id}
+                className="min-h-11 rounded-full bg-sky-50 px-5 text-sm font-black text-brand-700"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={updateEmail}
+                disabled={!emailInput.trim() || emailBusyUserId === emailTarget.id}
+                className="min-h-11 rounded-full bg-brand-700 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {emailBusyUserId === emailTarget.id ? '保存中…' : '保存绑定邮箱'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

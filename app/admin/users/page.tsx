@@ -7,6 +7,7 @@ import { adminModulePermissions, hasAdminPermission } from '@/lib/admin-permissi
 export default async function AdminUsersPage() {
   const user = await requireAdminPage('/admin/users', adminModulePermissions['/admin/users'])
   const canManageAccountSecurity = await hasAdminPermission(user, 'account_security_manage')
+  const canManageUserEmail = await hasAdminPermission(user, 'user_manage')
 
   return (
     <>
@@ -22,7 +23,7 @@ export default async function AdminUsersPage() {
             返回后台首页
           </Link>
         </section>
-        <AdminUsersManager canManageAccountSecurity={canManageAccountSecurity} />
+        <AdminUsersManager canManageAccountSecurity={canManageAccountSecurity} canManageUserEmail={canManageUserEmail} />
       </main>
     </>
   )
