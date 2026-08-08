@@ -248,6 +248,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     return (
       <section className={`community-panel concert-panel home-today-panel${device === 'mobile' ? ' mb-5' : ''}`} aria-label="Today in history">
         <header><h2>{homeText.today}</h2><Link href="/today">{homeText.todayMore} →</Link></header>
+        <div className="home-today-content">
         {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
         {events.length > 0 && events.length <= 2 ? (
           <div className="home-today-list">
@@ -275,6 +276,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
             <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + events.length) % events.length)} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % events.length)} aria-label="下一条">→</button></div>
           </div>
         ) : null}
+        </div>
       </section>
     )
   }
