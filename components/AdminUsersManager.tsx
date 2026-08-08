@@ -346,7 +346,7 @@ export function AdminUsersManager({ canManageAccountSecurity }: { canManageAccou
                     className="mt-1 size-4"
                   />
                   <span>
-                    同时删除这个用户的公开帖子、回复和 E友留言。默认不勾选时，公开内容会保留并显示为“已注销用户”。
+                    同时删除这个用户的公开帖子、回复和病友留言。默认不勾选时，公开内容会保留并显示为“已注销用户”。
                   </span>
                 </label>
 

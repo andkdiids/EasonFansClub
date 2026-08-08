@@ -5,7 +5,7 @@ export const adminPermissionGroups = [
   { key: 'reply_manage', label: '回复管理', description: '删除、恢复和屏蔽回复。' },
   { key: 'board_manage', label: '板块管理', description: '创建、编辑、隐藏和排序论坛板块。' },
   { key: 'checkin_manage', label: '每日挂号管理', description: '查看签到记录、补签和重置签到。' },
-  { key: 'daily_message_manage', label: 'E友留言管理', description: '删除、精选和管理留言互动。' },
+  { key: 'daily_message_manage', label: '病友留言管理', description: '删除、精选和管理留言互动。' },
   { key: 'music_manage', label: 'EasMusic 管理', description: '维护音乐专辑、歌曲资料和播放来源预留信息。' },
   { key: 'entertainment_manage', label: '娱乐中心管理', description: '维护每日抽奖使用的歌词处方库。' },
   { key: 'achievement_manage', label: '成就 / 勋章管理', description: '管理成就、勋章、称号和奖励。' },

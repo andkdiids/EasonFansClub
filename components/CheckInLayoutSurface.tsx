@@ -50,6 +50,10 @@ function densityCardClass(density: PageLayoutModuleDensity) {
   return 'checkin-layout-card rounded-sm border border-sky-100 bg-white/85'
 }
 
+function publicMessagesTitle(title?: string | null) {
+  return !title || title === 'E友留言' || title === '公开挂号留言' ? '病友留言' : title
+}
+
 function CheckInStatsCard({
   density,
   activeUsers,
@@ -199,7 +203,7 @@ export function createCheckInLayoutModules({
         ),
         'checkin.publicMessages': (layoutItem, { density }) => (
           <CheckInMessagesPanel
-            title={layoutItem.title ?? undefined}
+            title={publicMessagesTitle(layoutItem.title)}
             density={density}
             anonymous
             scope="public"

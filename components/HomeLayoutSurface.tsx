@@ -30,7 +30,7 @@ const homeText = {
   noMusic: '今日暂时没有可试听的推荐歌曲。',
   noLyrics: '这首歌还没有歌词资料。',
   today: '今日',
-  todayMore: '查看全部今日',
+  todayMore: '与你常在',
   noToday: '今天还没有历史记录，先留下一个占位。',
   entertainment: '娱乐天空',
   endlessBest: '无尽模式最高分',

@@ -46,7 +46,9 @@ export async function GET(request: Request) {
   const status = isModerationStatus(rawStatus) ? rawStatus : 'PENDING'
   const posts = await prisma.post.findMany({
     where: { moderationStatus: status, isDeleted: false },
-    orderBy: { createdAt: 'asc' },
+    orderBy: status === 'PENDING'
+      ? [{ createdAt: 'desc' as const }]
+      : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }],
     take: 200,
     select: reviewSelect,
   })
@@ -67,6 +69,7 @@ export async function PATCH(request: Request) {
 
   try {
     const post = await prisma.$transaction(async (tx) => {
+      const reviewedAt = new Date()
       const current = await tx.post.findFirst({
         where: { id: postId, isDeleted: false },
         select: { id: true, authorId: true, boardId: true, title: true, moderationStatus: true },
@@ -74,7 +77,7 @@ export async function PATCH(request: Request) {
       if (!current) throw new Error('POST_NOT_FOUND')
       const updated = await tx.post.update({
         where: { id: postId, isDeleted: false },
-        data: { moderationStatus: status, reviewedAt: new Date(), reviewedById: guard.user.id, rejectionReason },
+        data: { moderationStatus: status, reviewedAt, reviewedById: guard.user.id, rejectionReason },
         select: { id: true, moderationStatus: true },
       })
       await tx.adminAction.create({
@@ -86,6 +89,14 @@ export async function PATCH(request: Request) {
         },
       })
       if (current.moderationStatus !== status) {
+        await tx.notification.updateMany({
+          where: {
+            type: 'ADMIN',
+            isRead: false,
+            key: `post-review:${current.id}`,
+          },
+          data: { isRead: true, readAt: reviewedAt },
+        })
         const postCount = await tx.post.count({
           where: { boardId: current.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
         })

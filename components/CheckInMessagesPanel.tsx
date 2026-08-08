@@ -28,6 +28,14 @@ function updateUrl(date: string, sort: CheckInMessageSort) {
   window.history.pushState(null, '', `${url.pathname}?${url.searchParams.toString()}`)
 }
 
+type CheckInMessagesChangedDetail = { messageId?: string; date?: string }
+
+function notifyCheckInMessagesChanged(messageId: string, date: string) {
+  window.dispatchEvent(new CustomEvent<CheckInMessagesChangedDetail>('checkin:messages-changed', {
+    detail: { messageId, date },
+  }))
+}
+
 function buildCommentTree(comments: DailyComment[]) {
   const byParent = new Map<string | null, DailyComment[]>()
   comments.forEach((comment) => {
@@ -111,7 +119,7 @@ export function CheckInMessagesPanel({
     return Array.from({ length: end - start + 1 }, (_, index) => start + index)
   }, [page, totalPages])
 
-  const loadMessages = useCallback(async (nextDate = date, nextSort = sort) => {
+  const loadMessages = useCallback(async (nextDate = date, nextSort = sort, syncUrl = true) => {
     if (isLoading) return
 
     setError('')
@@ -146,7 +154,7 @@ export function CheckInMessagesPanel({
         liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
       })))
       setPage(1)
-      updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest')
+      if (syncUrl) updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest')
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '留言列表暂时无法加载，请稍后重试')
     } finally {
@@ -229,6 +237,19 @@ export function CheckInMessagesPanel({
     }
   }, [loadMessages, maxDate, previewMode, sort])
 
+  useEffect(() => {
+    if (previewMode) return
+    function handleMessagesChanged(event: Event) {
+      const detail = (event as CustomEvent<CheckInMessagesChangedDetail>).detail
+      if (detail?.date && detail.date !== date) return
+      if (detail?.messageId && !messages.some((item) => item.id === detail.messageId)) return
+      void loadMessages(detail?.date || date, sort, false)
+    }
+
+    window.addEventListener('checkin:messages-changed', handleMessagesChanged)
+    return () => window.removeEventListener('checkin:messages-changed', handleMessagesChanged)
+  }, [date, loadMessages, messages, previewMode, sort])
+
   // 管理员删除留言：复用后台既有软删除接口（服务端校验 daily_message_manage 权限），
   // 成功后只从当前列表局部移除目标留言，不重新加载列表、不改动分页/筛选/滚动位置。
   // 若删除后当前页恰好为空且页码大于 1，由下方 page > totalPages 的夹取 effect 退回上一有效页。
@@ -247,6 +268,7 @@ export function CheckInMessagesPanel({
         throw new Error(typeof data.message === 'string' ? data.message : '删除失败，请稍后重试')
       }
       setMessages((current) => current.filter((message) => message.id !== deleteTarget.id))
+      notifyCheckInMessagesChanged(deleteTarget.id, date)
       setDeleteTarget(null)
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除失败，请稍后重试')
@@ -261,7 +283,7 @@ export function CheckInMessagesPanel({
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{anonymous ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
-          <h2 className={isMinimal ? 'text-base font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950'}>{title || 'E友留言'}</h2>
+          <h2 className={isMinimal ? 'text-base font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950'}>{title || '病友留言'}</h2>
         </div>
         {!isMinimal ? <form
           className="flex flex-wrap gap-1.5"
@@ -401,7 +423,7 @@ export function CheckInMessagesPanel({
                                     回复
                                   </button>
                                   {comment.canDelete ? (
-                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} onDeleted={() => loadMessages(date, sort)} />
+                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} onDeleted={() => notifyCheckInMessagesChanged(item.id, date)} />
                                   ) : null}
                                 </div>
 
@@ -435,7 +457,7 @@ export function CheckInMessagesPanel({
                                                   回复
                                                 </button>
                                                 {child.canDelete ? (
-                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} variant="text" onDeleted={() => loadMessages(date, sort)} />
+                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} variant="text" onDeleted={() => notifyCheckInMessagesChanged(item.id, date)} />
                                                 ) : null}
                                               </div>
                                             </div>
@@ -470,7 +492,7 @@ export function CheckInMessagesPanel({
                     initialFavorited={'favorited' in item ? item.favorited : item.favorites.length > 0}
                     replyTo={replyTarget}
                     onReplyCancel={() => setReplyTargets((current) => ({ ...current, [item.id]: null }))}
-                    onCommentCreated={() => loadMessages(date, sort)}
+                    onCommentCreated={() => notifyCheckInMessagesChanged(item.id, date)}
                     onLikeChange={(value) => likeCtx.setLike(item.id, value)}
                   /> : null}
                   {!isMinimal && !previewMode && !anonymous ? (
@@ -489,11 +511,11 @@ export function CheckInMessagesPanel({
             </article>
           )
         }) : (
-          <div className="checkin-messages-empty rounded-2xl p-8 text-center font-bold text-slate-500">{emptyText || '这一天还没有 E友留言。'}</div>
+          <div className="checkin-messages-empty rounded-2xl p-8 text-center font-bold text-slate-500">{emptyText || '这一天还没有病友留言。'}</div>
         )}
       </div>
       {messages.length > previewPageSize ? (
-        <nav className={`${isMinimal ? 'mt-1 gap-1' : 'mt-3 gap-1.5'} flex shrink-0 flex-wrap items-center justify-center`} aria-label="E友留言分页">
+        <nav className={`${isMinimal ? 'mt-1 gap-1' : 'mt-3 gap-1.5'} flex shrink-0 flex-wrap items-center justify-center`} aria-label="病友留言分页">
           <button
             type="button"
             onClick={() => setPage(1)}

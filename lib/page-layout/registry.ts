@@ -62,7 +62,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     required: true,
     layoutBehavior: 'auto',
   }),
-  defineLayoutModule('home', 'home.dailyMessages', 'E友留言', '每日留言精选', 50, {
+  defineLayoutModule('home', 'home.dailyMessages', '病友留言', '每日留言精选', 50, {
     desktop: grid(0, 15, 6, 4),
     minH: 2,
     mobile: grid(0, 14, 4, 4),
@@ -109,7 +109,7 @@ export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
     minH: 5,
     layoutBehavior: 'auto',
   }),
-  defineLayoutModule('checkin', 'checkin.publicMessages', '公开挂号留言', '匿名展示所有用户每日挂号留言', 20, {
+  defineLayoutModule('checkin', 'checkin.publicMessages', '病友留言', '匿名展示所有用户每日挂号留言', 20, {
     desktop: grid(0, 8, 6, 6),
     tablet: grid(0, 8, 8, 6),
     mobile: grid(0, 8, 4, 6),

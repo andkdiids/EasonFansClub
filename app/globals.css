@@ -3540,15 +3540,26 @@ body:has(.games-full-width) .app-shell main {
 
   /* 移动端双栏：缩小内距/标题/按钮，隐藏 EasMusic 简介（保留封面/歌曲名/专辑年份） */
   .home-mobile-dual { grid-template-columns:1fr 1fr; gap:10px; }
-  .home-mobile-dual > .community-panel { padding-inline:12px; }
+  .home-mobile-dual > .community-panel { display:flex; min-height:0; flex-direction:column; padding-inline:12px; }
+  .home-mobile-dual > .community-panel > header { flex:none; }
+  .home-mobile-dual .home-entertainment-content,
+  .home-mobile-dual .home-daily-music { flex:1; }
+  .home-mobile-dual .home-entertainment-content { min-height:0; }
+  .home-mobile-dual .home-entertainment-button { margin-top:auto; }
+  .home-mobile-dual .home-daily-music-copy { display:flex; flex-direction:column; }
+  .home-mobile-dual .home-daily-music-copy h3 { display:-webkit-box; min-height:2.45em; overflow:hidden; overflow-wrap:anywhere; line-height:1.22; text-overflow:ellipsis; white-space:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; }
+  .home-mobile-dual .home-daily-music-button { align-self:flex-start; margin-top:auto; }
   .home-mobile-dual .community-panel > header h2 { font-size:13px; }
   .home-mobile-dual .home-daily-music-lyrics { display:none; }
   .home-mobile-dual .home-daily-music-copy p { font-size:11px; }
   .home-mobile-dual .home-daily-music-button { min-height:30px; padding:0 10px; font-size:10px; }
+  .home-mobile-dual .home-entertainment-button,
+  .home-mobile-dual .home-daily-music-button { min-height:34px; padding:0 10px; font-size:10px; }
   .home-mobile-dual .home-today-list > a { padding:10px 12px; }
   .home-today-panel { padding-inline:0; }
   .home-today-panel > header { padding-inline:14px; }
   .home-today-content { padding:16px; }
+  .home-album-strip { margin-right:0; padding-right:14px; }
 }
 
 /* 今日模块：顶部分隔线(border-top)与标题之间留出间距，避免横线贴住「今日」标题 */

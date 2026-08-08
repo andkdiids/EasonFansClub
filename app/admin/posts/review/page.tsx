@@ -1,6 +1,7 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { publicImageUrl } from '@/lib/images'
+import { markModerationNotificationsRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { PostReviewManager, type ReviewPost } from './PostReviewManager'
 
@@ -8,9 +9,10 @@ export const dynamic = 'force-dynamic'
 
 export default async function AdminPostReviewPage() {
   const user = await requireAdminPage('/admin/posts/review', 'post_manage')
+  await markModerationNotificationsRead(user.id)
   const posts = await prisma.post.findMany({
     where: { moderationStatus: 'PENDING', isDeleted: false },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: 200,
     select: {
       id: true,

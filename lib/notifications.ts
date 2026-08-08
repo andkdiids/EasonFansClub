@@ -448,7 +448,22 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
  */
 export async function markModerationNotificationsRead(userId: string) {
   const readAt = new Date()
-  const result = await prisma.notification.updateMany({
+  const pendingReviewNotifications = await prisma.notification.findMany({
+    where: {
+      recipientId: userId,
+      isRead: false,
+      type: 'ADMIN',
+      link: '/admin/posts/review',
+      key: { startsWith: 'post-review:' },
+    },
+    select: { key: true },
+  })
+  const reviewPostIds = Array.from(new Set(pendingReviewNotifications.flatMap(({ key }) => {
+    const postId = key?.startsWith('post-review:') ? key.slice('post-review:'.length) : ''
+    return postId ? [postId] : []
+  })))
+
+  const resultNotifications = await prisma.notification.updateMany({
     where: {
       recipientId: userId,
       isRead: false,
@@ -460,5 +475,28 @@ export async function markModerationNotificationsRead(userId: string) {
     },
     data: { isRead: true, readAt },
   })
-  return { ok: true, count: result.count, readAt }
+  let count = resultNotifications.count
+
+  if (reviewPostIds.length) {
+    const completedPosts = await prisma.post.findMany({
+      where: { id: { in: reviewPostIds }, moderationStatus: { not: 'PENDING' } },
+      select: { id: true },
+    })
+    const completedReviewKeys = completedPosts.map(({ id }) => `post-review:${id}`)
+    if (completedReviewKeys.length) {
+      const completedResult = await prisma.notification.updateMany({
+        where: {
+          recipientId: userId,
+          isRead: false,
+          type: 'ADMIN',
+          link: '/admin/posts/review',
+          key: { in: completedReviewKeys },
+        },
+        data: { isRead: true, readAt },
+      })
+      count += completedResult.count
+    }
+  }
+
+  return { ok: true, count, readAt }
 }

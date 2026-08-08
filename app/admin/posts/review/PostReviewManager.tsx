@@ -46,6 +46,7 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
     const data = await response.json().catch(() => null)
     if (!response.ok) { setError(data?.message || '审核失败'); return }
     setPosts((current) => current.filter((post) => post.id !== postId))
+    window.dispatchEvent(new Event('unread-summary:refresh'))
     setMessage(status === 'APPROVED' ? '帖子已通过并公开' : '帖子已拒绝')
   }
 
