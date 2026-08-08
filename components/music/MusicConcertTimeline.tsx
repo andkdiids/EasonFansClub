@@ -73,7 +73,7 @@ function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: Concert
   const draft = tour.status && tour.status !== 'PUBLISHED'
   return <article ref={cardRef} className="music-concert-gallery-poster" aria-hidden={hidden || undefined}>
     <button data-testid="concert-orbit-card" type="button" tabIndex={hidden ? -1 : undefined} className="music-concert-gallery-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
-      <ArchivePoster tour={tour} sizes="(max-width: 767px) 132px, 220px" square />
+      <ArchivePoster tour={tour} sizes="(max-width: 767px) 104px, 220px" square />
       <span className="music-concert-gallery-year">{year}</span>
       <span className="music-concert-gallery-caption">
         <span>{year}{draft ? <em className="music-concert-gallery-draft">草稿</em> : null}</span>
@@ -229,7 +229,7 @@ function MyLiveCenter({ data, status, onRetry, loginHref }: Readonly<{ data: Con
       <div><b>{value(data?.attendedTourCount)}</b><span>观看巡演数</span></div>
     </div>
     <div className="music-concert-gallery-live-records">
-      <div><span>最近观看</span><b title={latest}>{latest}</b></div>
+      <div><span>最近现场</span><b title={latest}>{latest}</b></div>
       <div><span>看过城市数</span><b>{value(data?.attendedCityCount)}</b></div>
     </div>
     {status === 'error' ? <button type="button" className="music-concert-gallery-live-retry" onClick={onRetry}>加载失败 · 重试</button> : null}
@@ -259,13 +259,11 @@ function ExpandedConcert({ tour, onClose, isAdmin }: Readonly<{ tour: ConcertTim
 
 export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin = false, categories }: Readonly<{ tours: ConcertTimelineTour[]; compact?: boolean; myLive?: ConcertArchiveMyLive; isAdmin?: boolean; categories?: ConcertCategoryConfig[] }>) {
   const [activeCategory, setActiveCategory] = useState<ConcertCategorySlug>('main')
-  const [switching, setSwitching] = useState(false)
   const [interactionPaused, setInteractionPaused] = useState(false)
   const [expandedTour, setExpandedTour] = useState<ConcertTimelineTour | null>(null)
   const initialMyLiveData = myLive || null
   const [myLiveData, setMyLiveData] = useState<ConcertArchiveMyLive | null>(initialMyLiveData)
   const [myLiveStatus, setMyLiveStatus] = useState<MyLiveStatus>('loading')
-  const switchTimerRef = useRef<number | null>(null)
   const myLiveDataRef = useRef<ConcertArchiveMyLive | null>(initialMyLiveData)
   const myLiveRequestRef = useRef<AbortController | null>(null)
   const myLiveInFlightRef = useRef(false)
@@ -310,17 +308,9 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
   const activeLabel = { eyebrow: FALLBACK_CATEGORY_LABELS[activeCategory]?.eyebrow || activeCategory.toUpperCase(), label: tabLabel(activeCategory) }
 
   function selectCategory(nextCategory: ConcertCategorySlug) {
-    if (switching || nextCategory === activeCategory) return
-    setSwitching(true)
-    switchTimerRef.current = window.setTimeout(() => {
-      setActiveCategory(nextCategory)
-      window.requestAnimationFrame(() => setSwitching(false))
-    }, 180)
+    if (nextCategory === activeCategory) return
+    setActiveCategory(nextCategory)
   }
-
-  useEffect(() => () => {
-    if (switchTimerRef.current !== null) window.clearTimeout(switchTimerRef.current)
-  }, [])
 
   const loadMyLive = useCallback(async (showLoading = false) => {
     if (myLiveInFlightRef.current) return
@@ -430,11 +420,11 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
     <header className="music-concert-gallery-switcher">
       <p>{activeLabel.eyebrow}</p>
       <div role="tablist" aria-label="演唱会分类">
-        {orderedSlugs.map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} disabled={switching} onClick={() => selectCategory(category)}>{tabLabel(category)}</button>)}
+        {orderedSlugs.map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} onClick={() => selectCategory(category)}>{tabLabel(category)}</button>)}
       </div>
     </header>
-    <div className={`music-concert-gallery-stage${switching ? ' is-switching' : ''}`} onMouseEnter={() => setInteractionPaused(true)} onMouseLeave={() => setInteractionPaused(false)} onFocusCapture={() => setInteractionPaused(true)} onBlurCapture={() => setInteractionPaused(false)}>
-      <MuseumWheel key={activeCategory} tours={grouped[activeCategory] || []} paused={Boolean(expandedTour) || switching || interactionPaused} onOpen={setExpandedTour} />
+    <div className="music-concert-gallery-stage" onMouseEnter={() => setInteractionPaused(true)} onMouseLeave={() => setInteractionPaused(false)} onFocusCapture={() => setInteractionPaused(true)} onBlurCapture={() => setInteractionPaused(false)}>
+      <MuseumWheel tours={grouped[activeCategory] || []} paused={Boolean(expandedTour) || interactionPaused} onOpen={setExpandedTour} />
       <MyLiveCenter data={myLiveData} status={myLiveStatus} onRetry={() => void loadMyLive(true)} loginHref={`/login?redirect=${encodeURIComponent(pathname || '/music/concerts')}`} />
     </div>
     {expandedTour ? <ExpandedConcert tour={expandedTour} onClose={() => setExpandedTour(null)} isAdmin={Boolean(isAdmin)} /> : null}
