@@ -809,7 +809,10 @@ export function FriendDock({
                 }}
                 onSelectEmoji={insertEmoji}
                 composerRef={messageInputRef}
-                desktopColumns={4}
+                mobileColumns={5}
+                desktopColumns={5}
+                mobileCellPx={64}
+                desktopCellPx={64}
               />
             </div>
             </div>

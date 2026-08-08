@@ -5,7 +5,7 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { ConcertNotFound } from '@/components/music/ConcertNotFound'
 import { formatLiveDateRange } from '@/lib/music-live'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
-import { generateArchiveSlug, cityGroupSlug, effectiveCityGroup, type CityGroupType, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
+import { generateArchiveSlug, cityGroupSlug, effectiveCityGroup, decodeRouteParam, type CityGroupType, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
 import { resolveTourByArchiveSlug } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -54,9 +54,10 @@ export default async function MusicTourPage({ params, searchParams }: { params: 
   const isPreview = Boolean(previewParam) && Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
   const match = await resolveTourByArchiveSlug(tourId, isPreview)
   if (!match) return <ConcertNotFound />
-  // 旧的 CUID 直链跳转到规范的 slug 公开地址；slug 直链直接渲染
+  // 旧的 CUID 直链跳转到规范的 slug 公开地址；slug 直链直接渲染。
+  // 注意：非 ASCII slug 的路由参数可能是 percent-encoded，比较前先解码，避免中文巡演名无限重定向。
   const canonicalSlug = generateArchiveSlug(match.name)
-  if (tourId !== canonicalSlug) permanentRedirect(`/music/live/tours/${canonicalSlug}`)
+  if (decodeRouteParam(tourId) !== canonicalSlug) permanentRedirect(`/music/live/tours/${canonicalSlug}`)
   const [tour, config] = await Promise.all([
     prisma.musicTour.findFirst({
       where: { id: match.id, ...(isPreview ? {} : { status: 'PUBLISHED' }) },

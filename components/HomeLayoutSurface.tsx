@@ -36,7 +36,7 @@ const homeText = {
   endlessBest: '无尽模式最高分',
   rankingMore: '进入游戏中心',
   noRanking: '暂无无尽模式成绩，快去挑战吧。',
-  randomAlbums: '随机专辑',
+  randomAlbums: '每日推荐专辑',
   albumsMore: '更多',
   featured: '精选',
   pinned: '置顶',
@@ -246,7 +246,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const renderTodayPanel = () => {
     const events = data.todayEvents
     return (
-      <section className="community-panel concert-panel home-today-panel" aria-label="Today in history">
+      <section className={`community-panel concert-panel home-today-panel${device === 'mobile' ? ' mb-5' : ''}`} aria-label="Today in history">
         <header><h2>{homeText.today}</h2><Link href="/today">{homeText.todayMore} →</Link></header>
         {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
         {events.length > 0 && events.length <= 2 ? (
@@ -291,7 +291,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         defaultTitle={siteConfig.text.homeSubtitle}
       />
       <div id="community-content" className="community-content">
-        <section className="community-stats home-checkin-stats" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">
+        <section className="community-stats home-checkin-stats mb-4 sm:mb-6" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">
           <div><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
           <Link href="/checkin" className={`stat-checkin ${checkinStateClass}`}>
             <span>{homeText.todayCheckins}</span>
@@ -322,10 +322,10 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           </div>
         )}
 
-        <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="Random albums">
+        <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="每日推荐专辑">
           <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
           <div className="album-strip home-album-strip">
-            {data.albums.map((album) => <Link key={album.id} href={`/music/album/${album.id}`}><span>{album.coverUrl ? <Image src={album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" className="object-cover" /> : '♫'}</span><strong>{album.name}</strong><small>{album.releaseYear}</small></Link>)}
+            {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <Link key={album.id} href={`/music/album/${album.id}`}><span>{album.coverUrl ? <Image src={album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" className="object-cover" /> : '♫'}</span><strong>{album.name}</strong><small>{album.releaseYear}</small></Link>)}
             {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
           </div>
         </section>

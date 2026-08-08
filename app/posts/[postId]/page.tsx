@@ -58,9 +58,45 @@ function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR
   )
 }
 
+// 帖子审核中：用户通过通知/收藏/历史链接进入 PENDING 帖子时显示，而非 404。
+function ModerationPendingFallback() {
+  return (
+    <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
+      <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-amber-600">审核中</p>
+        <h1 className="mt-3 text-3xl font-black text-brand-950">帖子审核中</h1>
+        <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
+          该帖子正在等待审核，审核通过后即可正常查看。
+        </p>
+        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+          返回 E院广场
+        </Link>
+      </section>
+    </main>
+  )
+}
+
+// 帖子未通过审核：REJECTED 帖子显示提示，而非 404。
+function ModerationRejectedFallback() {
+  return (
+    <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
+      <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-red-600">未通过审核</p>
+        <h1 className="mt-3 text-3xl font-black text-brand-950">帖子未通过审核</h1>
+        <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
+          该帖子未通过审核，暂时无法查看。
+        </p>
+        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+          返回 E院广场
+        </Link>
+      </section>
+    </main>
+  )
+}
+
 function loadPost(postId: string, userId?: string) {
   return prisma.post.findFirst({
-    where: { id: postId, moderationStatus: 'APPROVED' },
+    where: { id: postId },
     include: {
       User: {
         select: {
@@ -277,6 +313,19 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
   if (post === null) {
     notFound()
+  }
+
+  // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
+  // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非 404。
+  // 管理员可查看全部（保持现有权限）；普通用户只能查看 APPROVED。
+  const viewerIsAdmin = Boolean(user && isAdminRole(user.role))
+  if (!viewerIsAdmin) {
+    if (post.moderationStatus === 'PENDING') {
+      return <ModerationPendingFallback />
+    }
+    if (post.moderationStatus === 'REJECTED') {
+      return <ModerationRejectedFallback />
+    }
   }
 
   if (post.isDeleted || post.status !== 'PUBLISHED') {

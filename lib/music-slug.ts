@@ -108,6 +108,16 @@ const CITY_NAME_EN: Record<string, string> = {
   张家港: 'Zhangjiagang',
 }
 
+// Next.js 动态路由参数对非 ASCII slug（中文巡演名 / 中文城市）可能保持 percent-encoded。
+// 解析与规范地址比较前先解码；解码失败保持原串。
+export function decodeRouteParam(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 export function generateArchiveSlug(text: string): string {
   return String(text ?? '')
     .replace(/['‘’`]/g, '') // 去掉撇号：Eason's -> Easons

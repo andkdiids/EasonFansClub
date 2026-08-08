@@ -10,12 +10,15 @@
 
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { generateArchiveSlug, generateCitySlug, generateDateSlug, cityGroupSlug, generateCityGroupSlug, effectiveCityGroup, type CityGroupType, type ConcertStageType } from '@/lib/music-slug'
+import { generateArchiveSlug, generateCitySlug, generateDateSlug, cityGroupSlug, generateCityGroupSlug, effectiveCityGroup, decodeRouteParam, type CityGroupType, type ConcertStageType } from '@/lib/music-slug'
 
 // includeDrafts: 仅管理员预览（?preview=1）时为 true，放宽 status 过滤，允许查看草稿巡演。
 export async function resolveTourByArchiveSlug(slug: string, includeDrafts = false): Promise<{ id: string; name: string } | null> {
+  // Next.js 动态路由参数对非 ASCII slug（如中文巡演名）可能保持 percent-encoded，
+  // 先解码再匹配；解码失败时保持原串，与 resolveCityGroupSlug 的处理一致。
+  const decoded = decodeRouteParam(slug)
   const byId = await prisma.musicTour.findFirst({
-    where: { id: slug, ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
+    where: { id: decoded, ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
     select: { id: true, name: true },
   })
   if (byId) return byId
@@ -23,7 +26,7 @@ export async function resolveTourByArchiveSlug(slug: string, includeDrafts = fal
     where: { ...(includeDrafts ? {} : { status: 'PUBLISHED' }) },
     select: { id: true, name: true },
   })
-  const match = candidates.find((tour) => generateArchiveSlug(tour.name) === slug)
+  const match = candidates.find((tour) => generateArchiveSlug(tour.name) === decoded)
   return match ? { id: match.id, name: match.name } : null
 }
 

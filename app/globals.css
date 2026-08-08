@@ -3547,3 +3547,38 @@ body:has(.games-full-width) .app-shell main {
   .home-mobile-dual .home-daily-music-button { min-height:30px; padding:0 10px; font-size:10px; }
   .home-mobile-dual .home-today-list > a { padding:10px 12px; }
 }
+
+/* 今日模块：顶部分隔线(border-top)与标题之间留出间距，避免横线贴住「今日」标题 */
+.home-today-panel { padding-top: 16px; }
+
+/* 表情包合集网格：列数与最大宽度通过 CSS 变量控制（inline style 可靠生效）。
+   避免动态拼接 Tailwind 任意值类名导致 JIT 无法生成、grid-template-columns 实际未应用的 bug。
+   --sg-cols / --sg-maxw 控制移动端；--sg-cols-md / --sg-maxw-md 控制桌面端(≥768px)。 */
+.sticker-pack-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(var(--sg-cols, 5), minmax(0, 1fr));
+  max-width: var(--sg-maxw, none);
+  margin-inline: auto;
+}
+@media (min-width: 768px) {
+  .sticker-pack-grid {
+    grid-template-columns: repeat(var(--sg-cols-md, var(--sg-cols, 5)), minmax(0, 1fr));
+    max-width: var(--sg-maxw-md, var(--sg-maxw, none));
+  }
+}
+
+/* 帖子回复表情网格（reply 变体）：
+   移动端 6 列铺满（~50px/格，接近 48px 目标）；
+   桌面端 repeat(8,64px) 固定 8 列 64px/格（需 584px 面板）。
+   gap 8px，object-contain 完整显示不裁切。 */
+.sticker-reply-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+@media (min-width: 768px) {
+  .sticker-reply-grid {
+    grid-template-columns: repeat(8, 64px);
+  }
+}

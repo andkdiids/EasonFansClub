@@ -2,15 +2,9 @@ import { NextResponse } from 'next/server'
 import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
 import { requireUser } from '@/lib/security'
 import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
+import { normalizeImageToWebp, ImageNormalizeError } from '@/lib/image-webp'
 
 export const runtime = 'nodejs'
-
-const allowedTypes = new Map([
-  ['image/jpeg', 'jpg'],
-  ['image/png', 'png'],
-  ['image/webp', 'webp'],
-  ['image/gif', 'gif'],
-])
 
 export async function POST(request: Request) {
   const guard = await requireUser()
@@ -30,11 +24,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '请选择要上传的图片' }, { status: 400 })
   }
 
-  const extension = allowedTypes.get(file.type)
-  if (!extension) {
-    return NextResponse.json({ message: '仅支持 JPG、PNG、WEBP 或 GIF 图片' }, { status: 400 })
-  }
-
   if (!FEEDBACK_ALLOWED_IMAGE_TYPES.includes(file.type as typeof FEEDBACK_ALLOWED_IMAGE_TYPES[number])) {
     return NextResponse.json({ message: '不支持的图片格式' }, { status: 400 })
   }
@@ -42,17 +31,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '单张图片不能超过 10MB' }, { status: 400 })
   }
 
-  const objectPath = `feedback/${guard.user.id}/feedback-${crypto.randomUUID()}.${extension}`
+  // 统一在服务端转 WebP + 压缩，禁止原样存储 jpg/png/gif。
+  let webpBuffer: Buffer
+  try {
+    webpBuffer = await normalizeImageToWebp(
+      Buffer.from(await file.arrayBuffer()),
+      { maxWidth: 1600, quality: 82 },
+    )
+  } catch (error) {
+    if (error instanceof ImageNormalizeError) {
+      return NextResponse.json({ message: error.message }, { status: 400 })
+    }
+    return NextResponse.json({ message: '图片处理失败，请换一张试试' }, { status: 400 })
+  }
+
+  const objectPath = `feedback/${guard.user.id}/feedback-${crypto.randomUUID()}.webp`
   const storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
     method: 'POST',
     headers: {
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
       'Cache-Control': '31536000',
-      'Content-Type': file.type,
+      'Content-Type': 'image/webp',
       'x-upsert': 'false',
     },
-    body: await file.arrayBuffer(),
+    body: new Uint8Array(webpBuffer),
   })
 
   if (!storageResponse.ok) {
@@ -65,5 +68,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
   }
 
-  return NextResponse.json({ url, mimeType: file.type })
+  return NextResponse.json({ url, mimeType: 'image/webp' })
 }

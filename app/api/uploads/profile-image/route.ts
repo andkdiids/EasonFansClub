@@ -5,22 +5,14 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { isDefaultAvatarUrl } from '@/lib/default-avatars'
+import { normalizeImageToWebp, ImageNormalizeError } from '@/lib/image-webp'
 
 export const runtime = 'nodejs'
 
 const avatarMaxFileSize = 10 * 1024 * 1024
 const backgroundMaxFileSize = 8 * 1024 * 1024
 
-const avatarTypes = new Map([
-  ['image/webp', 'webp'],
-  ['image/jpeg', 'jpg'],
-])
-
-const backgroundTypes = new Map([
-  ['image/jpeg', 'jpg'],
-  ['image/png', 'png'],
-  ['image/webp', 'webp'],
-])
+const PROFILE_INPUT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 
 function createCompatibleId() {
   if (globalThis.crypto?.randomUUID) {
@@ -73,15 +65,15 @@ export async function POST(request: Request) {
   }
 
 
+  if (!PROFILE_INPUT_TYPES.has(file.type)) {
+    return NextResponse.json(
+      { message: '仅支持 JPG、PNG、WebP 或 GIF 图片' },
+      { status: 400 }
+    )
+  }
+
+
   if (kind === 'avatar') {
-
-    if (!avatarTypes.has(file.type)) {
-      return NextResponse.json(
-        { message: '头像仅支持 JPG、WebP 图片' },
-        { status: 400 }
-      )
-    }
-
 
     if (file.size > avatarMaxFileSize) {
       return NextResponse.json(
@@ -91,15 +83,6 @@ export async function POST(request: Request) {
     }
 
   } else {
-
-
-    if (!backgroundTypes.has(file.type)) {
-      return NextResponse.json(
-        { message: '背景图仅支持 JPG、PNG、WebP' },
-        { status: 400 }
-      )
-    }
-
 
     if (file.size > backgroundMaxFileSize) {
       return NextResponse.json(
@@ -111,16 +94,10 @@ export async function POST(request: Request) {
   }
 
 
-  const extension =
-    kind === 'avatar'
-      ? avatarTypes.get(file.type)
-      : backgroundTypes.get(file.type)
-
-
   const objectPath =
     kind === 'avatar'
-      ? `avatars/${guard.user.id}/${createCompatibleId()}.${extension}`
-      : `profiles/${guard.user.id}/background-${createCompatibleId()}.${extension}`
+      ? `avatars/${guard.user.id}/${createCompatibleId()}.webp`
+      : `profiles/${guard.user.id}/background-${createCompatibleId()}.webp`
 
 
 
@@ -128,10 +105,19 @@ export async function POST(request: Request) {
 
   try {
 
+    const rawBuffer = Buffer.from(await file.arrayBuffer())
+    // 统一在服务端转 WebP + 等比压缩，禁止原样存储 jpg/png。
+    const webpBuffer = await normalizeImageToWebp(
+      rawBuffer,
+      kind === 'avatar'
+        ? { maxWidth: 512, maxHeight: 512, quality: 82 }
+        : { maxWidth: 1920, quality: 82 },
+    )
+
     await uploadToCos({
       key: objectPath,
-      body: Buffer.from(await file.arrayBuffer()),
-      contentType: file.type,
+      body: webpBuffer,
+      contentType: 'image/webp',
     })
 
 
@@ -139,6 +125,9 @@ export async function POST(request: Request) {
 
   } catch (error) {
 
+    if (error instanceof ImageNormalizeError) {
+      return NextResponse.json({ message: error.message }, { status: 400 })
+    }
     console.error('[profile-image] COS upload failed', error)
 
     return NextResponse.json(
@@ -308,7 +297,8 @@ export async function POST(request: Request) {
 
 
   return NextResponse.json({
-    url:safeUrl
+    url:safeUrl,
+    mimeType:'image/webp'
   })
 
 }

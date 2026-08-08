@@ -12,6 +12,7 @@ import { SetlistBlock } from '@/components/music/live/SetlistBlock'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { resolveConcertBySlug } from '@/lib/music-archive'
+import { decodeRouteParam } from '@/lib/music-slug'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,10 +33,11 @@ export default async function MusicConcertBySlugPage({
   if (!resolved) return <ConcertNotFound />
 
   // 规范的公开地址：/music/live/tours/<tourSlug>/<CITY>/<YYYYMMDD>
-  // 旧的 CUID / 原始 city / 小写 slug 直链 308 跳转
+  // 旧的 CUID / 原始 city / 小写 slug 直链 308 跳转。
+  // 非 ASCII 路由参数可能是 percent-encoded，比较前先解码，避免中文巡演名无限重定向。
   if (
-    tourId !== resolved.tourSlug ||
-    city !== resolved.citySlug ||
+    decodeRouteParam(tourId) !== resolved.tourSlug ||
+    decodeRouteParam(city) !== resolved.citySlug ||
     date !== resolved.dateSlug
   ) {
     permanentRedirect(`/music/live/tours/${resolved.tourSlug}/${resolved.citySlug}/${resolved.dateSlug}`)

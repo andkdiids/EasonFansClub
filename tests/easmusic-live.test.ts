@@ -103,8 +103,8 @@ test('Eason现场公开页面覆盖空状态、巡演和场次详情', () => {
   const home = read('app/music/live/page.tsx')
   assert.match(home, /现场档案正在整理中/)
   assert.match(home, /status: 'PUBLISHED'/)
-  assert.match(read('app/music/live/tours/[tourId]/page.tsx'), /notFound\(\)/)
-  assert.match(read('app/music/live/concerts/[concertId]/page.tsx'), /notFound\(\)/)
+  assert.match(read('app/music/live/tours/[tourId]/page.tsx'), /<ConcertNotFound \/>/)
+  assert.match(read('app/music/live/concerts/[concertId]/page.tsx'), /notFound\(\)|<ConcertNotFound \/>/)
 })
 
 test('未关联歌曲不生成链接，已关联歌曲复用现有详情路由', () => {

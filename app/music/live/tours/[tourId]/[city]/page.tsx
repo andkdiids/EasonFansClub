@@ -7,7 +7,7 @@ import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/
 import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
 import { formatConcertTime } from '@/lib/music-concert-admin'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
-import { generateArchiveSlug, generateDateSlug, cityGroupSlug, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
+import { generateArchiveSlug, generateDateSlug, cityGroupSlug, decodeRouteParam, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
 import { resolveTourByArchiveSlug, resolveCityGroupSlug, buildCityGroupWhere } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
@@ -60,8 +60,9 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
   const group = await resolveCityGroupSlug(tourMatch.id, cityGroup, isPreview)
   if (!group) return <ConcertNotFound />
   const canonicalCitySlug = cityGroupSlug(group.base, group.type)
-  // 规范的公开地址：/music/live/tours/<slug>/<GROUP>；旧的 id / 原始 city / 旧版 city slug 直链 308 跳转
-  if (tourId !== canonicalTourSlug || cityGroup !== canonicalCitySlug) {
+  // 规范的公开地址：/music/live/tours/<slug>/<GROUP>；旧的 id / 原始 city / 旧版 city slug 直链 308 跳转。
+  // 非 ASCII 路由参数可能是 percent-encoded，比较前先解码，避免中文巡演名无限重定向。
+  if (decodeRouteParam(tourId) !== canonicalTourSlug || decodeRouteParam(cityGroup) !== canonicalCitySlug) {
     permanentRedirect(`/music/live/tours/${canonicalTourSlug}/${canonicalCitySlug}`)
   }
   const [meta, config] = await Promise.all([

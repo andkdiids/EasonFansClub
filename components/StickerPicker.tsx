@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 
 /**
@@ -56,14 +56,26 @@ export function StickerPicker({
   onSelectEmoji,
   composerRef,
   desktopColumns,
+  mobileColumns,
+  mobileCellPx,
+  desktopCellPx,
+  variant = 'dm',
 }: {
   open: boolean
   onClose: () => void
   onSelectSticker: (sticker: PickerSticker) => void
   onSelectEmoji?: (emoji: string) => void
   composerRef?: React.RefObject<HTMLTextAreaElement | null>
-  // 桌面端自定义表情固定列数（如私信 4 列、帖子回复 8 列）。不传则沿用自适应 72px 网格。
+  // 桌面端自定义表情固定列数（如私信 5 列、帖子回复 8 列）。不传则沿用自适应 72px 网格。
   desktopColumns?: number
+  // 移动端固定列数（如私信 5 列）。不传则按容器宽度自适应（minmax(56px,1fr)，约 4~5 列）。
+  mobileColumns?: number
+  // 移动端单格最大宽度(px)。指定后网格居中、单格不超过该值，避免表情在宽面板中被放大撑满。
+  mobileCellPx?: number
+  // 桌面端单格最大宽度(px)。同上。
+  desktopCellPx?: number
+  // 'dm'（默认，私信全宽面板）或 'reply'（帖子回复小型浮层 420px / 8 列固定 / emoji 紧凑）。
+  variant?: 'dm' | 'reply'
 }) {
   const [data, setData] = useState<PickerDataResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -203,12 +215,39 @@ export function StickerPicker({
 
   const noPacks = data && data.packs.length === 0
 
+  // 网格列数与最大宽度通过 CSS 变量传入静态类 .sticker-pack-grid。
+  // 不再用动态拼接的 Tailwind 任意值类名（JIT 无法识别运行时模板字符串 → 样式不生成 → 表情撑满面板）。
+  // mobileCellPx/desktopCellPx > 0 时按 N×px 限量网格宽度并居中，避免宽面板下表情被放大；
+  // 未指定(0/undefined)时网格铺满容器，单元格随列宽自适应。
+  const gridStyle = {
+    '--sg-cols': String(mobileColumns ?? 5),
+    '--sg-cols-md': String(desktopColumns ?? mobileColumns ?? 5),
+    '--sg-maxw':
+      mobileCellPx && mobileCellPx > 0
+        ? `calc(${mobileColumns ?? 5} * ${mobileCellPx}px + ${Math.max((mobileColumns ?? 5) - 1, 0)} * 0.5rem)`
+        : 'none',
+    '--sg-maxw-md':
+      desktopCellPx && desktopCellPx > 0
+        ? `calc(${desktopColumns ?? mobileColumns ?? 5} * ${desktopCellPx}px + ${Math.max((desktopColumns ?? mobileColumns ?? 5) - 1, 0)} * 0.5rem)`
+        : 'none',
+  } as CSSProperties
+
+  // reply 变体：小型浮层（桌面 584px 容纳 8×64px / 移动 calc(100vw-32px)），固定网格，emoji 紧凑排列。
+  // dm 变体（默认）：全宽面板，CSS 变量网格，emoji 10 列。
+  const isReply = variant === 'reply'
+  const panelClassName = isReply
+    ? 'sticker-wechat-panel absolute bottom-full left-0 z-40 mb-2 flex h-[min(60vh,360px)] w-[584px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-[16px] bg-white shadow-2xl ring-1 ring-black/10'
+    : 'sticker-wechat-panel absolute inset-x-0 bottom-full z-40 mb-2 flex h-[min(60vh,360px)] flex-col overflow-hidden rounded-[16px] bg-white shadow-2xl ring-1 ring-black/10'
+  const gridClassName = isReply
+    ? 'sticker-reply-grid px-2 py-2'
+    : 'sticker-pack-grid px-2 py-2'
+
   if (!open) return null
 
   return (
     <div
       ref={rootRef}
-      className="sticker-wechat-panel absolute inset-x-0 bottom-full z-40 mb-2 flex h-[min(60vh,360px)] flex-col overflow-hidden rounded-[16px] bg-white shadow-2xl ring-1 ring-black/10"
+      className={panelClassName}
       role="dialog"
       aria-label="表情面板"
     >
@@ -240,8 +279,8 @@ export function StickerPicker({
           </button>
         </header>
 
-        {/* 主内容区 */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+        {/* 主内容区（pb-4 底部安全间距，防止最后一排表情被工具栏裁切） */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white pb-4">
           {loading ? (
             <div className="flex h-full items-center justify-center py-12 text-sm text-slate-400">加载中…</div>
           ) : error ? (
@@ -271,12 +310,12 @@ export function StickerPicker({
                   className="w-full rounded-full bg-slate-100 px-4 py-2 text-sm outline-none placeholder:text-slate-400"
                 />
               </div>
-              <div className={`grid gap-2 px-2 py-2 ${desktopGridClass(desktopColumns)}`}>
+              <div className={gridClassName} style={isReply ? undefined : gridStyle}>
                 {searchResults.length === 0 ? (
                   <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
                 ) : (
                   searchResults.map((s) => (
-                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} desktopColumns={desktopColumns} />
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} />
                   ))
                 )}
               </div>
@@ -284,12 +323,12 @@ export function StickerPicker({
           ) : view === 'pack' ? (
             // 我的表情包视图：有选中表情包则展示其表情；没有添加任何表情包时才显示空状态
             currentPack ? (
-              <div className={`grid gap-2 px-2 py-2 ${desktopGridClass(desktopColumns)}`}>
+              <div className={gridClassName} style={isReply ? undefined : gridStyle}>
                 {currentStickers.length === 0 ? (
                   <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
                 ) : (
                   currentStickers.map((s) => (
-                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} desktopColumns={desktopColumns} />
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} />
                   ))
                 )}
               </div>
@@ -317,7 +356,7 @@ export function StickerPicker({
                 recent={data?.recent || []}
                 onSelectSticker={onSelectSticker}
                 onSelectEmoji={handleEmojiClick}
-                desktopColumns={desktopColumns}
+                compact={isReply}
               />
           )}
         </div>
@@ -394,25 +433,14 @@ function SearchIcon() {
   )
 }
 
-// 桌面端自定义表情网格列数：传入正数时固定 N 列（minmax(0,1fr) 均分，无右侧空白）；
-// 否则沿用自适应 72px 网格（发帖等未指定列数的场景）。移动端统一 auto-fill 56px 自适应。
-export function desktopGridClass(cols?: number): string {
-  return cols && cols > 0
-    ? `grid-cols-[repeat(auto-fill,minmax(56px,56px))] md:grid-cols-[repeat(${cols},minmax(0,1fr))]`
-    : `grid-cols-[repeat(auto-fill,minmax(56px,56px))] md:grid-cols-[repeat(auto-fill,minmax(72px,72px))]`
+// 等比例方块格：aspect-square 让格子随列宽缩放为正方形（列宽由 .sticker-pack-grid 的 max-width 限量）。
+// 不使用 w-full —— 网格项默认 stretch 填充列轨道，aspect-square 保证高度=宽度，无需显式宽度。
+export function desktopCellClass(): string {
+  return 'relative flex aspect-square items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95'
 }
 
-// 桌面端自定义表情格子尺寸：固定列数场景放大到 80px 格 / 70px 图；否则 72px 格 / 60px 图。
-export function desktopCellClass(cols?: number): string {
-  return cols && cols > 0
-    ? 'relative flex h-[56px] w-full items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-[80px]'
-    : 'relative flex h-[56px] w-full items-center justify-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-[72px]'
-}
-
-export function desktopImgClass(cols?: number): string {
-  return cols && cols > 0
-    ? 'h-[48px] w-[48px] rounded-md object-contain md:h-[70px] md:w-[70px]'
-    : 'h-[48px] w-[48px] rounded-md object-contain md:h-[60px] md:w-[60px]'
+export function desktopImgClass(): string {
+  return 'h-full w-full rounded-md object-contain p-1'
 }
 
 function EmojiGrid({
@@ -420,30 +448,31 @@ function EmojiGrid({
   recent,
   onSelectSticker,
   onSelectEmoji,
-  desktopColumns,
+  compact,
 }: {
   emojis: string[]
   recent: PickerSticker[]
   onSelectSticker: (sticker: PickerSticker) => void
   onSelectEmoji: (emoji: string) => void
-  desktopColumns?: number
+  // 帖子回复场景：emoji 用 flex-wrap 紧凑排列（32px / text-[28px]）；私信场景用 10 列 grid。
+  compact?: boolean
 }) {
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
       {recent.length > 0 ? (
         <section>
           <h3 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">最近使用</h3>
-          <div className={`grid gap-2 ${desktopGridClass(desktopColumns)}`}>
+          <div className="flex flex-wrap gap-1.5">
             {recent.slice(0, 8).map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => onSelectSticker(s)}
-                className={desktopCellClass(desktopColumns)}
+                className="grid h-10 w-10 place-items-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-12 md:w-12"
                 aria-label={s.name || '表情'}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.url} alt={s.name || ''} className={desktopImgClass(desktopColumns)} loading="lazy" />
+                <img src={s.url} alt={s.name || ''} className="h-full w-full object-contain p-0.5" loading="lazy" />
               </button>
             ))}
           </div>
@@ -451,13 +480,16 @@ function EmojiGrid({
       ) : null}
       <section>
         <h3 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">默认表情</h3>
-        <div className="grid grid-cols-8 gap-1">
+        <div className={compact ? 'flex flex-wrap gap-3' : 'grid grid-cols-10 gap-2'}>
           {emojis.map((em, idx) => (
             <button
               key={`${em}-${idx}`}
               type="button"
               onClick={() => onSelectEmoji(em)}
-              className="flex aspect-square h-[38px] w-[38px] items-center justify-center rounded-md text-[28px] leading-none transition hover:bg-slate-100 active:scale-95 md:h-[42px] md:w-[42px]"
+              className={compact
+                ? 'flex h-8 w-8 items-center justify-center rounded-md text-[28px] leading-none transition hover:bg-slate-100 active:scale-95'
+                : 'flex aspect-square items-center justify-center rounded-md text-[24px] leading-none transition hover:bg-slate-100 active:scale-95'
+              }
               aria-label={`emoji ${em}`}
             >
               {em}
@@ -479,13 +511,11 @@ function StickerCell({
   onSelect,
   onPreview,
   previewing,
-  desktopColumns,
 }: {
   sticker: PickerSticker
   onSelect: () => void
   onPreview: (sticker: PickerSticker, source: 'touch' | 'mouse') => void
   previewing: boolean
-  desktopColumns?: number
 }) {
   const timerRef = useRef<number | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
@@ -536,11 +566,11 @@ function StickerCell({
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerMove={handlePointerMove}
-      className={desktopCellClass(desktopColumns)}
+      className={desktopCellClass()}
       aria-label={sticker.name || '表情'}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={sticker.url} alt={sticker.name || ''} className={desktopImgClass(desktopColumns)} loading="lazy" />
+      <img src={sticker.url} alt={sticker.name || ''} className={desktopImgClass()} loading="lazy" />
       {/* 微信式长按预览气泡：跟随当前表情按钮，移动端长按时出现，松手/移开即关闭 */}
       {previewing ? (
         <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-xl bg-white p-3 shadow-lg">

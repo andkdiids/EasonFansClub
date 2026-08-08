@@ -34,7 +34,7 @@ export default async function StickerStorePage({ searchParams }: { searchParams:
               <p className="text-sm font-black tracking-[0.2em] text-brand-700">表情包 · 商店</p>
               <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">表情包商店</h1>
               <p className="mt-3 max-w-2xl text-sm font-bold leading-7 text-slate-600">
-                浏览所有审核通过的表情包，点击「添加」即可加入你的表情库，就能在私信与评论中发送。
+                点击「添加」即可加入你的表情库，就能在私信与评论中发送。
               </p>
             </div>
             <Link

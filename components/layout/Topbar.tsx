@@ -81,14 +81,6 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
         消息中心
       </Link>
 
-      <Link href="/profile?module=favorites#profile-modules" onClick={() => setMenuOpen(false)}>
-        我的收藏
-      </Link>
-
-      <Link href="/games" onClick={() => setMenuOpen(false)}>
-        娱乐天空
-      </Link>
-
       <Link href="/settings/security" onClick={() => setMenuOpen(false)}>
         账号安全
       </Link>
