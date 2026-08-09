@@ -21,8 +21,16 @@ export async function POST(request: Request) {
     const guard = await requireUser()
     if (!guard.user) return guard.response
 
-    const formData = await request.formData().catch(() => null)
-    if (!formData) return NextResponse.json({ success: false, message: '上传请求无效' }, { status: 400 })
+    const formData = await request.formData().catch((error) => {
+      console.error('[sticker.upload.form-data]', error)
+      return null
+    })
+    if (!formData) {
+      return NextResponse.json(
+        { success: false, message: '上传请求无效或文件超过服务器限制' },
+        { status: 400 },
+      )
+    }
 
     const file = formData.get('file')
     if (!(file instanceof File)) return NextResponse.json({ success: false, message: '请选择表情图片' }, { status: 400 })

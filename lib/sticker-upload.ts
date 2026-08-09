@@ -1,6 +1,7 @@
 import sharp from 'sharp'
 import { randomUUID } from 'node:crypto'
 import { uploadSiteImage } from '@/lib/site-media-storage'
+import { STICKER_UPLOAD_MIME_TYPES } from '@/lib/sticker-upload-constraints'
 
 export type StickerUploadType = 'STATIC' | 'GIF'
 
@@ -22,14 +23,12 @@ export const STICKER_MAX_PACK_NAME_LENGTH = 40
 export const STICKER_MAX_DESCRIPTION_LENGTH = 200
 
 /**
- * 纯函数：判断某 MIME 是否允许作为指定类型的表情。
- * 静态表情仅接受 jpg / png / webp；GIF 仅接受 image/gif。
- * 用于把「创建时必须先选类型」「静态只能传静态、GIF 只能传动态」的规则落到上传校验。
+ * 纯函数：判断某 MIME 是否属于表情上传支持的候选格式。
+ * type 只是上传页的辅助选择，最终类型仍由文件真实内容决定，GIF 不会因为选择了静态而被拒绝。
  */
 export function isStickerMimeAllowed(mime: string, type: StickerUploadType): boolean {
-  const normalized = mime.toLowerCase()
-  if (type === 'GIF') return (STICKER_ANIMATED_MIME_TYPES as readonly string[]).includes(normalized)
-  return (STICKER_STATIC_MIME_TYPES as readonly string[]).includes(normalized)
+  const normalized = mime.trim().toLowerCase()
+  return (type === 'STATIC' || type === 'GIF') && (STICKER_UPLOAD_MIME_TYPES as readonly string[]).includes(normalized)
 }
 
 /** 校验并清洗表情名称（最多 4 字）。空值返回 null；超长抛错。 */

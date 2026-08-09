@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { isSupportedStickerFile, STICKER_UPLOAD_ACCEPT } from '@/lib/sticker-upload-constraints'
 
 type StickerType = 'STATIC' | 'GIF'
 
@@ -14,6 +15,7 @@ type StickerFile = {
 
 const MAX_FILES = 60
 const MIN_FILES = 6
+const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -24,12 +26,6 @@ function readAsDataUrl(file: File): Promise<string> {
   })
 }
 
-function inferType(files: StickerFile[]): StickerType {
-  if (!files[0]) return 'STATIC'
-  const mime = files[0].file.type
-  return mime === 'image/gif' ? 'GIF' : 'STATIC'
-}
-
 export function StickerPackUploader() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -37,13 +33,12 @@ export function StickerPackUploader() {
   const [category, setCategory] = useState('')
   const [cover, setCover] = useState<{ file: File; preview: string } | null>(null)
   const [stickerFiles, setStickerFiles] = useState<StickerFile[]>([])
+  const [stickerType, setStickerType] = useState<StickerType>('STATIC')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState<{ packId: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
-
-  const type: StickerType = inferType(stickerFiles)
 
   const handleFiles = useCallback(async (rawFiles: FileList | File[]) => {
     const list = Array.from(rawFiles)
@@ -51,7 +46,11 @@ export function StickerPackUploader() {
     for (const f of list) {
       if (stickerFiles.length + accepted.length >= MAX_FILES) break
       if (f.size === 0) continue
-      if (!['image/jpeg', 'image/png', 'image/apng', 'image/webp', 'image/gif'].includes(f.type)) {
+      if (f.size > MAX_FILE_SIZE) {
+        setError('单个表情不能超过 5MB')
+        continue
+      }
+      if (!isSupportedStickerFile(f)) {
         setError('仅支持 JPG / PNG / APNG / WebP / GIF 格式')
         continue
       }
@@ -110,7 +109,7 @@ export function StickerPackUploader() {
       form.append('description', description.slice(0, 200))
       form.append('copyright', copyright.slice(0, 100))
       form.append('category', category.slice(0, 40))
-      form.append('type', type)
+      form.append('type', stickerType)
       stickerFiles.forEach((s, idx) => {
         form.append('stickerFiles', s.file, `sticker-${idx}-${s.file.name}`)
         form.append('stickerNames', s.name)
@@ -153,11 +152,23 @@ export function StickerPackUploader() {
         <div className="flex items-center gap-6">
           <span className="text-sm font-black text-slate-700">类型</span>
           <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
-            <input type="radio" checked={type === 'STATIC'} readOnly className="h-4 w-4" />
+            <input
+              type="radio"
+              value="STATIC"
+              checked={stickerType === 'STATIC'}
+              onChange={() => setStickerType('STATIC')}
+              className="h-4 w-4"
+            />
             静态表情
           </label>
           <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
-            <input type="radio" checked={type === 'GIF'} readOnly className="h-4 w-4" />
+            <input
+              type="radio"
+              value="GIF"
+              checked={stickerType === 'GIF'}
+              onChange={() => setStickerType('GIF')}
+              className="h-4 w-4"
+            />
             动态表情
           </label>
           <span className="text-xs text-slate-400">（按文件实际内容自动识别，支持 GIF / Animated WebP / APNG）</span>
@@ -187,7 +198,7 @@ export function StickerPackUploader() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/jpeg,image/png,image/apng,image/webp,image/gif"
+            accept={STICKER_UPLOAD_ACCEPT}
             className="hidden"
             onChange={onStickerPick}
           />
