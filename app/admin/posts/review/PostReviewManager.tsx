@@ -65,14 +65,14 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
     <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Post Queue</p><h2 className="mt-1 text-2xl font-black text-brand-950">{statusLabels[queueStatus]}帖子</h2></div><span className="text-sm font-black text-slate-500">{posts.length} 条</span></div>
     <div className="mt-4 flex flex-wrap gap-2">{(Object.keys(statusLabels) as ReviewStatus[]).map((status) => <button key={status} type="button" disabled={loading || status === queueStatus} onClick={() => void loadStatus(status)} className={`rounded-full px-4 py-2 text-sm font-black ${status === queueStatus ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'} disabled:opacity-60`}>{statusLabels[status]}</button>)}</div>
     <div className="mt-5 divide-y divide-sky-100">
-      {posts.map((post) => <article key={post.id} className="grid gap-5 py-6 lg:grid-cols-[minmax(0,1fr)_auto]">
+      {posts.map((post) => <article key={post.id} className="grid gap-5 py-6 md:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500"><span className="rounded-full bg-sky-50 px-3 py-1 text-brand-700">[{post.Board.name}]</span><span>{post.User.Profile?.displayName || post.User.nickname}</span><span>UID {post.User.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time></div>
           <h3 className="mt-3 text-xl font-black text-brand-950">{post.title}</h3>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{post.content}</p>
           {post.PostMedia.length ? <div className="mt-4 flex flex-wrap gap-3">{post.PostMedia.map((media) => media.url ? <img key={media.id} src={media.thumbnail || media.url} alt="帖子图片" className="h-28 w-40 rounded-xl object-cover" /> : null)}</div> : null}
         </div>
-        <div className="flex flex-wrap items-start gap-2 lg:w-32 lg:flex-col">
+        <div className="flex flex-wrap items-start gap-2 md:w-32 md:flex-col">
           {queueStatus === 'PENDING' ? <><button type="button" onClick={() => void review(post.id, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white">通过</button>
           <button type="button" onClick={() => void review(post.id, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700">拒绝</button></> : null}
           <button type="button" onClick={() => void toggleFlag(post.id, 'isFeatured', !post.isFeatured)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">{post.isFeatured ? '取消精选' : '设置精选'}</button>

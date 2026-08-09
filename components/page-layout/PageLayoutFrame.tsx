@@ -7,8 +7,8 @@ const widthClass = {
   wide: 'mx-auto w-full max-w-6xl',
   medium: 'mx-auto w-full max-w-4xl',
   narrow: 'mx-auto w-full max-w-2xl',
-  half: 'w-full lg:w-[calc(50%-0.75rem)]',
-  third: 'w-full lg:w-[calc(33.333%-1rem)]',
+  half: 'w-full md:w-[calc(50%-0.75rem)]',
+  third: 'w-full md:w-[calc(33.333%-1rem)]',
 }
 
 const spacingTopClass = {

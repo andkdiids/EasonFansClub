@@ -126,7 +126,7 @@ export default async function PublicUserPage({ params }: PageProps) {
           backgroundUrl={background}
         />
 
-        <section className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <section className="grid gap-5 md:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-sky-100 bg-white/82 p-5 shadow-sm">
               <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">

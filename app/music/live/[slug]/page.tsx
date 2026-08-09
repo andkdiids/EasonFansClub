@@ -112,7 +112,7 @@ export default async function ConcertCategoryDetailPage({ params }: { params: Pr
         <section aria-labelledby="category-tours-title">
           <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p>
           <h2 id="category-tours-title" className="mt-2 text-2xl font-black text-white sm:text-3xl">巡演档案</h2>
-          <div className="mt-7 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="mt-7 grid min-w-0 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {resolvedTours.map((tour) => {
               const href = `/music/live/tours/${generateArchiveSlug(tour.name)}${isAdmin && tour.status !== 'PUBLISHED' ? '?preview=1' : ''}`
               return (

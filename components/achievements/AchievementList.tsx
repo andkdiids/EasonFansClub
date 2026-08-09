@@ -34,7 +34,7 @@ export default function AchievementList({
     <main className="site-page-main flat-page mx-auto max-w-7xl space-y-12 px-4 py-8 sm:px-5 sm:py-10">
       <section className="relative overflow-hidden border-y border-slate-200 bg-white px-6 py-10 shadow-[0_10px_32px_rgba(15,23,42,.05)] sm:px-10 sm:py-12">
         <div className="absolute inset-y-0 left-0 w-1 bg-brand-700" aria-hidden="true" />
-        <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="grid gap-8 md:grid-cols-[1fr_auto] md:items-end">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.3em] text-sky-700">Achievement System</p>
             <h1 className="mt-4 text-4xl font-black tracking-tight text-brand-950 sm:text-6xl">E院成就系统</h1>

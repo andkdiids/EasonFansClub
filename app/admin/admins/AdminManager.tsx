@@ -241,7 +241,7 @@ function PermissionCard({
         </span>
       </label>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 md:grid-cols-3">
         {adminPermissionGroups.map((permission) => (
           <label key={permission.key} className={`rounded-xl border p-3 ${isSuperAdmin ? 'border-sky-100 bg-white/70 opacity-75' : 'border-white bg-white/80'}`}>
             <span className="flex items-start gap-2">

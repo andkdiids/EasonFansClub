@@ -34,7 +34,7 @@ include: {
         </section>
 
         <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/85 shadow-sm">
-          <div className="grid grid-cols-[1.1fr_0.8fr_0.7fr_0.7fr_0.7fr] gap-3 border-b border-sky-100 px-5 py-3 text-xs font-black text-slate-500 max-lg:hidden">
+          <div className="grid grid-cols-[1.1fr_0.8fr_0.7fr_0.7fr_0.7fr] gap-3 border-b border-sky-100 px-5 py-3 text-xs font-black text-slate-500 max-md:hidden">
             <span>成就</span>
             <span>分类</span>
             <span>稀有度</span>
@@ -43,7 +43,7 @@ include: {
           </div>
           <div className="divide-y divide-sky-100">
             {achievements.map((item) => (
-              <article key={item.id} className="grid gap-3 px-5 py-4 lg:grid-cols-[1.1fr_0.8fr_0.7fr_0.7fr_0.7fr]">
+              <article key={item.id} className="grid gap-3 px-5 py-4 md:grid-cols-[1.1fr_0.8fr_0.7fr_0.7fr_0.7fr]">
                 <div>
                   <p className="font-black text-brand-950">
                     <span className="mr-2">{item.icon || '🏆'}</span>

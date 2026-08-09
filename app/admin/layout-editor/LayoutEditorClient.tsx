@@ -31,7 +31,6 @@ type CheckInPreviewState = 'pending' | 'completed'
 
 const deviceOptions: { key: PageLayoutDevice; label: string; columns: number }[] = [
   { key: 'desktop', label: '桌面端', columns: 12 },
-  { key: 'tablet', label: '平板端', columns: 8 },
   { key: 'mobile', label: '移动端', columns: 4 },
 ]
 
@@ -50,7 +49,7 @@ function cloneConfig(config: PageLayoutConfig): PageLayoutConfig {
 }
 
 function columnsFor(device: PageLayoutDevice) {
-  return device === 'desktop' ? 12 : device === 'tablet' ? 8 : 4
+  return device === 'mobile' ? 4 : 12
 }
 
 function findModule(registry: PageLayoutModuleDefinition[], key: string) {
@@ -579,7 +578,7 @@ if (pageKey === 'checkin') {
               <button onClick={() => updateDeviceItems((items) => compactItems(items, device))} className="rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">自动整理</button>
             </div>
           </div>
-          <div className={`rounded-[22px] bg-white/78 p-4 ${device === 'mobile' ? 'mx-auto max-w-sm' : device === 'tablet' ? 'mx-auto max-w-3xl' : ''}`}>
+          <div className={`rounded-[22px] bg-white/78 p-4 ${device === 'mobile' ? 'mx-auto max-w-sm' : ''}`}>
             <PageLayoutCanvasEditor
               pageKey={pageKey}
               config={previewConfig}

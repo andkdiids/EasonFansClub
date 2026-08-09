@@ -79,7 +79,7 @@ export function SuperAdminUserActions({ targetUserId, initialUid, initialAccount
     <p className="mt-2 text-sm font-bold leading-7 text-amber-900/70">这些操作仅限超级管理员，并会写入管理员操作日志。当前 UID：{formatUid(currentUid)}</p>
     {message ? <p className="mt-4 rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-black text-emerald-800">{message}</p> : null}
     {error ? <p className="mt-4 rounded-2xl bg-red-100 px-4 py-3 text-sm font-black text-red-700">{error}</p> : null}
-    <div className="mt-6 grid gap-5 lg:grid-cols-2">
+    <div className="mt-6 grid gap-5 md:grid-cols-2">
       <form onSubmit={updateUid} className="rounded-2xl bg-white p-5 ring-1 ring-amber-200">
         <h3 className="text-lg font-black text-slate-950">修改 UID</h3>
         <p className="mt-2 text-xs font-bold leading-6 text-slate-500">输入 1 至 5 位数字，系统自动补足为五位，并检查是否重复。</p>

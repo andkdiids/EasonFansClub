@@ -24,7 +24,7 @@ export default async function AlbumReviewsPage() {
       <h1 className="mt-3 text-5xl font-black tracking-tight text-white sm:text-7xl">专辑鉴赏</h1>
       <p className="mt-5 max-w-2xl text-sm font-bold leading-7 text-slate-300/70">从制作资料、幕后故事、歌曲解析与时代背景，重新走进一张专辑。</p>
     </header>
-    {reviews.length ? <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+    {reviews.length ? <section className="grid gap-5 sm:grid-cols-2 md:grid-cols-3">
       {reviews.map((review) => <Link key={review.id} href={`/music/reviews/${review.id}`} className="group overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.055] transition hover:-translate-y-1 hover:border-sky-300/30 hover:bg-white/[0.09]">
         <div className="relative aspect-[16/10] bg-[#0b2038]">
           {review.coverUrl || review.MusicAlbum.coverUrl ? <Image src={(review.coverUrl || review.MusicAlbum.coverUrl)!} alt={review.title} fill sizes="(max-width: 640px) 100vw, 33vw" className="object-cover transition duration-500 group-hover:scale-105" /> : <div className="grid h-full place-items-center text-4xl text-sky-200/25">REVIEW</div>}

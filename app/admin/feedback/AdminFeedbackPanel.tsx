@@ -162,9 +162,9 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
       {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
       {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
-      <section className="grid gap-5 lg:grid-cols-[380px_1fr]">
+      <section className="grid gap-5 md:grid-cols-[380px_1fr]">
         <aside className="rounded-[24px] border border-sky-100 bg-white/88 p-4 shadow-sm">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-1">
             <input value={q} onChange={(e) => setQ(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="搜索标题、昵称、UID" />
             <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
               <option value="">全部状态</option>

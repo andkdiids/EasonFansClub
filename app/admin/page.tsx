@@ -110,7 +110,7 @@ export default async function AdminPage() {
           if (layoutItem.key === 'admin.stats') {
             return (
               <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
-                <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <section className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">
                   {[
                     ['活跃用户', users],
                     ['帖子总数', posts],

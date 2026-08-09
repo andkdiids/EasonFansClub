@@ -50,7 +50,7 @@ export function StickerStoreGrid(props: {
           商店中暂无表情包，快去上传一个吧
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
           {localPacks.map((pack) => (
             <article key={pack.id} className="flex flex-col overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <Link href={`/stickers/${pack.id}`} className="block aspect-square overflow-hidden bg-slate-50">

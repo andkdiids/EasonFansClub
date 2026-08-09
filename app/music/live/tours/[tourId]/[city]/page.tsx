@@ -181,7 +181,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
     <section className="mt-14" aria-labelledby="city-concerts-title">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CONCERTS</p>
       <h2 id="city-concerts-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">演出场次</h2>
-      <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 md:grid-cols-3">
         {cityConcerts.map((concert, index) => {
           const dateKey = concert.concertDate.slice(0, 10)
           const sameDay = (dayCountMap.get(dateKey) || 0) > 1

@@ -57,7 +57,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
 
     <MusicDetailReveal delay={0.12} className="mt-14 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-8">
       <div><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ARCHIVE METADATA</p><h2 className="mt-2 text-3xl font-black text-white">专辑资料</h2></div>
-      <dl className="mt-7 grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+      <dl className="mt-7 grid gap-x-8 gap-y-6 sm:grid-cols-2 md:grid-cols-3">
         {archiveDetails.map(([label, value]) => <div key={label} className="border-t border-white/10 pt-4"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-base font-black text-slate-100">{value}</dd></div>)}
       </dl>
     </MusicDetailReveal>

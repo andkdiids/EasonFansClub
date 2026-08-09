@@ -24,7 +24,7 @@ type CityGroupInfo = {
 // 城市卡片网格（复用既有卡片样式，仅对返场/最终站追加标签）
 function TourCityGrid({ tourSlug, tourPosterUrl, items }: { tourSlug: string; tourPosterUrl: string | null; items: CityGroupInfo[] }) {
   return (
-    <div className="tour-city-archive-grid mt-7 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="tour-city-archive-grid mt-7 grid min-w-0 gap-3 sm:grid-cols-2 md:grid-cols-3">
       {items.map((item) => {
         const href = `/music/live/tours/${tourSlug}/${item.groupSlug}`
         const resolvedPosterUrl = resolveConcertPoster({ posterUrl: item.posterUrl, tourPosterUrl }).resolvedPosterUrl

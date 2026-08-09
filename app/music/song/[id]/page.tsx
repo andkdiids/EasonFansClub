@@ -59,7 +59,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
 
     <MusicDetailReveal delay={0.12} className="mt-14 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8">
       <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CREATIVE CREDITS</p><h2 className="mt-2 text-3xl font-black text-white">创作资料</h2>
-      <dl className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
+      <dl className="mt-7 grid gap-4 sm:grid-cols-2 md:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
     </MusicDetailReveal>
 
     <div id="song-preview" className="mt-8 scroll-mt-24"><MusicPlayer id={song.id} title={song.title} artist={song.artist} albumName={song.MusicAlbum.name} coverUrl={coverUrl} sourceType={song.sourceType} previewUrl={playback.previewUrl} previewDuration={playback.previewDuration} isFullPlayback={playback.isFullPlayback} /></div>

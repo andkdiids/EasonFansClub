@@ -89,7 +89,7 @@ export function DefaultAvatarManager({ initialAvatars }: Readonly<{ initialAvata
           <span className="text-sm font-bold text-slate-500">{avatars.filter((item) => item.enabled).length} 个已启用</span>
         </div>
         {!avatars.length ? <p className="mt-5 bg-sky-50 p-5 text-sm font-bold text-slate-500">尚未上传系统默认头像。未设置头像的用户会暂时显示 UID 首字符。</p> : null}
-        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
           {avatars.map((item) => (
             <article key={item.id} className="border border-sky-100 bg-sky-50/60 p-4">
               <img src={item.url} alt="系统默认头像" className="aspect-square w-full bg-white object-cover" />

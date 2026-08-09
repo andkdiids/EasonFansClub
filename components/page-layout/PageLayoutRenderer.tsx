@@ -18,23 +18,24 @@ export type PageLayoutRenderContext = {
 export type PageLayoutModuleRenderer = (item: PageLayoutModuleConfig, context: PageLayoutRenderContext) => ReactNode
 export type PageLayoutRendererModules = Record<string, ReactNode | PageLayoutModuleRenderer>
 
+function normalizeLayoutDevice(device: PageLayoutDevice): PageLayoutDevice {
+  return device === 'mobile' ? 'mobile' : 'desktop'
+}
+
 function useLayoutDevice(forcedDevice?: PageLayoutDevice) {
-  const [device, setDevice] = useState<PageLayoutDevice>(forcedDevice || 'desktop')
+  const [device, setDevice] = useState<PageLayoutDevice>(forcedDevice ? normalizeLayoutDevice(forcedDevice) : 'desktop')
 
   useEffect(() => {
     if (forcedDevice) {
-      setDevice(forcedDevice)
+      setDevice(normalizeLayoutDevice(forcedDevice))
       return
     }
     const query = window.matchMedia('(max-width: 767px)')
-    const tabletQuery = window.matchMedia('(max-width: 1100px)')
-    const update = () => setDevice(query.matches ? 'mobile' : tabletQuery.matches ? 'tablet' : 'desktop')
+    const update = () => setDevice(query.matches ? 'mobile' : 'desktop')
     update()
     query.addEventListener('change', update)
-    tabletQuery.addEventListener('change', update)
     return () => {
       query.removeEventListener('change', update)
-      tabletQuery.removeEventListener('change', update)
     }
   }, [forcedDevice])
 
@@ -57,9 +58,10 @@ function getLayoutBehavior(pageKey: PageLayoutPageKey, item: PageLayoutModuleCon
 }
 
 export function getPageLayoutModules(config: PageLayoutConfig, device: PageLayoutDevice, pageKey?: PageLayoutPageKey) {
-  return [...config[device]]
+  const activeDevice = normalizeLayoutDevice(device)
+  return [...config[activeDevice]]
     .filter((item) => item.visible && !item.isHidden && (!pageKey || Boolean(getPageLayoutModule(pageKey, item.key))))
-    .sort((a, b) => a.grid[device].y - b.grid[device].y || a.grid[device].x - b.grid[device].x || a.order - b.order)
+    .sort((a, b) => a.grid[activeDevice].y - b.grid[activeDevice].y || a.grid[activeDevice].x - b.grid[activeDevice].x || a.order - b.order)
 }
 
 export function PageLayoutRenderer({
@@ -78,7 +80,7 @@ export function PageLayoutRenderer({
   className?: string
 }) {
   const device = useLayoutDevice(forcedDevice)
-  const columns = device === 'desktop' ? 12 : device === 'tablet' ? 8 : 4
+  const columns = device === 'mobile' ? 4 : 12
   const items = useMemo(() => getPageLayoutModules(config, device, pageKey), [config, device, pageKey])
   const renderedItems = useMemo(() => items.map((item) => {
     const grid = item.grid[device]

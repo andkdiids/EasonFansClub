@@ -74,7 +74,7 @@ export default async function AdminCulturePage() {
           </div>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-2">
+        <section className="grid gap-4 md:grid-cols-2">
           <div className="rounded-[24px] border border-sky-100 bg-white/85 p-5 shadow-sm">
             <h2 className="text-2xl font-black text-brand-950">每日一句</h2>
             <div className="mt-4 space-y-3">

@@ -204,7 +204,7 @@ export function AdminLyricsManager() {
         {!loading && lyrics.length === 0 ? <p className="p-8 text-center text-sm font-bold text-slate-500">暂无歌词处方，可以从上方新增。</p> : null}
         <div className="divide-y divide-sky-100">
           {lyrics.map((lyric) => (
-            <article key={lyric.id} className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <article key={lyric.id} className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <strong className="text-base text-brand-950">《{lyric.songTitle}》</strong>

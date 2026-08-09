@@ -29,7 +29,7 @@ async function loadJson<T>(url: string) {
 
 export function ProfileDeferredModules() {
   return (
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,40%)_minmax(0,60%)]">
+    <section className="grid gap-4 md:grid-cols-[minmax(0,40%)_minmax(0,60%)]">
       <ProfileCheckInCalendar />
       <ProfileRecentMessages />
     </section>

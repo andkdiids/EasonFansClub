@@ -234,7 +234,7 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
       {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
       {tab === 'feedback' ? (
-        <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
+        <section className="grid gap-5 md:grid-cols-[360px_1fr]">
           <div className="space-y-4">
             <form id="feedback-create-form" onSubmit={submitFeedback} className="rounded-[24px] border border-sky-100 bg-white/88 p-5 shadow-sm">
               <h2 className="text-xl font-black text-brand-950">新建反馈</h2>

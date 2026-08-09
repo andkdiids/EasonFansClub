@@ -166,7 +166,7 @@ export function NotificationBroadcastForm() {
   }
 
   return (
-    <main className="mx-auto grid max-w-7xl gap-6 px-5 py-8 lg:grid-cols-[430px_minmax(0,1fr)]">
+    <main className="mx-auto grid max-w-7xl gap-6 px-5 py-8 md:grid-cols-[430px_minmax(0,1fr)]">
       <form onSubmit={submit} className="space-y-4 rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
         <div>
           <p className="text-sm font-black tracking-[0.18em] text-brand-700">全站通知</p>

@@ -97,7 +97,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
         ) : null}
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1fr_0.9fr]">
+      <section className="mx-auto grid max-w-6xl gap-6 md:grid-cols-[1fr_0.9fr]">
         <div className="rounded-[32px] bg-white/78 p-8 shadow-xl shadow-sky-900/5 backdrop-blur">
           <p className="text-sm font-black uppercase tracking-[0.22em] text-sky-700">Daily</p>
           <h2 className="mt-2 text-4xl font-black text-brand-950">病友留言精选</h2>

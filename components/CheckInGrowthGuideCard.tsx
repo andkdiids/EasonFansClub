@@ -14,7 +14,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
           <p className="mt-1 text-xs font-bold text-slate-500 sm:text-sm">经验值记录成长，挂号费用于权益，两套资源独立计算。</p>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
           <GuideSection eyebrow="成长档案" title="经验值 EXP">
             <p>经验值代表你在私家E院的成长等级。</p>
             <GuideList title="用途" items={['提升等级', '解锁成长称号', '展示用户活跃程度']} />
@@ -30,7 +30,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
           经验值 EXP ≠ 挂号费：经验值决定成长等级，挂号费代表可使用的权益资源。
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
           <GuideSection eyebrow="每日奖励" title="如何获取挂号费">
             <GuideFact label="每日挂号" value="每日首次完成挂号，获得 3～7 挂号费。" />
             <GuideFact label="连续挂号奖励" value="连续挂号达到 7 天后解锁“长期患者奖励”，之后每日额外获得 +7 挂号费。" />
@@ -58,7 +58,7 @@ export function CheckInGrowthGuideCard({ compact = false }: Readonly<{ compact?:
 
 function GuideSection({ eyebrow, title, children, wide = false }: Readonly<{ eyebrow: string; title: string; children: ReactNode; wide?: boolean }>) {
   return (
-    <section className={`checkin-growth-guide-section space-y-3 rounded-sm border p-4 text-sm font-bold leading-6 text-slate-700 ${wide ? 'lg:col-span-2' : ''}`}>
+    <section className={`checkin-growth-guide-section space-y-3 rounded-sm border p-4 text-sm font-bold leading-6 text-slate-700 ${wide ? 'md:col-span-2' : ''}`}>
       <div className="border-b pb-2">
         <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-600">{eyebrow}</p>
         <h3 className="mt-0.5 font-black text-brand-950">【{title}】</h3>

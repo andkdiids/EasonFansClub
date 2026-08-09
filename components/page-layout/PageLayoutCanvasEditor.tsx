@@ -17,7 +17,8 @@ const GridLayout = WidthProvider(ReactGridLayout)
 
 const cols: Record<PageLayoutDevice, number> = {
   desktop: 12,
-  tablet: 8,
+  // Legacy persisted configs may still contain a tablet key. It uses the desktop canvas now.
+  tablet: 12,
   mobile: 4,
 }
 

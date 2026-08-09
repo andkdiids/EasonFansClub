@@ -43,7 +43,7 @@ export function SetlistBlock({
   const headingId = `${idPrefix}-title`
   const encoreHeadingId = `${idPrefix}-encore-title`
 
-  // 三列（桌面）/ 两列（平板）/ 单列（手机）扁平展示：主歌单与 Encore 分离
+  // 三列（桌面）/ 单列（手机）扁平展示：主歌单与 Encore 分离
   if (layout === 'columns') {
     const sorted = [...normalItems].sort((left, right) => left.position - right.position)
     const hasNormal = sorted.length > 0
@@ -54,7 +54,7 @@ export function SetlistBlock({
         <h2 id={headingId} className="mt-2 text-3xl font-black text-white sm:text-4xl">{title}</h2>
         </> : null}
         {hasNormal ? (
-          <ol className="concert-setlist-items mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-2 lg:columns-3">
+          <ol className="concert-setlist-items mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-3">
             {sorted.map((item) => {
               const name = item.MusicSong?.title || item.displayName || '未命名曲目'
               const tags = [

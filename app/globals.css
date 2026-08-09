@@ -54,7 +54,7 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 :root[data-theme='midnight'] .prescription-card :where(blockquote,strong,p) { color:inherit; }
 :root[data-theme='midnight'] .prescription-points strong { color:var(--primary); }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .entertainment-page { width:calc(100% - 28px); }
   .entertainment-heading { padding-top:22px; }
   .entertainment-heading h1 { font-size:28px; }
@@ -548,7 +548,7 @@ flex-direction:column;
   background: var(--surface-subtle);
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 768px) {
   .app-topbar-user-trigger { display: none !important; }
 }
 
@@ -711,7 +711,7 @@ flex-direction:column;
   background-color:var(--card-bg);
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 768px) {
   .app-topbar-home .app-topbar-actions { display: none; }
   .app-topbar-home .app-topbar-search {
     width: min(440px, 38vw);
@@ -720,11 +720,11 @@ flex-direction:column;
   }
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .site-footer-info { padding-bottom: calc(var(--mobile-bottom-nav-total) + var(--mobile-page-bottom-gap)); }
 }
 
-@media (max-width:1023px) {
+@media (max-width:767px) {
   .app-sidebar { display:none; }.app-main-area { width:100%; margin-left:0; }.app-page-content { padding-bottom:0; }
   .app-topbar { height:56px; padding:0 14px; }.app-topbar-brand { display:flex; min-width:0; margin-right:auto; }.app-topbar-search { display:none; }.app-topbar-actions { margin-left:auto; }.app-topbar-actions>a,
 .app-topbar-actions>button {
@@ -772,8 +772,6 @@ flex-direction:column;
   .friend-chat-composer .emoji-picker-panel { width:calc(80vw - 24px); max-width:396px; }
   @keyframes friend-dock-drawer-in { from { transform:translate(100%,-50%); } to { transform:translate(0,-50%); } }
 }
-
-@media (min-width:1024px) and (max-width:1180px) { .app-sidebar { width:184px; }.app-main-area { width:calc(100% - 184px); margin-left:184px; }.community-columns { grid-template-columns:1fr; }.community-right-column { grid-template-columns:1fr 1fr; } }
 
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; } }
 
@@ -1129,15 +1127,12 @@ svg {
   .page-layout-auto-flow-item > .home-hero[data-hero-height='spacious'] { min-height: 29rem !important; }
 }
 
-[data-layout-page='checkin'] .page-layout-auto-flow-desktop,
-[data-layout-page='checkin'] .page-layout-auto-flow-tablet {
+[data-layout-page='checkin'] .page-layout-auto-flow-desktop {
   align-items: stretch;
 }
 
 [data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.publicMessages'] > *,
-[data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.friendMessages'] > *,
-[data-layout-page='checkin'] .page-layout-auto-flow-tablet > [data-layout-label='checkin.publicMessages'] > *,
-[data-layout-page='checkin'] .page-layout-auto-flow-tablet > [data-layout-label='checkin.friendMessages'] > * {
+[data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.friendMessages'] > * {
   height: 100% !important;
 }
 
@@ -1234,16 +1229,6 @@ svg {
 
 .page-layout-auto-flow-mobile > .page-layout-auto-flow-item {
   grid-column: 1 / -1 !important;
-}
-
-.page-layout-grid-tablet {
-  max-width: 56rem;
-  margin-inline: auto;
-}
-
-.page-layout-auto-flow-tablet {
-  max-width: 56rem;
-  margin-inline: auto;
 }
 
 .page-layout-canvas {
@@ -1666,7 +1651,7 @@ svg {
 .concert-setlist-collapsible[open] .concert-setlist-expand-label { display:none; }
 .concert-setlist-collapsible[open] .concert-setlist-collapse-label { display:inline; }
 
-@media (max-width:768px) {
+@media (max-width:767px) {
   .concert-setlist-block { margin-top:18px!important; }
   .concert-setlist-items { margin-top:16px!important; }
   .concert-setlist-items>li { min-width:0; padding:6px 0; }
@@ -2163,13 +2148,7 @@ box-shadow:none;
   text-align:center;
 }
 
-@media (max-width:1100px) {
-  .easmusic-cassette-stage { min-height:610px; padding-inline:150px; }
-  .easmusic-tape { width:155px; }
-  .easmusic-tape:nth-child(4),.easmusic-tape:nth-child(8) { display:none; }
-  .easmusic-recorder { width:min(100%,720px); }
-}
-@media (max-width:768px) {
+@media (max-width:767px) {
   .easmusic-cassette-hero { display:flex; margin-inline:-4px; padding-top:22px; flex-direction:column; }
   .easmusic-cassette-heading { display:contents; }
   .easmusic-cassette-heading-copy { order:1; width:100%; padding-inline:14px; }
@@ -2247,7 +2226,7 @@ box-shadow:none;
     white-space:nowrap;
   }
   .easmusic-cassette-empty { order:4; margin:12px 14px 0; }
- @media (max-width:768px) {
+ @media (max-width:767px) {
   .easmusic-recorder-track-label > .easmusic-led-text {
     display:block;
     width:100%;
@@ -2716,10 +2695,6 @@ align-self:center;border:1px solid rgba(171,199,220,.2); padding:22px 28px; back
 @keyframes guess-wrong-shake { 25% { transform:translateX(-5px); } 50% { transform:translateX(5px); } 75% { transform:translateX(-3px); } }
 @keyframes guess-particle { to { opacity:0; transform:translate(var(--x,100px),var(--y,-80px)) rotate(180deg); } }
 
-@media (max-width:1199px) {
-  .game-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
-  .guess-detail-modes>div { grid-template-columns:repeat(2,1fr); }
-}
 @media (max-width:767px) {
   .games-page,.game-detail-page { width:calc(100% - 28px); padding:18px 0 calc(var(--mobile-fixed-total-height) + 20px); }
   .game-banner { min-height:275px; grid-template-columns:1fr; margin-top:15px; }
@@ -3032,7 +3007,7 @@ text-align:center;
     font-weight:800;
 }
 
-@media (max-width:800px) {
+@media (max-width:767px) {
   .guess-song-page,.guess-song-admin { width:calc(100% - 28px); }
   .guess-song-heading h1 { font-size:28px; }
   .guess-song-summary { grid-template-columns:repeat(2,1fr); }.guess-song-summary>*:nth-child(2) { border-right:0; }.guess-song-summary>* { border-bottom:1px solid var(--border); }
@@ -3045,7 +3020,7 @@ text-align:center;
   .guess-song-admin-form-grid,.guess-song-admin-filters,.guess-song-library-filters { grid-template-columns:1fr; }.guess-song-admin-list>article { grid-template-columns:1fr; }.guess-song-admin-actions { grid-column:auto; }
 }
 
-/* 听听答题：仅手机（≤767px）覆盖 max-width:800px 的 1 列规则，保持 2 列自适应；选项/按钮尺寸自适应，永不被播放器遮挡 */
+/* 听听答题：仅手机（≤767px）调整选项和按钮尺寸，永不被播放器遮挡 */
 @media (max-width:767px) {
   .guess-song-options { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; max-height:none; overflow:visible; }
   .guess-song-options button { min-height:52px; max-height:none; min-width:0; padding:8px 10px; font-size:clamp(14px,3.8vw,18px); gap:6px; }
@@ -3167,7 +3142,7 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
 /* Mobile authentication screen. This block must stay after the final
    desktop cascade above: the desktop .auth-page-layout grid otherwise
    overrides the single-column layout on phones and overflows the page. */
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .auth-page {
     width: 100%;
     height: auto;
@@ -3329,7 +3304,7 @@ body:has(.games-full-width) .app-shell main {
 /* 游戏页响应式安全间距：修复移动端卡片左右贴边
    覆盖 .games-full-width 对 main 的 padding:0!important，按屏幕自适应 gutter，
    不固定宽度（width:100% + border-box），禁止横向滚动 / 溢出 / 裁切。 */
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .games-page,
   .game-detail-page {
     width: 100%;
@@ -3347,12 +3322,6 @@ body:has(.games-full-width) .app-shell main {
   body:has(.games-full-width) .app-shell main.games-page {
     padding-left: 12px !important;
     padding-right: 12px !important;
-  }
-}
-@media (min-width: 769px) and (max-width: 1024px) {
-  body:has(.games-full-width) .app-shell main.games-page {
-    padding-left: 24px !important;
-    padding-right: 24px !important;
   }
 }
 @media (max-width:767px) and (max-height:760px) {
@@ -3401,7 +3370,7 @@ body:has(.games-full-width) .app-shell main {
 }
 
 /* Authentication visual and registration density refinements. */
-@media (min-width: 769px) {
+@media (min-width: 768px) {
   .auth-page .auth-hero-background {
     /* Reveal more of the uploaded portrait without changing its aspect ratio. */
     background-position: center 35%;
@@ -3458,7 +3427,7 @@ body:has(.games-full-width) .app-shell main {
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .auth-page .auth-hero-background {
     /* Keep the existing admin-controlled mobile crop. */
     background-position: var(--hero-position-mobile);
@@ -3536,12 +3505,6 @@ body:has(.games-full-width) .app-shell main {
 .home-concert-copy time { color:var(--primary); font-size:9px; }
 .home-concert-copy strong { margin-top:5px; font-size:12px; }
 .home-concert-copy small { margin-top:4px; color:var(--foreground-muted); font-size:9px; }
-
-@media (max-width:1100px) {
-  .home-primary-columns { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .home-primary-columns > .home-entertainment-panel { grid-column:1/-1; }
-  .home-concert-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-}
 
 @media (max-width:767px) {
   .community-stats.home-checkin-stats > .stat-total { display:flex; }

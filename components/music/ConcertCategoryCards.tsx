@@ -16,7 +16,7 @@ export function ConcertCategoryCards({
   return (
     <nav
       aria-label="演唱会分类"
-      className={`grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4${className ? ` ${className}` : ''}`}
+      className={`grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4${className ? ` ${className}` : ''}`}
     >
       {categories.map((category) => {
         const active = activeSlug === category.slug

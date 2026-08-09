@@ -135,7 +135,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             </div>
           </section>
         ) : (
-          <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
+          <section className="grid gap-6 md:grid-cols-[1fr_320px]">
             <div className="space-y-3">
               {posts.map((post) => (
                 <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">

@@ -188,7 +188,7 @@ export function AppearanceForm({ initialConfig }: { initialConfig: SiteAppearanc
             <div className="rounded-2xl border border-sky-100 bg-white p-4">
               <h2 className="text-lg font-black text-brand-950">Hero 全局样式</h2>
               <p className="mt-1 text-sm font-bold text-slate-500">文字内容和链接按每张轮播设置；字号、按钮、留白和圆角对所有轮播生效。</p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-5">
                 <HeroStyleSelect label="标题字号" value={config.heroStyle.titleSize} options={[['small', '小'], ['medium', '中'], ['large', '大'], ['extra-large', '特大']]} onChange={(value) => updateHeroStyle('titleSize', value)} />
                 <HeroStyleSelect label="描述字号" value={config.heroStyle.descriptionSize} options={[['small', '小'], ['medium', '中'], ['large', '大']]} onChange={(value) => updateHeroStyle('descriptionSize', value)} />
                 <HeroStyleSelect label="按钮大小" value={config.heroStyle.buttonSize} options={[['small', '小'], ['medium', '中'], ['large', '大']]} onChange={(value) => updateHeroStyle('buttonSize', value)} />

@@ -91,7 +91,7 @@ export function VisualManager({ initialConfig }: Readonly<{ initialConfig: SiteA
 
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_290px]">
           <div>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
               <VisualPreview visual={visual} device="desktop" onPointerDown={(event) => beginDrag(event, key, 'desktop')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} />
               <VisualPreview visual={visual} device="mobile" onPointerDown={(event) => beginDrag(event, key, 'mobile')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} />
             </div>

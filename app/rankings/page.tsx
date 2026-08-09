@@ -43,7 +43,7 @@ export default async function RankingsPage() {
           <p className="text-sm font-black uppercase tracking-[0.22em] text-brand-700">Rankings</p>
           <h1 className="mt-3 text-4xl font-black text-brand-950">排行榜（管理员调试）</h1>
         </section>
-        <section className="grid gap-6 lg:grid-cols-3">
+        <section className="grid gap-6 md:grid-cols-3">
           {[
             ['挂号费榜', points.map((u) => { const growth = calculateGrowthSummary(u.experience, growthLevels); return `${u.nickname} · ${growth.levelName} · Lv.${growth.level} · ${u.points}挂号费` })],
             ['签到榜', streakTop.map((item) => { const u = userById.get(item.userId); return u ? `${u.nickname} · 连续${item.currentStreak}天` : null }).filter((row): row is string => Boolean(row))],

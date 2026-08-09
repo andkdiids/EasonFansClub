@@ -80,14 +80,11 @@ function useDevice(): PageLayoutDevice {
   const [device, setDevice] = useState<PageLayoutDevice>('desktop')
   useEffect(() => {
     const mobile = matchMedia('(max-width:767px)')
-    const tablet = matchMedia('(max-width:1100px)')
-    const update = () => setDevice(mobile.matches ? 'mobile' : tablet.matches ? 'tablet' : 'desktop')
+    const update = () => setDevice(mobile.matches ? 'mobile' : 'desktop')
     update()
     mobile.addEventListener('change', update)
-    tablet.addEventListener('change', update)
     return () => {
       mobile.removeEventListener('change', update)
-      tablet.removeEventListener('change', update)
     }
   }, [])
   return device

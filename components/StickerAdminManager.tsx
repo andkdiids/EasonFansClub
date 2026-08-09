@@ -215,7 +215,7 @@ function ManagePanel({
       ) : stickers.length === 0 ? (
         <p className="py-8 text-center text-sm font-bold text-slate-400">暂无表情</p>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {stickers.map((s) => (
             <div key={s.id} className={`rounded-2xl border p-3 ${s.isHidden ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-white'}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -26,12 +26,11 @@ function findModule(registry: PageLayoutModuleDefinition[], key: string) {
 function getDevice(): PageLayoutDevice {
   if (typeof window === 'undefined') return 'desktop'
   if (window.matchMedia('(max-width: 767px)').matches) return 'mobile'
-  if (window.matchMedia('(max-width: 1100px)').matches) return 'tablet'
   return 'desktop'
 }
 
 function columnsFor(device: PageLayoutDevice) {
-  return device === 'desktop' ? 12 : device === 'tablet' ? 8 : 4
+  return device === 'mobile' ? 4 : 12
 }
 
 function patchGrid(item: PageLayoutModuleConfig, device: PageLayoutDevice, patch: Partial<PageLayoutGridItem>) {
