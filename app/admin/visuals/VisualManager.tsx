@@ -14,7 +14,7 @@ import {
   type PageVisualKey,
   type SiteHeroVisualConfig,
 } from '@/lib/hero-visuals'
-import type { SiteAppearanceConfig } from '@/lib/site-config'
+import { resolveHeroSlideVisual, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
 
 type Device = 'desktop' | 'mobile'
 type HeroImageTarget = 'desktopHero' | 'mobileHero'
@@ -50,27 +50,6 @@ const fitModeLabels: Record<HeroFitMode, string> = {
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
 
-function getHomePreviewVisual(config: SiteAppearanceConfig, visual: SiteHeroVisualConfig) {
-  const slide = config.heroSlides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)[0]
-  if (!slide) return visual
-  const mediaType = slide.mediaType || 'IMAGE'
-  const mediaUrl = slide.mediaUrl || (mediaType === 'IMAGE' ? slide.imageUrl : '')
-  if (!mediaUrl) return visual
-  const hasDedicatedHeroImage = Boolean(
-    visual.mobileHero
-    || (visual.desktopHero && visual.desktopHero !== visual.imageUrl),
-  )
-  const legacySlideImage = !hasDedicatedHeroImage && mediaType === 'IMAGE' ? mediaUrl : visual.desktopHero || visual.imageUrl
-  return {
-    ...visual,
-    imageUrl: hasDedicatedHeroImage ? visual.imageUrl : mediaType === 'IMAGE' ? mediaUrl : slide.imageUrl || visual.imageUrl,
-    desktopHero: legacySlideImage,
-    mediaType: hasDedicatedHeroImage ? 'IMAGE' : mediaType,
-    mediaUrl: hasDedicatedHeroImage ? '' : mediaUrl,
-    posterUrl: hasDedicatedHeroImage ? visual.posterUrl || '' : slide.posterUrl || (mediaType === 'VIDEO' ? slide.imageUrl : '') || visual.posterUrl || '',
-  }
-}
-
 function mediaAccept(mediaType: HeroMediaType) {
   if (mediaType === 'VIDEO') return 'video/mp4,video/webm,.mp4,.webm'
   if (mediaType === 'ANIMATED_IMAGE') return 'image/gif,image/webp,image/png,image/apng,.gif,.webp,.png'
@@ -84,14 +63,28 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [heroUploading, setHeroUploading] = useState<HeroImageTarget | ''>('')
+  const [selectedHomeHeroIndex, setSelectedHomeHeroIndex] = useState<number | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const visual = config.heroVisuals[visualKey]
-  const homeSlide = visualKey === 'home'
-    ? config.heroSlides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)[0]
+  const homeHeroEntries = config.heroSlides
+    .map((slide, index) => ({ slide, index }))
+    .filter(({ slide }) => slide.isVisible)
+    .sort((a, b) => a.slide.sortOrder - b.slide.sortOrder)
+  const defaultHomeHeroIndex = homeHeroEntries[0]?.index ?? null
+  const activeHomeHeroEntry = visualKey === 'home'
+    ? homeHeroEntries.find(({ index }) => index === selectedHomeHeroIndex) || homeHeroEntries[0]
     : null
+  const homeSlide = activeHomeHeroEntry?.slide || null
+  const activeHomeHeroIndex = activeHomeHeroEntry?.index ?? defaultHomeHeroIndex
+  const editingVisual = visualKey === 'home'
+    ? resolveHeroSlideVisual(visual, homeSlide) || visual
+    : visual
   const currentMediaType = (visualKey === 'home' ? homeSlide?.mediaType : visual.mediaType) || 'IMAGE'
+  const currentMediaUrl = visualKey === 'home'
+    ? homeSlide?.mediaUrl || homeSlide?.imageUrl || ''
+    : visual.mediaUrl || visual.imageUrl
   const currentPosterUrl = visualKey === 'home' ? homeSlide?.posterUrl || '' : visual.posterUrl || ''
-  const previewVisual = visualKey === 'home' ? getHomePreviewVisual(config, visual) : visual
+  const previewVisual = editingVisual
 
   function updateVisual(patch: Partial<SiteHeroVisualConfig>) {
     setConfig((current) => ({
@@ -105,21 +98,49 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
 
   function updateHomeSlide(patch: Partial<SiteAppearanceConfig['heroSlides'][number]>) {
     setConfig((current) => {
-      const activeSlide = current.heroSlides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)[0]
-      if (!activeSlide) return current
+      const entries = current.heroSlides
+        .map((slide, index) => ({ slide, index }))
+        .filter(({ slide }) => slide.isVisible)
+        .sort((a, b) => a.slide.sortOrder - b.slide.sortOrder)
+      const targetIndex = entries.find(({ index }) => index === selectedHomeHeroIndex)?.index ?? entries[0]?.index
+      if (targetIndex === undefined) return current
       return {
         ...current,
-        heroSlides: current.heroSlides.map((item) => item === activeSlide ? { ...item, ...patch } : item),
+        heroSlides: current.heroSlides.map((item, index) => index === targetIndex ? { ...item, ...patch } : item),
       }
     })
+  }
+
+  function updateComposition(patch: Partial<SiteHeroVisualConfig>) {
+    if (visualKey === 'home') {
+      updateHomeSlide(patch as Partial<SiteHeroSlide>)
+      return
+    }
+    updateVisual(patch)
   }
 
   async function save() {
     setSaving(true)
     setMessage('')
     setError('')
+    const nextHeroSlides = visualKey === 'home' && activeHomeHeroIndex !== null
+      ? config.heroSlides.map((slide, index) => index === activeHomeHeroIndex
+        ? {
+            ...slide,
+            desktopPositionX: editingVisual.desktopPositionX,
+            desktopPositionY: editingVisual.desktopPositionY,
+            mobilePositionX: editingVisual.mobilePositionX,
+            mobilePositionY: editingVisual.mobilePositionY,
+            desktopScale: editingVisual.desktopScale,
+            mobileScale: editingVisual.mobileScale,
+            desktopFitMode: editingVisual.desktopFitMode,
+            mobileFitMode: editingVisual.mobileFitMode,
+          }
+        : slide)
+      : config.heroSlides
     const nextConfig = {
       ...config,
+      heroSlides: nextHeroSlides,
       heroVisuals: {
         ...config.heroVisuals,
         [visualKey]: { ...config.heroVisuals[visualKey], updatedAt: new Date().toISOString() },
@@ -157,7 +178,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
       body.append('file', file, file.name)
       body.append('kind', kind)
       body.append('scope', visualKey === 'home' ? 'home' : visualKey)
-      if (kind === 'media') body.append('mediaType', visual.mediaType || 'IMAGE')
+      if (kind === 'media') body.append('mediaType', currentMediaType)
       const response = await fetch('/api/uploads/hero-media', { method: 'POST', body })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
@@ -227,8 +248,8 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
       device,
       startX: event.clientX,
       startY: event.clientY,
-      positionX: device === 'desktop' ? visual.desktopPositionX : visual.mobilePositionX,
-      positionY: device === 'desktop' ? visual.desktopPositionY : visual.mobilePositionY,
+      positionX: device === 'desktop' ? editingVisual.desktopPositionX : editingVisual.mobilePositionX,
+      positionY: device === 'desktop' ? editingVisual.desktopPositionY : editingVisual.mobilePositionY,
       width: rect.width,
       height: rect.height,
     }
@@ -239,7 +260,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     if (!drag || drag.pointerId !== event.pointerId) return
     const x = clamp(drag.positionX - ((event.clientX - drag.startX) / drag.width) * 100)
     const y = clamp(drag.positionY - ((event.clientY - drag.startY) / drag.height) * 100)
-    updateVisual(drag.device === 'desktop'
+    updateComposition(drag.device === 'desktop'
       ? { desktopPositionX: x, desktopPositionY: y }
       : { mobilePositionX: x, mobilePositionY: y })
   }
@@ -269,7 +290,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     }
   }
 
-  const resetDevice = (device: Device) => updateVisual(device === 'desktop'
+  const resetDevice = (device: Device) => updateComposition(device === 'desktop'
     ? { desktopPositionX: 50, desktopPositionY: 50, desktopScale: HERO_SCALE_DEFAULT, desktopFitMode: 'COVER' }
     : { mobilePositionX: 50, mobilePositionY: 50, mobileScale: HERO_SCALE_DEFAULT, mobileFitMode: 'COVER' })
 
@@ -281,6 +302,18 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
           <div>
             <h1 className="text-3xl font-black text-brand-950 sm:text-4xl">{visualLabels[visualKey].title}</h1>
             <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-500">{visualLabels[visualKey].description}</p>
+            {visualKey === 'home' && homeHeroEntries.length ? <label className="mt-4 block max-w-md text-sm font-black text-slate-600">
+              选择编辑 Hero
+              <select
+                value={String(activeHomeHeroIndex ?? '')}
+                onChange={(event) => setSelectedHomeHeroIndex(Number(event.target.value))}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-bold text-brand-950"
+              >
+                {homeHeroEntries.map(({ slide, index }, order) => <option key={`${index}-${slide.sortOrder}`} value={index}>
+                  {slide.title.trim() || `Hero ${order + 1}`}
+                </option>)}
+              </select>
+            </label> : null}
           </div>
           <button type="button" disabled={saving} onClick={() => void save()} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">
             {saving ? '保存中…' : '保存当前设置'}
@@ -309,26 +342,26 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
             <div className="mt-5 grid gap-5 md:grid-cols-2">
               <PositionControls
                 label="桌面端构图"
-                x={visual.desktopPositionX}
-                y={visual.desktopPositionY}
-                scale={visual.desktopScale}
-                fitMode={visual.desktopFitMode}
-                onX={(value) => updateVisual({ desktopPositionX: value })}
-                onY={(value) => updateVisual({ desktopPositionY: value })}
-                onScale={(value) => updateVisual({ desktopScale: value })}
-                onFitMode={(value) => updateVisual({ desktopFitMode: value })}
+                x={editingVisual.desktopPositionX}
+                y={editingVisual.desktopPositionY}
+                scale={editingVisual.desktopScale}
+                fitMode={editingVisual.desktopFitMode}
+                onX={(value) => updateComposition({ desktopPositionX: value })}
+                onY={(value) => updateComposition({ desktopPositionY: value })}
+                onScale={(value) => updateComposition({ desktopScale: value })}
+                onFitMode={(value) => updateComposition({ desktopFitMode: value })}
                 onReset={() => resetDevice('desktop')}
               />
               <PositionControls
                 label="移动端构图"
-                x={visual.mobilePositionX}
-                y={visual.mobilePositionY}
-                scale={visual.mobileScale}
-                fitMode={visual.mobileFitMode}
-                onX={(value) => updateVisual({ mobilePositionX: value })}
-                onY={(value) => updateVisual({ mobilePositionY: value })}
-                onScale={(value) => updateVisual({ mobileScale: value })}
-                onFitMode={(value) => updateVisual({ mobileFitMode: value })}
+                x={editingVisual.mobilePositionX}
+                y={editingVisual.mobilePositionY}
+                scale={editingVisual.mobileScale}
+                fitMode={editingVisual.mobileFitMode}
+                onX={(value) => updateComposition({ mobilePositionX: value })}
+                onY={(value) => updateComposition({ mobilePositionY: value })}
+                onScale={(value) => updateComposition({ mobileScale: value })}
+                onFitMode={(value) => updateComposition({ mobileFitMode: value })}
                 onReset={() => resetDevice('mobile')}
               />
             </div>
@@ -368,12 +401,12 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
             {currentMediaType === 'VIDEO' ? <>
               <p className="text-xs font-semibold leading-6 text-slate-400">建议上传 5–15 秒、1080p、MP4/H.264 视频，大小不超过 8MB；视频封面可改善移动端和弱网体验。</p>
               <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-xs font-black text-brand-700 hover:bg-slate-50">
-                {uploading ? '上传中…' : visual.posterUrl ? '替换视频封面' : '上传视频封面'}
+                {uploading ? '上传中…' : currentPosterUrl ? '替换视频封面' : '上传视频封面'}
                 <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void upload(event, 'poster')} className="hidden" />
               </label>
               {currentPosterUrl ? <button type="button" onClick={() => visualKey === 'home' ? updateHomeSlide({ posterUrl: '', posterSourceUrl: '' }) : updateVisual({ posterUrl: '', posterSourceUrl: '' })} className="block text-left text-xs font-black text-red-700">移除视频封面</button> : null}
             </> : <p className="text-xs font-semibold leading-6 text-slate-400">建议上传宽度至少 1920px 的高清原图。系统保留 master，并优先通过降低过大尺寸优化体积，不使用低质量缩略图作为正式媒体。</p>}
-            {(visual.mediaUrl || visual.imageUrl || homeSlide?.mediaUrl || homeSlide?.imageUrl) ? <button type="button" onClick={clearMedia} className="block text-left text-xs font-black text-red-700">清除当前媒体</button> : null}
+            {currentMediaUrl ? <button type="button" onClick={clearMedia} className="block text-left text-xs font-black text-red-700">清除当前媒体</button> : null}
             <p className="text-xs font-semibold leading-6 text-slate-400">后台预览使用与前台相同的 HeroBackground 和构图 resolver；移动端预览比例按当前页面真实容器设置。</p>
           </aside>
         </div>

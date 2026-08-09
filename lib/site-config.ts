@@ -25,6 +25,17 @@ export type SiteHeroSlide = {
   posterUrl?: string
   sourceUrl?: string
   posterSourceUrl?: string
+  showTitle?: boolean
+  showSubtitle?: boolean
+  showButton?: boolean
+  desktopPositionX?: number
+  desktopPositionY?: number
+  mobilePositionX?: number
+  mobilePositionY?: number
+  desktopScale?: number
+  mobileScale?: number
+  desktopFitMode?: HeroFitMode
+  mobileFitMode?: HeroFitMode
   isVisible: boolean
   sortOrder: number
 }
@@ -138,6 +149,9 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
       buttonText: '开始挂号',
       href: '/checkin',
       imageUrl: '',
+      showTitle: true,
+      showSubtitle: true,
+      showButton: true,
       isVisible: true,
       sortOrder: 1,
     },
@@ -147,6 +161,9 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
       buttonText: '进入广场',
       href: '/forum',
       imageUrl: '',
+      showTitle: true,
+      showSubtitle: true,
+      showButton: true,
       isVisible: true,
       sortOrder: 2,
     },
@@ -170,6 +187,14 @@ function percentage(value: unknown, fallback = 50) {
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : fallback
 }
 
+function optionalPercentage(value: unknown) {
+  return value === undefined || value === null || value === '' ? undefined : percentage(value)
+}
+
+function optionalHeroScale(value: unknown) {
+  return value === undefined || value === null || value === '' ? undefined : normalizeHeroScale(value)
+}
+
 function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
   const mediaType = enumValue(item.mediaType, heroMediaTypes, 'IMAGE')
   const imageUrl = typeof item.imageUrl === 'string' ? item.imageUrl : ''
@@ -179,7 +204,73 @@ function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
   const posterUrl = typeof item.posterUrl === 'string' ? item.posterUrl.trim() : ''
   const sourceUrl = typeof item.sourceUrl === 'string' ? item.sourceUrl.trim() : ''
   const posterSourceUrl = typeof item.posterSourceUrl === 'string' ? item.posterSourceUrl.trim() : ''
-  return { ...item, imageUrl, mediaType, mediaUrl, posterUrl, sourceUrl, posterSourceUrl }
+  const normalized: SiteHeroSlide = {
+    ...item,
+    imageUrl,
+    mediaType,
+    mediaUrl,
+    posterUrl,
+    sourceUrl,
+    posterSourceUrl,
+    showTitle: item.showTitle !== false,
+    showSubtitle: item.showSubtitle !== false,
+    showButton: item.showButton !== false,
+  }
+  const desktopPositionX = optionalPercentage(item.desktopPositionX)
+  const desktopPositionY = optionalPercentage(item.desktopPositionY)
+  const mobilePositionX = optionalPercentage(item.mobilePositionX)
+  const mobilePositionY = optionalPercentage(item.mobilePositionY)
+  const desktopScale = optionalHeroScale(item.desktopScale)
+  const mobileScale = optionalHeroScale(item.mobileScale)
+  if (desktopPositionX !== undefined) normalized.desktopPositionX = desktopPositionX
+  if (desktopPositionY !== undefined) normalized.desktopPositionY = desktopPositionY
+  if (mobilePositionX !== undefined) normalized.mobilePositionX = mobilePositionX
+  if (mobilePositionY !== undefined) normalized.mobilePositionY = mobilePositionY
+  if (desktopScale !== undefined) normalized.desktopScale = desktopScale
+  if (mobileScale !== undefined) normalized.mobileScale = mobileScale
+  if (item.desktopFitMode !== undefined) normalized.desktopFitMode = enumValue(item.desktopFitMode, heroFitModes, 'COVER')
+  if (item.mobileFitMode !== undefined) normalized.mobileFitMode = enumValue(item.mobileFitMode, heroFitModes, 'COVER')
+  return normalized
+}
+
+/**
+ * Resolves the media and per-slide composition settings used by both the
+ * public Hero and the visual-settings preview. Missing per-slide settings
+ * intentionally fall back to the legacy page-level Home Hero settings.
+ */
+export function resolveHeroSlideVisual(
+  visual: SiteHeroVisualConfig | null | undefined,
+  slide: SiteHeroSlide | null | undefined,
+): SiteHeroVisualConfig | null | undefined {
+  if (!visual || !slide) return visual
+
+  const mediaType = slide.mediaType || 'IMAGE'
+  const mediaUrl = slide.mediaUrl || (mediaType === 'IMAGE' ? slide.imageUrl : '')
+  const hasSlideMedia = Boolean(mediaUrl)
+  const slideImage = mediaType === 'IMAGE' ? mediaUrl : slide.imageUrl || ''
+
+  return {
+    ...visual,
+    title: slide.title || visual.title,
+    imageUrl: hasSlideMedia ? slideImage : visual.imageUrl,
+    desktopHero: hasSlideMedia && mediaType === 'IMAGE' ? mediaUrl : visual.desktopHero,
+    mobileHero: hasSlideMedia && mediaType === 'IMAGE' ? mediaUrl : visual.mobileHero,
+    mediaType: hasSlideMedia ? mediaType : visual.mediaType || 'IMAGE',
+    mediaUrl: hasSlideMedia ? mediaUrl : visual.mediaUrl || '',
+    posterUrl: hasSlideMedia
+      ? slide.posterUrl || (mediaType === 'VIDEO' ? slide.imageUrl : '') || visual.posterUrl || ''
+      : visual.posterUrl || '',
+    sourceUrl: hasSlideMedia ? slide.sourceUrl || visual.sourceUrl || '' : visual.sourceUrl || '',
+    posterSourceUrl: hasSlideMedia ? slide.posterSourceUrl || visual.posterSourceUrl || '' : visual.posterSourceUrl || '',
+    desktopPositionX: slide.desktopPositionX ?? visual.desktopPositionX,
+    desktopPositionY: slide.desktopPositionY ?? visual.desktopPositionY,
+    mobilePositionX: slide.mobilePositionX ?? visual.mobilePositionX,
+    mobilePositionY: slide.mobilePositionY ?? visual.mobilePositionY,
+    desktopScale: slide.desktopScale ?? visual.desktopScale,
+    mobileScale: slide.mobileScale ?? visual.mobileScale,
+    desktopFitMode: slide.desktopFitMode ?? visual.desktopFitMode,
+    mobileFitMode: slide.mobileFitMode ?? visual.mobileFitMode,
+  }
 }
 
 function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUrl: string, fallbackVisual = defaultSiteAppearance.heroVisuals[key]): SiteHeroVisualConfig {

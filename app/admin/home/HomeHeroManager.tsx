@@ -21,6 +21,17 @@ const emptySlide = (sortOrder: number): SiteHeroSlide => ({
   mediaUrl: '',
   posterUrl: '',
   sourceUrl: '',
+  showTitle: true,
+  showSubtitle: true,
+  showButton: true,
+  desktopPositionX: 50,
+  desktopPositionY: 50,
+  mobilePositionX: 50,
+  mobilePositionY: 50,
+  desktopScale: 100,
+  mobileScale: 100,
+  desktopFitMode: 'COVER',
+  mobileFitMode: 'COVER',
   isVisible: true,
   sortOrder,
 })
@@ -190,6 +201,12 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
                 <input value={slide.buttonText} onChange={(event) => update(index, { buttonText: event.target.value })} placeholder="按钮文字" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
                 <input value={slide.href} onChange={(event) => update(index, { href: event.target.value })} placeholder="跳转链接" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
                 <input type="number" value={slide.sortOrder} onChange={(event) => update(index, { sortOrder: Number(event.target.value) })} placeholder="排序" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600 sm:col-span-2">
+                  <span className="mr-1 text-slate-500">内容显示设置</span>
+                  <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showTitle !== false} onChange={(event) => update(index, { showTitle: event.target.checked })} />显示标题</label>
+                  <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showSubtitle !== false} onChange={(event) => update(index, { showSubtitle: event.target.checked })} />显示副标题</label>
+                  <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showButton !== false} onChange={(event) => update(index, { showButton: event.target.checked })} />显示按钮</label>
+                </div>
                 <label className="flex items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600"><input type="checkbox" checked={slide.isVisible} onChange={(event) => update(index, { isVisible: event.target.checked })} />启用</label>
                 <button type="button" onClick={() => setSlides((current) => current.filter((_, slideIndex) => slideIndex !== index))} className="justify-self-start rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700">删除此 Hero</button>
               </div>

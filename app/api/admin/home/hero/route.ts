@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, heroMediaTypes, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
+import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, heroFitModes, heroMediaTypes, type HeroFitMode, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
+import { normalizeHeroScale } from '@/lib/hero-visuals'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -13,6 +14,27 @@ function normalizeSlides(value: unknown): SiteHeroSlide[] {
       : 'IMAGE'
     const imageUrl = sanitizeText(row.imageUrl, 1000)
     const mediaUrl = sanitizeText(row.mediaUrl, 1000) || (mediaType === 'IMAGE' ? imageUrl : '')
+    const optionalPercentage = (input: unknown) => {
+      if (input === undefined || input === null || input === '') return undefined
+      const numeric = Number(input)
+      return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : undefined
+    }
+    const optionalScale = (input: unknown) => {
+      if (input === undefined || input === null || input === '') return undefined
+      return normalizeHeroScale(input)
+    }
+    const desktopPositionX = optionalPercentage(row.desktopPositionX)
+    const desktopPositionY = optionalPercentage(row.desktopPositionY)
+    const mobilePositionX = optionalPercentage(row.mobilePositionX)
+    const mobilePositionY = optionalPercentage(row.mobilePositionY)
+    const desktopScale = optionalScale(row.desktopScale)
+    const mobileScale = optionalScale(row.mobileScale)
+    const desktopFitMode = typeof row.desktopFitMode === 'string' && heroFitModes.includes(row.desktopFitMode as HeroFitMode)
+      ? row.desktopFitMode as HeroFitMode
+      : undefined
+    const mobileFitMode = typeof row.mobileFitMode === 'string' && heroFitModes.includes(row.mobileFitMode as HeroFitMode)
+      ? row.mobileFitMode as HeroFitMode
+      : undefined
     return {
       title: sanitizeText(row.title, 160),
       subtitle: sanitizeText(row.subtitle, 300),
@@ -24,6 +46,17 @@ function normalizeSlides(value: unknown): SiteHeroSlide[] {
       posterUrl: sanitizeText(row.posterUrl, 1000),
       sourceUrl: sanitizeText(row.sourceUrl, 1000),
       posterSourceUrl: sanitizeText(row.posterSourceUrl, 1000),
+      showTitle: row.showTitle !== false,
+      showSubtitle: row.showSubtitle !== false,
+      showButton: row.showButton !== false,
+      ...(desktopPositionX === undefined ? {} : { desktopPositionX }),
+      ...(desktopPositionY === undefined ? {} : { desktopPositionY }),
+      ...(mobilePositionX === undefined ? {} : { mobilePositionX }),
+      ...(mobilePositionY === undefined ? {} : { mobilePositionY }),
+      ...(desktopScale === undefined ? {} : { desktopScale }),
+      ...(mobileScale === undefined ? {} : { mobileScale }),
+      ...(desktopFitMode === undefined ? {} : { desktopFitMode }),
+      ...(mobileFitMode === undefined ? {} : { mobileFitMode }),
       isVisible: Boolean(row.isVisible),
       sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : index + 1,
     }
