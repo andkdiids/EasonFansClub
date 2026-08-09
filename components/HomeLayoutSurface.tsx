@@ -158,7 +158,9 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
-  const heroFallbackImage = siteConfig.heroVisuals.home.enabled ? siteConfig.heroVisuals.home.imageUrl : ''
+  const heroFallbackImage = siteConfig.heroVisuals.home.enabled
+    ? siteConfig.heroVisuals.home.desktopHero || siteConfig.heroVisuals.home.imageUrl
+    : ''
   const topRanking = data.entertainmentRanking?.rows[0] || null
 
   useEffect(() => {

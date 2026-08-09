@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { CassetteField } from '@/components/music/cassette/CassetteField'
+import { CassetteCover } from '@/components/music/cassette/CassetteCover'
 import { CassetteRecorder } from '@/components/music/cassette/CassetteRecorder'
 import { CassetteTapeVisual } from '@/components/music/cassette/CassetteTape'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
@@ -167,22 +168,18 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
           {selectedTrack ? (
             <div
               className="easmusic-cassette-selection"
-              data-has-cover={selectedTrack.coverUrl ? 'true' : 'false'}
+              data-has-cover="true"
               aria-live="polite"
             >
                 <span className="easmusic-cassette-selection-label">已选择</span>
-                {selectedTrack.coverUrl ? (
-                  <img
+                <span className="easmusic-selected-album-cover">
+                  <CassetteCover
                     src={selectedTrack.coverUrl}
-                    alt={`${selectedTrack.albumTitle} 专辑封面`}
-                    width={44}
-                    height={44}
-                    loading="lazy"
-                    decoding="async"
+                    alt={`${selectedTrack.albumTitle}专辑封面`}
                     sizes="44px"
-                    className="easmusic-selected-album-cover"
+                    className="easmusic-selected-album-cover-image"
                   />
-                ) : null}
+                </span>
                 <div className="easmusic-cassette-selection-copy">
                   <strong>{selectedTrack.title}</strong>
                   <small>{selectedTrack.albumTitle} · {selectedTrack.releaseYear || selectedTrack.language}</small>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { hasAdminPermission } from '@/lib/admin-permissions'
+import { hasAdminPermission, invalidateAdminPermissionCache } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -33,6 +33,8 @@ export async function DELETE(_request: Request, context: RouteContext) {
       },
     })
   })
+
+  invalidateAdminPermissionCache(target.id)
 
   return NextResponse.json({ message: '管理员身份已取消' })
 }

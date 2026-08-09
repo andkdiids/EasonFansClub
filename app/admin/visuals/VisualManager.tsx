@@ -17,6 +17,7 @@ import {
 import type { SiteAppearanceConfig } from '@/lib/site-config'
 
 type Device = 'desktop' | 'mobile'
+type HeroImageTarget = 'desktopHero' | 'mobileHero'
 type DragState = {
   pointerId: number
   device: Device
@@ -32,7 +33,7 @@ const visualLabels: Record<PageVisualKey, { title: string; description: string }
   login: { title: '登录页', description: '设置登录页背景媒体与桌面、移动端构图。' },
   register: { title: '注册页', description: '设置注册页背景媒体与桌面、移动端构图。' },
   welcome: { title: '欢迎页', description: '设置欢迎页背景媒体与桌面、移动端构图。' },
-  home: { title: '首页 Hero', description: '设置首页 Hero 媒体、构图、叠加层与响应式显示。' },
+  home: { title: '首页 Hero', description: '设置首页 Hero 的桌面端 / 移动端图片、媒体、构图与响应式显示。' },
 }
 
 const mediaTypeLabels: Record<HeroMediaType, string> = {
@@ -55,12 +56,18 @@ function getHomePreviewVisual(config: SiteAppearanceConfig, visual: SiteHeroVisu
   const mediaType = slide.mediaType || 'IMAGE'
   const mediaUrl = slide.mediaUrl || (mediaType === 'IMAGE' ? slide.imageUrl : '')
   if (!mediaUrl) return visual
+  const hasDedicatedHeroImage = Boolean(
+    visual.mobileHero
+    || (visual.desktopHero && visual.desktopHero !== visual.imageUrl),
+  )
+  const legacySlideImage = !hasDedicatedHeroImage && mediaType === 'IMAGE' ? mediaUrl : visual.desktopHero || visual.imageUrl
   return {
     ...visual,
-    imageUrl: mediaType === 'IMAGE' ? mediaUrl : slide.imageUrl || visual.imageUrl,
-    mediaType,
-    mediaUrl,
-    posterUrl: slide.posterUrl || (mediaType === 'VIDEO' ? slide.imageUrl : '') || visual.posterUrl || '',
+    imageUrl: hasDedicatedHeroImage ? visual.imageUrl : mediaType === 'IMAGE' ? mediaUrl : slide.imageUrl || visual.imageUrl,
+    desktopHero: legacySlideImage,
+    mediaType: hasDedicatedHeroImage ? 'IMAGE' : mediaType,
+    mediaUrl: hasDedicatedHeroImage ? '' : mediaUrl,
+    posterUrl: hasDedicatedHeroImage ? visual.posterUrl || '' : slide.posterUrl || (mediaType === 'VIDEO' ? slide.imageUrl : '') || visual.posterUrl || '',
   }
 }
 
@@ -76,6 +83,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [heroUploading, setHeroUploading] = useState<HeroImageTarget | ''>('')
   const dragRef = useRef<DragState | null>(null)
   const visual = config.heroVisuals[visualKey]
   const homeSlide = visualKey === 'home'
@@ -175,6 +183,39 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
       setError('媒体上传失败，请稍后重试')
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function uploadResponsiveHero(event: ChangeEvent<HTMLInputElement>, target: HeroImageTarget) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setHeroUploading(target)
+    setMessage('')
+    setError('')
+    try {
+      const body = new FormData()
+      body.append('file', file, file.name)
+      body.append('kind', 'media')
+      body.append('mediaType', 'IMAGE')
+      body.append('scope', target === 'desktopHero' ? 'home-desktop' : 'home-mobile')
+      const response = await fetch('/api/uploads/hero-media', { method: 'POST', body })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setError(data?.message || 'Hero 图片上传失败')
+        return
+      }
+      updateVisual({
+        [target]: data.url,
+        mediaType: 'IMAGE',
+        mediaUrl: '',
+        sourceUrl: data.sourceUrl || '',
+      })
+      setMessage(`${target === 'desktopHero' ? '桌面端' : '移动端'} Hero 图片已上传，请保存当前设置`)
+    } catch {
+      setError('Hero 图片上传失败，请稍后重试')
+    } finally {
+      setHeroUploading('')
     }
   }
 
@@ -294,6 +335,24 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
           </div>
 
           <aside className="space-y-4 border-l border-slate-200 pl-0 xl:pl-5">
+            {visualKey === 'home' ? <div className="space-y-3 border-b border-slate-200 pb-4">
+              <div>
+                <p className="text-sm font-black text-brand-950">首页 Hero 图片</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">桌面端和移动端独立保存；移动端未设置时自动使用桌面端图片。</p>
+              </div>
+              <label className="block cursor-pointer border border-slate-300 bg-white px-3 py-3 hover:bg-slate-50">
+                <span className="block text-sm font-black text-brand-700">{heroUploading === 'desktopHero' ? '上传中…' : '桌面端 Hero 图片'}</span>
+                <span className="mt-1 block text-xs font-semibold leading-5 text-slate-400">建议比例：16:6（1920×700）</span>
+                <span className="mt-1 block truncate text-[11px] font-bold text-slate-500">{visual.desktopHero || visual.imageUrl ? '已设置（桌面端预览）' : '尚未设置'}</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void uploadResponsiveHero(event, 'desktopHero')} className="hidden" />
+              </label>
+              <label className="block cursor-pointer border border-slate-300 bg-white px-3 py-3 hover:bg-slate-50">
+                <span className="block text-sm font-black text-brand-700">{heroUploading === 'mobileHero' ? '上传中…' : '移动端 Hero 图片'}</span>
+                <span className="mt-1 block text-xs font-semibold leading-5 text-slate-400">建议比例：9:16（750×1200）</span>
+                <span className="mt-1 block truncate text-[11px] font-bold text-slate-500">{visual.mobileHero ? '已设置（移动端预览）' : '未设置，自动使用桌面端'}</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void uploadResponsiveHero(event, 'mobileHero')} className="hidden" />
+              </label>
+            </div> : null}
             <label className="block text-sm font-black text-slate-600">媒体类型
               <select value={currentMediaType} onChange={(event) => changeMediaType(event.target.value as HeroMediaType)} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-bold outline-none focus:border-sky-400">
                 {heroMediaTypes.map((type) => <option key={type} value={type}>{mediaTypeLabels[type]}</option>)}
@@ -341,13 +400,14 @@ function VisualPreview({ visual, pageKey, device, onPointerDown, onPointerMove, 
   const overlayClass = pageKey === 'home' ? 'community-hero-overlay' : pageKey === 'welcome' ? 'welcome-overlay' : 'auth-page-overlay'
 
   return <div>
-    <p className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-500">{device === 'desktop' ? 'Desktop Preview' : 'Mobile Preview'}</p>
+    <p className="mb-1 text-xs font-black uppercase tracking-[0.16em] text-slate-500">{device === 'desktop' ? '桌面端预览' : '移动端预览'}</p>
+    {isHome ? <p className="mb-2 text-[11px] font-semibold text-slate-400">{device === 'desktop' ? '建议比例：16:6（1920×700）' : '建议比例：9:16（750×1200）'}</p> : null}
     <div data-visual-preview={device} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} className={`relative touch-none select-none overflow-hidden border border-slate-300 bg-[#071523] text-white ${aspectClass}`} style={{ cursor: 'grab' }}>
       <HeroBackground visual={visual} positionMode={device} />
       <div className={`pointer-events-none absolute inset-0 ${overlayClass}`} />
       <div className="pointer-events-none absolute inset-x-4 bottom-4 z-[2] sm:inset-x-6 sm:bottom-6"><span className="text-[9px] font-black tracking-[.2em] text-white/65">LIVE PREVIEW</span><strong className="mt-1 block text-base sm:text-xl">{visual.title}</strong></div>
       <span aria-hidden="true" className="pointer-events-none absolute z-[3] size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 shadow-[0_0_0_4px_rgba(0,0,0,.22)]" style={{ left: `${x}%`, top: `${y}%` }} />
-      {!visual.imageUrl && !visual.mediaUrl ? <span className="pointer-events-none absolute inset-x-0 bottom-3 z-[3] text-center text-xs font-bold text-white/55">暂无媒体，可上传后预览</span> : null}
+      {!visual.imageUrl && !visual.mediaUrl && !visual.desktopHero && !visual.mobileHero ? <span className="pointer-events-none absolute inset-x-0 bottom-3 z-[3] text-center text-xs font-bold text-white/55">暂无媒体，可上传后预览</span> : null}
     </div>
   </div>
 }

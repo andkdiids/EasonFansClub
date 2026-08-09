@@ -12,6 +12,10 @@ export { adminModulePermissions, adminPermissionGroups, allAdminPermissionKeys, 
 const permissionCacheTtlMs = Number(process.env.ADMIN_PERMISSION_CACHE_TTL_MS || 10000)
 const permissionSetCache = new Map<string, { expiresAt: number; permissions: Set<AdminPermissionKey>; promise?: Promise<Set<AdminPermissionKey>> }>()
 
+export function invalidateAdminPermissionCache(userId: string) {
+  permissionSetCache.delete(userId)
+}
+
 export function isSuperAdmin(user?: Pick<SessionUser, 'role'> | null) {
   return user?.role === 'SUPER_ADMIN'
 }
@@ -22,7 +26,6 @@ export function isAdminUser(user?: Pick<SessionUser, 'role'> | null) {
 
 export async function getAdminPermissionSet(user: Pick<SessionUser, 'id' | 'role'>) {
   if (isSuperAdmin(user)) return new Set<AdminPermissionKey>(allAdminPermissionKeys)
-  if (user.role !== 'ADMIN') return new Set<AdminPermissionKey>()
 
   const now = Date.now()
   const cached = permissionSetCache.get(user.id)
@@ -49,9 +52,7 @@ export async function getAdminPermissionSet(user: Pick<SessionUser, 'id' | 'role
 
 export async function hasAdminPermission(user: Pick<SessionUser, 'id' | 'role'>, permissionKey?: AdminPermissionKey) {
   if (isSuperAdmin(user)) return true
-  if (user.role !== 'ADMIN') return false
-  if (!permissionKey) return true
 
   const permissions = await getAdminPermissionSet(user)
-  return permissions.has(permissionKey)
+  return permissionKey ? permissions.has(permissionKey) : permissions.size > 0
 }

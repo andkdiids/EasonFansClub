@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { UserRole } from '@prisma/client'
-import { type AdminPermissionKey, hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
+import { type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
@@ -11,6 +11,10 @@ let sensitiveWordCache: { expiresAt: number; words: string[] } | null = null
 export type GuardResult =
   | { user: SessionUser; response: null }
   | { user: null; response: NextResponse }
+
+export function isAdminRole(role: UserRole) {
+  return role === 'ADMIN' || role === 'SUPER_ADMIN'
+}
 
 export async function requireUser(): Promise<GuardResult> {
   let user: SessionUser | null
@@ -36,20 +40,9 @@ export async function requireUser(): Promise<GuardResult> {
   return { user, response: null }
 }
 
-export function isAdminRole(role: UserRole) {
-  return role === 'ADMIN' || role === 'SUPER_ADMIN'
-}
-
 export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<GuardResult> {
   const result = await requireUser()
   if (!result.user) return result
-
-  if (!isAdminUser(result.user)) {
-    return {
-      user: null,
-      response: NextResponse.json({ message: '只有管理员可以执行' }, { status: 403 }),
-    }
-  }
 
   const allowed = await hasAdminPermission(result.user, permissionKey)
   if (!allowed) {

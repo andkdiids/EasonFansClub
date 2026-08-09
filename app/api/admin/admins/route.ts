@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser, invalidateCurrentUserCache } from '@/lib/auth'
-import { allAdminPermissionKeys, type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
+import { allAdminPermissionKeys, invalidateAdminPermissionCache, type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(request: Request) {
@@ -46,6 +46,7 @@ export async function POST(request: Request) {
   })
 
   invalidateCurrentUserCache(target.id)
+  invalidateAdminPermissionCache(target.id)
 
   return NextResponse.json({ message: '管理员权限已保存' })
 }

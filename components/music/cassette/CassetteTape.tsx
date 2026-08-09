@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { memo, type CSSProperties, type PointerEventHandler } from 'react'
+import { CassetteCover } from '@/components/music/cassette/CassetteCover'
 import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import type { CassetteSong } from '@/types/music-cassette'
 
@@ -40,17 +41,15 @@ export const CassetteTapeVisual = memo(function CassetteTapeVisual({ song, index
     draggable={false}
   />
 
-{albumCover ? (
   <span className="easmusic-tape-cover">
-    <Image
+    <CassetteCover
       src={albumCover}
       alt={`${song.title}专辑封面`}
-      fill
       sizes="(max-width: 767px) 20px, 32px"
       className="easmusic-tape-cover-image"
+      priority={priority}
     />
   </span>
-) : null}
 
 <span className="easmusic-tape-copy">
   <strong><LedMarqueeText text={song.title} /></strong>

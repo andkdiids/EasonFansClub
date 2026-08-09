@@ -190,6 +190,12 @@ function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUr
     : null
   const mediaType = enumValue(partial.mediaType, heroMediaTypes, fallback.mediaType || 'IMAGE')
   const imageUrl = typeof partial.imageUrl === 'string' && partial.imageUrl.trim() ? partial.imageUrl.trim() : fallbackImageUrl
+  const desktopHero = typeof partial.desktopHero === 'string' && partial.desktopHero.trim()
+    ? partial.desktopHero.trim()
+    : imageUrl
+  const mobileHero = typeof partial.mobileHero === 'string' && partial.mobileHero.trim()
+    ? partial.mobileHero.trim()
+    : ''
   const mediaUrl = typeof partial.mediaUrl === 'string' && partial.mediaUrl.trim()
     ? partial.mediaUrl.trim()
     : mediaType === 'IMAGE' ? imageUrl : fallback.mediaUrl || ''
@@ -203,6 +209,8 @@ function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUr
     key,
     title: typeof partial.title === 'string' && partial.title.trim() ? partial.title.trim().slice(0, 80) : fallback.title,
     imageUrl,
+    desktopHero,
+    mobileHero,
     mediaType,
     mediaUrl,
     posterUrl: typeof partial.posterUrl === 'string' && partial.posterUrl.trim() ? partial.posterUrl.trim() : fallback.posterUrl || '',

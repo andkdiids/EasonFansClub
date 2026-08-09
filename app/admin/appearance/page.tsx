@@ -6,7 +6,7 @@ import { AppearanceForm } from './AppearanceForm'
 export const dynamic = 'force-dynamic'
 
 export default async function AdminAppearancePage() {
-  const user = await requireAdminPage('/admin/appearance')
+  const user = await requireAdminPage('/admin/appearance', 'site_config_manage')
 
   const config = await getSiteAppearance()
 

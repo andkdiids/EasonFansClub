@@ -5,6 +5,7 @@ import { publicImageUrl } from '@/lib/images'
 import {
   resolveHeroMediaLayout,
   resolveHeroMediaSettings,
+  resolveHeroImageUrl,
   type HeroMediaDimensions,
   type HeroFitMode,
   type HeroMediaType,
@@ -92,8 +93,17 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   const [videoReady, setVideoReady] = useState(false)
   const [videoFailed, setVideoFailed] = useState(false)
   const mediaType: HeroMediaType = visual?.mediaType || 'IMAGE'
-  const imageUrl = publicImageUrl(visual?.imageUrl || fallbackImageUrl)
-  const mediaUrl = publicImageUrl(visual?.mediaUrl || (mediaType === 'IMAGE' ? visual?.imageUrl : ''))
+  const hasDedicatedHeroImage = Boolean(
+    visual?.mobileHero
+    || (visual?.desktopHero && visual.desktopHero !== visual.imageUrl),
+  )
+  const responsiveImageUrl = resolveHeroImageUrl(visual, device, fallbackImageUrl || '')
+  const imageUrl = publicImageUrl(responsiveImageUrl)
+  const mediaUrl = publicImageUrl(
+    mediaType === 'IMAGE'
+      ? hasDedicatedHeroImage ? responsiveImageUrl : visual?.mediaUrl || responsiveImageUrl
+      : visual?.mediaUrl || '',
+  )
   const fallbackUrl = publicImageUrl(
     visual?.posterUrl
       || (mediaType === 'VIDEO' ? visual?.imageUrl : '')

@@ -76,15 +76,22 @@ export function HomeHero({
 
   const activeMediaType = active?.mediaType || 'IMAGE'
   const activeMediaUrl = active?.mediaUrl || (activeMediaType === 'IMAGE' ? active?.imageUrl || '' : '')
+  const hasDedicatedHeroImage = Boolean(
+    visual?.mobileHero
+    || (visual?.desktopHero && visual.desktopHero !== visual.imageUrl),
+  )
+  const legacySlideImage = !hasDedicatedHeroImage && activeMediaType === 'IMAGE' ? activeMediaUrl : visual?.desktopHero || visual?.imageUrl || ''
   const backgroundVisual = activeMediaUrl
     ? ({
         ...visual,
         key: 'home',
         title: visual?.title || 'Home Hero',
-        imageUrl: activeMediaType === 'IMAGE' ? activeMediaUrl : active?.imageUrl || visual?.imageUrl || '',
-        mediaType: activeMediaType,
-        mediaUrl: activeMediaUrl,
-        posterUrl: active?.posterUrl || (activeMediaType === 'VIDEO' ? active?.imageUrl : '') || visual?.posterUrl || '',
+        imageUrl: hasDedicatedHeroImage ? visual?.imageUrl || '' : activeMediaType === 'IMAGE' ? activeMediaUrl : active?.imageUrl || visual?.imageUrl || '',
+        desktopHero: legacySlideImage,
+        mobileHero: visual?.mobileHero || '',
+        mediaType: hasDedicatedHeroImage ? 'IMAGE' : activeMediaType,
+        mediaUrl: hasDedicatedHeroImage ? '' : activeMediaUrl,
+        posterUrl: hasDedicatedHeroImage ? visual?.posterUrl || '' : active?.posterUrl || (activeMediaType === 'VIDEO' ? active?.imageUrl : '') || visual?.posterUrl || '',
         desktopPositionX: visual?.desktopPositionX ?? 50,
         desktopPositionY: visual?.desktopPositionY ?? 50,
         mobilePositionX: visual?.mobilePositionX ?? 50,
@@ -102,7 +109,7 @@ export function HomeHero({
     : visual
   const hasBackground = Boolean(
     (backgroundVisual?.enabled ?? true)
-    && (backgroundVisual?.mediaUrl || backgroundVisual?.imageUrl || backgroundVisual?.posterUrl || fallbackImageUrl),
+    && (backgroundVisual?.mediaUrl || backgroundVisual?.imageUrl || backgroundVisual?.desktopHero || backgroundVisual?.mobileHero || backgroundVisual?.posterUrl || fallbackImageUrl),
   )
 
   return (

@@ -8,7 +8,7 @@ import { prisma } from '@/lib/prisma'
 export const dynamic = 'force-dynamic'
 
 export default async function AdminBirthdaysPage() {
-  const currentUser = await requireAdminPage('/admin/birthdays')
+  const currentUser = await requireAdminPage('/admin/birthdays', 'stats_view')
   const { month, day } = getTodayMonthDay()
 
   const birthdayUsers = await prisma.user.findMany({

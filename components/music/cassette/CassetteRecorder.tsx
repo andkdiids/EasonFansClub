@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { forwardRef } from 'react'
+import { CassetteCover } from '@/components/music/cassette/CassetteCover'
 import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import { RecorderWaveform } from '@/components/music/cassette/RecorderWaveform'
 import type { AudioAnalysisMode, AudioAnalysisModeDetails, CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
@@ -61,18 +62,22 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
         priority
         className="easmusic-recorder-shell-image"
       />
-     {track?.coverUrl ? (
-  <div className="easmusic-recorder-cover">
-    <Image
-      src={track.coverUrl}
-      alt={track.title}
-      fill
-      sizes="160px"
-    />
-  </div>
-) : null}
+      {track ? (
+        <div className="easmusic-recorder-cover">
+          <CassetteCover
+            src={track.coverUrl}
+            alt={`${track.title}专辑封面`}
+            sizes="160px"
+            className="easmusic-recorder-cover-image"
+            priority
+          />
+        </div>
+      ) : null}
 
-      <div className="easmusic-recorder-track-label" aria-live="polite">
+      <div
+        className={`easmusic-recorder-track-label${track ? '' : ' easmusic-recorder-track-label--empty'}`}
+        aria-live="polite"
+      >
         <LedMarqueeText
           text={track?.title || '请放入一盘磁带'}
           className={!track ? 'easmusic-recorder-empty-text' : undefined}

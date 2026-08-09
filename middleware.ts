@@ -52,18 +52,6 @@ function isApiPath(pathname: string) {
   return pathname === '/api' || pathname.startsWith('/api/')
 }
 
-function isAdminPagePath(pathname: string) {
-  return pathname === '/admin' || pathname.startsWith('/admin/')
-}
-
-function isAdminApiPath(pathname: string) {
-  return pathname === '/api/admin' || pathname.startsWith('/api/admin/')
-}
-
-function isAdminRole(role: string | null) {
-  return role === 'ADMIN' || role === 'SUPER_ADMIN'
-}
-
 async function verifyRequestSession(request: NextRequest): Promise<VerifiedSession | null> {
   const token = request.cookies.get(authCookieName)?.value
   if (!token) return null
@@ -133,14 +121,8 @@ export async function middleware(request: NextRequest) {
   const session = await verifyRequestSession(request)
   if (!session) return isApiPath(pathname) ? unauthorizedApiResponse() : loginRedirect(request)
 
-  if (isAdminApiPath(pathname) && !isAdminRole(session.role)) {
-    return forbiddenAdminApiResponse()
-  }
-
-  if (isAdminPagePath(pathname) && pathname !== '/admin/no-access' && !isAdminRole(session.role)) {
-    return adminNoAccessRedirect(request)
-  }
-
+  // 后台细粒度权限由服务端 requireAdmin / requireAdminPage 查询权限表；
+  // 中间件只负责确认登录，避免把拥有权限但 role 尚未同步为 ADMIN 的用户提前拦截。
   return withNoStoreHeaders(NextResponse.next())
 }
 

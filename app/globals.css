@@ -1455,12 +1455,12 @@ svg {
 .music-concert-gallery-image.is-square { width:100%; height:100%; aspect-ratio:1/1; }
 .music-concert-gallery-image-fallback { display:grid; width:100%; height:100%; place-items:center; border-radius:inherit; color:rgba(186,230,253,.48); background:rgba(7,21,35,.72); font-size:12px; font-weight:950; letter-spacing:.16em; }
 .music-concert-gallery-year { position:absolute; z-index:5; right:11px; bottom:11px; border:1px solid rgba(224,242,254,.38); border-radius:999px; padding:5px 8px; color:#f0f9ff; background:rgba(3,15,29,.8); font-size:9px; font-weight:950; letter-spacing:.13em; backdrop-filter:blur(8px); transition:opacity 160ms ease; }
-.music-concert-gallery-caption { position:absolute; z-index:4; inset:0; display:flex; flex-direction:column; justify-content:flex-end; border-radius:28px; padding:22px 18px; opacity:0; background:linear-gradient(180deg,transparent 8%,rgba(2,12,27,.12) 34%,rgba(2,12,27,.96) 100%); box-shadow:inset 0 -70px 84px rgba(2,12,27,.2); pointer-events:none; transform:translate3d(0,13px,0) scale(.96); transition:opacity 180ms ease,transform 300ms cubic-bezier(.22,1,.36,1); }
+.music-concert-gallery-caption { position:absolute; z-index:4; inset:0; display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; border-radius:28px; padding:22px 18px; opacity:0; background:linear-gradient(180deg,transparent 8%,rgba(2,12,27,.12) 34%,rgba(2,12,27,.96) 100%); box-shadow:inset 0 -70px 84px rgba(2,12,27,.2); pointer-events:none; transform:translate3d(0,13px,0) scale(.96); transition:opacity 180ms ease,transform 300ms cubic-bezier(.22,1,.36,1); }
 .music-concert-gallery-poster-button:hover .music-concert-gallery-caption,
 .music-concert-gallery-poster-button:focus-visible .music-concert-gallery-caption { opacity:1; transform:translate3d(0,0,0) scale(1); }
 .music-concert-gallery-poster-button:hover .music-concert-gallery-year,
 .music-concert-gallery-poster-button:focus-visible .music-concert-gallery-year { opacity:0; }
-.music-concert-gallery-caption>span { color:#7dd3fc; font-size:10px; font-weight:950; letter-spacing:.18em; }
+.music-concert-gallery-caption>span { color:#7dd3fc; font-size:9px; font-weight:950; letter-spacing:.18em; }
 .music-concert-gallery-draft { display:inline-block; margin-left:6px; border:1px solid rgba(251,191,36,.6); border-radius:999px; padding:1px 6px; color:#fde68a; background:rgba(120,53,15,.55); font-size:8px; font-weight:950; letter-spacing:.1em; vertical-align:middle; }
 
 /* 今日（历史上的今天）海报墙 */
@@ -1484,9 +1484,9 @@ svg {
 @media (min-width:768px) {
   .today-poster-wall { columns:2; }
 }
-.music-concert-gallery-caption strong { display:block; margin-top:8px; min-height:calc(2 * 1.12em); overflow:visible; overflow-wrap:anywhere; color:#fff; font-size:clamp(18px,1.8vw,23px); font-weight:950; line-height:1.12; white-space:normal; }
-.music-concert-gallery-caption small { margin-top:10px; color:rgba(226,232,240,.76); font-size:11px; font-weight:900; }
-.music-concert-gallery-caption>b { display:flex; align-items:center; justify-content:space-between; margin-top:13px; color:#e0f2fe; font-size:10px; font-weight:900; letter-spacing:.04em; }
+.music-concert-gallery-caption strong { display:-webkit-box; height:2.2em; max-height:2.2em; min-height:0; margin-top:6px; overflow:hidden; overflow-wrap:anywhere; color:#fff; font-size:clamp(13px,1.35vw,17px); font-weight:950; line-height:1.1; text-overflow:ellipsis; white-space:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.music-concert-gallery-caption small { margin-top:7px; color:rgba(226,232,240,.76); font-size:9px; font-weight:900; }
+.music-concert-gallery-caption>b { display:flex; align-items:center; justify-content:space-between; margin-top:9px; color:#e0f2fe; font-size:9px; font-weight:900; letter-spacing:.04em; }
 .music-concert-gallery-my-live { position:absolute; z-index:60; top:50%; left:50%; width:310px; min-height:365px; border:1px solid rgba(186,230,253,.22); border-radius:4px; padding:31px 28px 27px; color:#fff; background:rgba(5,25,43,.88); text-align:left; transform:translate3d(-50%,-50%,0); }
 .music-concert-gallery-corner { position:absolute; width:34px; height:34px; pointer-events:none; }
 .music-concert-gallery-corner.is-top { top:-17px; left:-17px; border-top:1px solid rgba(186,230,253,.72); border-left:1px solid rgba(186,230,253,.72); }
@@ -1542,9 +1542,11 @@ svg {
   .music-concert-gallery-poster-button { border-radius:18px; }
   .music-concert-gallery-image { border-radius:18px; }
   .music-concert-gallery-caption { border-radius:18px; padding:10px 8px; }
-  .music-concert-gallery-caption strong { font-size:14px; min-height:calc(2 * 1.12em); max-height:none; overflow:visible; white-space:normal; }
-  .music-concert-gallery-caption small { margin-top:5px; font-size:8px; }
-  .music-concert-gallery-caption>b { margin-top:6px; font-size:8px; }
+  .music-concert-gallery-caption>span { font-size:7px; letter-spacing:.1em; }
+  .music-concert-gallery-caption strong { height:2.25em; max-height:2.25em; margin-top:4px; font-size:clamp(10px,2.8vw,12px); line-height:1.12; }
+  .music-concert-gallery-draft { font-size:6px; }
+  .music-concert-gallery-caption small { margin-top:4px; font-size:7px; }
+  .music-concert-gallery-caption>b { margin-top:5px; font-size:7px; }
   .music-concert-gallery-poster-button:hover,
   .music-concert-gallery-poster-button:focus-visible { transform:scale(1.08); }
   .music-concert-gallery-my-live { display:flex; width:clamp(128px,35vw,150px); height:clamp(204px,50vw,220px); min-height:0; flex-direction:column; border-radius:2px; padding:8px 10px 9px; overflow:visible; }
@@ -1970,7 +1972,12 @@ box-shadow:none;
 .easmusic-cassette-selection-copy { display:contents; }
 .easmusic-cassette-selection-copy>strong { font-size:12px; }
 .easmusic-cassette-selection-copy>small { margin:0; color:#72899a; font-size:9px; }
-.easmusic-selected-album-cover { display:none; }
+.easmusic-selected-album-cover {
+  display:none;
+  position:relative;
+  overflow:hidden;
+}
+.easmusic-selected-album-cover-image { object-fit:cover; }
 .easmusic-cassette-selection button { min-height:40px; margin-left:8px; color:#071710; background:#65e0ac; }
 .easmusic-cassette-empty { margin:28px; border:1px solid rgba(145,180,205,.18); padding:46px 20px; color:#8ba0b1; background:rgba(9,22,34,.7); text-align:center; }
 .easmusic-cassette-empty strong { display:block; color:#d9e5ed; }.easmusic-cassette-empty p { margin:8px 0 0; font-size:11px; }
@@ -2012,6 +2019,7 @@ box-shadow:none;
   left:24.8%;
 
   width:9.3%;
+  height:auto;
   aspect-ratio:1 / 1;
 
   overflow:hidden;
@@ -2026,6 +2034,7 @@ box-shadow:none;
   object-fit:cover;
   display:block;
 }
+.easmusic-recorder-cover-image { object-fit:cover; }
 .easmusic-recorder[data-drop-active='true'] { cursor:copy; }
 .easmusic-recorder-track-label {
   position:absolute;
@@ -2202,6 +2211,7 @@ box-shadow:none;
   .easmusic-cassette-stage--stacked .easmusic-tape { position:relative; top:auto!important; right:auto!important; bottom:auto!important; left:auto!important; display:grid!important; width:100%; min-width:0; max-width:none; transform:rotate(var(--cassette-rotate)); }
   .easmusic-cassette-stage--stacked .easmusic-tape:nth-child(-n+4) { display:grid!important; }
   .easmusic-cassette-stage--stacked .easmusic-tape:nth-child(n+5) { display:none!important; }
+  .easmusic-cassette-stage--stacked .easmusic-tape-copy { top:15%; }
   .easmusic-cassette-stage--stacked .easmusic-tape-copy strong { font-size:clamp(8px,2.4vw,11px); line-height:1.2; }
   .easmusic-cassette-stage--stacked .easmusic-tape-brand { bottom:4%; font-size:4px; }
   .easmusic-cassette-stage--stacked .easmusic-recorder {
@@ -2230,6 +2240,7 @@ box-shadow:none;
   .easmusic-cassette-selection[data-has-cover="false"] { grid-template-columns:minmax(0,1fr) auto; }
   .easmusic-selected-album-cover {
     display:block;
+    position:relative;
     grid-column:1;
     grid-row:1;
     width:42px;
@@ -2251,6 +2262,7 @@ box-shadow:none;
   .easmusic-cassette-selection[data-has-cover="false"] .easmusic-cassette-selection-copy { grid-column:1; }
   .easmusic-cassette-selection-copy>strong {
     min-width:0;
+    max-width:100%;
     overflow:hidden;
     font-size:12px;
     font-weight:700;
@@ -2259,6 +2271,7 @@ box-shadow:none;
   }
   .easmusic-cassette-selection-copy>small {
     min-width:0;
+    max-width:100%;
     overflow:hidden;
     color:#72899a;
     font-size:9px;
@@ -2268,6 +2281,13 @@ box-shadow:none;
   }
   .easmusic-cassette-empty { order:4; margin:12px 14px 0; }
   .easmusic-recorder-track-label { transform:translateY(3px); }
+  .easmusic-recorder-track-label--empty { transform:translateY(-2px); }
+  .easmusic-recorder-track-label > .easmusic-led-text {
+    flex:0 1 100%;
+    min-width:0;
+    max-width:100%;
+    overflow:hidden;
+  }
  @media (max-width:767px) {
   .easmusic-recorder-track-label > .easmusic-led-text:not(.easmusic-recorder-empty-text) {
     display:flex;

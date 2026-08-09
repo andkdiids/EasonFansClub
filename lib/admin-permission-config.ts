@@ -65,6 +65,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/admins': 'admin_manage',
   '/admin/growth': 'growth_manage',
   '/admin/birthday-messages': 'birthday_messages_manage',
+  '/admin/birthdays': 'stats_view',
   '/admin/stickers': 'sticker_manage',
   '/admin/registration-messages': 'daily_message_manage',
 }

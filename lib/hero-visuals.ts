@@ -72,6 +72,8 @@ export type SiteHeroVisualConfig = {
   key: HeroVisualKey
   title: string
   imageUrl: string
+  desktopHero: string
+  mobileHero: string
   mediaType?: HeroMediaType
   mediaUrl?: string
   posterUrl?: string
@@ -94,6 +96,8 @@ const visualDefaults = (key: HeroVisualKey, title: string): SiteHeroVisualConfig
   key,
   title,
   imageUrl: '',
+  desktopHero: '',
+  mobileHero: '',
   mediaType: 'IMAGE',
   mediaUrl: '',
   posterUrl: '',
@@ -120,4 +124,18 @@ export const defaultHeroVisuals: Record<HeroVisualKey, SiteHeroVisualConfig> = {
   activities: visualDefaults('activities', '活动中心 Banner'),
   birthday: visualDefaults('birthday', '生日应援 Banner'),
   music: visualDefaults('music', 'EasMusic 背景'),
+}
+
+export function resolveHeroImageUrl(
+  visual: Pick<SiteHeroVisualConfig, 'desktopHero' | 'mobileHero' | 'imageUrl'> | null | undefined,
+  device: 'desktop' | 'mobile',
+  fallbackImageUrl = '',
+) {
+  const desktopHero = typeof visual?.desktopHero === 'string' ? visual.desktopHero.trim() : ''
+  const mobileHero = typeof visual?.mobileHero === 'string' ? visual.mobileHero.trim() : ''
+  const legacyImage = typeof visual?.imageUrl === 'string' ? visual.imageUrl.trim() : ''
+
+  return device === 'mobile'
+    ? mobileHero || desktopHero || legacyImage || fallbackImageUrl
+    : desktopHero || legacyImage || fallbackImageUrl
 }

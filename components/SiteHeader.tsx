@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
-import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { publicImageUrl } from '@/lib/images'
@@ -27,7 +27,9 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
     providedConfig ? Promise.resolve(providedConfig) : measureBootstrap('site.appearance', getSiteAppearance()),
   ])
   const navItems = config.nav.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder)
-  const isAdmin = Boolean(user && isAdminUser(user))
+  const canAccessAdmin = user
+    ? await measureBootstrap('header.adminPermission', hasAdminPermission(user))
+    : false
   const displayName = user?.nickname || ''
   const navLogo = publicImageUrl(config.images.navLogoUrl)
   const mobileNav = navItems.slice(0, 5)
@@ -40,10 +42,10 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
             <BrandMark logoUrl={navLogo} compact />
           </Link>
 
-          <DesktopSiteNavigation items={navItems} isAdmin={isAdmin} />
+          <DesktopSiteNavigation items={navItems} isAdmin={canAccessAdmin} />
 
           {user ? (
-            <UserNotificationMenu currentUserId={user.id} uid={user.uid} displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={isAdmin} />
+            <UserNotificationMenu currentUserId={user.id} uid={user.uid} displayName={displayName} avatarUrl={user.avatarUrl} isAdmin={canAccessAdmin} />
           ) : (
             <div className="flex shrink-0 items-center gap-2">
               <Link href="/login" className="site-header-auth-link flat-button-secondary">登录</Link>

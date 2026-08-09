@@ -46,8 +46,9 @@ export default async function AdminPage() {
   const visibleModules = adminModules.filter((item) => {
     if (isSuperAdmin(currentUser)) return true
     const permission = adminModulePermissions[item.href]
-    return permission ? permissionSet.has(permission) : true
+    return Boolean(permission && permissionSet.has(permission))
   })
+  const canViewStats = isSuperAdmin(currentUser) || permissionSet.has('stats_view')
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -108,6 +109,7 @@ export default async function AdminPage() {
           }
 
           if (layoutItem.key === 'admin.stats') {
+            if (!canViewStats) return null
             return (
               <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
                 <section className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">

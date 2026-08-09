@@ -2,13 +2,11 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
-import { type AdminPermissionKey, hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
+import { type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 
 export async function requireAdminPage(path = '/admin', permissionKey?: AdminPermissionKey): Promise<SessionUser> {
   const user = await getCurrentUser()
   if (!user) redirect(`/login?redirect=${encodeURIComponent(path)}`)
-  if (!isAdminUser(user)) redirect(`/admin/no-access?from=${encodeURIComponent(path)}`)
-
   const allowed = await hasAdminPermission(user, permissionKey)
   if (!allowed) redirect(`/admin/no-access?from=${encodeURIComponent(path)}`)
 

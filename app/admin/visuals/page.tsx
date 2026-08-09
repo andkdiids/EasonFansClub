@@ -8,7 +8,7 @@ const pageVisualLabels: Record<PageVisualKey, { title: string; description: stri
   login: { title: '登录页', description: '设置登录页背景与桌面、移动端构图。' },
   register: { title: '注册页', description: '设置注册页背景与桌面、移动端构图。' },
   welcome: { title: '欢迎页', description: '设置欢迎页背景与桌面、移动端构图。' },
-  home: { title: '首页 Hero', description: '设置首页 Hero 媒体、构图与响应式显示。' },
+  home: { title: '首页 Hero', description: '设置首页 Hero 的桌面端 / 移动端图片、媒体、构图与响应式显示。' },
 }
 
 export default async function AdminVisualsPage() {
