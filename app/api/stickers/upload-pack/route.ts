@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { readFile } from 'node:fs/promises'
 import { requireUser } from '@/lib/security'
 import {
   uploadStickerImage,
@@ -8,10 +9,14 @@ import {
   STICKER_MAX_PACK_NAME_LENGTH,
   STICKER_MAX_DESCRIPTION_LENGTH,
   STICKER_FILE_TOO_LARGE_MESSAGE,
-  getStickerFormDataErrorResponse,
   getStickerUploadErrorResponse,
 } from '@/lib/sticker-upload'
 import { submitStickerPack } from '@/lib/sticker-center'
+import {
+  parseStickerPackMultipart,
+  removeStickerMultipartTempDirectory,
+  StickerMultipartError,
+} from '@/lib/sticker-pack-multipart'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
@@ -70,76 +75,57 @@ export async function POST(request: Request) {
     return guard.response
   }
 
-  let formData: FormData | null = null
-  let formDataError: unknown = null
-  stage = 'form_data_parsing'
+  let tempDirectory: string | null = null
   try {
-    formData = await request.formData()
-  } catch (error) {
-    console.error('[sticker.upload-pack.form-data]', error)
-    formDataError = error
-  }
-  if (!formData) {
-    const failure = getStickerFormDataErrorResponse(formDataError)
-    const tooLarge = failure.status === 413 || isPayloadTooLargeError(formDataError)
-    console.error('[sticker.uploadPack]', {
-      stage,
-      error: describeUploadPackError(formDataError),
-      fullError: formDataError,
-    })
-    return NextResponse.json(
-      {
-        success: false,
-        code: tooLarge ? 'REQUEST_TOO_LARGE' : 'SERVER_ERROR',
-        message: tooLarge ? STICKER_PACK_TOO_LARGE_MESSAGE : '服务器错误',
-      },
-      { status: tooLarge ? 413 : 500 },
-    )
-  }
+    stage = 'multipart_parsing'
+    const parsed = await parseStickerPackMultipart(request)
+    tempDirectory = parsed.tempDirectory
 
-  const name = String(formData.get('name') || '').trim()
-  if (!name) return NextResponse.json({ success: false, message: '请填写表情包名称' }, { status: 400 })
-  if (name.length > STICKER_MAX_PACK_NAME_LENGTH) {
-    return NextResponse.json({ success: false, message: `名称不能超过 ${STICKER_MAX_PACK_NAME_LENGTH} 字` }, { status: 400 })
-  }
-
-  const description = String(formData.get('description') || '').slice(0, STICKER_MAX_DESCRIPTION_LENGTH).trim()
-  const copyright = String(formData.get('copyright') || '').slice(0, 100).trim()
-  const category = String(formData.get('category') || '').slice(0, 40).trim()
-  const typeRaw = String(formData.get('type') || 'STATIC').toUpperCase()
-  const type = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
-
-  const stickerFiles = formData.getAll('stickerFiles').filter((f): f is File => f instanceof File)
-  const coverFile = formData.get('cover')
-  const coverSize = coverFile instanceof File && coverFile.size > 0 ? coverFile.size : 0
-  const stickerTotalSize = stickerFiles.reduce((total, file) => total + file.size, 0)
-  console.info('[sticker.uploadPack]', {
-    stage: 'form_data_parsed',
-    fileCount: stickerFiles.length,
-    files: stickerFiles.map((file) => ({ name: file.name, size: file.size, type: file.type })),
-    stickerTotalSize,
-    coverSize,
-    totalFileSize: stickerTotalSize + coverSize,
-    contentLength: request.headers.get('content-length'),
-  })
-
-  stage = 'parameter_validation'
-  if (stickerFiles.length < 6) {
-    return NextResponse.json({ success: false, message: '至少需要 6 张表情' }, { status: 400 })
-  }
-  if (stickerFiles.length > 60) {
-    return NextResponse.json({ success: false, message: '最多 60 张表情' }, { status: 400 })
-  }
-  for (const f of stickerFiles) {
-    if (f.size === 0) return NextResponse.json({ success: false, message: '请选择有效的表情文件' }, { status: 400 })
-    if (f.size > STICKER_MAX_FILE_SIZE) {
-      return NextResponse.json({ success: false, code: 'FILE_TOO_LARGE', message: STICKER_FILE_TOO_LARGE_MESSAGE }, { status: 413 })
+    const firstField = (fieldName: string) => parsed.fields.get(fieldName)?.[0] || ''
+    const name = firstField('name').trim()
+    if (!name) return NextResponse.json({ success: false, message: '请填写表情包名称' }, { status: 400 })
+    if (name.length > STICKER_MAX_PACK_NAME_LENGTH) {
+      return NextResponse.json({ success: false, message: `名称不能超过 ${STICKER_MAX_PACK_NAME_LENGTH} 字` }, { status: 400 })
     }
-  }
 
-  let coverUrl: string | null = null
+    const description = firstField('description').slice(0, STICKER_MAX_DESCRIPTION_LENGTH).trim()
+    const copyright = firstField('copyright').slice(0, 100).trim()
+    const category = firstField('category').slice(0, 40).trim()
+    const typeRaw = (firstField('type') || 'STATIC').toUpperCase()
+    const type = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
 
-  try {
+    const stickerFiles = parsed.files
+      .filter((file) => file.fieldName === 'stickerFiles')
+      .sort((left, right) => left.ordinal - right.ordinal)
+    const coverFile = parsed.files.find((file) => file.fieldName === 'cover') || null
+    const coverSize = coverFile && coverFile.size > 0 ? coverFile.size : 0
+    const stickerTotalSize = stickerFiles.reduce((total, file) => total + file.size, 0)
+    stage = 'form_data_parsed'
+    console.info('[sticker.uploadPack]', {
+      stage,
+      fileCount: stickerFiles.length,
+      files: stickerFiles.map((file) => ({ name: file.filename, size: file.size, type: file.mimeType })),
+      stickerTotalSize,
+      coverSize,
+      totalFileSize: stickerTotalSize + coverSize,
+      contentLength: request.headers.get('content-length'),
+    })
+
+    stage = 'parameter_validation'
+    if (stickerFiles.length < 6) {
+      return NextResponse.json({ success: false, message: '至少需要 6 张表情' }, { status: 400 })
+    }
+    if (stickerFiles.length > 60) {
+      return NextResponse.json({ success: false, message: '最多 60 张表情' }, { status: 400 })
+    }
+    for (const file of stickerFiles) {
+      if (file.size === 0) return NextResponse.json({ success: false, message: '请选择有效的表情文件' }, { status: 400 })
+      if (file.size > STICKER_MAX_FILE_SIZE) {
+        return NextResponse.json({ success: false, code: 'FILE_TOO_LARGE', message: STICKER_FILE_TOO_LARGE_MESSAGE }, { status: 413 })
+      }
+    }
+
+    let coverUrl: string | null = null
     console.info('[sticker.uploadPack]', {
       stage: 'file_processing_started',
       fileCount: stickerFiles.length,
@@ -147,8 +133,8 @@ export async function POST(request: Request) {
     })
 
     stage = 'cover_upload'
-    if (coverFile instanceof File && coverFile.size > 0) {
-      const buf = Buffer.from(await coverFile.arrayBuffer())
+    if (coverFile && coverFile.size > 0) {
+      const buf = await readFile(coverFile.path)
       coverUrl = await uploadStickerPackCover({ ownerId: guard.user.id, buffer: buf })
       console.info('[sticker.uploadPack]', {
         stage: 'cos_upload_success',
@@ -159,18 +145,18 @@ export async function POST(request: Request) {
     }
 
     const uploadedStickers: Array<{ name: string | null; url: string; type: 'STATIC' | 'GIF' }> = []
-    const stickerNamesRaw = formData.getAll('stickerNames').map((n) => String(n || ''))
+    const stickerNamesRaw = parsed.fields.get('stickerNames') || []
     stage = 'sticker_upload'
     for (let i = 0; i < stickerFiles.length; i += 1) {
       stickerIndex = i
       const file = stickerFiles[i]
-      const buf = Buffer.from(await file.arrayBuffer())
+      const buf = await readFile(file.path)
       console.info('[sticker.uploadPack]', {
         stage: 'sticker_processing_started',
         index: i,
-        name: file.name,
+        name: file.filename,
         size: file.size,
-        type: file.type,
+        type: file.mimeType,
       })
       const result = await uploadStickerImage({
         ownerId: guard.user.id,
@@ -221,8 +207,22 @@ export async function POST(request: Request) {
       message: '已提交审核，请等待管理员审核',
     })
   } catch (error) {
+    const multipartFailure = error instanceof StickerMultipartError
+      ? {
+          status: error.code === 'FILE_TOO_LARGE' ? 413 : 400,
+          code: error.code,
+          message: error.message,
+        }
+      : null
     const tooLarge = isPayloadTooLargeError(error)
     const failure = getStickerUploadErrorResponse(error)
+    const status = tooLarge || multipartFailure?.status === 413
+      ? 413
+      : multipartFailure
+        ? 400
+        : failure.status === 400
+          ? 400
+          : 500
     console.error('[sticker.uploadPack]', {
       stage,
       stickerIndex,
@@ -232,10 +232,36 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: false,
-        code: tooLarge ? 'REQUEST_TOO_LARGE' : failure.status === 400 ? failure.code : 'SERVER_ERROR',
-        message: tooLarge ? STICKER_PACK_TOO_LARGE_MESSAGE : failure.status === 400 ? failure.message : '服务器错误',
+        code: tooLarge || multipartFailure?.status === 413
+          ? 'REQUEST_TOO_LARGE'
+          : multipartFailure
+            ? 'INVALID_REQUEST'
+            : failure.status === 400
+              ? failure.code
+              : 'SERVER_ERROR',
+        message: tooLarge || multipartFailure?.status === 413
+          ? multipartFailure?.code === 'FILE_TOO_LARGE'
+            ? STICKER_FILE_TOO_LARGE_MESSAGE
+            : STICKER_PACK_TOO_LARGE_MESSAGE
+          : multipartFailure
+            ? multipartFailure.message
+            : failure.status === 400
+              ? failure.message
+              : '服务器错误',
       },
-      { status: tooLarge ? 413 : failure.status === 400 ? 400 : 500 },
+      { status },
     )
+  } finally {
+    if (tempDirectory) {
+      try {
+        await removeStickerMultipartTempDirectory(tempDirectory)
+      } catch (cleanupError) {
+        console.warn('[sticker.uploadPack]', {
+          stage: 'multipart_temp_cleanup',
+          tempDirectory,
+          error: describeUploadPackError(cleanupError),
+        })
+      }
+    }
   }
 }
