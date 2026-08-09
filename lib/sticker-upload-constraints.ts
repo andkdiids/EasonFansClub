@@ -1,3 +1,9 @@
+export const STICKER_MAX_FILE_SIZE = 20 * 1024 * 1024
+
+export const STICKER_FILE_TOO_LARGE_MESSAGE = '文件超过20MB限制'
+export const STICKER_UNSUPPORTED_FORMAT_MESSAGE = '暂不支持该图片格式'
+export const STICKER_UPLOAD_FAILED_MESSAGE = '上传失败，请稍后重试'
+
 export const STICKER_UPLOAD_MIME_TYPES = [
   'image/jpeg',
   'image/png',

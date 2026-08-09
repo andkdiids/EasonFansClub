@@ -1,6 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  isSupportedStickerFile,
+  STICKER_FILE_TOO_LARGE_MESSAGE,
+  STICKER_MAX_FILE_SIZE,
+  STICKER_UPLOAD_ACCEPT,
+} from '@/lib/sticker-upload-constraints'
 
 type AdminSticker = {
   id: string
@@ -269,6 +275,10 @@ function OfficialUploadForm({ onUploaded }: { onUploaded: () => void }) {
       setMsg('请选择表情图片')
       return
     }
+    if (file.size > STICKER_MAX_FILE_SIZE) {
+      setMsg(STICKER_FILE_TOO_LARGE_MESSAGE)
+      return
+    }
     setBusy(true)
     setMsg(null)
     try {
@@ -298,8 +308,30 @@ function OfficialUploadForm({ onUploaded }: { onUploaded: () => void }) {
       <p className="text-sm font-black text-brand-950">上传官方表情</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="text-xs font-bold text-slate-600">
-          图片（JPG/PNG/APNG/WEBP 或 GIF，≤5MB）
-          <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/apng,image/webp,image/gif" onChange={(e) => setFile(e.target.files?.[0] || null)} className="mt-1 block w-full text-xs" />
+          图片（JPG/PNG/APNG/WEBP 或 GIF，≤20MB）
+          <input
+            ref={inputRef}
+            type="file"
+            accept={STICKER_UPLOAD_ACCEPT}
+            onChange={(e) => {
+              const nextFile = e.target.files?.[0] || null
+              if (nextFile && nextFile.size > STICKER_MAX_FILE_SIZE) {
+                setFile(null)
+                setMsg(STICKER_FILE_TOO_LARGE_MESSAGE)
+                e.target.value = ''
+                return
+              }
+              if (nextFile && !isSupportedStickerFile(nextFile)) {
+                setFile(null)
+                setMsg('浠呮敮鎸?JPG / PNG / APNG / WebP / GIF 鏍煎紡')
+                e.target.value = ''
+                return
+              }
+              setMsg(null)
+              setFile(nextFile)
+            }}
+            className="mt-1 block w-full text-xs"
+          />
         </label>
         <label className="text-xs font-bold text-slate-600">
           类型

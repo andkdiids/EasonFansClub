@@ -7,6 +7,9 @@ import {
   STICKER_MAX_FILE_SIZE,
   STICKER_MAX_PACK_NAME_LENGTH,
   STICKER_MAX_DESCRIPTION_LENGTH,
+  STICKER_FILE_TOO_LARGE_MESSAGE,
+  getStickerFormDataErrorResponse,
+  getStickerUploadErrorResponse,
 } from '@/lib/sticker-upload'
 import { submitStickerPack } from '@/lib/sticker-center'
 
@@ -30,14 +33,19 @@ export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
-  const formData = await request.formData().catch((error) => {
+  let formData: FormData | null = null
+  let formDataError: unknown = null
+  try {
+    formData = await request.formData()
+  } catch (error) {
     console.error('[sticker.upload-pack.form-data]', error)
-    return null
-  })
+    formDataError = error
+  }
   if (!formData) {
+    const failure = getStickerFormDataErrorResponse(formDataError)
     return NextResponse.json(
-      { success: false, message: '上传请求无效或文件超过服务器限制' },
-      { status: 400 },
+      { success: false, code: failure.code, message: failure.message },
+      { status: failure.status },
     )
   }
 
@@ -63,7 +71,7 @@ export async function POST(request: Request) {
   for (const f of stickerFiles) {
     if (f.size === 0) return NextResponse.json({ success: false, message: '请选择有效的表情文件' }, { status: 400 })
     if (f.size > STICKER_MAX_FILE_SIZE) {
-      return NextResponse.json({ success: false, message: '单个表情不能超过 5MB' }, { status: 413 })
+      return NextResponse.json({ success: false, code: 'FILE_TOO_LARGE', message: STICKER_FILE_TOO_LARGE_MESSAGE }, { status: 413 })
     }
   }
 
@@ -113,12 +121,14 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error('[sticker.uploadPack]', error)
+    const failure = getStickerUploadErrorResponse(error)
     return NextResponse.json(
       {
         success: false,
-        message: error instanceof Error ? error.message : '上传失败，请稍后重试',
+        code: failure.code,
+        message: failure.message,
       },
-      { status: 500 },
+      { status: failure.status },
     )
   }
 }

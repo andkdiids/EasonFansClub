@@ -6,6 +6,9 @@ import {
   uploadStickerImage,
   sanitizeStickerName,
   STICKER_MAX_FILE_SIZE,
+  STICKER_FILE_TOO_LARGE_MESSAGE,
+  getStickerFormDataErrorResponse,
+  getStickerUploadErrorResponse,
 } from '@/lib/sticker-upload'
 import type { StickerPackStatus, StickerType } from '@prisma/client'
 
@@ -83,13 +86,20 @@ export async function POST(request: Request) {
   const guard = await requireAdmin('sticker_manage')
   if (!guard.user) return guard.response
 
-  const formData = await request.formData().catch(() => null)
+  let formData: FormData | null = null
+  try {
+    formData = await request.formData()
+  } catch (error) {
+    console.error('[admin.sticker.form-data]', error)
+    const failure = getStickerFormDataErrorResponse(error)
+    return NextResponse.json({ code: failure.code, message: failure.message }, { status: failure.status })
+  }
   if (!formData) return NextResponse.json({ message: '请求无效' }, { status: 400 })
 
   const file = formData.get('file')
   if (!(file instanceof File)) return NextResponse.json({ message: '请选择表情图片' }, { status: 400 })
   if (file.size === 0) return NextResponse.json({ message: '表情文件不能为空' }, { status: 400 })
-  if (file.size > STICKER_MAX_FILE_SIZE) return NextResponse.json({ message: '表情文件不能超过 5MB' }, { status: 400 })
+  if (file.size > STICKER_MAX_FILE_SIZE) return NextResponse.json({ code: 'FILE_TOO_LARGE', message: STICKER_FILE_TOO_LARGE_MESSAGE }, { status: 413 })
 
   const typeRaw = String(formData.get('type') || 'STATIC')
   const type: StickerType = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
@@ -115,6 +125,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ sticker }, { status: 201 })
   } catch (error) {
     console.error('[admin.sticker.create]', error)
-    return NextResponse.json({ message: error instanceof Error ? error.message : '上传官方表情失败' }, { status: 400 })
+    const failure = getStickerUploadErrorResponse(error)
+    return NextResponse.json({ code: failure.code, message: failure.message }, { status: failure.status })
   }
 }

@@ -14,13 +14,15 @@ test('表情上传改用 sharp 解码真实格式，不再信任浏览器 MIME�
   assert.doesNotMatch(lib, /uploadStickerImage\(\{[^}]*mime:/)
   assert.doesNotMatch(lib, /uploadStickerPackCover\(\{[^}]*mime:/)
 
-  // 新逻辑：用 sharp 解码真实格式 + 真实格式白名单。
+  // 新逻辑：用 sharp 解码真实格式 + 真实格式白名单，并统一返回可读错误。
   assert.match(lib, /new Set\(\['jpeg', 'jpg', 'png', 'webp', 'avif'\]\)/)
   assert.match(lib, /async function decodeImageFormat\(input: Buffer\): Promise<string>/)
   assert.match(lib, /sharp\(input, \{ failOn: 'none', limitInputPixels: 20_000_000 \}\)/)
   assert.match(lib, /metadata\.format/)
-  assert.match(lib, /图片格式错误，仅支持 JPG \/ PNG \/ WebP \/ AVIF 静态图/)
-  assert.match(lib, /不支持 SVG 格式/)
+  assert.match(lib, /STICKER_UNSUPPORTED_FORMAT_MESSAGE/)
+  assert.match(lib, /STICKER_FILE_TOO_LARGE_MESSAGE/)
+  assert.match(lib, /compressAnimatedStickerToWebp/)
+  assert.match(lib, /animated: true/)
 })
 
 test('表情上传接口不再用浏览器 MIME 做硬拒，统一交给 sharp 解码校验', () => {

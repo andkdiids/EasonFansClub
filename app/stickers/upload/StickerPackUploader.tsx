@@ -2,7 +2,12 @@
 
 import Link from 'next/link'
 import { useCallback, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { isSupportedStickerFile, STICKER_UPLOAD_ACCEPT } from '@/lib/sticker-upload-constraints'
+import {
+  isSupportedStickerFile,
+  STICKER_FILE_TOO_LARGE_MESSAGE,
+  STICKER_MAX_FILE_SIZE,
+  STICKER_UPLOAD_ACCEPT,
+} from '@/lib/sticker-upload-constraints'
 
 type StickerType = 'STATIC' | 'GIF'
 
@@ -15,7 +20,6 @@ type StickerFile = {
 
 const MAX_FILES = 60
 const MIN_FILES = 6
-const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -46,8 +50,8 @@ export function StickerPackUploader() {
     for (const f of list) {
       if (stickerFiles.length + accepted.length >= MAX_FILES) break
       if (f.size === 0) continue
-      if (f.size > MAX_FILE_SIZE) {
-        setError('单个表情不能超过 5MB')
+      if (f.size > STICKER_MAX_FILE_SIZE) {
+        setError(STICKER_FILE_TOO_LARGE_MESSAGE)
         continue
       }
       if (!isSupportedStickerFile(f)) {
@@ -79,6 +83,10 @@ export function StickerPackUploader() {
   function onCoverPick(event: ChangeEvent<HTMLInputElement>) {
     const f = event.target.files?.[0]
     if (!f) return
+    if (f.size > STICKER_MAX_FILE_SIZE) {
+      setError(STICKER_FILE_TOO_LARGE_MESSAGE)
+      return
+    }
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
       setError('封面仅支持 JPG / PNG / WebP 格式')
       return
@@ -179,7 +187,7 @@ export function StickerPackUploader() {
       <section className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-4">
           <span className="text-sm font-black text-slate-700">表情</span>
-          <span className="text-xs text-slate-400">JPG / PNG / WebP / GIF 格式，单个 ≤ 5MB，至少 {MIN_FILES} 张</span>
+          <span className="text-xs text-slate-400">JPG / PNG / WebP / GIF 格式，单个 ≤ 20MB，至少 {MIN_FILES} 张</span>
         </div>
         <div
           className="mt-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-sm font-bold text-slate-500"
