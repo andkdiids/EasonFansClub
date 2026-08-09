@@ -52,7 +52,7 @@ function describeUploadPackError(error: unknown) {
  * - `copyright`: 版权信息（≤ 100 字，可选）
  * - `category`: 分类（可选）
  * - `type`: STATIC|GIF
- * - `cover`: 封面图（可选）
+ * - `cover`: 静态封面图（必选）
  * - `stickerFiles`: 多张表情图片（至少 6 张，至多 60 张）
  * - `stickerNames`: 与 stickerFiles 顺序一一对应的名称数组（可选）
  *
@@ -98,6 +98,9 @@ export async function POST(request: Request) {
       .filter((file) => file.fieldName === 'stickerFiles')
       .sort((left, right) => left.ordinal - right.ordinal)
     const coverFile = parsed.files.find((file) => file.fieldName === 'cover') || null
+    if (!coverFile || coverFile.size === 0) {
+      return NextResponse.json({ success: false, code: 'COVER_REQUIRED', message: '请选择表情包封面' }, { status: 400 })
+    }
     const coverSize = coverFile && coverFile.size > 0 ? coverFile.size : 0
     const stickerTotalSize = stickerFiles.reduce((total, file) => total + file.size, 0)
     stage = 'form_data_parsed'

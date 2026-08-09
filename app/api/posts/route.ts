@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { hasAdminPermission } from '@/lib/admin-permissions'
+import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { awardExperience } from '@/lib/growth'
 import { getRandomPostRegistrationFee, POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const canPublishImmediately = await hasAdminPermission(user, 'post_manage')
+    const canPublishImmediately = isAdminUser(user)
     const moderationStatus = canPublishImmediately ? 'APPROVED' as const : 'PENDING' as const
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`

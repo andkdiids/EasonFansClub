@@ -83,7 +83,7 @@ export default async function MusicPage() {
       albumTitle: song.MusicAlbum.name,
       releaseYear: song.releaseYear,
       language: song.language,
-      coverUrl: song.coverUrl || song.MusicAlbum.coverUrl,
+      coverUrl: song.MusicAlbum.coverUrl || song.coverUrl,
       ...playback,
     }]
   })

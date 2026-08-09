@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import Image from 'next/image'
 import { CassetteField } from '@/components/music/cassette/CassetteField'
 import { CassetteRecorder } from '@/components/music/cassette/CassetteRecorder'
 import { CassetteTapeVisual } from '@/components/music/cassette/CassetteTape'
@@ -173,11 +172,13 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
             >
                 <span className="easmusic-cassette-selection-label">已选择</span>
                 {selectedTrack.coverUrl ? (
-                  <Image
+                  <img
                     src={selectedTrack.coverUrl}
                     alt={`${selectedTrack.albumTitle} 专辑封面`}
                     width={44}
                     height={44}
+                    loading="lazy"
+                    decoding="async"
                     sizes="44px"
                     className="easmusic-selected-album-cover"
                   />

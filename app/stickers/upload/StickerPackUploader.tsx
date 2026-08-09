@@ -21,6 +21,66 @@ type StickerFile = {
 const MAX_FILES = 60
 const MIN_FILES = 6
 
+const COVER_STATIC_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const COVER_STATIC_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+
+function fileExtension(file: File) {
+  return file.name.trim().toLowerCase().split('.').pop() || ''
+}
+
+function ascii(bytes: Uint8Array, start: number, length: number) {
+  return String.fromCharCode(...bytes.subarray(start, start + length))
+}
+
+function hasPngSignature(bytes: Uint8Array) {
+  return bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)
+}
+
+function hasGifSignature(bytes: Uint8Array) {
+  return bytes.length >= 6 && (ascii(bytes, 0, 6) === 'GIF87a' || ascii(bytes, 0, 6) === 'GIF89a')
+}
+
+function hasAnimatedPngChunk(bytes: Uint8Array) {
+  if (!hasPngSignature(bytes)) return false
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let offset = 8
+  while (offset + 12 <= bytes.length) {
+    const size = view.getUint32(offset)
+    if (offset + 12 + size > bytes.length) return false
+    if (ascii(bytes, offset + 4, 4) === 'acTL') return true
+    offset += 12 + size
+  }
+  return false
+}
+
+function hasAnimatedWebpChunk(bytes: Uint8Array) {
+  if (bytes.length < 16 || ascii(bytes, 0, 4) !== 'RIFF' || ascii(bytes, 8, 4) !== 'WEBP') return false
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let offset = 12
+  while (offset + 8 <= bytes.length) {
+    const size = view.getUint32(offset + 4, true)
+    if (offset + 8 + size > bytes.length) return false
+    const chunkType = ascii(bytes, offset, 4)
+    if (chunkType === 'ANIM' || chunkType === 'ANMF') return true
+    offset += 8 + size + (size % 2)
+  }
+  return false
+}
+
+async function isAnimatedCoverFile(file: File) {
+  const mime = file.type.trim().toLowerCase()
+  const extension = fileExtension(file)
+  if (mime === 'image/gif' || mime === 'image/apng' || extension === 'gif' || extension === 'apng') return true
+
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  return hasGifSignature(bytes) || hasAnimatedPngChunk(bytes) || hasAnimatedWebpChunk(bytes)
+}
+
+function isStaticCoverCandidate(file: File) {
+  const mime = file.type.trim().toLowerCase()
+  return COVER_STATIC_MIME_TYPES.has(mime) || COVER_STATIC_EXTENSIONS.has(fileExtension(file))
+}
+
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -80,14 +140,25 @@ export function StickerPackUploader() {
     }
   }
 
-  function onCoverPick(event: ChangeEvent<HTMLInputElement>) {
+  async function onCoverPick(event: ChangeEvent<HTMLInputElement>) {
     const f = event.target.files?.[0]
     if (!f) return
     if (f.size > STICKER_MAX_FILE_SIZE) {
       setError(STICKER_FILE_TOO_LARGE_MESSAGE)
       return
     }
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) {
+
+    try {
+      if (await isAnimatedCoverFile(f)) {
+        setError('封面必须使用静态图片')
+        return
+      }
+    } catch {
+      setError('封面图片读取失败，请重新选择')
+      return
+    }
+
+    if (!isStaticCoverCandidate(f)) {
       setError('封面仅支持 JPG / PNG / WebP 格式')
       return
     }
@@ -110,6 +181,7 @@ export function StickerPackUploader() {
     if (!name.trim()) return setError('请填写表情包名称')
     if (stickerFiles.length < MIN_FILES) return setError(`至少需要 ${MIN_FILES} 张表情（当前 ${stickerFiles.length} 张）`)
     if (stickerFiles.length > MAX_FILES) return setError(`最多 ${MAX_FILES} 张表情`)
+    if (!cover) return setError('请选择表情包封面')
     setBusy(true)
     try {
       const form = new FormData()
@@ -122,7 +194,7 @@ export function StickerPackUploader() {
         form.append('stickerFiles', s.file, `sticker-${idx}-${s.file.name}`)
         form.append('stickerNames', s.name)
       })
-      if (cover) form.append('cover', cover.file, cover.file.name)
+      form.append('cover', cover.file, cover.file.name)
 
       const res = await fetch('/api/stickers/upload-pack', { method: 'POST', body: form })
       const data = await res.json().catch(() => ({}))
@@ -292,8 +364,8 @@ export function StickerPackUploader() {
 
       {/* 封面 */}
       <section className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-black text-brand-950">封面</h2>
-        <p className="mt-1 text-xs font-bold text-slate-400">推荐 JPG 或 PNG 格式，至少 600×600；会作为表情商店与详情页主图。</p>
+        <h2 className="text-base font-black text-brand-950">封面 <span className="ml-1 text-red-500">*</span></h2>
+        <p className="mt-1 text-xs font-bold text-slate-400">请使用静态 JPG、PNG 或 WebP，至少 600×600；会作为表情商店与详情页主图。</p>
         <div className="mt-3 flex items-center gap-4">
           <button
             type="button"
@@ -302,7 +374,7 @@ export function StickerPackUploader() {
           >
             {cover ? '更换封面' : '选择封面'}
           </button>
-          <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onCoverPick} />
+          <input ref={coverInputRef} type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => void onCoverPick(event)} />
           {cover ? (
             <div className="relative h-24 w-24 overflow-hidden rounded-xl ring-1 ring-slate-200">
               {/* eslint-disable-next-line @next/next/no-img-element */}

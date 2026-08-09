@@ -24,6 +24,7 @@ export const STICKER_ANIMATED_MIME_TYPES = ['image/gif', 'image/webp', 'image/pn
 
 const STATIC_STICKER_FORMATS = new Set(['jpeg', 'jpg', 'png', 'webp', 'avif'])
 const ANIMATED_STICKER_FORMATS = new Set(['gif', 'png', 'webp'])
+const STATIC_COVER_FORMATS = new Set(['jpeg', 'jpg', 'png', 'webp'])
 const REJECTED_STICKER_FORMATS = new Set(['svg'])
 
 export const STICKER_MAX_NAME_LENGTH = 4
@@ -503,6 +504,11 @@ export async function uploadStickerPackCover(params: {
   const { ownerId, buffer } = params
   if (buffer.byteLength === 0) throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
   if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new StickerUploadError('FILE_TOO_LARGE', STICKER_FILE_TOO_LARGE_MESSAGE)
+  const metadata = await decodeImageMetadata(buffer)
+  const format = metadata.format as string
+  if (!STATIC_COVER_FORMATS.has(format) || isAnimatedSticker(format, metadata, buffer)) {
+    throw new StickerUploadError('UNSUPPORTED_FORMAT', '封面必须使用静态图片')
+  }
   const output = await convertStaticStickerToWebp(buffer, { flatten: true })
   const objectPath = `stickers/covers/${ownerId}/${randomUUID()}.webp`
   return uploadSiteImage({ key: objectPath, body: output })

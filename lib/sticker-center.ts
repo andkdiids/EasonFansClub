@@ -853,6 +853,29 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
         enabled: true,
       })),
     })
+
+    const creator = await tx.user.findUniqueOrThrow({
+      where: { id: input.creatorId },
+      select: { nickname: true },
+    })
+    const administrators = await tx.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+      select: { id: true },
+    })
+    if (administrators.length) {
+      await tx.notification.createMany({
+        data: administrators.map((administrator) => ({
+          recipientId: administrator.id,
+          actorId: input.creatorId,
+          type: 'ADMIN' as const,
+          title: '新的表情包审核申请',
+          content: `用户 ${creator.nickname} 提交了表情包《${pack.name}》，请前往审核中心处理。`,
+          link: '/admin/stickers',
+          key: `sticker-pack-review:${pack.id}`,
+        })),
+        skipDuplicates: true,
+      })
+    }
     return pack
   })
   return { packId: result.id, status: 'PENDING' }
