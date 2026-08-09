@@ -77,12 +77,6 @@ function answerDeadlineAtToAvailableAt(deadline: Date | null) {
   return availableAt?.toISOString() ?? null
 }
 
-function answerAvailableAt(deadline: Date | null) {
-  return deadline
-    ? new Date(deadline.getTime() - GUESS_SONG_ANSWER_SECONDS * 1000)
-    : null
-}
-
 function parseOptions(value: Prisma.JsonValue): OptionSnapshot[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item) => {
@@ -524,10 +518,6 @@ export async function answerGuessSongQuestion(input: {
     }
 
     const expert = question.GuessSongSession.mode === 'EXPERT'
-    const availableAt = expert ? answerAvailableAt(question.answerDeadlineAt) : null
-    if (expert && availableAt && availableAt > now) {
-      throw new GuessSongServiceError('音频尚未播放完成', 409, 'QUESTION_NOT_AVAILABLE')
-    }
     const timedOut = Boolean(question.answerDeadlineAt && question.answerDeadlineAt <= now)
     if (question.playCount < 1) throw new GuessSongServiceError('请先播放音频再作答')
 

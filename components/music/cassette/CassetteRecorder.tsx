@@ -6,6 +6,8 @@ import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import { RecorderWaveform } from '@/components/music/cassette/RecorderWaveform'
 import type { AudioAnalysisMode, AudioAnalysisModeDetails, CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
 
+const RECORDER_SHELL_IMAGE_SRC = '/easmusic/recorder-player-shell.png?v=20260809'
+
 type CassettePlayerProps = {
   phase: CassetteMachinePhase
   track: CassetteSong | null
@@ -52,7 +54,7 @@ export const CassetteRecorder = forwardRef<HTMLElement, CassettePlayerProps>(fun
       aria-label="EasMusic 复古录音机播放器"
     >
       <Image
-        src="/easmusic/recorder-player-shell.png"
+        src={RECORDER_SHELL_IMAGE_SRC}
         alt="EasMusic 复古录音机播放器"
         width={1280}
         height={960}

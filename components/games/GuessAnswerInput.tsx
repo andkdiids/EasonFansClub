@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export type GuessOption = {
   key: string
@@ -24,6 +24,7 @@ type GuessAnswerInputProps = {
   options: GuessOption[]
   disabled: boolean
   played: boolean
+  inputEnabled?: boolean
   wrongPulse: number
   mode: 'CHOICE' | 'INPUT'
   searchCandidates?: (query: string, signal: AbortSignal) => Promise<GuessSongCandidate[]>
@@ -35,6 +36,7 @@ export function GuessAnswerInput({
   options,
   disabled,
   played,
+  inputEnabled,
   wrongPulse,
   searchCandidates,
   onSubmit,
@@ -42,8 +44,17 @@ export function GuessAnswerInput({
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState('')
   const [candidates, setCandidates] = useState<GuessSongCandidate[]>([])
+  const inputRef = useRef<HTMLInputElement>(null)
+  const canUseInput = inputEnabled ?? played
+
   useEffect(() => {
-    if (mode !== 'INPUT' || !played || disabled || selectedKey || !searchCandidates) {
+    if (mode !== 'INPUT' || !canUseInput || disabled) return
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [canUseInput, disabled, mode])
+
+  useEffect(() => {
+    if (mode !== 'INPUT' || !canUseInput || disabled || selectedKey || !searchCandidates) {
       setCandidates([])
       return
     }
@@ -64,7 +75,7 @@ export function GuessAnswerInput({
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [disabled, mode, played, query, searchCandidates, selectedKey])
+  }, [canUseInput, disabled, mode, query, searchCandidates, selectedKey])
 
   function chooseOption(option: GuessOption) {
     setSelectedKey(option.key)
@@ -93,13 +104,19 @@ export function GuessAnswerInput({
         <label>
           <span>输入歌曲名称</span>
           <input
+            ref={inputRef}
             value={query}
-            disabled={disabled || !played}
-            placeholder={played ? '输入歌曲名称…' : '请先播放音频'}
+            disabled={disabled || !canUseInput}
+            placeholder={canUseInput ? '输入歌曲名称…' : '请先播放音频'}
             autoComplete="off"
             onChange={(event) => {
               setQuery(event.target.value)
               setSelectedKey('')
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+              event.preventDefault()
+              if (!disabled && canUseInput) submit()
             }}
           />
         </label>
@@ -120,7 +137,7 @@ export function GuessAnswerInput({
         </div>
       ) : null}
 
-      {mode === 'INPUT' && played && !disabled && candidates.length > 0 ? (
+      {mode === 'INPUT' && canUseInput && !disabled && candidates.length > 0 ? (
         <div className="guess-answer-suggestions" role="listbox" aria-label="歌曲候选">
           {candidates.map((candidate) => (
             <button key={candidate.id} type="button" onClick={() => chooseCandidate(candidate)}>
@@ -134,7 +151,7 @@ export function GuessAnswerInput({
       <button
         type="button"
         className="guess-confirm-button"
-        disabled={disabled || !played || (mode === 'CHOICE' ? !selectedKey : !query.trim())}
+        disabled={disabled || (mode === 'INPUT' ? !canUseInput : !played) || (mode === 'CHOICE' ? !selectedKey : !query.trim())}
         onClick={submit}
       >
         {mode === 'CHOICE' ? '确认答案' : '提交答案'}

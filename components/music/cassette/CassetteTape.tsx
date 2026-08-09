@@ -5,7 +5,7 @@ import { memo, type CSSProperties, type PointerEventHandler } from 'react'
 import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import type { CassetteSong } from '@/types/music-cassette'
 
-const CASSETTE_IMAGE_SRC = '/images/cassette/cassette-transparent.png'
+const CASSETTE_IMAGE_SRC = '/images/cassette/cassette-transparent.png?v=20260809'
 const CASSETTE_IMAGE_SIZES = '(max-width: 768px) 42vw, (max-width: 1100px) 155px, 240px'
 
 type CassetteTapeProps = {

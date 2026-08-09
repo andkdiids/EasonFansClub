@@ -52,6 +52,11 @@ type AnswerResult = {
   ranks: { weekRank: number | null; monthRank: number | null } | null
 }
 
+type PendingPlayRequest = {
+  publicId: string
+  promise: Promise<boolean>
+}
+
 async function api<T>(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
   const payload = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null
@@ -78,12 +83,14 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [durationSeconds, setDurationSeconds] = useState(0)
   const [deadlineSeconds, setDeadlineSeconds] = useState<number | null>(null)
+  const [startedQuestionId, setStartedQuestionId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [exitOpen, setExitOpen] = useState(false)
   const [exiting, setExiting] = useState(false)
   const [forceEnded, setForceEnded] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioGenerationRef = useRef(0)
+  const playRequestRef = useRef<PendingPlayRequest | null>(null)
   const timeoutSubmittedRef = useRef<string | null>(null)
   const submitAnswerRef = useRef<(answer: GuessAnswerSubmission) => void>(() => undefined)
   const startedAtRef = useRef(Date.now())
@@ -148,6 +155,8 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
 
   useEffect(() => {
     stopAudio()
+    setStartedQuestionId(null)
+    playRequestRef.current = null
     setAudioError('')
     setAnswerResult(null)
     setNextSession(null)
@@ -181,12 +190,20 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   async function requestFreshAudio() {
     const question = session?.question
     if (!session || !question || audioLoading || question.remainingPlayCount <= 0) return
+    setStartedQuestionId(question.publicId)
     stopAudio()
     window.dispatchEvent(new Event('easmusic:pause-all'))
     setError('')
     setAudioError('')
     setAudioLoading(true)
     const generation = audioGenerationRef.current
+    let resolvePlayReady: (ready: boolean) => void = () => undefined
+    const playReady = new Promise<boolean>((resolve) => {
+      resolvePlayReady = resolve
+    })
+    const pendingPlay: PendingPlayRequest = { publicId: question.publicId, promise: playReady }
+    playRequestRef.current = pendingPlay
+    let playRegistered = false
     try {
       const data = await api<{
         signedUrl: string
@@ -200,7 +217,12 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId: question.publicId, requestKey: createUUID() }),
       })
-      if (generation !== audioGenerationRef.current) return
+      if (generation !== audioGenerationRef.current) {
+        resolvePlayReady(false)
+        return
+      }
+      playRegistered = true
+      resolvePlayReady(true)
       setSession((current) => current?.question ? {
         ...current,
         totalPlayCount: current.totalPlayCount + 1,
@@ -246,10 +268,16 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       audio.load()
       await audio.play()
     } catch (reason) {
+      resolvePlayReady(false)
       if (generation !== audioGenerationRef.current) return
+      if (!playRegistered) {
+        setStartedQuestionId((current) => current === question.publicId ? null : current)
+      }
       setPlaying(false)
       setAudioLoading(false)
       setAudioError(reason instanceof Error ? reason.message : '音频播放失败')
+    } finally {
+      if (playRequestRef.current === pendingPlay) playRequestRef.current = null
     }
   }
 
@@ -278,8 +306,16 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   async function submitAnswer(answer: GuessAnswerSubmission) {
     const question = session?.question
     if (!session || !question || answering || answerResult) return
-    stopAudio()
     setAnswering(true)
+    const pendingPlay = playRequestRef.current
+    if (pendingPlay?.publicId === question.publicId) {
+      const ready = await pendingPlay.promise
+      if (!ready) {
+        setAnswering(false)
+        return
+      }
+    }
+    stopAudio()
     setError('')
     try {
       const result = await api<AnswerResult>(`/api/entertainment/guess-song/sessions/${session.id}/answer`, {
@@ -463,9 +499,8 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     )
   }
   const progress = durationSeconds ? elapsedSeconds / durationSeconds * 100 : 0
-  const expertAnswerAvailable = question.answerMode !== 'INPUT'
-    || !question.answerAvailableAt
-    || deadlineSeconds !== null
+  const inputEnabled = question.answerMode === 'INPUT'
+    && (question.playCount > 0 || startedQuestionId === question.publicId)
 
   return (
   <main className="games-page games-center-background games-full-width immersive-game-layout guess-play-page">
@@ -507,8 +542,9 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   key={question.publicId}
   mode={question.answerMode}
   options={question.options}
-  disabled={answering || Boolean(answerResult) || !expertAnswerAvailable}
+  disabled={answering || Boolean(answerResult)}
   played={question.playCount > 0}
+  inputEnabled={question.answerMode === 'INPUT' ? inputEnabled : undefined}
   wrongPulse={answerResult && !answerResult.correct ? 1 : 0}
   searchCandidates={question.answerMode === 'INPUT' ? searchCandidates : undefined}
   onSubmit={(answer) => void submitAnswer(answer)}
