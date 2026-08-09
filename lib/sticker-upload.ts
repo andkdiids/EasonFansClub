@@ -34,6 +34,7 @@ const STICKER_STATIC_MAX_WIDTH = 400
 const STICKER_ANIMATED_MAX_FRAMES = 120
 const STICKER_ANIMATED_TARGET_SIZE = 1 * 1024 * 1024
 const STICKER_ANIMATED_MAX_SIZE = 2 * 1024 * 1024
+const STICKER_ANIMATED_MIN_OUTPUT_RATIO = 0.01
 const ANIMATED_STICKER_COMPRESSION_PROFILES = [
   { width: 320, quality: 80 },
   { width: 240, quality: 70 },
@@ -433,6 +434,15 @@ export async function compressAnimatedStickerToWebp(
           .toBuffer()
 
       await assertAnimatedWebp(output, requiredAnimation)
+      if (output.byteLength < input.byteLength * STICKER_ANIMATED_MIN_OUTPUT_RATIO) {
+        console.warn('[sticker-upload] animated output is below 1% of the source; preserving the source to avoid an abnormal result', {
+          inputBytes: input.byteLength,
+          outputBytes: output.byteLength,
+          profile,
+        })
+        return lastOutput || input
+      }
+
       lastOutput = output
       if (output.byteLength <= STICKER_ANIMATED_TARGET_SIZE) return output
       if (output.byteLength <= STICKER_ANIMATED_MAX_SIZE && profile.width !== 320) return output
@@ -450,7 +460,7 @@ export async function uploadStickerImage(params: {
   ownerId: string
   type: StickerUploadType
   buffer: Buffer
-}): Promise<{ url: string; format: 'webp'; type: StickerUploadType; isAnimated: boolean }> {
+}): Promise<{ url: string; format: 'webp' | 'gif' | 'png'; type: StickerUploadType; isAnimated: boolean }> {
   const { ownerId, buffer } = params
   if (buffer.byteLength === 0) throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
   if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new StickerUploadError('FILE_TOO_LARGE', STICKER_FILE_TOO_LARGE_MESSAGE)
@@ -470,9 +480,14 @@ export async function uploadStickerImage(params: {
       throw new StickerUploadError('PROCESSING_FAILED', `动态表情帧数不能超过 ${STICKER_ANIMATED_MAX_FRAMES} 帧`)
     }
     const output = await compressAnimatedStickerToWebp(buffer, metadata, format)
-    const objectPath = `stickers/${ownerId}/${randomUUID()}.webp`
-    const url = await uploadSiteImage({ key: objectPath, body: output, contentType: 'image/webp' })
-    return { url, format: 'webp', type: 'GIF', isAnimated: true }
+    const outputIsAnimatedWebp = hasAnimatedWebp(output)
+    const sourceFormat = format === 'gif' ? 'gif' : format === 'png' ? 'png' : 'webp'
+    const outputFormat: 'webp' | 'gif' | 'png' = outputIsAnimatedWebp ? 'webp' : sourceFormat
+    const outputBody = outputFormat === 'webp' ? output : buffer
+    const contentType = outputFormat === 'gif' ? 'image/gif' : outputFormat === 'png' ? 'image/png' : 'image/webp'
+    const objectPath = `stickers/${ownerId}/${randomUUID()}.${outputFormat}`
+    const url = await uploadSiteImage({ key: objectPath, body: outputBody, contentType })
+    return { url, format: outputFormat, type: 'GIF', isAnimated: true }
   }
 
   const output = await convertStaticStickerToWebp(buffer)
