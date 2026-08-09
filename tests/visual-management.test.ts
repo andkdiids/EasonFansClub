@@ -6,7 +6,7 @@ import { defaultSiteAppearance, mergeSiteAppearanceConfig } from '../lib/site-co
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('页面视觉配置使用 site.appearance JSON，并包含四个独立页面键', () => {
+test('页面视觉配置使用 site.appearance JSON，并包含活动中心独立页面键', () => {
   const config = mergeSiteAppearanceConfig({})
   assert.deepEqual(Object.keys(config.heroVisuals), ['login', 'register', 'welcome', 'home', 'activities', 'birthday', 'music'])
   for (const visual of Object.values(config.heroVisuals)) {
@@ -75,12 +75,13 @@ test('超宽图片在自定义缩放下不会被 cover 再次强制放大', () =
   assert.ok(reduced.width < 390 || reduced.height < 250)
 })
 
-test('后台页面视觉入口提供四个独立设置页面和高清媒体上传', () => {
+test('后台页面视觉入口提供活动中心设置页面和高清媒体上传', () => {
   const page = read('app/admin/visuals/page.tsx')
   const route = read('app/admin/visuals/[visualKey]/page.tsx')
   const manager = read('app/admin/visuals/VisualManager.tsx')
   const upload = read('app/api/uploads/hero-media/route.ts')
   assert.match(page, /页面视觉设置/)
+  assert.match(page, /活动中心背景/)
   assert.match(route, /pageVisualKeys/)
   assert.match(manager, /data-visual-preview=\{device\}/)
   assert.match(manager, /type="range"/)

@@ -15,6 +15,18 @@ const nextConfig: NextConfig = {
     'cos-nodejs-sdk-v5',
     'sharp',
   ],
+  async headers() {
+    return [
+      {
+        source: '/easmusic/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+      },
+      {
+        source: '/images/cassette/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+      },
+    ]
+  },
   images: {
     remotePatterns: [
       {

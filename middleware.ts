@@ -2,6 +2,7 @@ import { jwtVerify } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 import { authCookieName } from '@/lib/auth-cookie'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+const immutableCacheValue = 'public, max-age=31536000, immutable'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
 
 const publicExactPaths = new Set([
@@ -24,6 +25,11 @@ const publicPathPrefixes = [
   '/uploads/',
 ]
 
+const immutablePublicPathPrefixes = [
+  '/easmusic/',
+  '/images/cassette/',
+]
+
 type VerifiedSession = {
   id: string
   role: string | null
@@ -33,6 +39,13 @@ function withNoStoreHeaders(response: NextResponse) {
   response.headers.set('Cache-Control', noStoreValue)
   response.headers.set('CDN-Cache-Control', 'no-store')
   response.headers.set('Cloudflare-CDN-Cache-Control', 'no-store')
+  return response
+}
+
+function withImmutableCacheHeaders(response: NextResponse) {
+  response.headers.set('Cache-Control', immutableCacheValue)
+  response.headers.set('CDN-Cache-Control', immutableCacheValue)
+  response.headers.set('Cloudflare-CDN-Cache-Control', immutableCacheValue)
   return response
 }
 
@@ -46,6 +59,10 @@ function isPublicPath(pathname: string) {
   if (publicExactPaths.has(pathname)) return true
   if (pathname === '/api/auth') return true
   return publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
+}
+
+function isImmutablePublicPath(pathname: string) {
+  return immutablePublicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
 }
 
 function isApiPath(pathname: string) {
@@ -116,7 +133,12 @@ export async function middleware(request: NextRequest) {
     return withNoStoreHeaders(NextResponse.redirect(secureUrl, 308))
   }
 
-  if (isPublicPath(pathname)) return withNoStoreHeaders(NextResponse.next())
+  if (isPublicPath(pathname)) {
+    const response = NextResponse.next()
+    return isImmutablePublicPath(pathname)
+      ? withImmutableCacheHeaders(response)
+      : withNoStoreHeaders(response)
+  }
 
   const session = await verifyRequestSession(request)
   if (!session) return isApiPath(pathname) ? unauthorizedApiResponse() : loginRedirect(request)

@@ -75,6 +75,10 @@ function unicodeLength(value: string) {
   return Array.from(value).length
 }
 
+function normalizePhone(value: string) {
+  return value.trim().replace(/\s+/g, '')
+}
+
 function makeRequestKey() {
   return typeof window.crypto?.randomUUID === 'function'
     ? window.crypto.randomUUID()
@@ -219,7 +223,9 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     const agreementAccepted = form.acceptedAgreement
 
     if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
-    if (form.phone.trim() && !/^1\d{10}$/.test(form.phone.trim().replace(/\s+/g, ''))) nextErrors.phone = '请输入 11 位中国大陆手机号，或留空'
+    const phone = normalizePhone(form.phone)
+    if (!phone) nextErrors.phone = '请输入手机号'
+    else if (!/^1\d{10}$/.test(phone)) nextErrors.phone = '请输入 11 位中国大陆手机号'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '请输入有效邮箱'
     if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
     if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
@@ -334,8 +340,21 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function sendEmailCode(token = draftToken, emailOverride = form.email, automatic = false) {
     const email = emailOverride.trim().toLowerCase()
+    const phone = normalizePhone(form.phone)
     if (!token) {
       setErrors({ form: '请先完成注册资料并开始 E院体检' })
+      return false
+    }
+    if (!phone) {
+      const nextErrors = { phone: '请输入手机号' }
+      setErrors(nextErrors)
+      focusFirstError(nextErrors)
+      return false
+    }
+    if (!/^1\d{10}$/.test(phone)) {
+      const nextErrors = { phone: '请输入 11 位中国大陆手机号' }
+      setErrors(nextErrors)
+      focusFirstError(nextErrors)
       return false
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -563,6 +582,19 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     if (isSubmitting || submitLockedRef.current) return
     if (!draftToken) return setErrors({ form: '请先完成 E院体检' })
     if (!hospitalPassed) return setErrors({ hospitalCheck: '请先完成并通过 E院体检' })
+    const phone = normalizePhone(form.phone)
+    if (!phone) {
+      const nextErrors = { phone: '请输入手机号' }
+      setErrors(nextErrors)
+      focusFirstError(nextErrors)
+      return
+    }
+    if (!/^1\d{10}$/.test(phone)) {
+      const nextErrors = { phone: '请输入 11 位中国大陆手机号' }
+      setErrors(nextErrors)
+      focusFirstError(nextErrors)
+      return
+    }
     if (!form.acceptedAgreement) return setErrors({ acceptedAgreement: '请先勾选用户协议' })
     if (!afterEmailVerification && !emailVerified) return setErrors({ emailCode: '请先完成邮箱验证码验证' })
 
@@ -827,7 +859,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block"><span className="text-sm font-bold text-white">用户名 / 昵称</span><input value={form.nickname} onChange={(event) => updateField('nickname', event.target.value)} data-register-field="nickname" autoComplete="nickname" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="2-16 个字符" /><FormError message={errors.nickname} /></label>
-              <label className="block"><span className="text-sm font-bold text-white">手机号 <small className="font-normal text-white/60">（选填）</small></span><input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} type="tel" autoComplete="tel" data-register-field="phone" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="可选，用于登录和找回账号" /><FormError message={errors.phone} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">手机号</span><input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} type="tel" autoComplete="tel" required data-register-field="phone" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="用于登录和找回账号" /><FormError message={errors.phone} /></label>
               <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="至少 8 位" /><FormError message={errors.password} /></label>
               <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="再次输入密码" /><FormError message={errors.confirmPassword} /></label>
               <label className="block sm:col-span-2"><span className="text-sm font-bold text-white">邮箱 <small className="font-normal text-white/60">（必填）</small></span><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" autoComplete="email" data-register-field="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 disabled:bg-emerald-50" placeholder="用于最终验证码验证" /><FormError message={errors.email} /></label>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from 'react'
 import { publicImageUrl } from '@/lib/images'
+import { usePageVisibility } from '@/hooks/usePageVisibility'
 import {
   resolveHeroMediaLayout,
   resolveHeroMediaSettings,
@@ -83,15 +84,16 @@ function layerStyle(
 
 export function HeroBackground({ visual, fallbackImageUrl, className = '', priority = false, positionMode = 'responsive' }: Readonly<HeroBackgroundProps>) {
   const reducedMotion = usePrefersReducedMotion()
+  const isPageVisible = usePageVisibility()
   const device = useHeroDevice(positionMode)
   const frameRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const playAttemptedRef = useRef(false)
   const [frameSize, setFrameSize] = useState<HeroMediaDimensions>({ width: 0, height: 0 })
   const [mediaDimensions, setMediaDimensions] = useState<HeroMediaDimensions | null>(null)
   const [fallbackDimensions, setFallbackDimensions] = useState<HeroMediaDimensions | null>(null)
   const [videoReady, setVideoReady] = useState(false)
   const [videoFailed, setVideoFailed] = useState(false)
+  const [isInViewport, setIsInViewport] = useState(true)
   const mediaAsset = resolveHeroMediaAsset(visual, device, fallbackImageUrl || '')
   const mediaType: HeroMediaType = mediaAsset?.mediaType || 'IMAGE'
   const imageUrl = publicImageUrl(mediaAsset?.imageUrl || '')
@@ -103,6 +105,8 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
       || (mediaType !== 'IMAGE' ? mediaAsset?.imageUrl : ''),
   )
   const staticUrl = mediaType === 'IMAGE' ? mediaUrl || imageUrl : fallbackUrl
+  const shouldAnimate = isPageVisible && isInViewport && !reducedMotion && !videoFailed
+  const hasAnimatedImagePoster = Boolean(mediaType === 'ANIMATED_IMAGE' && fallbackUrl && fallbackUrl !== mediaUrl)
   const settings = resolveHeroMediaSettings({
     desktopPositionX: visual?.desktopPositionX ?? 50,
     desktopPositionY: visual?.desktopPositionY ?? 50,
@@ -138,11 +142,20 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   }, [])
 
   useEffect(() => {
+    const frameElement = frameRef.current
+    if (!frameElement || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsInViewport(entry?.isIntersecting ?? true)
+    }, { rootMargin: '160px 0px' })
+    observer.observe(frameElement)
+    return () => observer.disconnect()
+  }, [mediaType, mediaUrl, fallbackUrl])
+
+  useEffect(() => {
     setMediaDimensions(null)
     setFallbackDimensions(null)
     setVideoReady(false)
     setVideoFailed(false)
-    playAttemptedRef.current = false
     const video = videoRef.current
     if (video && mediaType === 'VIDEO') {
       video.setAttribute('webkit-playsinline', 'true')
@@ -150,6 +163,28 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
       video.setAttribute('x5-video-player-type', 'h5-page')
     }
   }, [mediaType, mediaUrl, fallbackUrl])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || mediaType !== 'VIDEO' || reducedMotion) return
+    if (!shouldAnimate) {
+      video.pause()
+      return
+    }
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      setMediaDimensions({ width: video.videoWidth, height: video.videoHeight })
+    }
+    video.muted = true
+    const playPromise = video.play()
+    if (playPromise) {
+      void playPromise.then(() => setVideoReady(true)).catch(() => {
+        setVideoFailed(true)
+        setVideoReady(false)
+      })
+    } else {
+      setVideoReady(true)
+    }
+  }, [isPageVisible, isInViewport, reducedMotion, mediaType, mediaUrl, fallbackUrl, shouldAnimate])
 
   if (visual && !visual.enabled) return null
 
@@ -168,12 +203,11 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
     }
   }
 
-  function markVideoReady() {
+  function playVideoIfAllowed() {
     const video = videoRef.current
-    if (!video || playAttemptedRef.current) return
+    if (!video || !shouldAnimate) return
     handleVideoMetadata()
     video.muted = true
-    playAttemptedRef.current = true
     const playPromise = video.play()
     if (playPromise) {
       void playPromise.then(() => setVideoReady(true)).catch(() => {
@@ -185,12 +219,23 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
     }
   }
 
+  function markVideoReady() {
+    handleVideoMetadata()
+    if (!shouldAnimate) {
+      videoRef.current?.pause()
+      return
+    }
+    playVideoIfAllowed()
+  }
+
   if (mediaType === 'VIDEO' && mediaUrl && !reducedMotion) {
     return <div
       ref={frameRef}
       aria-hidden="true"
       data-hero-background={visual?.key || 'fallback'}
       data-hero-media-type="VIDEO"
+      data-hero-media-state={shouldAnimate ? 'playing' : 'paused'}
+      data-hero-document-visibility={isPageVisible ? 'visible' : 'hidden'}
       className={sharedClass}
       style={wrapperStyle}
     >
@@ -212,7 +257,7 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
         style={mediaStyle}
         src={mediaUrl}
         poster={fallbackUrl || undefined}
-        autoPlay
+        autoPlay={shouldAnimate}
         muted
         loop
         playsInline
@@ -228,11 +273,20 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
     </div>
   }
 
-  if (mediaType === 'ANIMATED_IMAGE' && mediaUrl) {
-    return <div ref={frameRef} aria-hidden="true" data-hero-background={visual?.key || 'fallback'} data-hero-media-type="ANIMATED_IMAGE" className={sharedClass} style={wrapperStyle}>
+  if (mediaType === 'ANIMATED_IMAGE' && mediaUrl && !reducedMotion) {
+    return <div ref={frameRef} aria-hidden="true" data-hero-background={visual?.key || 'fallback'} data-hero-media-type="ANIMATED_IMAGE" data-hero-media-state={shouldAnimate ? 'playing' : 'paused'} data-hero-document-visibility={isPageVisible ? 'visible' : 'hidden'} className={sharedClass} style={wrapperStyle}>
+      {hasAnimatedImagePoster && !shouldAnimate ? <img
+        key={`poster:${fallbackUrl}`}
+        data-hero-media-fallback="true"
+        className="hero-background-layer hero-background-poster"
+        src={fallbackUrl || undefined}
+        alt=""
+        style={posterStyle}
+        onLoad={(event) => handleImageLoad(event, true)}
+      /> : null}
       <img
         data-priority={priority ? 'true' : undefined}
-        className="hero-background-layer hero-background-media"
+        className={`hero-background-layer hero-background-media${shouldAnimate ? '' : ' is-paused'}`}
         style={mediaStyle}
         src={mediaUrl}
         alt=""
@@ -243,7 +297,7 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   }
 
   if (!staticUrl) return null
-  return <div ref={frameRef} aria-hidden="true" data-hero-background={visual?.key || 'fallback'} data-hero-media-type="IMAGE" className={sharedClass} style={wrapperStyle}>
+  return <div ref={frameRef} aria-hidden="true" data-hero-background={visual?.key || 'fallback'} data-hero-media-type="IMAGE" data-hero-media-state="static" className={sharedClass} style={wrapperStyle}>
     <img
       data-priority={priority ? 'true' : undefined}
       className="hero-background-layer hero-background-media"

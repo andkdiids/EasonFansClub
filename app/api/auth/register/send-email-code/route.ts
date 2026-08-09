@@ -29,6 +29,9 @@ export async function POST(request: Request) {
   const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash: hashToken(registrationToken) } })
   if (!draft || draft.completedAt) return errorResponse('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND')
   if (draft.expiresAt <= new Date()) return errorResponse('注册验证已过期，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_EXPIRED')
+  const draftPhone = normalizeText(draft.phone).replace(/\s+/g, '')
+  if (!draftPhone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+  if (!/^1\d{10}$/.test(draftPhone)) return errorResponse('请输入 11 位中国大陆手机号', 400, 'INVALID_PHONE', { phone: '请输入 11 位中国大陆手机号' })
 
   const config = await getEHospitalCheckConfig()
   if (config.enabled) {

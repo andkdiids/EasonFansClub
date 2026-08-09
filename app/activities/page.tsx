@@ -11,7 +11,7 @@ export default async function ActivitiesPage() {
     getSiteAppearance(),
   ])
   const banner = config.heroVisuals.activities
-  const hasBanner = banner.enabled && Boolean(banner.imageUrl || config.images.activityCoverUrl)
+  const hasBanner = banner.enabled && Boolean(banner.mediaUrl || banner.imageUrl || banner.posterUrl || config.images.activityCoverUrl)
 
   return (
     <>

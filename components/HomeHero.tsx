@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
+import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { resolveHeroSlideVisual, type SiteHeroSlide, type SiteHeroStyle } from '@/lib/site-config'
 import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
@@ -32,6 +33,7 @@ export function HomeHero({
     () => slides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder),
     [slides],
   )
+  const isPageVisible = usePageVisibility()
   const [index, setIndex] = useState(0)
   const pointerStartX = useRef<number | null>(null)
   const active = visibleSlides[index] || visibleSlides[0] || null
@@ -41,12 +43,12 @@ export function HomeHero({
   }, [visibleSlides.length])
 
   useEffect(() => {
-    if (visibleSlides.length <= 1) return
+    if (visibleSlides.length <= 1 || !isPageVisible) return
     const timer = window.setInterval(() => {
       setIndex((current) => (current + 1) % visibleSlides.length)
     }, 6000)
     return () => window.clearInterval(timer)
-  }, [visibleSlides.length])
+  }, [isPageVisible, visibleSlides.length])
 
   const title = active?.title || defaultTitle
   const subtitle = active?.subtitle || defaultSubtitle

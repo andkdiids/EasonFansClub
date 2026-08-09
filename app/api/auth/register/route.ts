@@ -91,6 +91,11 @@ export async function POST(request: Request) {
     const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash: hashToken(registrationToken) } })
     if (!draft || draft.completedAt) return jsonError('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND', { form: '注册验证已失效，请重新填写注册资料' })
     if (draft.expiresAt <= new Date()) return jsonError('注册验证已过期，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_EXPIRED', { form: '注册验证已过期，请重新填写注册资料' })
+    const submittedPhone = normalizeText(body?.phone).replace(/\s+/g, '')
+    const draftPhone = normalizeText(draft.phone).replace(/\s+/g, '')
+    if (!submittedPhone || !draftPhone) return jsonError('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+    if (!/^1\d{10}$/.test(submittedPhone) || !/^1\d{10}$/.test(draftPhone)) return jsonError('请输入 11 位中国大陆手机号', 400, 'INVALID_PHONE', { phone: '请输入 11 位中国大陆手机号' })
+    if (submittedPhone !== draftPhone) return jsonError('注册手机号已变化，请重新开始验证', 400, 'PHONE_CHANGED', { phone: '注册手机号已变化，请重新开始验证' })
     if (!draft.emailVerifiedAt) return jsonError('请先完成邮箱验证码验证', 409, 'EMAIL_VERIFICATION_REQUIRED', { emailCode: '请先完成邮箱验证码验证' })
 
     const hospitalConfig = await getEHospitalCheckConfig()
@@ -108,13 +113,12 @@ export async function POST(request: Request) {
     const usernameNormalized = accountValidation.usernameNormalized
     const nickname = getLoginAccountDisplay(body?.nickname || username)
     const email = draft.email
-    const phone = draft.phone
+    const phone = draftPhone
     const password = normalizeText(body?.password)
     const confirmPassword = normalizeText(body?.confirmPassword)
     const errors: Record<string, string> = {}
     if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error || nickname !== draft.nickname) errors.nickname = '注册资料已变化，请重新开始验证'
     if (body?.email && normalizeText(body.email).toLowerCase() !== email) errors.email = '注册邮箱已变化，请重新发送验证码'
-    if (body?.phone !== undefined && normalizeText(body.phone).replace(/\s+/g, '') !== phone) errors.phone = '注册手机号已变化，请重新开始验证'
     if (password && password.length < 8) errors.password = '密码至少需要 8 位'
     if (password && !(await verifyPassword(password, draft.passwordHash)).valid) errors.password = '注册资料已变化，请重新开始验证'
     if (password && confirmPassword !== password) errors.confirmPassword = '两次输入的密码不一致'

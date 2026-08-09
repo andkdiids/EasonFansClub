@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { LikeButton } from '@/components/PostActions'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
@@ -158,6 +158,10 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
+  const [todayAutoplayReset, setTodayAutoplayReset] = useState(0)
+  const [todaySwipeDirection, setTodaySwipeDirection] = useState<'next' | 'previous' | null>(null)
+  const todayTouchStart = useRef<{ x: number; y: number } | null>(null)
+  const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
   const heroFallbackImage = siteConfig.heroVisuals.home.enabled
     ? siteConfig.heroVisuals.home.desktopHero || siteConfig.heroVisuals.home.imageUrl
@@ -210,7 +214,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       }
     }, 5000)
     return () => window.clearInterval(timer)
-  }, [data.todayEvents.length, device, todayPageCount])
+  }, [data.todayEvents.length, device, todayPageCount, todayAutoplayReset])
 
   const checkedIn = Boolean(data.stats?.checkIns.length)
   const checkinStateClass = data.stats ? checkedIn ? 'is-checked' : 'is-not-checked' : 'is-loading'
@@ -219,6 +223,40 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     if (todayPageCount <= 1) return []
     return data.todayEvents.slice(todayPageIndex * 2, todayPageIndex * 2 + 2)
   }, [data.todayEvents, todayPageCount, todayPageIndex])
+
+  const handleTodayTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return
+    const touch = event.touches[0]
+    todayTouchStart.current = { x: touch.clientX, y: touch.clientY }
+    todayTouchCurrent.current = { x: touch.clientX, y: touch.clientY }
+    setTodaySwipeDirection(null)
+  }
+
+  const handleTodayTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    if (!todayTouchStart.current || event.touches.length !== 1) return
+    const touch = event.touches[0]
+    todayTouchCurrent.current = { x: touch.clientX, y: touch.clientY }
+  }
+
+  const handleTodayTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const start = todayTouchStart.current
+    todayTouchStart.current = null
+    const current = todayTouchCurrent.current
+    todayTouchCurrent.current = null
+    if (!start) return
+    const eventCount = data.todayEvents.length
+    if (eventCount < 2) return
+    const touch = event.changedTouches[0]
+    const endX = current?.x ?? touch?.clientX ?? start.x
+    const endY = current?.y ?? touch?.clientY ?? start.y
+    const deltaX = endX - start.x
+    const deltaY = endY - start.y
+    const swipeThreshold = 48
+    if (Math.abs(deltaX) < swipeThreshold || Math.abs(deltaX) <= Math.abs(deltaY)) return
+    setTodaySwipeDirection(deltaX < 0 ? 'next' : 'previous')
+    setTodayEventIndex((currentIndex) => (currentIndex + (deltaX < 0 ? 1 : -1) + eventCount) % eventCount)
+    setTodayAutoplayReset((current) => current + 1)
+  }
 
   const renderDailyMusicPanel = () => (
     <section className="community-panel music-panel home-daily-music-panel" aria-label="EasMusic 今日推荐">
@@ -289,14 +327,16 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
                   </Link>
                 ))}
               </div>
-            ) : todayEvent ? <Link href={todayEvent.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
+            ) : <div className="home-today-mobile-carousel" data-swipe-direction={todaySwipeDirection || undefined} onTouchStart={handleTodayTouchStart} onTouchMove={handleTodayTouchMove} onTouchEnd={handleTodayTouchEnd} onTouchCancel={handleTodayTouchEnd}>
+              {todayEvent ? <Link key={todayEvent.id} href={todayEvent.href || '/today'} onAnimationEnd={() => setTodaySwipeDirection(null)} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
               <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(todayEvent.year, todayEvent.month, todayEvent.day)}</time>
                 <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
               </div>
               <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{todayEvent.title}</strong>
               <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small>
-            </Link> : null}
+              </Link> : null}
+            </div>}
             <div className="home-today-desktop-carousel-controls" aria-label="今日事件分页控制"><button type="button" onClick={() => setTodayPageIndex((current) => (current - 1 + todayPageCount) % todayPageCount)} aria-label="上一页">←</button>{Array.from({ length: todayPageCount }, (_, pageIndex) => <button key={pageIndex} type="button" className={pageIndex === todayPageIndex ? 'is-active' : ''} onClick={() => setTodayPageIndex(pageIndex)} aria-label={'查看第 ' + (pageIndex + 1) + ' 页'}>●</button>)}<button type="button" onClick={() => setTodayPageIndex((current) => (current + 1) % todayPageCount)} aria-label="下一页">→</button></div>
             <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + events.length) % events.length)} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % events.length)} aria-label="下一条">→</button></div>
           </div>

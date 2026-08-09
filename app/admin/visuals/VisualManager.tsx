@@ -36,6 +36,7 @@ const visualLabels: Record<PageVisualKey, { title: string; description: string }
   register: { title: '注册页', description: '设置注册页背景媒体与桌面、移动端构图。' },
   welcome: { title: '欢迎页', description: '设置欢迎页背景媒体与桌面、移动端构图。' },
   home: { title: '首页 Hero', description: '设置首页 Hero 的桌面端 / 移动端图片、媒体、构图与响应式显示。' },
+  activities: { title: '活动中心背景', description: '设置活动中心背景媒体与桌面、移动端构图。' },
 }
 
 const mediaTypeLabels: Record<HeroMediaType, string> = {
@@ -179,6 +180,16 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     }))
   }
 
+  function updatePageVisual(patch: Partial<SiteHeroVisualConfig>) {
+    const nextMediaType = patch.mediaType || visual.mediaType || 'IMAGE'
+    const nextMediaUrl = typeof patch.mediaUrl === 'string' ? patch.mediaUrl : ''
+    if (nextMediaType === 'IMAGE' && typeof patch.mediaUrl === 'string') {
+      updateVisual({ ...patch, imageUrl: nextMediaUrl, desktopHero: nextMediaUrl, mobileHero: nextMediaUrl })
+      return
+    }
+    updateVisual(patch)
+  }
+
   function updateHomeSlide(patch: Partial<SiteAppearanceConfig['heroSlides'][number]>) {
     setConfig((current) => {
       const entries = current.heroSlides
@@ -280,7 +291,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
           sourceUrl: data.sourceUrl || '',
         }
         if (visualKey === 'home') updateHomeSlide(patch)
-        else updateVisual(patch)
+        else updatePageVisual(patch)
         setMessage('媒体已上传，请保存当前设置')
       }
     } catch {
@@ -420,7 +431,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     if (visualKey === 'home') {
       updateHomeSlide({ mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
     } else {
-      updateVisual({ mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
+      updateVisual({ mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', desktopHero: '', mobileHero: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
     }
   }
 
@@ -541,7 +552,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
                 </select>
               </label>
               <label className="block text-xs font-black text-slate-500">当前媒体 URL
-                <input value={visual.mediaUrl || visual.imageUrl} onChange={(event) => updateVisual({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'IMAGE' ? event.target.value : visual.imageUrl })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://…" />
+                <input value={visual.mediaUrl || visual.imageUrl} onChange={(event) => updatePageVisual({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'IMAGE' ? event.target.value : visual.imageUrl })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://…" />
               </label>
               <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:bg-slate-50">
                 {uploading ? '上传中…' : `上传 / 替换${mediaTypeLabels[currentMediaType]}`}

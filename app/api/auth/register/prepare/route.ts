@@ -30,8 +30,8 @@ export async function POST(request: Request) {
   const policy = await getRegistrationPolicy()
   const clientIp = getClientIp(request)
 
-  // The registration flow now always uses email verification. Phone remains an
-  // optional login/recovery field and is deliberately not a verification channel.
+  // The registration flow now always uses email verification. Phone is required
+  // as a login/recovery field and is deliberately not a verification channel.
   if (policy.registrationClosed || !policy.allowEmailRegistration) {
     return errorResponse('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
   }
@@ -55,7 +55,8 @@ export async function POST(request: Request) {
   if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error) {
     errors.nickname = '用户名 / 昵称需要 2-16 个字符'
   }
-  if (phone && !/^1\d{10}$/.test(phone)) errors.phone = '请输入 11 位中国大陆手机号，或留空'
+  if (!phone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+  if (!/^1\d{10}$/.test(phone)) errors.phone = '请输入 11 位中国大陆手机号'
   if (!email) errors.email = '请填写邮箱'
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = '请输入有效邮箱'
   if (!password || password.length < 8) errors.password = '密码至少需要 8 位'

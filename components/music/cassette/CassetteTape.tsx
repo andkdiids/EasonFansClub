@@ -6,7 +6,7 @@ import { CassetteCover } from '@/components/music/cassette/CassetteCover'
 import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import type { CassetteSong } from '@/types/music-cassette'
 
-const CASSETTE_IMAGE_SRC = '/images/cassette/cassette-transparent.png?v=20260809'
+const CASSETTE_IMAGE_SRC = '/images/cassette/cassette-transparent.webp?v=20260810'
 const CASSETTE_IMAGE_SIZES = '(max-width: 767px) 42vw, 240px'
 
 type CassetteTapeProps = {

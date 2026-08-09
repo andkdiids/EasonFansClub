@@ -9,6 +9,7 @@ const pageVisualLabels: Record<PageVisualKey, { title: string; description: stri
   register: { title: '注册页', description: '设置注册页背景与桌面、移动端构图。' },
   welcome: { title: '欢迎页', description: '设置欢迎页背景与桌面、移动端构图。' },
   home: { title: '首页 Hero', description: '设置首页 Hero 的桌面端 / 移动端图片、媒体、构图与响应式显示。' },
+  activities: { title: '活动中心背景', description: '设置活动中心背景媒体与桌面、移动端构图。' },
 }
 
 export default async function AdminVisualsPage() {
@@ -18,7 +19,7 @@ export default async function AdminVisualsPage() {
     <header className="border-b border-slate-200 pb-6">
       <p className="text-xs font-black uppercase tracking-[0.24em] text-sky-700">Page Visual Settings</p>
       <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">页面视觉设置</h1>
-      <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-500">登录页、注册页、欢迎页和首页 Hero 分开保存。每个页面都可以独立设置媒体、桌面构图和移动构图。</p>
+      <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-500">登录页、注册页、欢迎页、首页 Hero 和活动中心背景分开保存。每个页面都可以独立设置媒体、桌面构图和移动构图。</p>
     </header>
     <section className="mt-6 grid gap-4 sm:grid-cols-2">
       {pageVisualKeys.map((key) => {

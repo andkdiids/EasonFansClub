@@ -7,7 +7,7 @@ import { LedMarqueeText } from '@/components/music/cassette/LedMarqueeText'
 import { RecorderWaveform } from '@/components/music/cassette/RecorderWaveform'
 import type { AudioAnalysisMode, AudioAnalysisModeDetails, CassetteMachinePhase, CassetteSong } from '@/types/music-cassette'
 
-const RECORDER_SHELL_IMAGE_SRC = '/easmusic/recorder-player-shell.png?v=20260809'
+const RECORDER_SHELL_IMAGE_SRC = '/easmusic/recorder-player-shell.webp?v=20260810'
 
 type CassettePlayerProps = {
   phase: CassetteMachinePhase

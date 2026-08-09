@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Pointer
 import { usePathname } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import { ConcertCover } from '@/components/music/ConcertCover'
+import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { generateArchiveSlug } from '@/lib/music-slug'
 import type { ConcertCategoryConfig } from '@/lib/music-concert-category'
 import { CONCERT_CATEGORY_ENUM_TO_SLUG } from '@/lib/music-concert-category'
@@ -59,21 +60,22 @@ function archiveHref(tour: ConcertTimelineTour, isAdmin = false) {
   return isAdmin ? `${base}?preview=1` : base
 }
 
-function ArchivePoster({ tour, sizes, square = true }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean }>) {
+function ArchivePoster({ tour, sizes, square = true, priority = false }: Readonly<{ tour: ConcertTimelineTour; sizes: string; square?: boolean; priority?: boolean }>) {
   return <ConcertCover
     resolvedPosterUrl={tour.resolvedPosterUrl}
     alt={`${tour.name}演唱会海报`}
     sizes={sizes}
     className={`music-concert-gallery-image${square ? ' is-square' : ''}`}
+    priority={priority}
   />
 }
 
-function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: ConcertTimelineTour; hidden?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void }>) {
+function OrbitPoster({ tour, hidden, onOpen, cardRef, priority = false }: Readonly<{ tour: ConcertTimelineTour; hidden?: boolean; onOpen: (tour: ConcertTimelineTour) => void; cardRef: (element: HTMLElement | null) => void; priority?: boolean }>) {
   const year = formatYear(tour.startDate)
   const draft = tour.status && tour.status !== 'PUBLISHED'
   return <article ref={cardRef} className="music-concert-gallery-poster" aria-hidden={hidden || undefined}>
     <button data-testid="concert-orbit-card" type="button" tabIndex={hidden ? -1 : undefined} className="music-concert-gallery-poster-button" aria-label={`展开《${tour.name}》演唱会档案`} onClick={() => onOpen(tour)}>
-      <ArchivePoster tour={tour} sizes="(max-width: 767px) 104px, 220px" square />
+      <ArchivePoster tour={tour} sizes="(max-width: 767px) 104px, 220px" square priority={priority} />
       <span className="music-concert-gallery-year">{year}</span>
       <span className="music-concert-gallery-caption">
         <span>{year}{draft ? <em className="music-concert-gallery-draft">草稿</em> : null}</span>
@@ -88,24 +90,35 @@ function OrbitPoster({ tour, hidden, onOpen, cardRef }: Readonly<{ tour: Concert
 function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelineTour[]; paused: boolean; onOpen: (tour: ConcertTimelineTour) => void }>) {
   const stageRef = useRef<HTMLDivElement>(null)
   const cardsRef = useRef(new Map<number, HTMLElement>())
+  const layoutRef = useRef({ width: 0, height: 0, cardSize: 0, mobile: false })
   const rotationRef = useRef(0)
   const frameRef = useRef(0)
   const manualPauseUntilRef = useRef(0)
   const dragRef = useRef<{ pointerId: number; startAngle: number; startRotation: number; moved: boolean } | null>(null)
   const suppressClickRef = useRef(false)
+  const isPageVisible = usePageVisibility()
   const displayedTours = tours
 
   useLayoutEffect(() => {
     const stage = stageRef.current
-    if (!stage || displayedTours.length === 0) return undefined
+    if (!stage || displayedTours.length === 0 || !isPageVisible) return undefined
+    const syncLayout = () => {
+      const mobile = window.innerWidth < 768
+      layoutRef.current = {
+        width: stage.clientWidth,
+        height: stage.clientHeight,
+        cardSize: cardsRef.current.get(0)?.offsetWidth || (mobile ? 112 : 220),
+        mobile,
+      }
+    }
+    syncLayout()
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncLayout)
+    resizeObserver?.observe(stage)
     let previousTime = performance.now()
 
     const paint = (now: number) => {
-      const width = stage.clientWidth
-      const height = stage.clientHeight
-      const mobile = window.innerWidth < 768
+      const { width, height, cardSize, mobile } = layoutRef.current
       const orbitCount = displayedTours.length
-      const cardSize = cardsRef.current.get(0)?.offsetWidth || (mobile ? 112 : 220)
       const centerX = (width - cardSize) / 2
       const centerY = (height - cardSize) / 2
       const radius = Math.max(0, (Math.min(width, height) - cardSize) / 2 - (mobile ? 4 : 10) + (mobile ? 18 : 0))
@@ -137,8 +150,11 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
     }
 
     frameRef.current = window.requestAnimationFrame(paint)
-    return () => window.cancelAnimationFrame(frameRef.current)
-  }, [displayedTours.length, paused])
+    return () => {
+      resizeObserver?.disconnect()
+      window.cancelAnimationFrame(frameRef.current)
+    }
+  }, [displayedTours.length, isPageVisible, paused])
 
   useEffect(() => {
     const stage = stageRef.current
@@ -194,7 +210,7 @@ function MuseumWheel({ tours, paused, onOpen }: Readonly<{ tours: ConcertTimelin
   }}>
     <div className="music-concert-gallery-ring" aria-hidden="true" />
     <div className="music-concert-gallery-orbit">
-      {displayedTours.map((tour, index) => <OrbitPoster key={tour.id} tour={tour} hidden={false} onOpen={onOpen} cardRef={(element) => {
+       {displayedTours.map((tour, index) => <OrbitPoster key={tour.id} tour={tour} hidden={false} onOpen={onOpen} priority={index === 0} cardRef={(element) => {
         if (element) cardsRef.current.set(index, element)
         else cardsRef.current.delete(index)
       }} />)}
@@ -243,7 +259,7 @@ function ExpandedConcert({ tour, onClose, isAdmin }: Readonly<{ tour: ConcertTim
     <div className="music-concert-gallery-modal-scroll">
       <div className="music-concert-gallery-modal-card" role="dialog" aria-modal="true" aria-labelledby="concert-gallery-modal-title" onClick={(event) => event.stopPropagation()}>
         <button data-testid="concert-detail-close" type="button" className="music-concert-gallery-modal-close" aria-label="关闭演唱会档案" onClick={onClose}>×</button>
-        <ArchivePoster tour={tour} sizes="(max-width: 767px) 160px, 240px" />
+         <ArchivePoster tour={tour} sizes="(max-width: 767px) 160px, 240px" priority />
         <div className="music-concert-gallery-modal-copy">
           <time>{formatYear(tour.startDate)}</time>
           <h2 id="concert-gallery-modal-title">{tour.name}</h2>

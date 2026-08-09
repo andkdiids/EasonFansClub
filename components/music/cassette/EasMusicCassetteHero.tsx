@@ -115,6 +115,8 @@ export function EasMusicCassetteHero({ songs }: Readonly<{ songs: CassetteSong[]
 
   return (
     <section className="easmusic-cassette-hero" aria-labelledby="easmusic-cassette-title">
+      <link rel="preload" as="image" href="/easmusic/recorder-player-shell.webp?v=20260810" type="image/webp" fetchPriority="high" />
+      <link rel="preload" as="image" href="/images/cassette/cassette-transparent.webp?v=20260810" type="image/webp" fetchPriority="high" />
       <header className="easmusic-cassette-heading">
          <div className="easmusic-cassette-heading-copy">
           <span>CASSETTE SAMPLER · 60 SEC</span>

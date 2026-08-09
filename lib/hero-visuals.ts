@@ -1,5 +1,5 @@
 export const heroVisualKeys = ['login', 'register', 'welcome', 'home', 'activities', 'birthday', 'music'] as const
-export const pageVisualKeys = ['login', 'register', 'welcome', 'home'] as const
+export const pageVisualKeys = ['login', 'register', 'welcome', 'home', 'activities'] as const
 export type HeroVisualKey = typeof heroVisualKeys[number]
 export type PageVisualKey = typeof pageVisualKeys[number]
 

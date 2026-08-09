@@ -72,6 +72,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/visuals/register', title: '注册页视觉', desc: '设置注册页背景与响应式构图。' },
       { href: '/admin/visuals/welcome', title: '欢迎页视觉', desc: '设置欢迎页背景与响应式构图。' },
       { href: '/admin/visuals/home', title: '首页视觉', desc: '设置首页视觉媒体与构图。' },
+      { href: '/admin/visuals/activities', title: '活动中心背景', desc: '设置活动中心背景媒体与响应式构图。' },
     ],
   },
   {
