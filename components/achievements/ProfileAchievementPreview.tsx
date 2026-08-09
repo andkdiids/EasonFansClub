@@ -14,8 +14,10 @@ import Link from 'next/link'
 }
 export default function ProfileAchievementPreview({
   records,
+  isSelf = true,
 }: {
 records: AchievementRecord[]
+isSelf?: boolean
 }) {
 
   const unlocked = records
@@ -27,7 +29,7 @@ records: AchievementRecord[]
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-black text-brand-950">
-          我的成就
+          {isSelf ? '我的成就' : 'TA的成就'}
         </h2>
 
         <Link
@@ -67,7 +69,7 @@ records: AchievementRecord[]
 
       {!unlocked.length && (
         <p className="text-sm text-slate-500">
-          暂无获得的成就
+          {isSelf ? '我的成就暂时为空' : 'TA的成就暂时为空'}
         </p>
       )}
 

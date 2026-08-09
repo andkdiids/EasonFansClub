@@ -64,7 +64,7 @@ export function ProfilePageSurface({
   remarkEditor?: ReactNode
 }) {
   const { isSelf, isFriend, isBlocked, hasViewer, friendStatus } = relationship
-  const wallHref = isSelf ? '#profile-wall' : `/user/${formatUid(profile.uid)}#profile-wall`
+  const wallHref = '#profile-wall'
   const canViewWall = isSelf || profile.wallVisibility === 'PUBLIC' || (profile.wallVisibility === 'FRIENDS' && isFriend && !isBlocked)
 
   return (
@@ -84,40 +84,35 @@ export function ProfilePageSurface({
       />
 
       <section className="min-w-0 rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm sm:p-5">
-        <h2 className="profile-archive-title whitespace-nowrap text-base font-black text-brand-950 sm:text-lg md:text-xl">个人档案</h2>
-        <p className="mt-3 text-xs font-black tracking-[0.16em] text-sky-700">个人简介</p>
-        <p className="mt-2 min-w-0 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600 sm:text-base">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <h2 className="profile-archive-title whitespace-nowrap text-base font-black text-brand-950 sm:text-lg md:text-xl">个人档案</h2>
+          {!isSelf && hasViewer && isFriend && !isBlocked && remarkEditor ? <div className="shrink-0">{remarkEditor}</div> : null}
+        </div>
+        <p className="mt-3 min-w-0 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600 sm:text-base">
           {profile.bio || '这个成员还没有填写个人简介。'}
         </p>
       </section>
 
-      <section id="profile-actions" className="min-w-0 rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-black tracking-[0.16em] text-sky-700">PROFILE ACTIONS</p>
-            <h2 className="mt-1 text-lg font-black text-brand-950">操作</h2>
-          </div>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-start gap-2 sm:justify-end">
-            {isSelf ? (
-              <>
-                <Link href="/profile?edit=1" scroll={false} className={actionLinkClass('primary')}>编辑资料</Link>
-                <Link href={`/user/${formatUid(profile.uid)}`} className={actionLinkClass()}>查看公开主页</Link>
-                <Link href={wallHref} className={actionLinkClass()}>去留言</Link>
-                <Link href="/music/live/me" className={actionLinkClass('primary')}>我的现场</Link>
-                <Link href="/profile/stickers" className={actionLinkClass()}>我的表情包</Link>
-              </>
-            ) : (
-              <>
-                {hasViewer && !isFriend && !isBlocked ? <AddFriendButton uid={profile.uid} initialStatus={friendStatus === 'FRIEND' ? 'NONE' : friendStatus} /> : null}
-                {!hasViewer ? <Link href="/login" className={actionLinkClass('primary')}>登录后添加好友</Link> : null}
-                <Link href={wallHref} className={actionLinkClass('primary')}>去留言</Link>
-                {hasViewer && isFriend && !isBlocked ? remarkEditor : null}
-                {profile.publicLiveCount > 0 ? <Link href={`/user/${formatUid(profile.uid)}/live`} className={actionLinkClass('primary')}>TA的现场</Link> : null}
-              </>
-            )}
-          </div>
+      <div className="profile-actions-scroll min-w-0" aria-label={isSelf ? '个人操作' : '好友操作'}>
+        <div className="flex w-max min-w-full flex-nowrap items-center gap-2 py-0.5">
+          {isSelf ? (
+            <>
+              <Link href="/profile?edit=1" scroll={false} className={actionLinkClass('primary')}>编辑资料</Link>
+              <Link href={`/user/${formatUid(profile.uid)}`} className={actionLinkClass()}>查看公开主页</Link>
+              <Link href={wallHref} className={actionLinkClass()}>去留言</Link>
+              <Link href="/music/live/me" className={actionLinkClass()}>我的现场</Link>
+              <Link href="/profile/stickers" className={actionLinkClass()}>我的表情包</Link>
+            </>
+          ) : (
+            <>
+              {hasViewer && isFriend && !isBlocked ? <span className={actionLinkClass()}>已好友</span> : null}
+              {hasViewer && !isFriend && !isBlocked ? <AddFriendButton uid={profile.uid} initialStatus={friendStatus} /> : null}
+              {!hasViewer ? <Link href="/login" className={actionLinkClass()}>登录后添加好友</Link> : null}
+              {profile.publicLiveCount > 0 ? <Link href={`/user/${formatUid(profile.uid)}/live`} className={actionLinkClass()}>TA的现场</Link> : null}
+            </>
+          )}
         </div>
-      </section>
+      </div>
 
       <section className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.48fr)] lg:gap-5">
         <div id="profile-wall" className="min-w-0 scroll-mt-24">

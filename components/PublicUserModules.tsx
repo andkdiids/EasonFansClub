@@ -32,15 +32,20 @@ type FavoriteItem = {
 type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
 type CacheState = Record<string, { loading: boolean; failed: boolean; items: ModuleItem[] } | undefined>
 
-const tabs: Array<{ key: ModuleKey; label: string }> = [
-  { key: 'posts', label: '发帖记录' },
-  { key: 'replies', label: '回复记录' },
-  { key: 'recent-messages', label: '最近留言' },
-  { key: 'achievements', label: '我的成就' },
-  { key: 'badges', label: '我的勋章' },
-  { key: 'albums', label: '我的专辑' },
-  { key: 'favorites', label: '我的收藏' },
+const tabs: Array<{ key: ModuleKey; selfLabel: string; otherLabel: string }> = [
+  { key: 'posts', selfLabel: '发帖记录', otherLabel: '发帖记录' },
+  { key: 'replies', selfLabel: '回复记录', otherLabel: '回复记录' },
+  { key: 'recent-messages', selfLabel: '最近留言', otherLabel: '最近留言' },
+  { key: 'achievements', selfLabel: '我的成就', otherLabel: 'TA的成就' },
+  { key: 'badges', selfLabel: '我的勋章', otherLabel: 'TA的勋章' },
+  { key: 'albums', selfLabel: '我的专辑', otherLabel: 'TA的专辑' },
+  { key: 'favorites', selfLabel: '我的收藏', otherLabel: 'TA的收藏' },
 ]
+
+function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
+  const tab = tabs.find((item) => item.key === moduleKey)
+  return isSelf ? tab?.selfLabel || '内容' : tab?.otherLabel || '内容'
+}
 
 export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: string; isSelf: boolean; recentMessages?: ProfileRecentMessage[] }) {
   const [active, setActive] = useState<ModuleKey>('posts')
@@ -90,7 +95,7 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: s
             onClick={() => setActive(tab.key)}
             className={`max-w-full rounded-xl px-3 py-2 text-xs font-black whitespace-nowrap sm:px-4 sm:text-sm ${active === tab.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}
           >
-            {tab.label}
+            {isSelf ? tab.selfLabel : tab.otherLabel}
           </button>
         ))}
       </div>
@@ -98,14 +103,14 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: s
 <div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5">
       {state?.failed ? <ModuleFallback /> : null}
         {state?.loading || !state ? <ModuleFallback title="正在加载..." /> : null}
-        {state && !state.loading && !state.failed ? <ModuleContent moduleKey={active} items={state.items} /> : null}
+        {state && !state.loading && !state.failed ? <ModuleContent moduleKey={active} items={state.items} isSelf={isSelf} /> : null}
       </div>
     </section>
   )
 }
 
-function ModuleContent({ moduleKey, items }: { moduleKey: ModuleKey; items: ModuleItem[] }) {
-  if (!items.length) return <ModuleFallback title="暂时没有内容。" />
+function ModuleContent({ moduleKey, items, isSelf }: { moduleKey: ModuleKey; items: ModuleItem[]; isSelf: boolean }) {
+  if (!items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
 
   if (moduleKey === 'posts') {
     const posts = items as PostItem[]

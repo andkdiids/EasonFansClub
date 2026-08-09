@@ -89,8 +89,8 @@ export function ProfileHeader({
 
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
-      <div
-  className="relative isolate flex h-[240px] w-full items-center justify-start overflow-hidden bg-slate-900 px-4 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0"
+  <div
+  className="profile-hero-background relative isolate flex h-[210px] w-full items-end justify-start overflow-hidden bg-slate-900 px-4 pb-3 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0 sm:pb-0"
   style={{
     backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
     backgroundSize: 'cover',
@@ -114,7 +114,7 @@ export function ProfileHeader({
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center justify-start gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="profile-identity-badge">UID {formatUid(uid)}</span>
-            <span className="profile-identity-badge whitespace-nowrap">等级 {level} · {growthLevelName}</span>
+            <span className="profile-identity-badge">{growthLevelName}</span>
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">
             {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天

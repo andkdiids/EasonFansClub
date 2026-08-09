@@ -44,8 +44,7 @@ export function FriendRemarkEditor({ targetUserId, initialRemark, baseDisplayNam
   }
 
   return (
-    <div className="inline-flex min-h-11 flex-wrap items-center gap-2 text-sm font-bold text-slate-500">
-      {remark ? <span>（备注：{remark}）</span> : <span>尚未设置备注</span>}
+    <div className="inline-flex items-center">
       <button type="button" onClick={openEditor} className="rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50">
         修改备注
       </button>
