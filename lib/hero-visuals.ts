@@ -5,6 +5,15 @@ export type PageVisualKey = typeof pageVisualKeys[number]
 
 export const heroMediaTypes = ['IMAGE', 'ANIMATED_IMAGE', 'VIDEO'] as const
 export type HeroMediaType = typeof heroMediaTypes[number]
+
+export type HeroMediaAsset = {
+  mediaType: HeroMediaType
+  imageUrl: string
+  mediaUrl: string
+  posterUrl: string
+  sourceUrl: string
+  posterSourceUrl: string
+}
 export const heroFitModes = ['COVER', 'CONTAIN', 'CUSTOM'] as const
 export type HeroFitMode = typeof heroFitModes[number]
 
@@ -74,6 +83,8 @@ export type SiteHeroVisualConfig = {
   imageUrl: string
   desktopHero: string
   mobileHero: string
+  desktopHeroMedia?: HeroMediaAsset | null
+  mobileHeroMedia?: HeroMediaAsset | null
   mediaType?: HeroMediaType
   mediaUrl?: string
   posterUrl?: string
@@ -138,4 +149,37 @@ export function resolveHeroImageUrl(
   return device === 'mobile'
     ? mobileHero || desktopHero || legacyImage || fallbackImageUrl
     : desktopHero || legacyImage || fallbackImageUrl
+}
+
+export function hasHeroMediaAsset(asset: HeroMediaAsset | null | undefined): asset is HeroMediaAsset {
+  return Boolean(asset?.mediaUrl || asset?.imageUrl)
+}
+
+export function resolveHeroMediaAsset(
+  visual: SiteHeroVisualConfig | null | undefined,
+  device: 'desktop' | 'mobile',
+  fallbackImageUrl = '',
+): HeroMediaAsset | null {
+  const desktopMedia = hasHeroMediaAsset(visual?.desktopHeroMedia) ? visual?.desktopHeroMedia : null
+  const mobileMedia = hasHeroMediaAsset(visual?.mobileHeroMedia) ? visual?.mobileHeroMedia : null
+  const selected = device === 'mobile' ? mobileMedia || desktopMedia : desktopMedia
+  if (selected) return selected
+
+  const mediaType = visual?.mediaType || 'IMAGE'
+  const responsiveImageUrl = resolveHeroImageUrl(visual, device, fallbackImageUrl)
+  const dedicatedImage = device === 'mobile' ? visual?.mobileHero || visual?.desktopHero : visual?.desktopHero
+  const mediaUrl = mediaType === 'IMAGE'
+    ? dedicatedImage && dedicatedImage !== visual?.imageUrl ? responsiveImageUrl : visual?.mediaUrl || responsiveImageUrl
+    : visual?.mediaUrl || ''
+  const imageUrl = responsiveImageUrl || visual?.imageUrl || ''
+  const posterUrl = visual?.posterUrl || (mediaType === 'VIDEO' ? visual?.imageUrl : '') || ''
+  if (!mediaUrl && !imageUrl && !posterUrl) return null
+  return {
+    mediaType,
+    imageUrl,
+    mediaUrl,
+    posterUrl,
+    sourceUrl: visual?.sourceUrl || '',
+    posterSourceUrl: visual?.posterSourceUrl || '',
+  }
 }

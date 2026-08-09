@@ -1,6 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, heroFitModes, heroMediaTypes, type HeroFitMode, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
+import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, normalizeHeroMediaAsset, heroFitModes, heroMediaTypes, type HeroFitMode, type HeroMediaAsset, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
 import { normalizeHeroScale } from '@/lib/hero-visuals'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -35,6 +35,21 @@ function normalizeSlides(value: unknown): SiteHeroSlide[] {
     const mobileFitMode = typeof row.mobileFitMode === 'string' && heroFitModes.includes(row.mobileFitMode as HeroFitMode)
       ? row.mobileFitMode as HeroFitMode
       : undefined
+    const normalizeAsset = (value: unknown): HeroMediaAsset | null | undefined => {
+      if (value === undefined) return undefined
+      if (value === null) return null
+      const asset = value && typeof value === 'object' ? value as Partial<HeroMediaAsset> : {}
+      return normalizeHeroMediaAsset({
+        mediaType: asset.mediaType,
+        imageUrl: sanitizeText(asset.imageUrl, 1000),
+        mediaUrl: sanitizeText(asset.mediaUrl, 1000),
+        posterUrl: sanitizeText(asset.posterUrl, 1000),
+        sourceUrl: sanitizeText(asset.sourceUrl, 1000),
+        posterSourceUrl: sanitizeText(asset.posterSourceUrl, 1000),
+      }, null)
+    }
+    const desktopHeroMedia = normalizeAsset(row.desktopHeroMedia)
+    const mobileHeroMedia = normalizeAsset(row.mobileHeroMedia)
     return {
       title: sanitizeText(row.title, 160),
       subtitle: sanitizeText(row.subtitle, 300),
@@ -57,6 +72,8 @@ function normalizeSlides(value: unknown): SiteHeroSlide[] {
       ...(mobileScale === undefined ? {} : { mobileScale }),
       ...(desktopFitMode === undefined ? {} : { desktopFitMode }),
       ...(mobileFitMode === undefined ? {} : { mobileFitMode }),
+      ...(desktopHeroMedia === undefined ? {} : { desktopHeroMedia }),
+      ...(mobileHeroMedia === undefined ? {} : { mobileHeroMedia }),
       isVisible: Boolean(row.isVisible),
       sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : index + 1,
     }

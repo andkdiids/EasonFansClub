@@ -6,18 +6,20 @@ import {
   HERO_SCALE_DEFAULT,
   HERO_SCALE_MAX,
   HERO_SCALE_MIN,
+  hasHeroMediaAsset,
   heroFitModes,
   heroMediaTypes,
   normalizeHeroScale,
   type HeroFitMode,
+  type HeroMediaAsset,
   type HeroMediaType,
   type PageVisualKey,
   type SiteHeroVisualConfig,
 } from '@/lib/hero-visuals'
-import { resolveHeroSlideVisual, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
+import { getHeroMediaForDevice, resolveHeroSlideVisual, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
 
 type Device = 'desktop' | 'mobile'
-type HeroImageTarget = 'desktopHero' | 'mobileHero'
+type HeroMediaTarget = 'desktop' | 'mobile'
 type DragState = {
   pointerId: number
   device: Device
@@ -56,13 +58,80 @@ function mediaAccept(mediaType: HeroMediaType) {
   return 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
 }
 
+function mediaPreviewUrl(media: HeroMediaAsset | null) {
+  return media?.mediaUrl || media?.imageUrl || media?.posterUrl || ''
+}
+
+function ResponsiveHeroMediaControl({
+  target,
+  media,
+  mediaType,
+  explicit,
+  uploading,
+  onTypeChange,
+  onUpload,
+  onPosterUpload,
+  onClear,
+  onPosterClear,
+}: {
+  target: HeroMediaTarget
+  media: HeroMediaAsset | null
+  mediaType: HeroMediaType
+  explicit: boolean
+  uploading: string
+  onTypeChange: (mediaType: HeroMediaType) => void
+  onUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onPosterUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onClear: () => void
+  onPosterClear: () => void
+}) {
+  const label = target === 'desktop' ? '桌面端媒体' : '移动端媒体'
+  const previewUrl = mediaPreviewUrl(media)
+  const uploadKey = `${target}:media`
+  const posterKey = `${target}:poster`
+  return <div className="border border-slate-200 bg-slate-50 p-3">
+    <div className="flex items-center justify-between gap-2">
+      <div>
+        <p className="text-sm font-black text-brand-950">{label}</p>
+        <p className="mt-1 text-xs font-semibold text-slate-500">{explicit ? '当前已上传，可独立替换' : target === 'mobile' ? '未设置，将自动使用桌面端媒体' : '当前使用旧 Hero 媒体'}</p>
+      </div>
+      <span className="text-xs font-black text-sky-700">{mediaTypeLabels[mediaType]}</span>
+    </div>
+    <div className="relative mt-3 aspect-[16/9] overflow-hidden border border-slate-200 bg-[#071523]">
+      {previewUrl && mediaType === 'VIDEO' ? <video src={previewUrl} poster={media?.posterUrl || media?.imageUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
+      {previewUrl && mediaType !== 'VIDEO' ? <img src={previewUrl} alt={label} className="h-full w-full object-cover" /> : null}
+      {!previewUrl ? <div className="grid h-full place-items-center px-3 text-center text-xs font-bold text-slate-400">暂无媒体，请选择类型后上传</div> : null}
+    </div>
+    <label className="mt-3 block text-xs font-black text-slate-600">媒体类型
+      <select value={mediaType} onChange={(event) => onTypeChange(event.target.value as HeroMediaType)} className="mt-1 w-full border border-slate-200 bg-white px-2 py-2 text-sm font-bold">
+        {heroMediaTypes.map((type) => <option key={type} value={type}>{mediaTypeLabels[type]}</option>)}
+      </select>
+    </label>
+    <div className="mt-3 flex flex-wrap gap-2">
+      <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-3 py-2 text-xs font-black text-brand-700 hover:bg-slate-50">
+        {uploading === uploadKey ? '上传中…' : `上传 / 替换${label}`}
+        <input type="file" accept={mediaAccept(mediaType)} onChange={onUpload} className="hidden" />
+      </label>
+      {explicit ? <button type="button" onClick={onClear} className="border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700">清除</button> : null}
+    </div>
+    {mediaType === 'VIDEO' ? <div className="mt-3 border border-sky-100 bg-white p-2">
+      <p className="text-xs font-semibold leading-5 text-slate-400">视频可以单独设置封面。</p>
+      <label className="mt-2 inline-flex cursor-pointer border border-slate-200 bg-sky-50 px-3 py-2 text-xs font-black text-brand-700">
+        {uploading === posterKey ? '上传中…' : media?.posterUrl ? '替换视频封面' : '上传视频封面'}
+        <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={onPosterUpload} className="hidden" />
+      </label>
+      {explicit && media?.posterUrl ? <button type="button" onClick={onPosterClear} className="ml-2 text-xs font-black text-red-700">移除封面</button> : null}
+    </div> : null}
+  </div>
+}
+
 export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialConfig: SiteAppearanceConfig; visualKey: PageVisualKey }>) {
   const [config, setConfig] = useState(initialConfig)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [heroUploading, setHeroUploading] = useState<HeroImageTarget | ''>('')
+  const [homeMediaUploading, setHomeMediaUploading] = useState<`${HeroMediaTarget}:${'media' | 'poster'}` | ''>('')
   const [selectedHomeHeroIndex, setSelectedHomeHeroIndex] = useState<number | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const visual = config.heroVisuals[visualKey]
@@ -84,6 +153,20 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     ? homeSlide?.mediaUrl || homeSlide?.imageUrl || ''
     : visual.mediaUrl || visual.imageUrl
   const currentPosterUrl = visualKey === 'home' ? homeSlide?.posterUrl || '' : visual.posterUrl || ''
+  const homeDesktopMedia = visualKey === 'home'
+    ? (hasHeroMediaAsset(editingVisual.desktopHeroMedia) ? editingVisual.desktopHeroMedia : getHeroMediaForDevice(homeSlide, 'desktop'))
+    : null
+  const homeMobileField = visualKey === 'home' ? homeSlide?.mobileHeroMedia || null : null
+  const homeMobileExplicit = visualKey === 'home'
+    ? hasHeroMediaAsset(homeMobileField)
+      ? homeMobileField
+      : hasHeroMediaAsset(visual.mobileHeroMedia)
+        ? editingVisual.mobileHeroMedia || null
+        : visual.mobileHero
+          ? editingVisual.mobileHeroMedia || null
+          : null
+    : null
+  const homeMobileMedia = homeMobileExplicit
   const previewVisual = editingVisual
 
   function updateVisual(patch: Partial<SiteHeroVisualConfig>) {
@@ -207,37 +290,88 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     }
   }
 
-  async function uploadResponsiveHero(event: ChangeEvent<HTMLInputElement>, target: HeroImageTarget) {
+  function emptyHomeMedia(mediaType: HeroMediaType): HeroMediaAsset {
+    return { mediaType, imageUrl: '', mediaUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' }
+  }
+
+  function syncDesktopLegacy(asset: HeroMediaAsset): Partial<SiteHeroSlide> {
+    return {
+      mediaType: asset.mediaType,
+      mediaUrl: asset.mediaUrl,
+      imageUrl: asset.imageUrl,
+      posterUrl: asset.posterUrl,
+      sourceUrl: asset.sourceUrl,
+      posterSourceUrl: asset.posterSourceUrl,
+    }
+  }
+
+  function currentHomeMedia(target: HeroMediaTarget) {
+    if (!homeSlide) return null
+    return target === 'desktop' ? homeDesktopMedia : homeMobileField || homeMobileMedia || homeDesktopMedia
+  }
+
+  function setHomeMedia(target: HeroMediaTarget, asset: HeroMediaAsset | null) {
+    updateHomeSlide({
+      [target === 'desktop' ? 'desktopHeroMedia' : 'mobileHeroMedia']: asset,
+      ...(target === 'desktop' ? syncDesktopLegacy(asset || emptyHomeMedia('IMAGE')) : {}),
+    })
+  }
+
+  function changeHomeMediaType(target: HeroMediaTarget, mediaType: HeroMediaType) {
+    setHomeMedia(target, emptyHomeMedia(mediaType))
+  }
+
+  async function uploadHomeMedia(event: ChangeEvent<HTMLInputElement>, target: HeroMediaTarget, kind: 'media' | 'poster' = 'media') {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (!file) return
-    setHeroUploading(target)
+    if (!file || !homeSlide) return
+    const current = currentHomeMedia(target) || emptyHomeMedia('IMAGE')
+    const uploadKey = `${target}:${kind}` as `${HeroMediaTarget}:${'media' | 'poster'}`
+    setHomeMediaUploading(uploadKey)
     setMessage('')
     setError('')
     try {
       const body = new FormData()
       body.append('file', file, file.name)
-      body.append('kind', 'media')
-      body.append('mediaType', 'IMAGE')
-      body.append('scope', target === 'desktopHero' ? 'home-desktop' : 'home-mobile')
+      body.append('kind', kind)
+      body.append('scope', `home-visual-${activeHomeHeroIndex ?? 0}-${target}`)
+      if (kind === 'media') body.append('mediaType', current.mediaType)
       const response = await fetch('/api/uploads/hero-media', { method: 'POST', body })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
-        setError(data?.message || 'Hero 图片上传失败')
+        setError(data?.message || 'Hero 媒体上传失败')
         return
       }
-      updateVisual({
-        [target]: data.url,
-        mediaType: 'IMAGE',
-        mediaUrl: '',
-        sourceUrl: data.sourceUrl || '',
-      })
-      setMessage(`${target === 'desktopHero' ? '桌面端' : '移动端'} Hero 图片已上传，请保存当前设置`)
+      const asset: HeroMediaAsset = kind === 'poster'
+        ? { ...current, posterUrl: data.url, posterSourceUrl: data.sourceUrl || '' }
+        : {
+            ...current,
+            mediaType: data.mediaType as HeroMediaType,
+            mediaUrl: data.url,
+            imageUrl: data.mediaType === 'VIDEO' ? current.imageUrl || '' : data.url,
+            sourceUrl: data.sourceUrl || '',
+          }
+      setHomeMedia(target, asset)
+      setMessage(`${target === 'desktop' ? '桌面端' : '移动端'}媒体已上传，请保存当前设置`)
     } catch {
-      setError('Hero 图片上传失败，请稍后重试')
+      setError('Hero 媒体上传失败，请稍后重试')
     } finally {
-      setHeroUploading('')
+      setHomeMediaUploading('')
     }
+  }
+
+  function clearHomeMedia(target: HeroMediaTarget) {
+    if (target === 'desktop') {
+      updateHomeSlide({ desktopHeroMedia: null, mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' })
+    } else {
+      updateHomeSlide({ mobileHeroMedia: null })
+    }
+  }
+
+  function clearHomePoster(target: HeroMediaTarget) {
+    const current = currentHomeMedia(target)
+    if (!current) return
+    setHomeMedia(target, { ...current, posterUrl: '', posterSourceUrl: '' })
   }
 
   function beginDrag(event: PointerEvent<HTMLDivElement>, device: Device) {
@@ -370,43 +504,59 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
           <aside className="space-y-4 border-l border-slate-200 pl-0 xl:pl-5">
             {visualKey === 'home' ? <div className="space-y-3 border-b border-slate-200 pb-4">
               <div>
-                <p className="text-sm font-black text-brand-950">首页 Hero 图片</p>
-                <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">桌面端和移动端独立保存；移动端未设置时自动使用桌面端图片。</p>
+                <p className="text-sm font-black text-brand-950">当前 Hero 的设备媒体</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">桌面端和移动端完全独立；移动端没有专属媒体时自动回退到桌面端媒体。两端均支持静态图片、GIF、Animated WebP 和短视频。</p>
               </div>
-              <label className="block cursor-pointer border border-slate-300 bg-white px-3 py-3 hover:bg-slate-50">
-                <span className="block text-sm font-black text-brand-700">{heroUploading === 'desktopHero' ? '上传中…' : '桌面端 Hero 图片'}</span>
-                <span className="mt-1 block text-xs font-semibold leading-5 text-slate-400">建议比例：16:6（1920×700）</span>
-                <span className="mt-1 block truncate text-[11px] font-bold text-slate-500">{visual.desktopHero || visual.imageUrl ? '已设置（桌面端预览）' : '尚未设置'}</span>
-                <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void uploadResponsiveHero(event, 'desktopHero')} className="hidden" />
-              </label>
-              <label className="block cursor-pointer border border-slate-300 bg-white px-3 py-3 hover:bg-slate-50">
-                <span className="block text-sm font-black text-brand-700">{heroUploading === 'mobileHero' ? '上传中…' : '移动端 Hero 图片'}</span>
-                <span className="mt-1 block text-xs font-semibold leading-5 text-slate-400">建议比例：9:16（750×1200）</span>
-                <span className="mt-1 block truncate text-[11px] font-bold text-slate-500">{visual.mobileHero ? '已设置（移动端预览）' : '未设置，自动使用桌面端'}</span>
-                <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void uploadResponsiveHero(event, 'mobileHero')} className="hidden" />
-              </label>
+              {homeSlide ? <div className="grid gap-3">
+                <ResponsiveHeroMediaControl
+                  target="desktop"
+                  media={homeDesktopMedia}
+                  mediaType={homeSlide.desktopHeroMedia?.mediaType || homeDesktopMedia?.mediaType || 'IMAGE'}
+                  explicit={Boolean(hasHeroMediaAsset(homeSlide.desktopHeroMedia) || homeDesktopMedia)}
+                  uploading={homeMediaUploading}
+                  onTypeChange={(mediaType) => changeHomeMediaType('desktop', mediaType)}
+                  onUpload={(event) => void uploadHomeMedia(event, 'desktop')}
+                  onPosterUpload={(event) => void uploadHomeMedia(event, 'desktop', 'poster')}
+                  onClear={() => clearHomeMedia('desktop')}
+                  onPosterClear={() => clearHomePoster('desktop')}
+                />
+                <ResponsiveHeroMediaControl
+                  target="mobile"
+                  media={homeMobileMedia || homeDesktopMedia}
+                  mediaType={homeMobileExplicit?.mediaType || homeDesktopMedia?.mediaType || 'IMAGE'}
+                  explicit={Boolean(homeMobileExplicit)}
+                  uploading={homeMediaUploading}
+                  onTypeChange={(mediaType) => changeHomeMediaType('mobile', mediaType)}
+                  onUpload={(event) => void uploadHomeMedia(event, 'mobile')}
+                  onPosterUpload={(event) => void uploadHomeMedia(event, 'mobile', 'poster')}
+                  onClear={() => clearHomeMedia('mobile')}
+                  onPosterClear={() => clearHomePoster('mobile')}
+                />
+              </div> : <p className="text-xs font-bold text-slate-400">当前没有可编辑的 Hero。</p>}
             </div> : null}
-            <label className="block text-sm font-black text-slate-600">媒体类型
-              <select value={currentMediaType} onChange={(event) => changeMediaType(event.target.value as HeroMediaType)} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-bold outline-none focus:border-sky-400">
-                {heroMediaTypes.map((type) => <option key={type} value={type}>{mediaTypeLabels[type]}</option>)}
-              </select>
-            </label>
-            <label className="block text-xs font-black text-slate-500">当前媒体 URL
-              <input value={visualKey === 'home' ? (homeSlide?.mediaUrl || homeSlide?.imageUrl || '') : (visual.mediaUrl || visual.imageUrl)} onChange={(event) => visualKey === 'home' ? updateHomeSlide({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'IMAGE' ? event.target.value : homeSlide?.imageUrl || '' }) : updateVisual({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'IMAGE' ? event.target.value : visual.imageUrl })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://…" />
-            </label>
-            <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:bg-slate-50">
-              {uploading ? '上传中…' : `上传 / 替换${mediaTypeLabels[currentMediaType]}`}
-              <input type="file" accept={mediaAccept(currentMediaType)} onChange={(event) => void upload(event)} className="hidden" />
-            </label>
-            {currentMediaType === 'VIDEO' ? <>
-              <p className="text-xs font-semibold leading-6 text-slate-400">建议上传 5–15 秒、1080p、MP4/H.264 视频，大小不超过 8MB；视频封面可改善移动端和弱网体验。</p>
-              <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-xs font-black text-brand-700 hover:bg-slate-50">
-                {uploading ? '上传中…' : currentPosterUrl ? '替换视频封面' : '上传视频封面'}
-                <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void upload(event, 'poster')} className="hidden" />
+            {visualKey !== 'home' ? <>
+              <label className="block text-sm font-black text-slate-600">媒体类型
+                <select value={currentMediaType} onChange={(event) => changeMediaType(event.target.value as HeroMediaType)} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-bold outline-none focus:border-sky-400">
+                  {heroMediaTypes.map((type) => <option key={type} value={type}>{mediaTypeLabels[type]}</option>)}
+                </select>
               </label>
-              {currentPosterUrl ? <button type="button" onClick={() => visualKey === 'home' ? updateHomeSlide({ posterUrl: '', posterSourceUrl: '' }) : updateVisual({ posterUrl: '', posterSourceUrl: '' })} className="block text-left text-xs font-black text-red-700">移除视频封面</button> : null}
-            </> : <p className="text-xs font-semibold leading-6 text-slate-400">建议上传宽度至少 1920px 的高清原图。系统保留 master，并优先通过降低过大尺寸优化体积，不使用低质量缩略图作为正式媒体。</p>}
-            {currentMediaUrl ? <button type="button" onClick={clearMedia} className="block text-left text-xs font-black text-red-700">清除当前媒体</button> : null}
+              <label className="block text-xs font-black text-slate-500">当前媒体 URL
+                <input value={visual.mediaUrl || visual.imageUrl} onChange={(event) => updateVisual({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'IMAGE' ? event.target.value : visual.imageUrl })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://…" />
+              </label>
+              <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:bg-slate-50">
+                {uploading ? '上传中…' : `上传 / 替换${mediaTypeLabels[currentMediaType]}`}
+                <input type="file" accept={mediaAccept(currentMediaType)} onChange={(event) => void upload(event)} className="hidden" />
+              </label>
+              {currentMediaType === 'VIDEO' ? <>
+                <p className="text-xs font-semibold leading-6 text-slate-400">建议上传 5–15 秒、1080p、MP4/H.264 视频，大小不超过 8MB；视频封面可改善移动端和弱网体验。</p>
+                <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-xs font-black text-brand-700 hover:bg-slate-50">
+                  {uploading ? '上传中…' : currentPosterUrl ? '替换视频封面' : '上传视频封面'}
+                  <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void upload(event, 'poster')} className="hidden" />
+                </label>
+                {currentPosterUrl ? <button type="button" onClick={() => updateVisual({ posterUrl: '', posterSourceUrl: '' })} className="block text-left text-xs font-black text-red-700">移除视频封面</button> : null}
+              </> : <p className="text-xs font-semibold leading-6 text-slate-400">建议上传宽度至少 1920px 的高清原图。系统保留 master，并优先通过降低过大尺寸优化体积，不使用低质量缩略图作为正式媒体。</p>}
+              {currentMediaUrl ? <button type="button" onClick={clearMedia} className="block text-left text-xs font-black text-red-700">清除当前媒体</button> : null}
+            </> : null}
             <p className="text-xs font-semibold leading-6 text-slate-400">后台预览使用与前台相同的 HeroBackground 和构图 resolver；移动端预览比例按当前页面真实容器设置。</p>
           </aside>
         </div>

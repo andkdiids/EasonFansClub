@@ -1,180 +1,202 @@
 import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
 import { PageLayoutFrame } from '@/components/page-layout/PageLayoutFrame'
-
 import { adminModulePermissions } from '@/lib/admin-permission-config'
 import { getAdminPermissionSet, isSuperAdmin } from '@/lib/admin-permissions'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
-import { prisma } from '@/lib/prisma'
-import { getRegistrationPolicy } from '@/lib/registration'
-import { countTodayBirthdays, countBirthdayGreetingsSent, countBirthdayBadgesAwarded } from '@/lib/birthday'
 
 export const dynamic = 'force-dynamic'
 
-const adminModules = [
-  { href: '/admin/dashboard', title: '数据面板', desc: '查看注册、发帖、回复、挂号等核心数据。' },
-  { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
-  { href: '/admin/default-avatars', title: '默认头像管理', desc: '维护系统默认头像池，为未上传头像的用户固定分配头像。' },
-  { href: '/admin/security-settings', title: '账户安全设置', desc: '统一配置注册方式、密保、邮箱、手机与密码找回策略。' },
-  { href: '/admin/ehospital', title: '入院管理 · E院体检', desc: '配置新用户音乐听力验证的开关、题量、通过分数和每日次数。' },
-  { href: '/admin/content', title: '内容管理', desc: '管理首页模块、公告、板块、活动和友情链接。' },
-  { href: '/admin/home', title: '首页 Hero 管理', desc: '管理多张首页 Hero 图片、文案、排序和启用状态。' },
-  { href: '/admin/posts/review', title: '帖子审核中心', desc: '审核用户新帖，处理通过或拒绝，并设置精选与置顶。' },
-  { href: '/admin/today', title: '今日管理', desc: '管理历史上的今天内容并审核用户提交。' },
-  { href: '/admin/achievements', title: '成就 / 勋章', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
-  { href: '/admin/birthdays', title: '生日管理', desc: '查看今日过生日的用户（仅 UID、昵称、注册时间，保护隐私）。' },
-  { href: '/admin/culture', title: 'Eason 文化馆', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },
-  { href: '/admin/music', title: 'EasMusic 管理', desc: '维护陈奕迅音乐专辑、歌曲资料与播放来源预留信息。' },
-  { href: '/admin/entertainment/lyrics', title: '歌词处方库', desc: '维护娱乐天空每日抽奖使用的短歌词处方。' },
-  { href: '/admin/entertainment/guess-song', title: '听听题库', desc: '维护听听的题目、答案与私有短音频变体。' },
-  { href: '/admin/feedback', title: '反馈中心', desc: '查看用户反馈，回复并更新处理状态。' },
-  { href: '/admin/changelog', title: '更新日志', desc: '发布网站更新记录，让用户了解新功能和修复。' },
-  { href: '/admin/notifications', title: '全站通知', desc: '向所有用户发布系统通知，并查看已读和未读统计。' },
-  { href: '/admin/admins', title: '管理员管理', desc: '添加管理员、移除管理员并编辑后台权限。' },
-  { href: '/admin/appearance', title: '网站外观配置', desc: '修改前台文案、颜色、图片、导航图标和首页轮播。' },
-  { href: '/admin/visuals', title: '页面视觉设置', desc: '分别管理登录页、注册页、欢迎页和首页 Hero 的媒体与构图。' },
-  { href: '/admin/layout-editor', title: '页面布局编辑器', desc: '调整首页、每日挂号和后台首页的模块顺序、宽度、间距和发布状态。' },
-  { href: '/admin/growth', title: '成长系统管理', desc: '维护等级名称、升级经验和任务奖励基础配置。' },
-  { href: '/admin/birthday-messages', title: '生日祝福文案', desc: '维护生日纪念通知文案池，发送时随机选择启用的文案。' },
-  { href: '/admin/stickers', title: '表情包审核', desc: '审核用户提交的表情包合集，预览表情、通过或拒绝。' },
-  { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '查看、删除用户挂号页留言，并发布管理员公告与活动提醒。' },
+type AdminNavigationItem = {
+  href: string
+  title: string
+  desc: string
+}
+
+type AdminNavigationGroup = {
+  title: string
+  desc: string
+  items: readonly AdminNavigationItem[]
+}
+
+const adminNavigationGroups: readonly AdminNavigationGroup[] = [
+  {
+    title: '数据面板',
+    desc: '查看后台运营数据与趋势。',
+    items: [
+      { href: '/admin/dashboard', title: '打开数据面板', desc: '查看注册、发帖、回复、挂号等核心数据。' },
+    ],
+  },
+  {
+    title: '用户管理',
+    desc: '维护用户账号与默认资料资源。',
+    items: [
+      { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
+      { href: '/admin/default-avatars', title: '默认头像管理', desc: '维护系统默认头像池。' },
+    ],
+  },
+  {
+    title: '入院管理',
+    desc: '统一管理体检、注册、验证与账户安全。',
+    items: [
+      { href: '/admin/ehospital', title: 'E院体检设置', desc: '配置听力验证的开关、题量、通过分数和每日次数。' },
+      { href: '/admin/security-settings#registration-settings', title: '注册流程设置', desc: '设置注册方式与注册开关。' },
+      { href: '/admin/security-settings#verification-settings', title: '验证设置', desc: '设置邮箱、手机和密保验证策略。' },
+      { href: '/admin/security-settings#security-settings', title: '账户安全设置', desc: '配置密码找回和账户安全策略。' },
+    ],
+  },
+  {
+    title: '内容管理',
+    desc: '集中处理首页、帖子、今日内容、留言、生日与公告。',
+    items: [
+      { href: '/admin/home', title: '首页内容', desc: '管理首页 Hero、文案、排序和启用状态。' },
+      { href: '/admin/posts/review', title: '帖子审核', desc: '审核新帖并处理精选、置顶和拒绝。' },
+      { href: '/admin/today', title: '今日管理', desc: '管理历史上的今天内容并审核用户提交。' },
+      { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '管理挂号页留言、公告和活动提醒。' },
+      { href: '/admin/stickers', title: '表情包审核', desc: '审核用户提交的表情包合集。' },
+      { href: '/admin/birthdays', title: '生日管理', desc: '查看今日生日用户并保护隐私信息。' },
+      { href: '/admin/birthday-messages', title: '生日祝福文案', desc: '维护生日纪念通知文案池。' },
+      { href: '/admin/notifications', title: '公告管理', desc: '发布与管理后台系统公告。' },
+      { href: '/admin/content', title: '活动内容管理', desc: '保留原内容中心入口，管理活动与其他内容入口。' },
+    ],
+  },
+  {
+    title: '页面视觉设置',
+    desc: '统一管理网站外观、页面媒体与布局。',
+    items: [
+      { href: '/admin/home', title: '首页 Hero 管理', desc: '管理首页 Hero 图片、文案和排序。' },
+      { href: '/admin/appearance', title: '网站整体外观', desc: '修改前台文案、颜色、图片和导航图标。' },
+      { href: '/admin/layout-editor', title: '页面布局编辑器', desc: '调整页面模块顺序、宽度、间距和发布状态。' },
+      { href: '/admin/visuals', title: '页面视觉总览', desc: '进入登录、注册、欢迎页和首页视觉设置。' },
+      { href: '/admin/visuals/login', title: '登录页视觉', desc: '设置登录页背景与响应式构图。' },
+      { href: '/admin/visuals/register', title: '注册页视觉', desc: '设置注册页背景与响应式构图。' },
+      { href: '/admin/visuals/welcome', title: '欢迎页视觉', desc: '设置欢迎页背景与响应式构图。' },
+      { href: '/admin/visuals/home', title: '首页视觉', desc: '设置首页视觉媒体与构图。' },
+    ],
+  },
+  {
+    title: '娱乐天空管理',
+    desc: '统一进入歌词、听听题库与游戏相关配置。',
+    items: [
+      { href: '/admin/entertainment/lyrics', title: '歌词处方库', desc: '维护娱乐天空每日抽奖使用的歌词处方。' },
+      { href: '/admin/entertainment/guess-song', title: '听听题库', desc: '维护听听题目、答案与私有音频变体。' },
+      { href: '/admin/entertainment/guess-song#game-config', title: '游戏相关配置', desc: '沿用听听管理页中的游戏配置入口。' },
+      { href: '/admin/music/songs', title: '曲库管理', desc: '从 EasMusic 歌曲库维护游戏可用曲目。' },
+    ],
+  },
+  {
+    title: 'EasMusic 管理',
+    desc: '维护音乐专辑、歌曲、巡演和现场资料。',
+    items: [
+      { href: '/admin/music', title: 'EasMusic 管理', desc: '进入 EasMusic 管理总览及其子模块。' },
+    ],
+  },
+  {
+    title: '成就 / 勋章',
+    desc: '管理成就、勋章与成长系统配置。',
+    items: [
+      { href: '/admin/achievements', title: '成就 / 勋章管理', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
+      { href: '/admin/growth', title: '成长系统管理', desc: '维护等级名称、升级经验和任务奖励。' },
+    ],
+  },
+  {
+    title: 'Eason 文化馆',
+    desc: '维护歌曲、专辑、电影和 Live 档案。',
+    items: [
+      { href: '/admin/culture', title: 'Eason 文化馆管理', desc: '管理歌曲百科、专辑馆、电影馆、Live 档案和每日一句。' },
+    ],
+  },
+  {
+    title: '管理员管理',
+    desc: '维护后台管理员与权限分配。',
+    items: [
+      { href: '/admin/admins', title: '管理员管理', desc: '添加管理员、移除管理员并编辑后台权限。' },
+    ],
+  },
+  {
+    title: '更新与反馈',
+    desc: '发布后台更新记录并处理用户反馈。',
+    items: [
+      { href: '/admin/changelog', title: '更新日志管理', desc: '发布网站更新记录与功能说明。' },
+      { href: '/admin/feedback', title: '用户反馈管理', desc: '查看、回复和关闭用户反馈。' },
+    ],
+  },
 ] as const
+
+function routeFromHref(href: string) {
+  return href.split(/[?#]/, 1)[0]
+}
+
+function permissionForRoute(route: string) {
+  const exact = adminModulePermissions[route]
+  if (exact) return exact
+
+  const parentRoute = Object.keys(adminModulePermissions)
+    .filter((candidate) => route.startsWith(`${candidate}/`))
+    .sort((a, b) => b.length - a.length)[0]
+  return parentRoute ? adminModulePermissions[parentRoute] : undefined
+}
 
 export default async function AdminPage() {
   const currentUser = await requireAdminPage('/admin')
   const permissionSet = await getAdminPermissionSet(currentUser)
-  const visibleModules = adminModules.filter((item) => {
-    if (isSuperAdmin(currentUser)) return true
-    const permission = adminModulePermissions[item.href]
+  const superAdmin = isSuperAdmin(currentUser)
+  const canViewRoute = (href: string) => {
+    if (superAdmin) return true
+    const permission = permissionForRoute(routeFromHref(href))
     return Boolean(permission && permissionSet.has(permission))
-  })
-  const canViewStats = isSuperAdmin(currentUser) || permissionSet.has('stats_view')
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const [users, posts, replies, checkIns, achievements, cultureItems, todayBirthdays, birthdayGreetings, birthdayBadges, registrationPolicy, layoutConfig] = await Promise.all([
-    prisma.user.count({ where: { isDeleted: false, status: 'ACTIVE' } }),
-    prisma.post.count({ where: { isDeleted: false } }),
-    prisma.reply.count({ where: { isDeleted: false } }),
-    prisma.checkIn.count({ where: { createdAt: { gte: today } } }),
-    prisma.achievement.count().catch(() => 0),
-    prisma.cultureItem.count().catch(() => 0),
-    countTodayBirthdays(),
-    countBirthdayGreetingsSent(),
-    countBirthdayBadgesAwarded(),
-    getRegistrationPolicy(),
-    getPublishedPageLayoutConfig('admin-home'),
-  ])
-  const layoutModules = [...layoutConfig.desktop].filter((item) => item.visible && !item.isHidden).sort((a, b) => a.order - b.order)
+  }
+  const visibleGroups = adminNavigationGroups
+    .map((group) => ({ ...group, items: group.items.filter((item) => canViewRoute(item.href)) }))
+    .filter((group) => group.items.length > 0)
+  const layoutConfig = await getPublishedPageLayoutConfig('admin-home')
+  const headerLayout = layoutConfig.desktop.find((item) => item.key === 'admin.header')
+  const modulesLayout = layoutConfig.desktop.find((item) => item.key === 'admin.modules')
 
   return (
-    <>
-      
-      <main className="mx-auto flex max-w-6xl flex-wrap gap-x-5 px-4 py-5 sm:px-5 sm:py-7">
-        {layoutModules.map((layoutItem) => {
-          if (layoutItem.key === 'admin.header') {
-            return (
-              <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
-                <section className="layout-card rounded-[28px] border border-sky-100 bg-white/85 shadow-sm">
-                  <p className="text-sm font-black tracking-[0.18em] text-brand-700">管理后台</p>
-                  <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">{layoutItem.title || '管理后台'}</h1>
-                  <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">
-                    {layoutItem.subtitle || '管理用户、帖子、板块、挂号、站点外观、EasMusic、成就系统和 Eason 文化馆。'}
-                  </p>
-                </section>
-              </PageLayoutFrame>
-            )
-          }
+    <main className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-5 sm:py-7">
+      {headerLayout ? (
+        <PageLayoutFrame config={headerLayout}>
+          <section className="layout-card rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm sm:p-8">
+            <p className="text-sm font-black tracking-[0.18em] text-brand-700">管理后台</p>
+            <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">{headerLayout.title || '管理后台'}</h1>
+            <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">
+              {headerLayout.subtitle || '管理用户、内容、站点视觉、EasMusic、成就系统和 Eason 文化馆。'}
+            </p>
+          </section>
+        </PageLayoutFrame>
+      ) : null}
 
-          if (layoutItem.key === 'admin.registrationStatus') {
-            return (
-              <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
-                <section className={`layout-card rounded-[28px] border shadow-sm ${registrationPolicy.envForcedClosed ? 'border-red-100 bg-red-50' : registrationPolicy.registrationMode === 'PHONE' ? 'border-amber-100 bg-amber-50' : 'border-sky-100 bg-white/85'}`}>
-                  <h2 className="text-lg font-black text-brand-950">{layoutItem.title || '注册状态'}</h2>
-                  <div className="mt-3 grid gap-2 text-sm font-bold text-slate-600 md:grid-cols-3">
-                    <p>当前注册模式：{registrationPolicy.registrationModeLabel}</p>
-                    <p>手机号验证：未启用短信验证</p>
-                    <p>环境总开关：{registrationPolicy.allowRegister ? '允许注册' : '强制关闭注册'}</p>
-                  </div>
-                  {registrationPolicy.envForcedClosed ? (
-                    <p className="mt-3 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭，后台注册模式无法覆盖。</p>
-                  ) : null}
-                  {registrationPolicy.registrationMode === 'PHONE' ? (
-                    <p className="mt-3 text-sm font-black text-amber-800">当前手机号注册未验证号码归属，请仅用于备案期间或受控测试。</p>
-                  ) : null}
+      {modulesLayout ? (
+        <PageLayoutFrame config={modulesLayout}>
+          <section className="layout-card rounded-[28px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-6">
+            <div className="mb-5">
+              <h2 className="text-2xl font-black text-brand-950">功能入口导航</h2>
+              <p className="mt-2 text-sm font-bold leading-6 text-slate-600">按业务模块进入后台管理页面，统计数据不在首页重复展示。</p>
+            </div>
+            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {visibleGroups.map((group) => (
+                <section key={group.title} className="min-w-0 rounded-2xl border border-sky-100 bg-white/80 p-4">
+                  <h3 className="text-xl font-black text-brand-950">{group.title}</h3>
+                  <p className="mt-2 text-sm font-bold leading-6 text-slate-500">{group.desc}</p>
+                  <nav className="mt-4 grid min-w-0 gap-2" aria-label={`${group.title}子菜单`}>
+                    {group.items.map((item) => (
+                      <Link
+                        key={`${group.title}-${item.href}-${item.title}`}
+                        href={item.href}
+                        className="min-w-0 rounded-xl border border-sky-100 bg-sky-50/55 px-3 py-3 transition hover:border-sky-300 hover:bg-sky-50"
+                      >
+                        <span className="block break-words text-sm font-black text-brand-950">{item.title}</span>
+                        <span className="mt-1 block break-words text-xs font-bold leading-5 text-slate-500">{item.desc}</span>
+                      </Link>
+                    ))}
+                  </nav>
                 </section>
-              </PageLayoutFrame>
-            )
-          }
-
-          if (layoutItem.key === 'admin.stats') {
-            if (!canViewStats) return null
-            return (
-              <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
-                <section className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">
-                  {[
-                    ['活跃用户', users],
-                    ['帖子总数', posts],
-                    ['回复总数', replies],
-                    ['今日挂号', checkIns],
-                    ['成就数量', achievements],
-                    ['文化内容', cultureItems],
-                    ['今日生日', todayBirthdays],
-                    ['生日祝福', birthdayGreetings],
-                    ['生日徽章', birthdayBadges],
-                  ].map(([label, value]) => (
-                    <div key={label} className="layout-card rounded-2xl border border-sky-100 bg-white/80 shadow-sm">
-                      <p className="text-sm font-bold text-slate-500">{label}</p>
-                      <p className="mt-2 text-3xl font-black text-brand-950">{value}</p>
-                    </div>
-                  ))}
-                </section>
-              </PageLayoutFrame>
-            )
-          }
-
-          if (layoutItem.key === 'admin.modules') {
-            return (
-              <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
-                {layoutItem.title || layoutItem.subtitle ? (
-                  <div className="mb-4">
-                    {layoutItem.title ? <h2 className="text-2xl font-black text-brand-950">{layoutItem.title}</h2> : null}
-                    {layoutItem.subtitle ? <p className="mt-2 text-sm font-bold leading-6 text-slate-600">{layoutItem.subtitle}</p> : null}
-                  </div>
-                ) : null}
-                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  {visibleModules.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className="layout-card rounded-2xl border border-sky-100 bg-white/82 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                    >
-                      <h2 className="text-lg font-black text-brand-950">{item.title}</h2>
-                      <p className="mt-2 text-sm font-bold leading-6 text-slate-500">{item.desc}</p>
-                    </Link>
-                  ))}
-                </section>
-              </PageLayoutFrame>
-            )
-          }
-
-          if (layoutItem.key === 'admin.deploymentStatus') {
-            return (
-              <PageLayoutFrame key={layoutItem.key} config={layoutItem}>
-                <section className="layout-card rounded-[28px] border border-sky-100 bg-white/85 shadow-sm">
-                  <h2 className="text-lg font-black text-brand-950">{layoutItem.title || '部署状态'}</h2>
-                  <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
-                    {layoutItem.subtitle || '生产环境由 GitHub Actions 与 PM2 部署流程管理。'}
-                  </p>
-                </section>
-              </PageLayoutFrame>
-            )
-          }
-
-          return null
-        })}
-      </main>
-    </>
+              ))}
+            </div>
+          </section>
+        </PageLayoutFrame>
+      ) : null}
+    </main>
   )
 }

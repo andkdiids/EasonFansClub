@@ -44,10 +44,10 @@ export function FriendRemarkEditor({ targetUserId, initialRemark, baseDisplayNam
   }
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm font-bold text-slate-500">
+    <div className="inline-flex min-h-11 flex-wrap items-center gap-2 text-sm font-bold text-slate-500">
       {remark ? <span>（备注：{remark}）</span> : <span>尚未设置备注</span>}
       <button type="button" onClick={openEditor} className="rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50">
-        {remark ? '修改备注' : '设置备注'}
+        修改备注
       </button>
       {open ? (
         <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/35 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false) }}>

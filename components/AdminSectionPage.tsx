@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { adminModulePermissions } from '@/lib/admin-permissions'
@@ -18,9 +17,6 @@ export async function AdminSectionPage({
           <p className="text-sm font-black tracking-[0.18em] text-brand-700">管理后台</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">{title}</h1>
           <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 sm:text-base">{description}</p>
-          <Link href="/admin" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-950 px-5 text-sm font-black text-white">
-            返回后台首页
-          </Link>
         </section>
 
         <section className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm sm:p-6">

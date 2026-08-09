@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { formatUid } from '@/lib/uid'
+import type { ProfileRecentMessage } from '@/lib/profile-page'
 
-type ModuleKey = 'posts' | 'replies' | 'achievements' | 'badges' | 'albums' | 'favorites'
+type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
 type PostItem = {
   id: string
   title: string
@@ -28,22 +29,24 @@ type FavoriteItem = {
     author: { uid: number; nickname: string; profile?: { displayName: string | null } | null }
   }
 }
-type ModuleItem = PostItem | ReplyItem | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
+type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
 type CacheState = Record<string, { loading: boolean; failed: boolean; items: ModuleItem[] } | undefined>
 
 const tabs: Array<{ key: ModuleKey; label: string }> = [
   { key: 'posts', label: '发帖记录' },
   { key: 'replies', label: '回复记录' },
+  { key: 'recent-messages', label: '最近留言' },
   { key: 'achievements', label: '我的成就' },
   { key: 'badges', label: '我的勋章' },
   { key: 'albums', label: '我的专辑' },
   { key: 'favorites', label: '我的收藏' },
 ]
 
-export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolean }) {
+export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: string; isSelf: boolean; recentMessages?: ProfileRecentMessage[] }) {
   const [active, setActive] = useState<ModuleKey>('posts')
-  const [cache, setCache] = useState<CacheState>({})
-  const visibleTabs = isSelf ? tabs : tabs.filter((tab) => tab.key !== 'favorites')
+  const [cache, setCache] = useState<CacheState>(() => ({
+    'recent-messages': { loading: false, failed: false, items: recentMessages },
+  }))
   const state = cache[active]
 
   useEffect(() => {
@@ -53,6 +56,7 @@ export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolea
   }, [isSelf])
 
   useEffect(() => {
+    if (active === 'recent-messages') return
     if (cache[active]) return
     const key = active
     let cancelled = false
@@ -78,20 +82,20 @@ export function PublicUserModules({ uid, isSelf }: { uid: string; isSelf: boolea
   }, [active, uid])
 
   return (
-<section id="profile-modules" className="h-full">
-<div className="flex gap-2 overflow-x-auto border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
-          {visibleTabs.map((tab) => (
+<section id="profile-modules" className="h-full min-w-0">
+<div className="flex flex-wrap gap-2 border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
+          {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActive(tab.key)}
-            className={`shrink-0 rounded-xl px-4 py-2 text-sm font-black ${active === tab.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}
+            className={`max-w-full rounded-xl px-3 py-2 text-xs font-black whitespace-nowrap sm:px-4 sm:text-sm ${active === tab.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-<div className="border-x border-bborder-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+<div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5">
       {state?.failed ? <ModuleFallback /> : null}
         {state?.loading || !state ? <ModuleFallback title="正在加载..." /> : null}
         {state && !state.loading && !state.failed ? <ModuleContent moduleKey={active} items={state.items} /> : null}
@@ -134,6 +138,24 @@ function ModuleContent({ moduleKey, items }: { moduleKey: ModuleKey; items: Modu
 >            <p className="font-black text-brand-950">{reply.post.title}</p>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{reply.content}</p>
           </Link>
+        ))}
+      </div>
+    )
+  }
+
+  if (moduleKey === 'recent-messages') {
+    const messages = items as ProfileRecentMessage[]
+    return (
+      <div className="space-y-3">
+        {messages.map((message) => (
+          <article key={message.id} className="min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)] p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-black text-brand-950">
+              {message.mood ? <span className="rounded-full bg-sky-50 px-2 py-1 text-brand-700">{message.mood}</span> : null}
+              <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('zh-CN')}</time>
+            </div>
+            <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.content}</p>
+            <p className="mt-2 text-xs font-bold text-slate-500">赞 {message.likeCount} · 回复 {message.commentCount}</p>
+          </article>
         ))}
       </div>
     )

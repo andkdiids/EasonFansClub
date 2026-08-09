@@ -2,14 +2,25 @@
 
 import Link from 'next/link'
 import { useState, type ChangeEvent } from 'react'
-import type { HeroMediaType } from '@/lib/hero-visuals'
-import type { SiteHeroSlide } from '@/lib/site-config'
+import { hasHeroMediaAsset } from '@/lib/hero-visuals'
+import { getHeroMediaForDevice, type HeroMediaAsset, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
+
+type HeroDevice = 'desktop' | 'mobile'
 
 const mediaTypeOptions: Array<readonly [HeroMediaType, string]> = [
   ['IMAGE', '静态图片'],
-  ['ANIMATED_IMAGE', '动态图片'],
+  ['ANIMATED_IMAGE', 'GIF / Animated WebP'],
   ['VIDEO', '短视频'],
 ]
+
+const emptyHeroMedia = (mediaType: HeroMediaType): HeroMediaAsset => ({
+  mediaType,
+  imageUrl: '',
+  mediaUrl: '',
+  posterUrl: '',
+  sourceUrl: '',
+  posterSourceUrl: '',
+})
 
 const emptySlide = (sortOrder: number): SiteHeroSlide => ({
   title: '',
@@ -21,6 +32,7 @@ const emptySlide = (sortOrder: number): SiteHeroSlide => ({
   mediaUrl: '',
   posterUrl: '',
   sourceUrl: '',
+  posterSourceUrl: '',
   showTitle: true,
   showSubtitle: true,
   showButton: true,
@@ -42,8 +54,75 @@ function mediaAccept(mediaType: HeroMediaType) {
   return 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
 }
 
-function currentMediaUrl(slide: SiteHeroSlide) {
-  return slide.mediaUrl || (slide.mediaType === 'IMAGE' || !slide.mediaType ? slide.imageUrl : '')
+function mediaPreviewUrl(media: HeroMediaAsset | null) {
+  return media?.mediaUrl || media?.imageUrl || media?.posterUrl || ''
+}
+
+function DeviceMediaPanel({
+  device,
+  mediaType,
+  previewMedia,
+  hasExplicitMedia,
+  uploading,
+  onTypeChange,
+  onUpload,
+  onPosterUpload,
+  onClear,
+  onPosterClear,
+}: {
+  device: HeroDevice
+  mediaType: HeroMediaType
+  previewMedia: HeroMediaAsset | null
+  hasExplicitMedia: boolean
+  uploading: string
+  onTypeChange: (mediaType: HeroMediaType) => void
+  onUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onPosterUpload: (event: ChangeEvent<HTMLInputElement>) => void
+  onClear: () => void
+  onPosterClear: () => void
+}) {
+  const previewUrl = mediaPreviewUrl(previewMedia)
+  const isVideo = mediaType === 'VIDEO'
+  const label = device === 'desktop' ? '桌面端媒体' : '移动端媒体'
+  const uploadKey = `${device}:media`
+  const posterUploadKey = `${device}:poster`
+
+  return <section className="rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h3 className="text-sm font-black text-brand-950">{label}</h3>
+        <p className="mt-1 text-xs font-bold text-slate-500">{hasExplicitMedia ? '已上传，可独立替换' : device === 'mobile' ? '未设置，将自动使用桌面端媒体' : '使用现有 Hero 媒体'}</p>
+      </div>
+      <span className="text-xs font-black text-sky-700">{mediaTypeOptions.find(([value]) => value === mediaType)?.[1] || mediaType}</span>
+    </div>
+    <div className="relative mt-3 aspect-[16/9] overflow-hidden rounded-xl bg-sky-950">
+      {previewUrl && isVideo ? <video src={previewUrl} poster={previewMedia?.posterUrl || previewMedia?.imageUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
+      {previewUrl && !isVideo ? <img src={previewUrl} alt={label} className="h-full w-full object-cover" /> : null}
+      {!previewUrl ? <div className="grid h-full place-items-center px-4 text-center text-xs font-black text-slate-400">暂无媒体，请选择类型后上传</div> : null}
+    </div>
+    <label className="mt-3 block text-xs font-black text-slate-600">媒体类型
+      <select value={mediaType} onChange={(event) => onTypeChange(event.target.value as HeroMediaType)} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-2 py-2 text-sm font-bold">
+        {mediaTypeOptions.map(([value, optionLabel]) => <option key={value} value={value}>{optionLabel}</option>)}
+      </select>
+    </label>
+    <div className="mt-3 flex flex-wrap gap-2">
+      <label className="inline-flex cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">
+        {uploading === uploadKey ? '上传中…' : `上传 / 替换${device === 'desktop' ? '桌面端' : '移动端'}媒体`}
+        <input type="file" accept={mediaAccept(mediaType)} onChange={onUpload} className="hidden" />
+      </label>
+      {hasExplicitMedia ? <button type="button" onClick={onClear} className="rounded-full bg-red-50 px-3 py-2 text-xs font-black text-red-700">清除{device === 'desktop' ? '桌面端' : '移动端'}媒体</button> : null}
+    </div>
+    {isVideo ? <div className="mt-3 rounded-xl bg-white/80 p-3">
+      <p className="text-xs font-bold leading-5 text-slate-500">视频可单独设置封面，移动端会沿用当前设备媒体。</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label className="inline-flex cursor-pointer rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700">
+          {uploading === posterUploadKey ? '上传中…' : previewMedia?.posterUrl ? '替换视频封面' : '上传视频封面'}
+          <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={onPosterUpload} className="hidden" />
+        </label>
+        {hasExplicitMedia && previewMedia?.posterUrl ? <button type="button" onClick={onPosterClear} className="text-xs font-black text-red-700">移除封面</button> : null}
+      </div>
+    </div> : null}
+  </section>
 }
 
 export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlide[] }) {
@@ -57,48 +136,71 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
     setSlides((current) => current.map((slide, slideIndex) => slideIndex === index ? { ...slide, ...patch } : slide))
   }
 
-  function changeMediaType(index: number, mediaType: HeroMediaType) {
-    const slide = slides[index]
+  function effectiveMedia(slide: SiteHeroSlide, device: HeroDevice) {
+    return getHeroMediaForDevice(slide, device)
+  }
+
+  function explicitMedia(slide: SiteHeroSlide, device: HeroDevice) {
+    const media = device === 'desktop' ? slide.desktopHeroMedia : slide.mobileHeroMedia
+    return hasHeroMediaAsset(media) ? media : null
+  }
+
+  function syncDesktopLegacy(asset: HeroMediaAsset): Partial<SiteHeroSlide> {
+    return {
+      mediaType: asset.mediaType,
+      mediaUrl: asset.mediaUrl,
+      imageUrl: asset.imageUrl,
+      posterUrl: asset.posterUrl,
+      sourceUrl: asset.sourceUrl,
+      posterSourceUrl: asset.posterSourceUrl,
+    }
+  }
+
+  function changeMediaType(index: number, device: HeroDevice, mediaType: HeroMediaType) {
+    const asset = emptyHeroMedia(mediaType)
     update(index, {
-      mediaType,
-      mediaUrl: mediaType === 'IMAGE' ? slide.imageUrl || slide.mediaUrl || '' : '',
-      ...(mediaType === 'VIDEO' ? {} : { posterUrl: '' }),
+      [device === 'desktop' ? 'desktopHeroMedia' : 'mobileHeroMedia']: asset,
+      ...(device === 'desktop' ? syncDesktopLegacy(asset) : {}),
     })
   }
 
-  async function upload(index: number, event: ChangeEvent<HTMLInputElement>, kind: 'media' | 'poster' = 'media') {
+  async function upload(index: number, device: HeroDevice, event: ChangeEvent<HTMLInputElement>, kind: 'media' | 'poster' = 'media') {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
     const slide = slides[index]
-    const uploadKey = `${index}:${kind}`
-    setUploading(uploadKey)
+    const current = explicitMedia(slide, device) || effectiveMedia(slide, device) || emptyHeroMedia('IMAGE')
+    const uploadKey = `${device}:${kind}`
+    setUploading(`${index}:${uploadKey}`)
     setMessage('')
     setError('')
     try {
       const body = new FormData()
       body.append('file', file, file.name)
       body.append('kind', kind)
-      body.append('scope', 'home')
-      if (kind === 'media') body.append('mediaType', slide.mediaType || 'IMAGE')
+      body.append('scope', `home-${index}-${device}`)
+      if (kind === 'media') body.append('mediaType', current.mediaType)
       const response = await fetch('/api/uploads/hero-media', { method: 'POST', body })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
         setError(data?.message || 'Hero 媒体上传失败')
         return
       }
-      if (kind === 'poster') {
-        update(index, { posterUrl: data.url, posterSourceUrl: data.sourceUrl || '' })
-        setMessage('视频封面已上传，请保存 Hero 配置')
-      } else {
-        update(index, {
-          mediaType: data.mediaType as HeroMediaType,
-          mediaUrl: data.url,
-          sourceUrl: data.sourceUrl || '',
-          imageUrl: data.mediaType === 'IMAGE' ? data.url : slide.imageUrl,
-        })
-        setMessage('Hero 媒体已上传到 COS，请保存配置')
+      const asset: HeroMediaAsset = kind === 'poster'
+        ? { ...current, posterUrl: data.url, posterSourceUrl: data.sourceUrl || '' }
+        : {
+            ...current,
+            mediaType: data.mediaType as HeroMediaType,
+            mediaUrl: data.url,
+            imageUrl: data.mediaType === 'VIDEO' ? current.imageUrl || '' : data.url,
+            sourceUrl: data.sourceUrl || '',
+          }
+      const patch: Partial<SiteHeroSlide> = {
+        [device === 'desktop' ? 'desktopHeroMedia' : 'mobileHeroMedia']: asset,
+        ...(device === 'desktop' ? syncDesktopLegacy(asset) : {}),
       }
+      update(index, patch)
+      setMessage(`${device === 'desktop' ? '桌面端' : '移动端'}媒体已上传，请保存 Hero 配置`)
     } catch {
       setError('Hero 媒体上传失败，请稍后重试')
     } finally {
@@ -106,8 +208,21 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
     }
   }
 
-  function clearMedia(index: number) {
-    update(index, { mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' })
+  function clearMedia(index: number, device: HeroDevice) {
+    const patch: Partial<SiteHeroSlide> = device === 'desktop'
+      ? { desktopHeroMedia: null, mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' }
+      : { mobileHeroMedia: null }
+    update(index, patch)
+  }
+
+  function clearPoster(index: number, device: HeroDevice) {
+    const slide = slides[index]
+    const current = explicitMedia(slide, device) || effectiveMedia(slide, device) || emptyHeroMedia('VIDEO')
+    const asset = { ...current, posterUrl: '', posterSourceUrl: '' }
+    update(index, {
+      [device === 'desktop' ? 'desktopHeroMedia' : 'mobileHeroMedia']: asset,
+      ...(device === 'desktop' ? syncDesktopLegacy(asset) : {}),
+    })
   }
 
   async function save() {
@@ -134,86 +249,77 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Home Hero</p>
-            <h1 className="mt-2 text-3xl font-black text-brand-950">首页 Hero 管理</h1>
-            <p className="mt-3 max-w-2xl text-sm font-bold leading-7 text-slate-600">
-              支持静态图片、动态 GIF / Animated WebP 和短视频。视频建议使用 5–15 秒、MP4 / H.264、无音轨或静音文件，大小不超过 8MB。
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Link href="/admin/visuals/home" className="rounded-full border border-sky-200 bg-white px-4 py-3 text-sm font-black text-brand-700">页面视觉设置</Link>
-            <button type="button" onClick={() => setSlides((current) => [...current, emptySlide(current.length + 1)])} className="rounded-full bg-sky-50 px-4 py-3 text-sm font-black text-brand-700">新增 Hero</button>
-            <button type="button" disabled={saving} onClick={() => void save()} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{saving ? '保存中…' : '保存全部'}</button>
-          </div>
+  return <div className="space-y-6">
+    <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-sm font-black uppercase tracking-[0.18em] text-sky-700">Home Hero</p>
+          <h1 className="mt-2 text-3xl font-black text-brand-950">首页 Hero 管理</h1>
+          <p className="mt-3 max-w-2xl text-sm font-bold leading-7 text-slate-600">每个 Hero 都可以分别上传桌面端和移动端媒体，支持静态图片、GIF、Animated WebP 和短视频。移动端未设置时自动使用桌面端媒体。</p>
         </div>
-      </section>
-
-      {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</p> : null}
-
-      <div className="space-y-4">
-        {slides.map((slide, index) => {
-          const mediaType = slide.mediaType || 'IMAGE'
-          const mediaUrl = currentMediaUrl(slide)
-          const previewUrl = mediaType === 'IMAGE' ? mediaUrl : slide.mediaUrl
-          return (
-            <article key={`${index}-${slide.sortOrder}`} className="grid gap-5 rounded-[26px] border border-sky-100 bg-white/90 p-5 shadow-sm md:grid-cols-[250px_minmax(0,1fr)]">
-              <div>
-                <div className="relative aspect-[16/9] overflow-hidden rounded-2xl bg-sky-950">
-                  {previewUrl && mediaType === 'VIDEO' ? <video src={previewUrl} poster={slide.posterUrl || slide.imageUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
-                  {previewUrl && mediaType !== 'VIDEO' ? <img src={previewUrl} alt={slide.title || `Hero ${index + 1}`} className="h-full w-full object-cover" /> : null}
-                  {!previewUrl ? <div className="grid h-full place-items-center px-4 text-center text-sm font-black text-slate-400">暂无媒体，可先选择类型后上传</div> : null}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <label className="inline-flex cursor-pointer rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
-                    {uploading === `${index}:media` ? '上传中…' : '上传 / 替换媒体'}
-                    <input type="file" accept={mediaAccept(mediaType)} onChange={(event) => void upload(index, event)} className="hidden" />
-                  </label>
-                  {mediaUrl ? <button type="button" onClick={() => clearMedia(index)} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700">清除当前媒体</button> : null}
-                </div>
-                {mediaType === 'VIDEO' ? (
-                  <div className="mt-3 rounded-xl bg-sky-50 p-3">
-                    <p className="text-xs font-bold leading-5 text-slate-500">建议上传视频封面，可改善移动端和弱网体验。</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <label className="inline-flex cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-black text-brand-700">
-                        {uploading === `${index}:poster` ? '上传中…' : slide.posterUrl ? '替换视频封面' : '上传视频封面'}
-                        <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={(event) => void upload(index, event, 'poster')} className="hidden" />
-                      </label>
-                      {slide.posterUrl ? <button type="button" onClick={() => update(index, { posterUrl: '' })} className="text-xs font-black text-red-700">移除封面</button> : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-sm font-black text-slate-600 sm:col-span-2">Hero 媒体类型
-                  <select value={mediaType} onChange={(event) => changeMediaType(index, event.target.value as HeroMediaType)} className="mt-2 w-full rounded-xl border border-sky-100 px-3 py-2 font-bold">
-                    {mediaTypeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
-                <input value={slide.title} onChange={(event) => update(index, { title: event.target.value })} placeholder="标题" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
-                <input value={slide.subtitle} onChange={(event) => update(index, { subtitle: event.target.value })} placeholder="副标题" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
-                <input value={slide.buttonText} onChange={(event) => update(index, { buttonText: event.target.value })} placeholder="按钮文字" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
-                <input value={slide.href} onChange={(event) => update(index, { href: event.target.value })} placeholder="跳转链接" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
-                <input type="number" value={slide.sortOrder} onChange={(event) => update(index, { sortOrder: Number(event.target.value) })} placeholder="排序" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600 sm:col-span-2">
-                  <span className="mr-1 text-slate-500">内容显示设置</span>
-                  <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showTitle !== false} onChange={(event) => update(index, { showTitle: event.target.checked })} />显示标题</label>
-                  <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showSubtitle !== false} onChange={(event) => update(index, { showSubtitle: event.target.checked })} />显示副标题</label>
-                  <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showButton !== false} onChange={(event) => update(index, { showButton: event.target.checked })} />显示按钮</label>
-                </div>
-                <label className="flex items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600"><input type="checkbox" checked={slide.isVisible} onChange={(event) => update(index, { isVisible: event.target.checked })} />启用</label>
-                <button type="button" onClick={() => setSlides((current) => current.filter((_, slideIndex) => slideIndex !== index))} className="justify-self-start rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700">删除此 Hero</button>
-              </div>
-            </article>
-          )
-        })}
+        <div className="flex gap-2">
+          <Link href="/admin/visuals/home" className="rounded-full border border-sky-200 bg-white px-4 py-3 text-sm font-black text-brand-700">页面视觉设置</Link>
+          <button type="button" onClick={() => setSlides((current) => [...current, emptySlide(current.length + 1)])} className="rounded-full bg-sky-50 px-4 py-3 text-sm font-black text-brand-700">新增 Hero</button>
+          <button type="button" disabled={saving} onClick={() => void save()} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{saving ? '保存中…' : '保存全部'}</button>
+        </div>
       </div>
+    </section>
+
+    {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
+    {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</p> : null}
+
+    <div className="space-y-4">
+      {slides.map((slide, index) => {
+        const desktopMedia = effectiveMedia(slide, 'desktop')
+        const mobileExplicit = explicitMedia(slide, 'mobile')
+        const mobilePreview = mobileExplicit || desktopMedia
+        const desktopType = slide.desktopHeroMedia?.mediaType || desktopMedia?.mediaType || 'IMAGE'
+        const mobileType = slide.mobileHeroMedia?.mediaType || desktopType
+        return <article key={`${index}-${slide.sortOrder}`} className="grid gap-5 rounded-[26px] border border-sky-100 bg-white/90 p-5 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
+            <DeviceMediaPanel
+              device="desktop"
+              mediaType={desktopType}
+              previewMedia={desktopMedia}
+              hasExplicitMedia={Boolean(explicitMedia(slide, 'desktop') || desktopMedia)}
+              uploading={uploading.replace(`${index}:`, '')}
+              onTypeChange={(mediaType) => changeMediaType(index, 'desktop', mediaType)}
+              onUpload={(event) => void upload(index, 'desktop', event)}
+              onPosterUpload={(event) => void upload(index, 'desktop', event, 'poster')}
+              onClear={() => clearMedia(index, 'desktop')}
+              onPosterClear={() => clearPoster(index, 'desktop')}
+            />
+            <DeviceMediaPanel
+              device="mobile"
+              mediaType={mobileType}
+              previewMedia={mobilePreview}
+              hasExplicitMedia={Boolean(mobileExplicit)}
+              uploading={uploading.replace(`${index}:`, '')}
+              onTypeChange={(mediaType) => changeMediaType(index, 'mobile', mediaType)}
+              onUpload={(event) => void upload(index, 'mobile', event)}
+              onPosterUpload={(event) => void upload(index, 'mobile', event, 'poster')}
+              onClear={() => clearMedia(index, 'mobile')}
+              onPosterClear={() => clearPoster(index, 'mobile')}
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
+            <input value={slide.title} onChange={(event) => update(index, { title: event.target.value })} placeholder="标题" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+            <input value={slide.subtitle} onChange={(event) => update(index, { subtitle: event.target.value })} placeholder="副标题" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+            <input value={slide.buttonText} onChange={(event) => update(index, { buttonText: event.target.value })} placeholder="按钮文字" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+            <input value={slide.href} onChange={(event) => update(index, { href: event.target.value })} placeholder="跳转链接" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+            <input type="number" value={slide.sortOrder} onChange={(event) => update(index, { sortOrder: Number(event.target.value) })} placeholder="排序" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600">
+              <span className="mr-1 text-slate-500">内容显示</span>
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showTitle !== false} onChange={(event) => update(index, { showTitle: event.target.checked })} />显示标题</label>
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showSubtitle !== false} onChange={(event) => update(index, { showSubtitle: event.target.checked })} />显示副标题</label>
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showButton !== false} onChange={(event) => update(index, { showButton: event.target.checked })} />显示按钮</label>
+            </div>
+            <label className="flex items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600"><input type="checkbox" checked={slide.isVisible} onChange={(event) => update(index, { isVisible: event.target.checked })} />启用</label>
+            <button type="button" onClick={() => setSlides((current) => current.filter((_, slideIndex) => slideIndex !== index))} className="justify-self-start rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700">删除此 Hero</button>
+          </div>
+        </article>
+      })}
     </div>
-  )
+  </div>
 }

@@ -114,7 +114,7 @@ export function ProfileHeader({
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center justify-start gap-1.5 text-xs font-bold leading-none text-white/90">
             <span className="profile-identity-badge">UID {formatUid(uid)}</span>
-            <span className="profile-identity-badge">{growthLevelName}</span>
+            <span className="profile-identity-badge whitespace-nowrap">等级 {level} · {growthLevelName}</span>
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">
             {admissionInfo.date} 加入E院 <span aria-hidden>·</span> 已入院 {admissionInfo.days} 天

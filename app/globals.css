@@ -719,6 +719,18 @@ flex-direction:column;
   background-color:var(--card-bg);
 }
 
+.profile-archive-title {
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+@media (max-width:767px) {
+  .profile-archive-title { font-size:1rem; }
+}
+
 @media (min-width: 768px) {
   .app-topbar-home .app-topbar-actions { display: none; }
   .app-topbar-home .app-topbar-search {
@@ -2301,7 +2313,6 @@ box-shadow:none;
     font-weight:600;
     line-height:1.05;
     letter-spacing:.03em;
-    text-overflow:ellipsis;
     overflow:hidden;
     white-space:nowrap;
     text-shadow:0 1px 1px rgba(255,255,255,.35);
@@ -3110,7 +3121,7 @@ text-align:center;
 
 @media (max-width:767px) {
   .easmusic-recorder-track-label > .easmusic-recorder-empty-text {
-    font-size:14px;
+    font-size:clamp(10px,3vw,12px);
     font-weight:500;
     line-height:1.2;
     text-align:center;
@@ -3129,29 +3140,12 @@ text-align:center;
     padding:0 8px;
   }
   .easmusic-cassette-stage--stacked .easmusic-tape-copy strong {
-    font-size:12px;
+    font-size:clamp(8px,2.4vw,11px);
     font-weight:500;
     line-height:1.2;
     text-align:center;
     white-space:nowrap;
     overflow:hidden;
-    text-overflow:ellipsis;
-  }
-  .easmusic-tape-copy .easmusic-led-text[data-overflowing='true'] .easmusic-led-text-run {
-    width:100%;
-    animation:none;
-  }
-  .easmusic-tape-copy .easmusic-led-text[data-overflowing='true'] .easmusic-led-text-item {
-    width:100%;
-    min-width:0;
-    max-width:100%;
-    flex:0 1 100%;
-    overflow:hidden;
-    padding-right:0;
-    text-overflow:ellipsis;
-  }
-  .easmusic-tape-copy .easmusic-led-text[data-overflowing='true'] .easmusic-led-text-item[aria-hidden='true'] {
-    display:none;
   }
 }
 

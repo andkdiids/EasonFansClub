@@ -5,7 +5,7 @@ import { publicImageUrl } from '@/lib/images'
 import {
   resolveHeroMediaLayout,
   resolveHeroMediaSettings,
-  resolveHeroImageUrl,
+  resolveHeroMediaAsset,
   type HeroMediaDimensions,
   type HeroFitMode,
   type HeroMediaType,
@@ -92,23 +92,15 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   const [fallbackDimensions, setFallbackDimensions] = useState<HeroMediaDimensions | null>(null)
   const [videoReady, setVideoReady] = useState(false)
   const [videoFailed, setVideoFailed] = useState(false)
-  const mediaType: HeroMediaType = visual?.mediaType || 'IMAGE'
-  const hasDedicatedHeroImage = Boolean(
-    visual?.mobileHero
-    || (visual?.desktopHero && visual.desktopHero !== visual.imageUrl),
-  )
-  const responsiveImageUrl = resolveHeroImageUrl(visual, device, fallbackImageUrl || '')
-  const imageUrl = publicImageUrl(responsiveImageUrl)
-  const mediaUrl = publicImageUrl(
-    mediaType === 'IMAGE'
-      ? hasDedicatedHeroImage ? responsiveImageUrl : visual?.mediaUrl || responsiveImageUrl
-      : visual?.mediaUrl || '',
-  )
+  const mediaAsset = resolveHeroMediaAsset(visual, device, fallbackImageUrl || '')
+  const mediaType: HeroMediaType = mediaAsset?.mediaType || 'IMAGE'
+  const imageUrl = publicImageUrl(mediaAsset?.imageUrl || '')
+  const mediaUrl = publicImageUrl(mediaAsset?.mediaUrl || (mediaType === 'IMAGE' ? mediaAsset?.imageUrl : ''))
   const fallbackUrl = publicImageUrl(
-    visual?.posterUrl
-      || (mediaType === 'VIDEO' ? visual?.imageUrl : '')
+    mediaAsset?.posterUrl
+      || (mediaType === 'VIDEO' ? mediaAsset?.imageUrl : '')
       || fallbackImageUrl
-      || (mediaType !== 'IMAGE' ? visual?.imageUrl : ''),
+      || (mediaType !== 'IMAGE' ? mediaAsset?.imageUrl : ''),
   )
   const staticUrl = mediaType === 'IMAGE' ? mediaUrl || imageUrl : fallbackUrl
   const settings = resolveHeroMediaSettings({
