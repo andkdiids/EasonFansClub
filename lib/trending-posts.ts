@@ -7,6 +7,7 @@ export type TrendingRange = 7 | 30
 
 export type TrendingPost = {
   id: string
+  authorId: string
   title: string
   summary: string
   viewCount: number
@@ -54,6 +55,7 @@ export const getTrendingPosts = unstable_cache(
         p.createdAt,
         p.updatedAt,
         (p.viewCount * 0.08 + p.likeCount * 3 + p.replyCount * 5 + p.favoriteCount * 4) AS hotScore,
+        u.id AS authorId,
         u.uid AS authorUid,
         COALESCE(NULLIF(pr.displayName, ''), u.nickname) AS authorName,
         COALESCE(NULLIF(pr.avatarUrl, ''), u.avatarUrl) AS authorAvatarUrl,

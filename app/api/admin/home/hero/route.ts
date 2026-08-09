@@ -1,6 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
+import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, heroMediaTypes, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -8,12 +8,22 @@ function normalizeSlides(value: unknown): SiteHeroSlide[] {
   if (!Array.isArray(value)) return []
   return value.slice(0, 20).map((item, index) => {
     const row = item && typeof item === 'object' ? item as Partial<SiteHeroSlide> : {}
+    const mediaType = typeof row.mediaType === 'string' && heroMediaTypes.includes(row.mediaType as HeroMediaType)
+      ? row.mediaType as HeroMediaType
+      : 'IMAGE'
+    const imageUrl = sanitizeText(row.imageUrl, 1000)
+    const mediaUrl = sanitizeText(row.mediaUrl, 1000) || (mediaType === 'IMAGE' ? imageUrl : '')
     return {
       title: sanitizeText(row.title, 160),
       subtitle: sanitizeText(row.subtitle, 300),
       buttonText: sanitizeText(row.buttonText, 80),
       href: sanitizeText(row.href, 500) || '#community-content',
-      imageUrl: sanitizeText(row.imageUrl, 1000),
+      imageUrl,
+      mediaType,
+      mediaUrl,
+      posterUrl: sanitizeText(row.posterUrl, 1000),
+      sourceUrl: sanitizeText(row.sourceUrl, 1000),
+      posterSourceUrl: sanitizeText(row.posterSourceUrl, 1000),
       isVisible: Boolean(row.isVisible),
       sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : index + 1,
     }

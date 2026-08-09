@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
@@ -24,6 +25,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
     orderBy: { createdAt: 'desc' },
     take: 50,
     select: {
+      userId: true,
       User: {
         select: {
           uid: true,
@@ -34,11 +36,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
       },
     },
   })
+  const remarkMap = await loadFriendRemarkMap(user.id, likes.map((like) => like.userId))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
       nickname: like.User.nickname,
-      displayName: like.User.Profile?.displayName || null,
+      displayName: resolveFriendDisplayName({
+        viewerId: user.id,
+        targetUserId: like.userId,
+        fallbackName: getPublicUserDisplayName(like.User),
+        remarkMap,
+      }),
       avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
     })),
   })

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import type { StickerReportReason } from '@prisma/client'
 
 /** 选择器可见表情：未隐藏、未下架、所属合集已通过审核。 */
@@ -621,7 +622,7 @@ export async function getStorePacks(opts: {
         category: true,
         isOfficial: true,
         createdAt: true,
-        creator: { select: { id: true, nickname: true, uid: true } },
+        creator: { select: { id: true, nickname: true, uid: true, Profile: { select: { displayName: true } } } },
       },
     }),
     prisma.stickerPack.count({ where }),
@@ -629,6 +630,7 @@ export async function getStorePacks(opts: {
 
   const agg = await aggregatePackUsage(packs.map((p) => p.id))
   const addedSet = await getUserAddedPackIds(opts.userId, packs.map((p) => p.id))
+  const remarkMap = await loadFriendRemarkMap(opts.userId, packs.flatMap((pack) => pack.creator ? [pack.creator.id] : []))
 
   // 排序：hot / official 都按下载量降序；new 走时间倒序
   let ordered = packs
@@ -645,7 +647,16 @@ export async function getStorePacks(opts: {
     type: pack.type,
     category: pack.category,
     isOfficial: pack.isOfficial,
-    creator: pack.creator,
+    creator: pack.creator ? {
+      id: pack.creator.id,
+      uid: pack.creator.uid,
+      nickname: resolveFriendDisplayName({
+        viewerId: opts.userId,
+        targetUserId: pack.creator.id,
+        fallbackName: getPublicUserDisplayName(pack.creator),
+        remarkMap,
+      }),
+    } : null,
     stickerCount: agg.get(pack.id)?.stickerCount ?? 0,
     downloadCount: agg.get(pack.id)?.downloadCount ?? 0,
     addedByCount: agg.get(pack.id)?.addedByCount ?? 0,
@@ -686,7 +697,7 @@ export async function getStorePackDetail(packId: string, userId: string | null):
       category: true,
       isOfficial: true,
       createdAt: true,
-      creator: { select: { id: true, nickname: true, uid: true } },
+      creator: { select: { id: true, nickname: true, uid: true, Profile: { select: { displayName: true } } } },
       stickers: {
         where: { isHidden: false, enabled: true },
         orderBy: { sort: 'asc' },
@@ -697,6 +708,7 @@ export async function getStorePackDetail(packId: string, userId: string | null):
   if (!pack) return null
   const agg = await aggregatePackUsage([pack.id])
   const addedSet = userId ? await getUserAddedPackIds(userId, [pack.id]) : new Set<string>()
+  const remarkMap = await loadFriendRemarkMap(userId, pack.creator ? [pack.creator.id] : [])
   return {
     id: pack.id,
     name: pack.name,
@@ -706,7 +718,16 @@ export async function getStorePackDetail(packId: string, userId: string | null):
     type: pack.type,
     category: pack.category,
     isOfficial: pack.isOfficial,
-    creator: pack.creator,
+    creator: pack.creator ? {
+      id: pack.creator.id,
+      uid: pack.creator.uid,
+      nickname: resolveFriendDisplayName({
+        viewerId: userId,
+        targetUserId: pack.creator.id,
+        fallbackName: getPublicUserDisplayName(pack.creator),
+        remarkMap,
+      }),
+    } : null,
     copyright: null,
     stickerCount: pack.stickers.length,
     downloadCount: agg.get(pack.id)?.downloadCount ?? 0,

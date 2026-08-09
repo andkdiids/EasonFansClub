@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { BackButton } from '@/components/BackButton'
+import { FriendRemarkEditor } from '@/components/FriendRemarkEditor'
 import { ProfileHeader } from '@/components/ProfileSummary'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import { getCurrentUser } from '@/lib/auth'
@@ -71,24 +72,47 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (isSelf) redirect('/profile')
   let friendship = null
   let pendingRequest: { senderId: string; receiverId: string } | null = null
+  let blocked = false
+  let initialRemark: string | null = null
 
   if (viewer && !isSelf) {
     try {
       const [userAId, userBId] = normalizeFriendPair(viewer.id, user.id)
-      friendship = await withDbTimeout('Friendship.findUnique publicUser.friendship', prisma.friendship.findUnique({
-        where: { userAId_userBId: { userAId, userBId } },
-        select: { id: true },
-      }), 2500)
-      pendingRequest = await withDbTimeout('FriendRequest.findFirst publicUser.pendingRequest', prisma.friendRequest.findFirst({
-        where: {
-          status: 'PENDING',
-          OR: [
-            { senderId: viewer.id, receiverId: user.id },
-            { senderId: user.id, receiverId: viewer.id },
-          ],
-        },
-        select: { senderId: true, receiverId: true },
-      }), 2500)
+      const [friendshipResult, pendingResult, blockResult] = await Promise.all([
+        withDbTimeout('Friendship.findUnique publicUser.friendship', prisma.friendship.findUnique({
+          where: { userAId_userBId: { userAId, userBId } },
+          select: { id: true },
+        }), 2500),
+        withDbTimeout('FriendRequest.findFirst publicUser.pendingRequest', prisma.friendRequest.findFirst({
+          where: {
+            status: 'PENDING',
+            OR: [
+              { senderId: viewer.id, receiverId: user.id },
+              { senderId: user.id, receiverId: viewer.id },
+            ],
+          },
+          select: { senderId: true, receiverId: true },
+        }), 2500),
+        withDbTimeout('Block.findFirst publicUser.block', prisma.block.findFirst({
+          where: {
+            OR: [
+              { blockerId: viewer.id, blockedId: user.id },
+              { blockerId: user.id, blockedId: viewer.id },
+            ],
+          },
+          select: { id: true },
+        }), 2500),
+      ])
+      friendship = friendshipResult
+      pendingRequest = pendingResult
+      blocked = Boolean(blockResult)
+      if (friendship && !blocked) {
+        const remark = await withDbTimeout('FriendRemark.findUnique publicUser.remark', prisma.friendRemark.findUnique({
+          where: { ownerId_friendId: { ownerId: viewer.id, friendId: user.id } },
+          select: { remark: true },
+        }), 2500)
+        initialRemark = remark?.remark || null
+      }
     } catch (error) {
       console.error('[public-user:ssr] relationship-query:failed', {
         queries: [
@@ -98,6 +122,8 @@ export default async function PublicUserPage({ params }: PageProps) {
       }, error)
       friendship = null
       pendingRequest = null
+      blocked = false
+      initialRemark = null
     }
   }
 
@@ -143,7 +169,9 @@ export default async function PublicUserPage({ params }: PageProps) {
                     <Link href="/profile?edit=1" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">
                       编辑个人资料
                     </Link>
-                  ) : viewer && !friendship ? (
+                  ) : viewer && friendship && !blocked ? (
+                    <FriendRemarkEditor targetUserId={user.id} initialRemark={initialRemark} baseDisplayName={name} />
+                  ) : viewer && !friendship && !blocked ? (
                     <AddFriendButton uid={user.uid} initialStatus={friendStatus} />
                   ) : !viewer ? (
                     <Link href="/login" className="rounded-xl border border-sky-100 bg-brand-950 px-4 py-2.5 text-center text-sm font-black text-white shadow-sm transition hover:bg-brand-800">

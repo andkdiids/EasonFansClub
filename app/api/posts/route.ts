@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { awardExperience } from '@/lib/growth'
 import { getRandomPostRegistrationFee, POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
@@ -26,6 +27,7 @@ function createSummary(content: string, length = 180) {
 }
 
 export async function GET(request: Request) {
+  const viewer = await getCurrentUser()
   const { searchParams } = new URL(request.url)
   const boardSlug = searchParams.get('board')
   const page = Math.max(Number(searchParams.get('page') || 1), 1)
@@ -56,9 +58,10 @@ export async function GET(request: Request) {
         isPinned: true,
         isFeatured: true,
         createdAt: true,
-        User: {
-          select: {
-            uid: true,
+          User: {
+            select: {
+              id: true,
+              uid: true,
             nickname: true,
             avatarUrl: true,
             level: true,
@@ -71,9 +74,21 @@ export async function GET(request: Request) {
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
+    const remarkMap = await loadFriendRemarkMap(viewer?.id, pageRows.map((row) => row.User.id))
     const posts = pageRows.map(({ summary, content, User, Board, sticker, ...post }) => ({
       ...post,
-      author: { ...User, profile: User.Profile },
+      author: {
+        ...User,
+        profile: User.Profile ? {
+          ...User.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: viewer?.id,
+            targetUserId: User.id,
+            fallbackName: getPublicUserDisplayName(User),
+            remarkMap,
+          }),
+        } : User.Profile,
+      },
       board: Board,
       content: summary || createSummary(content),
       stickerUrl: sticker?.url || null,
@@ -81,7 +96,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json(
       { posts, page, hasMore },
-      { headers: { 'Cache-Control': 'public, max-age=15, s-maxage=45, stale-while-revalidate=120' } },
+      { headers: viewer
+        ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+        : { 'Cache-Control': 'public, max-age=15, s-maxage=45, stale-while-revalidate=120', Vary: 'Cookie' } },
     )
   } catch (error) {
     console.error('[posts:list:error]', { boardSlug, page, error })

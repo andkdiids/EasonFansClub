@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
@@ -271,6 +272,7 @@ export async function POST(request: Request, { params }: Params) {
   const { createdReply, rewardPoints } = reply
   const { User: replyAuthor, sticker: replySticker, ...serializedReply } = createdReply
   const mentionUserById = new Map(mentionedFriends.map((friend) => [friend.id, friend]))
+  const remarkMap = await loadFriendRemarkMap(user.id, mentionedFriends.map((friend) => friend.id))
 
   if (stickerId) {
     await recordStickerUsage(user.id, stickerId)
@@ -299,7 +301,12 @@ export async function POST(request: Request, { params }: Params) {
           user: {
             id: friend.id,
             uid: friend.uid,
-            name: friend.Profile?.displayName || friend.nickname,
+            name: resolveFriendDisplayName({
+              viewerId: user.id,
+              targetUserId: friend.id,
+              fallbackName: getPublicUserDisplayName(friend),
+              remarkMap,
+            }),
           },
         }]
       }),

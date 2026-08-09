@@ -8,7 +8,7 @@ import { useCheckInLike } from '@/components/checkin-like-context'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
-import type { CheckInDisplayMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
+import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
@@ -28,12 +28,49 @@ function updateUrl(date: string, sort: CheckInMessageSort) {
   window.history.pushState(null, '', `${url.pathname}?${url.searchParams.toString()}`)
 }
 
+type CheckInCompletedDetail = {
+  date?: string
+  dailyMessage?: CheckInMessageItem | null
+}
+
 type CheckInMessagesChangedDetail = { messageId?: string; date?: string }
 
 function notifyCheckInMessagesChanged(messageId: string, date: string) {
   window.dispatchEvent(new CustomEvent<CheckInMessagesChangedDetail>('checkin:messages-changed', {
     detail: { messageId, date },
   }))
+}
+
+function isAdminMessage(message: CheckInDisplayMessageItem) {
+  return 'isAdminMessage' in message && message.isAdminMessage
+}
+
+function messageSortOrder(message: CheckInDisplayMessageItem) {
+  return 'sort' in message && typeof message.sort === 'number' ? message.sort : 0
+}
+
+function compareCheckInMessages(left: CheckInDisplayMessageItem, right: CheckInDisplayMessageItem, sort: CheckInMessageSort) {
+  const adminOrder = Number(isAdminMessage(right)) - Number(isAdminMessage(left))
+  if (adminOrder) return adminOrder
+
+  const manualOrder = messageSortOrder(left) - messageSortOrder(right)
+  if (manualOrder) return manualOrder
+
+  const pinnedOrder = Number(right.isPinned) - Number(left.isPinned)
+  if (pinnedOrder) return pinnedOrder
+
+  const featuredOrder = Number(right.isFeatured) - Number(left.isFeatured)
+  if (featuredOrder) return featuredOrder
+
+  if (sort === 'hot') {
+    const likeOrder = right.likeCount - left.likeCount
+    if (likeOrder) return likeOrder
+
+    const commentOrder = right.commentCount - left.commentCount
+    if (commentOrder) return commentOrder
+  }
+
+  return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
 }
 
 function buildCommentTree(comments: DailyComment[]) {
@@ -85,7 +122,7 @@ export function CheckInMessagesPanel({
 }>) {
   const [date, setDate] = useState(initialDate)
   const [sort, setSort] = useState<CheckInMessageSort>(initialSort)
-  const [messages, setMessages] = useState(initialMessages)
+  const [messages, setMessages] = useState<CheckInDisplayMessageItem[]>(initialMessages)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [replyTargets, setReplyTargets] = useState<Record<string, { id: string; name: string } | null>>({})
@@ -100,6 +137,7 @@ export function CheckInMessagesPanel({
   // likeCtx 的 value 在每次点赞后都会更换身份（覆盖层变化），同步 effect / loadMessages
   // 只能通过 ref 访问它，否则点赞会反复触发「重置分页 + 用服务端旧值覆盖点赞状态」。
   const likeCtxRef = useRef(likeCtx)
+  const initialQueryRef = useRef({ date: initialDate, sort: initialSort })
   useEffect(() => {
     likeCtxRef.current = likeCtx
   })
@@ -119,7 +157,12 @@ export function CheckInMessagesPanel({
     return Array.from({ length: end - start + 1 }, (_, index) => start + index)
   }, [page, totalPages])
 
-  const loadMessages = useCallback(async (nextDate = date, nextSort = sort, syncUrl = true) => {
+  const loadMessages = useCallback(async (
+    nextDate = date,
+    nextSort = sort,
+    syncUrl = true,
+    resetPage = true,
+  ) => {
     if (isLoading) return
 
     setError('')
@@ -153,7 +196,7 @@ export function CheckInMessagesPanel({
         likeCount: item.likeCount,
         liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
       })))
-      setPage(1)
+      if (resetPage) setPage(1)
       if (syncUrl) updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest')
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '留言列表暂时无法加载，请稍后重试')
@@ -163,6 +206,7 @@ export function CheckInMessagesPanel({
   }, [date, isLoading, scope, sort])
 
   useEffect(() => {
+    const queryChanged = initialQueryRef.current.date !== initialDate || initialQueryRef.current.sort !== initialSort
     setDate(initialDate)
     setSort(initialSort)
     setMessages(initialMessages)
@@ -174,7 +218,8 @@ export function CheckInMessagesPanel({
       likeCount: item.likeCount,
       liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
     })))
-    setPage(1)
+    if (queryChanged) setPage(1)
+    initialQueryRef.current = { date: initialDate, sort: initialSort }
   }, [initialDate, initialMessages, initialSort])
 
   useEffect(() => {
@@ -218,9 +263,22 @@ export function CheckInMessagesPanel({
   useEffect(() => {
     if (previewMode) return
     function handleCheckInCompleted(event: Event) {
-      const detail = (event as CustomEvent<{ date?: string }>).detail
+      if (scope !== 'public') return
+      const detail = (event as CustomEvent<CheckInCompletedDetail>).detail
       const nextDate = detail?.date || maxDate
-      loadMessages(nextDate, sort)
+      const createdMessage = detail?.dailyMessage
+      if (!createdMessage || nextDate !== date) return
+
+      const displayMessage = anonymous
+        ? anonymizeCheckInMessages([createdMessage])[0]
+        : createdMessage
+      if (!displayMessage) return
+
+      setMessages((current) => {
+        if (current.some((item) => item.id === displayMessage.id)) return current
+        return [...current, displayMessage].sort((left, right) => compareCheckInMessages(left, right, sort))
+      })
+      setPage(1)
     }
     function handleDayChanged(event: Event) {
       const detail = (event as CustomEvent<{ date?: string }>).detail
@@ -235,7 +293,7 @@ export function CheckInMessagesPanel({
       window.removeEventListener('checkin:completed', handleCheckInCompleted)
       window.removeEventListener('checkin:dayChanged', handleDayChanged)
     }
-  }, [loadMessages, maxDate, previewMode, sort])
+  }, [anonymous, date, loadMessages, maxDate, previewMode, scope, sort])
 
   useEffect(() => {
     if (previewMode) return
@@ -243,7 +301,7 @@ export function CheckInMessagesPanel({
       const detail = (event as CustomEvent<CheckInMessagesChangedDetail>).detail
       if (detail?.date && detail.date !== date) return
       if (detail?.messageId && !messages.some((item) => item.id === detail.messageId)) return
-      void loadMessages(detail?.date || date, sort, false)
+      void loadMessages(detail?.date || date, sort, false, false)
     }
 
     window.addEventListener('checkin:messages-changed', handleMessagesChanged)

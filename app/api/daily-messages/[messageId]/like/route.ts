@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
 import { formatBeijingDate } from '@/lib/checkin'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
 const likerUserSelect = {
+  id: true,
   uid: true,
   nickname: true,
   avatarUrl: true,
@@ -14,6 +16,7 @@ const likerUserSelect = {
 
 type LikerRow = {
   User: {
+    id: string
     uid: number
     nickname: string
     avatarUrl: string | null
@@ -21,11 +24,16 @@ type LikerRow = {
   }
 }
 
-function serializeLiker(row: LikerRow) {
+function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<string, string>) {
   return {
     uid: row.User.uid,
     nickname: row.User.nickname,
-    displayName: row.User.Profile?.displayName || null,
+    displayName: resolveFriendDisplayName({
+      viewerId,
+      targetUserId: row.User.id,
+      fallbackName: getPublicUserDisplayName(row.User),
+      remarkMap,
+    }),
     avatarUrl: row.User.Profile?.avatarUrl || row.User.avatarUrl || null,
   }
 }
@@ -42,7 +50,8 @@ export async function GET(_request: Request, context: RouteContext) {
     take: 50,
     select: { User: { select: likerUserSelect } },
   })
-  return NextResponse.json({ likers: likes.map(serializeLiker) })
+  const remarkMap = await loadFriendRemarkMap(guard.user.id, likes.map((like) => like.User.id))
+  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, guard.user.id, remarkMap)) })
 }
 
 export async function POST(_request: Request, context: RouteContext) {

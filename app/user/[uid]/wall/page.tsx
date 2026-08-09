@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { ProfileWall } from '@/components/ProfileWall'
 import { BackButton } from '@/components/BackButton'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { formatUid, parseUidParam } from '@/lib/uid'
 
@@ -17,11 +18,18 @@ export default async function ProfileWallPage({ params, searchParams }: { params
     getCurrentUser(),
     prisma.user.findFirst({
       where: { uid: numericUid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-      select: { uid: true, nickname: true, Profile: { select: { displayName: true } } },
+      select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
     }),
   ])
   if (!target) notFound()
-  const name = target.Profile?.displayName || target.nickname
+  const remarkMap = await loadFriendRemarkMap(viewer?.id, [target.id])
+  const name = resolveFriendDisplayName({
+    viewerId: viewer?.id,
+    targetUserId: target.id,
+    fallbackName: getPublicUserDisplayName(target),
+    remarkMap,
+    context: 'default',
+  })
 
   return (
     <>

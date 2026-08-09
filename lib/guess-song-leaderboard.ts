@@ -2,6 +2,7 @@ import type { GuessSongMode, GuessSongPeriodType } from '@prisma/client'
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import { toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 
 type ScoreRecord = {
@@ -78,6 +79,7 @@ type LeaderboardRow = ScoreRecord & {
   userId: string
   mode?: GuessSongMode
   User: {
+    id: string
     uid: number
     nickname: string
     username: string
@@ -86,12 +88,17 @@ type LeaderboardRow = ScoreRecord & {
   }
 }
 
-function serializeRow(row: LeaderboardRow, rank: number) {
+function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remarkMap: ReadonlyMap<string, string>) {
   return {
     rank,
     userId: row.userId,
     uid: row.User.uid,
-    nickname: row.User.nickname || row.User.username,
+    nickname: resolveFriendDisplayName({
+      viewerId,
+      targetUserId: row.User.id,
+      fallbackName: getPublicUserDisplayName(row.User),
+      remarkMap,
+    }),
     avatarUrl: row.User.Profile?.avatarUrl || row.User.avatarUrl,
     mode: row.mode ? toPublicGuessSongMode(row.mode) : undefined,
     score: row.score,
@@ -135,11 +142,12 @@ export async function getGuessSongLeaderboard(input: {
         completedAt: true,
         User: {
           select: {
+            id: true,
             uid: true,
             nickname: true,
             username: true,
             avatarUrl: true,
-            Profile: { select: { avatarUrl: true } },
+            Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
       },
@@ -176,11 +184,12 @@ export async function getGuessSongLeaderboard(input: {
       include: {
         User: {
           select: {
+            id: true,
             uid: true,
             nickname: true,
             username: true,
             avatarUrl: true,
-            Profile: { select: { avatarUrl: true } },
+            Profile: { select: { displayName: true, avatarUrl: true } },
           },
         },
       },
@@ -197,14 +206,15 @@ export async function getGuessSongLeaderboard(input: {
   }
 
   rows.sort(compareGuessSongScores)
+  const remarkMap = await loadFriendRemarkMap(input.userId, rows.map((row) => row.userId))
   const ownIndex = rows.findIndex((row) => row.userId === input.userId)
   return {
     periodType: input.periodType,
     periodKey,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
-    rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1)),
-    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1)) : null,
+    rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1, input.userId, remarkMap)),
+    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1), input.userId, remarkMap) : null,
   }
 }
 

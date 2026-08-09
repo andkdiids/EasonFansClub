@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getFriendIds } from '@/lib/friends'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 
 const DEFAULT_LIMIT = 20
@@ -65,6 +66,7 @@ export async function GET(request: Request) {
       include: {
         User: {
           select: {
+            id: true,
             uid: true,
             nickname: true,
             avatarUrl: true,
@@ -75,6 +77,7 @@ export async function GET(request: Request) {
     }),
   ])
   const totalPages = Math.max(1, Math.ceil(total / limit))
+  const remarkMap = await loadFriendRemarkMap(viewer.id, activities.map((item) => item.actorId))
 
   return NextResponse.json({
     activities: activities.map((item) => ({
@@ -86,7 +89,15 @@ export async function GET(request: Request) {
       createdAt: item.createdAt.toISOString(),
       actor: {
         ...item.User,
-        profile: item.User.Profile,
+        profile: item.User.Profile ? {
+          ...item.User.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: viewer.id,
+            targetUserId: item.actorId,
+            fallbackName: getPublicUserDisplayName(item.User),
+            remarkMap,
+          }),
+        } : item.User.Profile,
       },
     })),
     pagination: {

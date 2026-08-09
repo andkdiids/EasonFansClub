@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 
@@ -125,13 +126,14 @@ export async function GET(request: Request, context: RouteContext) {
               id: true,
               title: true,
               content: true,
-              User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
+              User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
             },
           },
         },
       }),
       [],
     )
+    const remarkMap = await loadFriendRemarkMap(viewer.id, favorites.map((item) => item.Post.User.id))
     return NextResponse.json({
       items: favorites.map(({ Post, ...favorite }) => ({
         ...favorite,
@@ -139,7 +141,15 @@ export async function GET(request: Request, context: RouteContext) {
           ...Post,
           author: {
             ...Post.User,
-            profile: Post.User.Profile,
+            profile: Post.User.Profile ? {
+              ...Post.User.Profile,
+              displayName: resolveFriendDisplayName({
+                viewerId: viewer.id,
+                targetUserId: Post.User.id,
+                fallbackName: getPublicUserDisplayName(Post.User),
+                remarkMap,
+              }),
+            } : Post.User.Profile,
           },
         },
       })),

@@ -919,6 +919,20 @@ model Friendship {
   @@index([userBId, createdAt])
 }
 
+model FriendRemark {
+  id        String   @id @default(cuid())
+  remark    String   @db.VarChar(20)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ownerId   String
+  friendId  String
+  Owner     User     @relation("FriendRemarkOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  Friend    User     @relation("FriendRemarkFriend", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, friendId])
+  @@index([friendId])
+}
+
 model GrowthLevelConfig {
   id          String   @id @default(cuid())
   level       Int      @unique
@@ -2225,6 +2239,8 @@ model User {
   Follow_Follow_followerIdToUser                         Follow[]                    @relation("Follow_followerIdToUser")
   Follow_Follow_followingIdToUser                        Follow[]                    @relation("Follow_followingIdToUser")
   FriendActivity                                         FriendActivity[]
+  FriendRemark_FriendRemark_ownerIdToUser                FriendRemark[]               @relation("FriendRemarkOwner")
+  FriendRemark_FriendRemark_friendIdToUser               FriendRemark[]               @relation("FriendRemarkFriend")
   FriendRequest_FriendRequest_receiverIdToUser           FriendRequest[]             @relation("FriendRequest_receiverIdToUser")
   FriendRequest_FriendRequest_senderIdToUser             FriendRequest[]             @relation("FriendRequest_senderIdToUser")
   Friendship_Friendship_userAIdToUser                    Friendship[]                @relation("Friendship_userAIdToUser")

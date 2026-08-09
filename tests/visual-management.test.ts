@@ -1,69 +1,95 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { resolveHeroMediaLayout } from '../lib/hero-visuals'
 import { defaultSiteAppearance, mergeSiteAppearanceConfig } from '../lib/site-config'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('视觉管理复用 site.appearance JSON 且提供六个可扩展视觉位', () => {
+test('页面视觉配置使用 site.appearance JSON，并包含四个独立页面键', () => {
   const config = mergeSiteAppearanceConfig({})
-  assert.deepEqual(Object.keys(config.heroVisuals), ['login', 'register', 'home', 'activities', 'birthday', 'music'])
+  assert.deepEqual(Object.keys(config.heroVisuals), ['login', 'register', 'welcome', 'home', 'activities', 'birthday', 'music'])
   for (const visual of Object.values(config.heroVisuals)) {
-    assert.equal(visual.desktopPositionX, 50)
-    assert.equal(visual.desktopPositionY, 50)
-    assert.equal(visual.mobilePositionX, 50)
-    assert.equal(visual.mobilePositionY, 50)
+    if (visual.key === 'welcome') {
+      assert.equal(visual.desktopPositionX, 68)
+      assert.equal(visual.desktopPositionY, 33)
+      assert.equal(visual.mobilePositionX, 65)
+      assert.equal(visual.mobilePositionY, 50)
+    } else {
+      assert.equal(visual.desktopPositionX, 50)
+      assert.equal(visual.desktopPositionY, 50)
+      assert.equal(visual.mobilePositionX, 50)
+      assert.equal(visual.mobilePositionY, 50)
+    }
+    assert.equal(visual.desktopScale, 100)
+    assert.equal(visual.mobileScale, 100)
+    assert.equal(visual.desktopFitMode, 'COVER')
+    assert.equal(visual.mobileFitMode, 'COVER')
     assert.equal(visual.focusPoint, null)
   }
-  const api = read('app/api/admin/appearance/route.ts')
-  assert.match(api, /key: 'site\.appearance'/)
-  assert.match(api, /requireAdmin\('site_config_manage'\)/)
+  assert.match(read('app/api/admin/appearance/route.ts'), /key: 'site\.appearance'/)
+  assert.match(read('app/api/admin/appearance/route.ts'), /requireAdmin\('site_config_manage'\)/)
   assert.ok(defaultSiteAppearance.heroVisuals.login.enabled)
   assert.ok(defaultSiteAppearance.heroVisuals.register.enabled)
+  assert.ok(defaultSiteAppearance.heroVisuals.welcome.enabled)
 })
 
-test('注册视觉兼容旧配置并按注册图、登录视觉、登录图顺序回退', () => {
-  const registerImage = mergeSiteAppearanceConfig({ images: { registerBackgroundUrl: 'register-image' } })
-  assert.equal(registerImage.heroVisuals.register.imageUrl, 'register-image')
-
-  const loginVisual = mergeSiteAppearanceConfig({
-    images: { loginBackgroundUrl: 'login-image' },
-    heroVisuals: { login: { imageUrl: 'login-visual', desktopPositionY: 32 } },
+test('旧配置会为欢迎页生成一次独立快照，之后不再跟随首页轮播变化', () => {
+  const legacy = mergeSiteAppearanceConfig({
+    heroSlides: [{ title: '旧首页', subtitle: '', buttonText: '', href: '/', imageUrl: 'old-home', isVisible: true, sortOrder: 1 }],
   })
-  assert.equal(loginVisual.heroVisuals.register.imageUrl, 'login-visual')
-  assert.equal(loginVisual.heroVisuals.register.desktopPositionY, 32)
+  assert.equal(legacy.heroVisuals.welcome.imageUrl, 'old-home')
 
-  const legacyLoginImage = mergeSiteAppearanceConfig({ images: { loginBackgroundUrl: 'login-image' } })
-  assert.equal(legacyLoginImage.heroVisuals.register.imageUrl, 'login-image')
+  const afterHomeChange = mergeSiteAppearanceConfig({
+    ...legacy,
+    heroSlides: [{ title: '新首页', subtitle: '', buttonText: '', href: '/', imageUrl: 'new-home', isVisible: true, sortOrder: 1 }],
+  })
+  assert.equal(afterHomeChange.heroSlides[0].imageUrl, 'new-home')
+  assert.equal(afterHomeChange.heroVisuals.welcome.imageUrl, 'old-home')
 })
 
-test('HeroBackground 用 CSS 变量统一桌面与移动端 position', () => {
-  const component = read('components/HeroBackground.tsx')
-  const css = read('app/globals.css')
-  assert.match(component, /--hero-position-desktop/)
-  assert.match(component, /--hero-position-mobile/)
-  assert.match(component, /data-desktop-position/)
-  assert.match(css, /background-position:var\(--hero-position-desktop\)/)
-  assert.match(css, /background-position:var\(--hero-position-mobile\)/)
-})
-
-test('后台视觉编辑器支持上传、双预览、滑块、拖拽与独立保存', () => {
-  const manager = read('app/admin/visuals/VisualManager.tsx')
-  assert.match(manager, /\/api\/uploads\/site-image/)
-  assert.match(manager, /data-visual-preview=\{device\}/)
-  assert.match(manager, /type="range"/)
-  assert.match(manager, /setPointerCapture/)
-  assert.match(manager, /desktopPositionX/)
-  assert.match(manager, /mobilePositionY/)
-  assert.match(manager, /保存当前位置/)
-})
-
-test('登录、首页、活动和 EasMusic 接入视觉配置且旧生日页关闭', () => {
+test('登录、注册和欢迎页分别读取各自视觉配置', () => {
   assert.match(read('app/login/page.tsx'), /heroVisual=\{config\.heroVisuals\.login\}/)
   assert.match(read('app/register/page.tsx'), /heroVisual=\{config\.heroVisuals\.register\}/)
+  assert.match(read('app/welcome/page.tsx'), /config\.heroVisuals\.welcome/)
   assert.match(read('components/HomeLayoutSurface.tsx'), /siteConfig\.heroVisuals\.home/)
-  assert.match(read('app/activities/page.tsx'), /heroVisuals\.activities/)
-  assert.match(read('app/birthday/page.tsx'), /redirect\('\/activities'\)/)
-  assert.match(read('app/music/page.tsx'), /heroVisuals\.music/)
-  assert.match(read('components/music/MusicArchiveShell.tsx'), /backgroundVisual/)
+})
+
+test('HeroBackground 和后台预览共用媒体布局 resolver', () => {
+  const component = read('components/HeroBackground.tsx')
+  const resolver = read('lib/hero-visuals.ts')
+  assert.match(component, /resolveHeroMediaLayout/)
+  assert.match(component, /resolveHeroMediaSettings/)
+  assert.match(resolver, /desktopFitMode/)
+  assert.match(resolver, /mobileFitMode/)
+  assert.match(resolver, /CONTAIN/)
+  assert.match(resolver, /HERO_SCALE_MIN = 40/)
+})
+
+test('超宽图片在自定义缩放下不会被 cover 再次强制放大', () => {
+  const full = resolveHeroMediaLayout({ width: 390, height: 250 }, { width: 1536, height: 709 }, { positionX: 50, positionY: 50, scale: 100, fitMode: 'CUSTOM' })
+  const reduced = resolveHeroMediaLayout({ width: 390, height: 250 }, { width: 1536, height: 709 }, { positionX: 50, positionY: 50, scale: 60, fitMode: 'CUSTOM' })
+  assert.ok(full && reduced)
+  assert.ok(reduced.width < full.width)
+  assert.ok(reduced.height < full.height)
+  assert.ok(reduced.width < 390 || reduced.height < 250)
+})
+
+test('后台页面视觉入口提供四个独立设置页面和高清媒体上传', () => {
+  const page = read('app/admin/visuals/page.tsx')
+  const route = read('app/admin/visuals/[visualKey]/page.tsx')
+  const manager = read('app/admin/visuals/VisualManager.tsx')
+  const upload = read('app/api/uploads/hero-media/route.ts')
+  assert.match(page, /页面视觉设置/)
+  assert.match(route, /pageVisualKeys/)
+  assert.match(manager, /data-visual-preview=\{device\}/)
+  assert.match(manager, /type="range"/)
+  assert.match(manager, /desktopPositionX/)
+  assert.match(manager, /mobilePositionY/)
+  assert.match(manager, /desktopFitMode/)
+  assert.match(manager, /mobileScale/)
+  assert.match(manager, /\/api\/uploads\/hero-media/)
+  assert.match(upload, /quality: 94/)
+  assert.match(upload, /MAX_IMAGE_EDGE = 2560/)
+  assert.match(upload, /sourceUrl/)
 })

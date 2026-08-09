@@ -8,6 +8,7 @@ import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { isSupabaseStorageUrl, profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -120,6 +121,7 @@ function loadPost(postId: string, userId?: string) {
           userId: true,
           User: {
             select: {
+              id: true,
               uid: true,
               nickname: true,
               avatarUrl: true,
@@ -154,6 +156,7 @@ function loadPostReplies(postId: string, userId?: string) {
           userId: true,
           User: {
             select: {
+              id: true,
               uid: true,
               nickname: true,
               avatarUrl: true,
@@ -388,6 +391,17 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     }
   }
 
+  const displayNameUserIds = [
+    post.User.id,
+    ...post.Like.map((like) => like.userId),
+    ...postReplies.flatMap((reply) => [
+      reply.User.id,
+      ...reply.ReplyLike.map((like) => like.userId),
+      ...reply.ReplyMention.map((mention) => mention.User_ReplyMention_mentionedUserIdToUser.id),
+    ]),
+  ]
+  const remarkMap = await loadFriendRemarkMap(user?.id, displayNameUserIds)
+
   // 当前用户的点赞状态：两次恒定数量的批量查询（避免 N+1）；点赞用户头像列表由 Like / ReplyLike include 提供。
   let viewerPostLiked = false
   const viewerLikedReplyIds = new Set<string>()
@@ -410,7 +424,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const liked = viewerPostLiked
   const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
   const authorAvatar = profileImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl)
-  const authorName = post.User.Profile.displayName || post.User.nickname
+  const authorName = resolveFriendDisplayName({
+    viewerId: user?.id,
+    targetUserId: post.User.id,
+    fallbackName: getPublicUserDisplayName(post.User),
+    remarkMap,
+  })
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && isAdminRole(user.role))
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
@@ -420,14 +439,27 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     stickerId: reply.stickerId ?? null,
     stickerUrl: reply.sticker?.url ?? null,
     author: User.status === 'ACTIVE' && !User.isDeleted
-      ? { ...User, profile: User.Profile }
+      ? { ...User, profile: User.Profile ? {
+          ...User.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: user?.id,
+            targetUserId: User.id,
+            fallbackName: getPublicUserDisplayName(User),
+            remarkMap,
+          }),
+        } : User.Profile }
       : { id: '', uid: 0, nickname: '已注销用户', level: 0, avatarUrl: null, profile: null },
     liked: viewerLikedReplyIds.has(reply.id),
     likers: Array.isArray(ReplyLike)
       ? ReplyLike.map((like) => ({
           uid: like.User.uid,
           nickname: like.User.nickname,
-          displayName: like.User.Profile?.displayName || null,
+          displayName: resolveFriendDisplayName({
+            viewerId: user?.id,
+            targetUserId: like.userId,
+            fallbackName: getPublicUserDisplayName(like.User),
+            remarkMap,
+          }),
           avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
         }))
       : [],
@@ -436,7 +468,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       user: {
         id: mentionedUser.id,
         uid: mentionedUser.uid,
-        name: mentionedUser.Profile?.displayName || mentionedUser.nickname,
+        name: resolveFriendDisplayName({
+          viewerId: user?.id,
+          targetUserId: mentionedUser.id,
+          fallbackName: getPublicUserDisplayName(mentionedUser),
+          remarkMap,
+        }),
       },
     })),
   }))

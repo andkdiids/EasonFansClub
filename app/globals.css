@@ -123,14 +123,22 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
   inset:0;
   width:100%;
   height:100%;
-  min-height:100vh;
   z-index:0;
-  background-repeat:no-repeat;
-  background-size:cover;
-  background-position:center center;
+  overflow:hidden;
 }
-.hero-background-force-desktop { background-position:var(--hero-position-desktop) !important; }
-.hero-background-force-mobile { background-position:var(--hero-position-mobile) !important; }
+.hero-background-force-desktop { --hero-active-position:var(--hero-position-desktop); }
+.hero-background-force-mobile { --hero-active-position:var(--hero-position-mobile); }
+.hero-background-layer { position:absolute; max-width:none; max-height:none; pointer-events:none; }
+.hero-background-media { display:block; object-fit:cover; }
+.hero-background-video { display:block; opacity:0; background:#07111b; object-fit:cover; transition:opacity 180ms ease-out; }
+.hero-background-video.is-ready { opacity:1; }
+.hero-background-poster { z-index:0; }
+.hero-background-video,.hero-background-media { z-index:1; }
+.hero-preview-desktop { aspect-ratio:16 / 7; }
+.hero-preview-mobile { aspect-ratio:25 / 16; }
+@media (prefers-reduced-motion: reduce) {
+  .hero-background-video { display:none !important; }
+}
 
 .ecfc-brand { display:flex; align-items:center; gap:10px; color:var(--foreground); line-height:1; }
 .ecfc-brand-inverse { color:#fff; }
@@ -356,7 +364,6 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .community-mobile-nav { display:none; }
 
 @media (max-width: 767px) {
-  .hero-background { background-position:var(--hero-position-mobile); }
   .welcome-header { padding-inline:20px; }.welcome-copy {
  justify-content:center;
  padding:130px 24px 80px;
@@ -374,6 +381,7 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
  border-bottom:0;
  padding:14px 10px;
 }
+
   .community-stats>.stat-checkin { 
   grid-column:auto; 
   min-height:88px; 
@@ -2142,7 +2150,7 @@ box-shadow:none;
   transform:scaleY(var(--wave-height,.12));
   transform-origin:bottom;
   border-radius:2px 2px 0 0;
-  background:repeating-linear-gradient(to top,rgba(65,162,226,.96) 0 4px,transparent 4px 8px);
+  background:repeating-linear-gradient(to top,rgba(65,162,226,.96) 0 3px,transparent 3px 4px);
   box-shadow:0 0 4px rgba(65,162,226,.72),0 0 10px rgba(35,119,190,.35);
   transition:transform .14s ease-out;
   will-change:transform;
@@ -2259,6 +2267,7 @@ box-shadow:none;
     white-space:nowrap;
   }
   .easmusic-cassette-empty { order:4; margin:12px 14px 0; }
+  .easmusic-recorder-track-label { transform:translateY(3px); }
  @media (max-width:767px) {
   .easmusic-recorder-track-label > .easmusic-led-text:not(.easmusic-recorder-empty-text) {
     display:flex;
@@ -3848,8 +3857,33 @@ body:has(.games-full-width) .app-shell main {
   .home-today-panel { padding-inline:0; }
   .home-today-panel > header { padding-inline:14px; }
   .home-today-content { padding:16px; }
-  .home-album-strip { margin-right:0; padding-right:14px; }
+  .home-album-strip {
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:10px;
+    margin-inline:0;
+    padding-inline:0;
+    overflow:visible;
+  }
+  .home-album-strip > a {
+    width:auto;
+    min-width:0;
+  }
 }
+
+/* Page visual editor uses the real page frame ratios instead of a generic poster frame. */
+.hero-preview-home { aspect-ratio:36 / 13; }
+.hero-preview-page-desktop { aspect-ratio:16 / 10; }
+.hero-preview-page-mobile { aspect-ratio:390 / 844; }
+.hero-preview-desktop { aspect-ratio:36 / 13; }
+.hero-preview-mobile { aspect-ratio:25 / 16; }
+.welcome-page > [data-hero-background] { z-index:0; }
+.welcome-overlay,
+.community-hero-overlay,
+.auth-page-overlay { pointer-events:none; }
+.welcome-overlay { z-index:1; }
+.community-hero-overlay { z-index:1; }
+.auth-page-overlay { display:block; min-height:0; padding:0; }
 
 /* 今日模块：顶部分隔线(border-top)与标题之间留出间距，避免横线贴住「今日」标题 */
 /* 桌面端三列首页模块共享同一行高；今日模块的额外顶部留白只保留在移动端。 */

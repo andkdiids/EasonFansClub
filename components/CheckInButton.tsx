@@ -227,6 +227,7 @@ onStateChange?.({
           detail: {
             date: data.checkDate,
             hasMessage: Boolean(data.dailyMessageId),
+            dailyMessage: data.dailyMessage || null,
           },
         }),
       )

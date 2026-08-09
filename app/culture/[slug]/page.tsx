@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -24,11 +25,12 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
         take: 20,
-        include: { User: { select: { nickname: true, Profile: true } } },
+        include: { User: { select: { id: true, nickname: true, Profile: { select: { displayName: true } } } } },
       },
     },
   })
   if (!item) notFound()
+  const remarkMap = await loadFriendRemarkMap(user.id, item.CultureComment.map((comment) => comment.User.id))
 
   const facts = [
     ['专辑', item.albumName],
@@ -80,7 +82,12 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
           <div className="mt-4 space-y-3">
             {item.CultureComment.map((comment) => (
               <div key={comment.id} className="rounded-2xl bg-sky-50/80 p-4">
-                <p className="text-sm font-black text-brand-950">{comment.User.Profile?.displayName || comment.User.nickname}</p>
+                <p className="text-sm font-black text-brand-950">{resolveFriendDisplayName({
+                  viewerId: user.id,
+                  targetUserId: comment.User.id,
+                  fallbackName: getPublicUserDisplayName(comment.User),
+                  remarkMap,
+                })}</p>
                 <p className="mt-2 text-sm font-bold leading-7 text-slate-600">{comment.content}</p>
               </div>
             ))}

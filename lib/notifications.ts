@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 import type { SystemNotificationType } from '@prisma/client'
@@ -42,6 +43,32 @@ function getNotificationCategory(type: string, link?: string | null) {
 function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system') {
   if (link?.startsWith('/feedback/')) return '反馈'
   return source === 'system' ? systemTypeLabels[type] || type : personalTypeLabels[type] || type
+}
+
+const dynamicActorSuffixes = [
+  '点赞了你的帖子',
+  '点赞了你的回复',
+  '点赞了你的挂号留言',
+  '赞了你的留言',
+  '回复了你的评论',
+  '回复了你的帖子',
+  '评论了你的挂号留言',
+  '回复了你的留言',
+  '给你留言了',
+  '关注了你',
+  '向你发送了好友申请',
+  '在回复中提到了你',
+]
+
+function resolveNotificationActorText(value: string | null, actorName: string | null) {
+  if (!value || !actorName) return value
+  for (const suffix of dynamicActorSuffixes) {
+    const index = value.indexOf(suffix)
+    if (index <= 0) continue
+    const hasSpace = /\s/.test(value[index - 1] || '')
+    return `${actorName}${hasSpace ? ' ' : ''}${value.slice(index)}`
+  }
+  return value
 }
 
 export type UnifiedNotification = {
@@ -153,8 +180,9 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         isRead: true,
         createdAt: true,
         readAt: true,
-        User_Notification_actorIdToUser: {
+          User_Notification_actorIdToUser: {
           select: {
+            id: true,
             uid: true,
             nickname: true,
             avatarUrl: true,
@@ -187,35 +215,49 @@ export async function listUnifiedNotifications(userId: string, options: { unread
     }),
   ])
 
+  const actorIds = personal.flatMap((item) => item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
+  const remarkMap = await loadFriendRemarkMap(userId, actorIds)
+
   const merged: UnifiedNotification[] = [
-    ...personal.map((item) => ({
-      id: item.id,
-      source: 'personal' as const,
-      type: item.type,
-      typeLabel: getNotificationTypeLabel(item.type, item.link, 'personal'),
-      category: getNotificationCategory(item.type, item.link),
-      title: item.title,
-      content: item.content,
-      link: item.link,
-      targetUrl: item.link,
-      actorName: item.User_Notification_actorIdToUser?.Profile?.displayName || item.User_Notification_actorIdToUser?.nickname || null,
-      actorUid: item.User_Notification_actorIdToUser?.uid || null,
-      actorAvatarUrl: publicImageUrl(item.User_Notification_actorIdToUser?.Profile?.avatarUrl || item.User_Notification_actorIdToUser?.avatarUrl),
-      popup: false,
-      sticky: false,
-      isRead: item.isRead,
-      read: item.isRead,
-      createdAt: item.createdAt,
-      readAt: item.readAt,
-      replyTarget: parseNotificationReplyTarget({
+    ...personal.map((item) => {
+      const actor = item.User_Notification_actorIdToUser
+      const actorName = actor
+        ? resolveFriendDisplayName({
+            viewerId: userId,
+            targetUserId: actor.id,
+            fallbackName: getPublicUserDisplayName(actor),
+            remarkMap,
+          })
+        : null
+      return {
         id: item.id,
-        source: 'personal',
+        source: 'personal' as const,
         type: item.type,
+        typeLabel: getNotificationTypeLabel(item.type, item.link, 'personal'),
+        category: getNotificationCategory(item.type, item.link),
+        title: resolveNotificationActorText(item.title, actorName) || item.title,
+        content: resolveNotificationActorText(item.content, actorName),
         link: item.link,
         targetUrl: item.link,
-      }),
-      replyDisabledReason: null,
-    })),
+        actorName,
+        actorUid: actor?.uid || null,
+        actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
+        popup: false,
+        sticky: false,
+        isRead: item.isRead,
+        read: item.isRead,
+        createdAt: item.createdAt,
+        readAt: item.readAt,
+        replyTarget: parseNotificationReplyTarget({
+          id: item.id,
+          source: 'personal',
+          type: item.type,
+          link: item.link,
+          targetUrl: item.link,
+        }),
+        replyDisabledReason: null,
+      }
+    }),
     ...system.map((item) => {
       const targetUrl = item.buttonUrl || item.link
       const isRead = item.SystemNotificationRead.length > 0

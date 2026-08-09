@@ -1,9 +1,9 @@
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
-import { defaultHeroVisuals, type HeroVisualKey, type SiteHeroVisualConfig } from '@/lib/hero-visuals'
+import { defaultHeroVisuals, heroFitModes, heroMediaTypes, normalizeHeroScale, type HeroFitMode, type HeroMediaType, type HeroVisualKey, type SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
-export { heroVisualKeys } from '@/lib/hero-visuals'
-export type { HeroVisualKey, SiteHeroVisualConfig } from '@/lib/hero-visuals'
+export { heroFitModes, heroMediaTypes, heroVisualKeys, pageVisualKeys } from '@/lib/hero-visuals'
+export type { HeroFitMode, HeroMediaType, HeroVisualKey, SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
 export type SiteNavItem = {
   label: string
@@ -20,6 +20,11 @@ export type SiteHeroSlide = {
   buttonText: string
   href: string
   imageUrl: string
+  mediaType?: HeroMediaType
+  mediaUrl?: string
+  posterUrl?: string
+  sourceUrl?: string
+  posterSourceUrl?: string
   isVisible: boolean
   sortOrder: number
 }
@@ -165,20 +170,52 @@ function percentage(value: unknown, fallback = 50) {
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : fallback
 }
 
+function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
+  const mediaType = enumValue(item.mediaType, heroMediaTypes, 'IMAGE')
+  const imageUrl = typeof item.imageUrl === 'string' ? item.imageUrl : ''
+  const mediaUrl = typeof item.mediaUrl === 'string' && item.mediaUrl.trim()
+    ? item.mediaUrl.trim()
+    : mediaType === 'IMAGE' ? imageUrl : ''
+  const posterUrl = typeof item.posterUrl === 'string' ? item.posterUrl.trim() : ''
+  const sourceUrl = typeof item.sourceUrl === 'string' ? item.sourceUrl.trim() : ''
+  const posterSourceUrl = typeof item.posterSourceUrl === 'string' ? item.posterSourceUrl.trim() : ''
+  return { ...item, imageUrl, mediaType, mediaUrl, posterUrl, sourceUrl, posterSourceUrl }
+}
+
 function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUrl: string, fallbackVisual = defaultSiteAppearance.heroVisuals[key]): SiteHeroVisualConfig {
   const fallback = fallbackVisual
   const partial = value && typeof value === 'object' ? value as Partial<SiteHeroVisualConfig> : {}
   const focusPoint = partial.focusPoint && typeof partial.focusPoint === 'object'
     ? { x: percentage(partial.focusPoint.x), y: percentage(partial.focusPoint.y) }
     : null
+  const mediaType = enumValue(partial.mediaType, heroMediaTypes, fallback.mediaType || 'IMAGE')
+  const imageUrl = typeof partial.imageUrl === 'string' && partial.imageUrl.trim() ? partial.imageUrl.trim() : fallbackImageUrl
+  const mediaUrl = typeof partial.mediaUrl === 'string' && partial.mediaUrl.trim()
+    ? partial.mediaUrl.trim()
+    : mediaType === 'IMAGE' ? imageUrl : fallback.mediaUrl || ''
+  const sourceUrl = typeof partial.sourceUrl === 'string' && partial.sourceUrl.trim()
+    ? partial.sourceUrl.trim()
+    : fallback.sourceUrl || ''
+  const posterSourceUrl = typeof partial.posterSourceUrl === 'string' && partial.posterSourceUrl.trim()
+    ? partial.posterSourceUrl.trim()
+    : fallback.posterSourceUrl || ''
   return {
     key,
     title: typeof partial.title === 'string' && partial.title.trim() ? partial.title.trim().slice(0, 80) : fallback.title,
-    imageUrl: typeof partial.imageUrl === 'string' && partial.imageUrl.trim() ? partial.imageUrl.trim() : fallbackImageUrl,
+    imageUrl,
+    mediaType,
+    mediaUrl,
+    posterUrl: typeof partial.posterUrl === 'string' && partial.posterUrl.trim() ? partial.posterUrl.trim() : fallback.posterUrl || '',
+    sourceUrl,
+    posterSourceUrl,
     desktopPositionX: percentage(partial.desktopPositionX, fallback.desktopPositionX),
     desktopPositionY: percentage(partial.desktopPositionY, fallback.desktopPositionY),
     mobilePositionX: percentage(partial.mobilePositionX, fallback.mobilePositionX),
     mobilePositionY: percentage(partial.mobilePositionY, fallback.mobilePositionY),
+    desktopScale: normalizeHeroScale(partial.desktopScale, fallback.desktopScale ?? 100),
+    mobileScale: normalizeHeroScale(partial.mobileScale, fallback.mobileScale ?? 100),
+    desktopFitMode: enumValue(partial.desktopFitMode, heroFitModes, fallback.desktopFitMode || 'COVER') as HeroFitMode,
+    mobileFitMode: enumValue(partial.mobileFitMode, heroFitModes, fallback.mobileFitMode || 'COVER') as HeroFitMode,
     enabled: typeof partial.enabled === 'boolean' ? partial.enabled : fallback.enabled,
     focusPoint,
     updatedAt: typeof partial.updatedAt === 'string' ? partial.updatedAt : '',
@@ -189,15 +226,33 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
   if (!value || typeof value !== 'object') return defaultSiteAppearance
   const partial = value as Partial<SiteAppearanceConfig>
   const images = { ...defaultSiteAppearance.images, ...(partial.images || {}) }
-  const heroSlides = (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => (
-    item.href === '/boards/announcements' || item.href === '/boards/daily-chat' ? { ...item, href: '/forum' } : item
-  ))
-  const firstHeroImage = heroSlides.filter((item) => item.isVisible && item.imageUrl).sort((a, b) => a.sortOrder - b.sortOrder)[0]?.imageUrl || images.checkinBackgroundUrl || images.loginBackgroundUrl
+  const heroSlides = (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => {
+    const normalized = normalizeHeroSlide(item)
+    return normalized.href === '/boards/announcements' || normalized.href === '/boards/daily-chat' ? { ...normalized, href: '/forum' } : normalized
+  })
+  const firstHeroImage = heroSlides
+    .filter((item) => item.isVisible)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((item) => item.mediaType === 'IMAGE' ? item.mediaUrl || item.imageUrl : item.posterUrl || item.imageUrl)
+    .find(Boolean)
+    || images.checkinBackgroundUrl
+    || images.loginBackgroundUrl
   const visualInput = partial.heroVisuals as Partial<Record<HeroVisualKey, Partial<SiteHeroVisualConfig>>> | undefined
   const loginVisual = normalizeHeroVisual('login', visualInput?.login, images.loginBackgroundUrl)
   const registerVisualFallback = images.registerBackgroundUrl
     ? defaultSiteAppearance.heroVisuals.register
     : { ...loginVisual, key: 'register' as const, title: defaultSiteAppearance.heroVisuals.register.title }
+  const welcomeVisualFallback = visualInput?.welcome
+    ? defaultSiteAppearance.heroVisuals.welcome
+    : {
+        ...defaultSiteAppearance.heroVisuals.welcome,
+        imageUrl: firstHeroImage,
+        mediaUrl: firstHeroImage,
+        desktopPositionX: 68,
+        desktopPositionY: 33,
+        mobilePositionX: 65,
+        mobilePositionY: 50,
+      }
   return {
     text: { ...defaultSiteAppearance.text, ...(partial.text || {}) },
     colors: { ...defaultSiteAppearance.colors, ...(partial.colors || {}) },
@@ -218,6 +273,7 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
     heroVisuals: {
       login: loginVisual,
       register: normalizeHeroVisual('register', visualInput?.register, images.registerBackgroundUrl || loginVisual.imageUrl, registerVisualFallback),
+      welcome: normalizeHeroVisual('welcome', visualInput?.welcome, firstHeroImage, welcomeVisualFallback),
       home: normalizeHeroVisual('home', visualInput?.home, firstHeroImage),
       activities: normalizeHeroVisual('activities', visualInput?.activities, images.activityCoverUrl),
       birthday: normalizeHeroVisual('birthday', visualInput?.birthday, images.activityCoverUrl),

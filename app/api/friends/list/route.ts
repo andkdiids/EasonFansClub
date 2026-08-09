@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere } from '@/lib/friends'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
@@ -37,27 +38,30 @@ export async function GET(request: Request) {
   ])
   const friendRows = rows.slice(0, pageSize)
   const friendIds = friendRows.map((row) => row.userAId === user.id ? row.userBId : row.userAId)
-  const conversations = friendIds.length ? await prisma.conversation.findMany({
-    where: {
-      ConversationParticipant: {
-        some: { userId: user.id, isDeleted: false },
+  const [conversations, remarkMap] = await Promise.all([
+    friendIds.length ? prisma.conversation.findMany({
+      where: {
+        ConversationParticipant: {
+          some: { userId: user.id, isDeleted: false },
+        },
+        AND: [{
+          ConversationParticipant: { some: { userId: { in: friendIds }, isDeleted: false } },
+        }],
       },
-      AND: [{
-        ConversationParticipant: { some: { userId: { in: friendIds }, isDeleted: false } },
-      }],
-    },
-    select: {
-      id: true,
-      lastMessageAt: true,
-      ConversationParticipant: { select: { userId: true, lastReadAt: true } },
-      DirectMessage: {
-        where: { isDeleted: false },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 1,
-        select: { id: true, content: true, createdAt: true, senderId: true, type: true },
+      select: {
+        id: true,
+        lastMessageAt: true,
+        ConversationParticipant: { select: { userId: true, lastReadAt: true } },
+        DirectMessage: {
+          where: { isDeleted: false },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: { id: true, content: true, createdAt: true, senderId: true, type: true },
+        },
       },
-    },
-  }) : []
+    }) : [],
+    loadFriendRemarkMap(user.id, friendIds),
+  ])
   const conversationByFriend = new Map(conversations.map((conversation) => {
     const otherId = conversation.ConversationParticipant.find((item) => item.userId !== user.id)?.userId
     return [otherId, conversation] as const
@@ -68,8 +72,14 @@ export async function GET(request: Request) {
     const friend = row.userAId === user.id ? row.User_Friendship_userBIdToUser : row.User_Friendship_userAIdToUser
     const conversation = conversationByFriend.get(friend.id)
     const growth = calculateGrowthSummary(friend.experience, growthLevels)
+    const displayName = resolveFriendDisplayName({
+      viewerId: user.id,
+      targetUserId: friend.id,
+      fallbackName: getPublicUserDisplayName(friend),
+      remarkMap,
+    })
     return {
-      ...serializePublicUser(friend, growth.level, growth.levelName),
+      ...serializePublicUser(friend, growth.level, growth.levelName, displayName),
       conversationId: conversation?.id || null,
       lastMessage: conversation?.DirectMessage[0] || null,
       lastMessageAt: conversation?.lastMessageAt || null,
@@ -134,6 +144,7 @@ async function searchUsers(currentUserId: string, q: string) {
   ]) : [[], [], []]
   const friendIds = new Set(friendships.flatMap((item) => [item.userAId, item.userBId]).filter((id) => id !== currentUserId))
   const blockedIds = new Set(blocks.flatMap((item) => [item.blockerId, item.blockedId]).filter((id) => id !== currentUserId))
+  const remarkMap = await loadFriendRemarkMap(currentUserId, friendIds)
 
   return NextResponse.json({
     results: users.map((item) => {
@@ -146,8 +157,14 @@ async function searchUsers(currentUserId: string, q: string) {
                 : request ? 'INCOMING_PENDING'
                   : 'NONE'
       const growth = calculateGrowthSummary(item.experience, growthLevels)
+      const displayName = resolveFriendDisplayName({
+        viewerId: currentUserId,
+        targetUserId: item.id,
+        fallbackName: getPublicUserDisplayName(item),
+        remarkMap,
+      })
       return {
-        ...serializePublicUser(item, growth.level, growth.levelName),
+        ...serializePublicUser(item, growth.level, growth.levelName, displayName),
         relationshipStatus,
         requestId: relationshipStatus === 'INCOMING_PENDING' ? request?.id : null,
       }
@@ -213,6 +230,7 @@ function serializePublicUser(
   },
   level: number,
   levelName: string,
+  displayName = getPublicUserDisplayName(friend),
 ) {
   return {
     id: friend.id,
@@ -225,6 +243,6 @@ function serializePublicUser(
     createdAt: friend.createdAt,
     level,
     levelName,
-    profile: friend.Profile,
+    profile: friend.Profile ? { ...friend.Profile, displayName } : friend.Profile,
   }
 }

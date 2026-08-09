@@ -5,6 +5,7 @@ import { formatLiveDate } from '@/lib/music-live'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { normalizedCityKey } from '@/lib/music-personal-live'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { parseUidParam } from '@/lib/uid'
@@ -21,7 +22,7 @@ export default async function PublicUserLivePage({ params }: { params: Promise<{
     prisma.user.findFirst({
       where: { uid: numericUid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       select: {
-        uid: true, nickname: true, Profile: { select: { displayName: true } },
+        id: true, uid: true, nickname: true, Profile: { select: { displayName: true } },
         UserMusicConcert: {
           where: { isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } },
           orderBy: [{ MusicConcert: { concertDate: 'desc' } }, { createdAt: 'desc' }],
@@ -41,7 +42,13 @@ export default async function PublicUserLivePage({ params }: { params: Promise<{
     getSiteAppearance(),
   ])
   if (!user || !user.Profile) notFound()
-  const name = user.Profile.displayName || user.nickname
+  const remarkMap = await loadFriendRemarkMap(viewer?.id, [user.id])
+  const name = resolveFriendDisplayName({
+    viewerId: viewer?.id,
+    targetUserId: user.id,
+    fallbackName: getPublicUserDisplayName(user),
+    remarkMap,
+  })
   const tours = new Set(user.UserMusicConcert.map((record) => record.MusicConcert.MusicTour.id))
   const cities = new Set(user.UserMusicConcert.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>

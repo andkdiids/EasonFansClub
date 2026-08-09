@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
@@ -19,6 +20,7 @@ export async function GET(_request: Request, { params }: Params) {
     select: {
       User: {
         select: {
+          id: true,
           uid: true,
           nickname: true,
           avatarUrl: true,
@@ -27,11 +29,17 @@ export async function GET(_request: Request, { params }: Params) {
       },
     },
   })
+  const remarkMap = await loadFriendRemarkMap(user.id, likes.map((like) => like.User.id))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
       nickname: like.User.nickname,
-      displayName: like.User.Profile?.displayName || null,
+      displayName: resolveFriendDisplayName({
+        viewerId: user.id,
+        targetUserId: like.User.id,
+        fallbackName: getPublicUserDisplayName(like.User),
+        remarkMap,
+      }),
       avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
     })),
   })

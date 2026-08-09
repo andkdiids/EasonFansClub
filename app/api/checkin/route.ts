@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { getCheckInMessage } from '@/lib/checkin-messages'
 import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
@@ -258,6 +259,22 @@ export async function POST(request: Request) {
     }
     throw error
   }
+
+  const createdMessage = result.dailyMessageId
+    ? await safeDb(
+        'DailyMessage.findUnique checkinApi.createdMessage',
+        getCheckInMessage({
+          messageId: result.dailyMessageId,
+          selectedDate: today,
+          nextDate: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+          viewerId: user.id,
+          viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
+        }),
+        null,
+        8000,
+      )
+    : null
+
 const [verifyCheckIn, verifyUser] = await Promise.all([
   prisma.checkIn.findUnique({
     where: {
@@ -391,6 +408,7 @@ return NextResponse.json({
     ordinaryRegistrationFee: result.ordinaryRegistrationFee,
     streakBonusRegistrationFee: result.streakBonusRegistrationFee,
     dailyMessageId: result.dailyMessageId,
+    dailyMessage: createdMessage,
     consecutiveDays: result.streaks.currentStreak,
     currentStreak: result.streaks.currentStreak,
     longestStreak: result.streaks.longestStreak,

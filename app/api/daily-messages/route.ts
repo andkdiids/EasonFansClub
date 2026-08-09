@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/auth'
 import { startOfLocalDay, startOfYesterday } from '@/lib/checkin'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(request: Request) {
+  const viewer = await getCurrentUser()
   const { searchParams } = new URL(request.url)
   const day = searchParams.get('day') === 'yesterday' ? 'yesterday' : 'today'
   const sort = searchParams.get('sort') === 'hot' ? 'hot' : 'latest'
@@ -68,19 +71,49 @@ export async function GET(request: Request) {
     })
 
     const hasMore = rows.length > take
-    const messages = (hasMore ? rows.slice(0, take) : rows).map(({ User, DailyMessageComment, ...message }) => ({
+    const visibleRows = hasMore ? rows.slice(0, take) : rows
+    const displayNameUserIds = [
+      ...visibleRows.map((row) => row.User.id),
+      ...visibleRows.flatMap((row) => row.DailyMessageComment.map((comment) => comment.User.id)),
+    ]
+    const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
+    const messages = visibleRows.map(({ User, DailyMessageComment, ...message }) => ({
       ...message,
-      user: { ...User, profile: User.Profile },
+      user: {
+        ...User,
+        profile: User.Profile ? {
+          ...User.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: viewer?.id,
+            targetUserId: User.id,
+            fallbackName: getPublicUserDisplayName(User),
+            remarkMap,
+          }),
+        } : User.Profile,
+      },
       comments: DailyMessageComment.map(({ User: commentUser, ...comment }) => ({
         ...comment,
-        user: { ...commentUser, profile: commentUser.Profile },
+        user: {
+          ...commentUser,
+          profile: commentUser.Profile ? {
+            ...commentUser.Profile,
+            displayName: resolveFriendDisplayName({
+              viewerId: viewer?.id,
+              targetUserId: commentUser.id,
+              fallbackName: getPublicUserDisplayName(commentUser),
+              remarkMap,
+            }),
+          } : commentUser.Profile,
+        },
       })),
     }))
     const total = skip + messages.length + (hasMore ? 1 : 0)
 
     return NextResponse.json(
       { messages, total, page, hasMore },
-      { headers: { 'Cache-Control': 'public, max-age=10, s-maxage=30, stale-while-revalidate=90' } },
+      { headers: viewer
+        ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+        : { 'Cache-Control': 'public, max-age=10, s-maxage=30, stale-while-revalidate=90', Vary: 'Cookie' } },
     )
   } catch (error) {
     console.error('[daily-messages:list:error]', { day, sort, page, error })

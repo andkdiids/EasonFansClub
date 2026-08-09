@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
@@ -42,6 +43,7 @@ export async function GET() {
     [],
   )
 
+  const remarkMap = await loadFriendRemarkMap(user.id, messages.flatMap((message) => message.DailyMessageComment.map((comment) => comment.User.id)))
   const mapped = messages.map((message) => ({
     id: message.id,
     mood: message.mood,
@@ -53,7 +55,14 @@ export async function GET() {
       id: comment.id,
       content: comment.content,
       createdAt: comment.createdAt,
-      authorName: comment.User?.Profile?.displayName || comment.User?.nickname || '匿名用户',
+      authorName: comment.User
+        ? resolveFriendDisplayName({
+            viewerId: user.id,
+            targetUserId: comment.User.id,
+            fallbackName: getPublicUserDisplayName(comment.User),
+            remarkMap,
+          })
+        : '匿名用户',
       authorAvatarUrl: comment.User?.Profile?.avatarUrl || comment.User?.avatarUrl || null,
     })),
   }))

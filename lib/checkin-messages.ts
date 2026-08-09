@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import type { LikeAvatarUser } from '@/components/LikeAvatars'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
@@ -105,7 +106,32 @@ export async function getCheckInMessages({
   return promise
 }
 
+export async function getCheckInMessage({
+  messageId,
+  selectedDate,
+  nextDate,
+  viewerId,
+  viewerCanModerate = false,
+}: {
+  messageId: string
+  selectedDate: Date
+  nextDate: Date
+  viewerId: string
+  viewerCanModerate?: boolean
+}): Promise<CheckInMessageItem | null> {
+  const messages = await getCheckInMessagesUncached({
+    messageId,
+    selectedDate,
+    nextDate,
+    sort: 'latest',
+    viewerId,
+    viewerCanModerate,
+  })
+  return messages[0] || null
+}
+
 async function getCheckInMessagesUncached({
+  messageId,
   selectedDate,
   nextDate,
   sort,
@@ -113,6 +139,7 @@ async function getCheckInMessagesUncached({
   viewerCanModerate,
   userIds,
 }: {
+  messageId?: string
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
@@ -124,6 +151,7 @@ async function getCheckInMessagesUncached({
 
   const rows = await prisma.dailyMessage.findMany({
     where: {
+      ...(messageId ? { id: messageId } : {}),
       date: { gte: selectedDate, lt: nextDate },
       isDeleted: false,
       moderationStatus: 'APPROVED',
@@ -137,6 +165,7 @@ async function getCheckInMessagesUncached({
     include: {
       User: {
         select: {
+          id: true,
           uid: true,
           nickname: true,
           avatarUrl: true,
@@ -151,6 +180,7 @@ async function getCheckInMessagesUncached({
           userId: true,
           User: {
             select: {
+              id: true,
               uid: true,
               nickname: true,
               avatarUrl: true,
@@ -188,36 +218,63 @@ async function getCheckInMessagesUncached({
       })
     : []
   const viewerLikeIdByMessage = new Map(viewerLikes.map((like) => [like.messageId, like.id]))
+  const displayNameUserIds = [
+    ...rows.map((item) => item.userId),
+    ...rows.flatMap((item) => item.DailyMessageLike.map((like) => like.userId)),
+    ...rows.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
+  ]
+  const remarkMap = await loadFriendRemarkMap(viewerId, displayNameUserIds)
 
-  return rows.map((item) => ({
-    ...item,
-    author: {
-      ...item.User,
-      profile: item.User.Profile,
-    },
-    likes: viewerLikeIdByMessage.has(item.id) ? [{ id: viewerLikeIdByMessage.get(item.id)! }] : [],
-    likers: item.DailyMessageLike.map((like) => ({
-      uid: like.User.uid,
-      nickname: like.User.nickname,
-      displayName: like.User.Profile?.displayName || null,
-      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
-    })),
-    favorites: item.DailyMessageFavorite,
-    canDelete: viewerCanModerate || item.userId === viewerId,
-    date: item.date.toISOString(),
-    createdAt: item.createdAt.toISOString(),
-    updatedAt: item.updatedAt.toISOString(),
-    deletedAt: item.deletedAt?.toISOString() || null,
-    comments: item.DailyMessageComment.map((comment) => ({
-      ...comment,
+  return rows.map((item) => {
+    const authorName = resolveFriendDisplayName({
+      viewerId,
+      targetUserId: item.userId,
+      fallbackName: getPublicUserDisplayName(item.User),
+      remarkMap,
+    })
+    return {
+      ...item,
       author: {
-        ...comment.User,
-        profile: comment.User.Profile,
+        ...item.User,
+        profile: item.User.Profile ? { ...item.User.Profile, displayName: authorName } : item.User.Profile,
       },
-      canDelete: viewerCanModerate || comment.User.id === viewerId,
-      createdAt: comment.createdAt.toISOString(),
-      updatedAt: comment.updatedAt.toISOString(),
-      deletedAt: comment.deletedAt?.toISOString() || null,
-    })),
-  }))
+      likes: viewerLikeIdByMessage.has(item.id) ? [{ id: viewerLikeIdByMessage.get(item.id)! }] : [],
+      likers: item.DailyMessageLike.map((like) => ({
+        uid: like.User.uid,
+        nickname: like.User.nickname,
+        displayName: resolveFriendDisplayName({
+          viewerId,
+          targetUserId: like.userId,
+          fallbackName: getPublicUserDisplayName(like.User),
+          remarkMap,
+        }),
+        avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+      })),
+      favorites: item.DailyMessageFavorite,
+      canDelete: viewerCanModerate || item.userId === viewerId,
+      date: item.date.toISOString(),
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
+      deletedAt: item.deletedAt?.toISOString() || null,
+      comments: item.DailyMessageComment.map((comment) => ({
+        ...comment,
+        author: {
+          ...comment.User,
+          profile: comment.User.Profile ? {
+            ...comment.User.Profile,
+            displayName: resolveFriendDisplayName({
+              viewerId,
+              targetUserId: comment.User.id,
+              fallbackName: getPublicUserDisplayName(comment.User),
+              remarkMap,
+            }),
+          } : comment.User.Profile,
+        },
+        canDelete: viewerCanModerate || comment.User.id === viewerId,
+        createdAt: comment.createdAt.toISOString(),
+        updatedAt: comment.updatedAt.toISOString(),
+        deletedAt: comment.deletedAt?.toISOString() || null,
+      })),
+    }
+  })
 }

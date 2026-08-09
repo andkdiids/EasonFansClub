@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { clampForumPage, excerptForumPost, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -65,7 +66,7 @@ export async function GET(request: Request) {
         isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
         Board: { select: { name: true, slug: true } },
         sticker: { select: { url: true } },
-        User: { select: { uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+        User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         Like: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
       },
     })
@@ -74,12 +75,24 @@ export async function GET(request: Request) {
 
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
+  const remarkMap = await loadFriendRemarkMap(user?.id, rows.map((row) => row.User.id))
   return NextResponse.json({
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
     posts: rows.map(({ summary, content, Like, User, Board, sticker, ...post }) => ({
       ...post,
-      author: { ...User, profile: User.Profile },
+      author: {
+        ...User,
+        profile: User.Profile ? {
+          ...User.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: user?.id,
+            targetUserId: User.id,
+            fallbackName: getPublicUserDisplayName(User),
+            remarkMap,
+          }),
+        } : User.Profile,
+      },
       board: Board,
       content: excerptForumPost(summary || content),
       stickerUrl: sticker?.url || null,

@@ -74,22 +74,36 @@ export function HomeHero({
     else previous()
   }
 
-  const backgroundVisual = active?.imageUrl
+  const activeMediaType = active?.mediaType || 'IMAGE'
+  const activeMediaUrl = active?.mediaUrl || (activeMediaType === 'IMAGE' ? active?.imageUrl || '' : '')
+  const backgroundVisual = activeMediaUrl
     ? ({
         ...visual,
         key: 'home',
         title: visual?.title || 'Home Hero',
-          imageUrl: active.imageUrl,
+        imageUrl: activeMediaType === 'IMAGE' ? activeMediaUrl : active?.imageUrl || visual?.imageUrl || '',
+        mediaType: activeMediaType,
+        mediaUrl: activeMediaUrl,
+        posterUrl: active?.posterUrl || (activeMediaType === 'VIDEO' ? active?.imageUrl : '') || visual?.posterUrl || '',
         desktopPositionX: visual?.desktopPositionX ?? 50,
         desktopPositionY: visual?.desktopPositionY ?? 50,
         mobilePositionX: visual?.mobilePositionX ?? 50,
         mobilePositionY: visual?.mobilePositionY ?? 50,
+        desktopScale: visual?.desktopScale ?? 100,
+        mobileScale: visual?.mobileScale ?? 100,
+        desktopFitMode: visual?.desktopFitMode ?? 'COVER',
+        mobileFitMode: visual?.mobileFitMode ?? 'COVER',
+        sourceUrl: visual?.sourceUrl || '',
+        posterSourceUrl: visual?.posterSourceUrl || '',
         enabled: true,
         focusPoint: visual?.focusPoint ?? null,
         updatedAt: visual?.updatedAt || '',
       } satisfies SiteHeroVisualConfig)
     : visual
-  const hasBackground = Boolean((backgroundVisual?.enabled ?? true) && (backgroundVisual?.imageUrl || fallbackImageUrl))
+  const hasBackground = Boolean(
+    (backgroundVisual?.enabled ?? true)
+    && (backgroundVisual?.mediaUrl || backgroundVisual?.imageUrl || backgroundVisual?.posterUrl || fallbackImageUrl),
+  )
 
   return (
     <section

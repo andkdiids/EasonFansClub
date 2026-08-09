@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 import { formatBeijingDate } from '@/lib/checkin'
 
@@ -8,6 +10,7 @@ type RouteContext = { params: Promise<{ messageId: string }> }
 const COMMENT_PAGE_SIZE = 80
 
 export async function GET(_request: Request, context: RouteContext) {
+  const viewer = await getCurrentUser()
   const { messageId } = await context.params
   const comments = await prisma.dailyMessageComment.findMany({
     where: { messageId, isDeleted: false },
@@ -18,7 +21,22 @@ export async function GET(_request: Request, context: RouteContext) {
     },
   })
 
-  return NextResponse.json({ comments })
+  const remarkMap = await loadFriendRemarkMap(viewer?.id, comments.map((comment) => comment.User.id))
+  return NextResponse.json({ comments: comments.map((comment) => ({
+    ...comment,
+    User: comment.User.Profile ? {
+      ...comment.User,
+      Profile: {
+        ...comment.User.Profile,
+        displayName: resolveFriendDisplayName({
+          viewerId: viewer?.id,
+          targetUserId: comment.User.id,
+          fallbackName: getPublicUserDisplayName(comment.User),
+          remarkMap,
+        }),
+      },
+    } : comment.User,
+  })) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
 export async function POST(request: Request, context: RouteContext) {

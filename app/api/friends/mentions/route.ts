@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere } from '@/lib/friends'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
   const friendIds = friends.map((item) => item.user.id)
   const cutoff = new Date(Date.now() - MENTION_HISTORY_DAYS * 24 * 60 * 60 * 1000)
 
-  const [mentionStats, conversations] = friendIds.length ? await Promise.all([
+  const [mentionStats, conversations, remarkMap] = friendIds.length ? await Promise.all([
     prisma.replyMention.groupBy({
       by: ['mentionedUserId'],
       where: { mentionerId: user.id, mentionedUserId: { in: friendIds }, createdAt: { gte: cutoff } },
@@ -53,7 +54,8 @@ export async function GET(request: Request) {
         ConversationParticipant: { select: { userId: true } },
       },
     }),
-  ]) : [[], []]
+    loadFriendRemarkMap(user.id, friendIds),
+  ]) : [[], [], new Map<string, string>()]
 
   const statsByFriend = new Map(mentionStats.map((item) => [item.mentionedUserId, {
     count: item._count._all,
@@ -67,20 +69,26 @@ export async function GET(request: Request) {
 
   const results = friends
     .map(({ user: friend, friendshipCreatedAt }) => {
-      const name = friend.Profile?.displayName?.trim() || friend.nickname
+      const name = resolveFriendDisplayName({
+        viewerId: user.id,
+        targetUserId: friend.id,
+        fallbackName: getPublicUserDisplayName(friend),
+        remarkMap,
+      })
       const normalized = {
         uid: formatUid(friend.uid).toLocaleLowerCase('zh-CN'),
         rawUid: String(friend.uid),
         username: friend.username.toLocaleLowerCase('zh-CN'),
         nickname: friend.nickname.toLocaleLowerCase('zh-CN'),
         displayName: (friend.Profile?.displayName || '').toLocaleLowerCase('zh-CN'),
+        remark: (remarkMap.get(friend.id) || '').toLocaleLowerCase('zh-CN'),
       }
       const matchRank = !q ? 0
         : normalized.uid === q || normalized.rawUid === q ? 1
           : normalized.username === q ? 2
-            : normalized.nickname === q || normalized.displayName === q ? 3
+              : normalized.nickname === q || normalized.displayName === q || normalized.remark === q ? 3
               : normalized.username.includes(q) ? 4
-                : normalized.nickname.includes(q) || normalized.displayName.includes(q) ? 5
+                : normalized.nickname.includes(q) || normalized.displayName.includes(q) || normalized.remark.includes(q) ? 5
                   : normalized.uid.startsWith(q) || normalized.rawUid.startsWith(q) ? 6
                     : 99
       const stat = statsByFriend.get(friend.id)

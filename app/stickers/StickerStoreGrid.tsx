@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { useState } from 'react'
 import type { StorePackItem } from '@/lib/sticker-center'
@@ -50,36 +51,53 @@ export function StickerStoreGrid(props: {
           商店中暂无表情包，快去上传一个吧
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-5 md:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(140px,1fr))]">
           {localPacks.map((pack) => (
-            <article key={pack.id} className="flex flex-col overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-              <Link href={`/stickers/${pack.id}`} className="block aspect-square overflow-hidden bg-slate-50">
-                {pack.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pack.coverUrl} alt={pack.name} className="h-full w-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-5xl">😊</div>
-                )}
+            <article key={pack.id} className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <Link
+                href={`/stickers/${pack.id}`}
+                aria-label={`查看表情包合集：${pack.name}`}
+                className="absolute inset-0 z-0 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700"
+              >
+                <span className="sr-only">{pack.name}</span>
               </Link>
-              <div className="flex flex-1 flex-col gap-1 p-3">
-                <Link href={`/stickers/${pack.id}`} className="line-clamp-1 text-sm font-black text-brand-950 hover:underline">
+              <div className="relative z-10 aspect-square overflow-hidden bg-slate-50 pointer-events-none">
+                {pack.coverUrl ? (
+                  <Image
+                    src={pack.coverUrl}
+                    alt={pack.name}
+                    fill
+                    sizes="(max-width: 639px) calc((100vw - 48px) / 3), (max-width: 767px) calc((100vw - 76px) / 4), (max-width: 1023px) calc((100vw - 104px) / 5), 160px"
+                    className="object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-3xl">😊</div>
+                )}
+              </div>
+              <div className="relative z-10 flex min-w-0 flex-1 flex-col gap-1 p-2 pointer-events-none">
+                <div className="min-h-[2.5rem] line-clamp-2 break-words text-[13px] font-semibold leading-5 text-brand-950">
                   {pack.name}
-                </Link>
-                <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
-                  <span className="truncate">
+                </div>
+                <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[11px] font-bold leading-4 text-slate-500">
+                  <span className="min-w-0 flex-1 truncate">
                     {pack.isOfficial ? '官方' : pack.creator?.nickname || '匿名用户'}
                   </span>
-                  <span className="text-slate-300">·</span>
-                  <span>{pack.stickerCount} 张</span>
+                  <span className="shrink-0 text-slate-300">·</span>
+                  <span className="shrink-0">{pack.stickerCount} 张</span>
                 </div>
-                <div className="text-[11px] font-bold text-slate-500">
+                <div className="text-[11px] font-bold leading-4 text-slate-500">
                   下载：<span className="text-brand-700">{pack.downloadCount.toLocaleString('zh-CN')}</span>
                 </div>
                 <button
                   type="button"
                   disabled={busy === pack.id}
-                  onClick={() => void toggleAdd(pack)}
-                  className={`mt-auto w-full rounded-full px-3 py-1.5 text-xs font-black transition disabled:opacity-50 ${pack.added ? 'border border-slate-300 bg-white text-slate-500 hover:bg-slate-50' : 'bg-brand-700 text-white hover:bg-brand-800'}`}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void toggleAdd(pack)
+                  }}
+                  className={`relative z-20 mt-auto min-h-8 w-full rounded-full px-2 py-1 text-[11px] font-black transition disabled:opacity-50 pointer-events-auto ${pack.added ? 'border border-slate-300 bg-white text-slate-500 hover:bg-slate-50' : 'bg-brand-700 text-white hover:bg-brand-800'}`}
                   aria-label={pack.added ? '取消添加' : '添加到表情库'}
                 >
                   {busy === pack.id ? '处理中…' : pack.added ? '已添加' : '添加'}

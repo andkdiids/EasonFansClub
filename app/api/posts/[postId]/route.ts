@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
 import { isSupabaseStorageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { containsSensitiveContent, isAdminRole, requireUser, sanitizeText } from '@/lib/security'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -33,6 +35,7 @@ function isAcceptableImageUrl(value: unknown): value is string {
 }
 
 export async function GET(_request: Request, { params }: Params) {
+  const viewer = await getCurrentUser()
   const { postId } = await params
   const post = await prisma.post.findFirst({
     where: {
@@ -63,6 +66,7 @@ export async function GET(_request: Request, { params }: Params) {
         include: {
           User: {
             select: {
+              id: true,
               nickname: true,
               level: true,
               avatarUrl: true,
@@ -79,14 +83,41 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const { User, Board, Reply, ...postData } = post
+  const remarkMap = await loadFriendRemarkMap(viewer?.id, [User.id, ...Reply.map((reply) => reply.User.id)])
+  const author = User.Profile ? {
+    ...User,
+    Profile: {
+      ...User.Profile,
+      displayName: resolveFriendDisplayName({
+        viewerId: viewer?.id,
+        targetUserId: User.id,
+        fallbackName: getPublicUserDisplayName(User),
+        remarkMap,
+      }),
+    },
+  } : User
   return NextResponse.json({
     post: {
       ...postData,
-      author: User,
+      author,
       board: Board,
-      replies: Reply.map(({ User: replyAuthor, ...reply }) => ({ ...reply, author: replyAuthor })),
+      replies: Reply.map(({ User: replyAuthor, ...reply }) => ({
+        ...reply,
+        author: replyAuthor.Profile ? {
+          ...replyAuthor,
+          Profile: {
+            ...replyAuthor.Profile,
+            displayName: resolveFriendDisplayName({
+              viewerId: viewer?.id,
+              targetUserId: replyAuthor.id,
+              fallbackName: getPublicUserDisplayName(replyAuthor),
+              remarkMap,
+            }),
+          },
+        } : replyAuthor,
+      })),
     },
-  })
+  }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
 export async function PATCH(request: Request, { params }: Params) {

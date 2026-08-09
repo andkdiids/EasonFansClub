@@ -3,6 +3,7 @@ import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { getGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
@@ -37,13 +38,29 @@ function excerpt(value: string | null | undefined, length = 180) {
 
 export async function getHomePosts(userId?: string) {
   const posts = await getHomePostsUncached()
-  if (!userId || posts.length === 0) return posts.map((post) => ({ ...post, likedByMe: false }))
+  const remarkMap = await loadFriendRemarkMap(userId, posts.map((post) => post.author.id))
+  const displayPosts = posts.map((post) => ({
+    ...post,
+    author: {
+      ...post.author,
+      profile: post.author.profile ? {
+        ...post.author.profile,
+        displayName: resolveFriendDisplayName({
+          viewerId: userId,
+          targetUserId: post.author.id,
+          fallbackName: getPublicUserDisplayName(post.author),
+          remarkMap,
+        }),
+      } : post.author.profile,
+    },
+  }))
+  if (!userId || posts.length === 0) return displayPosts.map((post) => ({ ...post, likedByMe: false }))
   const liked = await prisma.like.findMany({
     where: { userId, postId: { in: posts.map((post) => post.id) } },
     select: { postId: true },
   })
   const likedIds = new Set(liked.map((item) => item.postId))
-  return posts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
+  return displayPosts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
 }
 
 async function getHomePostsUncached() {
@@ -68,6 +85,7 @@ async function getHomePostsUncached() {
     Board: { select: { name: true, slug: true } },
     User: {
       select: {
+        id: true,
         uid: true,
         nickname: true,
         level: true,
@@ -108,8 +126,25 @@ async function getHomePostsUncached() {
   }))
 }
 
-export async function getHomeDailyMessages() {
-  return cachedHomeData('home.dailyMessages', getHomeDailyMessagesUncached)
+export async function getHomeDailyMessages(userId?: string) {
+  const messages = await cachedHomeData('home.dailyMessages', getHomeDailyMessagesUncached)
+  const remarkMap = await loadFriendRemarkMap(userId, messages.map((message) => message.user.id))
+  if (!userId || messages.length === 0) return messages
+  return messages.map((message) => ({
+    ...message,
+    user: message.user.profile ? {
+      ...message.user,
+      profile: {
+        ...message.user.profile,
+        displayName: resolveFriendDisplayName({
+          viewerId: userId,
+          targetUserId: message.user.id,
+          fallbackName: getPublicUserDisplayName(message.user),
+          remarkMap,
+        }),
+      },
+    } : message.user,
+  }))
 }
 
 async function getHomeDailyMessagesUncached() {
@@ -130,6 +165,7 @@ async function getHomeDailyMessagesUncached() {
         content: true,
         User: {
           select: {
+            id: true,
             uid: true,
             nickname: true,
             level: true,

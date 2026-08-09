@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
@@ -125,13 +126,29 @@ export async function GET(request: Request) {
       })
     : []
   const viewerLikedIds = new Set(viewerLikes.map((like) => like.messageId))
+  const displayNameUserIds = [
+    ...rows.flatMap((item) => [
+      item.User_ProfileWallMessage_senderIdToUser.id,
+      ...item.other_ProfileWallMessage.map((child) => child.User_ProfileWallMessage_senderIdToUser.id),
+    ]),
+    ...rows.flatMap((item) => [
+      ...item.ProfileWallLike.map((like) => like.userId),
+      ...item.other_ProfileWallMessage.flatMap((child) => child.ProfileWallLike.map((like) => like.userId)),
+    ]),
+  ]
+  const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
 
   // 序列化为 LikeAvatars 的 LikeAvatarUser 结构（与每日留言 / 帖子点赞列表保持一致）。
-  function serializeWallLikers(likes: Array<{ User: { uid: number; nickname: string; avatarUrl: string | null; Profile: { displayName: string | null; avatarUrl: string | null } | null } }>) {
+  function serializeWallLikers(likes: Array<{ userId: string; User: { uid: number; nickname: string; avatarUrl: string | null; Profile: { displayName: string | null; avatarUrl: string | null } | null } }>) {
     return likes.map((like) => ({
       uid: like.User.uid,
       nickname: like.User.nickname,
-      displayName: like.User.Profile?.displayName || null,
+      displayName: resolveFriendDisplayName({
+        viewerId: viewer?.id,
+        targetUserId: like.userId,
+        fallbackName: getPublicUserDisplayName(like.User),
+        remarkMap,
+      }),
       avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
     }))
   }
@@ -143,7 +160,15 @@ export async function GET(request: Request) {
       ...item,
       sender: {
         ...item.User_ProfileWallMessage_senderIdToUser,
-        profile: item.User_ProfileWallMessage_senderIdToUser.Profile,
+        profile: item.User_ProfileWallMessage_senderIdToUser.Profile ? {
+          ...item.User_ProfileWallMessage_senderIdToUser.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: viewer?.id,
+            targetUserId: item.senderId,
+            fallbackName: getPublicUserDisplayName(item.User_ProfileWallMessage_senderIdToUser),
+            remarkMap,
+          }),
+        } : item.User_ProfileWallMessage_senderIdToUser.Profile,
       },
       createdAt: item.createdAt.toISOString(),
       updatedAt: item.updatedAt.toISOString(),
@@ -155,7 +180,15 @@ export async function GET(request: Request) {
         ...child,
         sender: {
           ...child.User_ProfileWallMessage_senderIdToUser,
-          profile: child.User_ProfileWallMessage_senderIdToUser.Profile,
+          profile: child.User_ProfileWallMessage_senderIdToUser.Profile ? {
+            ...child.User_ProfileWallMessage_senderIdToUser.Profile,
+            displayName: resolveFriendDisplayName({
+              viewerId: viewer?.id,
+              targetUserId: child.senderId,
+              fallbackName: getPublicUserDisplayName(child.User_ProfileWallMessage_senderIdToUser),
+              remarkMap,
+            }),
+          } : child.User_ProfileWallMessage_senderIdToUser.Profile,
         },
         children: [],
         createdAt: child.createdAt.toISOString(),

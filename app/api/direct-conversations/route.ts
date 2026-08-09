@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
 
@@ -13,7 +14,7 @@ export async function GET() {
     orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
     take: 30,
     include: {
-      ConversationParticipant: { select: { userId: true, lastReadAt: true, User: { select: { uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } } } },
+      ConversationParticipant: { select: { userId: true, lastReadAt: true, User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } } } },
       DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, createdAt: true, senderId: true } },
     },
   })
@@ -39,12 +40,30 @@ export async function GET() {
     const lastReadAt = readByConversation.get(message.conversationId)
     if (!lastReadAt || message.createdAt > lastReadAt) unreadByConversation.set(message.conversationId, (unreadByConversation.get(message.conversationId) || 0) + 1)
   })
+  const otherUserIds = conversations.flatMap((row) => row.ConversationParticipant
+    .filter((participant) => participant.userId !== user.id)
+    .map((participant) => participant.userId))
+  const remarkMap = await loadFriendRemarkMap(user.id, otherUserIds)
   return NextResponse.json({ conversations: conversations.map((row) => {
     const other = row.ConversationParticipant.find((participant) => participant.userId !== user.id)
+    const otherUser = other?.User
+      ? {
+          ...other.User,
+          Profile: other.User.Profile ? {
+            ...other.User.Profile,
+            displayName: resolveFriendDisplayName({
+              viewerId: user.id,
+              targetUserId: other.User.id,
+              fallbackName: getPublicUserDisplayName(other.User),
+              remarkMap,
+            }),
+          } : other.User.Profile,
+        }
+      : null
     return {
       id: row.id,
       lastMessageAt: row.lastMessageAt,
-      otherUser: other?.User || null,
+      otherUser,
       latestMessage: row.DirectMessage[0] || null,
       unreadCount: unreadByConversation.get(row.id) || 0,
     }

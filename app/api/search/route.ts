@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
         ],
       },
       include: {
-        User: { select: { nickname: true, level: true } },
+        User: { select: { id: true, nickname: true, level: true, Profile: { select: { displayName: true } } } },
         Board: { select: { name: true, slug: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -133,16 +134,40 @@ export async function GET(request: Request) {
     }),
   ])
 
+  const remarkMap = await loadFriendRemarkMap(user?.id, [
+    ...users.map((item) => item.id),
+    ...posts.map((item) => item.User.id),
+  ])
+
   return NextResponse.json({
     users: users.map(({ Profile, Post, _count, ...item }) => ({
       ...item,
-      profile: Profile,
+      profile: Profile ? {
+        ...Profile,
+        displayName: resolveFriendDisplayName({
+          viewerId: user?.id,
+          targetUserId: item.id,
+          fallbackName: getPublicUserDisplayName({ ...item, Profile }),
+          remarkMap,
+        }),
+      } : Profile,
       posts: Post,
       _count: { posts: _count.Post },
     })),
     posts: posts.map(({ User, Board, ...post }) => ({
       ...post,
-      author: User,
+      author: {
+        ...User,
+        Profile: User.Profile ? {
+          ...User.Profile,
+          displayName: resolveFriendDisplayName({
+            viewerId: user?.id,
+            targetUserId: User.id,
+            fallbackName: getPublicUserDisplayName(User),
+            remarkMap,
+          }),
+        } : User.Profile,
+      },
       board: Board,
     })),
     boards,
@@ -155,5 +180,5 @@ export async function GET(request: Request) {
       hasPreview: Boolean(song.previewUrl),
       previewUrl: undefined,
     })),
-  })
+  }, { headers: user ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }

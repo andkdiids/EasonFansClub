@@ -244,11 +244,23 @@ export function FriendDock({
   useEffect(() => {
     const openDock = () => openFriendList()
     const closeFromOtherOverlay = () => closeDock()
+    const updateRemark = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetUserId?: string; displayName?: string }>).detail
+      if (!detail?.targetUserId || typeof detail.displayName !== 'string') return
+      const update = (items: FriendDockUser[]) => items.map((item) => item.id === detail.targetUserId
+        ? { ...item, profile: item.profile ? { ...item.profile, displayName: detail.displayName! } : item.profile }
+        : item)
+      setFriends(update)
+      setSearchResults(update)
+      setChatFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
+      setProfileFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
+    }
     const refresh = () => {
       if (open && !chatFriend && !debouncedQuery) void loadFriends(1)
     }
     window.addEventListener('friend-dock:open', openDock)
     window.addEventListener('friend-dock:close', closeFromOtherOverlay)
+    window.addEventListener('friend-remark:updated', updateRemark)
     window.addEventListener('friend-dock:refresh', refresh)
     const channel = 'BroadcastChannel' in window
       ? new BroadcastChannel(`eason-private-sync:${currentUserId}`)
@@ -263,6 +275,7 @@ export function FriendDock({
       channel?.close()
       window.removeEventListener('friend-dock:open', openDock)
       window.removeEventListener('friend-dock:close', closeFromOtherOverlay)
+      window.removeEventListener('friend-remark:updated', updateRemark)
       window.removeEventListener('friend-dock:refresh', refresh)
     }
   }, [currentUserId, open, chatFriend, debouncedQuery, loadFriends, openFriendList, closeDock])

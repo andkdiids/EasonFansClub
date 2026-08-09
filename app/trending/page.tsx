@@ -3,6 +3,8 @@ import { formatDate } from '@/lib/format'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { getTrendingPosts, type TrendingRange } from '@/lib/trending-posts'
+import { getCurrentUser } from '@/lib/auth'
+import { loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +20,17 @@ export default async function TrendingPostsPage({
   const query = await searchParams
   const range: TrendingRange = query.range === '30' ? 30 : 7
   const page = Math.min(100, Math.max(1, Number(query.page) || 1))
-  const data = await getTrendingPosts(range, page)
+  const [data, viewer] = await Promise.all([getTrendingPosts(range, page), getCurrentUser()])
+  const remarkMap = await loadFriendRemarkMap(viewer?.id, data.posts.map((post) => post.authorId))
+  const posts = data.posts.map((post) => ({
+    ...post,
+    authorName: resolveFriendDisplayName({
+      viewerId: viewer?.id,
+      targetUserId: post.authorId,
+      fallbackName: post.authorName,
+      remarkMap,
+    }),
+  }))
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-5xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
@@ -41,9 +53,9 @@ export default async function TrendingPostsPage({
         ))}
       </nav>
 
-      {data.posts.length ? (
+      {posts.length ? (
         <section className="space-y-3" aria-label={`近 ${range} 天热门帖子`}>
-          {data.posts.map((post) => {
+          {posts.map((post) => {
             const avatar = profileImageUrl(post.authorAvatarUrl)
             const image = publicImageUrl(post.imageUrl)
             return (
