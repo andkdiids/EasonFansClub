@@ -116,10 +116,11 @@ export async function POST(request: Request) {
   const rawTitle = sanitizeText(body?.title, 120)
   const rawContent = stripUnsafeHtml(sanitizeText(body?.content, 20000))
   const rawStickerId = typeof body?.stickerId === 'string' && body.stickerId ? String(body.stickerId).trim().slice(0, 191) : null
-  if (checkForbiddenWords(`${rawTitle}\n${rawContent}`).blocked) {
+  const isAdmin = isAdminUser(user)
+  if (!isAdmin && checkForbiddenWords(`${rawTitle}\n${rawContent}`).blocked) {
     return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
   }
-  if (await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
+  if (!isAdmin && await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
     return NextResponse.json({ message: '帖子包含违禁词，无法发布', errors: { content: '请修改后重新发布' } }, { status: 400 })
   }
   if (rawStickerId && !(await isStickerVisible(rawStickerId))) {
@@ -157,7 +158,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const canPublishImmediately = isAdminUser(user)
+    const canPublishImmediately = isAdmin
     const moderationStatus = canPublishImmediately ? 'APPROVED' as const : 'PENDING' as const
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
