@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolveHeroMediaLayout } from '../lib/hero-visuals'
-import { defaultSiteAppearance, mergeSiteAppearanceConfig } from '../lib/site-config'
+import { defaultSiteAppearance, getHeroMediaForDevice, mergeSiteAppearanceConfig } from '../lib/site-config'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -93,4 +93,29 @@ test('后台页面视觉入口提供活动中心设置页面和高清媒体上�
   assert.match(upload, /quality: 94/)
   assert.match(upload, /MAX_IMAGE_EDGE = 2560/)
   assert.match(upload, /sourceUrl/)
+})
+
+test('Hero 后台按设备媒体字段显示，不回退旧媒体或另一端媒体', () => {
+  const legacySlide = {
+    title: '',
+    subtitle: '',
+    buttonText: '',
+    href: '#',
+    imageUrl: 'legacy-image',
+    mediaType: 'IMAGE' as const,
+    mediaUrl: 'legacy-image',
+    posterUrl: '',
+    sourceUrl: '',
+    posterSourceUrl: '',
+    isVisible: true,
+    sortOrder: 1,
+    desktopHeroMedia: { mediaType: 'ANIMATED_IMAGE' as const, imageUrl: '', mediaUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' },
+    mobileHeroMedia: null,
+  }
+  assert.equal(getHeroMediaForDevice(legacySlide, 'desktop'), null)
+  assert.equal(getHeroMediaForDevice(legacySlide, 'mobile'), null)
+  assert.match(read('app/admin/home/HomeHeroManager.tsx'), /const desktopMedia = explicitMedia\(slide, 'desktop'\)/)
+  assert.match(read('app/admin/home/HomeHeroManager.tsx'), /const current = selectedMedia\(slide, device\) \|\| emptyHeroMedia\('IMAGE'\)/)
+  assert.match(read('app/admin/visuals/VisualManager.tsx'), /homePreviewVisual\(editingVisual, homeDesktopMedia, homeMobileMedia\)/)
+  assert.match(read('app/admin/visuals/VisualManager.tsx'), /暂无媒体，请选择类型后上传/)
 })

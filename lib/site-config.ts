@@ -239,11 +239,8 @@ export function legacyHeroMediaFromSlide(slide: Pick<SiteHeroSlide, 'imageUrl' |
 
 export function getHeroMediaForDevice(slide: SiteHeroSlide | null | undefined, device: 'desktop' | 'mobile') {
   if (!slide) return null
-  const desktopMedia = hasHeroMediaAsset(slide.desktopHeroMedia)
-    ? slide.desktopHeroMedia
-    : legacyHeroMediaFromSlide(slide)
-  const mobileMedia = hasHeroMediaAsset(slide.mobileHeroMedia) ? slide.mobileHeroMedia : null
-  return device === 'mobile' ? mobileMedia || desktopMedia : desktopMedia
+  const media = device === 'mobile' ? slide.mobileHeroMedia : slide.desktopHeroMedia
+  return hasHeroMediaAsset(media) ? media : null
 }
 
 function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {

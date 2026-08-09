@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState, type ChangeEvent } from 'react'
 import { hasHeroMediaAsset } from '@/lib/hero-visuals'
-import { getHeroMediaForDevice, type HeroMediaAsset, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
+import type { HeroMediaAsset, HeroMediaType, SiteHeroSlide } from '@/lib/site-config'
 
 type HeroDevice = 'desktop' | 'mobile'
 
@@ -50,7 +50,7 @@ const emptySlide = (sortOrder: number): SiteHeroSlide => ({
 
 function mediaAccept(mediaType: HeroMediaType) {
   if (mediaType === 'VIDEO') return 'video/mp4,video/webm,.mp4,.webm'
-  if (mediaType === 'ANIMATED_IMAGE') return 'image/gif,image/webp,image/png,image/apng,.gif,.webp,.png'
+  if (mediaType === 'ANIMATED_IMAGE') return 'image/gif,image/webp,.gif,.webp'
   return 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
 }
 
@@ -58,10 +58,16 @@ function mediaPreviewUrl(media: HeroMediaAsset | null) {
   return media?.mediaUrl || media?.imageUrl || media?.posterUrl || ''
 }
 
+function cacheBustedUrl(url: string, cacheKey?: string) {
+  if (!url || !cacheKey) return url
+  return `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(cacheKey)}`
+}
+
 function DeviceMediaPanel({
   device,
   mediaType,
   previewMedia,
+  cacheKey,
   hasExplicitMedia,
   uploading,
   onTypeChange,
@@ -73,6 +79,7 @@ function DeviceMediaPanel({
   device: HeroDevice
   mediaType: HeroMediaType
   previewMedia: HeroMediaAsset | null
+  cacheKey?: string
   hasExplicitMedia: boolean
   uploading: string
   onTypeChange: (mediaType: HeroMediaType) => void
@@ -81,7 +88,8 @@ function DeviceMediaPanel({
   onClear: () => void
   onPosterClear: () => void
 }) {
-  const previewUrl = mediaPreviewUrl(previewMedia)
+  const previewUrl = cacheBustedUrl(mediaPreviewUrl(previewMedia), cacheKey)
+  const posterUrl = cacheBustedUrl(previewMedia?.posterUrl || previewMedia?.imageUrl || '', cacheKey)
   const isVideo = mediaType === 'VIDEO'
   const label = device === 'desktop' ? '桌面端媒体' : '移动端媒体'
   const uploadKey = `${device}:media`
@@ -91,12 +99,12 @@ function DeviceMediaPanel({
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
         <h3 className="text-sm font-black text-brand-950">{label}</h3>
-        <p className="mt-1 text-xs font-bold text-slate-500">{hasExplicitMedia ? '已上传，可独立替换' : device === 'mobile' ? '未设置，将自动使用桌面端媒体' : '使用现有 Hero 媒体'}</p>
+        <p className="mt-1 text-xs font-bold text-slate-500">{hasExplicitMedia ? '已上传，可独立替换' : '未上传，请选择类型后上传'}</p>
       </div>
       <span className="text-xs font-black text-sky-700">{mediaTypeOptions.find(([value]) => value === mediaType)?.[1] || mediaType}</span>
     </div>
     <div className="relative mt-3 aspect-[16/9] overflow-hidden rounded-xl bg-sky-950">
-      {previewUrl && isVideo ? <video src={previewUrl} poster={previewMedia?.posterUrl || previewMedia?.imageUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
+      {previewUrl && isVideo ? <video src={previewUrl} poster={posterUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
       {previewUrl && !isVideo ? <img src={previewUrl} alt={label} className="h-full w-full object-cover" /> : null}
       {!previewUrl ? <div className="grid h-full place-items-center px-4 text-center text-xs font-black text-slate-400">暂无媒体，请选择类型后上传</div> : null}
     </div>
@@ -130,19 +138,24 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState('')
+  const [previewVersions, setPreviewVersions] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
   function update(index: number, patch: Partial<SiteHeroSlide>) {
     setSlides((current) => current.map((slide, slideIndex) => slideIndex === index ? { ...slide, ...patch } : slide))
   }
 
-  function effectiveMedia(slide: SiteHeroSlide, device: HeroDevice) {
-    return getHeroMediaForDevice(slide, device)
+  function selectedMedia(slide: SiteHeroSlide, device: HeroDevice) {
+    return (device === 'desktop' ? slide.desktopHeroMedia : slide.mobileHeroMedia) || null
   }
 
   function explicitMedia(slide: SiteHeroSlide, device: HeroDevice) {
-    const media = device === 'desktop' ? slide.desktopHeroMedia : slide.mobileHeroMedia
+    const media = selectedMedia(slide, device)
     return hasHeroMediaAsset(media) ? media : null
+  }
+
+  function markPreviewVersion(index: number, device: HeroDevice) {
+    setPreviewVersions((current) => ({ ...current, [`${index}:${device}`]: String(Date.now()) }))
   }
 
   function syncDesktopLegacy(asset: HeroMediaAsset): Partial<SiteHeroSlide> {
@@ -169,7 +182,7 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
     event.target.value = ''
     if (!file) return
     const slide = slides[index]
-    const current = explicitMedia(slide, device) || effectiveMedia(slide, device) || emptyHeroMedia('IMAGE')
+    const current = selectedMedia(slide, device) || emptyHeroMedia('IMAGE')
     const uploadKey = `${device}:${kind}`
     setUploading(`${index}:${uploadKey}`)
     setMessage('')
@@ -200,6 +213,7 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
         ...(device === 'desktop' ? syncDesktopLegacy(asset) : {}),
       }
       update(index, patch)
+      markPreviewVersion(index, device)
       setMessage(`${device === 'desktop' ? '桌面端' : '移动端'}媒体已上传，请保存 Hero 配置`)
     } catch {
       setError('Hero 媒体上传失败，请稍后重试')
@@ -217,7 +231,7 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
 
   function clearPoster(index: number, device: HeroDevice) {
     const slide = slides[index]
-    const current = explicitMedia(slide, device) || effectiveMedia(slide, device) || emptyHeroMedia('VIDEO')
+    const current = selectedMedia(slide, device) || emptyHeroMedia('VIDEO')
     const asset = { ...current, posterUrl: '', posterSourceUrl: '' }
     update(index, {
       [device === 'desktop' ? 'desktopHeroMedia' : 'mobileHeroMedia']: asset,
@@ -270,18 +284,20 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
 
     <div className="space-y-4">
       {slides.map((slide, index) => {
-        const desktopMedia = effectiveMedia(slide, 'desktop')
-        const mobileExplicit = explicitMedia(slide, 'mobile')
-        const mobilePreview = mobileExplicit || desktopMedia
-        const desktopType = slide.desktopHeroMedia?.mediaType || desktopMedia?.mediaType || 'IMAGE'
-        const mobileType = slide.mobileHeroMedia?.mediaType || desktopType
+        const desktopMedia = explicitMedia(slide, 'desktop')
+        const mobileMedia = explicitMedia(slide, 'mobile')
+        const desktopField = selectedMedia(slide, 'desktop')
+        const mobileField = selectedMedia(slide, 'mobile')
+        const desktopType = desktopField?.mediaType || 'IMAGE'
+        const mobileType = mobileField?.mediaType || 'IMAGE'
         return <article key={`${index}-${slide.sortOrder}`} className="grid gap-5 rounded-[26px] border border-sky-100 bg-white/90 p-5 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
             <DeviceMediaPanel
               device="desktop"
               mediaType={desktopType}
               previewMedia={desktopMedia}
-              hasExplicitMedia={Boolean(explicitMedia(slide, 'desktop') || desktopMedia)}
+              cacheKey={previewVersions[`${index}:desktop`]}
+              hasExplicitMedia={Boolean(desktopMedia)}
               uploading={uploading.replace(`${index}:`, '')}
               onTypeChange={(mediaType) => changeMediaType(index, 'desktop', mediaType)}
               onUpload={(event) => void upload(index, 'desktop', event)}
@@ -292,8 +308,9 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
             <DeviceMediaPanel
               device="mobile"
               mediaType={mobileType}
-              previewMedia={mobilePreview}
-              hasExplicitMedia={Boolean(mobileExplicit)}
+              previewMedia={mobileMedia}
+              cacheKey={previewVersions[`${index}:mobile`]}
+              hasExplicitMedia={Boolean(mobileMedia)}
               uploading={uploading.replace(`${index}:`, '')}
               onTypeChange={(mediaType) => changeMediaType(index, 'mobile', mediaType)}
               onUpload={(event) => void upload(index, 'mobile', event)}

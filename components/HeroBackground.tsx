@@ -20,6 +20,7 @@ type HeroBackgroundProps = {
   className?: string
   priority?: boolean
   positionMode?: HeroPositionMode
+  cacheBust?: string
 }
 
 type HeroBackgroundStyle = CSSProperties & {
@@ -59,6 +60,12 @@ function useHeroDevice(positionMode: HeroPositionMode) {
   return device
 }
 
+function cacheBustedUrl(url: string | null | undefined, cacheBust?: string) {
+  const normalizedUrl = url || ''
+  if (!normalizedUrl || !cacheBust) return normalizedUrl
+  return `${normalizedUrl}${normalizedUrl.includes('?') ? '&' : '?'}v=${encodeURIComponent(cacheBust)}`
+}
+
 function getImageDimensions(event: SyntheticEvent<HTMLImageElement>): HeroMediaDimensions | null {
   const image = event.currentTarget
   return image.naturalWidth > 0 && image.naturalHeight > 0
@@ -82,7 +89,7 @@ function layerStyle(
   }
 }
 
-export function HeroBackground({ visual, fallbackImageUrl, className = '', priority = false, positionMode = 'responsive' }: Readonly<HeroBackgroundProps>) {
+export function HeroBackground({ visual, fallbackImageUrl, className = '', priority = false, positionMode = 'responsive', cacheBust }: Readonly<HeroBackgroundProps>) {
   const reducedMotion = usePrefersReducedMotion()
   const isPageVisible = usePageVisibility()
   const device = useHeroDevice(positionMode)
@@ -96,14 +103,15 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   const [isInViewport, setIsInViewport] = useState(true)
   const mediaAsset = resolveHeroMediaAsset(visual, device, fallbackImageUrl || '')
   const mediaType: HeroMediaType = mediaAsset?.mediaType || 'IMAGE'
-  const imageUrl = publicImageUrl(mediaAsset?.imageUrl || '')
-  const mediaUrl = publicImageUrl(mediaAsset?.mediaUrl || (mediaType === 'IMAGE' ? mediaAsset?.imageUrl : ''))
-  const fallbackUrl = publicImageUrl(
+  const imageUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.imageUrl || '', cacheBust))
+  const mediaUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.mediaUrl || (mediaType === 'IMAGE' ? mediaAsset?.imageUrl : ''), cacheBust))
+  const fallbackUrl = publicImageUrl(cacheBustedUrl(
     mediaAsset?.posterUrl
       || (mediaType === 'VIDEO' ? mediaAsset?.imageUrl : '')
       || fallbackImageUrl
       || (mediaType !== 'IMAGE' ? mediaAsset?.imageUrl : ''),
-  )
+    cacheBust,
+  ))
   const staticUrl = mediaType === 'IMAGE' ? mediaUrl || imageUrl : fallbackUrl
   const shouldAnimate = isPageVisible && isInViewport && !reducedMotion && !videoFailed
   const hasAnimatedImagePoster = Boolean(mediaType === 'ANIMATED_IMAGE' && fallbackUrl && fallbackUrl !== mediaUrl)

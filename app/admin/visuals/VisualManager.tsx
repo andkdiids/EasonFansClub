@@ -16,7 +16,7 @@ import {
   type PageVisualKey,
   type SiteHeroVisualConfig,
 } from '@/lib/hero-visuals'
-import { getHeroMediaForDevice, resolveHeroSlideVisual, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
+import { resolveHeroSlideVisual, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
 
 type Device = 'desktop' | 'mobile'
 type HeroMediaTarget = 'desktop' | 'mobile'
@@ -55,7 +55,7 @@ const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
 
 function mediaAccept(mediaType: HeroMediaType) {
   if (mediaType === 'VIDEO') return 'video/mp4,video/webm,.mp4,.webm'
-  if (mediaType === 'ANIMATED_IMAGE') return 'image/gif,image/webp,image/png,image/apng,.gif,.webp,.png'
+  if (mediaType === 'ANIMATED_IMAGE') return 'image/gif,image/webp,.gif,.webp'
   return 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
 }
 
@@ -63,11 +63,40 @@ function mediaPreviewUrl(media: HeroMediaAsset | null) {
   return media?.mediaUrl || media?.imageUrl || media?.posterUrl || ''
 }
 
+function cacheBustedUrl(url: string, cacheKey?: string) {
+  if (!url || !cacheKey) return url
+  return `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(cacheKey)}`
+}
+
+function explicitSlideMedia(slide: SiteHeroSlide | null, target: HeroMediaTarget) {
+  const media = target === 'desktop' ? slide?.desktopHeroMedia : slide?.mobileHeroMedia
+  return hasHeroMediaAsset(media) ? media : null
+}
+
+function homePreviewVisual(base: SiteHeroVisualConfig, desktopMedia: HeroMediaAsset | null, mobileMedia: HeroMediaAsset | null) {
+  const desktopUrl = desktopMedia ? mediaPreviewUrl(desktopMedia) : ''
+  const mobileUrl = mobileMedia ? mediaPreviewUrl(mobileMedia) : ''
+  return {
+    ...base,
+    imageUrl: desktopMedia?.mediaType === 'IMAGE' ? desktopUrl : '',
+    desktopHero: desktopMedia?.mediaType === 'IMAGE' ? desktopUrl : '',
+    mobileHero: mobileMedia?.mediaType === 'IMAGE' ? mobileUrl : '',
+    desktopHeroMedia: desktopMedia,
+    mobileHeroMedia: mobileMedia,
+    mediaType: desktopMedia?.mediaType || 'IMAGE',
+    mediaUrl: desktopMedia?.mediaUrl || '',
+    posterUrl: desktopMedia?.posterUrl || '',
+    sourceUrl: desktopMedia?.sourceUrl || '',
+    posterSourceUrl: desktopMedia?.posterSourceUrl || '',
+  }
+}
+
 function ResponsiveHeroMediaControl({
   target,
   media,
   mediaType,
   explicit,
+  cacheKey,
   uploading,
   onTypeChange,
   onUpload,
@@ -79,6 +108,7 @@ function ResponsiveHeroMediaControl({
   media: HeroMediaAsset | null
   mediaType: HeroMediaType
   explicit: boolean
+  cacheKey?: string
   uploading: string
   onTypeChange: (mediaType: HeroMediaType) => void
   onUpload: (event: ChangeEvent<HTMLInputElement>) => void
@@ -87,19 +117,20 @@ function ResponsiveHeroMediaControl({
   onPosterClear: () => void
 }) {
   const label = target === 'desktop' ? '桌面端媒体' : '移动端媒体'
-  const previewUrl = mediaPreviewUrl(media)
+  const previewUrl = cacheBustedUrl(mediaPreviewUrl(media), cacheKey)
+  const posterUrl = cacheBustedUrl(media?.posterUrl || media?.imageUrl || '', cacheKey)
   const uploadKey = `${target}:media`
   const posterKey = `${target}:poster`
   return <div className="border border-slate-200 bg-slate-50 p-3">
     <div className="flex items-center justify-between gap-2">
       <div>
         <p className="text-sm font-black text-brand-950">{label}</p>
-        <p className="mt-1 text-xs font-semibold text-slate-500">{explicit ? '当前已上传，可独立替换' : target === 'mobile' ? '未设置，将自动使用桌面端媒体' : '当前使用旧 Hero 媒体'}</p>
+        <p className="mt-1 text-xs font-semibold text-slate-500">{explicit ? '当前已上传，可独立替换' : '未上传，请选择类型后上传'}</p>
       </div>
       <span className="text-xs font-black text-sky-700">{mediaTypeLabels[mediaType]}</span>
     </div>
     <div className="relative mt-3 aspect-[16/9] overflow-hidden border border-slate-200 bg-[#071523]">
-      {previewUrl && mediaType === 'VIDEO' ? <video src={previewUrl} poster={media?.posterUrl || media?.imageUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
+      {previewUrl && mediaType === 'VIDEO' ? <video src={previewUrl} poster={posterUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
       {previewUrl && mediaType !== 'VIDEO' ? <img src={previewUrl} alt={label} className="h-full w-full object-cover" /> : null}
       {!previewUrl ? <div className="grid h-full place-items-center px-3 text-center text-xs font-bold text-slate-400">暂无媒体，请选择类型后上传</div> : null}
     </div>
@@ -133,6 +164,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [homeMediaUploading, setHomeMediaUploading] = useState<`${HeroMediaTarget}:${'media' | 'poster'}` | ''>('')
+  const [previewCacheKey, setPreviewCacheKey] = useState('')
   const [selectedHomeHeroIndex, setSelectedHomeHeroIndex] = useState<number | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const visual = config.heroVisuals[visualKey]
@@ -154,21 +186,13 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     ? homeSlide?.mediaUrl || homeSlide?.imageUrl || ''
     : visual.mediaUrl || visual.imageUrl
   const currentPosterUrl = visualKey === 'home' ? homeSlide?.posterUrl || '' : visual.posterUrl || ''
-  const homeDesktopMedia = visualKey === 'home'
-    ? (hasHeroMediaAsset(editingVisual.desktopHeroMedia) ? editingVisual.desktopHeroMedia : getHeroMediaForDevice(homeSlide, 'desktop'))
-    : null
+  const homeDesktopField = visualKey === 'home' ? homeSlide?.desktopHeroMedia || null : null
+  const homeDesktopMedia = visualKey === 'home' ? explicitSlideMedia(homeSlide, 'desktop') : null
   const homeMobileField = visualKey === 'home' ? homeSlide?.mobileHeroMedia || null : null
-  const homeMobileExplicit = visualKey === 'home'
-    ? hasHeroMediaAsset(homeMobileField)
-      ? homeMobileField
-      : hasHeroMediaAsset(visual.mobileHeroMedia)
-        ? editingVisual.mobileHeroMedia || null
-        : visual.mobileHero
-          ? editingVisual.mobileHeroMedia || null
-          : null
-    : null
-  const homeMobileMedia = homeMobileExplicit
-  const previewVisual = editingVisual
+  const homeMobileMedia = visualKey === 'home' ? explicitSlideMedia(homeSlide, 'mobile') : null
+  const previewVisual = visualKey === 'home'
+    ? homePreviewVisual(editingVisual, homeDesktopMedia, homeMobileMedia)
+    : editingVisual
 
   function updateVisual(patch: Partial<SiteHeroVisualConfig>) {
     setConfig((current) => ({
@@ -282,6 +306,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
       if (kind === 'poster') {
         if (visualKey === 'home') updateHomeSlide({ posterUrl: data.url, posterSourceUrl: data.sourceUrl || '' })
         else updateVisual({ posterUrl: data.url, posterSourceUrl: data.sourceUrl || '' })
+        setPreviewCacheKey(String(Date.now()))
         setMessage('视频封面已上传，请保存当前设置')
       } else {
         const patch = {
@@ -292,6 +317,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
         }
         if (visualKey === 'home') updateHomeSlide(patch)
         else updatePageVisual(patch)
+        setPreviewCacheKey(String(Date.now()))
         setMessage('媒体已上传，请保存当前设置')
       }
     } catch {
@@ -318,7 +344,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
 
   function currentHomeMedia(target: HeroMediaTarget) {
     if (!homeSlide) return null
-    return target === 'desktop' ? homeDesktopMedia : homeMobileField || homeMobileMedia || homeDesktopMedia
+    return target === 'desktop' ? homeDesktopField : homeMobileField
   }
 
   function setHomeMedia(target: HeroMediaTarget, asset: HeroMediaAsset | null) {
@@ -363,6 +389,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
             sourceUrl: data.sourceUrl || '',
           }
       setHomeMedia(target, asset)
+      setPreviewCacheKey(String(Date.now()))
       setMessage(`${target === 'desktop' ? '桌面端' : '移动端'}媒体已上传，请保存当前设置`)
     } catch {
       setError('Hero 媒体上传失败，请稍后重试')
@@ -481,8 +508,8 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
           <div>
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(150px,220px)]">
-              <VisualPreview visual={previewVisual} pageKey={visualKey} device="desktop" onPointerDown={(event) => beginDrag(event, 'desktop')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} />
-              <VisualPreview visual={previewVisual} pageKey={visualKey} device="mobile" onPointerDown={(event) => beginDrag(event, 'mobile')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} />
+              <VisualPreview visual={previewVisual} pageKey={visualKey} device="desktop" cacheBust={previewCacheKey} onPointerDown={(event) => beginDrag(event, 'desktop')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} />
+              <VisualPreview visual={previewVisual} pageKey={visualKey} device="mobile" cacheBust={previewCacheKey} onPointerDown={(event) => beginDrag(event, 'mobile')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} />
             </div>
             <div className="mt-5 grid gap-5 md:grid-cols-2">
               <PositionControls
@@ -516,14 +543,15 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
             {visualKey === 'home' ? <div className="space-y-3 border-b border-slate-200 pb-4">
               <div>
                 <p className="text-sm font-black text-brand-950">当前 Hero 的设备媒体</p>
-                <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">桌面端和移动端完全独立；移动端没有专属媒体时自动回退到桌面端媒体。两端均支持静态图片、GIF、Animated WebP 和短视频。</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">桌面端和移动端完全独立；未上传时只显示空状态，不会读取另一端或旧 Hero 媒体。两端均支持静态图片、GIF、Animated WebP 和短视频。</p>
               </div>
               {homeSlide ? <div className="grid gap-3">
                 <ResponsiveHeroMediaControl
                   target="desktop"
                   media={homeDesktopMedia}
-                  mediaType={homeSlide.desktopHeroMedia?.mediaType || homeDesktopMedia?.mediaType || 'IMAGE'}
-                  explicit={Boolean(hasHeroMediaAsset(homeSlide.desktopHeroMedia) || homeDesktopMedia)}
+                  mediaType={homeDesktopField?.mediaType || 'IMAGE'}
+                  explicit={Boolean(homeDesktopMedia)}
+                  cacheKey={previewCacheKey}
                   uploading={homeMediaUploading}
                   onTypeChange={(mediaType) => changeHomeMediaType('desktop', mediaType)}
                   onUpload={(event) => void uploadHomeMedia(event, 'desktop')}
@@ -533,9 +561,10 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
                 />
                 <ResponsiveHeroMediaControl
                   target="mobile"
-                  media={homeMobileMedia || homeDesktopMedia}
-                  mediaType={homeMobileExplicit?.mediaType || homeDesktopMedia?.mediaType || 'IMAGE'}
-                  explicit={Boolean(homeMobileExplicit)}
+                  media={homeMobileMedia}
+                  mediaType={homeMobileField?.mediaType || 'IMAGE'}
+                  explicit={Boolean(homeMobileMedia)}
+                  cacheKey={previewCacheKey}
                   uploading={homeMediaUploading}
                   onTypeChange={(mediaType) => changeHomeMediaType('mobile', mediaType)}
                   onUpload={(event) => void uploadHomeMedia(event, 'mobile')}
@@ -576,10 +605,11 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   )
 }
 
-function VisualPreview({ visual, pageKey, device, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: {
+function VisualPreview({ visual, pageKey, device, cacheBust, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: {
   visual: SiteHeroVisualConfig
   pageKey: PageVisualKey
   device: Device
+  cacheBust?: string
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void
   onPointerMove: (event: PointerEvent<HTMLDivElement>) => void
   onPointerUp: (event: PointerEvent<HTMLDivElement>) => void
@@ -588,6 +618,12 @@ function VisualPreview({ visual, pageKey, device, onPointerDown, onPointerMove, 
   const x = device === 'desktop' ? visual.desktopPositionX : visual.mobilePositionX
   const y = device === 'desktop' ? visual.desktopPositionY : visual.mobilePositionY
   const isHome = pageKey === 'home'
+  const isEmptyHomeMobile = isHome && device === 'mobile' && !hasHeroMediaAsset(visual.mobileHeroMedia)
+  const hasPreviewMedia = isHome
+    ? device === 'desktop'
+      ? hasHeroMediaAsset(visual.desktopHeroMedia)
+      : hasHeroMediaAsset(visual.mobileHeroMedia)
+    : Boolean(visual.imageUrl || visual.mediaUrl || visual.desktopHero || visual.mobileHero)
   const aspectClass = device === 'desktop'
     ? isHome ? 'hero-preview-desktop' : 'hero-preview-page-desktop'
     : isHome ? 'hero-preview-mobile' : 'hero-preview-page-mobile'
@@ -597,11 +633,11 @@ function VisualPreview({ visual, pageKey, device, onPointerDown, onPointerMove, 
     <p className="mb-1 text-xs font-black uppercase tracking-[0.16em] text-slate-500">{device === 'desktop' ? '桌面端预览' : '移动端预览'}</p>
     {isHome ? <p className="mb-2 text-[11px] font-semibold text-slate-400">{device === 'desktop' ? '建议比例：16:6（1920×700）' : '建议比例：9:16（750×1200）'}</p> : null}
     <div data-visual-preview={device} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} className={`relative touch-none select-none overflow-hidden border border-slate-300 bg-[#071523] text-white ${aspectClass}`} style={{ cursor: 'grab' }}>
-      <HeroBackground visual={visual} positionMode={device} />
+      {!isEmptyHomeMobile ? <HeroBackground visual={visual} positionMode={device} cacheBust={cacheBust} /> : null}
       <div className={`pointer-events-none absolute inset-0 ${overlayClass}`} />
       <div className="pointer-events-none absolute inset-x-4 bottom-4 z-[2] sm:inset-x-6 sm:bottom-6"><span className="text-[9px] font-black tracking-[.2em] text-white/65">LIVE PREVIEW</span><strong className="mt-1 block text-base sm:text-xl">{visual.title}</strong></div>
       <span aria-hidden="true" className="pointer-events-none absolute z-[3] size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 shadow-[0_0_0_4px_rgba(0,0,0,.22)]" style={{ left: `${x}%`, top: `${y}%` }} />
-      {!visual.imageUrl && !visual.mediaUrl && !visual.desktopHero && !visual.mobileHero ? <span className="pointer-events-none absolute inset-x-0 bottom-3 z-[3] text-center text-xs font-bold text-white/55">暂无媒体，可上传后预览</span> : null}
+      {!hasPreviewMedia ? <span className="pointer-events-none absolute inset-x-0 bottom-3 z-[3] text-center text-xs font-bold text-white/55">暂无媒体，可上传后预览</span> : null}
     </div>
   </div>
 }
