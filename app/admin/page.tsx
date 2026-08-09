@@ -85,14 +85,14 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     ],
   },
   {
-    title: 'EasMusic 管理',
+    title: 'EasMusic管理',
     desc: '维护音乐专辑、歌曲、巡演和现场资料。',
     items: [
       { href: '/admin/music', title: 'EasMusic 管理', desc: '进入 EasMusic 管理总览及其子模块。' },
     ],
   },
   {
-    title: '成就 / 勋章',
+    title: '成就系统',
     desc: '管理成就、勋章与成长系统配置。',
     items: [
       { href: '/admin/achievements', title: '成就 / 勋章管理', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
@@ -174,12 +174,17 @@ export default async function AdminPage() {
               <h2 className="text-2xl font-black text-brand-950">功能入口导航</h2>
               <p className="mt-2 text-sm font-bold leading-6 text-slate-600">按业务模块进入后台管理页面，统计数据不在首页重复展示。</p>
             </div>
-            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {visibleGroups.map((group) => (
-                <section key={group.title} className="min-w-0 rounded-2xl border border-sky-100 bg-white/80 p-4">
-                  <h3 className="text-xl font-black text-brand-950">{group.title}</h3>
-                  <p className="mt-2 text-sm font-bold leading-6 text-slate-500">{group.desc}</p>
-                  <nav className="mt-4 grid min-w-0 gap-2" aria-label={`${group.title}子菜单`}>
+                <details key={group.title} className="group min-w-0 rounded-2xl border border-sky-100 bg-white/80 transition-colors open:bg-white">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-4 outline-none marker:hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400 [&::-webkit-details-marker]:hidden">
+                    <span className="min-w-0">
+                      <span className="block text-lg font-black text-brand-950">{group.title}</span>
+                      <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">{group.desc}</span>
+                    </span>
+                    <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-lg font-black leading-none text-brand-700 transition-transform group-open:rotate-180">⌄</span>
+                  </summary>
+                  <nav className="grid min-w-0 gap-2 border-t border-sky-100 px-3 pb-3 pt-3" aria-label={`${group.title}子菜单`}>
                     {group.items.map((item) => (
                       <Link
                         key={`${group.title}-${item.href}-${item.title}`}
@@ -191,7 +196,7 @@ export default async function AdminPage() {
                       </Link>
                     ))}
                   </nav>
-                </section>
+                </details>
               ))}
             </div>
           </section>
