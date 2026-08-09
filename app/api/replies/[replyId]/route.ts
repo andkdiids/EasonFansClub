@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { reverseCommunityCommentRewards } from '@/lib/community-rewards'
 import { prisma } from '@/lib/prisma'
 import { isAdminUser } from '@/lib/admin-permissions'
 import { requireUser } from '@/lib/security'
@@ -12,7 +13,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const { replyId } = await context.params
   const reply = await prisma.reply.findFirst({
     where: { id: replyId, isDeleted: false },
-    select: { id: true, authorId: true, postId: true },
+    select: { id: true, authorId: true, postId: true, Post: { select: { authorId: true } } },
   })
 
   if (!reply) return NextResponse.json({ message: '评论不存在' }, { status: 404 })
@@ -25,7 +26,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   const threadRows = await prisma.reply.findMany({
     where: { postId: reply.postId, isDeleted: false },
-    select: { id: true, parentId: true },
+    select: { id: true, parentId: true, authorId: true },
   })
   const collectDescendantIds = (parentId: string): string[] => {
     const children = threadRows.filter((item) => item.parentId === parentId)
@@ -46,7 +47,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
       data: { replyCount: count },
     })
 
-    if (!isOwner) {
+    if (isAllowedAdmin) {
       await tx.adminAction.create({
         data: {
           adminId: guard.user.id,
@@ -55,6 +56,15 @@ export async function DELETE(_request: Request, context: RouteContext) {
           metadata: { deletedBy: 'admin' },
         },
       })
+
+      for (const deletedReply of threadRows.filter((item) => deleteIds.includes(item.id))) {
+        await reverseCommunityCommentRewards(tx, {
+          commentId: deletedReply.id,
+          postId: reply.postId,
+          commenterId: deletedReply.authorId,
+          postAuthorId: reply.Post.authorId,
+        })
+      }
     }
 
     return count

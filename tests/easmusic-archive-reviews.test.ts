@@ -44,7 +44,7 @@ test('专辑鉴赏支持绑定专辑、多图、发布、点赞和收藏且没�
   assert.doesNotMatch([admin, detail, interaction].join('\n'), /ReviewComment|\/comments/)
 })
 
-test('签到区迁移保留帖子记录并重新统计每日水楼', () => {
+test('签到区迁移保留帖子记录并重新统计日常吹水', () => {
   const migrationPath = 'prisma/migrations/20260730120000_add_album_reviews_and_merge_checkin_board/migration.sql'
   assert.equal(existsSync(migrationPath), true)
   const migration = read(migrationPath)

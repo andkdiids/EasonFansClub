@@ -59,7 +59,7 @@
 ## Board 板块表
 
 - `id`：板块唯一 ID。
-- `name`：板块名称，例如公告区、每日水楼。
+- `name`：板块名称，例如公告区、日常吹水。
 - `slug`：URL 友好的板块标识，例如 `announcements`。
 - `description`：板块介绍。
 - `sortOrder`：排序值，数字越小越靠前。

@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { checkForbiddenWords } from '@/lib/content-filter'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
-import { getShanghaiDateKey } from '@/lib/checkin'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -59,7 +59,7 @@ export async function POST(request: Request, { params }: Params) {
   const textContent = sanitizeText(body?.content, 5000)
   const imageUrls = parseContentImageUrls(body?.imageUrls)
   const content = appendContentImages(textContent, imageUrls)
-  if (await containsSensitiveContent(content)) {
+  if (checkForbiddenWords(content).blocked || await containsSensitiveContent(content)) {
     return NextResponse.json({ message: '回复包含违禁词，无法发布' }, { status: 400 })
   }
   const parentId = sanitizeText(body?.parentId, 80)
@@ -146,7 +146,9 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const reply = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
+    for (const userId of [...new Set([user.id, post.authorId])].sort()) {
+      await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
+    }
     await tx.user.findFirstOrThrow({
       where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       select: { id: true },
@@ -242,23 +244,16 @@ export async function POST(request: Request, { params }: Params) {
       description: '回复帖子',
     })
 
-    const dateKey = getShanghaiDateKey(new Date())
-    const rewardedToday = await tx.pointLog.count({ where: { userId: user.id, action: 'POST_COMMENT_DAILY', dateKey } })
-    const feeAward = rewardedToday < POINTS.dailyPostCommentLimit
-      ? await awardRegistrationFee(tx, {
-        userId: user.id,
-        action: 'POST_COMMENT_DAILY',
-        requestedAmount: POINTS.dailyPostComment,
-        reason: '每日评论奖励',
-        postId,
-        replyId: createdReply.id,
-        businessKey: `post-comment:${createdReply.id}`,
-      })
-      : null
+    const communityReward = await awardCommunityCommentRewards(tx, {
+      commentId: createdReply.id,
+      postId,
+      commenterId: user.id,
+      postAuthorId: post.authorId,
+    })
 
     return {
       createdReply,
-      rewardPoints: feeAward?.awardedAmount || 0,
+      rewardPoints: communityReward.commenterRewardPoints,
     }
   })
 

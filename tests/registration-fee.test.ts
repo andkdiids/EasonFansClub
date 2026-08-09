@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { getStreakBonus } from '../lib/daily'
-import { getRandomCheckInPoints, getRandomPostRegistrationFee } from '../lib/points'
+import { getRandomCheckInPoints } from '../lib/points'
 import {
   HUNDRED_DAY_RECORD_REWARD,
   LONG_TERM_PATIENT_DAILY_BONUS,
@@ -19,13 +19,6 @@ test('每日首次挂号随机奖励严格位于 3 到 7 挂号费', () => {
   for (let index = 0; index < 500; index += 1) {
     const amount = getRandomCheckInPoints()
     assert.ok(amount >= 3 && amount <= 7)
-  }
-})
-
-test('每日首次发帖随机奖励严格位于 1 到 3 挂号费', () => {
-  for (let index = 0; index < 500; index += 1) {
-    const amount = getRandomPostRegistrationFee()
-    assert.ok(amount >= 1 && amount <= 3)
   }
 })
 
@@ -47,8 +40,6 @@ test('统一挂号费服务不再计算所有来源合计每日 30 上限', () =
 test('所有真实挂号费收入入口接入统一流水服务', () => {
   for (const path of [
     'app/api/checkin/route.ts',
-    'app/api/posts/route.ts',
-    'app/api/posts/[postId]/replies/route.ts',
     'app/api/posts/[postId]/like/route.ts',
     'lib/entertainment.ts',
     'lib/achievements.ts',
@@ -56,6 +47,7 @@ test('所有真实挂号费收入入口接入统一流水服务', () => {
     assert.match(read(path), /awardRegistrationFee/)
   }
   assert.match(read('app/api/admin/users/[userId]/route.ts'), /adjustRegistrationFeeBalance/)
+  assert.match(read('app/api/posts/[postId]/replies/route.ts'), /awardCommunityCommentRewards/)
   assert.doesNotMatch(read('app/api/auth/register/route.ts'), /points:\s*\{\s*increment/)
 })
 

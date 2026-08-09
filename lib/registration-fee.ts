@@ -7,6 +7,8 @@ export const LONG_TERM_PATIENT_STREAK_DAYS = 7
 export const LONG_TERM_PATIENT_DAILY_BONUS = 7
 export const HUNDRED_DAY_RECORD_REWARD = 100
 
+// Legacy labels stay readable for historical PointLog rows; the old post and
+// daily-comment actions are no longer written by the community routes.
 export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
   POST_CREATE: '发帖奖励',
   REPLY_CREATE: '回复奖励',
@@ -22,8 +24,14 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   POST_COMMENT_DAILY: '回复奖励',
 }
 
+const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
+  POST_COMMENT_RECEIVED: '帖子收到评论',
+  COMMENT_POST: '评论他人帖子',
+  COMMENT_REVOKE: '评论奖励追回',
+}
+
 export function getRegistrationFeeSourceLabel(action: PointActionType) {
-  return REGISTRATION_FEE_SOURCE_LABELS[action] || '其他'
+  return REGISTRATION_FEE_SOURCE_LABELS[action] || COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS[action] || '其他'
 }
 
 type RegistrationFeeAwardInput = {
@@ -88,6 +96,64 @@ export async function awardRegistrationFee(
   })
   return {
     awardedAmount: requestedAmount,
+    totalPoints: updatedUser.points,
+    duplicate: false,
+    dateKey,
+  }
+}
+
+type RegistrationFeeReversalInput = {
+  userId: string
+  amount: number
+  reason: string
+  businessKey: string
+  now?: Date
+  postId?: string
+  replyId?: string
+}
+
+/** Write a negative ledger entry for a previously awarded reward. */
+export async function reverseRegistrationFee(
+  tx: Prisma.TransactionClient,
+  input: RegistrationFeeReversalInput,
+) {
+  if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    throw new RangeError('REGISTRATION_FEE_REVERSAL_AMOUNT_MUST_BE_POSITIVE_INTEGER')
+  }
+
+  const now = input.now || new Date()
+  const { dateKey } = getShanghaiDayRange(now)
+  await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${input.userId} FOR UPDATE`
+
+  const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, select: { points: true } })
+  const existing = await tx.pointLog.findUnique({ where: { businessKey: input.businessKey }, select: { id: true } })
+  if (existing) {
+    return { reversedAmount: 0, totalPoints: user.points, duplicate: true, dateKey }
+  }
+
+  const updatedUser = await tx.user.update({
+    where: { id: input.userId },
+    data: { points: { decrement: input.amount } },
+    select: { points: true },
+  })
+  await tx.pointLog.create({
+    data: {
+      userId: input.userId,
+      action: 'COMMENT_REVOKE',
+      points: -input.amount,
+      before: user.points,
+      after: updatedUser.points,
+      reason: input.reason,
+      businessKey: input.businessKey,
+      dateKey,
+      postId: input.postId,
+      replyId: input.replyId,
+      createdAt: now,
+    },
+  })
+
+  return {
+    reversedAmount: input.amount,
     totalPoints: updatedUser.points,
     duplicate: false,
     dateKey,

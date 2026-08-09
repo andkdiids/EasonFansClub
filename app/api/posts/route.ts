@@ -4,13 +4,11 @@ import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { awardExperience } from '@/lib/growth'
-import { getRandomPostRegistrationFee, POINTS } from '@/lib/points'
+import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
-import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { parseContentImageUrls } from '@/lib/content-images'
-import { getShanghaiDateKey } from '@/lib/checkin'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
 function stripUnsafeHtml(value: string) {
@@ -220,17 +218,7 @@ export async function POST(request: Request) {
         description: '发布帖子',
       })
 
-      const dateKey = getShanghaiDateKey(new Date())
-      const feeAward = await awardRegistrationFee(tx, {
-        userId: user.id,
-        requestedAmount: getRandomPostRegistrationFee(),
-        action: 'POST_DAILY_FIRST',
-        reason: '每日首次发帖',
-        businessKey: `post-daily:${user.id}:${dateKey}`,
-        postId: post.id,
-      })
-
-      return { post, rewardPoints: feeAward.awardedAmount }
+      return { post }
     })
 
     if (rawStickerId) {
@@ -239,8 +227,7 @@ export async function POST(request: Request) {
       })
     }
 
-    const detailQuery = result.rewardPoints ? `?reward=${result.rewardPoints}` : ''
-    const detailUrl = `/posts/${result.post.id}${detailQuery}`
+    const detailUrl = `/posts/${result.post.id}`
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)
     })
@@ -248,7 +235,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       post: { ...result.post, detailUrl },
       detailUrl,
-      rewardPoints: result.rewardPoints,
       moderationStatus,
       message: moderationStatus === 'PENDING' ? '帖子已提交，等待管理员审核后公开' : '帖子发布成功',
     }, { status: 201 })

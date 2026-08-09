@@ -63,17 +63,17 @@ test('评论点赞和热门评论使用既有 ReplyLike 与统一热度公式', 
   assert.match(component, /热门评论/)
 })
 
-test('每日发帖和评论积分使用北京日期、行锁、业务键及评论三次上限', () => {
+test('社区互动奖励使用上海时间、行锁、业务键并移除发帖挂号费', () => {
   const post = read('app/api/posts/route.ts')
   const reply = read('app/api/posts/[postId]/replies/route.ts')
-  for (const source of [post, reply]) {
-    assert.match(source, /getShanghaiDateKey/)
-    assert.match(source, /FOR UPDATE/)
-    assert.match(source, /businessKey/)
-  }
-  assert.match(post, /POST_DAILY_FIRST/)
-  assert.match(post, /getRandomPostRegistrationFee/)
-  assert.match(reply, /POST_COMMENT_DAILY/)
-  assert.match(reply, /rewardedToday < POINTS\.dailyPostCommentLimit/)
-  assert.match(reply, /post-comment:\$\{createdReply\.id\}/)
+  const rewards = read('lib/community-rewards.ts')
+  assert.doesNotMatch(post, /POST_DAILY_FIRST/)
+  assert.doesNotMatch(post, /getRandomPostRegistrationFee/)
+  assert.match(reply, /checkForbiddenWords/)
+  assert.match(reply, /awardCommunityCommentRewards/)
+  assert.match(rewards, /POST_COMMENT_RECEIVED/)
+  assert.match(rewards, /COMMENT_POST/)
+  assert.match(rewards, /getShanghaiWeekKey/)
+  assert.match(rewards, /post-comment-received:/)
+  assert.match(rewards, /comment-post:/)
 })

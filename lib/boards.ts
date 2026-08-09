@@ -6,7 +6,7 @@ export const defaultBoards = [
     sortOrder: 1,
   },
   {
-    name: '每日水楼',
+    name: '日常吹水',
     slug: 'daily-chat',
     description: '日常聊天、打卡闲聊、轻量互动',
     sortOrder: 2,

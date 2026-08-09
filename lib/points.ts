@@ -1,10 +1,6 @@
 export const POINTS = {
   postCreateExperience: 5,
   replyCreateExperience: 2,
-  dailyFirstPostMin: 1,
-  dailyFirstPostMax: 3,
-  dailyPostComment: 3,
-  dailyPostCommentLimit: 3,
   dailyCheckInMin: 3,
   dailyCheckInMax: 7,
   postLikeReceived: 1,
@@ -12,10 +8,6 @@ export const POINTS = {
 
 export function getRandomCheckInPoints() {
   return Math.floor(Math.random() * (POINTS.dailyCheckInMax - POINTS.dailyCheckInMin + 1)) + POINTS.dailyCheckInMin
-}
-
-export function getRandomPostRegistrationFee() {
-  return Math.floor(Math.random() * (POINTS.dailyFirstPostMax - POINTS.dailyFirstPostMin + 1)) + POINTS.dailyFirstPostMin
 }
 
 export function calcLevel(points: number) {

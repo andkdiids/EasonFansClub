@@ -55,7 +55,6 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
       return
     }
-    if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
     if (isPending) {
       router.push(`/post/submitted?postId=${postId}&status=${data.moderationStatus}`)
     } else {

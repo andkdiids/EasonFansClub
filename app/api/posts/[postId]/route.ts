@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { awardFeaturedPostRewards } from '@/lib/community-rewards'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { checkForbiddenWords } from '@/lib/content-filter'
@@ -185,19 +186,33 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   const post = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    const lockedExisting = await tx.post.findUnique({
+      where: { id: postId },
+      select: { id: true, authorId: true, boardId: true, isDeleted: true, isFeatured: true },
+    })
+    if (!lockedExisting) throw new Error('POST_NOT_FOUND')
+
     const updated = await tx.post.update({
       where: { id: postId },
       data,
       select: { id: true, isPinned: true, isFeatured: true, isDeleted: true },
     })
 
-    if (data.isDeleted !== undefined && existing.isDeleted !== data.isDeleted) {
+    if (data.isDeleted !== undefined && lockedExisting.isDeleted !== data.isDeleted) {
       const postCount = await tx.post.count({
-        where: { boardId: existing.boardId, status: 'PUBLISHED', isDeleted: false },
+        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false },
       })
       await tx.board.update({
-        where: { id: existing.boardId },
+        where: { id: lockedExisting.boardId },
         data: { postCount },
+      })
+    }
+
+    if (data.isFeatured === true && !lockedExisting.isFeatured) {
+      await awardFeaturedPostRewards(tx, {
+        postId,
+        authorId: lockedExisting.authorId,
       })
     }
 
