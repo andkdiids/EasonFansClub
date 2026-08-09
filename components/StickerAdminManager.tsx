@@ -298,8 +298,8 @@ function OfficialUploadForm({ onUploaded }: { onUploaded: () => void }) {
       <p className="text-sm font-black text-brand-950">上传官方表情</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="text-xs font-bold text-slate-600">
-          图片（JPG/PNG/WEBP 或 GIF，≤5MB）
-          <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => setFile(e.target.files?.[0] || null)} className="mt-1 block w-full text-xs" />
+          图片（JPG/PNG/APNG/WEBP 或 GIF，≤5MB）
+          <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/apng,image/webp,image/gif" onChange={(e) => setFile(e.target.files?.[0] || null)} className="mt-1 block w-full text-xs" />
         </label>
         <label className="text-xs font-bold text-slate-600">
           类型

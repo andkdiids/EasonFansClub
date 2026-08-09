@@ -80,8 +80,10 @@ export async function POST(request: Request) {
       })
       const rawName = stickerNamesRaw[i] || ''
       const trimmed = rawName.trim().slice(0, 4)
-      uploadedStickers.push({ name: trimmed || null, url: result.url, type })
+      uploadedStickers.push({ name: trimmed || null, url: result.url, type: result.type })
     }
+
+    const packType = uploadedStickers.some((sticker) => sticker.type === 'GIF') ? 'GIF' : 'STATIC'
 
     const { packId } = await submitStickerPack({
       creatorId: guard.user.id,
@@ -89,7 +91,7 @@ export async function POST(request: Request) {
       description: description || null,
       copyright: copyright || null,
       coverUrl,
-      type,
+      type: packType,
       category: category || null,
       stickers: uploadedStickers,
     })

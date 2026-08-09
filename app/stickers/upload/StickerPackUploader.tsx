@@ -51,8 +51,8 @@ export function StickerPackUploader() {
     for (const f of list) {
       if (stickerFiles.length + accepted.length >= MAX_FILES) break
       if (f.size === 0) continue
-      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(f.type)) {
-        setError('仅支持 JPG / PNG / WebP / GIF 格式')
+      if (!['image/jpeg', 'image/png', 'image/apng', 'image/webp', 'image/gif'].includes(f.type)) {
+        setError('仅支持 JPG / PNG / APNG / WebP / GIF 格式')
         continue
       }
       const preview = await readAsDataUrl(f)
@@ -160,7 +160,7 @@ export function StickerPackUploader() {
             <input type="radio" checked={type === 'GIF'} readOnly className="h-4 w-4" />
             动态表情
           </label>
-          <span className="text-xs text-slate-400">（根据首张图片自动判断）</span>
+          <span className="text-xs text-slate-400">（按文件实际内容自动识别，支持 GIF / Animated WebP / APNG）</span>
         </div>
       </section>
 
@@ -187,7 +187,7 @@ export function StickerPackUploader() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/jpeg,image/png,image/webp,image/gif"
+            accept="image/jpeg,image/png,image/apng,image/webp,image/gif"
             className="hidden"
             onChange={onStickerPick}
           />

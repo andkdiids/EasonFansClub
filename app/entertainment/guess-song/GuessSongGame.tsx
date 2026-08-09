@@ -46,7 +46,13 @@ type SessionState = {
 type AnswerResult = {
   duplicate: boolean
   correct: boolean
+  answerStatus: 'CORRECT' | 'WRONG' | 'UNKNOWN'
+  skipped: boolean
   correctSongTitle: string
+  correctSongArtist: string | null
+  correctSongAlbumTitle: string | null
+  correctSongReleaseYear: number | null
+  correctSongDescription: string | null
   awardedScore: number
   session: SessionState
   ranks: { weekRank: number | null; monthRank: number | null } | null
@@ -75,6 +81,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const [session, setSession] = useState<SessionState | null>(null)
   const [nextSession, setNextSession] = useState<SessionState | null>(null)
   const [answerResult, setAnswerResult] = useState<AnswerResult | null>(null)
+  const [skipPending, setSkipPending] = useState(false)
   const [loading, setLoading] = useState(true)
   const [playing, setPlaying] = useState(false)
   const [audioLoading, setAudioLoading] = useState(false)
@@ -92,6 +99,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const audioGenerationRef = useRef(0)
   const playRequestRef = useRef<PendingPlayRequest | null>(null)
   const timeoutSubmittedRef = useRef<string | null>(null)
+  const submittedQuestionRef = useRef<string | null>(null)
   const submitAnswerRef = useRef<(answer: GuessAnswerSubmission) => void>(() => undefined)
   const startedAtRef = useRef(Date.now())
   const finalRanksRef = useRef<AnswerResult['ranks']>(null)
@@ -159,8 +167,10 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     playRequestRef.current = null
     setAudioError('')
     setAnswerResult(null)
+    setSkipPending(false)
     setNextSession(null)
     timeoutSubmittedRef.current = null
+    submittedQuestionRef.current = null
   }, [session?.question?.publicId, stopAudio])
 
   useEffect(() => {
@@ -303,14 +313,24 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     return data.candidates
   }, [])
 
+  function giveUpQuestion() {
+    const question = session?.question
+    if (!session || !question || question.answerMode !== 'INPUT' || answering || answerResult || submittedQuestionRef.current === question.publicId) return
+    setSkipPending(true)
+    void submitAnswer({ optionKey: null, songId: null, answerText: null, skip: true })
+  }
+
   async function submitAnswer(answer: GuessAnswerSubmission) {
     const question = session?.question
-    if (!session || !question || answering || answerResult) return
+    if (!session || !question || answering || answerResult || submittedQuestionRef.current === question.publicId) return
+    submittedQuestionRef.current = question.publicId
     setAnswering(true)
     const pendingPlay = playRequestRef.current
     if (pendingPlay?.publicId === question.publicId) {
       const ready = await pendingPlay.promise
       if (!ready) {
+        if (submittedQuestionRef.current === question.publicId) submittedQuestionRef.current = null
+        if (answer.skip === true) setSkipPending(false)
         setAnswering(false)
         return
       }
@@ -321,12 +341,15 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       const result = await api<AnswerResult>(`/api/entertainment/guess-song/sessions/${session.id}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionId: question.publicId, ...answer }),
+        body: JSON.stringify({ questionId: question.publicId, ...answer, skip: answer.skip === true }),
       })
+      if (answer.skip === true) setSkipPending(false)
       setAnswerResult(result)
       setNextSession(result.session)
       if (result.ranks) finalRanksRef.current = result.ranks
     } catch (reason) {
+      if (submittedQuestionRef.current === question.publicId) submittedQuestionRef.current = null
+      if (answer.skip === true) setSkipPending(false)
       setError(reason instanceof Error ? reason.message : '答案提交失败')
     } finally {
       setAnswering(false)
@@ -505,7 +528,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   return (
   <main className="games-page games-center-background games-full-width immersive-game-layout guess-play-page">
       <button type="button" className="game-exit-button" onClick={requestExit} aria-label="退出游戏">← <span>退出游戏</span></button>
-      <div className={`guess-play-shell ${answerResult && !answerResult.correct ? 'is-wrong' : ''}`}>
+      <div className={`guess-play-shell ${answerResult?.answerStatus === 'WRONG' ? 'is-wrong' : ''}`}>
         <GuessHeader
           mode={`${session.modeLabel}模式`}
           position={question.position}
@@ -516,6 +539,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
            lives={session.livesRemaining}
            wrongCount={session.wrongCount}
            maxWrongCount={session.maxWrongCount ?? undefined}
+           showLives={question.answerMode === 'INPUT'}
           countdown={deadlineSeconds}
         />
         {error ? <p className="guess-play-message is-error" role="alert">{error}</p> : null}
@@ -527,7 +551,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           elapsedSeconds={elapsedSeconds}
           durationSeconds={durationSeconds || question.playbackDurationSeconds}
           remainingPlayCount={question.remainingPlayCount}
-          disabled={audioLoading || Boolean(answerResult) || (question.remainingPlayCount <= 0 && !audioRef.current)}
+          disabled={audioLoading || Boolean(answerResult) || skipPending || (question.remainingPlayCount <= 0 && !audioRef.current)}
           onToggle={() => void toggleAudio()}
         />
         <section className="guess-answer-zone answer-section" aria-label="回答区域">
@@ -535,28 +559,36 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
             <div className="guess-expert-status" aria-live="polite">
               <span>答题时间 {deadlineSeconds == null ? '音频结束后开始' : `${deadlineSeconds}s`}</span>
               <span>播放 {question.playCount}/{question.maxPlayCount}</span>
-              <span>错误 {session.wrongCount}/{session.maxWrongCount}</span>
+              <span>机会 {session.livesRemaining}/{session.maxWrongCount}</span>
             </div>
           ) : null}
 <GuessAnswerInput
   key={question.publicId}
   mode={question.answerMode}
   options={question.options}
-  disabled={answering || Boolean(answerResult)}
+  disabled={answering || Boolean(answerResult) || skipPending}
   played={question.playCount > 0}
   inputEnabled={question.answerMode === 'INPUT' ? inputEnabled : undefined}
-  wrongPulse={answerResult && !answerResult.correct ? 1 : 0}
+  wrongPulse={answerResult?.answerStatus === 'WRONG' ? 1 : 0}
   searchCandidates={question.answerMode === 'INPUT' ? searchCandidates : undefined}
   onSubmit={(answer) => void submitAnswer(answer)}
+  onGiveUp={question.answerMode === 'INPUT' ? giveUpQuestion : undefined}
  />
           <GuessFooter played={question.playCount > 0} playCount={question.playCount} maxPlayCount={question.maxPlayCount} />
         </section>
-        {answerResult ? (
+        {answerResult || skipPending ? (
           <GuessResultOverlay
-            correct={answerResult.correct}
-            title={answerResult.correctSongTitle}
-            score={answerResult.awardedScore}
-            final={nextSession?.status === 'COMPLETED'}
+            key={question.publicId}
+            loading={skipPending && !answerResult}
+            correct={answerResult?.correct ?? false}
+            skipped={answerResult?.skipped ?? true}
+            title={answerResult?.correctSongTitle ?? ''}
+            artist={answerResult?.correctSongArtist}
+            albumTitle={answerResult?.correctSongAlbumTitle}
+            releaseYear={answerResult?.correctSongReleaseYear}
+            description={answerResult?.correctSongDescription}
+            score={answerResult?.awardedScore ?? 0}
+            final={Boolean(answerResult && nextSession?.status === 'COMPLETED')}
             onContinue={continueGame}
           />
         ) : null}

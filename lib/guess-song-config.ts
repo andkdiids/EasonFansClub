@@ -44,7 +44,7 @@ export const GUESS_SONG_MODE_CONFIG = {
     durationSeconds: 7,
     maxPlayCount: 5,
     questionCount: null,
-    maxWrongCount: 5,
+    maxWrongCount: 3,
     answerMode: 'INPUT',
     baseScore: GUESS_SONG_BASE_SCORE,
     sessionMinutes: 60,

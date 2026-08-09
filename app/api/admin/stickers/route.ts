@@ -104,13 +104,13 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer())
   try {
-    const { url } = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
+    const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
     const sticker = await createOfficialSticker({
       creatorId: guard.user.id,
       name,
-      url,
+      url: result.url,
       category,
-      type,
+      type: result.type,
     })
     return NextResponse.json({ sticker }, { status: 201 })
   } catch (error) {

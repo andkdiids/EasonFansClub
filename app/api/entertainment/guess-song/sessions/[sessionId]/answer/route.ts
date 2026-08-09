@@ -18,6 +18,7 @@ export async function POST(request: Request, { params }: Context) {
     optionKey?: unknown
     songId?: unknown
     answerText?: unknown
+    skip?: unknown
   } | null
   try {
     return guessSongOk(await answerGuessSongQuestion({
@@ -27,6 +28,7 @@ export async function POST(request: Request, { params }: Context) {
       optionKey: body?.optionKey === null ? null : sanitizeText(body?.optionKey, 100),
       songId: sanitizeText(body?.songId, 100) || null,
       answerText: sanitizeText(body?.answerText, 160) || null,
+      skip: body?.skip === true,
     }))
   } catch (error) {
     return handleGuessSongError(error, 'sessions.answer')

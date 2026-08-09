@@ -44,7 +44,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, url, format: 'webp' })
       }
       const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
-      return NextResponse.json({ success: true, url: result.url, format: result.format })
+      return NextResponse.json({
+        success: true,
+        url: result.url,
+        format: result.format,
+        type: result.type,
+        isAnimated: result.isAnimated,
+      })
     } catch (error) {
       const message =
         error instanceof SiteMediaStorageError

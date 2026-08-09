@@ -1,4 +1,4 @@
-export function GuessHeader({ mode, position, total, score, streak, remaining, lives, wrongCount, maxWrongCount, countdown }: Readonly<{
+export function GuessHeader({ mode, position, total, score, streak, remaining, lives, wrongCount, maxWrongCount, showLives = false, countdown }: Readonly<{
   mode: string
   position: number
   total: number | null
@@ -8,6 +8,7 @@ export function GuessHeader({ mode, position, total, score, streak, remaining, l
   lives?: number
   wrongCount?: number
   maxWrongCount?: number
+  showLives?: boolean
   countdown?: number | null
 }>) {
   return (
@@ -19,7 +20,9 @@ export function GuessHeader({ mode, position, total, score, streak, remaining, l
       <dl>
         <div><dt>得分</dt><dd>{score}</dd></div>
         <div><dt>连击</dt><dd>{streak}</dd></div>
-        {maxWrongCount !== undefined
+        {showLives && lives !== undefined
+          ? <div><dt>机会</dt><dd>{lives}</dd></div>
+          : maxWrongCount !== undefined
           ? <div><dt>错误</dt><dd>{wrongCount ?? Math.max(0, maxWrongCount - (lives ?? maxWrongCount))}/{maxWrongCount}</dd></div>
           : lives !== undefined
             ? <div><dt>机会</dt><dd>{lives}</dd></div>

@@ -18,6 +18,7 @@ export type GuessAnswerSubmission = {
   optionKey: string | null
   songId: string | null
   answerText: string | null
+  skip?: boolean
 }
 
 type GuessAnswerInputProps = {
@@ -29,6 +30,7 @@ type GuessAnswerInputProps = {
   mode: 'CHOICE' | 'INPUT'
   searchCandidates?: (query: string, signal: AbortSignal) => Promise<GuessSongCandidate[]>
   onSubmit: (answer: GuessAnswerSubmission) => void
+  onGiveUp?: () => void
 }
 
 export function GuessAnswerInput({
@@ -40,6 +42,7 @@ export function GuessAnswerInput({
   wrongPulse,
   searchCandidates,
   onSubmit,
+  onGiveUp,
 }: Readonly<GuessAnswerInputProps>) {
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState('')
@@ -148,14 +151,26 @@ export function GuessAnswerInput({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        className="guess-confirm-button"
-        disabled={disabled || (mode === 'INPUT' ? !canUseInput : !played) || (mode === 'CHOICE' ? !selectedKey : !query.trim())}
-        onClick={submit}
-      >
-        {mode === 'CHOICE' ? '确认答案' : '提交答案'}
-      </button>
+      <div className={`guess-answer-actions ${mode === 'INPUT' ? 'has-give-up' : ''}`}>
+        <button
+          type="button"
+          className="guess-confirm-button"
+          disabled={disabled || (mode === 'INPUT' ? !canUseInput : !played) || (mode === 'CHOICE' ? !selectedKey : !query.trim())}
+          onClick={submit}
+        >
+          {mode === 'CHOICE' ? '确认答案' : '提交答案'}
+        </button>
+        {mode === 'INPUT' && onGiveUp ? (
+          <button
+            type="button"
+            className="guess-give-up-button"
+            disabled={disabled || !canUseInput}
+            onClick={onGiveUp}
+          >
+            我不知道
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }

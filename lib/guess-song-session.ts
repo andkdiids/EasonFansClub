@@ -473,8 +473,39 @@ export async function requestGuessSongPlayback(input: {
 type AnswerOutcome = {
   duplicate: boolean
   correct: boolean
+  answerStatus: 'CORRECT' | 'WRONG' | 'UNKNOWN'
+  skipped: boolean
   correctSongTitle: string
+  correctSongArtist: string | null
+  correctSongAlbumTitle: string | null
+  correctSongReleaseYear: number | null
+  correctSongDescription: string | null
   awardedScore: number
+}
+
+const GUESS_SONG_SKIPPED_OPTION = '__SKIPPED__'
+
+type MusicSongWithAlbum = Prisma.MusicSongGetPayload<{ include: { MusicAlbum: true } }>
+
+function getGuessSongAnswerDetails(question: {
+  songTitle: string
+  albumTitle: string | null
+  MusicSong: MusicSongWithAlbum | null
+}) {
+  const song = question.MusicSong
+  const album = song?.MusicAlbum
+  return {
+    correctSongTitle: question.songTitle,
+    correctSongArtist: song?.artist ?? null,
+    correctSongAlbumTitle: album?.name ?? question.albumTitle ?? null,
+    correctSongReleaseYear: song?.releaseYear ?? album?.releaseYear ?? null,
+    correctSongDescription:
+      song?.description?.trim()
+      || song?.story?.trim()
+      || album?.description?.trim()
+      || album?.story?.trim()
+      || null,
+  }
 }
 
 export async function answerGuessSongQuestion(input: {
@@ -484,6 +515,7 @@ export async function answerGuessSongQuestion(input: {
   optionKey: string | null
   songId?: string | null
   answerText?: string | null
+  skip?: boolean
   now?: Date
 }) {
   const now = input.now ?? new Date()
@@ -492,7 +524,7 @@ export async function answerGuessSongQuestion(input: {
       where: { publicId: input.publicQuestionId },
       include: {
         GuessSongSession: true,
-        GuessSongQuestion: { include: { MusicSong: true } },
+        GuessSongQuestion: { include: { MusicSong: { include: { MusicAlbum: true } } } },
       },
     })
     if (!question || question.sessionId !== input.sessionId || question.GuessSongSession.userId !== input.userId) {
@@ -512,19 +544,27 @@ export async function answerGuessSongQuestion(input: {
       return {
         duplicate: true,
         correct: Boolean(question.isCorrect),
-        correctSongTitle: question.GuessSongQuestion.songTitle,
+        answerStatus: question.selectedOptionKey === GUESS_SONG_SKIPPED_OPTION
+          ? 'UNKNOWN'
+          : question.isCorrect ? 'CORRECT' : 'WRONG',
+        skipped: question.selectedOptionKey === GUESS_SONG_SKIPPED_OPTION,
+        ...getGuessSongAnswerDetails(question.GuessSongQuestion),
         awardedScore: question.awardedScore,
       }
     }
 
     const expert = question.GuessSongSession.mode === 'EXPERT'
     const timedOut = Boolean(question.answerDeadlineAt && question.answerDeadlineAt <= now)
+    const skipped = Boolean(input.skip && expert && !timedOut)
+    if (input.skip && !expert) throw new GuessSongServiceError('只有专家模式可以跳过本题', 409, 'SKIP_NOT_SUPPORTED')
     if (question.playCount < 1) throw new GuessSongServiceError('请先播放音频再作答')
 
     const options = parseOptions(question.optionsSnapshot)
     let selectedOptionKey = '__TIMEOUT__'
     let correct = false
-    if (!timedOut && expert) {
+    if (skipped) {
+      selectedOptionKey = GUESS_SONG_SKIPPED_OPTION
+    } else if (!timedOut && expert) {
       const answerText = input.answerText?.trim() || ''
       const submittedSongId = input.songId?.trim() || ''
       if (!answerText && !submittedSongId) {
@@ -574,38 +614,42 @@ export async function answerGuessSongQuestion(input: {
     if (claimed.count !== 1) {
       const existing = await tx.guessSongSessionQuestion.findUniqueOrThrow({
         where: { id: question.id },
-        include: { GuessSongQuestion: true },
+        include: { GuessSongQuestion: { include: { MusicSong: { include: { MusicAlbum: true } } } } },
       })
       return {
         duplicate: true,
         correct: Boolean(existing.isCorrect),
-        correctSongTitle: existing.GuessSongQuestion.songTitle,
+        answerStatus: existing.selectedOptionKey === GUESS_SONG_SKIPPED_OPTION
+          ? 'UNKNOWN'
+          : existing.isCorrect ? 'CORRECT' : 'WRONG',
+        skipped: existing.selectedOptionKey === GUESS_SONG_SKIPPED_OPTION,
+        ...getGuessSongAnswerDetails(existing.GuessSongQuestion),
         awardedScore: existing.awardedScore,
       }
     }
 
-    await Promise.all([
-      tx.guessSongQuestion.update({
+    if (!skipped) {
+      await tx.guessSongQuestion.update({
         where: { id: question.questionId },
         data: {
           answerCount: { increment: 1 },
           ...(correct ? { correctCount: { increment: 1 } } : {}),
         },
-      }),
-      tx.guessSongSession.update({
-        where: { id: input.sessionId },
-        data: {
-          score: { increment: awardedScore },
-          correctCount: { increment: correct ? 1 : 0 },
-          wrongCount: { increment: correct ? 0 : 1 },
-          currentStreak: nextStreak,
-          maxStreak: Math.max(question.GuessSongSession.maxStreak, nextStreak),
-          livesRemaining,
-          currentPosition: completed ? question.position : question.position + 1,
-          ...(completed ? { status: 'COMPLETED', completedAt: now, activeKey: null } : {}),
-        },
-      }),
-    ])
+      })
+    }
+    await tx.guessSongSession.update({
+      where: { id: input.sessionId },
+      data: {
+        score: { increment: awardedScore },
+        correctCount: { increment: correct ? 1 : 0 },
+        wrongCount: { increment: correct || skipped ? 0 : 1 },
+        currentStreak: nextStreak,
+        maxStreak: Math.max(question.GuessSongSession.maxStreak, nextStreak),
+        livesRemaining,
+        currentPosition: completed ? question.position : question.position + 1,
+        ...(completed ? { status: 'COMPLETED', completedAt: now, activeKey: null } : {}),
+      },
+    })
 
     if (!completed && infiniteSession) {
       const quizConfig = await tx.guessSongQuizConfig.findUnique({ where: { id: GUESS_SONG_QUIZ_CONFIG_ID } })
@@ -622,7 +666,9 @@ export async function answerGuessSongQuestion(input: {
     return {
       duplicate: false,
       correct,
-      correctSongTitle: question.GuessSongQuestion.songTitle,
+      answerStatus: skipped ? 'UNKNOWN' : correct ? 'CORRECT' : 'WRONG',
+      skipped,
+      ...getGuessSongAnswerDetails(question.GuessSongQuestion),
       awardedScore,
     }
   })
