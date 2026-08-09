@@ -3538,6 +3538,53 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
     transform: translateX(-12px);
   }
 }
+
+/* Mobile home avatar: keep the hit area, but remove every rectangular button surface. */
+@media (max-width:767px) {
+  .app-topbar-actions .app-topbar-user-trigger {
+    display:grid !important;
+    width:36px !important;
+    height:36px !important;
+    min-width:36px !important;
+    margin:0;
+    padding:0 !important;
+    border:0 !important;
+    border-radius:50%;
+    outline:0;
+    box-shadow:none !important;
+    background:transparent !important;
+    appearance:none;
+    -webkit-appearance:none;
+  }
+  .app-topbar-actions .app-topbar-user-trigger:hover,
+  .app-topbar-actions .app-topbar-user-trigger:active,
+  .app-topbar-actions .app-topbar-user-trigger[aria-expanded='true'] {
+    border:0 !important;
+    box-shadow:none !important;
+    background:transparent !important;
+  }
+  .app-topbar-actions .app-topbar-user-trigger:focus-visible {
+    outline:2px solid rgba(255,255,255,.78);
+    outline-offset:2px;
+  }
+  .app-topbar-user-trigger .app-topbar-avatar {
+    display:grid;
+    width:32px;
+    height:32px;
+    border:0;
+    border-radius:50%;
+    padding:0;
+    box-shadow:none;
+    background:transparent;
+  }
+  .app-topbar-user-trigger .app-topbar-avatar > img,
+  .app-topbar-user-trigger .app-topbar-avatar > span {
+    display:block;
+    width:100%;
+    height:100%;
+    border-radius:inherit;
+  }
+}
 /* 娱乐天空整体背景 */
 .games-center-background {
   min-height: 100vh;
@@ -3809,6 +3856,7 @@ body:has(.games-full-width) .app-shell main {
 .home-today-carousel-controls { display:flex; align-items:center; justify-content:flex-end; gap:6px; padding:8px 0 0; }
 .home-today-carousel-controls button { border:0; padding:2px 4px; color:var(--foreground-muted); background:transparent; font-size:10px; line-height:1; }
 .home-today-carousel-controls button:hover,.home-today-carousel-controls button.is-active { color:var(--primary); }
+.home-today-desktop-carousel-controls { display:none; }
 
 /* 今日模块：≤2 条展开为普通列表（隐藏轮播箭头/圆点） */
 .home-today-list { display:flex; flex-direction:column; gap:10px; }
@@ -3885,7 +3933,7 @@ body:has(.games-full-width) .app-shell main {
   .home-mobile-dual .home-daily-music-button { min-height:34px; padding:0 10px; font-size:10px; }
   .home-mobile-dual .home-today-list > a { padding:10px 12px; }
   .home-today-panel { padding-inline:0; }
-  .home-today-panel > header { padding-inline:14px; }
+  .home-today-panel > header { margin-inline:16px; padding-inline:0; }
   .home-today-content { padding:16px; }
   .home-album-strip {
     display:grid;
@@ -3918,6 +3966,11 @@ body:has(.games-full-width) .app-shell main {
 /* 今日模块：顶部分隔线(border-top)与标题之间留出间距，避免横线贴住「今日」标题 */
 /* 桌面端三列首页模块共享同一行高；今日模块的额外顶部留白只保留在移动端。 */
 @media (min-width:768px) {
+  .home-today-desktop-carousel { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .home-today-carousel-controls { display:none; }
+  .home-today-desktop-carousel-controls { display:flex; align-items:center; justify-content:flex-end; gap:6px; padding:8px 0 0; }
+  .home-today-desktop-carousel-controls button { border:0; padding:2px 4px; color:var(--foreground-muted); background:transparent; font-size:10px; line-height:1; }
+  .home-today-desktop-carousel-controls button:hover,.home-today-desktop-carousel-controls button.is-active { color:var(--primary); }
   .home-primary-columns > .community-panel {
     display:flex;
     min-height:0;
@@ -3929,7 +3982,7 @@ body:has(.games-full-width) .app-shell main {
   .home-primary-columns .home-entertainment-content {
     flex:1 1 auto;
   }
-  .home-primary-columns .home-today-content { padding-bottom:8px; }
+  .home-primary-columns .home-today-content { padding-top:14px; padding-bottom:8px; }
   .home-primary-columns .home-daily-music-copy { display:flex; flex-direction:column; }
   .home-primary-columns .home-daily-music-button,
   .home-primary-columns .home-entertainment-button { margin-top:auto; }

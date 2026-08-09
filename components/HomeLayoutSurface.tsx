@@ -157,6 +157,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const [data, setData] = useState<Payload>({ posts: [], activities: [], albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], entertainmentRanking: null, concerts: [] })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
+  const [todayPageIndex, setTodayPageIndex] = useState(0)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
   const heroFallbackImage = siteConfig.heroVisuals.home.enabled
     ? siteConfig.heroVisuals.home.desktopHero || siteConfig.heroVisuals.home.imageUrl
@@ -195,18 +196,29 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     }
   }, [])
 
+  const todayPageCount = Math.ceil(data.todayEvents.length / 2)
+
   useEffect(() => {
     setTodayEventIndex((current) => data.todayEvents.length ? current % data.todayEvents.length : 0)
+    setTodayPageIndex((current) => todayPageCount ? current % todayPageCount : 0)
     if (data.todayEvents.length <= 2) return
     const timer = window.setInterval(() => {
-      setTodayEventIndex((current) => (current + 1) % data.todayEvents.length)
+      if (device === 'desktop') {
+        setTodayPageIndex((current) => (current + 1) % todayPageCount)
+      } else {
+        setTodayEventIndex((current) => (current + 1) % data.todayEvents.length)
+      }
     }, 5000)
     return () => window.clearInterval(timer)
-  }, [data.todayEvents.length])
+  }, [data.todayEvents.length, device, todayPageCount])
 
   const checkedIn = Boolean(data.stats?.checkIns.length)
   const checkinStateClass = data.stats ? checkedIn ? 'is-checked' : 'is-not-checked' : 'is-loading'
   const todayEvent = data.todayEvents[todayEventIndex] || null
+  const desktopTodayEvents = useMemo(() => {
+    if (todayPageCount <= 1) return []
+    return data.todayEvents.slice(todayPageIndex * 2, todayPageIndex * 2 + 2)
+  }, [data.todayEvents, todayPageCount, todayPageIndex])
 
   const renderDailyMusicPanel = () => (
     <section className="community-panel music-panel home-daily-music-panel" aria-label="EasMusic 今日推荐">
@@ -241,7 +253,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     </section>
   )
 
-  // 今日模块：≤2 条直接展开为普通列表（隐藏轮播箭头/圆点）；>2 条保持单卡轮播。
+  // 今日模块：≤2 条直接展开为普通列表；桌面端 >2 条显示双卡轮播，移动端保留单卡轮播。
   const renderTodayPanel = () => {
     const events = data.todayEvents
     return (
@@ -264,7 +276,20 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           </div>
         ) : events.length > 2 ? (
           <div>
-            {todayEvent ? <Link href={todayEvent.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
+            {device === 'desktop' ? (
+              <div className="home-today-desktop-carousel">
+                {desktopTodayEvents.map((event) => (
+                  <Link key={event.id} href={event.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
+                    <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(event.year, event.month, event.day)}</time>
+                      <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
+                    </div>
+                    <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{event.title}</strong>
+                    <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small>
+                  </Link>
+                ))}
+              </div>
+            ) : todayEvent ? <Link href={todayEvent.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
               <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(todayEvent.year, todayEvent.month, todayEvent.day)}</time>
                 <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
@@ -272,6 +297,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
               <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{todayEvent.title}</strong>
               <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small>
             </Link> : null}
+            <div className="home-today-desktop-carousel-controls" aria-label="今日事件分页控制"><button type="button" onClick={() => setTodayPageIndex((current) => (current - 1 + todayPageCount) % todayPageCount)} aria-label="上一页">←</button>{Array.from({ length: todayPageCount }, (_, pageIndex) => <button key={pageIndex} type="button" className={pageIndex === todayPageIndex ? 'is-active' : ''} onClick={() => setTodayPageIndex(pageIndex)} aria-label={'查看第 ' + (pageIndex + 1) + ' 页'}>●</button>)}<button type="button" onClick={() => setTodayPageIndex((current) => (current + 1) % todayPageCount)} aria-label="下一页">→</button></div>
             <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + events.length) % events.length)} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % events.length)} aria-label="下一条">→</button></div>
           </div>
         ) : null}
