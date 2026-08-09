@@ -16,6 +16,30 @@ import { submitStickerPack } from '@/lib/sticker-center'
 export const runtime = 'nodejs'
 export const maxDuration = 180
 
+const STICKER_PACK_TOO_LARGE_MESSAGE = '文件总大小超过限制'
+
+function isPayloadTooLargeError(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { code?: unknown; status?: unknown; statusCode?: unknown; message?: unknown }
+  const status = Number(candidate.status ?? candidate.statusCode)
+  if (status === 413) return true
+
+  const detail = [candidate.code, candidate.message].filter(Boolean).map(String).join(' ').toLowerCase()
+  return /413|payload too large|request entity too large|body exceeded|body.*(?:size|limit|exceed)|(?:request|content).*(?:large|limit|exceed)/.test(detail)
+}
+
+function describeUploadPackError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause,
+    }
+  }
+  return error
+}
+
 /**
  * 用户上传表情包：multipart/form-data
  * - `name`: 合集名称（≤ 40 字）
@@ -30,11 +54,25 @@ export const maxDuration = 180
  * 提交后进入 PENDING 审核流程。
  */
 export async function POST(request: Request) {
+  let stage = 'request_received'
+  let stickerIndex: number | null = null
+  console.info('[sticker.uploadPack]', {
+    stage,
+    method: request.method,
+    contentType: request.headers.get('content-type'),
+    contentLength: request.headers.get('content-length'),
+  })
+
+  stage = 'authentication'
   const guard = await requireUser()
-  if (!guard.user) return guard.response
+  if (!guard.user) {
+    console.warn('[sticker.uploadPack]', { stage, status: guard.response.status })
+    return guard.response
+  }
 
   let formData: FormData | null = null
   let formDataError: unknown = null
+  stage = 'form_data_parsing'
   try {
     formData = await request.formData()
   } catch (error) {
@@ -43,9 +81,19 @@ export async function POST(request: Request) {
   }
   if (!formData) {
     const failure = getStickerFormDataErrorResponse(formDataError)
+    const tooLarge = failure.status === 413 || isPayloadTooLargeError(formDataError)
+    console.error('[sticker.uploadPack]', {
+      stage,
+      error: describeUploadPackError(formDataError),
+      fullError: formDataError,
+    })
     return NextResponse.json(
-      { success: false, code: failure.code, message: failure.message },
-      { status: failure.status },
+      {
+        success: false,
+        code: tooLarge ? 'REQUEST_TOO_LARGE' : 'SERVER_ERROR',
+        message: tooLarge ? STICKER_PACK_TOO_LARGE_MESSAGE : '服务器错误',
+      },
+      { status: tooLarge ? 413 : 500 },
     )
   }
 
@@ -62,6 +110,20 @@ export async function POST(request: Request) {
   const type = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
 
   const stickerFiles = formData.getAll('stickerFiles').filter((f): f is File => f instanceof File)
+  const coverFile = formData.get('cover')
+  const coverSize = coverFile instanceof File && coverFile.size > 0 ? coverFile.size : 0
+  const stickerTotalSize = stickerFiles.reduce((total, file) => total + file.size, 0)
+  console.info('[sticker.uploadPack]', {
+    stage: 'form_data_parsed',
+    fileCount: stickerFiles.length,
+    files: stickerFiles.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+    stickerTotalSize,
+    coverSize,
+    totalFileSize: stickerTotalSize + coverSize,
+    contentLength: request.headers.get('content-length'),
+  })
+
+  stage = 'parameter_validation'
   if (stickerFiles.length < 6) {
     return NextResponse.json({ success: false, message: '至少需要 6 张表情' }, { status: 400 })
   }
@@ -75,20 +137,41 @@ export async function POST(request: Request) {
     }
   }
 
-  const coverFile = formData.get('cover')
   let coverUrl: string | null = null
 
   try {
+    console.info('[sticker.uploadPack]', {
+      stage: 'file_processing_started',
+      fileCount: stickerFiles.length,
+      totalFileSize: stickerTotalSize + coverSize,
+    })
+
+    stage = 'cover_upload'
     if (coverFile instanceof File && coverFile.size > 0) {
       const buf = Buffer.from(await coverFile.arrayBuffer())
       coverUrl = await uploadStickerPackCover({ ownerId: guard.user.id, buffer: buf })
+      console.info('[sticker.uploadPack]', {
+        stage: 'cos_upload_success',
+        kind: 'cover',
+        url: coverUrl,
+        size: buf.byteLength,
+      })
     }
 
     const uploadedStickers: Array<{ name: string | null; url: string; type: 'STATIC' | 'GIF' }> = []
     const stickerNamesRaw = formData.getAll('stickerNames').map((n) => String(n || ''))
+    stage = 'sticker_upload'
     for (let i = 0; i < stickerFiles.length; i += 1) {
+      stickerIndex = i
       const file = stickerFiles[i]
       const buf = Buffer.from(await file.arrayBuffer())
+      console.info('[sticker.uploadPack]', {
+        stage: 'sticker_processing_started',
+        index: i,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      })
       const result = await uploadStickerImage({
         ownerId: guard.user.id,
         type,
@@ -97,10 +180,26 @@ export async function POST(request: Request) {
       const rawName = stickerNamesRaw[i] || ''
       const trimmed = rawName.trim().slice(0, 4)
       uploadedStickers.push({ name: trimmed || null, url: result.url, type: result.type })
+      console.info('[sticker.uploadPack]', {
+        stage: 'cos_upload_success',
+        kind: 'sticker',
+        index: i,
+        url: result.url,
+        size: buf.byteLength,
+        outputFormat: result.format,
+        isAnimated: result.isAnimated,
+      })
     }
 
     const packType = uploadedStickers.some((sticker) => sticker.type === 'GIF') ? 'GIF' : 'STATIC'
 
+    stage = 'prisma_create_started'
+    console.info('[sticker.uploadPack]', {
+      stage,
+      fileCount: uploadedStickers.length,
+      packType,
+      hasCover: Boolean(coverUrl),
+    })
     const { packId } = await submitStickerPack({
       creatorId: guard.user.id,
       name,
@@ -111,6 +210,8 @@ export async function POST(request: Request) {
       category: category || null,
       stickers: uploadedStickers,
     })
+    stage = 'prisma_create_succeeded'
+    console.info('[sticker.uploadPack]', { stage, packId })
 
     revalidatePath('/profile/stickers')
     return NextResponse.json({
@@ -120,15 +221,21 @@ export async function POST(request: Request) {
       message: '已提交审核，请等待管理员审核',
     })
   } catch (error) {
-    console.error('[sticker.uploadPack]', error)
+    const tooLarge = isPayloadTooLargeError(error)
     const failure = getStickerUploadErrorResponse(error)
+    console.error('[sticker.uploadPack]', {
+      stage,
+      stickerIndex,
+      error: describeUploadPackError(error),
+      fullError: error,
+    })
     return NextResponse.json(
       {
         success: false,
-        code: failure.code,
-        message: failure.message,
+        code: tooLarge ? 'REQUEST_TOO_LARGE' : failure.status === 400 ? failure.code : 'SERVER_ERROR',
+        message: tooLarge ? STICKER_PACK_TOO_LARGE_MESSAGE : failure.status === 400 ? failure.message : '服务器错误',
       },
-      { status: failure.status },
+      { status: tooLarge ? 413 : failure.status === 400 ? 400 : 500 },
     )
   }
 }
