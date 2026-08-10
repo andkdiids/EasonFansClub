@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_DIR: /home/${{ secrets.SERVER_USER }}/EasonFansClub
+  APP_DIR: /home/apps/easonfansclub
   APP_PORT: "3000"
   PACKAGE_NAME: easonfansclub-${{ github.sha }}.tar.gz
   MAX_PACKAGE_BYTES: "52428800"
