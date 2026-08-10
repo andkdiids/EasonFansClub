@@ -14,6 +14,7 @@ export const registrationModeLabels: Record<RegistrationMode, string> = {
 }
 
 const registrationModeSettingKey = 'registration.mode'
+const registrationLimitSettingKey = 'registrationLimitEnabled'
 
 export function isValidRegistrationMode(value: unknown): value is RegistrationMode {
   return typeof value === 'string' && registrationModes.includes(value as RegistrationMode)
@@ -54,11 +55,42 @@ export async function setStoredRegistrationMode(mode: RegistrationMode) {
   })
 }
 
+export async function getRegistrationLimitEnabled() {
+  const setting = await prisma.siteSetting.findUnique({
+    where: { key: registrationLimitSettingKey },
+    select: { value: true },
+  })
+  return setting?.value === 'true'
+}
+
+export async function setRegistrationLimitEnabled(enabled: boolean) {
+  await prisma.siteSetting.upsert({
+    where: { key: registrationLimitSettingKey },
+    update: {
+      value: String(enabled),
+      valueType: 'BOOLEAN',
+      group: 'system',
+      label: '注册限制',
+    },
+    create: {
+      key: registrationLimitSettingKey,
+      value: String(enabled),
+      valueType: 'BOOLEAN',
+      group: 'system',
+      label: '注册限制',
+    },
+  })
+}
+
 export async function getRegistrationPolicy() {
   const allowRegister = isRegisterEnvAllowed()
   const registrationMode = await getStoredRegistrationMode()
   const enableTurnstile = isTurnstileEnabled()
-  const [securitySettings, hospitalConfig] = await Promise.all([getAccountSecuritySettings(), getEHospitalCheckConfig()])
+  const [securitySettings, hospitalConfig, registrationLimitEnabled] = await Promise.all([
+    getAccountSecuritySettings(),
+    getEHospitalCheckConfig(),
+    getRegistrationLimitEnabled(),
+  ])
   const allowPhoneRegistration = allowRegister && (registrationMode === 'PHONE' || registrationMode === 'BOTH')
   const allowEmailRegistration = allowRegister && (registrationMode === 'EMAIL' || registrationMode === 'BOTH')
   const registrationClosed = !allowRegister || registrationMode === 'CLOSED' || (!allowPhoneRegistration && !allowEmailRegistration)
@@ -75,6 +107,7 @@ export async function getRegistrationPolicy() {
     envForcedClosed: !allowRegister,
     requireSecurityQuestionsForNewUsers: securitySettings.requireSecurityQuestionsForNewUsers,
     ehospitalCheckEnabled: hospitalConfig.enabled,
+    registrationLimitEnabled,
   }
 }
 

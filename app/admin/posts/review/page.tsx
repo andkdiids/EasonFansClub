@@ -20,6 +20,8 @@ export default async function AdminPostReviewPage() {
       content: true,
       createdAt: true,
       moderationStatus: true,
+      reviewedAt: true,
+      rejectionReason: true,
       isPinned: true,
       isFeatured: true,
       User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
@@ -30,6 +32,7 @@ export default async function AdminPostReviewPage() {
   const initialPosts: ReviewPost[] = posts.map((post) => ({
     ...post,
     createdAt: post.createdAt.toISOString(),
+    reviewedAt: post.reviewedAt?.toISOString() || null,
     User: post.User,
     PostMedia: post.PostMedia.map((media) => ({ ...media, url: publicImageUrl(media.url), thumbnail: publicImageUrl(media.thumbnail) })),
   }))

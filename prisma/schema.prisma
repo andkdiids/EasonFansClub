@@ -1038,6 +1038,12 @@ model GuessSongSession {
   activeKey                 String?                     @unique
   mode                      GuessSongMode
   status                    GuessSongSessionStatus      @default(IN_PROGRESS)
+  riskScore                 Int                         @default(0)
+  riskReasons               Json?
+  isValid                   Boolean                     @default(true)
+  clientSessionNonce        String?
+  clientSessionTokenIssuedAt DateTime?
+  invalidatedAt             DateTime?
   score                     Int                         @default(0)
   correctCount              Int                         @default(0)
   wrongCount                Int                         @default(0)
@@ -1054,6 +1060,7 @@ model GuessSongSession {
   updatedAt                 DateTime                    @updatedAt
   userId                    String
   GuessSongLeaderboardEntry GuessSongLeaderboardEntry[]
+  GuessSongRiskLog          GuessSongRiskLog[]
   User                      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   GuessSongSessionQuestion  GuessSongSessionQuestion[]
 
@@ -1061,6 +1068,8 @@ model GuessSongSession {
   @@index([status, expiresAt])
   @@index([userId, completedAt])
   @@index([userId, mode, status])
+  @@index([riskScore, createdAt])
+  @@index([isValid, createdAt])
 }
 
 model GuessSongSessionQuestion {
@@ -1070,6 +1079,9 @@ model GuessSongSessionQuestion {
   playbackDurationSeconds Int
   maxPlayCount            Int
   playCount               Int                    @default(0)
+  questionAttemptTokenHash String?
+  firstPlayedAt            DateTime?
+  answerLatencyMs          Int?
   optionsSnapshot         Json
   correctOptionKey        String
   selectedOptionKey       String?
@@ -1101,6 +1113,25 @@ model GuessSongQuizConfig {
   questionCount Int                 @default(10)
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
+}
+
+model GuessSongRiskLog {
+  id               String            @id @default(cuid())
+  mode             GuessSongMode
+  score            Int
+  riskScore        Int
+  trigger          String?
+  reasons          Json
+  createdAt        DateTime          @default(now())
+  userId           String
+  sessionId        String?
+  User             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  GuessSongSession GuessSongSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([riskScore, createdAt])
+  @@index([sessionId])
 }
 
 model Like {
@@ -1351,6 +1382,7 @@ model MusicSong {
   scene                   String?
   recommendLevel          String?
   description             String?
+  expertEnabled           Boolean                   @default(true)
   GuessSongQuestion       GuessSongQuestion[]
   MusicConcertSetlistItem MusicConcertSetlistItem[]
   UserDailyMusicRecommendation UserDailyMusicRecommendation[]
@@ -2246,6 +2278,7 @@ model User {
   Friendship_Friendship_userAIdToUser                    Friendship[]                @relation("Friendship_userAIdToUser")
   Friendship_Friendship_userBIdToUser                    Friendship[]                @relation("Friendship_userBIdToUser")
   GuessSongLeaderboardEntry                              GuessSongLeaderboardEntry[]
+  GuessSongRiskLog                                       GuessSongRiskLog[]
   GuessSongSession                                       GuessSongSession[]
   Like                                                   Like[]
   LoginDevice                                            LoginDevice[]
@@ -2539,6 +2572,7 @@ enum GuessSongSessionStatus {
   COMPLETED
   ABANDONED
   EXPIRED
+  CHEAT_DETECTED
 }
 
 enum MediaType {

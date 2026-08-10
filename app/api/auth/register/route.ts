@@ -7,6 +7,7 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { chooseDefaultAvatar } from '@/lib/default-avatars'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
 import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
+import { MySqlAdvisoryLockBusyError, createMySqlAdvisoryLockName, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy } from '@/lib/registration'
@@ -17,7 +18,6 @@ import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
-const REGISTRATION_FINALIZE_LOCK_ROW_ID = 'global'
 
 class RegistrationConflictError extends Error {
   constructor(readonly field: 'email' | 'phone' | 'username') {
@@ -134,13 +134,15 @@ export async function POST(request: Request) {
 
     const storedSecurityQuestions = parseStoredSecurityQuestions(draft.securityQuestions)
 
-    const user = await prisma.$transaction(async (tx) => {
-      // User.email and User.phone are indexed but intentionally remain
-      // nullable/non-unique in the existing schema. Lock the existing global
-      // config row until this transaction commits, then recheck all identity
-      // fields inside the same transaction. This serializes final signup
-      // without a migration or a broad table lock.
-      await tx.$queryRaw`SELECT id FROM EHospitalCheckConfig WHERE id = ${REGISTRATION_FINALIZE_LOCK_ROW_ID} FOR UPDATE`
+    const registrationLockNames = [
+      createMySqlAdvisoryLockName('registration:email', email),
+      createMySqlAdvisoryLockName('registration:phone', phone),
+      createMySqlAdvisoryLockName('registration:username', draft.usernameNormalized),
+    ]
+    const user = await prisma.$transaction(async (tx) => withMySqlAdvisoryLocks(
+      tx,
+      registrationLockNames,
+      async () => {
       const concurrentDuplicate = await tx.user.findFirst({
         where: {
           status: 'ACTIVE',
@@ -154,8 +156,6 @@ export async function POST(request: Request) {
       const concurrentUsername = await tx.user.findUnique({ where: { usernameNormalized: draft.usernameNormalized }, select: { id: true } })
       if (concurrentUsername) throw new RegistrationConflictError('username')
 
-      const latest = await tx.user.findFirst({ orderBy: { uid: 'desc' }, select: { uid: true } })
-      if ((latest?.uid ?? -1) >= MAX_UID) throw new Error('UID_LIMIT_REACHED')
       const defaultAvatarUrl = await chooseDefaultAvatar(tx)
       const created = await tx.user.create({
         data: {
@@ -176,6 +176,10 @@ export async function POST(request: Request) {
         },
         select: { id: true, uid: true, username: true, nickname: true, role: true },
       })
+      // User.uid is a database auto-increment column with a unique index. The
+      // insert is the atomic allocator; reject an out-of-range allocation and
+      // roll back instead of serializing every registration on one row.
+      if (created.uid > MAX_UID) throw new Error('UID_LIMIT_REACHED')
 
       if (storedSecurityQuestions.length) {
         await tx.userSecurityQuestion.createMany({ data: storedSecurityQuestions.map((item) => ({ ...item, userId: created.id })) })
@@ -184,7 +188,8 @@ export async function POST(request: Request) {
       await tx.eHospitalCheckAttempt.updateMany({ where: { registrationDraftId: draft.id, userId: null }, data: { userId: created.id } })
       await tx.registrationDraft.update({ where: { id: draft.id }, data: { completedAt: new Date() } })
       return created
-    })
+      },
+    ))
 
     void syncUserAchievements(user.id, ['REGISTER']).catch((achievementError) => console.error('[achievements:register]', achievementError))
     return authenticatedResponse(request, user, 201, { message: '注册成功，正在进入欢迎页', emailVerified: true })
@@ -195,6 +200,7 @@ export async function POST(request: Request) {
       if (existing) return authenticatedResponse(request, existing, 200, { message: '注册已完成，正在进入私家E院', idempotentReplay: true })
     }
     console.error('[auth.register]', error)
+    if (error instanceof MySqlAdvisoryLockBusyError) return jsonError('已有注册请求处理中，请稍后再试', 409, 'REGISTRATION_IN_PROGRESS', { form: '已有注册请求处理中，请稍后再试' })
     if (error instanceof RegistrationConflictError) {
       console.info('[auth.register] duplicate user prevented', { field: error.field })
       if (error.field === 'email') return jsonError('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })

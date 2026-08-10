@@ -79,15 +79,15 @@ test('评论渲染异常由局部 Error Boundary 接管', () => {
 })
 
 test('统一定义真实移动底栏高度和 safe area 总高度', () => {
-  assert.match(css, /--mobile-bottom-nav-height:\s*62px/)
+  assert.match(css, /--mobile-bottom-nav-height:\s*70px/)
   assert.match(css, /--mobile-safe-area-bottom:\s*env\(safe-area-inset-bottom,\s*0px\)/)
   assert.match(css, /--mobile-bottom-nav-total:\s*calc\(var\(--mobile-bottom-nav-height\) \+ var\(--mobile-safe-area-bottom\)\)/)
 })
 
 test('AppShell 只由 Footer 提供一次移动底部补偿', () => {
-  assert.match(css, /\.site-footer-info \{ padding-bottom: calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-page-bottom-gap\)\); \}/)
-  assert.match(css, /\.app-shell \.site-page-main \{ padding-bottom:0; \}/)
-  assert.match(css, /\.app-page-content \{ padding-bottom:0; \}/)
+  assert.match(css, /\.app-shell \.app-page-content \{[\s\S]*padding-bottom:calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-page-bottom-gap\)\);/)
+  assert.match(css, /\.app-shell \.site-footer-info \{[\s\S]*padding-bottom:0;/)
+  assert.match(css, /\.app-main-area \{[^}]*overflow:visible;[^}]*transform:none;[^}]*filter:none;[^}]*perspective:none;[^}]*contain:none;/)
 })
 
 test('普通无壳页面避开固定导航且使用统一变量', () => {
@@ -164,7 +164,7 @@ test('好友窗口作为右侧浮层抽屉保留页面上下文且内容限制�
 
 test('E院中心作为完整卡片止于底部导航上方', () => {
   assert.match(css, /--mobile-center-action-overhang:\s*28px/)
-  assert.match(css, /\.app-mobile-nav \{[^}]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\);[^}]*overflow:visible/)
+  assert.match(css, /\.app-mobile-nav \{[^}]*display:flex;[^}]*overflow:visible/)
   assert.match(css, /\.app-mobile-nav \.mobile-center-icon \{[^}]*left:50%;[^}]*border-radius:50%;[^}]*color:#fff;[^}]*background:var\(--primary\);[^}]*box-shadow:[^;}]+;[^}]*transform:translateX\(-50%\)/)
   assert.match(css, /\.mobile-center-backdrop \{[^}]*inset:0;[^}]*height:100dvh/)
   assert.match(css, /\.mobile-center-sheet \{[^}]*bottom:calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-center-action-overhang\) \+ 10px\)[^}]*max-height:min\(620px,calc\(100dvh - var\(--mobile-bottom-nav-total\) - var\(--mobile-center-action-overhang\) - 54px\)\)[^}]*border-radius:18px/)
@@ -216,4 +216,11 @@ test('EasMusic 对话框沿用集中层级且公开现场路由未被改写', ()
   assert.match(read('components/music/MusicSearchDialog.tsx'), /z-\[var\(--layer-dialog\)\]/)
   assert.match(read('components/music/live/AttendancePanel.tsx'), /z-\[var\(--layer-dialog\)\]/)
   assert.match(read('components/layout/navigation.ts'), /href: '\/music'[\s\S]*mobile: true/)
+})
+
+test('移动底栏固定在 visual viewport 并记录开发期定位诊断', () => {
+  assert.match(css, /\.mobile-bottom-nav \{[\s\S]*position:fixed;[\s\S]*right:0;[\s\S]*bottom:0;[\s\S]*left:0;[\s\S]*width:100%;[\s\S]*z-index:99999;/)
+  assert.match(css, /@media \(max-width:767px\)[\s\S]*\.mobile-bottom-nav \{[\s\S]*display:flex;[\s\S]*padding:[^;]*env\(safe-area-inset-bottom,0px\)/)
+  assert.match(css, /\.mobile-bottom-nav > a,[\s\S]*\.mobile-bottom-nav > button \{[\s\S]*flex:1 1 0;[\s\S]*min-width:0;/)
+  assert.match(mobileNavigation, /console\.log\(\{[\s\S]*viewportHeight: window\.innerHeight[\s\S]*scrollY: window\.scrollY[\s\S]*bottomNavRect: mobileBottomNav\?\.getBoundingClientRect\(\)/)
 })

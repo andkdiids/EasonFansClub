@@ -3,6 +3,7 @@ import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import { toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { prisma } from '@/lib/prisma'
 
 type ScoreRecord = {
@@ -21,6 +22,8 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
       userId: true,
       mode: true,
       status: true,
+      isValid: true,
+      riskScore: true,
       score: true,
       correctCount: true,
       maxStreak: true,
@@ -30,6 +33,7 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
     },
   })
   if (!session || session.status !== 'COMPLETED' || !session.completedAt) return
+  if (!session.isValid || session.riskScore >= GUESS_SONG_RISK_THRESHOLD) return
   // Historical ten-question EASY sessions remain in history but must not enter
   // the replacement infinite simple leaderboard.
   if (session.mode === 'EASY' && session.questionCount !== null) return
@@ -128,6 +132,8 @@ export async function getGuessSongLeaderboard(input: {
     const sessions = await prisma.guessSongSession.findMany({
       where: {
         status: 'COMPLETED',
+        isValid: true,
+        riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
         completedAt: { gte: start, lt: end },
         mode: { in: modeFilter },
         ...legacySimpleFilter,
@@ -179,7 +185,11 @@ export async function getGuessSongLeaderboard(input: {
         periodType: input.periodType,
         periodKey,
         mode: { in: modeFilter },
-        ...(input.mode === 'EASY' ? { GuessSongSession: { questionCount: null } } : {}),
+        GuessSongSession: {
+          isValid: true,
+          riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+          ...(input.mode === 'EASY' ? { questionCount: null } : {}),
+        },
       },
       include: {
         User: {

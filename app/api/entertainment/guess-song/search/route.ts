@@ -21,7 +21,6 @@ export async function GET(request: Request) {
         MusicAlbum: { status: 'PUBLISHED' },
       },
       select: {
-        id: true,
         title: true,
         artist: true,
         MusicAlbum: { select: { name: true } },
@@ -31,7 +30,6 @@ export async function GET(request: Request) {
     })
     return guessSongOk({
       candidates: songs.map((song) => ({
-        id: song.id,
         title: song.title,
         artist: song.artist,
         albumTitle: song.MusicAlbum.name,

@@ -8,7 +8,7 @@ import type { HeroMediaAsset, HeroMediaType, SiteHeroSlide } from '@/lib/site-co
 type HeroDevice = 'desktop' | 'mobile'
 
 const mediaTypeOptions: Array<readonly [HeroMediaType, string]> = [
-  ['IMAGE', '静态图片'],
+  ['STATIC_IMAGE', '静态图片'],
   ['ANIMATED_IMAGE', 'GIF / Animated WebP'],
   ['VIDEO', '短视频'],
 ]
@@ -28,7 +28,7 @@ const emptySlide = (sortOrder: number): SiteHeroSlide => ({
   buttonText: '查看详情',
   href: '#community-content',
   imageUrl: '',
-  mediaType: 'IMAGE',
+  mediaType: 'STATIC_IMAGE',
   mediaUrl: '',
   posterUrl: '',
   sourceUrl: '',
@@ -101,7 +101,7 @@ function DeviceMediaPanel({
         <h3 className="text-sm font-black text-brand-950">{label}</h3>
         <p className="mt-1 text-xs font-bold text-slate-500">{hasExplicitMedia ? '已上传，可独立替换' : '未上传，请选择类型后上传'}</p>
       </div>
-      <span className="text-xs font-black text-sky-700">{mediaTypeOptions.find(([value]) => value === mediaType)?.[1] || mediaType}</span>
+      <span className="text-xs font-black text-sky-700">{mediaType === 'STATIC_IMAGE' ? mediaTypeOptions[0][1] : mediaTypeOptions.find(([value]) => value === mediaType)?.[1] || mediaType}</span>
     </div>
     <div className="relative mt-3 aspect-[16/9] overflow-hidden rounded-xl bg-sky-950">
       {previewUrl && isVideo ? <video src={previewUrl} poster={posterUrl || undefined} muted loop playsInline controls className="h-full w-full object-cover" /> : null}
@@ -182,7 +182,7 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
     event.target.value = ''
     if (!file) return
     const slide = slides[index]
-    const current = selectedMedia(slide, device) || emptyHeroMedia('IMAGE')
+    const current = selectedMedia(slide, device) || emptyHeroMedia('STATIC_IMAGE')
     const uploadKey = `${device}:${kind}`
     setUploading(`${index}:${uploadKey}`)
     setMessage('')
@@ -224,7 +224,7 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
 
   function clearMedia(index: number, device: HeroDevice) {
     const patch: Partial<SiteHeroSlide> = device === 'desktop'
-      ? { desktopHeroMedia: null, mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' }
+      ? { desktopHeroMedia: null, mediaType: 'STATIC_IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' }
       : { mobileHeroMedia: null }
     update(index, patch)
   }
@@ -288,8 +288,8 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
         const mobileMedia = explicitMedia(slide, 'mobile')
         const desktopField = selectedMedia(slide, 'desktop')
         const mobileField = selectedMedia(slide, 'mobile')
-        const desktopType = desktopField?.mediaType || 'IMAGE'
-        const mobileType = mobileField?.mediaType || 'IMAGE'
+        const desktopType = desktopField?.mediaType || 'STATIC_IMAGE'
+        const mobileType = mobileField?.mediaType || 'STATIC_IMAGE'
         return <article key={`${index}-${slide.sortOrder}`} className="grid gap-5 rounded-[26px] border border-sky-100 bg-white/90 p-5 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
             <DeviceMediaPanel

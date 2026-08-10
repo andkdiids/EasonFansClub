@@ -4,6 +4,11 @@ import { prisma } from '@/lib/prisma'
 import { clearSiteAppearanceCache, defaultSiteAppearance, getSiteAppearance, mergeSiteAppearanceConfig } from '@/lib/site-config'
 import { requireAdmin } from '@/lib/security'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
+
 const revalidateTargets = [
   '/',
   '/login',
@@ -28,8 +33,8 @@ export async function GET() {
   if (!guard.user) return guard.response
 
   return NextResponse.json({
-    config: await getSiteAppearance(),
-  })
+    config: await getSiteAppearance({ cache: 'no-store' }),
+  }, { headers: noStoreHeaders })
 }
 
 export async function PATCH(request: Request) {

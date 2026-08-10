@@ -3,8 +3,22 @@ export const pageVisualKeys = ['login', 'register', 'welcome', 'home', 'activiti
 export type HeroVisualKey = typeof heroVisualKeys[number]
 export type PageVisualKey = typeof pageVisualKeys[number]
 
-export const heroMediaTypes = ['IMAGE', 'ANIMATED_IMAGE', 'VIDEO'] as const
-export type HeroMediaType = typeof heroMediaTypes[number]
+export const heroMediaTypes = ['STATIC_IMAGE', 'ANIMATED_IMAGE', 'VIDEO'] as const
+/** Legacy `IMAGE` is accepted only at input boundaries and normalized away. */
+export type HeroMediaType = typeof heroMediaTypes[number] | 'IMAGE'
+
+/**
+ * `IMAGE` was the old serialized name for a static Hero image. Keep accepting
+ * it when reading existing site.appearance JSON, but never expose it as the
+ * normalized media type used by the UI or public Hero renderer.
+ */
+export function normalizeHeroMediaType(value: unknown, fallback: HeroMediaType = 'STATIC_IMAGE'): HeroMediaType {
+  if (value === 'IMAGE') return 'STATIC_IMAGE'
+  const normalizedFallback = fallback === 'IMAGE' ? 'STATIC_IMAGE' : fallback
+  return typeof value === 'string' && heroMediaTypes.includes(value as typeof heroMediaTypes[number])
+    ? value as HeroMediaType
+    : normalizedFallback
+}
 
 export type HeroMediaAsset = {
   mediaType: HeroMediaType
@@ -109,7 +123,7 @@ const visualDefaults = (key: HeroVisualKey, title: string): SiteHeroVisualConfig
   imageUrl: '',
   desktopHero: '',
   mobileHero: '',
-  mediaType: 'IMAGE',
+  mediaType: 'STATIC_IMAGE',
   mediaUrl: '',
   posterUrl: '',
   sourceUrl: '',
@@ -162,13 +176,23 @@ export function resolveHeroMediaAsset(
 ): HeroMediaAsset | null {
   const desktopMedia = hasHeroMediaAsset(visual?.desktopHeroMedia) ? visual?.desktopHeroMedia : null
   const mobileMedia = hasHeroMediaAsset(visual?.mobileHeroMedia) ? visual?.mobileHeroMedia : null
-  const selected = device === 'mobile' ? mobileMedia || desktopMedia : desktopMedia
+  const normalizedDesktopMedia = desktopMedia ? { ...desktopMedia, mediaType: normalizeHeroMediaType(desktopMedia.mediaType) } : null
+  const normalizedMobileMedia = mobileMedia ? { ...mobileMedia, mediaType: normalizeHeroMediaType(mobileMedia.mediaType) } : null
+
+  // Homepage Hero media is explicit per device. In particular, an empty
+  // desktopHeroMedia must stay empty and must not resurrect imageUrl,
+  // desktopHero, or a caller-provided fallback image.
+  if (visual?.key === 'home') {
+    return device === 'mobile' ? normalizedMobileMedia : normalizedDesktopMedia
+  }
+
+  const selected = device === 'mobile' ? normalizedMobileMedia || normalizedDesktopMedia : normalizedDesktopMedia
   if (selected) return selected
 
-  const mediaType = visual?.mediaType || 'IMAGE'
+  const mediaType = normalizeHeroMediaType(visual?.mediaType)
   const responsiveImageUrl = resolveHeroImageUrl(visual, device, fallbackImageUrl)
   const dedicatedImage = device === 'mobile' ? visual?.mobileHero || visual?.desktopHero : visual?.desktopHero
-  const mediaUrl = mediaType === 'IMAGE'
+  const mediaUrl = mediaType === 'STATIC_IMAGE'
     ? dedicatedImage && dedicatedImage !== visual?.imageUrl ? responsiveImageUrl : visual?.mediaUrl || responsiveImageUrl
     : visual?.mediaUrl || ''
   const imageUrl = responsiveImageUrl || visual?.imageUrl || ''

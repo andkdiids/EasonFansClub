@@ -3,9 +3,12 @@ import COS from 'cos-nodejs-sdk-v5'
 const COS_UPLOAD_TIMEOUT_MS = 120_000
 
 export class SiteMediaStorageError extends Error {
-  constructor(message: string) {
+  detail?: string
+
+  constructor(message: string, detail?: string) {
     super(message)
     this.name = 'SiteMediaStorageError'
+    this.detail = detail
   }
 }
 
@@ -52,13 +55,14 @@ export async function uploadSiteImage(params: { key: string; body: Buffer; conte
       }),
     ])
   } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 300) : String(error || 'UNKNOWN_ERROR').slice(0, 300)
     console.error('[site-media.cos]', {
       code: error && typeof error === 'object' && 'code' in error ? error.code : undefined,
-      message: error instanceof Error ? error.message.slice(0, 300) : undefined,
+      message: detail,
     })
     throw new SiteMediaStorageError(error instanceof Error && error.message === 'COS_UPLOAD_TIMEOUT'
       ? '上传腾讯云 COS 超时，请稍后重试'
-      : '图片上传至腾讯云 COS 失败，请稍后重试')
+      : '图片上传至腾讯云 COS 失败，请稍后重试', detail)
   } finally {
     if (timeout) clearTimeout(timeout)
   }

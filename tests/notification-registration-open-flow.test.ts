@@ -28,7 +28,7 @@ test('friend request notifications are keyed and direct decisions mark only the 
   assert.doesNotMatch(requestRoute, /where: \{ actorId: user\.id, type: 'FRIEND_REQUEST', link:/)
 })
 
-test('open registration no longer blocks on drafts or application rate limits', () => {
+test('open registration no longer blocks on drafts or legacy application rate limits', () => {
   const prepare = read('app/api/auth/register/prepare/route.ts')
   const register = read('app/api/auth/register/route.ts')
   const emailCode = read('app/api/auth/register/send-email-code/route.ts')
@@ -37,8 +37,13 @@ test('open registration no longer blocks on drafts or application rate limits', 
   assert.doesNotMatch(prepare, /REGISTRATION_DRAFT_EXISTS|consumeRateLimit|register:prepare/)
   assert.doesNotMatch(register, /REGISTER_REQUEST_RATE_LIMITED|REGISTER_SUCCESS_RATE_LIMITED|consumeRateLimit|checkRateLimit/)
   assert.doesNotMatch(emailCode, /consumeRateLimit|register:email-code/)
-  assert.doesNotMatch(hospital, /DAILY_LIMIT_REACHED|countAttempts\(/)
-  assert.match(register, /EHospitalCheckConfig WHERE id = .*FOR UPDATE/)
+  assert.match(emailCode, /checkDailyRegistrationEmailCodeLimit/)
+  assert.match(emailCode, /recordSuccessfulRegistrationEmailCodeSend/)
+  assert.match(hospital, /DAILY_LIMIT_REACHED|countAttempts\(/)
+  assert.match(hospital, /getShanghaiDayRange/)
+  assert.doesNotMatch(register, /EHospitalCheckConfig WHERE id = .*FOR UPDATE/)
+  assert.match(register, /withMySqlAdvisoryLocks/)
+  assert.match(register, /created\.uid > MAX_UID/)
   assert.match(register, /concurrentDuplicate/)
 })
 

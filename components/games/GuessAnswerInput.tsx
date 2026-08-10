@@ -8,7 +8,6 @@ export type GuessOption = {
 }
 
 export type GuessSongCandidate = {
-  id: string
   title: string
   artist: string
   albumTitle: string
@@ -16,7 +15,6 @@ export type GuessSongCandidate = {
 
 export type GuessAnswerSubmission = {
   optionKey: string | null
-  songId: string | null
   answerText: string | null
   skip?: boolean
 }
@@ -85,7 +83,6 @@ export function GuessAnswerInput({
   }
 
   function chooseCandidate(candidate: GuessSongCandidate) {
-    setSelectedKey(candidate.id)
     setQuery(candidate.title)
     setCandidates([])
   }
@@ -93,12 +90,12 @@ export function GuessAnswerInput({
   function submit() {
     if (mode === 'CHOICE') {
       if (!selectedKey) return
-      onSubmit({ optionKey: selectedKey, songId: null, answerText: null })
+      onSubmit({ optionKey: selectedKey, answerText: null })
       return
     }
     const answerText = query.trim()
     if (!answerText) return
-    onSubmit({ optionKey: null, songId: selectedKey || null, answerText })
+    onSubmit({ optionKey: null, answerText })
   }
 
   return (
@@ -143,7 +140,7 @@ export function GuessAnswerInput({
       {mode === 'INPUT' && canUseInput && !disabled && candidates.length > 0 ? (
         <div className="guess-answer-suggestions" role="listbox" aria-label="歌曲候选">
           {candidates.map((candidate) => (
-            <button key={candidate.id} type="button" onClick={() => chooseCandidate(candidate)}>
+            <button key={`${candidate.title}:${candidate.artist}:${candidate.albumTitle}`} type="button" onClick={() => chooseCandidate(candidate)}>
               <strong>{candidate.title}</strong>
               <small>{candidate.albumTitle} · {candidate.artist}</small>
             </button>

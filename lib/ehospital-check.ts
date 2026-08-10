@@ -1,12 +1,15 @@
 import { randomInt } from 'node:crypto'
 import { Prisma } from '@prisma/client'
+import { getShanghaiDayRange } from '@/lib/checkin'
 import { createGuessSongSignedUrl, getGuessSongSignedUrlExpires } from '@/lib/guess-song-storage'
+import { createMySqlAdvisoryLockName, MySqlAdvisoryLockBusyError, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
 import { prisma } from '@/lib/prisma'
 import { createUUID } from '@/lib/utils/uuid'
 
 export const EHOSPITAL_CONFIG_ID = 'global'
 export const EHOSPITAL_AUDIO_SECONDS = 7
 export const EHOSPITAL_SESSION_MINUTES = 30
+export const EHOSPITAL_START_DEDUPE_WINDOW_MS = 10_000
 
 function logHospitalServer(event: string, details?: unknown) {
   console.info(`[ehospital][server] ${new Date().toISOString()} ${event}`, details ?? {})
@@ -97,19 +100,34 @@ function createAnswerResult(question: HospitalQuestionSnapshot, optionKey: strin
   }
 }
 
-export async function getEHospitalCheckConfig() {
-  return prisma.eHospitalCheckConfig.upsert({
-    where: { id: EHOSPITAL_CONFIG_ID },
-    update: {},
-    create: {
-      id: EHOSPITAL_CONFIG_ID,
-      enabled: true,
-      questionCount: 10,
-      audioSeconds: EHOSPITAL_AUDIO_SECONDS,
-      passScore: 60,
-      dailyLimit: 3,
-    },
+async function countAttempts(identityHash: string, now: Date) {
+  const { start, end } = getShanghaiDayRange(now)
+  return prisma.eHospitalCheckAttempt.count({
+    where: { identityHash, createdAt: { gte: start, lt: end } },
   })
+}
+
+export async function getEHospitalCheckConfig() {
+  const existing = await prisma.eHospitalCheckConfig.findUnique({ where: { id: EHOSPITAL_CONFIG_ID } })
+  if (existing) return existing
+
+  try {
+    return await prisma.eHospitalCheckConfig.create({
+      data: {
+        id: EHOSPITAL_CONFIG_ID,
+        enabled: true,
+        questionCount: 10,
+        audioSeconds: EHOSPITAL_AUDIO_SECONDS,
+        passScore: 60,
+        dailyLimit: 3,
+      },
+    })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return prisma.eHospitalCheckConfig.findUniqueOrThrow({ where: { id: EHOSPITAL_CONFIG_ID } })
+    }
+    throw error
+  }
 }
 
 export async function updateEHospitalCheckConfig(input: {
@@ -203,6 +221,37 @@ async function loadQuestionPool() {
   })
 }
 
+type RegisterCheckQuestionPool = Awaited<ReturnType<typeof loadQuestionPool>>
+
+let registerCheckQuestionPoolCache: RegisterCheckQuestionPool | null = null
+let registerCheckQuestionPoolInitialization: Promise<RegisterCheckQuestionPool> | null = null
+
+async function initializeRegisterCheckQuestionPool() {
+  const startedAt = Date.now()
+  logHospitalServer('register check question pool initialization started')
+  await ensureRegisterCheckVariants()
+  const pool = await loadQuestionPool()
+  logHospitalServer('register check question pool initialization finished', {
+    elapsedMs: Date.now() - startedAt,
+    count: pool.length,
+  })
+  return pool
+}
+
+async function getRegisterCheckQuestionPool() {
+  if (registerCheckQuestionPoolCache !== null) return registerCheckQuestionPoolCache
+
+  const initialization = registerCheckQuestionPoolInitialization ?? (registerCheckQuestionPoolInitialization = initializeRegisterCheckQuestionPool()
+    .then((pool) => {
+      registerCheckQuestionPoolCache = pool
+      return pool
+    })
+    .finally(() => {
+      registerCheckQuestionPoolInitialization = null
+    }))
+  return initialization
+}
+
 function createQuestionSnapshot(
   question: Awaited<ReturnType<typeof loadQuestionPool>>[number],
   songs: Awaited<ReturnType<typeof loadQuestionPool>>[number]['song'][],
@@ -247,6 +296,8 @@ async function getDraft(tokenHash: string) {
 
 async function buildPublicState(
   session: Awaited<ReturnType<typeof prisma.eHospitalCheckSession.findUniqueOrThrow>>,
+  config: Awaited<ReturnType<typeof getEHospitalCheckConfig>>,
+  identityHash: string,
   now: Date,
 ) {
   let status = session.status
@@ -286,23 +337,24 @@ async function buildPublicState(
     score: session.score ?? answers.filter((answer) => answer.correct).length * 10,
     correctCount: answers.filter((answer) => answer.correct).length,
     answeredCount: answers.length,
-    // Keep the legacy setting for admin compatibility, but do not block
-    // registration retries during the open-registration period.
-    remainingAttempts: null,
+    remainingAttempts: Math.max(0, config.dailyLimit - await countAttempts(identityHash, now)),
     question,
   }
 }
 
-export async function startEHospitalCheck(input: {
+async function startEHospitalCheckOnce(input: {
   draftTokenHash: string
   ip: string
+  requestId: string
   now?: Date
 }) {
   const now = input.now ?? new Date()
-  logHospitalServer('startEHospitalCheck entered', { at: now.toISOString() })
   const draft = await getDraft(input.draftTokenHash)
+  logHospitalServer('startEHospitalCheck entered', { requestId: input.requestId, userId: draft.id, at: now.toISOString() })
   const config = await getEHospitalCheckConfig()
   logHospitalServer('EHospitalCheckConfig loaded', {
+    requestId: input.requestId,
+    userId: draft.id,
     enabled: config.enabled,
     questionCount: config.questionCount,
     audioSeconds: config.audioSeconds,
@@ -318,37 +370,116 @@ export async function startEHospitalCheck(input: {
     where: { registrationDraftId: draft.id, status: 'STARTED' },
     orderBy: { createdAt: 'desc' },
   })
-  if (active && active.expiresAt > now) return buildPublicState(active, now)
+  if (active && active.expiresAt > now) return buildPublicState(active, config, draft.identityHash, now)
   if (active) await prisma.eHospitalCheckSession.update({ where: { id: active.id }, data: { status: 'EXPIRED' } })
 
-  const ensureStartedAt = Date.now()
-  logHospitalServer('ensureRegisterCheckVariants started')
-  await ensureRegisterCheckVariants()
-  logHospitalServer('ensureRegisterCheckVariants finished', { elapsedMs: Date.now() - ensureStartedAt })
-  const pool = await loadQuestionPool()
+  const used = await countAttempts(draft.identityHash, now)
+  if (used >= config.dailyLimit) {
+    throw new EHospitalCheckError('今日体检次数已用完，请明日再次参加。', 429, 'DAILY_LIMIT_REACHED')
+  }
+
+  const pool = await getRegisterCheckQuestionPool()
   if (pool.length < config.questionCount || pool.length < 4) {
     throw new EHospitalCheckError('可用体检题目不足，请联系管理员补充已发布歌曲音频', 409, 'QUESTION_POOL_INSUFFICIENT')
   }
   const selected = shuffle(pool).slice(0, config.questionCount)
   const snapshots = selected.map((question) => createQuestionSnapshot(question, pool.map((item) => item.song)))
-  const session = await prisma.eHospitalCheckSession.create({
-    data: {
-      registrationDraftId: draft.id,
-      questions: snapshots,
-      answers: [],
-      status: 'STARTED',
-      expiresAt: new Date(now.getTime() + EHOSPITAL_SESSION_MINUTES * 60_000),
-    },
+  let sessionResult: {
+    session: Awaited<ReturnType<typeof prisma.eHospitalCheckSession.create>>
+    reused: boolean
+  }
+  try {
+    sessionResult = await prisma.$transaction(async (tx) => withMySqlAdvisoryLocks(
+      tx,
+      [createMySqlAdvisoryLockName('ehospital:start', draft.id)],
+      async () => {
+        const lockedActive = await tx.eHospitalCheckSession.findFirst({
+          where: { registrationDraftId: draft.id, status: 'STARTED' },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (lockedActive && lockedActive.expiresAt > now) return { session: lockedActive, reused: true }
+        if (lockedActive) await tx.eHospitalCheckSession.update({ where: { id: lockedActive.id }, data: { status: 'EXPIRED' } })
+
+        const { start, end } = getShanghaiDayRange(now)
+        const lockedUsed = await tx.eHospitalCheckAttempt.count({ where: { identityHash: draft.identityHash, createdAt: { gte: start, lt: end } } })
+        if (lockedUsed >= config.dailyLimit) {
+          throw new EHospitalCheckError('今日体检次数已用完，请明日再次参加。', 429, 'DAILY_LIMIT_REACHED')
+        }
+
+        const session = await tx.eHospitalCheckSession.create({
+          data: {
+            registrationDraftId: draft.id,
+            questions: snapshots,
+            answers: [],
+            status: 'STARTED',
+            expiresAt: new Date(now.getTime() + EHOSPITAL_SESSION_MINUTES * 60_000),
+          },
+        })
+        return { session, reused: false }
+      },
+    ))
+  } catch (error) {
+    if (error instanceof MySqlAdvisoryLockBusyError) {
+      throw new EHospitalCheckError('已有体检请求处理中，请稍后再试', 409, 'EHOSPITAL_CHECK_IN_PROGRESS')
+    }
+    throw error
+  }
+  logHospitalServer('EHospitalCheckSession resolved', {
+    requestId: input.requestId,
+    userId: draft.id,
+    sessionId: sessionResult.session.id,
+    questionCount: snapshots.length,
+    reused: sessionResult.reused,
   })
-  logHospitalServer('EHospitalCheckSession created', { sessionId: session.id, questionCount: snapshots.length })
-  const state = await buildPublicState(session, now)
+  const state = await buildPublicState(sessionResult.session, config, draft.identityHash, now)
   logHospitalServer('startEHospitalCheck returning', {
+    requestId: input.requestId,
+    userId: draft.id,
     sessionId: state.sessionId,
     status: state.status,
     currentPosition: state.currentPosition,
     totalQuestions: state.totalQuestions,
+    reused: sessionResult.reused,
   })
   return state
+}
+
+type HospitalCheckStartState = Awaited<ReturnType<typeof buildPublicState>>
+type HospitalCheckStartRequest = {
+  promise: Promise<HospitalCheckStartState>
+  expiresAt: number
+}
+
+const hospitalCheckStartRequests = new Map<string, HospitalCheckStartRequest>()
+
+function hospitalCheckStartRequestKey(input: { draftTokenHash: string; ip: string }) {
+  return `${input.draftTokenHash}:${input.ip.trim() || 'unknown'}:hospital-check:start`
+}
+
+export async function startEHospitalCheck(input: {
+  draftTokenHash: string
+  ip: string
+  requestId?: string
+  now?: Date
+}) {
+  const requestId = input.requestId?.trim() || createUUID()
+  const key = hospitalCheckStartRequestKey(input)
+  const now = Date.now()
+  const existing = hospitalCheckStartRequests.get(key)
+  if (existing && existing.expiresAt > now) {
+    logHospitalServer('startEHospitalCheck deduplicated', { requestId, action: 'hospital-check:start' })
+    return existing.promise
+  }
+  if (existing) hospitalCheckStartRequests.delete(key)
+
+  const promise = startEHospitalCheckOnce({ ...input, requestId })
+  const entry = { promise, expiresAt: now + EHOSPITAL_START_DEDUPE_WINDOW_MS }
+  hospitalCheckStartRequests.set(key, entry)
+  const clearEntry = () => {
+    if (hospitalCheckStartRequests.get(key) === entry) hospitalCheckStartRequests.delete(key)
+  }
+  void promise.then(clearEntry, clearEntry)
+  return promise
 }
 
 export async function answerEHospitalCheck(input: {
@@ -379,7 +510,7 @@ export async function answerEHospitalCheck(input: {
   const duplicate = answers.find((answer) => answer.questionId === current.publicId)
   if (duplicate) {
     return {
-      ...(await buildPublicState(session, now)),
+      ...(await buildPublicState(session, config, draft.identityHash, now)),
       answerResult: createAnswerResult(current, duplicate.optionKey, duplicate.correct),
     }
   }
@@ -406,7 +537,7 @@ export async function answerEHospitalCheck(input: {
   })
   if (updatedCount.count !== 1) {
     const latest = await prisma.eHospitalCheckSession.findUniqueOrThrow({ where: { id: session.id } })
-    if (parseAnswers(latest.answers).some((answer) => answer.questionId === current.publicId)) return buildPublicState(latest, now)
+    if (parseAnswers(latest.answers).some((answer) => answer.questionId === current.publicId)) return buildPublicState(latest, config, draft.identityHash, now)
     throw new EHospitalCheckError('答案提交冲突，请重试本题', 409, 'ANSWER_CONFLICT')
   }
   const updated = await prisma.eHospitalCheckSession.findUniqueOrThrow({ where: { id: session.id } })
@@ -426,7 +557,7 @@ export async function answerEHospitalCheck(input: {
   }
 
   return {
-    ...(await buildPublicState(updated, now)),
+    ...(await buildPublicState(updated, config, draft.identityHash, now)),
     answerResult,
   }
 }
@@ -441,5 +572,5 @@ export async function getEHospitalCheckState(input: {
   if (!session || session.registrationDraftId !== draft.id) {
     throw new EHospitalCheckError('体检场次不存在', 404, 'SESSION_NOT_FOUND')
   }
-  return buildPublicState(session, input.now ?? new Date())
+  return buildPublicState(session, await getEHospitalCheckConfig(), draft.identityHash, input.now ?? new Date())
 }

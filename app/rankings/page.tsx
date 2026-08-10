@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicPostWhere } from '@/lib/post-moderation'
 import { isAdminRole } from '@/lib/security'
 import { redirect } from 'next/navigation'
 
@@ -16,7 +17,7 @@ export default async function RankingsPage() {
   const [points, checkInKeys, posts, growthLevels] = await Promise.all([
     prisma.user.findMany({ where: { isDeleted: false }, orderBy: { points: 'desc' }, take: 10, select: { id: true, nickname: true, points: true, experience: true, Profile: { select: { displayName: true } } } }),
     prisma.checkIn.findMany({ where: { User: { isDeleted: false } }, select: { userId: true, checkinDateKey: true } }),
-    prisma.post.findMany({ where: { isDeleted: false, moderationStatus: 'APPROVED' }, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, replyCount: true, likeCount: true } }),
+    prisma.post.findMany({ where: publicPostWhere, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, replyCount: true, likeCount: true } }),
     listGrowthLevels(),
   ])
 

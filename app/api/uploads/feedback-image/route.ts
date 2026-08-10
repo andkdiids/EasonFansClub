@@ -1,22 +1,24 @@
+import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { publicImageUrl, supabasePublicObjectUrl } from '@/lib/images'
+import { publicImageUrl } from '@/lib/images'
 import { requireUser } from '@/lib/security'
 import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
 import { normalizeImageToWebp, ImageNormalizeError } from '@/lib/image-webp'
+import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage'
 
 export const runtime = 'nodejs'
+
+function errorDetail(error: unknown) {
+  return (error instanceof Error ? error.message : String(error || '未知错误')).slice(0, 300)
+}
+
+function developmentUploadMessage(detail: string) {
+  return process.env.NODE_ENV === 'development' ? `图片上传失败：${detail}` : '图片上传失败，请稍后重试'
+}
 
 export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
-
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'eason-fans-club'
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    return NextResponse.json({ message: '图片存储尚未配置' }, { status: 500 })
-  }
 
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
@@ -31,6 +33,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '单张图片不能超过 10MB' }, { status: 400 })
   }
 
+  const uploadMeta = { filename: file.name, size: file.size, type: file.type }
+
   // 统一在服务端转 WebP + 压缩，禁止原样存储 jpg/png/gif。
   let webpBuffer: Buffer
   try {
@@ -42,31 +46,29 @@ export async function POST(request: Request) {
     if (error instanceof ImageNormalizeError) {
       return NextResponse.json({ message: error.message }, { status: 400 })
     }
-    return NextResponse.json({ message: '图片处理失败，请换一张试试' }, { status: 400 })
+    const detail = errorDetail(error)
+    console.error('[feedback-image.normalize]', { ...uploadMeta, error: detail })
+    return NextResponse.json({
+      message: developmentUploadMessage(detail),
+      ...(process.env.NODE_ENV === 'development' ? { detail } : {}),
+    }, { status: 400 })
   }
 
-  const objectPath = `feedback/${guard.user.id}/feedback-${crypto.randomUUID()}.webp`
-  const storageResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${bucket}/${objectPath}`, {
-    method: 'POST',
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Cache-Control': '31536000',
-      'Content-Type': 'image/webp',
-      'x-upsert': 'false',
-    },
-    body: new Uint8Array(webpBuffer),
-  })
-
-  if (!storageResponse.ok) {
-    const errorText = await storageResponse.text().catch(() => '')
-    return NextResponse.json({ message: '图片上传失败', detail: errorText.slice(0, 200) }, { status: 502 })
+  const objectPath = `feedback/${guard.user.id}/feedback-${randomUUID()}.webp`
+  try {
+    const uploadResult = await uploadSiteImage({ key: objectPath, body: webpBuffer, contentType: 'image/webp' })
+    const url = publicImageUrl(uploadResult)
+    console.log('[feedback-image.upload]', { ...uploadMeta, uploadResult })
+    if (!url) {
+      return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
+    }
+    return NextResponse.json({ url, mimeType: 'image/webp' })
+  } catch (error) {
+    const detail = error instanceof SiteMediaStorageError ? error.detail || error.message : errorDetail(error)
+    console.error('[feedback-image.upload]', { ...uploadMeta, uploadResult: 'failed', error: detail })
+    return NextResponse.json({
+      message: developmentUploadMessage(detail),
+      ...(process.env.NODE_ENV === 'development' ? { detail } : {}),
+    }, { status: 502 })
   }
-
-  const url = publicImageUrl(supabasePublicObjectUrl(supabaseUrl, bucket, objectPath))
-  if (!url) {
-    return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
-  }
-
-  return NextResponse.json({ url, mimeType: 'image/webp' })
 }

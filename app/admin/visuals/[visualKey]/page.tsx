@@ -10,6 +10,6 @@ export default async function AdminVisualSettingsPage({ params }: { params: Prom
   const { visualKey } = await params
   if (!pageVisualKeys.includes(visualKey as PageVisualKey)) notFound()
   await requireAdminPage(`/admin/visuals/${visualKey}`, 'site_config_manage')
-  const config = await getSiteAppearance()
+  const config = await getSiteAppearance({ cache: 'no-store' })
   return <main className="mx-auto max-w-7xl px-4 py-8 sm:px-5"><VisualManager initialConfig={config} visualKey={visualKey as PageVisualKey} /></main>
 }

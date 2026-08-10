@@ -13,6 +13,7 @@ type Policy = {
   registrationClosed: boolean
   enableTurnstile: boolean
   envForcedClosed: boolean
+  registrationLimitEnabled: boolean
 }
 
 const options: { value: RegistrationMode; label: string; description: string }[] = [
@@ -26,13 +27,14 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
   const router = useRouter()
   const [policy, setPolicy] = useState(initialPolicy)
   const [mode, setMode] = useState<RegistrationMode>(initialPolicy.registrationMode)
+  const [registrationLimitEnabled, setRegistrationLimitEnabled] = useState(initialPolicy.registrationLimitEnabled)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
   async function save() {
-    if (mode === 'PHONE' && !confirm('手机号注册暂不进行短信验证，用户可能填写非本人号码。确定继续吗？')) return
-    if (mode === 'CLOSED' && !confirm('关闭后新用户将无法注册，但不会影响已有用户登录。确定继续吗？')) return
+    if (mode !== policy.registrationMode && mode === 'PHONE' && !confirm('手机号注册暂不进行短信验证，用户可能填写非本人号码。确定继续吗？')) return
+    if (mode !== policy.registrationMode && mode === 'CLOSED' && !confirm('关闭后新用户将无法注册，但不会影响已有用户登录。确定继续吗？')) return
 
     setMessage('')
     setError('')
@@ -40,7 +42,7 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
     const response = await fetch('/api/admin/registration-settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ registrationMode: mode }),
+      body: JSON.stringify({ registrationMode: mode, registrationLimitEnabled }),
     })
     const data = await response.json().catch(() => ({}))
     setIsSaving(false)
@@ -49,9 +51,12 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
       return
     }
     setPolicy(data.policy)
+    setRegistrationLimitEnabled(Boolean(data.policy.registrationLimitEnabled))
     setMessage(data.message || '注册模式已保存')
     router.refresh()
   }
+
+  const hasChanges = mode !== policy.registrationMode || registrationLimitEnabled !== policy.registrationLimitEnabled
 
   return (
     <section className="rounded-[28px] border border-sky-100 bg-white/85 p-6 shadow-sm">
@@ -75,11 +80,23 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
         ))}
       </div>
 
+      <label className={`mt-5 flex cursor-pointer gap-3 rounded-2xl border p-4 ${registrationLimitEnabled ? 'border-brand-700 bg-sky-50' : 'border-sky-100 bg-white'}`}>
+        <input type="checkbox" checked={registrationLimitEnabled} onChange={(event) => setRegistrationLimitEnabled(event.target.checked)} className="mt-1 size-5" />
+        <span>
+          <span className="block text-sm font-black text-brand-950">注册限制</span>
+          <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">
+            {registrationLimitEnabled ? '开启后，同一 IP 每日最多成功发送 3 次注册验证码。' : '关闭后，不限制同一 IP 每日发送注册验证码次数。'}
+          </span>
+          <span className="mt-1 block text-xs font-black leading-5 text-slate-600">固定规则：每日体检最多 3 次，不受此开关影响。</span>
+        </span>
+      </label>
+
       <div className="mt-5 space-y-2 rounded-2xl bg-sky-50/70 p-4 text-sm font-bold text-slate-600">
         <p>当前注册模式：{policy.registrationModeLabel}</p>
         <p>环境总开关：{policy.allowRegister ? '允许注册' : '强制关闭注册'}</p>
         <p>Turnstile：{policy.enableTurnstile ? '已启用' : '未启用'}</p>
         <p>手机号验证：未启用短信验证</p>
+        <p>注册限制：{registrationLimitEnabled ? '已开启' : '已关闭'}</p>
       </div>
 
       {policy.envForcedClosed ? (
@@ -99,10 +116,10 @@ export function RegistrationSettingsForm({ initialPolicy }: { initialPolicy: Pol
 
       <button
         onClick={save}
-        disabled={isSaving || mode === policy.registrationMode}
+        disabled={isSaving || !hasChanges}
         className="mt-5 w-full rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isSaving ? '保存中...' : '保存注册模式'}
+        {isSaving ? '保存中...' : '保存注册设置'}
       </button>
     </section>
   )

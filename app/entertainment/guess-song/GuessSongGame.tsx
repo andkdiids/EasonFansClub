@@ -15,6 +15,7 @@ type AnswerMode = 'CHOICE' | 'INPUT'
 type SessionQuestion = {
   answerMode: AnswerMode
   publicId: string
+  questionAttemptToken: string | null
   position: number
   playbackDurationSeconds: number
   maxPlayCount: number
@@ -28,7 +29,10 @@ type SessionState = {
   id: string
   mode: Mode
   modeLabel: string
-  status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'EXPIRED'
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'EXPIRED' | 'CHEAT_DETECTED'
+  riskScore: number
+  isValid: boolean
+  clientSessionToken: string
   score: number
   correctCount: number
   wrongCount: number
@@ -56,6 +60,8 @@ type AnswerResult = {
   awardedScore: number
   session: SessionState
   ranks: { weekRank: number | null; monthRank: number | null } | null
+  cheatDetected?: boolean
+  exitAfterSeconds?: number
 }
 
 type PendingPlayRequest = {
@@ -95,6 +101,8 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const [exitOpen, setExitOpen] = useState(false)
   const [exiting, setExiting] = useState(false)
   const [forceEnded, setForceEnded] = useState(false)
+  const [cheatDetected, setCheatDetected] = useState(false)
+  const [cheatCountdown, setCheatCountdown] = useState(10)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioGenerationRef = useRef(0)
   const playRequestRef = useRef<PendingPlayRequest | null>(null)
@@ -141,6 +149,27 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   }, [initialSessionId])
 
   useEffect(() => {
+    if (session?.status === 'CHEAT_DETECTED') setCheatDetected(true)
+  }, [session?.status])
+
+  useEffect(() => {
+    if (!cheatDetected) return
+    stopAudio()
+    setCheatCountdown(10)
+    let remaining = 10
+    const timer = window.setInterval(() => {
+      remaining -= 1
+      setCheatCountdown(Math.max(0, remaining))
+      if (remaining <= 0) {
+        window.clearInterval(timer)
+        allowNavigationRef.current = true
+        router.replace('/games')
+      }
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [cheatDetected, router, stopAudio])
+
+  useEffect(() => {
     if (!session || session.status !== 'IN_PROGRESS') return
     const remaining = new Date(session.expiresAt).getTime() - Date.now()
     if (remaining <= 0) {
@@ -149,7 +178,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     }
     const timer = window.setTimeout(() => setForceEnded(true), remaining + 500)
     return () => window.clearTimeout(timer)
-  }, [session?.id, session?.status, session?.expiresAt])
+  }, [session, session?.id, session?.status, session?.expiresAt])
 
   useEffect(() => {
     if (!session) return
@@ -176,7 +205,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   useEffect(() => {
     const sessionId = session?.id
     const sessionStatus = session?.status
-    if (!sessionId || sessionStatus === 'COMPLETED') return
+    if (!sessionId || sessionStatus === 'COMPLETED' || sessionStatus === 'CHEAT_DETECTED') return
     const guardId = `guess-song:${sessionId}`
     const installGuard = () => window.history.pushState({ ...window.history.state, gameExitGuard: guardId }, '', window.location.href)
     installGuard()
@@ -222,13 +251,26 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         remainingPlayCount: number
         answerDeadlineAt: string | null
         answerAvailableAt: string | null
+        cheatDetected?: boolean
+        exitAfterSeconds?: number
       }>(`/api/entertainment/guess-song/sessions/${session.id}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionId: question.publicId, requestKey: createUUID() }),
+        body: JSON.stringify({
+          questionId: question.publicId,
+          requestKey: createUUID(),
+          clientSessionToken: session.clientSessionToken,
+        }),
       })
       if (generation !== audioGenerationRef.current) {
         resolvePlayReady(false)
+        return
+      }
+      if (data.cheatDetected) {
+        resolvePlayReady(false)
+        stopAudio()
+        setCheatDetected(true)
+        setSession((current) => current ? { ...current, status: 'CHEAT_DETECTED', score: 0, isValid: false } : current)
         return
       }
       playRegistered = true
@@ -317,7 +359,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     const question = session?.question
     if (!session || !question || question.answerMode !== 'INPUT' || answering || answerResult || submittedQuestionRef.current === question.publicId) return
     setSkipPending(true)
-    void submitAnswer({ optionKey: null, songId: null, answerText: null, skip: true })
+    void submitAnswer({ optionKey: null, answerText: null, skip: true })
   }
 
   async function submitAnswer(answer: GuessAnswerSubmission) {
@@ -341,8 +383,21 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       const result = await api<AnswerResult>(`/api/entertainment/guess-song/sessions/${session.id}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionId: question.publicId, ...answer, skip: answer.skip === true }),
+        body: JSON.stringify({
+          questionId: question.publicId,
+          ...answer,
+          skip: answer.skip === true,
+          clientSessionToken: session.clientSessionToken,
+          questionAttemptToken: question.questionAttemptToken,
+        }),
       })
+      if (result.cheatDetected) {
+        setCheatDetected(true)
+        setSession(result.session)
+        setAnswerResult(null)
+        setNextSession(null)
+        return
+      }
       if (answer.skip === true) setSkipPending(false)
       setAnswerResult(result)
       setNextSession(result.session)
@@ -365,7 +420,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     const timer = window.setTimeout(() => {
       if (timeoutSubmittedRef.current === publicId) return
       timeoutSubmittedRef.current = publicId
-      submitAnswerRef.current({ optionKey: null, songId: null, answerText: null })
+      submitAnswerRef.current({ optionKey: null, answerText: null })
     }, Math.max(0, remaining + 100))
     return () => window.clearTimeout(timer)
   }, [answerResult, session?.question?.answerDeadlineAt, session?.question?.publicId])
@@ -453,7 +508,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       const data = await api<{ resumed: boolean; session: SessionState }>('/api/entertainment/guess-song/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: session.mode }),
+        body: JSON.stringify({ mode: session.mode, clientFlowNonce: createUUID() }),
       })
       stopAudio()
       setSession(data.session)
@@ -477,6 +532,18 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       <Link href={exitTarget}>返回游戏详情</Link>
     </main>
   )
+
+  if (cheatDetected || session.status === 'CHEAT_DETECTED') {
+    return (
+      <main className="guess-play-error game-cheat-screen">
+        <section className="game-cheat-dialog" role="alertdialog" aria-modal="true" aria-labelledby="guess-cheat-title" aria-live="assertive">
+          <h1 id="guess-cheat-title">检测到异常答题行为</h1>
+          <p>本局成绩无效。</p>
+          <strong>游戏将在 {cheatCountdown} 秒后退出。</strong>
+        </section>
+      </main>
+    )
+  }
 
   if (session.status === 'COMPLETED') {
     const attempts = session.correctCount + session.wrongCount

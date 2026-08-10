@@ -1,19 +1,22 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, normalizeHeroMediaAsset, heroFitModes, heroMediaTypes, type HeroFitMode, type HeroMediaAsset, type HeroMediaType, type SiteHeroSlide } from '@/lib/site-config'
-import { normalizeHeroScale } from '@/lib/hero-visuals'
+import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, normalizeHeroMediaAsset, heroFitModes, type HeroFitMode, type HeroMediaAsset, type SiteHeroSlide } from '@/lib/site-config'
+import { normalizeHeroMediaType, normalizeHeroScale } from '@/lib/hero-visuals'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 function normalizeSlides(value: unknown): SiteHeroSlide[] {
   if (!Array.isArray(value)) return []
   return value.slice(0, 20).map((item, index) => {
     const row = item && typeof item === 'object' ? item as Partial<SiteHeroSlide> : {}
-    const mediaType = typeof row.mediaType === 'string' && heroMediaTypes.includes(row.mediaType as HeroMediaType)
-      ? row.mediaType as HeroMediaType
-      : 'IMAGE'
+    const mediaType = normalizeHeroMediaType(row.mediaType)
     const imageUrl = sanitizeText(row.imageUrl, 1000)
-    const mediaUrl = sanitizeText(row.mediaUrl, 1000) || (mediaType === 'IMAGE' ? imageUrl : '')
+    const mediaUrl = sanitizeText(row.mediaUrl, 1000) || (mediaType === 'STATIC_IMAGE' ? imageUrl : '')
     const optionalPercentage = (input: unknown) => {
       if (input === undefined || input === null || input === '') return undefined
       const numeric = Number(input)
@@ -83,8 +86,8 @@ function normalizeSlides(value: unknown): SiteHeroSlide[] {
 export async function GET() {
   const guard = await requireAdmin('home_manage')
   if (!guard.user) return guard.response
-  const config = await getSiteAppearance()
-  return NextResponse.json({ slides: [...config.heroSlides].sort((a, b) => a.sortOrder - b.sortOrder) })
+  const config = await getSiteAppearance({ cache: 'no-store' })
+  return NextResponse.json({ slides: [...config.heroSlides].sort((a, b) => a.sortOrder - b.sortOrder) }, { headers: noStoreHeaders })
 }
 
 export async function PATCH(request: Request) {
@@ -93,7 +96,7 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => null)
   const slides = normalizeSlides(body?.slides)
   if (!slides.length) return NextResponse.json({ message: '至少保留一张 Hero 配置' }, { status: 400 })
-  const current = await getSiteAppearance()
+  const current = await getSiteAppearance({ cache: 'no-store' })
   const config = mergeSiteAppearanceConfig({ ...current, heroSlides: slides })
   await prisma.siteSetting.upsert({
     where: { key: 'site.appearance' },
@@ -103,5 +106,7 @@ export async function PATCH(request: Request) {
   clearSiteAppearanceCache()
   revalidatePath('/community')
   revalidatePath('/welcome')
+  revalidatePath('/admin/home')
+  revalidatePath('/admin/visuals/home')
   return NextResponse.json({ slides: config.heroSlides, message: '首页 Hero 已保存' })
 }

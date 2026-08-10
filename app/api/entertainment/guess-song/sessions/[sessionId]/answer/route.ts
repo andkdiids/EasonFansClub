@@ -16,9 +16,10 @@ export async function POST(request: Request, { params }: Context) {
   const body = await request.json().catch(() => null) as {
     questionId?: unknown
     optionKey?: unknown
-    songId?: unknown
     answerText?: unknown
     skip?: unknown
+    clientSessionToken?: unknown
+    questionAttemptToken?: unknown
   } | null
   try {
     return guessSongOk(await answerGuessSongQuestion({
@@ -26,9 +27,10 @@ export async function POST(request: Request, { params }: Context) {
       sessionId,
       publicQuestionId: sanitizeText(body?.questionId, 100),
       optionKey: body?.optionKey === null ? null : sanitizeText(body?.optionKey, 100),
-      songId: sanitizeText(body?.songId, 100) || null,
       answerText: sanitizeText(body?.answerText, 160) || null,
       skip: body?.skip === true,
+      clientSessionToken: sanitizeText(body?.clientSessionToken, 2000) || null,
+      questionAttemptToken: sanitizeText(body?.questionAttemptToken, 2000) || null,
     }))
   } catch (error) {
     return handleGuessSongError(error, 'sessions.answer')

@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
-import { getRegistrationPolicy, isValidRegistrationMode, setStoredRegistrationMode } from '@/lib/registration'
+import {
+  getRegistrationPolicy,
+  isValidRegistrationMode,
+  setRegistrationLimitEnabled,
+  setStoredRegistrationMode,
+} from '@/lib/registration'
 import { requireAdmin } from '@/lib/security'
 
 export async function GET() {
@@ -19,8 +24,17 @@ export async function PATCH(request: Request) {
   if (!isValidRegistrationMode(mode)) {
     return NextResponse.json({ message: '注册模式不正确' }, { status: 400 })
   }
+  if (body?.registrationLimitEnabled !== undefined && typeof body.registrationLimitEnabled !== 'boolean') {
+    return NextResponse.json({ message: '注册限制设置格式不正确' }, { status: 400 })
+  }
 
+  const currentPolicy = await getRegistrationPolicy()
   await setStoredRegistrationMode(mode)
+  await setRegistrationLimitEnabled(
+    typeof body.registrationLimitEnabled === 'boolean'
+      ? body.registrationLimitEnabled
+      : currentPolicy.registrationLimitEnabled,
+  )
   const policy = await getRegistrationPolicy()
-  return NextResponse.json({ message: '注册模式已保存并立即生效', policy })
+  return NextResponse.json({ message: '注册设置已保存并立即生效', policy })
 }

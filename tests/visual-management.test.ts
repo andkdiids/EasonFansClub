@@ -115,7 +115,7 @@ test('Hero 后台按设备媒体字段显示，不回退旧媒体或另一端媒
   assert.equal(getHeroMediaForDevice(legacySlide, 'desktop'), null)
   assert.equal(getHeroMediaForDevice(legacySlide, 'mobile'), null)
   assert.match(read('app/admin/home/HomeHeroManager.tsx'), /const desktopMedia = explicitMedia\(slide, 'desktop'\)/)
-  assert.match(read('app/admin/home/HomeHeroManager.tsx'), /const current = selectedMedia\(slide, device\) \|\| emptyHeroMedia\('IMAGE'\)/)
+  assert.match(read('app/admin/home/HomeHeroManager.tsx'), /const current = selectedMedia\(slide, device\) \|\| emptyHeroMedia\('STATIC_IMAGE'\)/)
   assert.match(read('app/admin/visuals/VisualManager.tsx'), /homePreviewVisual\(editingVisual, homeDesktopMedia, homeMobileMedia\)/)
   assert.match(read('app/admin/visuals/VisualManager.tsx'), /暂无媒体，请选择类型后上传/)
 })

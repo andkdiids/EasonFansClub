@@ -3,7 +3,9 @@ import { sendRegistrationVerificationCode } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, createRegistrationCode, hashRegistrationCode, REGISTRATION_CODE_TTL_MS } from '@/lib/registration-draft'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
-import { rejectInvalidRequestOrigin } from '@/lib/security'
+import { getRegistrationLimitEnabled } from '@/lib/registration'
+import { checkDailyRegistrationEmailCodeLimit, recordSuccessfulRegistrationEmailCodeSend } from '@/lib/registration-rate-limit'
+import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { findActiveConflict } from '@/lib/users'
 import { hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
@@ -50,6 +52,24 @@ export async function POST(request: Request) {
     if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
   }
 
+  const clientIp = getClientIp(request)
+  let registrationLimitEnabled = false
+  try {
+    registrationLimitEnabled = await getRegistrationLimitEnabled()
+    if (registrationLimitEnabled) {
+      if (clientIp === 'unknown') {
+        return errorResponse('暂时无法识别请求网络环境，请稍后重试', 503, 'REGISTRATION_IP_UNAVAILABLE')
+      }
+      const rate = await checkDailyRegistrationEmailCodeLimit(clientIp)
+      if (rate.limited) {
+        return errorResponse('今日该网络环境发送验证码次数已达上限，请明日再试。', 429, 'REGISTRATION_IP_DAILY_LIMIT_REACHED')
+      }
+    }
+  } catch (error) {
+    console.error('[send-email-code.rate-limit]', error)
+    return errorResponse('注册限制服务暂时不可用，请稍后重试', 503, 'REGISTRATION_LIMIT_UNAVAILABLE')
+  }
+
   const code = createRegistrationCode()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + REGISTRATION_CODE_TTL_MS)
@@ -68,6 +88,14 @@ export async function POST(request: Request) {
     const mailResult = await sendRegistrationVerificationCode(email, code)
     if (!mailResult.sent) {
       return errorResponse('邮件服务尚未配置，暂时无法发送验证码', 503, 'EMAIL_SERVICE_NOT_CONFIGURED')
+    }
+    if (registrationLimitEnabled) {
+      try {
+        await recordSuccessfulRegistrationEmailCodeSend(clientIp)
+      } catch (error) {
+        console.error('[send-email-code.rate-limit.record]', error)
+        return errorResponse('注册限制服务暂时不可用，请稍后重试', 503, 'REGISTRATION_LIMIT_UNAVAILABLE')
+      }
     }
     return NextResponse.json({
       ok: true,

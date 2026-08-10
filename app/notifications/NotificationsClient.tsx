@@ -19,6 +19,11 @@ function isSystemLikeNotification(item: UnifiedNotification) {
   return item.source === 'system' || item.actorUid === null || SYSTEM_LIKE_TYPES.has(item.type)
 }
 
+function isSystemNotification(item: UnifiedNotification) {
+  // UnifiedNotification 用 source 标记 SystemNotification，用 type 标记个人系统通知。
+  return item.source === 'system' || item.type === 'SYSTEM'
+}
+
 function isBirthdayNotification(item: UnifiedNotification) {
   return item.type === 'BIRTHDAY_GREETING'
 }
@@ -31,6 +36,8 @@ function isBirthdayNotification(item: UnifiedNotification) {
  * - 返回 null 时该通知不展示智能入口（如无任何跳转目标的系统公告，仅可标记已读 / 清除）。
  */
 function getSmartEntry(item: UnifiedNotification): { label: string; href?: string; action?: 'dock' } | null {
+  if (isSystemNotification(item)) return null
+
   const target = getNotificationTarget(item)
   switch (item.type) {
     case 'LIKE':
@@ -48,7 +55,6 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
       return { label: '查看徽章', href: '/profile/badges' }
     case 'BIRTHDAY_GREETING':
       return { label: '编辑资料', href: '/profile/edit' }
-    case 'SYSTEM':
     case 'ANNOUNCEMENT':
     case 'MAINTENANCE':
     case 'SECURITY':

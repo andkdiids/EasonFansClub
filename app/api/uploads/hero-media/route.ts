@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import sharp, { type Metadata } from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
-import { heroMediaTypes, type HeroMediaType } from '@/lib/hero-visuals'
+import { heroMediaTypes, normalizeHeroMediaType, type HeroMediaType } from '@/lib/hero-visuals'
 import { requireAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -74,12 +74,13 @@ function imageContentType(format: string) {
 }
 
 function mediaTypeFromImage(metadata: Metadata, input: Buffer): HeroMediaType {
-  return isAnimatedImage(metadata, input) ? 'ANIMATED_IMAGE' : 'IMAGE'
+  return isAnimatedImage(metadata, input) ? 'ANIMATED_IMAGE' : 'STATIC_IMAGE'
 }
 
 function expectedMediaType(value: FormDataEntryValue | null): HeroMediaType | null {
   if (typeof value !== 'string') return null
-  return heroMediaTypes.includes(value as HeroMediaType) ? value as HeroMediaType : null
+  if (value === 'IMAGE') return 'STATIC_IMAGE'
+  return heroMediaTypes.includes(value as typeof heroMediaTypes[number]) ? normalizeHeroMediaType(value) : null
 }
 
 function safeScope(value: FormDataEntryValue | null) {
@@ -120,6 +121,9 @@ function keepSafeOutput(input: Buffer, output: Buffer) {
 
 function validateRequestedType(requested: HeroMediaType | null, detected: HeroMediaType) {
   if (!requested || requested === detected) return null
+  // File content is authoritative for animated images so GIF and Animated
+  // WebP cannot be persisted as a static image by mistake.
+  if (detected === 'ANIMATED_IMAGE') return null
   if (requested === 'VIDEO') return '视频 Hero 请选择 MP4 或 WebM 文件'
   if (requested === 'ANIMATED_IMAGE') return '动态图片 Hero 请选择 GIF 或 Animated WebP 文件'
   return '静态图片 Hero 不支持动态图片或视频'
@@ -175,7 +179,7 @@ export async function POST(request: Request) {
         output = keepSafeOutput(input, processed.body)
         extension = output === input ? extensionForImage(imageMetadata.format) : processed.extension
         contentType = output === input ? imageContentType(imageMetadata.format) : processed.contentType
-        detectedType = 'IMAGE'
+        detectedType = 'STATIC_IMAGE'
       }
     } else if (isMp4(input) || isWebm(input)) {
       detectedType = 'VIDEO'
@@ -202,7 +206,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       url,
       sourceUrl,
-      mediaType: kind === 'poster' ? 'IMAGE' : detectedType,
+      mediaType: kind === 'poster' ? 'STATIC_IMAGE' : detectedType,
       contentType,
       format: extension,
       originalSize: input.byteLength,

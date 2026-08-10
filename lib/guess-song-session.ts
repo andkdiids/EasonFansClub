@@ -21,6 +21,14 @@ import {
   createGuessSongSignedUrl,
   getGuessSongSignedUrlExpires,
 } from '@/lib/guess-song-storage'
+import {
+  GUESS_SONG_RISK_THRESHOLD,
+  GuessSongRiskService,
+  createClientSessionNonce,
+  ensureClientSessionCredentials,
+  isQuestionAttemptTokenValid,
+  issueQuestionAttemptToken,
+} from '@/lib/guess-song-risk'
 import { prisma } from '@/lib/prisma'
 import { createUUID } from '@/lib/utils/uuid'
 
@@ -109,14 +117,17 @@ async function createSessionQuestion(
   const { options, correctOptionKey } = expert
     ? { options: [], correctOptionKey: input.question.musicSongId || '' }
     : createOptions(input.question)
+  const publicId = createUUID()
+  const questionAttemptToken = issueQuestionAttemptToken(publicId)
   return tx.guessSongSessionQuestion.create({
     data: {
       sessionId: input.sessionId,
       questionId: input.question.id,
-      publicId: createUUID(),
+      publicId,
       position: input.position,
       playbackDurationSeconds: input.durationSeconds,
       maxPlayCount: input.maxPlayCount,
+      questionAttemptTokenHash: questionAttemptToken.hash,
       optionsSnapshot: options,
       correctOptionKey,
     },
@@ -126,9 +137,16 @@ async function createSessionQuestion(
 /** Manual questions keep their original rules; AUTO questions serve every mode
     but only while their album is published and auto generation is enabled. */
 function eligibleSourceFilter(mode: GuessSongMode, autoEnabled: boolean): Prisma.GuessSongQuestionWhereInput[] {
-  const expertSongFilter = mode === 'EXPERT' ? { musicSongId: { not: null } } : {}
+  const expertSongFilter = mode === 'EXPERT'
+    ? { musicSongId: { not: null }, MusicSong: { expertEnabled: true } }
+    : {}
   const autoBranch: Prisma.GuessSongQuestionWhereInput[] = autoEnabled
-    ? [{ questionType: GUESS_SONG_QUESTION_TYPE_AUTO, ...expertSongFilter, MusicSong: { MusicAlbum: { status: 'PUBLISHED' } } }]
+    ? [{
+      questionType: GUESS_SONG_QUESTION_TYPE_AUTO,
+      ...(mode === 'EXPERT'
+        ? { musicSongId: { not: null }, MusicSong: { expertEnabled: true, MusicAlbum: { status: 'PUBLISHED' } } }
+        : { MusicSong: { MusicAlbum: { status: 'PUBLISHED' } } }),
+    }]
     : []
   if (mode === 'ENDLESS' || mode === 'EXPERT') {
     return [{ questionType: GUESS_SONG_QUESTION_TYPE_MANUAL, ...expertSongFilter }, ...autoBranch]
@@ -239,6 +257,8 @@ export async function createOrResumeGuessSongSession(
           userId,
           activeKey: `${userId}:${mode}`,
           mode,
+          clientSessionNonce: createClientSessionNonce(),
+          clientSessionTokenIssuedAt: now,
           livesRemaining: config.maxWrongCount || GUESS_SONG_INITIAL_LIVES,
           questionCount: null,
           expiresAt: sessionExpiry(mode, now),
@@ -276,9 +296,21 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     throw new GuessSongServiceError('本场游戏已过期，请重新开始', 410, 'SESSION_EXPIRED')
   }
 
+  const clientCredentials = await ensureClientSessionCredentials(session, null, now)
   const currentQuestion = await prisma.guessSongSessionQuestion.findUnique({
     where: { sessionId_position: { sessionId, position: session.currentPosition } },
   })
+  let questionAttemptToken: string | null = null
+  if (session.status === 'IN_PROGRESS' && currentQuestion && !currentQuestion.answeredAt) {
+    const issued = issueQuestionAttemptToken(currentQuestion.publicId)
+    if (currentQuestion.questionAttemptTokenHash !== issued.hash) {
+      await prisma.guessSongSessionQuestion.updateMany({
+        where: { id: currentQuestion.id, answeredAt: null },
+        data: { questionAttemptTokenHash: issued.hash },
+      })
+    }
+    questionAttemptToken = issued.token
+  }
   const config = GUESS_SONG_MODE_CONFIG[session.mode]
   const publicMode = toPublicGuessSongMode(session.mode)
   return {
@@ -287,6 +319,9 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     modeLabel: GUESS_SONG_MODE_CONFIG[publicMode].label,
     status: session.status,
     score: session.score,
+    riskScore: session.riskScore,
+    isValid: session.isValid,
+    clientSessionToken: clientCredentials.clientSessionToken,
     correctCount: session.correctCount,
     wrongCount: session.wrongCount,
     currentStreak: session.currentStreak,
@@ -301,6 +336,7 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     question: session.status === 'IN_PROGRESS' && currentQuestion
       ? {
           publicId: currentQuestion.publicId,
+          questionAttemptToken,
           position: currentQuestion.position,
           playbackDurationSeconds: currentQuestion.playbackDurationSeconds,
           maxPlayCount: currentQuestion.maxPlayCount,
@@ -355,6 +391,7 @@ export async function requestGuessSongPlayback(input: {
   sessionId: string
   publicQuestionId: string
   requestKey: string
+  clientSessionToken?: string | null
   now?: Date
 }) {
   const now = input.now ?? new Date()
@@ -398,6 +435,7 @@ export async function requestGuessSongPlayback(input: {
         },
         data: {
           playCount: { increment: 1 },
+          firstPlayedAt: playable.sessionQuestion.firstPlayedAt ?? now,
           answerDeadlineAt: playable.sessionQuestion.answerDeadlineAt
             ?? new Date(now.getTime() + (
               GUESS_SONG_MODE_CONFIG[playable.sessionQuestion.GuessSongSession.mode].answerMode === 'INPUT'
@@ -438,11 +476,20 @@ export async function requestGuessSongPlayback(input: {
         answerAvailableAt: answerDeadlineAtToAvailableAt(after.answerDeadlineAt),
       }
     })
+    const risk = await GuessSongRiskService.assess({
+      userId: input.userId,
+      sessionId: input.sessionId,
+      trigger: 'PLAY',
+      clientSessionToken: input.clientSessionToken,
+      now,
+    })
     return {
       ...result,
-      signedUrl,
-      expiresIn: signedUrlExpires,
+      signedUrl: risk.cheatDetected ? '' : signedUrl,
+      expiresIn: risk.cheatDetected ? 0 : signedUrlExpires,
       durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
+      cheatDetected: risk.cheatDetected,
+      ...(risk.cheatDetected ? { exitAfterSeconds: risk.exitAfterSeconds } : {}),
     }
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -513,13 +560,16 @@ export async function answerGuessSongQuestion(input: {
   sessionId: string
   publicQuestionId: string
   optionKey: string | null
-  songId?: string | null
   answerText?: string | null
   skip?: boolean
+  clientSessionToken?: string | null
+  questionAttemptToken?: string | null
   now?: Date
 }) {
   const now = input.now ?? new Date()
-  const outcome = await prisma.$transaction<AnswerOutcome>(async (tx) => {
+  let outcome: AnswerOutcome
+  try {
+    outcome = await prisma.$transaction<AnswerOutcome>(async (tx) => {
     const question = await tx.guessSongSessionQuestion.findUnique({
       where: { publicId: input.publicQuestionId },
       include: {
@@ -553,6 +603,10 @@ export async function answerGuessSongQuestion(input: {
       }
     }
 
+    if (!isQuestionAttemptTokenValid(input.questionAttemptToken, question.questionAttemptTokenHash)) {
+      throw new GuessSongServiceError('鏈 answer token 鏃犳晥鎴栧凡浣跨敤', 409, 'QUESTION_ATTEMPT_TOKEN_INVALID')
+    }
+
     const expert = question.GuessSongSession.mode === 'EXPERT'
     const timedOut = Boolean(question.answerDeadlineAt && question.answerDeadlineAt <= now)
     const skipped = Boolean(input.skip && expert && !timedOut)
@@ -566,16 +620,15 @@ export async function answerGuessSongQuestion(input: {
       selectedOptionKey = GUESS_SONG_SKIPPED_OPTION
     } else if (!timedOut && expert) {
       const answerText = input.answerText?.trim() || ''
-      const submittedSongId = input.songId?.trim() || ''
-      if (!answerText && !submittedSongId) {
+      if (!answerText) {
         throw new GuessSongServiceError('请输入或选择歌曲名称')
       }
       const targetSongId = question.GuessSongQuestion.musicSongId
       const targetSongTitle = question.GuessSongQuestion.MusicSong?.title || question.GuessSongQuestion.songTitle
       const normalizedText = normalizeGuessSongAnswer(answerText)
       const titleMatches = Boolean(normalizedText && normalizedText === normalizeGuessSongAnswer(targetSongTitle))
-      selectedOptionKey = submittedSongId || normalizedText
-      correct = Boolean(targetSongId && (submittedSongId === targetSongId || titleMatches))
+      selectedOptionKey = normalizedText
+      correct = Boolean(targetSongId && titleMatches)
     } else if (!timedOut) {
       if (input.optionKey === null) {
         throw new GuessSongServiceError('本题尚未超时', 409, 'QUESTION_NOT_TIMED_OUT')
@@ -609,6 +662,10 @@ export async function answerGuessSongQuestion(input: {
         isCorrect: correct,
         awardedScore,
         answeredAt: now,
+        questionAttemptTokenHash: null,
+        answerLatencyMs: question.firstPlayedAt
+          ? Math.max(0, now.getTime() - question.firstPlayedAt.getTime())
+          : null,
       },
     })
     if (claimed.count !== 1) {
@@ -671,9 +728,57 @@ export async function answerGuessSongQuestion(input: {
       ...getGuessSongAnswerDetails(question.GuessSongQuestion),
       awardedScore,
     }
-  })
+    })
+  } catch (error) {
+    if (error instanceof GuessSongServiceError && error.code === 'QUESTION_ATTEMPT_TOKEN_INVALID') {
+      const risk = await GuessSongRiskService.assess({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        trigger: 'ANSWER',
+        clientSessionToken: input.clientSessionToken,
+        questionAttemptTokenValid: false,
+        now,
+      })
+      if (risk.cheatDetected) {
+        return {
+          duplicate: false,
+          correct: false,
+          answerStatus: 'WRONG' as const,
+          skipped: false,
+          correctSongTitle: '',
+          correctSongArtist: null,
+          correctSongAlbumTitle: null,
+          correctSongReleaseYear: null,
+          correctSongDescription: null,
+          awardedScore: 0,
+          session: await getGuessSongSessionState(input.userId, input.sessionId, now),
+          ranks: null,
+          cheatDetected: true,
+          exitAfterSeconds: risk.exitAfterSeconds,
+        }
+      }
+    }
+    throw error
+  }
 
+  const risk = await GuessSongRiskService.assess({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    trigger: 'ANSWER',
+    clientSessionToken: input.clientSessionToken,
+    questionAttemptTokenValid: true,
+    now,
+  })
   const session = await getGuessSongSessionState(input.userId, input.sessionId, now)
+  if (risk.cheatDetected) {
+    return {
+      ...outcome,
+      session,
+      ranks: null,
+      cheatDetected: true,
+      exitAfterSeconds: risk.exitAfterSeconds,
+    }
+  }
   let ranks: { weekRank: number | null; monthRank: number | null } | null = null
   if (session.status === 'COMPLETED') {
     await recordGuessSongLeaderboard(input.sessionId)
@@ -698,15 +803,25 @@ export async function getGuessSongLobbySummary(userId: string, now = new Date())
   const month = getGuessSongPeriod('MONTH', now)
   const [weeklyEntries, monthlyEntries, recentSessionRow, activeSessionRows, quizConfig] = await Promise.all([
     prisma.guessSongLeaderboardEntry.findMany({
-      where: { userId, periodType: 'WEEK', periodKey: week.periodKey },
+      where: {
+        userId,
+        periodType: 'WEEK',
+        periodKey: week.periodKey,
+        GuessSongSession: { isValid: true, riskScore: { lt: GUESS_SONG_RISK_THRESHOLD } },
+      },
       orderBy: { score: 'desc' },
     }),
     prisma.guessSongLeaderboardEntry.findMany({
-      where: { userId, periodType: 'MONTH', periodKey: month.periodKey },
+      where: {
+        userId,
+        periodType: 'MONTH',
+        periodKey: month.periodKey,
+        GuessSongSession: { isValid: true, riskScore: { lt: GUESS_SONG_RISK_THRESHOLD } },
+      },
       orderBy: { score: 'desc' },
     }),
     prisma.guessSongSession.findFirst({
-      where: { userId, status: 'COMPLETED' },
+      where: { userId, status: 'COMPLETED', isValid: true, riskScore: { lt: GUESS_SONG_RISK_THRESHOLD } },
       orderBy: { completedAt: 'desc' },
       select: {
         id: true,

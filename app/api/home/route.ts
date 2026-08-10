@@ -16,6 +16,9 @@ import { getCurrentUser } from '@/lib/auth'
 import { DAILY_MUSIC_ANONYMOUS_COOKIE } from '@/lib/daily-music'
 import { getGrowthSummary } from '@/lib/growth'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET() {
   try {
     const cookieStore = await cookies()

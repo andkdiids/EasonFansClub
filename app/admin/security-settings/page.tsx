@@ -8,7 +8,7 @@ import { SecuritySettingsForm } from './SecuritySettingsForm'
 export const dynamic = 'force-dynamic'
 
 export default async function AdminSecuritySettingsPage() {
-  const user = await requireAdminPage('/admin/security-settings', 'account_security_manage')
+  await requireAdminPage('/admin/security-settings', 'account_security_manage')
   const [settings, policy] = await Promise.all([getAccountSecuritySettings(), getRegistrationPolicy()])
   return (
     <main className="mx-auto max-w-4xl space-y-6 px-5 py-8">
@@ -18,7 +18,7 @@ export default async function AdminSecuritySettingsPage() {
         <p className="mt-3 text-sm font-bold leading-7 text-slate-600">统一配置注册流程、验证方式、密保与邮箱密码找回策略；修改会记录管理员操作日志。</p>
       </header>
       <section id="registration-settings" className="scroll-mt-24">
-        <RegistrationSettingsForm initialPolicy={{ allowRegister: policy.allowRegister, registrationMode: policy.registrationMode, registrationModeLabel: policy.registrationModeLabel, allowPhoneRegistration: policy.allowPhoneRegistration, allowEmailRegistration: policy.allowEmailRegistration, registrationClosed: policy.registrationClosed, enableTurnstile: policy.enableTurnstile, envForcedClosed: policy.envForcedClosed }} />
+        <RegistrationSettingsForm initialPolicy={{ allowRegister: policy.allowRegister, registrationMode: policy.registrationMode, registrationModeLabel: policy.registrationModeLabel, allowPhoneRegistration: policy.allowPhoneRegistration, allowEmailRegistration: policy.allowEmailRegistration, registrationClosed: policy.registrationClosed, enableTurnstile: policy.enableTurnstile, envForcedClosed: policy.envForcedClosed, registrationLimitEnabled: policy.registrationLimitEnabled }} />
       </section>
       <section id="verification-settings" className="scroll-mt-24 rounded-2xl border border-sky-100 bg-sky-50/60 p-5">
         <h2 className="text-xl font-black text-brand-950">验证设置</h2>

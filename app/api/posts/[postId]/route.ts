@@ -6,6 +6,7 @@ import { checkForbiddenWords } from '@/lib/content-filter'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
 import { isSupabaseStorageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { publicPostWhere } from '@/lib/post-moderation'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { containsSensitiveContent, isAdminRole, requireUser, sanitizeText } from '@/lib/security'
 
@@ -40,10 +41,8 @@ export async function GET(_request: Request, { params }: Params) {
   const { postId } = await params
   const post = await prisma.post.findFirst({
     where: {
+      ...publicPostWhere,
       id: postId,
-      isDeleted: false,
-      status: 'PUBLISHED',
-      moderationStatus: 'APPROVED',
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     include: {

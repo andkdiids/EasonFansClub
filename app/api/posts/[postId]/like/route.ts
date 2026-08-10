@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { POINTS } from '@/lib/points'
+import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 
@@ -14,7 +15,7 @@ export async function GET(_request: Request, { params }: Params) {
 
   const { postId } = await params
   const likes = await prisma.like.findMany({
-    where: { postId, Post: { isDeleted: false } },
+    where: { postId, Post: publicPostWhere },
     orderBy: { createdAt: 'desc' },
     take: 50,
     select: {
@@ -52,7 +53,7 @@ export async function POST(_request: Request, { params }: Params) {
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({
-      where: { id: postId, isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' },
+      where: { ...publicPostWhere, id: postId },
       select: { id: true, authorId: true, likeCount: true },
     })
     if (!post) return null
@@ -111,7 +112,7 @@ export async function DELETE(_request: Request, { params }: Params) {
 
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {
-    const post = await tx.post.findFirst({ where: { id: postId, moderationStatus: 'APPROVED' }, select: { likeCount: true } })
+    const post = await tx.post.findFirst({ where: { ...publicPostWhere, id: postId }, select: { likeCount: true } })
     if (!post) return null
 
     await tx.like.deleteMany({ where: { postId, userId: user.id } })

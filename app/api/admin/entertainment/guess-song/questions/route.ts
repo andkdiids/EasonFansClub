@@ -5,6 +5,7 @@ import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { guessSongError, guessSongOk, handleGuessSongError } from '@/lib/guess-song-api'
 
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 export const runtime = 'nodejs'
 
 export async function GET(request: Request) {
@@ -49,6 +50,7 @@ export async function GET(request: Request) {
           releaseYear: true,
           coverUrl: true,
           previewUrl: true,
+          expertEnabled: true,
           sourceAudioPath: true,
           sourceAudioRevision: true,
           MusicAlbum: {
@@ -66,7 +68,7 @@ export async function GET(request: Request) {
         take: 1000,
       }),
     ])
-    return guessSongOk({
+    const response = guessSongOk({
       questions: questions.map(({ GuessSongAudioVariant, MusicSong, ...question }) => ({
         ...question,
         musicSong: MusicSong
@@ -86,6 +88,8 @@ export async function GET(request: Request) {
         album: MusicAlbum,
       })),
     })
+    response.headers.set('Cache-Control', 'private, no-store')
+    return response
   } catch (error) {
     return handleGuessSongError(error, 'admin.questions.list')
   }

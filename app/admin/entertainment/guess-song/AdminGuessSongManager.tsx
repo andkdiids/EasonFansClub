@@ -16,6 +16,7 @@ type MusicSong = {
   releaseYear: number
   coverUrl: string | null
   previewUrl: string | null
+  expertEnabled: boolean
   sourceAudioRevision: string | null
   hasAudioSource: boolean
   hasGuessClip: boolean
@@ -221,6 +222,7 @@ export function AdminGuessSongManager() {
   const [error, setError] = useState('')
   const [quizConfig, setQuizConfig] = useState<QuizConfig | null>(null)
   const [configSaving, setConfigSaving] = useState(false)
+  const [expertToggleId, setExpertToggleId] = useState<string | null>(null)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const uploadRegionRef = useRef<HTMLDivElement | null>(null)
   const selectedMusicSong = musicSongs.find((song) => song.id === form.musicSongId) || null
@@ -245,6 +247,7 @@ export function AdminGuessSongManager() {
       const params = new URLSearchParams({ q: query, difficulty, enabled: enabledFilter })
       const data = await api<{ questions: Question[]; musicSongs: MusicSong[] }>(
         `/api/admin/entertainment/guess-song/questions?${params}`,
+        { cache: 'no-store' },
       )
       setQuestions(data.questions)
       setMusicSongs(data.musicSongs)
@@ -564,6 +567,29 @@ export function AdminGuessSongManager() {
     }
   }
 
+  async function toggleSongExpertEnabled(song: MusicSong) {
+    if (expertToggleId) return
+    setExpertToggleId(song.id)
+    setError('')
+    try {
+      const data = await api<{ song: { id: string; expertEnabled: boolean } }>(
+        `/api/admin/entertainment/guess-song/music-songs/${song.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expertEnabled: !song.expertEnabled }),
+        },
+      )
+      setMusicSongs((current) => current.map((item) =>
+        item.id === data.song.id ? { ...item, expertEnabled: data.song.expertEnabled } : item))
+      setMessage(data.song.expertEnabled ? '歌曲已加入专家模式题库' : '歌曲已从专家模式题库移除')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '专家模式开关保存失败')
+    } finally {
+      setExpertToggleId(null)
+    }
+  }
+
   const field = (key: keyof FormState, label: string, required = true) => (
     <label>
       <span>{label}</span>
@@ -675,6 +701,9 @@ export function AdminGuessSongManager() {
                   ))}
                 </select>
               </div>
+              <p className="guess-song-expert-hint">
+                专家模式：控制该歌曲是否进入专家模式。如果歌曲存在同旋律不同语言版本，建议关闭其中一个版本，避免答案歧义。
+              </p>
               <div className="guess-song-library-list">
                 {filteredMusicSongs.slice(0, 100).map((song) => (
                   <article key={song.id} aria-current={form.musicSongId === song.id}>
@@ -692,6 +721,19 @@ export function AdminGuessSongManager() {
                         {' · '}{song.hasGuessClip ? '已有猜歌题目' : '未生成猜歌片段'}
                       </small>
                     </div>
+                    <div className="guess-song-library-actions">
+                      <span className={song.expertEnabled ? 'guess-song-expert-enabled' : 'guess-song-expert-disabled'}>
+                        {song.expertEnabled ? '✅ 专家模式' : '❌ 不参与专家模式'}
+                      </span>
+                      <button
+                        type="button"
+                        className="guess-song-expert-toggle"
+                        aria-pressed={song.expertEnabled}
+                        disabled={expertToggleId === song.id}
+                        onClick={() => void toggleSongExpertEnabled(song)}
+                      >
+                        {expertToggleId === song.id ? '保存中…' : song.expertEnabled ? '关闭专家模式' : '开启专家模式'}
+                      </button>
                     {song.hasAudioSource ? (
                       <button type="button" onClick={() => selectMusicSong(song)}>
                         {form.musicSongId === song.id ? '已选择' : '选择'}
@@ -699,6 +741,7 @@ export function AdminGuessSongManager() {
                     ) : (
                       <Link href={`/admin/music/albums/${song.album.id}`}>编辑歌曲</Link>
                     )}
+                    </div>
                   </article>
                 ))}
               </div>

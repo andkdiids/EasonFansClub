@@ -11,6 +11,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { isSupabaseStorageUrl, profileImageUrl } from '@/lib/images'
+import { getPostModerationAccess } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
@@ -321,13 +322,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非 404。
   // 管理员可查看全部（保持现有权限）；普通用户只能查看 APPROVED。
   const viewerIsAdmin = Boolean(user && isAdminRole(user.role))
-  if (!viewerIsAdmin) {
-    if (post.moderationStatus === 'PENDING') {
-      return <ModerationPendingFallback />
-    }
-    if (post.moderationStatus === 'REJECTED') {
-      return <ModerationRejectedFallback />
-    }
+  const moderationAccess = getPostModerationAccess(post.moderationStatus, viewerIsAdmin)
+  if (moderationAccess === 'PENDING') {
+    return <ModerationPendingFallback />
+  }
+  if (moderationAccess === 'REJECTED') {
+    return <ModerationRejectedFallback />
   }
 
   if (post.isDeleted || post.status !== 'PUBLISHED') {

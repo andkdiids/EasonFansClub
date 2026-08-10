@@ -37,8 +37,11 @@ export function FeedbackImageUploader({ onChange, onBusyChange }: {
       const body = new FormData()
       body.append('file', item.file)
       const response = await fetch('/api/uploads/feedback-image', { method: 'POST', body, cache: 'no-store' })
-      const data = await response.json().catch(() => null) as { url?: string; mimeType?: string; message?: string } | null
-      if (!response.ok || !data?.url) throw new Error(data?.message || '图片上传失败')
+      const data = await response.json().catch(() => null) as { url?: string; mimeType?: string; message?: string; detail?: string } | null
+      const fallbackMessage = process.env.NODE_ENV === 'development'
+        ? `图片上传失败（HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}）`
+        : '图片上传失败'
+      if (!response.ok || !data?.url) throw new Error(data?.message || (process.env.NODE_ENV === 'development' ? data?.detail : '') || fallbackMessage)
       setItems((current) => current.map((row) => row.id === item.id ? { ...row, status: 'success', uploaded: { url: data.url!, mimeType: data.mimeType || item.file.type } } : row))
     } catch (reason) {
       setItems((current) => current.map((row) => row.id === item.id ? { ...row, status: 'failed', error: reason instanceof Error ? reason.message : '图片上传失败' } : row))

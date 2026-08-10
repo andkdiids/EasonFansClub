@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
+import { hasHeroMediaAsset } from '@/lib/hero-visuals'
 import { resolveHeroSlideVisual, type SiteHeroSlide, type SiteHeroStyle } from '@/lib/site-config'
 import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
@@ -15,7 +16,6 @@ export function HomeHero({
   siteName,
   buttonColor,
   styleConfig,
-  fallbackImageUrl,
   visual,
   defaultTitle = defaultHeroTitle,
   defaultSubtitle = 'NOW IS THE ONLY REALITY.',
@@ -24,7 +24,6 @@ export function HomeHero({
   siteName: string
   buttonColor: string
   styleConfig: SiteHeroStyle
-  fallbackImageUrl?: string | null
   visual?: SiteHeroVisualConfig | null
   defaultTitle?: string
   defaultSubtitle?: string
@@ -83,7 +82,7 @@ export function HomeHero({
   const hasHeroCopy = showTitle || showSubtitle || showButton
   const hasBackground = Boolean(
     (backgroundVisual?.enabled ?? true)
-    && (backgroundVisual?.mediaUrl || backgroundVisual?.imageUrl || backgroundVisual?.desktopHero || backgroundVisual?.mobileHero || backgroundVisual?.posterUrl || fallbackImageUrl),
+    && (hasHeroMediaAsset(backgroundVisual?.desktopHeroMedia) || hasHeroMediaAsset(backgroundVisual?.mobileHeroMedia)),
   )
 
   return (
@@ -98,7 +97,7 @@ export function HomeHero({
       className="community-hero"
       style={{ touchAction: 'pan-y' }}
     >
-      <HeroBackground visual={backgroundVisual} fallbackImageUrl={fallbackImageUrl} priority />
+      <HeroBackground visual={backgroundVisual} priority />
       {!hasBackground ? <div className="community-hero-fallback" /> : null}
       <div className="community-hero-overlay" />
       {hasHeroCopy ? <div aria-live="polite" className="community-hero-copy">

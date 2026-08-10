@@ -13,7 +13,7 @@ export default async function CommunityPage() {
   if (!user) redirect('/login?redirect=%2Fwelcome')
 
   const [config, announcement, layoutConfig] = await Promise.all([
-    getSiteAppearance(),
+    getSiteAppearance({ cache: 'no-store' }),
     getHomeAnnouncement(),
     getPublishedPageLayoutConfig('home'),
   ])

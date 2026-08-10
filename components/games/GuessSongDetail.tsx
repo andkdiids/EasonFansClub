@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { GameCatalogItem } from '@/lib/game-catalog'
 import { GUESS_SONG_MODE_CONFIG, type GuessSongPublicMode } from '@/lib/guess-song-config'
+import { createUUID } from '@/lib/utils/uuid'
 import { GameDetailLayout } from './GameDetailLayout'
 
 type Mode = GuessSongPublicMode
@@ -76,7 +77,7 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
       const data = await request<{ resumed: boolean; session: { id: string } }>('/api/entertainment/guess-song/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ mode, clientFlowNonce: createUUID() }),
       })
       router.push(`/games/guess-song/play?session=${encodeURIComponent(data.session.id)}&from=detail`)
     } catch (reason) {

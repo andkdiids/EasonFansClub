@@ -101,7 +101,7 @@ test('FriendDock backdrop fallback closes after the compatibility click', () => 
 test('FriendDock backdrop covers posts links buttons and BottomNav', () => {
   assert.match(css, /\.friend-dock-backdrop \{[^}]*position:fixed;[^}]*inset:0;[^}]*pointer-events:auto;[^}]*touch-action:manipulation/)
   assert.match(css, /--layer-overlay: 90/)
-  assert.match(css, /--layer-mobile-nav: 70/)
+  assert.match(css, /--layer-mobile-nav: 99999/)
 })
 
 test('FriendDock panel actions remain separate from backdrop closing', () => {
@@ -133,7 +133,7 @@ test('E center sheet independently clears nav center button and visual gap', () 
 test('E center layering keeps backdrop above content nav visible and sheet on top', () => {
   assert.match(css, /--layer-floating-action: 65/)
   assert.match(css, /--layer-center-backdrop: 68/)
-  assert.match(css, /--layer-mobile-nav: 70/)
+  assert.match(css, /--layer-mobile-nav: 99999/)
   assert.match(css, /--layer-center-sheet: 110/)
   assert.match(css, /\.mobile-center-backdrop \{[^}]*z-index:var\(--layer-center-backdrop\)/)
   assert.match(css, /\.mobile-center-sheet \{[^}]*z-index:var\(--layer-center-sheet\)/)

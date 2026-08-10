@@ -5,6 +5,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { clampForumPage, excerptForumPost, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
+import { publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -29,9 +30,7 @@ export async function GET(request: Request) {
     : null
 
   const where: Prisma.PostWhereInput = {
-    isDeleted: false,
-    status: 'PUBLISHED',
-    moderationStatus: 'APPROVED',
+    ...publicPostWhere,
     User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     ...(selectedBoard ? { boardId: selectedBoard.id } : { Board: { isActive: true } }),
     ...(sort === 'featured' ? { isFeatured: true } : {}),

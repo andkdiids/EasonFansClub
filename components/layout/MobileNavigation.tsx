@@ -84,6 +84,39 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
 
   useEffect(() => () => window.clearTimeout(backdropCloseTimer.current), [])
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return
+
+    let frame = 0
+    const logViewport = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        const mobileBottomNav = document.querySelector<HTMLElement>('.mobile-bottom-nav')
+        console.log({
+          viewportHeight: window.innerHeight,
+          scrollY: window.scrollY,
+          bottomNavRect: mobileBottomNav?.getBoundingClientRect(),
+        })
+      })
+    }
+
+    logViewport()
+    window.addEventListener('resize', logViewport, { passive: true })
+    window.addEventListener('orientationchange', logViewport, { passive: true })
+    window.addEventListener('scroll', logViewport, { passive: true })
+    window.visualViewport?.addEventListener('resize', logViewport, { passive: true })
+    window.visualViewport?.addEventListener('scroll', logViewport, { passive: true })
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', logViewport)
+      window.removeEventListener('orientationchange', logViewport)
+      window.removeEventListener('scroll', logViewport)
+      window.visualViewport?.removeEventListener('resize', logViewport)
+      window.visualViewport?.removeEventListener('scroll', logViewport)
+    }
+  }, [])
+
   function openCenter() {
     if (centerOpen) return
     window.dispatchEvent(new Event('friend-dock:close'))
@@ -167,7 +200,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
     <nav
       data-mobile-main-nav
       data-center-open={centerOpen || undefined}
-      className="app-mobile-nav"
+      className="mobile-bottom-nav app-mobile-nav"
       aria-label="移动端导航"
       onClickCapture={interceptNavigationWhileCenterOpen}
     >

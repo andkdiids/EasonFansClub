@@ -12,13 +12,18 @@ export async function POST(request: Request, { params }: Context) {
   const limit = await consumeRateLimit(guard.user.id, 'guess-song-play', 60, 60)
   if (limit.limited) return guessSongError('播放请求过于频繁，请稍后再试', 429)
   const { sessionId } = await params
-  const body = await request.json().catch(() => null) as { questionId?: unknown; requestKey?: unknown } | null
+  const body = await request.json().catch(() => null) as {
+    questionId?: unknown
+    requestKey?: unknown
+    clientSessionToken?: unknown
+  } | null
   try {
     return guessSongOk(await requestGuessSongPlayback({
       userId: guard.user.id,
       sessionId,
       publicQuestionId: sanitizeText(body?.questionId, 100),
       requestKey: sanitizeText(body?.requestKey, 100),
+      clientSessionToken: sanitizeText(body?.clientSessionToken, 2000) || null,
     }))
   } catch (error) {
     return handleGuessSongError(error, 'sessions.play')

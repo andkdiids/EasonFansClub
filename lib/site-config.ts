@@ -1,6 +1,6 @@
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
-import { defaultHeroVisuals, hasHeroMediaAsset, heroFitModes, heroMediaTypes, normalizeHeroScale, type HeroFitMode, type HeroMediaAsset, type HeroMediaType, type HeroVisualKey, type SiteHeroVisualConfig } from '@/lib/hero-visuals'
+import { defaultHeroVisuals, hasHeroMediaAsset, heroFitModes, normalizeHeroMediaType, normalizeHeroScale, type HeroFitMode, type HeroMediaAsset, type HeroMediaType, type HeroVisualKey, type SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
 export { heroFitModes, heroMediaTypes, heroVisualKeys, pageVisualKeys } from '@/lib/hero-visuals'
 export type { HeroFitMode, HeroMediaAsset, HeroMediaType, HeroVisualKey, SiteHeroVisualConfig } from '@/lib/hero-visuals'
@@ -205,12 +205,12 @@ export function normalizeHeroMediaAsset(value: unknown, fallback: HeroMediaAsset
   if (value === undefined) return fallback ? { ...fallback } : null
   if (value === null || typeof value !== 'object') return null
   const row = value as Partial<HeroMediaAsset>
-  const mediaType = enumValue(row.mediaType, heroMediaTypes, fallback?.mediaType || 'IMAGE')
+  const mediaType = normalizeHeroMediaType(row.mediaType, fallback?.mediaType || 'STATIC_IMAGE')
   const hasUrlFields = ['imageUrl', 'mediaUrl', 'posterUrl', 'sourceUrl', 'posterSourceUrl']
     .some((key) => Object.prototype.hasOwnProperty.call(row, key))
   const urlFallback = hasUrlFields ? null : fallback
-  const imageUrl = textValue(row.imageUrl) || (mediaType === 'IMAGE' ? textValue(row.mediaUrl) : '') || urlFallback?.imageUrl || ''
-  const mediaUrl = textValue(row.mediaUrl) || (mediaType === 'IMAGE' ? imageUrl : urlFallback?.mediaUrl || '')
+  const imageUrl = textValue(row.imageUrl) || (mediaType === 'STATIC_IMAGE' ? textValue(row.mediaUrl) : '') || urlFallback?.imageUrl || ''
+  const mediaUrl = textValue(row.mediaUrl) || (mediaType === 'STATIC_IMAGE' ? imageUrl : urlFallback?.mediaUrl || '')
   return {
     mediaType,
     imageUrl,
@@ -221,22 +221,6 @@ export function normalizeHeroMediaAsset(value: unknown, fallback: HeroMediaAsset
   }
 }
 
-export function legacyHeroMediaFromSlide(slide: Pick<SiteHeroSlide, 'imageUrl' | 'mediaType' | 'mediaUrl' | 'posterUrl' | 'sourceUrl' | 'posterSourceUrl'>): HeroMediaAsset | null {
-  const mediaType = enumValue(slide.mediaType, heroMediaTypes, 'IMAGE')
-  const imageUrl = textValue(slide.imageUrl)
-  const mediaUrl = textValue(slide.mediaUrl) || (mediaType === 'IMAGE' ? imageUrl : '')
-  const posterUrl = textValue(slide.posterUrl)
-  if (!mediaUrl && !(mediaType === 'IMAGE' && imageUrl)) return null
-  return {
-    mediaType,
-    imageUrl,
-    mediaUrl,
-    posterUrl,
-    sourceUrl: textValue(slide.sourceUrl),
-    posterSourceUrl: textValue(slide.posterSourceUrl),
-  }
-}
-
 export function getHeroMediaForDevice(slide: SiteHeroSlide | null | undefined, device: 'desktop' | 'mobile') {
   if (!slide) return null
   const media = device === 'mobile' ? slide.mobileHeroMedia : slide.desktopHeroMedia
@@ -244,11 +228,11 @@ export function getHeroMediaForDevice(slide: SiteHeroSlide | null | undefined, d
 }
 
 function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
-  const mediaType = enumValue(item.mediaType, heroMediaTypes, 'IMAGE')
+  const mediaType = normalizeHeroMediaType(item.mediaType)
   const imageUrl = typeof item.imageUrl === 'string' ? item.imageUrl : ''
   const mediaUrl = typeof item.mediaUrl === 'string' && item.mediaUrl.trim()
     ? item.mediaUrl.trim()
-    : mediaType === 'IMAGE' ? imageUrl : ''
+    : mediaType === 'STATIC_IMAGE' ? imageUrl : ''
   const posterUrl = typeof item.posterUrl === 'string' ? item.posterUrl.trim() : ''
   const sourceUrl = typeof item.sourceUrl === 'string' ? item.sourceUrl.trim() : ''
   const posterSourceUrl = typeof item.posterSourceUrl === 'string' ? item.posterSourceUrl.trim() : ''
@@ -264,17 +248,10 @@ function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
     showSubtitle: item.showSubtitle !== false,
     showButton: item.showButton !== false,
   }
-  const legacyMedia = legacyHeroMediaFromSlide(normalized)
-  if (Object.prototype.hasOwnProperty.call(item, 'desktopHeroMedia')) {
-    normalized.desktopHeroMedia = normalizeHeroMediaAsset(item.desktopHeroMedia, legacyMedia)
-  } else {
-    normalized.desktopHeroMedia = legacyMedia
-  }
-  if (Object.prototype.hasOwnProperty.call(item, 'mobileHeroMedia')) {
-    normalized.mobileHeroMedia = normalizeHeroMediaAsset(item.mobileHeroMedia, null)
-  } else {
-    normalized.mobileHeroMedia = null
-  }
+  // A missing or explicitly cleared device asset is an empty state. Never
+  // synthesize desktopHeroMedia from the legacy slide image fields.
+  normalized.desktopHeroMedia = normalizeHeroMediaAsset(item.desktopHeroMedia, null)
+  normalized.mobileHeroMedia = normalizeHeroMediaAsset(item.mobileHeroMedia, null)
   const desktopPositionX = optionalPercentage(item.desktopPositionX)
   const desktopPositionY = optionalPercentage(item.desktopPositionY)
   const mobilePositionX = optionalPercentage(item.mobilePositionX)
@@ -292,67 +269,38 @@ function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
   return normalized
 }
 
-/**
- * Resolves the media and per-slide composition settings used by both the
- * public Hero and the visual-settings preview. Missing per-slide settings
- * intentionally fall back to the legacy page-level Home Hero settings.
- */
-function heroMediaFromVisual(visual: SiteHeroVisualConfig, device: 'desktop' | 'mobile'): HeroMediaAsset | null {
-  const dedicatedImage = device === 'mobile' ? visual.mobileHero || visual.desktopHero : visual.desktopHero
-  const mediaType = visual.mediaType || 'IMAGE'
-  const imageUrl = dedicatedImage || visual.imageUrl || ''
-  const mediaUrl = mediaType === 'IMAGE'
-    ? dedicatedImage && dedicatedImage !== visual.imageUrl ? dedicatedImage : visual.mediaUrl || imageUrl
-    : visual.mediaUrl || ''
-  const posterUrl = visual.posterUrl || (mediaType === 'VIDEO' ? visual.imageUrl : '') || ''
-  if (!imageUrl && !mediaUrl && !posterUrl) return null
-  return {
-    mediaType,
-    imageUrl,
-    mediaUrl,
-    posterUrl,
-    sourceUrl: visual.sourceUrl || '',
-    posterSourceUrl: visual.posterSourceUrl || '',
-  }
-}
-
+/** Resolves explicit per-slide media and composition settings for a Hero. */
 export function resolveHeroSlideVisual(
   visual: SiteHeroVisualConfig | null | undefined,
   slide: SiteHeroSlide | null | undefined,
 ): SiteHeroVisualConfig | null | undefined {
   if (!visual || !slide) return visual
 
-  const legacyMedia = legacyHeroMediaFromSlide(slide)
-  const pageDesktopMedia = hasHeroMediaAsset(visual.desktopHeroMedia)
-    ? visual.desktopHeroMedia
-    : visual.desktopHero && visual.desktopHero !== visual.imageUrl ? heroMediaFromVisual(visual, 'desktop') : null
-  const pageMobileMedia = hasHeroMediaAsset(visual.mobileHeroMedia)
-    ? visual.mobileHeroMedia
-    : visual.mobileHero ? heroMediaFromVisual(visual, 'mobile') : null
-  const desktopHeroMedia = pageDesktopMedia
-    || (hasHeroMediaAsset(slide.desktopHeroMedia) ? slide.desktopHeroMedia : null)
-    || legacyMedia
-    || heroMediaFromVisual(visual, 'desktop')
-  const mobileHeroMedia = pageMobileMedia
-    || (hasHeroMediaAsset(slide.mobileHeroMedia) ? slide.mobileHeroMedia : null)
-  const mediaType = desktopHeroMedia?.mediaType || visual.mediaType || 'IMAGE'
-  const mediaUrl = desktopHeroMedia?.mediaUrl || (mediaType === 'IMAGE' ? desktopHeroMedia?.imageUrl || '' : '')
+  const isHomeHero = visual.key === 'home'
+  const pageDesktopMedia = hasHeroMediaAsset(visual.desktopHeroMedia) ? visual.desktopHeroMedia : null
+  const pageMobileMedia = hasHeroMediaAsset(visual.mobileHeroMedia) ? visual.mobileHeroMedia : null
+  const slideDesktopMedia = hasHeroMediaAsset(slide.desktopHeroMedia) ? slide.desktopHeroMedia : null
+  const slideMobileMedia = hasHeroMediaAsset(slide.mobileHeroMedia) ? slide.mobileHeroMedia : null
+  const desktopHeroMedia = isHomeHero ? slideDesktopMedia : pageDesktopMedia || slideDesktopMedia
+  const mobileHeroMedia = isHomeHero ? slideMobileMedia : pageMobileMedia || slideMobileMedia
+  const mediaType = desktopHeroMedia?.mediaType || normalizeHeroMediaType(visual.mediaType)
+  const mediaUrl = desktopHeroMedia?.mediaUrl || (mediaType === 'STATIC_IMAGE' ? desktopHeroMedia?.imageUrl || '' : '')
   const slideImage = desktopHeroMedia?.imageUrl || ''
   const hasSlideMedia = hasHeroMediaAsset(desktopHeroMedia)
 
   return {
     ...visual,
     title: slide.title || visual.title,
-    imageUrl: hasSlideMedia ? slideImage : visual.imageUrl,
+    imageUrl: isHomeHero ? '' : hasSlideMedia ? slideImage : visual.imageUrl,
     desktopHeroMedia,
     mobileHeroMedia,
-    desktopHero: desktopHeroMedia?.mediaType === 'IMAGE' ? desktopHeroMedia.mediaUrl || desktopHeroMedia.imageUrl : visual.desktopHero,
-    mobileHero: mobileHeroMedia?.mediaType === 'IMAGE' ? mobileHeroMedia.mediaUrl || mobileHeroMedia.imageUrl : visual.mobileHero,
-    mediaType: hasSlideMedia ? mediaType : visual.mediaType || 'IMAGE',
-    mediaUrl: hasSlideMedia ? mediaUrl : visual.mediaUrl || '',
-    posterUrl: hasSlideMedia ? desktopHeroMedia?.posterUrl || visual.posterUrl || '' : visual.posterUrl || '',
-    sourceUrl: hasSlideMedia ? desktopHeroMedia?.sourceUrl || visual.sourceUrl || '' : visual.sourceUrl || '',
-    posterSourceUrl: hasSlideMedia ? desktopHeroMedia?.posterSourceUrl || visual.posterSourceUrl || '' : visual.posterSourceUrl || '',
+    desktopHero: isHomeHero ? '' : desktopHeroMedia?.mediaType === 'STATIC_IMAGE' ? desktopHeroMedia.mediaUrl || desktopHeroMedia.imageUrl : visual.desktopHero,
+    mobileHero: isHomeHero ? '' : mobileHeroMedia?.mediaType === 'STATIC_IMAGE' ? mobileHeroMedia.mediaUrl || mobileHeroMedia.imageUrl : visual.mobileHero,
+    mediaType: isHomeHero ? mediaType : hasSlideMedia ? mediaType : normalizeHeroMediaType(visual.mediaType),
+    mediaUrl: isHomeHero ? mediaUrl : hasSlideMedia ? mediaUrl : visual.mediaUrl || '',
+    posterUrl: isHomeHero ? desktopHeroMedia?.posterUrl || '' : hasSlideMedia ? desktopHeroMedia?.posterUrl || visual.posterUrl || '' : visual.posterUrl || '',
+    sourceUrl: isHomeHero ? desktopHeroMedia?.sourceUrl || '' : hasSlideMedia ? desktopHeroMedia?.sourceUrl || visual.sourceUrl || '' : visual.sourceUrl || '',
+    posterSourceUrl: isHomeHero ? desktopHeroMedia?.posterSourceUrl || '' : hasSlideMedia ? desktopHeroMedia?.posterSourceUrl || visual.posterSourceUrl || '' : visual.posterSourceUrl || '',
     desktopPositionX: slide.desktopPositionX ?? visual.desktopPositionX,
     desktopPositionY: slide.desktopPositionY ?? visual.desktopPositionY,
     mobilePositionX: slide.mobilePositionX ?? visual.mobilePositionX,
@@ -367,26 +315,27 @@ export function resolveHeroSlideVisual(
 function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUrl: string, fallbackVisual = defaultSiteAppearance.heroVisuals[key]): SiteHeroVisualConfig {
   const fallback = fallbackVisual
   const partial = value && typeof value === 'object' ? value as Partial<SiteHeroVisualConfig> : {}
+  const isHomeHero = key === 'home'
   const focusPoint = partial.focusPoint && typeof partial.focusPoint === 'object'
     ? { x: percentage(partial.focusPoint.x), y: percentage(partial.focusPoint.y) }
     : null
-  const mediaType = enumValue(partial.mediaType, heroMediaTypes, fallback.mediaType || 'IMAGE')
-  const imageUrl = typeof partial.imageUrl === 'string' && partial.imageUrl.trim() ? partial.imageUrl.trim() : fallbackImageUrl
-  const desktopHero = typeof partial.desktopHero === 'string' && partial.desktopHero.trim()
+  const mediaType = normalizeHeroMediaType(partial.mediaType, fallback.mediaType || 'STATIC_IMAGE')
+  const imageUrl = isHomeHero ? '' : typeof partial.imageUrl === 'string' && partial.imageUrl.trim() ? partial.imageUrl.trim() : fallbackImageUrl
+  const desktopHero = isHomeHero ? '' : typeof partial.desktopHero === 'string' && partial.desktopHero.trim()
     ? partial.desktopHero.trim()
     : imageUrl
-  const mobileHero = typeof partial.mobileHero === 'string' && partial.mobileHero.trim()
+  const mobileHero = isHomeHero ? '' : typeof partial.mobileHero === 'string' && partial.mobileHero.trim()
     ? partial.mobileHero.trim()
     : ''
-  const mediaUrl = typeof partial.mediaUrl === 'string' && partial.mediaUrl.trim()
+  const mediaUrl = isHomeHero ? '' : typeof partial.mediaUrl === 'string' && partial.mediaUrl.trim()
     ? partial.mediaUrl.trim()
-    : mediaType === 'IMAGE' ? imageUrl : fallback.mediaUrl || ''
+    : mediaType === 'STATIC_IMAGE' ? imageUrl : fallback.mediaUrl || ''
   const desktopHeroMedia = normalizeHeroMediaAsset(partial.desktopHeroMedia, null)
   const mobileHeroMedia = normalizeHeroMediaAsset(partial.mobileHeroMedia, null)
-  const sourceUrl = typeof partial.sourceUrl === 'string' && partial.sourceUrl.trim()
+  const sourceUrl = isHomeHero ? '' : typeof partial.sourceUrl === 'string' && partial.sourceUrl.trim()
     ? partial.sourceUrl.trim()
     : fallback.sourceUrl || ''
-  const posterSourceUrl = typeof partial.posterSourceUrl === 'string' && partial.posterSourceUrl.trim()
+  const posterSourceUrl = isHomeHero ? '' : typeof partial.posterSourceUrl === 'string' && partial.posterSourceUrl.trim()
     ? partial.posterSourceUrl.trim()
     : fallback.posterSourceUrl || ''
   return {
@@ -399,7 +348,7 @@ function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUr
     mobileHeroMedia,
     mediaType,
     mediaUrl,
-    posterUrl: typeof partial.posterUrl === 'string' && partial.posterUrl.trim() ? partial.posterUrl.trim() : fallback.posterUrl || '',
+    posterUrl: isHomeHero ? '' : typeof partial.posterUrl === 'string' && partial.posterUrl.trim() ? partial.posterUrl.trim() : fallback.posterUrl || '',
     sourceUrl,
     posterSourceUrl,
     desktopPositionX: percentage(partial.desktopPositionX, fallback.desktopPositionX),
@@ -427,7 +376,9 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
   const firstHeroImage = heroSlides
     .filter((item) => item.isVisible)
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((item) => item.mediaType === 'IMAGE' ? item.mediaUrl || item.imageUrl : item.posterUrl || item.imageUrl)
+    // Keep the existing welcome-page snapshot behavior. This value is only
+    // used by the welcome visual; the homepage resolver never consumes it.
+    .map((item) => item.mediaType === 'STATIC_IMAGE' ? item.mediaUrl || item.imageUrl : item.posterUrl || item.imageUrl)
     .find(Boolean)
     || images.checkinBackgroundUrl
     || images.loginBackgroundUrl
@@ -468,7 +419,7 @@ export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig 
       login: loginVisual,
       register: normalizeHeroVisual('register', visualInput?.register, images.registerBackgroundUrl || loginVisual.imageUrl, registerVisualFallback),
       welcome: normalizeHeroVisual('welcome', visualInput?.welcome, firstHeroImage, welcomeVisualFallback),
-      home: normalizeHeroVisual('home', visualInput?.home, firstHeroImage),
+      home: normalizeHeroVisual('home', visualInput?.home, ''),
       activities: normalizeHeroVisual('activities', visualInput?.activities, images.activityCoverUrl),
       birthday: normalizeHeroVisual('birthday', visualInput?.birthday, images.activityCoverUrl),
       music: normalizeHeroVisual('music', visualInput?.music, ''),
@@ -483,9 +434,10 @@ export function clearSiteAppearanceCache() {
   appearanceCache = null
 }
 
-export async function getSiteAppearance() {
+export async function getSiteAppearance(options: { cache?: 'default' | 'no-store' } = {}) {
+  const bypassCache = options.cache === 'no-store'
   const now = Date.now()
-  if (appearanceCache && appearanceCache.expiresAt > now) {
+  if (!bypassCache && appearanceCache && appearanceCache.expiresAt > now) {
     if (appearanceCache.promise) return appearanceCache.promise
     return appearanceCache.config
   }
@@ -505,6 +457,8 @@ export async function getSiteAppearance() {
       return defaultSiteAppearance
     }
   })
+
+  if (bypassCache) return promise
 
   appearanceCache = { expiresAt: now + appearanceCacheTtlMs, config: defaultSiteAppearance, promise }
   const config = await promise

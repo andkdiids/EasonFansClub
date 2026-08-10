@@ -4,6 +4,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { awardExperience } from '@/lib/growth'
 import { POINTS } from '@/lib/points'
+import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
@@ -75,11 +76,9 @@ export async function POST(request: Request, { params }: Params) {
 
   const post = await prisma.post.findFirst({
     where: {
+      ...publicPostWhere,
       id: postId,
-      isDeleted: false,
       isLocked: false,
-      status: 'PUBLISHED',
-      moderationStatus: 'APPROVED',
       Board: { isActive: true },
     },
     select: { id: true, authorId: true },

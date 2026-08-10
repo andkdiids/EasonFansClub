@@ -116,18 +116,19 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   const [videoReady, setVideoReady] = useState(false)
   const [videoFailed, setVideoFailed] = useState(false)
   const [isInViewport, setIsInViewport] = useState(true)
+  const isHomeHero = visual?.key === 'home'
   const mediaAsset = resolveHeroMediaAsset(visual, device, fallbackImageUrl || '')
-  const mediaType: HeroMediaType = mediaAsset?.mediaType || 'IMAGE'
+  const mediaType: HeroMediaType = mediaAsset?.mediaType || 'STATIC_IMAGE'
   const imageUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.imageUrl || '', cacheBust))
-  const mediaUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.mediaUrl || (mediaType === 'IMAGE' ? mediaAsset?.imageUrl : ''), cacheBust))
+  const mediaUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.mediaUrl || (mediaType === 'STATIC_IMAGE' ? mediaAsset?.imageUrl : ''), cacheBust))
   const fallbackUrl = publicImageUrl(cacheBustedUrl(
     mediaAsset?.posterUrl
       || (mediaType === 'VIDEO' ? mediaAsset?.imageUrl : '')
-      || fallbackImageUrl
-      || (mediaType !== 'IMAGE' ? mediaAsset?.imageUrl : ''),
+      || (isHomeHero ? '' : fallbackImageUrl)
+      || (mediaType !== 'STATIC_IMAGE' ? mediaAsset?.imageUrl : ''),
     cacheBust,
   ))
-  const staticUrl = mediaType === 'IMAGE' ? mediaUrl || imageUrl : fallbackUrl
+  const staticUrl = mediaType === 'STATIC_IMAGE' ? mediaUrl || imageUrl : fallbackUrl
   const shouldAnimate = isPageVisible && isInViewport && !reducedMotion && !videoFailed
   const hasAnimatedImagePoster = Boolean(mediaType === 'ANIMATED_IMAGE' && fallbackUrl && fallbackUrl !== mediaUrl)
   const settings = resolveHeroMediaSettings({
@@ -152,6 +153,17 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   const frame = frameSize
   const mediaStyle = layerStyle(frame, mediaDimensions, settings)
   const posterStyle = layerStyle(frame, fallbackDimensions, settings)
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || !isHomeHero || device !== 'desktop') return
+    const media = mediaAsset as (typeof mediaAsset & { id?: string })
+    console.log('desktopHeroMedia:', media ? {
+      id: media.id ?? null,
+      type: media.mediaType,
+      url: media.mediaUrl || media.imageUrl,
+    } : null)
+    if (!media) console.log('desktop hero empty')
+  }, [device, isHomeHero, mediaAsset])
 
   useEffect(() => {
     const frameElement = frameRef.current
@@ -320,7 +332,7 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   }
 
   if (!staticUrl) return null
-  return <div ref={frameRef} aria-hidden="true" data-hero-background={visual?.key || 'fallback'} data-hero-media-type="IMAGE" data-hero-media-state="static" className={sharedClass} style={wrapperStyle}>
+  return <div ref={frameRef} aria-hidden="true" data-hero-background={visual?.key || 'fallback'} data-hero-media-type="STATIC_IMAGE" data-hero-media-state="static" className={sharedClass} style={wrapperStyle}>
     <img
       data-priority={priority ? 'true' : undefined}
       className="hero-background-layer hero-background-media"

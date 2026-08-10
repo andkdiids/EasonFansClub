@@ -31,7 +31,7 @@ export function DesktopSiteNavigation({ items, isAdmin }: Readonly<{ items: Site
 export function MobileSiteNavigation({ items }: Readonly<{ items: SiteNavigationItem[] }>) {
   const pathname = usePathname()
   const musicTheme = isMusicRoute(pathname)
-  return <nav data-mobile-main-nav className={`site-mobile-nav fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 border-t md:hidden ${musicTheme ? 'site-mobile-nav-music' : ''}`}>
+  return <nav data-mobile-main-nav className={`mobile-bottom-nav site-mobile-nav border-t md:hidden ${musicTheme ? 'site-mobile-nav-music' : ''}`}>
     {items.map((item) => {
       const active = isNavigationItemActive(pathname, item.href)
       return <Link key={item.href} href={item.href} title={item.title || item.label} aria-current={active ? 'page' : undefined} className="site-mobile-nav-link"><span className="text-lg" aria-hidden>{item.icon}</span><span>{item.label}</span></Link>

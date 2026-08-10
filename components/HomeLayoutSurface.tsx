@@ -163,10 +163,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const todayTouchStart = useRef<{ x: number; y: number } | null>(null)
   const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
-  const heroFallbackImage = siteConfig.heroVisuals.home.enabled
-    ? siteConfig.heroVisuals.home.desktopHero || siteConfig.heroVisuals.home.imageUrl
-    : ''
   const topRanking = data.entertainmentRanking?.rows[0] || null
+  const dailyMusicCoverUrl = data.dailyMusic?.album.coverUrl || null
 
   useEffect(() => {
     const controller = new AbortController()
@@ -199,6 +197,12 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       document.removeEventListener('visibilitychange', refresh)
     }
   }, [])
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || !data.dailyMusic) return
+    console.log('album cover url', dailyMusicCoverUrl)
+    if (!dailyMusicCoverUrl) console.log('album cover missing')
+  }, [data.dailyMusic, dailyMusicCoverUrl])
 
   const todayPageCount = Math.ceil(data.todayEvents.length / 2)
 
@@ -263,7 +267,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'}>{homeText.viewDetails} →</Link></header>
       {data.dailyMusic ? <div className="home-daily-music">
         <div className="home-daily-music-cover">
-          {data.dailyMusic.coverUrl ? <Image src={data.dailyMusic.coverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" className="object-cover" /> : <span aria-hidden="true">♫</span>}
+          {dailyMusicCoverUrl ? <Image src={dailyMusicCoverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" className="object-cover" onError={() => { if (process.env.NODE_ENV === 'development') console.log('album cover load failed', dailyMusicCoverUrl) }} /> : <span aria-hidden="true">♫</span>}
         </div>
         <div className="home-daily-music-copy">
           <span>{data.dailyMusic.artist}</span>
@@ -353,7 +357,6 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         siteName={siteConfig.text.siteName}
         buttonColor={siteConfig.colors.button}
         styleConfig={siteConfig.heroStyle}
-        fallbackImageUrl={heroFallbackImage}
         visual={siteConfig.heroVisuals.home}
         defaultTitle={siteConfig.text.homeSubtitle}
       />

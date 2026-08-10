@@ -129,6 +129,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const requestControllerRef = useRef<AbortController | null>(null)
   const idempotencyKeyRef = useRef('')
   const submitLockedRef = useRef(false)
+  const hospitalStartLockedRef = useRef(false)
   const mountedRef = useRef(true)
   const automaticEmailKeyRef = useRef('')
   const registrationRestoreInitializedRef = useRef(false)
@@ -443,9 +444,17 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       setErrors({ hospitalCheck: '注册验证已过期，请重新点击开始体检' })
       return
     }
+    if (retryCount === 0) {
+      if (hospitalStartLockedRef.current) {
+        logHospitalClient('begin hospital quiz ignored; request already in flight')
+        return
+      }
+      hospitalStartLockedRef.current = true
+    }
     setHospitalLoading(true)
     const fetchStartedAt = Date.now()
-    logHospitalClient('hospital-check fetch started', { endpoint: '/api/auth/hospital-check' })
+    const requestId = makeRequestKey()
+    logHospitalClient('hospital-check fetch started', { endpoint: '/api/auth/hospital-check', requestId })
     setErrors((current) => ({ ...current, hospitalCheck: undefined }))
     try {
       const response = await fetch('/api/auth/hospital-check', {
@@ -453,12 +462,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         cache: 'no-store',
-        body: JSON.stringify({ registrationToken }),
+        body: JSON.stringify({ registrationToken, requestId }),
       })
-      logHospitalClient('hospital-check fetch ended', { elapsedMs: Date.now() - fetchStartedAt })
-      logHospitalClient('hospital-check response status', { status: response.status, ok: response.ok })
+      logHospitalClient('hospital-check fetch ended', { requestId, elapsedMs: Date.now() - fetchStartedAt })
+      logHospitalClient('hospital-check response status', { requestId, status: response.status, ok: response.ok })
       const data = await response.json().catch(() => ({}))
-      logHospitalClient('hospital-check response json', data)
+      logHospitalClient('hospital-check response json', { requestId, data })
       if (!response.ok) {
         if (response.status === 410 || data.code === 'REGISTRATION_DRAFT_EXPIRED' || data.code === 'REGISTRATION_DRAFT_NOT_FOUND') {
           clearRegistrationDraftToken()
@@ -497,6 +506,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       logHospitalClient('hospital-check cleanup will clear hospitalLoading', { mounted: mountedRef.current })
       setErrors({ hospitalCheck: '网络连接失败，请稍后重试' })
     } finally {
+      if (retryCount === 0) hospitalStartLockedRef.current = false
       if (mountedRef.current) setHospitalLoading(false)
     }
   }

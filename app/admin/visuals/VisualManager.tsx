@@ -39,8 +39,8 @@ const visualLabels: Record<PageVisualKey, { title: string; description: string }
   activities: { title: '活动中心背景', description: '设置活动中心背景媒体与桌面、移动端构图。' },
 }
 
-const mediaTypeLabels: Record<HeroMediaType, string> = {
-  IMAGE: '静态图片',
+const mediaTypeLabels: Record<string, string> = {
+  STATIC_IMAGE: 'Static image',
   ANIMATED_IMAGE: '动态图片',
   VIDEO: '短视频',
 }
@@ -78,12 +78,12 @@ function homePreviewVisual(base: SiteHeroVisualConfig, desktopMedia: HeroMediaAs
   const mobileUrl = mobileMedia ? mediaPreviewUrl(mobileMedia) : ''
   return {
     ...base,
-    imageUrl: desktopMedia?.mediaType === 'IMAGE' ? desktopUrl : '',
-    desktopHero: desktopMedia?.mediaType === 'IMAGE' ? desktopUrl : '',
-    mobileHero: mobileMedia?.mediaType === 'IMAGE' ? mobileUrl : '',
+    imageUrl: desktopMedia?.mediaType === 'STATIC_IMAGE' ? desktopUrl : '',
+    desktopHero: desktopMedia?.mediaType === 'STATIC_IMAGE' ? desktopUrl : '',
+    mobileHero: mobileMedia?.mediaType === 'STATIC_IMAGE' ? mobileUrl : '',
     desktopHeroMedia: desktopMedia,
     mobileHeroMedia: mobileMedia,
-    mediaType: desktopMedia?.mediaType || 'IMAGE',
+    mediaType: desktopMedia?.mediaType || 'STATIC_IMAGE',
     mediaUrl: desktopMedia?.mediaUrl || '',
     posterUrl: desktopMedia?.posterUrl || '',
     sourceUrl: desktopMedia?.sourceUrl || '',
@@ -181,7 +181,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   const editingVisual = visualKey === 'home'
     ? resolveHeroSlideVisual(visual, homeSlide) || visual
     : visual
-  const currentMediaType = (visualKey === 'home' ? homeSlide?.mediaType : visual.mediaType) || 'IMAGE'
+  const currentMediaType = (visualKey === 'home' ? homeSlide?.mediaType : visual.mediaType) || 'STATIC_IMAGE'
   const currentMediaUrl = visualKey === 'home'
     ? homeSlide?.mediaUrl || homeSlide?.imageUrl || ''
     : visual.mediaUrl || visual.imageUrl
@@ -205,9 +205,9 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   }
 
   function updatePageVisual(patch: Partial<SiteHeroVisualConfig>) {
-    const nextMediaType = patch.mediaType || visual.mediaType || 'IMAGE'
+    const nextMediaType = patch.mediaType || visual.mediaType || 'STATIC_IMAGE'
     const nextMediaUrl = typeof patch.mediaUrl === 'string' ? patch.mediaUrl : ''
-    if (nextMediaType === 'IMAGE' && typeof patch.mediaUrl === 'string') {
+    if (nextMediaType === 'STATIC_IMAGE' && typeof patch.mediaUrl === 'string') {
       updateVisual({ ...patch, imageUrl: nextMediaUrl, desktopHero: nextMediaUrl, mobileHero: nextMediaUrl })
       return
     }
@@ -312,7 +312,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
         const patch = {
           mediaType: data.mediaType as HeroMediaType,
           mediaUrl: data.url,
-          imageUrl: data.mediaType === 'IMAGE' ? data.url : visualKey === 'home' ? homeSlide?.imageUrl || '' : visual.imageUrl,
+          imageUrl: data.mediaType === 'STATIC_IMAGE' ? data.url : visualKey === 'home' ? homeSlide?.imageUrl || '' : visual.imageUrl,
           sourceUrl: data.sourceUrl || '',
         }
         if (visualKey === 'home') updateHomeSlide(patch)
@@ -350,7 +350,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
   function setHomeMedia(target: HeroMediaTarget, asset: HeroMediaAsset | null) {
     updateHomeSlide({
       [target === 'desktop' ? 'desktopHeroMedia' : 'mobileHeroMedia']: asset,
-      ...(target === 'desktop' ? syncDesktopLegacy(asset || emptyHomeMedia('IMAGE')) : {}),
+    ...(target === 'desktop' ? syncDesktopLegacy(asset || emptyHomeMedia('STATIC_IMAGE')) : {}),
     })
   }
 
@@ -362,7 +362,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file || !homeSlide) return
-    const current = currentHomeMedia(target) || emptyHomeMedia('IMAGE')
+    const current = currentHomeMedia(target) || emptyHomeMedia('STATIC_IMAGE')
     const uploadKey = `${target}:${kind}` as `${HeroMediaTarget}:${'media' | 'poster'}`
     setHomeMediaUploading(uploadKey)
     setMessage('')
@@ -400,7 +400,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
 
   function clearHomeMedia(target: HeroMediaTarget) {
     if (target === 'desktop') {
-      updateHomeSlide({ desktopHeroMedia: null, mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' })
+      updateHomeSlide({ desktopHeroMedia: null, mediaType: 'STATIC_IMAGE', mediaUrl: '', imageUrl: '', posterUrl: '', sourceUrl: '', posterSourceUrl: '' })
     } else {
       updateHomeSlide({ mobileHeroMedia: null })
     }
@@ -447,7 +447,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
         mediaType,
         mediaUrl: '',
         sourceUrl: '',
-        ...(mediaType === 'IMAGE' ? {} : { posterUrl: '', posterSourceUrl: '' }),
+        ...(mediaType === 'STATIC_IMAGE' ? {} : { posterUrl: '', posterSourceUrl: '' }),
       })
       return
     }
@@ -456,9 +456,9 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
 
   function clearMedia() {
     if (visualKey === 'home') {
-      updateHomeSlide({ mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
+      updateHomeSlide({ mediaType: 'STATIC_IMAGE', mediaUrl: '', imageUrl: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
     } else {
-      updateVisual({ mediaType: 'IMAGE', mediaUrl: '', imageUrl: '', desktopHero: '', mobileHero: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
+      updateVisual({ mediaType: 'STATIC_IMAGE', mediaUrl: '', imageUrl: '', desktopHero: '', mobileHero: '', sourceUrl: '', posterUrl: '', posterSourceUrl: '' })
     }
   }
 
@@ -549,7 +549,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
                 <ResponsiveHeroMediaControl
                   target="desktop"
                   media={homeDesktopMedia}
-                  mediaType={homeDesktopField?.mediaType || 'IMAGE'}
+                  mediaType={homeDesktopField?.mediaType || 'STATIC_IMAGE'}
                   explicit={Boolean(homeDesktopMedia)}
                   cacheKey={previewCacheKey}
                   uploading={homeMediaUploading}
@@ -562,7 +562,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
                 <ResponsiveHeroMediaControl
                   target="mobile"
                   media={homeMobileMedia}
-                  mediaType={homeMobileField?.mediaType || 'IMAGE'}
+                  mediaType={homeMobileField?.mediaType || 'STATIC_IMAGE'}
                   explicit={Boolean(homeMobileMedia)}
                   cacheKey={previewCacheKey}
                   uploading={homeMediaUploading}
@@ -581,7 +581,7 @@ export function VisualManager({ initialConfig, visualKey }: Readonly<{ initialCo
                 </select>
               </label>
               <label className="block text-xs font-black text-slate-500">当前媒体 URL
-                <input value={visual.mediaUrl || visual.imageUrl} onChange={(event) => updatePageVisual({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'IMAGE' ? event.target.value : visual.imageUrl })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://…" />
+                <input value={visual.mediaUrl || visual.imageUrl} onChange={(event) => updatePageVisual({ mediaUrl: event.target.value, imageUrl: currentMediaType === 'STATIC_IMAGE' ? event.target.value : visual.imageUrl })} className="mt-2 w-full border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-sky-400" placeholder="https://…" />
               </label>
               <label className="inline-flex cursor-pointer border border-slate-300 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:bg-slate-50">
                 {uploading ? '上传中…' : `上传 / 替换${mediaTypeLabels[currentMediaType]}`}

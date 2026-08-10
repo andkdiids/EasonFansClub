@@ -10,6 +10,7 @@ import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { parseContentImageUrls } from '@/lib/content-images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
+import { publicPostWhere } from '@/lib/post-moderation'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -35,9 +36,7 @@ export async function GET(request: Request) {
   try {
     const rows = await prisma.post.findMany({
       where: {
-        isDeleted: false,
-        status: 'PUBLISHED',
-        moderationStatus: 'APPROVED',
+        ...publicPostWhere,
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
