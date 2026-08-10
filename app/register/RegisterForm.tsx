@@ -113,6 +113,9 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [hospitalLoading, setHospitalLoading] = useState(false)
   const [answering, setAnswering] = useState(false)
   const [hasPlayed, setHasPlayed] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [playBlocked, setPlayBlocked] = useState(false)
+  const [audioProgress, setAudioProgress] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState('')
   const [hospitalAnswerResult, setHospitalAnswerResult] = useState<HospitalAnswerResult | null>(null)
   const [hospitalNextState, setHospitalNextState] = useState<HospitalState | null>(null)
@@ -124,7 +127,9 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [registrationDetailsExpanded, setRegistrationDetailsExpanded] = useState(true)
   const turnstileRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef('')
-  const audioRef = useRef<HTMLAudioElement>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioGenerationId = useRef(0)
+  const audioTimerRef = useRef<number | null>(null)
   const draftTokenRef = useRef('')
   const requestControllerRef = useRef<AbortController | null>(null)
   const idempotencyKeyRef = useRef('')
@@ -143,11 +148,15 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   useEffect(() => {
     mountedRef.current = true
-    const audio = audioRef.current
     return () => {
       mountedRef.current = false
       requestControllerRef.current?.abort()
-      audio?.pause()
+      audioGenerationId.current += 1
+      if (audioTimerRef.current !== null) {
+        window.clearTimeout(audioTimerRef.current)
+        audioTimerRef.current = null
+      }
+      audioRef.current?.pause()
     }
   }, [])
 
@@ -511,12 +520,87 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
   }
 
-  function playHospitalAudio() {
-    if (!hospitalState?.question || !audioRef.current) return
-    audioRef.current.src = hospitalState.question.audioUrl
-    audioRef.current.currentTime = 0
+  function clearHospitalAudioTimer() {
+    if (audioTimerRef.current !== null) {
+      window.clearTimeout(audioTimerRef.current)
+      audioTimerRef.current = null
+    }
+  }
+
+  function stopHospitalAudio() {
+    audioGenerationId.current += 1
+    clearHospitalAudioTimer()
+    const audio = audioRef.current
+    if (audio) {
+      audio.pause()
+      audio.currentTime = 0
+      audio.removeAttribute('src')
+      audio.load()
+    }
+    setPlaying(false)
+    setHasPlayed(false)
+    setPlayBlocked(false)
+    setAudioProgress(0)
+  }
+
+  function scheduleHospitalAudioTimer(audio: HTMLAudioElement, generation: number) {
+    clearHospitalAudioTimer()
+    const durationSeconds = hospitalState?.question?.audioSeconds ?? hospitalState?.audioSeconds ?? 7
+    const elapsedSeconds = Number.isFinite(audio.currentTime) ? audio.currentTime : 0
+    const remainingMs = Math.max(0, (durationSeconds - elapsedSeconds) * 1000)
+    audioTimerRef.current = window.setTimeout(() => {
+      audioTimerRef.current = null
+      if (audioRef.current !== audio || audioGenerationId.current !== generation) return
+      audio.pause()
+      setPlaying(false)
+      setHasPlayed(true)
+      setAudioProgress(100)
+    }, remainingMs)
+  }
+
+  async function playHospitalAudio(generation = audioGenerationId.current) {
+    const audio = audioRef.current
+    if (!hospitalState?.question || !audio || generation !== audioGenerationId.current) return false
+
+    try {
+      await audio.play()
+    } catch (error) {
+      if (audioRef.current !== audio || audioGenerationId.current !== generation) return false
+      setPlaying(false)
+      setHasPlayed(false)
+      setPlayBlocked(true)
+      clearHospitalAudioTimer()
+      return false
+    }
+
+    if (audioRef.current !== audio || audioGenerationId.current !== generation) return false
+    if (audio.paused || audio.ended) {
+      clearHospitalAudioTimer()
+      setPlaying(false)
+      return true
+    }
+    setPlaying(true)
     setHasPlayed(true)
-    void audioRef.current.play().catch(() => setHasPlayed(false))
+    setPlayBlocked(false)
+    scheduleHospitalAudioTimer(audio, generation)
+    return true
+  }
+
+  async function toggleHospitalAudio() {
+    const audio = audioRef.current
+    if (!hospitalState?.question || !audio) return
+    const generation = audioGenerationId.current
+    if (!audio.paused && !audio.ended) {
+      audio.pause()
+      clearHospitalAudioTimer()
+      setPlaying(false)
+      return
+    }
+    if (audio.ended) {
+      audio.currentTime = 0
+      setAudioProgress(0)
+    }
+    await playHospitalAudio(generation)
   }
 
   async function answerHospitalQuestion() {
@@ -552,6 +636,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   function advanceHospitalQuestion() {
     if (!hospitalNextState || !hospitalAnswerResult) return
     const nextState = hospitalNextState
+    stopHospitalAudio()
     setHospitalNextState(null)
     setHospitalAnswerResult(null)
     setSelectedAnswer('')
@@ -797,40 +882,96 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   useEffect(() => {
     const audio = audioRef.current
+    const generation = ++audioGenerationId.current
     let disposed = false
 
-    if (!hospitalQuestionId || !hospitalAudioUrl || !audio) {
-      setHasPlayed(false)
-      audio?.pause()
-      return
-    }
-
-    const autoPlay = () => {
-      if (disposed || audioRef.current !== audio) return
-      setHasPlayed(true)
-      void audio.play().catch(() => {
-        if (!disposed) setHasPlayed(false)
-      })
-    }
-
     setHasPlayed(false)
+    setPlaying(false)
+    setPlayBlocked(false)
+    setAudioProgress(0)
+    clearHospitalAudioTimer()
+
+    if (!hospitalModalOpen || !hospitalQuestionId || !hospitalAudioUrl || !audio) {
+      if (audio) {
+        audio.pause()
+        audio.currentTime = 0
+        audio.removeAttribute('src')
+        audio.load()
+      }
+      return () => {
+        disposed = true
+        if (audioGenerationId.current === generation) clearHospitalAudioTimer()
+        audio?.pause()
+      }
+    }
+
+    const isCurrentAudio = () => !disposed && audioRef.current === audio && audioGenerationId.current === generation
+    const durationSeconds = hospitalState?.question?.audioSeconds ?? hospitalState?.audioSeconds ?? 7
+    const onPlaying = () => {
+      if (!isCurrentAudio()) return
+      setPlaying(true)
+      setHasPlayed(true)
+      setPlayBlocked(false)
+    }
+    const onPause = () => {
+      if (!isCurrentAudio()) return
+      clearHospitalAudioTimer()
+      setPlaying(false)
+    }
+    const onTimeUpdate = () => {
+      if (!isCurrentAudio()) return
+      const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : durationSeconds
+      setAudioProgress(Math.min(100, Math.max(0, audio.currentTime / duration * 100)))
+    }
+    const onEnded = () => {
+      if (!isCurrentAudio()) return
+      clearHospitalAudioTimer()
+      setPlaying(false)
+      setHasPlayed(true)
+      setAudioProgress(100)
+    }
+    const onError = () => {
+      if (!isCurrentAudio()) return
+      clearHospitalAudioTimer()
+      setPlaying(false)
+      setHasPlayed(false)
+      setPlayBlocked(true)
+    }
+    const onCanPlay = () => {
+      if (!isCurrentAudio()) return
+      audio.removeEventListener('canplay', onCanPlay)
+      void playHospitalAudio(generation)
+    }
+
+    audio.addEventListener('playing', onPlaying)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('timeupdate', onTimeUpdate)
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('error', onError)
+    audio.addEventListener('canplay', onCanPlay)
+
     audio.pause()
-    audio.src = hospitalAudioUrl
     audio.currentTime = 0
+    audio.src = hospitalAudioUrl
     audio.load()
 
     if (audio.readyState >= 3) {
-      autoPlay()
-    } else {
-      audio.addEventListener('canplay', autoPlay, { once: true })
+      audio.removeEventListener('canplay', onCanPlay)
+      void playHospitalAudio(generation)
     }
 
     return () => {
       disposed = true
-      audio.removeEventListener('canplay', autoPlay)
+      audio.removeEventListener('playing', onPlaying)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('timeupdate', onTimeUpdate)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('error', onError)
+      audio.removeEventListener('canplay', onCanPlay)
+      if (audioGenerationId.current === generation) clearHospitalAudioTimer()
       audio.pause()
     }
-  }, [hospitalQuestionId, hospitalAudioUrl])
+  }, [hospitalModalOpen, hospitalQuestionId, hospitalAudioUrl])
 
   if (policy.registrationClosed || !policy.allowEmailRegistration) {
     return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">网站当前暂未开放邮箱验证注册，请关注后续公告。</div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
@@ -903,7 +1044,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       {hospitalModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-[2px] sm:p-5" role="dialog" aria-modal="true" aria-labelledby="hospital-modal-title">
           <div className="max-h-[calc(100dvh-24px)] w-[90%] max-w-[480px] overflow-y-auto rounded-md border border-white/10 bg-[#111827] p-4 text-white shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:max-h-[90dvh] sm:p-5">
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-3"><div><p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">Eason 粉丝认证流程</p><h2 id="hospital-modal-title" className="mt-1 text-xl font-black text-white">🏥 E院体检</h2></div><button type="button" onClick={() => setHospitalModalOpen(false)} className="rounded-sm border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-black text-white/65 hover:bg-white/10">关闭</button></div>
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-3"><div><p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">Eason 粉丝认证流程</p><h2 id="hospital-modal-title" className="mt-1 text-xl font-black text-white">🏥 E院体检</h2></div><button type="button" onClick={() => { stopHospitalAudio(); setHospitalModalOpen(false) }} className="rounded-sm border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-black text-white/65 hover:bg-white/10">关闭</button></div>
             {hospitalStage === 'intro' ? (
               <div className="mt-5 border border-white/10 bg-white/[0.035] p-5 text-white">
                 <h3 className="text-xl font-black text-white">欢迎进入E院体检</h3>
@@ -937,8 +1078,10 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
                 <div className="mt-4 border border-white/10 bg-black/20 p-4 text-center">
                   <p className="text-xs font-bold text-white/60">每题播放{hospitalState.audioSeconds}秒歌曲片段 · 单选</p>
                   <div className="ehospital-voice-wave mt-2" aria-label="声纹动画" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /></div>
-                  <button type="button" onClick={playHospitalAudio} className="mx-auto flex h-14 w-14 items-center justify-center rounded-sm border border-blue-300/60 bg-blue-400/10 text-xl text-blue-100 transition hover:bg-blue-400/20" aria-label="播放歌曲片段">▶</button>
-                  <audio ref={audioRef} className="sr-only" onEnded={() => setHasPlayed(true)} />
+                  <button type="button" onClick={() => void toggleHospitalAudio()} className="mx-auto flex h-14 w-14 items-center justify-center rounded-sm border border-blue-300/60 bg-blue-400/10 text-xl text-blue-100 transition hover:bg-blue-400/20" aria-label={playing ? '暂停歌曲片段' : '播放歌曲片段'}>{playing ? '⏸' : '▶'}</button>
+                  <audio ref={audioRef} className="sr-only" preload="auto" playsInline />
+                  <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10" aria-hidden="true"><div className="h-full bg-blue-300 transition-[width]" style={{ width: `${audioProgress}%` }} /></div>
+                  {playBlocked ? <p className="mt-2 text-xs font-black text-amber-200" role="status">点击播放按钮继续试听</p> : null}
                 </div>
                 <p className="mt-3 text-center text-xs font-bold text-white/50">先播放歌曲片段，再选择正确歌曲。</p>
                 <div className="mt-3 grid gap-2">
