@@ -1,4 +1,5 @@
 import COS from 'cos-nodejs-sdk-v5'
+import { putCosObjectWithAclFallback, readCosEnv } from '@/lib/tencent-cos'
 
 type MusicMediaKind = 'cover' | 'preview'
 
@@ -12,10 +13,10 @@ export class MusicMediaStorageError extends Error {
 }
 
 function getConfig() {
-  const secretId = process.env.TENCENT_COS_SECRET_ID?.trim()
-  const secretKey = process.env.TENCENT_COS_SECRET_KEY?.trim()
-  const bucket = (process.env.TENCENT_COS_MUSIC_BUCKET || process.env.TENCENT_COS_BUCKET)?.trim()
-  const region = (process.env.TENCENT_COS_MUSIC_REGION || process.env.TENCENT_COS_REGION)?.trim()
+  const secretId = readCosEnv('TENCENT_COS_SECRET_ID', 'COS_SECRET_ID')
+  const secretKey = readCosEnv('TENCENT_COS_SECRET_KEY', 'COS_SECRET_KEY')
+  const bucket = readCosEnv('TENCENT_COS_MUSIC_BUCKET', 'COS_MUSIC_BUCKET', 'TENCENT_COS_BUCKET', 'COS_BUCKET')
+  const region = readCosEnv('TENCENT_COS_MUSIC_REGION', 'COS_MUSIC_REGION', 'TENCENT_COS_REGION', 'COS_REGION')
   if (!secretId || !secretKey || !bucket || !region) {
     throw new MusicMediaStorageError('腾讯云 COS 音乐媒体存储尚未配置完整')
   }
@@ -50,19 +51,20 @@ export async function uploadMusicMedia(params: {
   const key = params.key.trim().replace(/^\/+/, '')
   if (!key || key.includes('..')) throw new MusicMediaStorageError('音乐媒体对象路径无效')
   const client = new COS({ SecretId: config.secretId, SecretKey: config.secretKey })
+  const putObject = {
+    Bucket: config.bucket,
+    Region: config.region,
+    Key: key,
+    Body: params.body,
+    ContentLength: params.body.byteLength,
+    ContentType: params.contentType,
+    CacheControl: 'public, max-age=31536000, immutable',
+    ACL: 'public-read' as const,
+  }
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([
-      client.putObject({
-        Bucket: config.bucket,
-        Region: config.region,
-        Key: key,
-        Body: params.body,
-        ContentLength: params.body.byteLength,
-        ContentType: params.contentType,
-        CacheControl: 'public, max-age=31536000, immutable',
-        ACL: 'public-read',
-      }),
+      params.kind === 'cover' ? putCosObjectWithAclFallback(client, putObject) : client.putObject(putObject),
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => reject(new Error('COS_UPLOAD_TIMEOUT')), COS_UPLOAD_TIMEOUT_MS)
       }),

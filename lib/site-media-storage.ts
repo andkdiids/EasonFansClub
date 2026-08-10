@@ -1,4 +1,5 @@
 import COS from 'cos-nodejs-sdk-v5'
+import { putCosObjectWithAclFallback, readCosEnv } from '@/lib/tencent-cos'
 
 const COS_UPLOAD_TIMEOUT_MS = 120_000
 
@@ -13,10 +14,10 @@ export class SiteMediaStorageError extends Error {
 }
 
 function getConfig() {
-  const secretId = process.env.TENCENT_COS_SECRET_ID?.trim()
-  const secretKey = process.env.TENCENT_COS_SECRET_KEY?.trim()
-  const bucket = process.env.TENCENT_COS_BUCKET?.trim()
-  const region = process.env.TENCENT_COS_REGION?.trim()
+  const secretId = readCosEnv('TENCENT_COS_SECRET_ID', 'COS_SECRET_ID')
+  const secretKey = readCosEnv('TENCENT_COS_SECRET_KEY', 'COS_SECRET_KEY')
+  const bucket = readCosEnv('TENCENT_COS_BUCKET', 'COS_BUCKET')
+  const region = readCosEnv('TENCENT_COS_REGION', 'COS_REGION')
   if (!secretId || !secretKey || !bucket || !region) {
     throw new SiteMediaStorageError('腾讯云 COS 图片存储尚未配置完整')
   }
@@ -40,7 +41,7 @@ export async function uploadSiteImage(params: { key: string; body: Buffer; conte
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([
-      client.putObject({
+      putCosObjectWithAclFallback(client, {
         Bucket: config.bucket,
         Region: config.region,
         Key: key,

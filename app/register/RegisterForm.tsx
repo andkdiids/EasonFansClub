@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FormError } from '@/components/FormError'
 import type { RegistrationMode } from '@/lib/registration'
@@ -520,12 +520,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
   }
 
-  function clearHospitalAudioTimer() {
+  const clearHospitalAudioTimer = useCallback(() => {
     if (audioTimerRef.current !== null) {
       window.clearTimeout(audioTimerRef.current)
       audioTimerRef.current = null
     }
-  }
+  }, [])
 
   function stopHospitalAudio() {
     audioGenerationId.current += 1
@@ -543,7 +543,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setAudioProgress(0)
   }
 
-  function scheduleHospitalAudioTimer(audio: HTMLAudioElement, generation: number) {
+  const scheduleHospitalAudioTimer = useCallback((audio: HTMLAudioElement, generation: number) => {
     clearHospitalAudioTimer()
     const durationSeconds = hospitalState?.question?.audioSeconds ?? hospitalState?.audioSeconds ?? 7
     const elapsedSeconds = Number.isFinite(audio.currentTime) ? audio.currentTime : 0
@@ -556,9 +556,9 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       setHasPlayed(true)
       setAudioProgress(100)
     }, remainingMs)
-  }
+  }, [clearHospitalAudioTimer, hospitalState?.audioSeconds, hospitalState?.question?.audioSeconds])
 
-  async function playHospitalAudio(generation = audioGenerationId.current) {
+  const playHospitalAudio = useCallback(async (generation = audioGenerationId.current) => {
     const audio = audioRef.current
     if (!hospitalState?.question || !audio || generation !== audioGenerationId.current) return false
 
@@ -584,9 +584,9 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setPlayBlocked(false)
     scheduleHospitalAudioTimer(audio, generation)
     return true
-  }
+  }, [clearHospitalAudioTimer, hospitalState, scheduleHospitalAudioTimer])
 
-  async function toggleHospitalAudio() {
+  const toggleHospitalAudio = useCallback(async () => {
     const audio = audioRef.current
     if (!hospitalState?.question || !audio) return
     const generation = audioGenerationId.current
@@ -601,7 +601,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       setAudioProgress(0)
     }
     await playHospitalAudio(generation)
-  }
+  }, [clearHospitalAudioTimer, hospitalState, playHospitalAudio])
 
   async function answerHospitalQuestion() {
     if (!hospitalState?.question || !hasPlayed || answering || hospitalAnswerResult || !selectedAnswer || !draftToken) return
@@ -891,7 +891,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setAudioProgress(0)
     clearHospitalAudioTimer()
 
-    if (!hospitalModalOpen || !hospitalQuestionId || !hospitalAudioUrl || !audio) {
+    if (!hospitalModalOpen || !hospitalQuestionId || !hospitalAudioUrl || !hospitalState?.question || !audio) {
       if (audio) {
         audio.pause()
         audio.currentTime = 0
@@ -943,6 +943,13 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       void playHospitalAudio(generation)
     }
 
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[ehospital][audio]', {
+        url: hospitalAudioUrl,
+        hasSignature: hospitalAudioUrl.includes('q-sign-'),
+      })
+    }
+
     audio.addEventListener('playing', onPlaying)
     audio.addEventListener('pause', onPause)
     audio.addEventListener('timeupdate', onTimeUpdate)
@@ -952,7 +959,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
     audio.pause()
     audio.currentTime = 0
-    audio.src = hospitalAudioUrl
+    audio.src = hospitalState.question.audioUrl
     audio.load()
 
     if (audio.readyState >= 3) {
@@ -970,8 +977,11 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       audio.removeEventListener('canplay', onCanPlay)
       if (audioGenerationId.current === generation) clearHospitalAudioTimer()
       audio.pause()
+      audio.currentTime = 0
+      audio.removeAttribute('src')
+      audio.load()
     }
-  }, [hospitalModalOpen, hospitalQuestionId, hospitalAudioUrl])
+  }, [clearHospitalAudioTimer, hospitalModalOpen, hospitalQuestionId, hospitalAudioUrl, hospitalState, playHospitalAudio])
 
   if (policy.registrationClosed || !policy.allowEmailRegistration) {
     return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">网站当前暂未开放邮箱验证注册，请关注后续公告。</div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
