@@ -63,7 +63,8 @@ test('好友列表独立滚动、分页加载且保留末尾 padding', () => {
   assert.match(css, /\.friend-dock-list \{[^}]*min-height:0;[^}]*flex:1;[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain/)
   assert.match(friendDock, /加载更多好友/)
   assert.match(friendDock, /friend-dock-list-end/)
-  assert.match(friendList, /take: pageSize \+ 1/)
+  assert.match(friendList, /const pageStart = \(page - 1\) \* pageSize/)
+  assert.match(friendList, /const visibleRows = orderedFriendRows\.slice\(pageStart, pageStart \+ pageSize\)/)
   assert.match(friendList, /pageSize = Math\.min\(50/)
 })
 
@@ -153,7 +154,9 @@ test('统一未读按真实消息条数统计并在好友行展示', () => {
   assert.match(notifications, /messages: directMessages/)
   assert.match(friendList, /unreadCount/)
   assert.match(friendDock, /friend-dock-row-unread/)
-  assert.match(friendList, /Number\(b\.unreadCount > 0\) - Number\(a\.unreadCount > 0\)/)
+  assert.match(friendList, /compareFriendConversationOrder/)
+  assert.match(friendList, /latestMessageAt: .*DirectMessage\[0\]\?\.createdAt/)
+  assert.doesNotMatch(friendList, /Number\(b\.unreadCount > 0\) - Number\(a\.unreadCount > 0\)/)
 })
 
 test('通知中心显示私信来源且总红点由统一汇总同步', () => {

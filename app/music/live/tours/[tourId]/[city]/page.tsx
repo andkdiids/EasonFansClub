@@ -4,7 +4,7 @@ import { ConcertCover } from '@/components/music/ConcertCover'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { ConcertNotFound } from '@/components/music/ConcertNotFound'
 import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
-import { formatLiveDate, formatLiveDateRange } from '@/lib/music-live'
+import { formatLiveDate, formatLiveDateRange, splitSetlistItems } from '@/lib/music-live'
 import { formatConcertTime } from '@/lib/music-concert-admin'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { generateArchiveSlug, generateDateSlug, cityGroupSlug, decodeRouteParam, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
@@ -77,7 +77,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
             MusicConcertSetlistItem: {
               orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
               select: {
-                id: true, displayName: true, section: true, position: true, versionName: true, note: true,
+                id: true, displayName: true, section: true, position: true, createdAt: true, versionName: true, note: true,
                 isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true,
                 MusicSong: { select: { id: true, title: true } },
               },
@@ -93,8 +93,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
 
   const cityConcerts: CityConcert[] = meta.MusicConcert.map((concert) => {
     const items = concert.MusicConcertSetlistItem as unknown as SetlistItemForBlock[]
-    const normal = items.filter((item) => !item.isEncore)
-    const encore = items.filter((item) => item.isEncore)
+    const { all, normal, encore } = splitSetlistItems(items)
     return {
       id: concert.id,
       title: concert.title,
@@ -107,7 +106,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
       posterUrl: concert.posterUrl,
       normal,
       encore,
-      full: items,
+      full: all,
       signature: normalSignature(normal),
     }
   })

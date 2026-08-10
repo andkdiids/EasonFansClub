@@ -43,8 +43,9 @@ test('feedback creation creates personal notifications for active administrators
 test('admin feedback notifications are included in unread-summary and notification center queries', () => {
   const notifications = read('lib/notifications.ts')
 
-  assert.match(notifications, /recipientId: userId/)
-  assert.match(notifications, /type: \{ notIn: \['FRIEND_REQUEST', 'MESSAGE', 'REPLY', 'LIKE'\] \}/)
+  assert.match(notifications, /getUnreadNotificationWhere\(userId\)/)
+  assert.match(notifications, /getNotificationCategory\(item\.type, item\.link\)/)
+  assert.doesNotMatch(notifications, /prisma\.friendRequest\.count\(/)
   assert.match(notifications, /prisma\.notification\.findMany\(/)
   assert.doesNotMatch(notifications, /NOT: \{ link: \{ startsWith: '\/admin\/feedback' \} \}/)
 })

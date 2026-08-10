@@ -1,14 +1,15 @@
 import Link from 'next/link'
-import { MUSIC_SETLIST_SECTION_LABELS } from '@/lib/music-live'
+import { isExplicitEncoreSetlistItem, MUSIC_SETLIST_SECTION_LABELS, sortSetlistItems } from '@/lib/music-live'
 
 export type SetlistItemForBlock = {
   id: string
   displayName?: string | null
   section: string
   position: number
+  createdAt?: Date | string | null
   versionName?: string | null
   note?: string | null
-  isEncore: boolean
+  isEncore?: boolean | null
   isRequest: boolean
   isDebut: boolean
   isGuest: boolean
@@ -17,12 +18,36 @@ export type SetlistItemForBlock = {
   MusicSong?: { id?: string | null; title?: string | null } | null
 }
 
+function EncoreSection({ items, headingId }: { items: SetlistItemForBlock[]; headingId: string }) {
+  return (
+    <div className="mt-10 border-t border-white/10 pt-8">
+      <h3 id={headingId} className="text-xl font-black text-sky-100">Encore</h3>
+      {items.length ? (
+        <ol className="mt-4 space-y-2">
+          {items.map((item, index) => {
+            const name = item.MusicSong?.title || item.displayName || '未命名曲目'
+            return (
+              <li key={item.id} className="flex items-baseline gap-3">
+                <span className="shrink-0 text-sm font-black text-sky-300/55">{String(index + 1).padStart(2, '0')}</span>
+                <span className="min-w-0 break-words font-bold text-white/90">《{name}》</span>
+              </li>
+            )
+          })}
+        </ol>
+      ) : (
+        <p className="mt-3 text-sm font-medium text-slate-400">暂无 Encore</p>
+      )}
+    </div>
+  )
+}
+
 export function SetlistBlock({
   items,
   title,
   eyebrow = 'LIVE SETLIST',
   idPrefix = 'setlist',
   excludeEncore = false,
+  showEncore = true,
   layout = 'sections',
   showHeading = true,
 }: {
@@ -31,21 +56,23 @@ export function SetlistBlock({
   eyebrow?: string
   idPrefix?: string
   excludeEncore?: boolean
+  showEncore?: boolean
   layout?: 'sections' | 'columns'
   showHeading?: boolean
 }) {
-  const source = excludeEncore ? items.filter((item) => !item.isEncore) : items
+  const orderedItems = sortSetlistItems(items)
   // 主歌单与 Encore 拆分：Encore 不混入主歌单
-  const normalItems = items.filter((item) => !item.isEncore)
-  const encoreItems = items.filter((item) => item.isEncore)
-  const showEncore = !excludeEncore
-  if (!source.length) return null
+  const normalItems = orderedItems.filter((item) => !isExplicitEncoreSetlistItem(item))
+  const encoreItems = orderedItems.filter((item) => isExplicitEncoreSetlistItem(item))
+  const source = normalItems
+  const showEncoreSection = showEncore && !excludeEncore
+  if (!normalItems.length && (!showEncoreSection || !encoreItems.length)) return null
   const headingId = `${idPrefix}-title`
   const encoreHeadingId = `${idPrefix}-encore-title`
 
   // 三列（桌面）/ 单列（手机）扁平展示：主歌单与 Encore 分离
   if (layout === 'columns') {
-    const sorted = [...normalItems].sort((left, right) => left.position - right.position)
+    const sorted = sortSetlistItems(normalItems)
     const hasNormal = sorted.length > 0
     return (
       <section className="concert-setlist-block mt-14" aria-labelledby={showHeading ? headingId : undefined} aria-label={showHeading ? undefined : '完整歌单'}>
@@ -55,7 +82,7 @@ export function SetlistBlock({
         </> : null}
         {hasNormal ? (
           <ol className="concert-setlist-items mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-3">
-            {sorted.map((item) => {
+            {sorted.map((item, index) => {
               const name = item.MusicSong?.title || item.displayName || '未命名曲目'
               const tags = [
                 item.isRequest && '点歌',
@@ -67,7 +94,7 @@ export function SetlistBlock({
               return (
                 <li key={item.id} className="break-inside-avoid py-2">
                   <div className="flex items-baseline gap-3">
-                    <span className="shrink-0 text-sm font-black text-sky-300/55">{String(item.position).padStart(2, '0')}</span>
+                    <span className="shrink-0 text-sm font-black text-sky-300/55">{String(index + 1).padStart(2, '0')}</span>
                     <div className="min-w-0">
                       {item.MusicSong?.id ? (
                         <Link href={`/music/song/${item.MusicSong.id}`} className="break-words font-black text-white hover:text-sky-200">{name}</Link>
@@ -88,28 +115,7 @@ export function SetlistBlock({
             })}
           </ol>
         ) : null}
-        {showEncore ? (
-          <div className="mt-10 border-t border-white/10 pt-8">
-            <h3 id={encoreHeadingId} className="text-xl font-black text-sky-100">Encore</h3>
-            {encoreItems.length ? (
-              <ol className="mt-4 space-y-2">
-                {[...encoreItems]
-                  .sort((left, right) => left.position - right.position)
-                  .map((item, idx) => {
-                    const name = item.MusicSong?.title || item.displayName || '未命名曲目'
-                    return (
-                      <li key={item.id} className="flex items-baseline gap-3">
-                        <span className="shrink-0 text-sm font-black text-sky-300/55">{String(idx + 1).padStart(2, '0')}</span>
-                        <span className="min-w-0 break-words font-bold text-white/90">《{name}》</span>
-                      </li>
-                    )
-                  })}
-              </ol>
-            ) : (
-              <p className="mt-3 text-sm font-medium text-slate-400">暂无 Encore</p>
-            )}
-          </div>
-        ) : null}
+        {showEncoreSection ? <EncoreSection items={encoreItems} headingId={encoreHeadingId} /> : null}
       </section>
     )
   }
@@ -173,6 +179,7 @@ export function SetlistBlock({
           </section>
         ))}
       </div>
+      {showEncoreSection ? <EncoreSection items={encoreItems} headingId={encoreHeadingId} /> : null}
     </section>
   )
 }

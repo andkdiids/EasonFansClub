@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
@@ -104,20 +104,71 @@ type NotificationReadResponse = {
 }
 
 // 本地即时递减未读数（分类角标同步），随后由 unread-summary:refresh 触发的服务端拉取校正为权威值。
-function decrementUnreadSummary(base: UnreadSummary, items: UnifiedNotification[]): UnreadSummary {
+const NOTIFICATION_LIST_LIMIT = 50
+const OPTIMISTIC_READ_STORAGE_KEY = 'notifications:optimistic-read'
+
+function notificationKey(item: Pick<UnifiedNotification, 'id' | 'source'>) {
+  return `${item.source}:${item.id}`
+}
+
+function persistOptimisticRead(key: string, readAt: Date) {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(OPTIMISTIC_READ_STORAGE_KEY) || '{}') as Record<string, string>
+    stored[key] = readAt.toISOString()
+    window.sessionStorage.setItem(OPTIMISTIC_READ_STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    // sessionStorage is only a return-state enhancement; server persistence is authoritative.
+  }
+}
+
+function removePersistedOptimisticRead(key: string) {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(OPTIMISTIC_READ_STORAGE_KEY) || '{}') as Record<string, string>
+    delete stored[key]
+    if (Object.keys(stored).length) window.sessionStorage.setItem(OPTIMISTIC_READ_STORAGE_KEY, JSON.stringify(stored))
+    else window.sessionStorage.removeItem(OPTIMISTIC_READ_STORAGE_KEY)
+  } catch {
+    // Ignore malformed or unavailable session storage.
+  }
+}
+
+function isNotificationRead(item: UnifiedNotification) {
+  // `isRead` is the unified client-side fact. Personal rows are mapped from
+  // Notification.isRead and system rows from SystemNotificationRead.
+  return item.isRead === true
+}
+
+function mergeUnreadSummary(base: UnreadSummary, items: UnifiedNotification[], direction: 1 | -1) {
   const next = { ...base }
+  const change = (value: number) => direction === -1 ? Math.max(0, value - 1) : value + 1
   for (const item of items) {
-    if (item.isRead) continue
-    next.total = Math.max(0, next.total - 1)
-    if (item.source === 'system') next.system = Math.max(0, next.system - 1)
-    else if (item.category === 'reply') next.replies = Math.max(0, next.replies - 1)
-    else if (item.category === 'like') next.likes = Math.max(0, next.likes - 1)
-    else if (item.category === 'friend') next.friendRequests = Math.max(0, next.friendRequests - 1)
-    else if (item.category === 'messages') next.messages = Math.max(0, next.messages - 1)
-    else if (item.category === 'feedback') next.feedback = Math.max(0, next.feedback - 1)
-    else next.notifications = Math.max(0, next.notifications - 1)
+    if (isNotificationRead(item)) continue
+    next.total = change(next.total)
+    if (item.source === 'system' || item.category === 'system' || item.category === 'reply' || item.category === 'like') {
+      next.notifications = change(next.notifications)
+    }
+    if (item.source === 'system' || item.category === 'system') next.system = change(next.system)
+    if (item.category === 'reply') next.replies = change(next.replies)
+    if (item.category === 'like') next.likes = change(next.likes)
+    if (item.category === 'friend') next.friendRequests = change(next.friendRequests)
+    if (item.category === 'messages') {
+      next.messages = change(next.messages)
+      next.directMessages = change(next.directMessages)
+    }
+    if (item.category === 'feedback') {
+      next.feedback = change(next.feedback)
+      next.feedbackReplies = change(next.feedbackReplies)
+    }
   }
   return next
+}
+
+function decrementUnreadSummary(base: UnreadSummary, items: UnifiedNotification[]): UnreadSummary {
+  return mergeUnreadSummary(base, items, -1)
+}
+
+function incrementUnreadSummary(base: UnreadSummary, items: UnifiedNotification[]): UnreadSummary {
+  return mergeUnreadSummary(base, items, 1)
 }
 
 export function NotificationsClient({
@@ -140,12 +191,80 @@ export function NotificationsClient({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [replyStatus, setReplyStatus] = useState<Record<string, string>>({})
   const [sendingReply, setSendingReply] = useState<string | null>(null)
+  const optimisticReadRef = useRef<Map<string, Date>>(new Map())
+  const notificationListRequestRef = useRef<Promise<void> | null>(null)
   // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
   const markingReadRef = useRef<Set<string>>(new Set())
   // 清除二次确认：第一次点击只打开确认框，确认后才真正调用删除接口。
   const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[] } | null>(null)
   const [isClearing, setIsClearing] = useState(false)
   const [actionError, setActionError] = useState('')
+
+  const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[]) => {
+    const merged = serverNotifications.map((item) => {
+      const key = notificationKey(item)
+      if (isNotificationRead(item)) {
+        optimisticReadRef.current.delete(key)
+        return item
+      }
+      const optimisticReadAt = optimisticReadRef.current.get(key)
+      return optimisticReadAt
+        ? { ...item, isRead: true, read: true, readAt: optimisticReadAt }
+        : item
+    })
+    setNotifications(merged)
+  }, [])
+
+  const refreshNotifications = useCallback(() => {
+    if (notificationListRequestRef.current) return notificationListRequestRef.current
+    const request = (async () => {
+      try {
+        const response = await fetch(`/api/notifications?limit=${NOTIFICATION_LIST_LIMIT}`, {
+          cache: 'no-store',
+        })
+        if (!response.ok) return
+        const data = await response.json().catch(() => null) as { notifications?: UnifiedNotification[] } | null
+        if (Array.isArray(data?.notifications)) mergeServerNotifications(data.notifications)
+        await refreshUnreadSummary()
+      } catch {
+        // The server-rendered list remains usable when a background refresh fails.
+      }
+    })()
+    notificationListRequestRef.current = request
+    void request.finally(() => {
+      if (notificationListRequestRef.current === request) notificationListRequestRef.current = null
+    })
+    return request
+  }, [mergeServerNotifications, refreshUnreadSummary])
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(OPTIMISTIC_READ_STORAGE_KEY) || '{}') as Record<string, string>
+      Object.entries(stored).forEach(([key, value]) => {
+        const readAt = new Date(value)
+        if (!Number.isNaN(readAt.getTime())) optimisticReadRef.current.set(key, readAt)
+      })
+      window.sessionStorage.removeItem(OPTIMISTIC_READ_STORAGE_KEY)
+    } catch {
+      // Ignore malformed return state.
+    }
+    mergeServerNotifications(initialNotifications)
+  }, [initialNotifications, mergeServerNotifications])
+
+  useEffect(() => {
+    const sync = () => {
+      if (document.visibilityState === 'visible') void refreshNotifications()
+    }
+    void refreshNotifications()
+    window.addEventListener('pageshow', sync)
+    window.addEventListener('unread-summary:refresh', sync)
+    document.addEventListener('visibilitychange', sync)
+    return () => {
+      window.removeEventListener('pageshow', sync)
+      window.removeEventListener('unread-summary:refresh', sync)
+      document.removeEventListener('visibilitychange', sync)
+    }
+  }, [refreshNotifications])
 
   useEffect(() => {
     setSummaryOverride(null)
@@ -167,7 +286,7 @@ export function NotificationsClient({
   useEffect(() => {
     const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
     if (!dismissed.size) return
-    const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !item.isRead)
+    const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !isNotificationRead(item))
     setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
     if (!hiddenUnread.length) return
     setSummaryOverride((current) => ({
@@ -210,14 +329,17 @@ export function NotificationsClient({
   }, [searchParams])
 
   async function markRead(item: UnifiedNotification): Promise<boolean> {
-    if (item.isRead) return true
+    if (isNotificationRead(item)) return true
 
     const matchesItem = (row: UnifiedNotification) => row.id === item.id && row.source === item.source
-    const itemKey = `${item.source}:${item.id}`
+    const itemKey = notificationKey(item)
     // 同一条通知已读请求进行中时不重复发起（连点 / 双击只算一次）。
     if (markingReadRef.current.has(itemKey)) return true
     markingReadRef.current.add(itemKey)
     const optimisticReadAt = new Date()
+    optimisticReadRef.current.set(itemKey, optimisticReadAt)
+    persistOptimisticRead(itemKey, optimisticReadAt)
+    setSummaryOverride(decrementUnreadSummary(unreadSummary, [item]))
     // Update the card before waiting for the network. If the request fails,
     // the exact optimistic row is restored below.
     setNotifications((current) => current.map((row) => matchesItem(row)
@@ -235,9 +357,12 @@ export function NotificationsClient({
       })
       const data = await response.json().catch(() => null) as NotificationReadResponse | null
       if (!response.ok || data?.ok === false) {
+        optimisticReadRef.current.delete(itemKey)
+        removePersistedOptimisticRead(itemKey)
         setNotifications((current) => current.map((row) => matchesItem(row) && row.readAt === optimisticReadAt
           ? { ...row, isRead: item.isRead, read: item.read, readAt: item.readAt }
           : row))
+        setSummaryOverride((current) => incrementUnreadSummary(current || sharedSummary, [item]))
         return false
       }
 
@@ -251,13 +376,15 @@ export function NotificationsClient({
         ? { ...row, isRead: true, read: true, readAt: safeReadAt }
         : row))
       // 未读数立即减 1（本地），随后由 Provider 重新拉取的服务端汇总校正。
-      setSummaryOverride((current) => decrementUnreadSummary(current || sharedSummary, [item]))
       window.dispatchEvent(new Event('unread-summary:refresh'))
       return true
     } catch (reason) {
+      optimisticReadRef.current.delete(itemKey)
+      removePersistedOptimisticRead(itemKey)
       setNotifications((current) => current.map((row) => matchesItem(row) && row.readAt === optimisticReadAt
         ? { ...row, isRead: item.isRead, read: item.read, readAt: item.readAt }
         : row))
+      setSummaryOverride((current) => incrementUnreadSummary(current || sharedSummary, [item]))
       if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
       return false
     } finally {
@@ -324,14 +451,62 @@ export function NotificationsClient({
   }
 
   async function markAllRead() {
+    const previousSummary = unreadSummary
+    const previousNotifications = notifications
+    const optimisticReadAt = new Date()
+    const optimisticItems = notifications.filter((item) => !isNotificationRead(item))
+    const zeroSummary: UnreadSummary = {
+      notifications: 0,
+      system: 0,
+      replies: 0,
+      likes: 0,
+      feedbackReplies: 0,
+      feedback: 0,
+      friendRequests: 0,
+      directMessages: 0,
+      messages: 0,
+      total: 0,
+    }
+    optimisticItems.forEach((item) => {
+      const key = notificationKey(item)
+      optimisticReadRef.current.set(key, optimisticReadAt)
+      persistOptimisticRead(key, optimisticReadAt)
+    })
+    setNotifications((current) => current.map((row) => ({
+      ...row,
+      isRead: true,
+      read: true,
+      readAt: row.readAt || optimisticReadAt,
+    })))
+    setSummaryOverride(zeroSummary)
     setIsUpdating(true)
-    const response = await fetch('/api/notifications/read-all', { method: 'POST' })
-    setIsUpdating(false)
-    if (!response.ok) return
-    setNotifications((current) => current.map((row) => ({ ...row, isRead: true, read: true, readAt: row.readAt || new Date() })))
-    window.dispatchEvent(new Event('unread-summary:refresh'))
-    await refreshUnreadSummary()
-    router.refresh()
+    try {
+      const response = await fetch('/api/notifications/read-all', { method: 'POST' })
+      if (!response.ok) {
+        optimisticItems.forEach((item) => {
+          const key = notificationKey(item)
+          optimisticReadRef.current.delete(key)
+          removePersistedOptimisticRead(key)
+        })
+        setNotifications(previousNotifications)
+        setSummaryOverride(previousSummary)
+        return
+      }
+      window.dispatchEvent(new Event('unread-summary:refresh'))
+      await refreshUnreadSummary()
+      setSummaryOverride(null)
+      router.refresh()
+    } catch {
+      optimisticItems.forEach((item) => {
+        const key = notificationKey(item)
+        optimisticReadRef.current.delete(key)
+        removePersistedOptimisticRead(key)
+      })
+      setNotifications(previousNotifications)
+      setSummaryOverride(previousSummary)
+    } finally {
+      setIsUpdating(false)
+    }
   }
 
   // 只负责真正的删除请求与本地状态更新；调用前必须经过 clearConfirm 二次确认。
@@ -392,8 +567,8 @@ export function NotificationsClient({
     const isBirthday = isBirthdayNotification(item)
     const smartEntry = getSmartEntry(item)
     // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框（保持扁平简洁 Windows 风格）
-    const emphasisClass = isBirthday && !item.isRead ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
-    const titleClass = item.isRead ? 'font-bold text-slate-700' : 'font-black text-slate-950'
+    const emphasisClass = isBirthday && !isNotificationRead(item) ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
+    const titleClass = isNotificationRead(item) ? 'font-bold text-slate-700' : 'font-black text-slate-950'
     // 生日通知分类文字显示为「今日」（仅前端展示，不动数据库枚举）
     const displayLabel = isBirthday ? '今日' : item.typeLabel
 
@@ -416,7 +591,7 @@ export function NotificationsClient({
             }
           }}
           className={`notification-list-item group flex min-w-0 gap-3 rounded-sm border p-4 transition sm:gap-4 sm:p-5 ${
-            item.isRead ? 'is-read' : 'is-unread'
+            isNotificationRead(item) ? 'is-read' : 'is-unread'
           } ${emphasisClass} ${target ? 'cursor-pointer' : ''}`}
         >
           {/* 头像区 */}
@@ -445,7 +620,7 @@ export function NotificationsClient({
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
-              {!item.isRead ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
+              {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
             </div>
             <h2 className={`notification-title mt-2 break-words text-base sm:text-lg ${titleClass}`}>{item.title}</h2>
             {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
@@ -492,7 +667,7 @@ export function NotificationsClient({
                     直接回复
                   </button>
                 ) : null}
-                {!item.isRead ? (
+                {!isNotificationRead(item) ? (
                   <button
                     type="button"
                     disabled={isUpdating}

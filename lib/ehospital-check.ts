@@ -97,12 +97,6 @@ function createAnswerResult(question: HospitalQuestionSnapshot, optionKey: strin
   }
 }
 
-function dayStart(now: Date) {
-  const value = new Date(now)
-  value.setUTCHours(0, 0, 0, 0)
-  return value
-}
-
 export async function getEHospitalCheckConfig() {
   return prisma.eHospitalCheckConfig.upsert({
     where: { id: EHOSPITAL_CONFIG_ID },
@@ -243,12 +237,6 @@ function createQuestionSnapshot(
   } satisfies HospitalQuestionSnapshot
 }
 
-async function countAttempts(identityHash: string, now: Date) {
-  return prisma.eHospitalCheckAttempt.count({
-    where: { identityHash, createdAt: { gte: dayStart(now) } },
-  })
-}
-
 async function getDraft(tokenHash: string) {
   const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash } })
   if (!draft) throw new EHospitalCheckError('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND')
@@ -259,7 +247,6 @@ async function getDraft(tokenHash: string) {
 
 async function buildPublicState(
   session: Awaited<ReturnType<typeof prisma.eHospitalCheckSession.findUniqueOrThrow>>,
-  config: Awaited<ReturnType<typeof getEHospitalCheckConfig>>,
   now: Date,
 ) {
   let status = session.status
@@ -289,11 +276,6 @@ async function buildPublicState(
     }
   }
 
-  const remainingAttempts = Math.max(0, config.dailyLimit - await countAttempts(
-    (await prisma.registrationDraft.findUniqueOrThrow({ where: { id: session.registrationDraftId }, select: { identityHash: true } })).identityHash,
-    now,
-  ))
-
   return {
     sessionId: session.id,
     status,
@@ -304,7 +286,9 @@ async function buildPublicState(
     score: session.score ?? answers.filter((answer) => answer.correct).length * 10,
     correctCount: answers.filter((answer) => answer.correct).length,
     answeredCount: answers.length,
-    remainingAttempts,
+    // Keep the legacy setting for admin compatibility, but do not block
+    // registration retries during the open-registration period.
+    remainingAttempts: null,
     question,
   }
 }
@@ -334,13 +318,8 @@ export async function startEHospitalCheck(input: {
     where: { registrationDraftId: draft.id, status: 'STARTED' },
     orderBy: { createdAt: 'desc' },
   })
-  if (active && active.expiresAt > now) return buildPublicState(active, config, now)
+  if (active && active.expiresAt > now) return buildPublicState(active, now)
   if (active) await prisma.eHospitalCheckSession.update({ where: { id: active.id }, data: { status: 'EXPIRED' } })
-
-  const used = await countAttempts(draft.identityHash, now)
-  if (used >= config.dailyLimit) {
-    throw new EHospitalCheckError('今日体检次数已用完，请明日再次参加。', 429, 'DAILY_LIMIT_REACHED')
-  }
 
   const ensureStartedAt = Date.now()
   logHospitalServer('ensureRegisterCheckVariants started')
@@ -362,7 +341,7 @@ export async function startEHospitalCheck(input: {
     },
   })
   logHospitalServer('EHospitalCheckSession created', { sessionId: session.id, questionCount: snapshots.length })
-  const state = await buildPublicState(session, config, now)
+  const state = await buildPublicState(session, now)
   logHospitalServer('startEHospitalCheck returning', {
     sessionId: state.sessionId,
     status: state.status,
@@ -400,7 +379,7 @@ export async function answerEHospitalCheck(input: {
   const duplicate = answers.find((answer) => answer.questionId === current.publicId)
   if (duplicate) {
     return {
-      ...(await buildPublicState(session, config, now)),
+      ...(await buildPublicState(session, now)),
       answerResult: createAnswerResult(current, duplicate.optionKey, duplicate.correct),
     }
   }
@@ -427,7 +406,7 @@ export async function answerEHospitalCheck(input: {
   })
   if (updatedCount.count !== 1) {
     const latest = await prisma.eHospitalCheckSession.findUniqueOrThrow({ where: { id: session.id } })
-    if (parseAnswers(latest.answers).some((answer) => answer.questionId === current.publicId)) return buildPublicState(latest, config, now)
+    if (parseAnswers(latest.answers).some((answer) => answer.questionId === current.publicId)) return buildPublicState(latest, now)
     throw new EHospitalCheckError('答案提交冲突，请重试本题', 409, 'ANSWER_CONFLICT')
   }
   const updated = await prisma.eHospitalCheckSession.findUniqueOrThrow({ where: { id: session.id } })
@@ -447,7 +426,7 @@ export async function answerEHospitalCheck(input: {
   }
 
   return {
-    ...(await buildPublicState(updated, config, now)),
+    ...(await buildPublicState(updated, now)),
     answerResult,
   }
 }
@@ -462,5 +441,5 @@ export async function getEHospitalCheckState(input: {
   if (!session || session.registrationDraftId !== draft.id) {
     throw new EHospitalCheckError('体检场次不存在', 404, 'SESSION_NOT_FOUND')
   }
-  return buildPublicState(session, await getEHospitalCheckConfig(), input.now ?? new Date())
+  return buildPublicState(session, input.now ?? new Date())
 }

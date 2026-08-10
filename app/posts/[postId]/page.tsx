@@ -15,6 +15,7 @@ import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
 import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
+import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -387,6 +388,15 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       commentsLoadError = true
       console.warn('[post:comments:focus-load-failed]', { postId, focusId, error })
     }
+  }
+
+  const focusedReplyExists = Boolean(focusId && postReplies.some((reply) => reply.id === focusId))
+  if (user && (!focusId || focusedReplyExists)) {
+    await markPersonalNotificationsForTargetRead({
+      userId: user.id,
+      linkPrefix: focusId ? `/posts/${postId}?focus=${focusId}` : `/posts/${postId}`,
+      types: focusId ? ['REPLY', 'LIKE'] : ['LIKE'],
+    }).catch((error) => console.warn('[post:notifications:mark-read-failed]', { postId, focusId, error }))
   }
 
   const displayNameUserIds = [

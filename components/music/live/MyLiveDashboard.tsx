@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { generateArchiveSlug, buildConcertSlugPath } from '@/lib/music-slug'
 import { ConcertCover } from '@/components/music/ConcertCover'
+import { BatchAttendancePanel } from '@/components/music/live/BatchAttendancePanel'
 
 type RecordItem = {
   id: string
@@ -68,12 +69,14 @@ type DashboardData = {
 const dateLabel = (value: string) => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
 const tabClass = (active: boolean) => `border-b-2 px-3 py-3 text-sm font-black ${active ? 'border-sky-200 text-white' : 'border-transparent text-slate-400 hover:text-white'}`
 
-export function MyLiveDashboard({ data }: Readonly<{ data: DashboardData }>) {
+export function MyLiveDashboard({ data, batchTourId }: Readonly<{ data: DashboardData; batchTourId?: string }>) {
   const router = useRouter()
   const [tab, setTab] = useState<'overview' | 'concerts' | 'songs' | 'timeline'>('overview')
   const [concertFilters, setConcertFilters] = useState({ tourId: '', year: '', city: '', visibility: '', sort: 'newest' })
   const [songFilters, setSongFilters] = useState({ albumId: '', tourId: '', frequency: '', sort: 'popular' })
   const [error, setError] = useState('')
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchMessage, setBatchMessage] = useState('')
   const availableRecords = data.records.filter((record) => !record.unavailable && record.concert)
   const filteredRecords = useMemo(() => {
     const rows = availableRecords.filter((record) => {
@@ -125,10 +128,11 @@ export function MyLiveDashboard({ data }: Readonly<{ data: DashboardData }>) {
 
   return <div className="my-live-dashboard">
     <div className="my-live-mobile-topbar" aria-label="我的现场快捷导航"><Link href="/music/concerts" aria-label="返回 Eason in Concert">←</Link><span>我的现场</span><Link href="/profile?module=favorites#profile-modules" aria-label="打开我的收藏">☆</Link></div>
-    <div className="my-live-toolbar flex flex-wrap items-center justify-between gap-4"><Link href="/music/concerts" className="text-sm font-black text-sky-300/80">← 返回 Eason in Concert</Link><Link href="/music/concerts" className="border border-white/15 px-4 py-2 text-sm font-black text-white">浏览演唱会档案</Link></div>
+    <div className="my-live-toolbar flex flex-wrap items-center justify-between gap-4"><Link href="/music/concerts" className="text-sm font-black text-sky-300/80">← 返回 Eason in Concert</Link><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => { setBatchMessage(''); setBatchOpen(true) }} className="bg-sky-100 px-4 py-2 text-sm font-black text-[#06101d]">批量添加场次</button><Link href="/music/concerts" className="border border-white/15 px-4 py-2 text-sm font-black text-white">浏览演唱会档案</Link></div></div>
     <header className="my-live-heading py-10 sm:py-14"><p className="text-xs font-black tracking-[0.22em] text-sky-300/65">MY LIVE HISTORY</p><h1 className="mt-4 text-5xl font-black text-white sm:text-7xl">我的现场</h1><p className="mt-4 text-sm font-bold text-slate-300/70">记录与你在现场相遇的每一次</p></header>
     <nav aria-label="我的现场内容" className="my-live-tabs flex overflow-x-auto border-y border-white/10">{[['overview','总览'],['concerts','看过的场次'],['songs','歌曲图鉴'],['timeline','时间线']].map(([key,label]) => <button key={key} type="button" onClick={() => setTab(key as typeof tab)} className={tabClass(tab === key)}>{label}</button>)}</nav>
     {error ? <p role="alert" className="mt-5 border border-red-300/20 bg-red-300/10 p-3 text-sm font-bold text-red-200">{error}</p> : null}
+    {batchMessage ? <p role="status" className="mt-5 border border-emerald-200/20 bg-emerald-200/[0.08] p-3 text-sm font-bold text-emerald-100">{batchMessage}</p> : null}
 
     {tab === 'overview' ? <div className="mt-8 space-y-12">
       <dl className="grid grid-cols-2 border-l border-t border-white/10 md:grid-cols-5">{[
@@ -153,6 +157,7 @@ export function MyLiveDashboard({ data }: Readonly<{ data: DashboardData }>) {
     {tab === 'songs' ? <section className="mt-8"><h2 className="text-3xl font-black text-white">现场歌曲图鉴</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-4"><select aria-label="按专辑筛选" value={songFilters.albumId} onChange={(event) => setSongFilters({ ...songFilters, albumId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部专辑</option>{albums.map((album) => <option key={album.id} value={album.id}>{album.name}</option>)}</select><select aria-label="按巡演筛选歌曲" value={songFilters.tourId} onChange={(event) => setSongFilters({ ...songFilters, tourId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部巡演</option>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select><select aria-label="按听过次数筛选" value={songFilters.frequency} onChange={(event) => setSongFilters({ ...songFilters, frequency: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部次数</option><option value="once">只听过一次</option><option value="multiple">听过多次</option></select><select aria-label="歌曲排序" value={songFilters.sort} onChange={(event) => setSongFilters({ ...songFilters, sort: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="popular">最常听</option><option value="recent">最近听到</option><option value="first">首次听到</option><option value="name">歌曲名称</option></select></div>{!filteredSongs.length ? <p className="mt-6 border border-white/10 p-6 text-sm font-bold text-slate-300">标记看过的演唱会后，现场歌曲会自动出现在这里</p> : <div className="mt-6 grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">{filteredSongs.map((song) => <Link key={song.songId} href={`/music/song/${song.songId}`} className="min-w-0 border border-white/10 bg-white/[0.04] p-3 hover:bg-white/[0.08]"><div className="relative aspect-square bg-[#0b2038]">{song.album.coverUrl ? <Image src={song.album.coverUrl} alt={`${song.album.name}专辑封面`} fill sizes="(max-width: 768px) 50vw, 25vw" className="object-cover" /> : null}</div><h3 className="mt-3 line-clamp-2 break-words font-black text-white">{song.title}</h3><p className="mt-1 truncate text-xs text-slate-400">《{song.album.name}》</p><p className="mt-3 text-sm font-black text-sky-200">现场听过 {song.occurrenceCount} 次</p><p className="mt-1 text-xs text-slate-300/65">出现在 {song.concertCount} 场</p><p className="mt-3 text-[11px] leading-5 text-slate-400">首次：{dateLabel(song.first.date)} · {song.first.city}<br />最近：{dateLabel(song.latest.date)} · {song.latest.city}</p></Link>)}</div>}</section> : null}
 
     {tab === 'timeline' ? <section className="mt-8"><h2 className="text-3xl font-black text-white">观演时间线</h2>{!timeline.length ? <p className="mt-6 border border-white/10 p-6 text-sm font-bold text-slate-300">还没有记录看过的演唱会</p> : <div className="mt-8 space-y-10">{timeline.map(([year, records]) => <section key={year}><h3 className="text-4xl font-black text-sky-100">{year}</h3><div className="mt-4 border-l border-sky-300/30 pl-4 sm:pl-6">{records.map((record) => <Link key={record.id} href={buildConcertSlugPath(record.concert!.tour.name, record.concert!.city, record.concert!.concertDate, record.concert!.stageType)} className="relative block min-w-0 border-b border-white/10 py-5 before:absolute before:-left-[21px] before:top-7 before:h-2 before:w-2 before:bg-sky-200 sm:before:-left-[29px]"><time className="text-sm font-black text-sky-200">{dateLabel(record.concert!.concertDate)}</time><h4 className="mt-1 break-words text-xl font-black text-white">{record.concert!.city}{record.concert!.sessionNumber ? ` · ${record.concert!.sessionNumber}` : ''}</h4><p className="mt-1 break-words text-sm text-slate-300/65">{record.concert!.venue || '场馆待整理'} · {record.concert!.tour.name}</p><p className="mt-2 text-xs font-bold text-slate-400">{record.mood ? `心情：${record.mood} · ` : ''}{record.isPublic ? '公开' : '仅自己'}</p></Link>)}</div></section>)}</div>}</section> : null}
+    <BatchAttendancePanel open={batchOpen} tourId={batchTourId} onClose={() => setBatchOpen(false)} onSaved={(message) => { setBatchMessage(message); router.refresh() }} />
   </div>
 }
 

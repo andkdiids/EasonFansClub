@@ -3,7 +3,7 @@ import { sendRegistrationVerificationCode } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, createRegistrationCode, hashRegistrationCode, REGISTRATION_CODE_TTL_MS } from '@/lib/registration-draft'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
-import { consumeRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
+import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { findActiveConflict } from '@/lib/users'
 import { hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
@@ -48,11 +48,6 @@ export async function POST(request: Request) {
   if (emailChanged) {
     const duplicate = await findActiveConflict({ email })
     if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
-  }
-
-  const rate = await consumeRateLimit(`registration-draft:${draft.id}`, 'register:email-code', 6, 10 * 60)
-  if (rate.limited) {
-    return NextResponse.json({ ok: false, message: '验证码发送过于频繁，请稍后再试', retryAfter: rate.retryAfter }, { status: 429, headers: noStoreHeaders })
   }
 
   const code = createRegistrationCode()

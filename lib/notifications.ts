@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
-import type { SystemNotificationType } from '@prisma/client'
+import type { NotificationType, Prisma, SystemNotificationType } from '@prisma/client'
 import { parseNotificationReplyTarget, type NotificationReplyTarget } from '@/lib/notification-target'
 export { getNotificationTarget } from '@/lib/notification-target'
 
@@ -31,13 +31,49 @@ const systemTypeLabels: Record<string, string> = {
   SECURITY: '安全',
 }
 
-function getNotificationCategory(type: string, link?: string | null) {
+export function getNotificationCategory(type: string, link?: string | null) {
   if (link?.startsWith('/feedback/')) return 'feedback'
   if (type === 'REPLY') return 'reply'
   if (type === 'LIKE') return 'like'
   if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'friend'
   if (type === 'MESSAGE') return 'messages'
   return 'system'
+}
+
+/**
+ * All personal-notification reads must start from the same recipient scope.
+ * Keeping this in one place prevents the list, summary and read endpoints from
+ * slowly drifting apart again.
+ */
+export function getNotificationVisibilityFilter(userId: string, extra: Prisma.NotificationWhereInput = {}): Prisma.NotificationWhereInput {
+  return { recipientId: userId, ...extra }
+}
+
+export function getUnreadNotificationWhere(userId: string, extra: Prisma.NotificationWhereInput = {}): Prisma.NotificationWhereInput {
+  return getNotificationVisibilityFilter(userId, { isRead: false, ...extra })
+}
+
+export function getNotificationCategoryFilter(category: string): Prisma.NotificationWhereInput {
+  if (category === 'reply') return { type: 'REPLY' }
+  if (category === 'like') return { type: 'LIKE' }
+  if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW'] } }
+  if (category === 'messages') return { type: 'MESSAGE' }
+  if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
+  return {
+    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE'] },
+    NOT: { link: { startsWith: '/feedback/' } },
+  }
+}
+
+export const FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX = 'friend-request:'
+export const FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX = 'friend-request-accepted:'
+
+export function getFriendRequestNotificationKey(requestId: string) {
+  return `${FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX}${requestId}`
+}
+
+export function getFriendRequestAcceptedNotificationKey(requestId: string) {
+  return `${FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX}${requestId}`
 }
 
 function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system') {
@@ -107,26 +143,123 @@ export type UnreadSummary = {
   total: number
 }
 
+async function reconcileStalePersonalNotifications(userId: string) {
+  const unread = await prisma.notification.findMany({
+    where: getUnreadNotificationWhere(userId),
+    select: {
+      id: true,
+      type: true,
+      title: true,
+      link: true,
+      createdAt: true,
+      key: true,
+      actorId: true,
+      User_Notification_actorIdToUser: { select: { id: true } },
+    },
+  })
+  if (!unread.length) return
+
+  const targetRows = unread.map((item) => ({
+    item,
+    target: parseNotificationReplyTarget({
+      id: item.id,
+      source: 'personal' as const,
+      type: item.type,
+      link: item.link,
+      targetUrl: item.link,
+    }),
+  }))
+  const postTargets = targetRows.flatMap(({ target }) => target?.kind === 'post' ? [target] : [])
+  const dailyTargets = targetRows.flatMap(({ target }) => target?.kind === 'daily-message' ? [target] : [])
+  const feedbackTargets = targetRows.flatMap(({ target }) => target?.kind === 'feedback' ? [target] : [])
+  const wallTargets = targetRows.flatMap(({ target }) => target?.kind === 'profile-wall' ? [target] : [])
+
+  const requestIds = unread.flatMap(({ key }) => {
+    if (key?.startsWith(FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX)) return [key.slice(FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX.length)]
+    if (key?.startsWith(FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX)) return [key.slice(FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX.length)]
+    return []
+  })
+  const legacyIncomingActorIds = unread.flatMap((item) => (
+    item.type === 'FRIEND_REQUEST' && !item.key && item.title === '好友申请' && item.actorId ? [item.actorId] : []
+  ))
+
+  const [requests, legacyIncomingRequests, postReplies, dailyComments, feedbacks, wallMessages] = await Promise.all([
+    requestIds.length ? prisma.friendRequest.findMany({
+      where: { id: { in: Array.from(new Set(requestIds)) } },
+      select: { id: true, status: true, senderId: true, receiverId: true },
+    }) : [],
+    legacyIncomingActorIds.length ? prisma.friendRequest.findMany({
+      where: { receiverId: userId, senderId: { in: Array.from(new Set(legacyIncomingActorIds)) } },
+      select: { senderId: true, status: true, createdAt: true },
+    }) : [],
+    postTargets.length ? prisma.reply.findMany({
+      where: { id: { in: postTargets.map((target) => target.parentId) }, isDeleted: false },
+      select: { id: true, postId: true },
+    }) : [],
+    dailyTargets.length ? prisma.dailyMessageComment.findMany({
+      where: { id: { in: dailyTargets.map((target) => target.parentId) }, isDeleted: false, DailyMessage: { isDeleted: false } },
+      select: { id: true, messageId: true },
+    }) : [],
+    feedbackTargets.length ? prisma.feedback.findMany({
+      where: { id: { in: feedbackTargets.map((target) => target.resourceId) }, userId },
+      select: { id: true },
+    }) : [],
+    wallTargets.length ? prisma.profileWallMessage.findMany({
+      where: { id: { in: wallTargets.map((target) => target.parentId) }, deletedAt: null },
+      select: { id: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
+    }) : [],
+  ])
+
+  const requestById = new Map(requests.map((request) => [request.id, request]))
+  const pendingLegacyIncomingRequests = new Map(legacyIncomingRequests
+    .filter((request) => request.status === 'PENDING')
+    .map((request) => [request.senderId, request.createdAt]))
+  const staleIds = new Set<string>()
+
+  for (const { item, target } of targetRows) {
+    if ((item.type === 'FRIEND_REQUEST' || item.type === 'FOLLOW') && item.actorId && !item.User_Notification_actorIdToUser) {
+      staleIds.add(item.id)
+      continue
+    }
+
+    if (item.type === 'FRIEND_REQUEST' && item.key?.startsWith(FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX)) {
+      const request = requestById.get(item.key.slice(FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX.length))
+      if (!request || request.receiverId !== userId || request.status !== 'PENDING') staleIds.add(item.id)
+    } else if (item.type === 'FRIEND_REQUEST' && item.key?.startsWith(FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX)) {
+      const request = requestById.get(item.key.slice(FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX.length))
+      if (!request || request.senderId !== userId || request.status !== 'ACCEPTED') staleIds.add(item.id)
+    } else if (item.type === 'FRIEND_REQUEST' && !item.key && item.title === '好友申请' && item.actorId) {
+      // Legacy rows did not store requestId. Keep only the row created for the
+      // currently pending request; older rows from a processed request are
+      // historical ghosts and can be retired safely.
+      const pendingCreatedAt = pendingLegacyIncomingRequests.get(item.actorId)
+      if (!pendingCreatedAt || item.createdAt < pendingCreatedAt) staleIds.add(item.id)
+    }
+
+    if (!target) continue
+    if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) staleIds.add(item.id)
+    if (target.kind === 'daily-message' && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId)) staleIds.add(item.id)
+    if (target.kind === 'feedback' && !feedbacks.some((feedback) => feedback.id === target.resourceId)) staleIds.add(item.id)
+    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)) staleIds.add(item.id)
+  }
+
+  if (staleIds.size) {
+    await prisma.notification.updateMany({
+      where: getUnreadNotificationWhere(userId, { id: { in: Array.from(staleIds) } }),
+      data: { isRead: true, readAt: new Date() },
+    })
+  }
+}
+
 export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
+  await reconcileStalePersonalNotifications(userId)
   const now = new Date()
-  const [otherPersonal, system, replies, likes, feedbackReplies, pendingFriendRequests, friendUpdates, directMessageRows] = await Promise.all([
-    prisma.notification.count({ where: {
-      recipientId: userId,
-      isRead: false,
-      type: { notIn: ['FRIEND_REQUEST', 'MESSAGE', 'REPLY', 'LIKE'] },
-      NOT: { link: { startsWith: '/feedback/' } },
-    } }),
+  const [personal, systemCount, directMessageRows] = await Promise.all([
+    prisma.notification.findMany({
+      where: getUnreadNotificationWhere(userId),
+      select: { type: true, link: true },
+    }),
     prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
-    prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'REPLY' } }),
-    prisma.notification.count({ where: { recipientId: userId, isRead: false, type: 'LIKE' } }),
-    prisma.feedback.count({ where: { userId, userUnread: true } }),
-    prisma.friendRequest.count({ where: { receiverId: userId, status: 'PENDING' } }),
-    prisma.notification.count({ where: {
-      recipientId: userId,
-      isRead: false,
-      type: 'FRIEND_REQUEST',
-      title: { not: '好友申请' },
-    } }),
     prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
       SELECT COUNT(*) AS unreadCount
       FROM DirectMessage dm
@@ -139,14 +272,29 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
         AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
     `,
   ])
+
+  const personalCounts = personal.reduce((counts, item) => {
+    const category = getNotificationCategory(item.type, item.link)
+    if (category === 'reply') counts.replies += 1
+    else if (category === 'like') counts.likes += 1
+    else if (category === 'friend') counts.friendRequests += 1
+    else if (category === 'messages') counts.messages += 1
+    else if (category === 'feedback') counts.feedback += 1
+    else counts.system += 1
+    return counts
+  }, { replies: 0, likes: 0, friendRequests: 0, messages: 0, feedback: 0, system: 0 })
+
   const directMessages = Number(directMessageRows[0]?.unreadCount || 0)
-  const notifications = otherPersonal + system + replies + likes
-  const friendRequests = pendingFriendRequests + friendUpdates
+  const notifications = personalCounts.system + systemCount + personalCounts.replies + personalCounts.likes
+  const friendRequests = personalCounts.friendRequests
+  const feedbackReplies = personalCounts.feedback
+  // Direct messages have their own conversation read cursor and are rendered
+  // by the notification center as a dedicated entry, not as Notification rows.
   return {
     notifications,
-    system: system + otherPersonal,
-    replies,
-    likes,
+    system: systemCount + personalCounts.system,
+    replies: personalCounts.replies,
+    likes: personalCounts.likes,
     feedbackReplies,
     feedback: feedbackReplies,
     friendRequests,
@@ -161,12 +309,13 @@ export async function getUnreadNotificationCount(userId: string) {
 }
 
 export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number } = {}) {
+  await reconcileStalePersonalNotifications(userId)
   const now = new Date()
   const limit = Math.min(Math.max(options.limit || MAX_NOTIFICATION_PAGE_SIZE, 1), MAX_NOTIFICATION_PAGE_SIZE)
   const [personal, system] = await Promise.all([
     prisma.notification.findMany({
       where: {
-        recipientId: userId,
+        ...getNotificationVisibilityFilter(userId),
         ...(options.unreadOnly ? { isRead: false } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -429,7 +578,7 @@ export async function markUnifiedNotificationReadWithState(userId: string, sourc
 
   const readAt = new Date()
   const result = await prisma.notification.updateMany({
-    where: { id, recipientId: userId, isRead: false },
+    where: getUnreadNotificationWhere(userId, { id }),
     data: { isRead: true, readAt },
   })
 
@@ -439,7 +588,7 @@ export async function markUnifiedNotificationReadWithState(userId: string, sourc
   // racing to read the same notification without turning a successful read
   // into a misleading 404 response.
   const existing = await prisma.notification.findFirst({
-    where: { id, recipientId: userId },
+    where: getNotificationVisibilityFilter(userId, { id }),
     select: { isRead: true, readAt: true },
   })
   return existing?.isRead ? { ok: true, readAt: existing.readAt } : { ok: false, readAt: null }
@@ -450,18 +599,43 @@ export async function markUnifiedNotificationRead(userId: string, source: string
   return (await markUnifiedNotificationReadWithState(userId, source, id)).ok
 }
 
+/** Mark only notifications whose link points at the resource just opened. */
+export async function markPersonalNotificationsForTargetRead(input: {
+  userId: string
+  linkPrefix: string
+  types?: NotificationType[]
+}) {
+  const readAt = new Date()
+  const result = await prisma.notification.updateMany({
+    where: getUnreadNotificationWhere(input.userId, {
+      link: { startsWith: input.linkPrefix },
+      ...(input.types?.length ? { type: { in: input.types } } : {}),
+    }),
+    data: { isRead: true, readAt },
+  })
+  return result.count
+}
+
 export async function markAllUnifiedNotificationsRead(userId: string) {
+  await reconcileStalePersonalNotifications(userId)
   const now = new Date()
   const unreadSystem = await prisma.systemNotification.findMany({
     where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } },
     select: { id: true },
-    take: 500,
   })
 
   await prisma.$transaction([
     prisma.notification.updateMany({
-      where: { recipientId: userId, isRead: false },
+      where: getUnreadNotificationWhere(userId),
       data: { isRead: true, readAt: now },
+    }),
+    prisma.feedback.updateMany({
+      where: { userId, userUnread: true },
+      data: { userUnread: false },
+    }),
+    prisma.conversationParticipant.updateMany({
+      where: { userId, isDeleted: false },
+      data: { lastReadAt: now },
     }),
     ...(unreadSystem.length
       ? [

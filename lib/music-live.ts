@@ -24,6 +24,58 @@ export type ParsedSetlistItem = {
   isSpecial: boolean
 }
 
+type SetlistEncoreMarker = {
+  isEncore?: unknown
+  encore?: unknown
+  section?: unknown
+  type?: unknown
+}
+
+type SetlistOrderFields = {
+  id: string
+  position: number
+  createdAt?: Date | string | null
+}
+
+function isEncoreLabel(value: unknown) {
+  return typeof value === 'string' && value.trim().toUpperCase() === 'ENCORE'
+}
+
+/** Only an explicit Encore flag/label may move a song out of the main setlist. */
+export function isExplicitEncoreSetlistItem(item: SetlistEncoreMarker) {
+  return item.isEncore === true
+    || item.encore === true
+    || isEncoreLabel(item.encore)
+    || isEncoreLabel(item.section)
+    || isEncoreLabel(item.type)
+}
+
+function dateValue(value: Date | string | null | undefined) {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+/** Stable setlist order: position, createdAt, then id. */
+export function sortSetlistItems<T extends SetlistOrderFields>(items: readonly T[]) {
+  return [...items].sort((left, right) => {
+    const positionDifference = left.position - right.position
+    if (positionDifference) return positionDifference
+    const createdAtDifference = dateValue(left.createdAt) - dateValue(right.createdAt)
+    if (createdAtDifference) return createdAtDifference
+    return left.id.localeCompare(right.id)
+  })
+}
+
+export function splitSetlistItems<T extends SetlistOrderFields & SetlistEncoreMarker>(items: readonly T[]) {
+  const ordered = sortSetlistItems(items)
+  return {
+    all: ordered,
+    normal: ordered.filter((item) => !isExplicitEncoreSetlistItem(item)),
+    encore: ordered.filter((item) => isExplicitEncoreSetlistItem(item)),
+  }
+}
+
 export type ParsedHighlight = {
   title: string
   content: string

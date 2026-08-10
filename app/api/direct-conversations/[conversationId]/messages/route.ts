@@ -132,7 +132,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
           data: { conversationId, senderId: user.id, type: 'STICKER', content: '', stickerId, clientMessageId },
           select: messageSelect,
         })
-        await tx.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: now } })
+        await tx.conversation.updateMany({
+          where: {
+            id: conversationId,
+            OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: created.createdAt } }],
+          },
+          data: { lastMessageAt: created.createdAt },
+        })
         await tx.conversationParticipant.updateMany({
           where: { conversationId, userId: user.id },
           data: { lastReadAt: now, isDeleted: false },
@@ -194,7 +200,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         data: { conversationId, senderId: user.id, content, type: 'TEXT', clientMessageId },
         select: messageSelect,
       })
-      await tx.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: now } })
+      await tx.conversation.updateMany({
+        where: {
+          id: conversationId,
+          OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: created.createdAt } }],
+        },
+        data: { lastMessageAt: created.createdAt },
+      })
       await tx.conversationParticipant.updateMany({
         where: { conversationId, userId: user.id },
         data: { lastReadAt: now, isDeleted: false },

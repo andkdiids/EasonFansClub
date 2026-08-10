@@ -6,9 +6,9 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { ConcertNotFound } from '@/components/music/ConcertNotFound'
 import { AttendancePanel } from '@/components/music/live/AttendancePanel'
 import { getCurrentUser } from '@/lib/auth'
-import { MUSIC_HIGHLIGHT_TYPE_LABELS, formatLiveDate } from '@/lib/music-live'
+import { MUSIC_HIGHLIGHT_TYPE_LABELS, formatLiveDate, splitSetlistItems } from '@/lib/music-live'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
-import { SetlistBlock } from '@/components/music/live/SetlistBlock'
+import { SetlistBlock, type SetlistItemForBlock } from '@/components/music/live/SetlistBlock'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { resolveConcertBySlug } from '@/lib/music-archive'
@@ -52,7 +52,7 @@ export default async function MusicConcertBySlugPage({
         MusicTour: { select: { id: true, name: true, posterUrl: true } },
         MusicConcertSetlistItem: {
           orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-          select: { id: true, displayName: true, section: true, position: true, versionName: true, note: true, isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true, MusicSong: { select: { id: true, title: true } } },
+          select: { id: true, displayName: true, section: true, position: true, createdAt: true, versionName: true, note: true, isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true, MusicSong: { select: { id: true, title: true } } },
         },
         MusicConcertHighlight: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true, title: true, content: true, type: true } },
       },
@@ -76,26 +76,28 @@ export default async function MusicConcertBySlugPage({
   }).resolvedPosterUrl
 
   const cityPageHref = `/music/live/tours/${resolved.tourSlug}/${resolved.citySlug}`
-  const initialSetlistItems = concert.MusicConcertSetlistItem.slice(0, 12)
-  const additionalSetlistItems = concert.MusicConcertSetlistItem.slice(12)
+  const setlist = splitSetlistItems(concert.MusicConcertSetlistItem as unknown as SetlistItemForBlock[])
+  const initialSetlistItems = setlist.normal.slice(0, 12)
+  const additionalSetlistItems = [...setlist.normal.slice(12), ...setlist.encore]
+  const hasEncore = setlist.encore.length > 0
 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <div className="my-live-concert-detail-page">
     <div className="flex flex-wrap items-center gap-4"><BackButton fallbackHref={cityPageHref} label="返回上一页" /><Link href={cityPageHref} className="text-sm font-black text-sky-300/80">返回城市：{concert.city}站</Link></div>
     <section className="my-live-concert-detail-hero mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="my-live-concert-detail-poster relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedPosterUrl} alt={`${concert.city}演唱会海报`} sizes="(max-width: 767px) 100vw, 260px" className="h-full w-full" /></div><div className="my-live-concert-detail-info min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{concert.MusicTour.name}</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{concert.title || concert.city}</h1><dl className="my-live-concert-detail-meta mt-6 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-2"><div><dt className="text-xs text-slate-400">日期</dt><dd className="mt-1 font-black">{formatLiveDate(concert.concertDate)}</dd></div><div><dt className="text-xs text-slate-400">城市 / 地区</dt><dd className="mt-1 break-words font-black">{concert.city}{concert.countryOrRegion ? ` · ${concert.countryOrRegion}` : ''}</dd></div><div><dt className="text-xs text-slate-400">场馆</dt><dd className="mt-1 break-words font-black">{concert.venue || '待整理'}</dd></div><div><dt className="text-xs text-slate-400">场次编号</dt><dd className="mt-1 break-words font-black">{concert.sessionNumber || '—'}</dd></div><div><dt className="text-xs text-slate-400">分类</dt><dd className="mt-1 break-words font-black">{concert.MusicTour.name}</dd></div><div><dt className="text-xs text-slate-400">座位</dt><dd className="mt-1 break-words font-black">{attendance?.seatInfo || '未记录'}</dd></div></dl>{concert.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{concert.description}</p> : null}<AttendancePanel concertId={concert.id} loggedIn={Boolean(currentUser)} initialAttendance={attendance} /></div></section>
-    {concert.MusicConcertSetlistItem.length ? (
+    {setlist.all.length ? (
       <>
         <div className="md:hidden">
-          {initialSetlistItems.length ? <SetlistBlock items={initialSetlistItems} title="现场歌单" idPrefix="mobile-concert-setlist" layout="columns" /> : null}
+          {initialSetlistItems.length ? <SetlistBlock items={initialSetlistItems} title="现场歌单" idPrefix="mobile-concert-setlist" layout="columns" showEncore={false} /> : null}
           {additionalSetlistItems.length ? (
             <details className="concert-setlist-collapsible">
               <summary><span className="concert-setlist-expand-label">展开完整歌单</span><span className="concert-setlist-collapse-label">收起歌单</span></summary>
-              <SetlistBlock items={additionalSetlistItems} title="完整歌单" idPrefix="mobile-concert-setlist-more" layout="columns" showHeading={false} />
+              <SetlistBlock items={additionalSetlistItems} title="完整歌单" idPrefix="mobile-concert-setlist-more" layout="columns" showHeading={false} showEncore={hasEncore} />
             </details>
           ) : null}
         </div>
         <div className="hidden md:block">
-          <SetlistBlock items={concert.MusicConcertSetlistItem} title="现场歌单" idPrefix="desktop-concert-setlist" layout="columns" />
+          <SetlistBlock items={setlist.all} title="现场歌单" idPrefix="desktop-concert-setlist" layout="columns" showEncore={hasEncore} />
         </div>
       </>
     ) : null}

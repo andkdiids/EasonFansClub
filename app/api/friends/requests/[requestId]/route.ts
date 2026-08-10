@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { decideFriendRequest } from '@/lib/friends'
+import { getFriendRequestNotificationKey } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
@@ -12,15 +13,49 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { requestId } = await context.params
   const body = await request.json().catch(() => null)
   if (body?.action === 'cancel') {
-    const cancelled = await prisma.friendRequest.updateMany({
-      where: { id: requestId, senderId: user.id, status: 'PENDING' },
-      data: { status: 'CANCELLED' },
+    const cancelled = await prisma.$transaction(async (tx) => {
+      const pending = await tx.friendRequest.findFirst({
+        where: { id: requestId, senderId: user.id, status: 'PENDING' },
+        select: { id: true, receiverId: true, createdAt: true },
+      })
+      if (!pending) return false
+
+      const updated = await tx.friendRequest.updateMany({
+        where: { id: pending.id, senderId: user.id, status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      })
+      if (!updated.count) return false
+
+      const exactNotification = await tx.notification.findFirst({
+        where: {
+          recipientId: pending.receiverId,
+          actorId: user.id,
+          type: 'FRIEND_REQUEST',
+          key: getFriendRequestNotificationKey(requestId),
+          isRead: false,
+        },
+        select: { id: true },
+      })
+      const legacyNotification = exactNotification ? null : await tx.notification.findFirst({
+        where: {
+          recipientId: pending.receiverId,
+          actorId: user.id,
+          type: 'FRIEND_REQUEST',
+          title: '好友申请',
+          key: null,
+          isRead: false,
+          createdAt: { gte: pending.createdAt },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      })
+      const notification = exactNotification || legacyNotification
+      if (notification) {
+        await tx.notification.update({ where: { id: notification.id }, data: { isRead: true, readAt: new Date() } })
+      }
+      return true
     })
-    if (!cancelled.count) return NextResponse.json({ message: '好友申请不存在或已处理' }, { status: 404 })
-    await prisma.notification.updateMany({
-      where: { actorId: user.id, type: 'FRIEND_REQUEST', link: '/friends#received-requests', isRead: false },
-      data: { isRead: true, readAt: new Date() },
-    })
+    if (!cancelled) return NextResponse.json({ message: '好友申请不存在或已处理' }, { status: 404 })
     return NextResponse.json({ message: '好友申请已取消' })
   }
   const action = body?.action === 'accept' ? 'accept' : 'reject'

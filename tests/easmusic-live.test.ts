@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { parseBulkSetlist, parseSetlistItems } from '../lib/music-live'
+import { isExplicitEncoreSetlistItem, parseBulkSetlist, parseSetlistItems, splitSetlistItems } from '../lib/music-live'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -112,6 +112,53 @@ test('未关联歌曲不生成链接，已关联歌曲复用现有详情路由',
   assert.match(page, /item\.MusicSong\?\.id \? \(/)
   assert.match(page, /<Link href=\{`\/music\/song\/\$\{item\.MusicSong\.id\}`\}/)
   assert.match(page, /<span className="[^"]*">\{name\}<\/span>/)
+})
+
+test('Encore 只接受明确标记，普通歌曲不会因位置超过 12 首而被拆开', () => {
+  const normalItems = Array.from({ length: 25 }, (_, index) => ({
+    id: `normal-${index + 1}`,
+    position: index + 1,
+    section: index === 12 ? 'MAIN' : '',
+    isEncore: index === 12 ? null : false,
+  }))
+  const result = splitSetlistItems(normalItems)
+  assert.equal(result.normal.length, 25)
+  assert.equal(result.encore.length, 0)
+  assert.deepEqual(result.normal.map((item) => item.position), Array.from({ length: 25 }, (_, index) => index + 1))
+
+  const mixed = splitSetlistItems([
+    ...normalItems,
+    { id: 'encore-1', position: 26, section: 'ENCORE', isEncore: false },
+    { id: 'encore-2', position: 27, section: 'MAIN', isEncore: true },
+  ])
+  assert.equal(mixed.normal.length, 25)
+  assert.deepEqual(mixed.encore.map((item) => item.id), ['encore-1', 'encore-2'])
+})
+
+test('旧数据的 null、undefined、空字符串默认属于普通歌单，并按 position、createdAt、id 稳定排序', () => {
+  assert.equal(isExplicitEncoreSetlistItem({ isEncore: null, section: '', type: undefined }), false)
+  assert.equal(isExplicitEncoreSetlistItem({ isEncore: undefined, section: null, type: '' }), false)
+  assert.equal(isExplicitEncoreSetlistItem({ isEncore: false, section: 'encore' }), true)
+  assert.equal(isExplicitEncoreSetlistItem({ isEncore: false, section: 'MAIN', type: 'ENCORE' }), true)
+
+  const result = splitSetlistItems([
+    { id: 'b', position: 2, createdAt: '2026-01-02T00:00:00.000Z', isEncore: false },
+    { id: 'a', position: 2, createdAt: '2026-01-01T00:00:00.000Z', isEncore: false },
+    { id: 'c', position: 1, createdAt: null, isEncore: false },
+  ])
+  assert.deepEqual(result.normal.map((item) => item.id), ['c', 'a', 'b'])
+})
+
+test('移动端歌单分页只让第二段负责 Encore，避免第一段和底部重复渲染', () => {
+  const page = read('app/music/live/tours/[tourId]/[city]/[date]/page.tsx')
+  const block = read('components/music/live/SetlistBlock.tsx')
+  assert.match(page, /splitSetlistItems\(/)
+  assert.match(page, /const initialSetlistItems = setlist\.normal\.slice\(0, 12\)/)
+  assert.match(page, /showEncore=\{false\}/)
+  assert.match(page, /showEncore=\{hasEncore\}/)
+  assert.doesNotMatch(page, /concert\.MusicConcertSetlistItem\.slice\(12\)/)
+  assert.match(block, /isExplicitEncoreSetlistItem/)
+  assert.match(block, /function EncoreSection/)
 })
 
 test('现场首页和详情继续使用 EasMusic 深蓝壳层并限制横向溢出', () => {

@@ -35,7 +35,7 @@ test('清除请求中防止重复提交，失败保留数据并提示错误', ()
 
 test('删除未读通知时本地未读数立即减少且不出现负数', () => {
   assert.match(client, /decrementUnreadSummary\(current \|\| sharedSummary, items\)/)
-  assert.match(client, /Math\.max\(0, next\.total - 1\)/)
+  assert.match(client, /Math\.max\(0, value - 1\)/)
 })
 
 test('同一条通知已读请求去重，未读数不会重复扣减', () => {

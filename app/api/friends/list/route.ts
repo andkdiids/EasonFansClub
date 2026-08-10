@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
+import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -27,8 +28,6 @@ export async function GET(request: Request) {
         ],
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip: (page - 1) * pageSize,
-      take: pageSize + 1,
       include: {
         User_Friendship_userAIdToUser: { select: publicFriendSelect },
         User_Friendship_userBIdToUser: { select: publicFriendSelect },
@@ -36,10 +35,12 @@ export async function GET(request: Request) {
     }),
     listGrowthLevels().catch(() => [...defaultGrowthLevels]),
   ])
-  const friendRows = rows.slice(0, pageSize)
+  // Load all friendships before paging.  Paging by friendship.createdAt first
+  // can hide a later friendship whose conversation just received a message.
+  // The actual page is selected only after conversation ordering below.
+  const friendRows = rows
   const friendIds = friendRows.map((row) => row.userAId === user.id ? row.userBId : row.userAId)
-  const [conversations, remarkMap] = await Promise.all([
-    friendIds.length ? prisma.conversation.findMany({
+  const conversations = friendIds.length ? await prisma.conversation.findMany({
       where: {
         ConversationParticipant: {
           some: { userId: user.id, isDeleted: false },
@@ -59,18 +60,41 @@ export async function GET(request: Request) {
           select: { id: true, content: true, createdAt: true, senderId: true, type: true },
         },
       },
-    }) : [],
-    loadFriendRemarkMap(user.id, friendIds),
-  ])
+    }) : []
   const conversationByFriend = new Map(conversations.map((conversation) => {
     const otherId = conversation.ConversationParticipant.find((item) => item.userId !== user.id)?.userId
     return [otherId, conversation] as const
   }))
-  const unreadByConversation = await getUnreadCounts(user.id, conversations.map((item) => item.id))
 
-  const friends = friendRows.map((row) => {
-    const friend = row.userAId === user.id ? row.User_Friendship_userBIdToUser : row.User_Friendship_userAIdToUser
-    const conversation = conversationByFriend.get(friend.id)
+  const orderedFriendRows = friendRows
+    .map((row) => {
+      const friend = row.userAId === user.id ? row.User_Friendship_userBIdToUser : row.User_Friendship_userAIdToUser
+      const conversation = conversationByFriend.get(friend.id)
+      return { row, friend, conversation }
+    })
+    .sort((left, right) => compareFriendConversationOrder(
+      {
+        latestMessageAt: left.conversation?.DirectMessage[0]?.createdAt || null,
+        fallbackAt: left.row.createdAt,
+        stableId: left.row.id,
+      },
+      {
+        latestMessageAt: right.conversation?.DirectMessage[0]?.createdAt || null,
+        fallbackAt: right.row.createdAt,
+        stableId: right.row.id,
+      },
+    ))
+
+  const pageStart = (page - 1) * pageSize
+  const visibleRows = orderedFriendRows.slice(pageStart, pageStart + pageSize)
+  const visibleFriendIds = visibleRows.map(({ friend }) => friend.id)
+  const visibleConversationIds = visibleRows.flatMap(({ conversation }) => conversation ? [conversation.id] : [])
+  const [unreadByConversation, remarkMap] = await Promise.all([
+    getUnreadCounts(user.id, visibleConversationIds),
+    loadFriendRemarkMap(user.id, visibleFriendIds),
+  ])
+
+  const friends = visibleRows.map(({ friend, conversation }) => {
     const growth = calculateGrowthSummary(friend.experience, growthLevels)
     const displayName = resolveFriendDisplayName({
       viewerId: user.id,
@@ -82,17 +106,15 @@ export async function GET(request: Request) {
       ...serializePublicUser(friend, growth.level, growth.levelName, displayName),
       conversationId: conversation?.id || null,
       lastMessage: conversation?.DirectMessage[0] || null,
-      lastMessageAt: conversation?.lastMessageAt || null,
+      // Derive this from the latest visible message instead of the mutable
+      // conversation metadata.  This keeps legacy/stale lastMessageAt values
+      // and deleted messages from changing the displayed order.
+      lastMessageAt: conversation?.DirectMessage[0]?.createdAt || null,
       unreadCount: conversation ? unreadByConversation.get(conversation.id) || 0 : 0,
     }
-  }).sort((a, b) =>
-    Number(b.unreadCount > 0) - Number(a.unreadCount > 0)
-    || b.unreadCount - a.unreadCount
-    || (b.lastMessageAt?.getTime() || 0) - (a.lastMessageAt?.getTime() || 0)
-    || a.nickname.localeCompare(b.nickname, 'zh-CN'),
-  )
+  })
 
-  return NextResponse.json({ friends, page, hasMore: rows.length > pageSize }, { headers: privateHeaders })
+  return NextResponse.json({ friends, page, hasMore: pageStart + pageSize < orderedFriendRows.length }, { headers: privateHeaders })
 }
 
 async function searchUsers(currentUserId: string, q: string) {

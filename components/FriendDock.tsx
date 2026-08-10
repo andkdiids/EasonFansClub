@@ -27,6 +27,7 @@ type Message = {
   content: string
   senderId: string
   createdAt: string
+  type?: string | null
   clientMessageId: string | null
   readAt: string | null
   status?: MessageStatus
@@ -46,6 +47,8 @@ const emptySummary: UnreadSummary = {
   messages: 0,
   total: 0,
 }
+
+const FRIEND_LIST_REFRESH_INTERVAL_MS = 3000
 
 function createMessageId() {
   const cryptoApi = globalThis.crypto
@@ -110,6 +113,9 @@ export function FriendDock({
   const backdropCloseTimerRef = useRef(0)
   const sendingMessageIdsRef = useRef(new Set<string>())
   const chatSessionRef = useRef(0)
+  const friendListRequestRef = useRef(0)
+  const friendsRef = useRef<FriendDockUser[]>([])
+  const friendListPageRef = useRef(1)
 
   // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
   const insertEmoji = useCallback((emoji: string) => {
@@ -169,23 +175,56 @@ export function FriendDock({
     }
   }, [currentUserId])
 
-  const loadFriends = useCallback(async (nextPage = 1, append = false, signal?: AbortSignal) => {
-    setLoadingList(true)
-    const params = new URLSearchParams({ page: String(nextPage), pageSize: '30' })
-    const response = await fetch(`/api/friends/list?${params}`, { signal, cache: 'no-store' })
-    const data = await response.json().catch(() => ({}))
-    setLoadingList(false)
-    if (!response.ok) {
-      setError(data.message || '好友列表加载失败')
-      return
+  const loadFriends = useCallback(async (nextPage = 1, append = false, signal?: AbortSignal, silent = false) => {
+    const requestId = ++friendListRequestRef.current
+    if (!silent) setLoadingList(true)
+    try {
+      const params = new URLSearchParams({ page: String(nextPage), pageSize: '30' })
+      const response = await fetch(`/api/friends/list?${params}`, { signal, cache: 'no-store' })
+      const data = await response.json().catch(() => ({}))
+      if (requestId !== friendListRequestRef.current) return
+      if (!response.ok) {
+        setError(data.message || '好友列表加载失败')
+        return
+      }
+      const incoming = Array.isArray(data.friends) ? data.friends as FriendDockUser[] : []
+      const preserveLoadedPages = silent && friendListPageRef.current > 1 && !append
+      if (preserveLoadedPages) {
+        const current = friendsRef.current
+        // A full first page means that the previously loaded later pages can
+        // still be retained. If the page shrank (including to an empty list),
+        // replace the local list so removed friends are not kept visible.
+        const sameFirstPageOrder = incoming.length === 30
+          && incoming.every((item, index) => current[index]?.id === item.id)
+        if (sameFirstPageOrder) {
+          const incomingById = new Map(incoming.map((item) => [item.id, item]))
+          const merged = current.map((item) => incomingById.get(item.id) || item)
+          friendsRef.current = merged
+          setFriends(merged)
+          return
+        }
+      }
+      const nextFriends = append
+        ? [...friendsRef.current, ...incoming.filter((item) => !friendsRef.current.some((existing) => existing.id === item.id))]
+        : incoming
+      friendsRef.current = nextFriends
+      setFriends(nextFriends)
+      friendListPageRef.current = nextPage
+      setPage(nextPage)
+      setHasMore(Boolean(data.hasMore))
+    } catch (loadError) {
+      if (loadError instanceof DOMException && loadError.name === 'AbortError') return
+      if (requestId === friendListRequestRef.current) {
+        setError(loadError instanceof Error ? loadError.message : '好友列表加载失败')
+      }
+    } finally {
+      if (!silent && requestId === friendListRequestRef.current) setLoadingList(false)
     }
-    const incoming = Array.isArray(data.friends) ? data.friends as FriendDockUser[] : []
-    setFriends((current) => append
-      ? [...current, ...incoming.filter((item) => !current.some((existing) => existing.id === item.id))]
-      : incoming)
-    setPage(nextPage)
-    setHasMore(Boolean(data.hasMore))
   }, [])
+
+  useEffect(() => {
+    friendsRef.current = friends
+  }, [friends])
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(`friend-dock:collapsed:${currentUserId}`) === '1')
@@ -233,6 +272,29 @@ export function FriendDock({
         })
     }
     return () => controller.abort()
+  }, [open, chatFriend, debouncedQuery, loadFriends])
+
+  // The list view has no open conversation to poll for incremental messages.
+  // Refresh its first server-sorted page while it is visible so a message from
+  // another user can move that friend to the top without a manual reload.
+  useEffect(() => {
+    if (!open || chatFriend || debouncedQuery) return
+    let stopped = false
+    let timer = 0
+    const poll = async () => {
+      if (stopped) return
+      if (document.visibilityState !== 'visible') {
+        timer = window.setTimeout(poll, FRIEND_LIST_REFRESH_INTERVAL_MS)
+        return
+      }
+      await loadFriends(1, false, undefined, true)
+      if (!stopped) timer = window.setTimeout(poll, FRIEND_LIST_REFRESH_INTERVAL_MS)
+    }
+    timer = window.setTimeout(poll, FRIEND_LIST_REFRESH_INTERVAL_MS)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
   }, [open, chatFriend, debouncedQuery, loadFriends])
 
   useEffect(() => {
@@ -486,6 +548,28 @@ export function FriendDock({
     window.requestAnimationFrame(() => scrollToBottom('auto'))
   }
 
+  function promoteFriendConversation(id: string, message: Message) {
+    setFriends((current) => {
+      const index = current.findIndex((friend) => friend.conversationId === id)
+      if (index < 0) return current
+      const friend = current[index]
+      const updated = {
+        ...friend,
+        lastMessageAt: message.createdAt,
+        lastMessage: {
+          id: message.id,
+          content: message.content,
+          createdAt: message.createdAt,
+          senderId: message.senderId,
+          type: message.type || (message.stickerId ? 'STICKER' : 'TEXT'),
+        },
+      }
+      const next = [updated, ...current.slice(0, index), ...current.slice(index + 1)]
+      friendsRef.current = next
+      return next
+    })
+  }
+
   async function sendMessage(input: { content: string; clientMessageId: string; optimisticId?: string; stickerId?: string; stickerUrl?: string | null }) {
     if (!conversationId || sendingMessageIdsRef.current.has(input.clientMessageId)) return false
     const chatSession = chatSessionRef.current
@@ -534,6 +618,7 @@ export function FriendDock({
         throw new Error('服务器未返回有效消息，消息未确认发送')
       }
       mergeMessages([data.message])
+      promoteFriendConversation(conversationId, data.message)
       notifyClients('messages')
       return true
     } catch (sendError) {

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { BrandMark } from '@/components/BrandMark'
 import { HeroBackground } from '@/components/HeroBackground'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -9,8 +10,12 @@ import { getSiteAppearance } from '@/lib/site-config'
 
 export const dynamic = 'force-dynamic'
 
+function isPhoneRequest(userAgent: string, clientHint: string | null) {
+  return clientHint === '?1' || /Android.*Mobile|iPhone|iPod|Windows Phone/i.test(userAgent)
+}
+
 export default async function WelcomePage() {
-  const [user, config] = await Promise.all([getCurrentUser(), getSiteAppearance()])
+  const [user, config, requestHeaders] = await Promise.all([getCurrentUser(), getSiteAppearance(), headers()])
   if (!user) redirect('/login?redirect=%2Fwelcome')
 
   const visual = config.heroVisuals.welcome
@@ -19,10 +24,11 @@ export default async function WelcomePage() {
     visual.enabled && (visual.mediaUrl || visual.imageUrl || visual.posterUrl || fallbackImageUrl),
   )
   const logoUrl = publicImageUrl(config.images.navLogoUrl || config.images.logoUrl)
+  const positionMode = isPhoneRequest(requestHeaders.get('user-agent') || '', requestHeaders.get('sec-ch-ua-mobile')) ? 'mobile' : 'desktop'
 
   return (
     <main className="welcome-page">
-      <HeroBackground visual={visual} fallbackImageUrl={fallbackImageUrl} priority />
+      <HeroBackground visual={visual} fallbackImageUrl={fallbackImageUrl} priority positionMode={positionMode} />
       {!hasBackground ? <div className="welcome-hero-fallback" /> : null}
       <div className="welcome-overlay" />
       <header className="welcome-header">

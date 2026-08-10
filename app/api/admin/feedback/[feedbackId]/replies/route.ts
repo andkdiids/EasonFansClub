@@ -56,6 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
         link: `/feedback/${feedback.id}?focus=${reply.id}`,
         recipientId: feedback.userId,
         actorId: guard.user.id,
+        key: `feedback-reply:${feedback.id}:${reply.id}`,
       },
     })
 

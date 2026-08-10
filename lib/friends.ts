@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notifications'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -107,6 +108,7 @@ export async function createFriendRequest(
         title: '好友申请',
         content: `${currentUser.nickname} 向你发送了好友申请`,
         link: '/friends#received-requests',
+        key: getFriendRequestNotificationKey(request.id),
       },
     })
 
@@ -133,16 +135,35 @@ export async function decideFriendRequest(userId: string, requestId: string, act
       where: { id: requestId },
       data: { status: action === 'accept' ? 'ACCEPTED' : 'REJECTED' },
     })
-    await tx.notification.updateMany({
+    const exactNotification = await tx.notification.findFirst({
+      where: {
+        recipientId: userId,
+        type: 'FRIEND_REQUEST',
+        key: getFriendRequestNotificationKey(requestId),
+        isRead: false,
+      },
+      select: { id: true },
+    })
+    const legacyNotification = exactNotification ? null : await tx.notification.findFirst({
       where: {
         recipientId: userId,
         actorId: friendRequest.senderId,
         type: 'FRIEND_REQUEST',
         title: '好友申请',
+        key: null,
         isRead: false,
+        createdAt: { gte: friendRequest.createdAt },
       },
-      data: { isRead: true, readAt: new Date() },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
     })
+    const requestNotification = exactNotification || legacyNotification
+    if (requestNotification) {
+      await tx.notification.update({
+        where: { id: requestNotification.id },
+        data: { isRead: true, readAt: new Date() },
+      })
+    }
 
     if (action === 'accept') {
       const [userAId, userBId] = normalizeFriendPair(friendRequest.senderId, friendRequest.receiverId)
@@ -159,6 +180,7 @@ export async function decideFriendRequest(userId: string, requestId: string, act
           title: '好友申请已通过',
           content: '你的好友申请已通过',
           link: '/friends#received-requests',
+          key: getFriendRequestAcceptedNotificationKey(friendRequest.id),
         },
       })
     }

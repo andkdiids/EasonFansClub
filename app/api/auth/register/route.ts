@@ -10,16 +10,21 @@ import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-a
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy } from '@/lib/registration'
-import { checkRateLimit, consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
+import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { MAX_UID } from '@/lib/uid'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
-const registerRequestLimit = { action: 'register:request', limit: 10, windowSeconds: 30 * 60 } as const
-const registerSuccessLimit = { action: 'register:success', limit: 3, windowSeconds: 60 * 60 } as const
+const REGISTRATION_FINALIZE_LOCK_ROW_ID = 'global'
 
+class RegistrationConflictError extends Error {
+  constructor(readonly field: 'email' | 'phone' | 'username') {
+    super(`DUPLICATE_${field.toUpperCase()}`)
+    this.name = 'RegistrationConflictError'
+  }
+}
 function jsonError(message: string, status: number, code: string, errors: Record<string, string> = {}, meta: Record<string, unknown> = {}) {
   return NextResponse.json({ message, code, errors, ...meta }, { status, headers: noStoreHeaders })
 }
@@ -77,14 +82,9 @@ export async function POST(request: Request) {
     }
 
     const policy = await getRegistrationPolicy()
-    const clientIp = getClientIp(request)
-    const ipRateLimitKey = `ip:${clientIp}`
     if (!policy.allowRegister || policy.registrationMode === 'CLOSED' || !policy.allowEmailRegistration) {
       return jsonError('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
     }
-
-    const requestLimit = await consumeRateLimit(ipRateLimitKey, registerRequestLimit.action, registerRequestLimit.limit, registerRequestLimit.windowSeconds)
-    if (requestLimit.limited) return jsonError('操作过于频繁，请稍后再试', 429, 'REGISTER_REQUEST_RATE_LIMITED', {}, { retryAfter: requestLimit.retryAfter })
 
     const registrationToken = normalizeText(body?.registrationToken)
     if (!registrationToken) return jsonError('请先完成 E院体检和邮箱验证', 409, 'REGISTRATION_VERIFICATION_REQUIRED', { form: '请先完成 E院体检和邮箱验证' })
@@ -132,12 +132,28 @@ export async function POST(request: Request) {
     if (duplicate?.email === email) return jsonError('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
     if (accountDuplicate) return jsonError('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
 
-    const successLimit = await checkRateLimit(ipRateLimitKey, registerSuccessLimit.action, registerSuccessLimit.limit)
-    if (successLimit.limited) return jsonError('当前网络注册账号数量较多，请稍后再试', 429, 'REGISTER_SUCCESS_RATE_LIMITED', {}, { retryAfter: successLimit.retryAfter })
-    const successLimitExpiresAt = new Date(Date.now() + registerSuccessLimit.windowSeconds * 1000)
     const storedSecurityQuestions = parseStoredSecurityQuestions(draft.securityQuestions)
 
     const user = await prisma.$transaction(async (tx) => {
+      // User.email and User.phone are indexed but intentionally remain
+      // nullable/non-unique in the existing schema. Lock the existing global
+      // config row until this transaction commits, then recheck all identity
+      // fields inside the same transaction. This serializes final signup
+      // without a migration or a broad table lock.
+      await tx.$queryRaw`SELECT id FROM EHospitalCheckConfig WHERE id = ${REGISTRATION_FINALIZE_LOCK_ROW_ID} FOR UPDATE`
+      const concurrentDuplicate = await tx.user.findFirst({
+        where: {
+          status: 'ACTIVE',
+          isDeleted: false,
+          OR: [{ email }, { phone }],
+        },
+        select: { email: true, phone: true },
+      })
+      if (concurrentDuplicate?.email === email) throw new RegistrationConflictError('email')
+      if (concurrentDuplicate?.phone === phone) throw new RegistrationConflictError('phone')
+      const concurrentUsername = await tx.user.findUnique({ where: { usernameNormalized: draft.usernameNormalized }, select: { id: true } })
+      if (concurrentUsername) throw new RegistrationConflictError('username')
+
       const latest = await tx.user.findFirst({ orderBy: { uid: 'desc' }, select: { uid: true } })
       if ((latest?.uid ?? -1) >= MAX_UID) throw new Error('UID_LIMIT_REACHED')
       const defaultAvatarUrl = await chooseDefaultAvatar(tx)
@@ -165,7 +181,6 @@ export async function POST(request: Request) {
         await tx.userSecurityQuestion.createMany({ data: storedSecurityQuestions.map((item) => ({ ...item, userId: created.id })) })
       }
       await tx.pointLog.create({ data: { userId: created.id, action: 'REGISTER', points: 0, before: 0, after: 0, reason: '邮箱验证注册账号' } })
-      await tx.rateLimitLog.create({ data: { key: ipRateLimitKey, action: registerSuccessLimit.action, expiresAt: successLimitExpiresAt } })
       await tx.eHospitalCheckAttempt.updateMany({ where: { registrationDraftId: draft.id, userId: null }, data: { userId: created.id } })
       await tx.registrationDraft.update({ where: { id: draft.id }, data: { completedAt: new Date() } })
       return created
@@ -180,6 +195,17 @@ export async function POST(request: Request) {
       if (existing) return authenticatedResponse(request, existing, 200, { message: '注册已完成，正在进入私家E院', idempotentReplay: true })
     }
     console.error('[auth.register]', error)
+    if (error instanceof RegistrationConflictError) {
+      console.info('[auth.register] duplicate user prevented', { field: error.field })
+      if (error.field === 'email') return jsonError('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
+      if (error.field === 'phone') return jsonError('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
+      return jsonError('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const target = String(error.meta?.target || '')
+      if (target.includes('email')) return jsonError('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
+      if (target.includes('phone')) return jsonError('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
+    }
     if (error instanceof Error && error.message === 'UID_LIMIT_REACHED') return jsonError('成员 UID 已达到上限', 409, 'UID_LIMIT_REACHED', { form: '成员 UID 已达到上限' })
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && String(error.meta?.target || '').includes('usernameNormalized')) return jsonError('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
     return jsonError('注册失败，请稍后再试', 500, 'REGISTER_FAILED', { form: '注册失败，请稍后再试' })

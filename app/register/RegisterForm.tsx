@@ -43,7 +43,7 @@ type HospitalState = {
   score: number
   correctCount: number
   answeredCount: number
-  remainingAttempts: number
+  remainingAttempts: number | null
   question: { questionId: string; audioUrl: string; options: Array<{ key: string; label: string }>; audioSeconds: number } | null
 }
 
@@ -310,7 +310,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           score,
           correctCount: Math.floor(score / 10),
           answeredCount: 10,
-          remainingAttempts: 0,
+          remainingAttempts: null,
           question: null,
         })
         setHospitalStage('intro')
@@ -771,7 +771,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
             score,
             correctCount: Math.floor(score / 10),
             answeredCount: 10,
-            remainingAttempts: 0,
+            remainingAttempts: null,
             question: null,
           }
           setHospitalState(summary)
@@ -910,7 +910,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
             ) : hospitalState?.status === 'FAILED' ? (
               <div className="mt-5 border border-rose-300/20 bg-rose-950/35 p-5 text-center">
                 <p className="text-lg font-black text-rose-100">🏥 体检未通过</p>
-                <p className="mt-2 text-sm font-bold leading-6 text-rose-200/80">本次成绩：{hospitalState.correctCount} / {hospitalState.totalQuestions}<br />今日剩余机会：{hospitalState.remainingAttempts}次</p>
+                <p className="mt-2 text-sm font-bold leading-6 text-rose-200/80">本次成绩：{hospitalState.correctCount} / {hospitalState.totalQuestions}<br />{hospitalState.remainingAttempts === null ? '开放注册期间可重新开始体检' : `今日剩余机会：${hospitalState.remainingAttempts}次`}</p>
                 <button type="button" onClick={() => setHospitalModalOpen(false)} className="mt-4 rounded-sm border border-white/15 bg-white/[0.05] px-5 py-2 text-sm font-black text-white hover:bg-white/10">返回注册页</button>
               </div>
             ) : hospitalState?.status === 'PASSED' ? (

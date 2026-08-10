@@ -19,17 +19,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     return NextResponse.json({ message: '反馈不存在，或你无权查看' }, { status: 404 })
   }
 
+  await prisma.$transaction([
+    prisma.feedback.update({
+      where: { id: feedback.id },
+      data: { userUnread: false },
+    }),
+    prisma.feedbackReply.updateMany({
+      where: { feedbackId: feedback.id, authorRole: 'ADMIN', isReadByUser: false },
+      data: { isReadByUser: true },
+    }),
+    prisma.notification.updateMany({
+      where: {
+        recipientId: guard.user.id,
+        isRead: false,
+        link: { startsWith: `/feedback/${feedback.id}` },
+      },
+      data: { isRead: true, readAt: new Date() },
+    }),
+  ])
   if (feedback.userUnread) {
-    await prisma.$transaction([
-      prisma.feedback.update({
-        where: { id: feedback.id },
-        data: { userUnread: false },
-      }),
-      prisma.feedbackReply.updateMany({
-        where: { feedbackId: feedback.id, authorRole: 'ADMIN', isReadByUser: false },
-        data: { isReadByUser: true },
-      }),
-    ])
     feedback.userUnread = false
     feedback.FeedbackReply = feedback.FeedbackReply.map((reply) =>
       reply.authorRole === 'ADMIN' ? { ...reply, isReadByUser: true } : reply,

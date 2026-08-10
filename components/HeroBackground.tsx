@@ -79,13 +79,28 @@ function layerStyle(
   settings: { positionX: number; positionY: number; scale: number; fitMode?: HeroFitMode },
 ): CSSProperties {
   const layout = dimensions ? resolveHeroMediaLayout(frame, dimensions, settings) : null
+  const positionX = Math.max(0, Math.min(100, Number(settings.positionX) || 0))
+  const positionY = Math.max(0, Math.min(100, Number(settings.positionY) || 0))
+  const scale = Math.max(40, Math.min(200, Number(settings.scale) || 100)) / 100
+  if (!layout) {
+    return {
+      left: 0,
+      top: 0,
+      width: '100%',
+      height: '100%',
+      objectFit: settings.fitMode === 'CONTAIN' ? 'contain' : 'cover',
+      objectPosition: `${positionX}% ${positionY}%`,
+      transform: scale === 1 ? 'none' : `scale(${scale})`,
+      transformOrigin: `${positionX}% ${positionY}%`,
+    }
+  }
   return {
-    left: layout ? `${layout.left}px` : 0,
-    top: layout ? `${layout.top}px` : 0,
-    width: layout ? `${layout.width}px` : '100%',
-    height: layout ? `${layout.height}px` : '100%',
+    left: `${layout.left}px`,
+    top: `${layout.top}px`,
+    width: `${layout.width}px`,
+    height: `${layout.height}px`,
     objectFit: 'cover',
-    objectPosition: `${settings.positionX}% ${settings.positionY}%`,
+    objectPosition: `${positionX}% ${positionY}%`,
   }
 }
 

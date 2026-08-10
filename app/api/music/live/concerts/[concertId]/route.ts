@@ -14,7 +14,7 @@ export async function GET(_request: Request, { params }: Context) {
       MusicConcertSetlistItem: {
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         select: {
-          id: true, displayName: true, section: true, position: true, versionName: true, note: true,
+          id: true, displayName: true, section: true, position: true, createdAt: true, versionName: true, note: true,
           isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true,
           MusicSong: { select: { id: true, title: true, releaseYear: true, MusicAlbum: { select: { name: true } } } },
         },

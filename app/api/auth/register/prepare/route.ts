@@ -5,7 +5,7 @@ import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, REGISTRATION_DRAFT_TTL_MS } from '@/lib/registration-draft'
 import { getRegistrationPolicy } from '@/lib/registration'
-import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
+import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { createPlainToken, hashToken } from '@/lib/tokens'
@@ -28,17 +28,11 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null)
   const policy = await getRegistrationPolicy()
-  const clientIp = getClientIp(request)
 
   // The registration flow now always uses email verification. Phone is required
   // as a login/recovery field and is deliberately not a verification channel.
   if (policy.registrationClosed || !policy.allowEmailRegistration) {
     return errorResponse('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
-  }
-
-  const rate = await consumeRateLimit(`ip:${clientIp}`, 'register:prepare', 10, 30 * 60)
-  if (rate.limited) {
-    return NextResponse.json({ message: '操作过于频繁，请稍后再试', retryAfter: rate.retryAfter }, { status: 429, headers: noStoreHeaders })
   }
 
   const nickname = getLoginAccountDisplay(body?.nickname || body?.username)
@@ -71,14 +65,14 @@ export async function POST(request: Request) {
   const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
   if (!turnstile.success) return errorResponse(turnstile.message || '人机验证失败', 400, 'TURNSTILE_FAILED', { turnstileToken: turnstile.message || '人机验证失败' })
 
-  const phoneFilter = phone ? [{ phone }] : []
-  const pendingDraftFilter = [{ email }, ...phoneFilter]
-  const [duplicate, accountDuplicate, recoverableDraft, pendingDraft] = await Promise.all([
+  const draftIdentityFilter = [{ email }, { phone }]
+  const [duplicate, accountDuplicate, recoverableDraft, existingDrafts] = await Promise.all([
     findActiveConflict({ phone: phone || null, email }),
     findLoginAccountConflict(usernameNormalized),
     prisma.registrationDraft.findFirst({
       where: {
         email,
+        phone,
         completedAt: null,
         expiresAt: { gt: new Date() },
         EHospitalCheckSession: { some: { status: 'PASSED' } },
@@ -101,8 +95,9 @@ export async function POST(request: Request) {
         },
       },
     }),
-    prisma.registrationDraft.findFirst({
-      where: { completedAt: null, expiresAt: { gt: new Date() }, OR: pendingDraftFilter },
+    prisma.registrationDraft.findMany({
+      where: { completedAt: null, expiresAt: { gt: new Date() }, OR: draftIdentityFilter },
+      orderBy: { createdAt: 'desc' },
       select: { id: true },
     }),
   ])
@@ -140,8 +135,18 @@ export async function POST(request: Request) {
       }, { headers: noStoreHeaders })
     }
   }
-  if (pendingDraft) return errorResponse('该邮箱或手机号已有未完成的注册验证，请稍后重试', 409, 'REGISTRATION_DRAFT_EXISTS')
-
+  const oldDraftIds = existingDrafts.map(({ id }) => id)
+  if (oldDraftIds.length) {
+    const invalidatedAt = new Date()
+    await prisma.registrationDraft.updateMany({
+      where: { id: { in: oldDraftIds }, completedAt: null, expiresAt: { gt: invalidatedAt } },
+      data: { expiresAt: invalidatedAt },
+    })
+    console.info('[auth.register.prepare] superseded old drafts', {
+      draftCount: oldDraftIds.length,
+      reason: 'new registration flow started',
+    })
+  }
   const draftToken = createPlainToken(32)
   const passwordHash = await hashPassword(password)
   const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
@@ -168,7 +173,7 @@ export async function POST(request: Request) {
     },
   })
 
-  console.info('[auth.register.prepare] draft created', {
+  console.info('[auth.register.prepare] draft created or renewed', {
     draftId: draft.id,
     tokenExists: Boolean(draftToken),
     expiresAt: draft.expiresAt.toISOString(),

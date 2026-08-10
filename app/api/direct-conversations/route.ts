@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
@@ -9,15 +10,30 @@ const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
-  const conversations = await prisma.conversation.findMany({
+  const conversationRows = await prisma.conversation.findMany({
     where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
-    orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
-    take: 30,
     include: {
       ConversationParticipant: { select: { userId: true, lastReadAt: true, User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } } } },
       DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, createdAt: true, senderId: true } },
     },
   })
+  // Sort by the latest visible message, then page.  Conversation.updatedAt is
+  // intentionally not used: read markers and other metadata updates must not
+  // move an old conversation above a newer one.
+  const conversations = conversationRows
+    .sort((left, right) => compareFriendConversationOrder(
+      {
+        latestMessageAt: left.DirectMessage[0]?.createdAt || null,
+        fallbackAt: left.createdAt,
+        stableId: left.id,
+      },
+      {
+        latestMessageAt: right.DirectMessage[0]?.createdAt || null,
+        fallbackAt: right.createdAt,
+        stableId: right.id,
+      },
+    ))
+    .slice(0, 30)
   const participants = conversations.map((row) => ({
     conversationId: row.id,
     lastReadAt: row.ConversationParticipant.find((participant) => participant.userId === user.id)?.lastReadAt || null,
@@ -62,7 +78,7 @@ export async function GET() {
       : null
     return {
       id: row.id,
-      lastMessageAt: row.lastMessageAt,
+      lastMessageAt: row.DirectMessage[0]?.createdAt || null,
       otherUser,
       latestMessage: row.DirectMessage[0] || null,
       unreadCount: unreadByConversation.get(row.id) || 0,

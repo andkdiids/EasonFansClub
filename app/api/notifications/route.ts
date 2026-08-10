@@ -5,6 +5,9 @@ import { prisma } from '@/lib/prisma'
 
 const NOTIFICATION_ID_BATCH_LIMIT = 100
 const NOTIFICATION_PAGE_SIZE = 50
+const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+
+export const dynamic = 'force-dynamic'
 
 type NotificationReadInput = { id: string; source?: string }
 
@@ -24,7 +27,7 @@ export async function GET(request: Request) {
     page: 1,
     limit,
     hasMore: notifications.length >= limit,
-  })
+  }, { headers: privateHeaders })
 }
 
 export async function PATCH(request: Request) {

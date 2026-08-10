@@ -7,6 +7,7 @@ import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
+import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -29,14 +30,30 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
 
   const params = await searchParams
   let selectedDate = parseDate(params.date)
+  let notificationTargetDate: Date | null = null
+  const notificationMessageId = params.message?.slice(0, 80) || ''
+  const notificationFocusId = params.focus?.slice(0, 80) || ''
   // 通知点赞跳转到 /checkin?message=<id> 时，目标留言可能不在「今天」：
   // 先按 id 查出其所属日期并作为选中日期加载，确保留言进入列表后能被定位高亮。
   if (params.message) {
     const targetMessage = await prisma.dailyMessage.findUnique({
-      where: { id: params.message.slice(0, 80) },
+      where: { id: notificationMessageId },
       select: { date: true },
     })
-    if (targetMessage) selectedDate = parseDate(formatBeijingDate(targetMessage.date))
+    if (targetMessage) {
+      selectedDate = parseDate(formatBeijingDate(targetMessage.date))
+      notificationTargetDate = targetMessage.date
+    }
+  }
+  if (notificationTargetDate && notificationMessageId) {
+    const dateKey = formatBeijingDate(notificationTargetDate)
+    await markPersonalNotificationsForTargetRead({
+      userId: sessionUser.id,
+      linkPrefix: notificationFocusId
+        ? `/checkin?date=${dateKey}&message=${notificationMessageId}&focus=${notificationFocusId}`
+        : `/checkin?date=${dateKey}&message=${notificationMessageId}`,
+      types: notificationFocusId ? ['REPLY', 'LIKE'] : ['LIKE'],
+    }).catch((error) => console.warn('[checkin:notifications:mark-read-failed]', { messageId: notificationMessageId, focusId: notificationFocusId, error }))
   }
   const nextDate = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000)
   const today = startOfLocalDay()
