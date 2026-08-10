@@ -1,14 +1,17 @@
 onlyBuiltDependencies:
   - '@prisma/client'
   - '@prisma/engines'
+  - '@ffmpeg-installer/linux-x64'
   - bcrypt
   - esbuild
   - prisma
   - sharp
   - unrs-resolver
+
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  '@ffmpeg-installer/linux-x64': true
   bcrypt: true
   esbuild: true
   prisma: true
