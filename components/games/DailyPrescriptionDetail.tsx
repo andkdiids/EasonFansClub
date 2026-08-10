@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { SavePrescriptionButton } from './SavePrescriptionButton'
 
 type DrawResult = {
   dateKey: string
@@ -78,6 +79,9 @@ export function DailyPrescriptionDetail() {
           <strong>+{status.draw.points} 挂号费</strong>
           {status.draw.lyric ? <blockquote>“{status.draw.lyric.text}”<cite>《{status.draw.lyric.songTitle}》</cite></blockquote> : null}
           <small>处方编号：{status.draw.prescriptionCode}</small>
+          <footer className="daily-prescription-footer">
+            <SavePrescriptionButton data={status.draw} />
+          </footer>
         </article>
       )}
     </section>

@@ -50,6 +50,12 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .prescription-lyric cite { display:block; max-width:720px; margin:12px auto 0; color:var(--foreground-muted); font-size:12px; font-style:normal; text-align:right; }
 .prescription-lyric p { margin:16px 0 0; color:var(--foreground-muted); font-size:13px; }
 .prescription-card>footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 20px; border-top:1px solid var(--border); padding:13px 18px; color:var(--foreground-muted); font-size:10px; }
+.prescription-save-action { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-left:auto; }
+.prescription-save-button { min-height:36px; border:1px solid var(--success); border-radius:2px; padding:0 14px; color:var(--success); background:transparent; font-size:11px; font-weight:850; cursor:pointer; }
+.prescription-save-button:hover:not(:disabled) { color:var(--surface); background:var(--success); }
+.prescription-save-button:disabled { cursor:wait; opacity:.62; }
+.prescription-save-message { color:var(--foreground-muted); font-size:10px; }
+.daily-prescription-footer { display:flex; justify-content:flex-end; margin-top:4px; }
 :root[data-theme='midnight'] .prescription-card { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
 :root[data-theme='midnight'] .prescription-card :where(blockquote,strong,p) { color:inherit; }
 :root[data-theme='midnight'] .prescription-points strong { color:var(--primary); }
@@ -3599,6 +3605,28 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
     radial-gradient(circle at 20% 0%, rgba(45,215,170,.12), transparent 35rem),
     radial-gradient(circle at 80% 20%, rgba(40,100,180,.12), transparent 35rem),
     linear-gradient(180deg,#07101d 0%,#0b1626 100%);
+}
+.games-route-root {
+  display:flex;
+  min-height:100%;
+  min-height:100svh;
+  min-height:100dvh;
+  flex-direction:column;
+  background-color:#050a11;
+}
+html:has(.games-route-root),
+body:has(.games-route-root) {
+  min-height:100%;
+  min-height:100svh;
+  min-height:100dvh;
+  background-color:#050a11;
+}
+.games-route-root > .immersive-game-layout {
+  flex:1 0 auto;
+  min-height:100%;
+  min-height:100svh;
+  min-height:100dvh;
+  background-color:#050a11;
 }
 .games-center-background {
   margin: 0;

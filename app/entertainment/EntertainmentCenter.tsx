@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { UiIcon } from '@/components/UiIcon'
+import { SavePrescriptionButton } from '@/components/games/SavePrescriptionButton'
 import { MAX_DAILY_PRESCRIPTION_REWARD, MIN_DAILY_PRESCRIPTION_REWARD } from '@/lib/daily-prescription-reward'
 
 type DrawResult = {
@@ -180,6 +181,7 @@ export function EntertainmentCenter() {
               <footer>
                 <span>处方编号：{drawResult.prescriptionCode}</span>
                 <span>开具时间：{drawResult.issuedAtBeijing}</span>
+                <SavePrescriptionButton data={drawResult} />
               </footer>
             </article>
           ) : null}
