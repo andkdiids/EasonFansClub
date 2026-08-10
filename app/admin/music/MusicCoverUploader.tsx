@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useState } from 'react'
 import { MusicUploadStatus } from '@/app/admin/music/MusicUploadStatus'
+import { compressMusicCoverInBrowser } from '@/app/admin/music/music-cover-client'
 import {
   MUSIC_UPLOAD_TIMEOUT_MS,
   musicUploadError,
@@ -62,11 +63,17 @@ export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploade
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), MUSIC_UPLOAD_TIMEOUT_MS)
     let conversionTimer: number | undefined
-    const form = new FormData()
-    form.set('file', file)
-    form.set('entityType', entityType)
-    form.set('entityId', entityId)
     try {
+      setStage('converting')
+      setMessage('正在压缩图片并转换为 WebP…')
+      const compressedFile = await compressMusicCoverInBrowser(file)
+      if (compressedFile.size > MUSIC_COVER_MAX_FILE_SIZE) {
+        throw new Error('图片过大，请选择较小图片或等待压缩完成')
+      }
+      const form = new FormData()
+      form.set('file', compressedFile)
+      form.set('entityType', entityType)
+      form.set('entityId', entityId)
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       setStage('uploading')
       setMessage('正在上传图片…')
@@ -79,6 +86,9 @@ export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploade
         body: form,
         signal: controller.signal,
       })
+      if (response.status === 413) {
+        throw new Error('图片过大，请选择较小图片或等待压缩完成')
+      }
       const data = await readMusicUploadResponse(response)
       if (!response.ok) throw new Error(musicUploadError(response, data))
       if (data.success !== true || typeof data.url !== 'string') {

@@ -182,10 +182,24 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         if (!disposed && !(error instanceof Error && error.name === 'AbortError')) setFailed(true)
       }
     }
+    async function loadEntertainmentRanking() {
+      try {
+        const response = await fetch('/api/home/entertainment-ranking', { cache: 'no-store', signal: controller.signal })
+        if (!response.ok) return
+        const nextData = await response.json() as { entertainmentRanking?: Payload['entertainmentRanking'] }
+        if (!disposed) setData((current) => ({ ...current, entertainmentRanking: nextData.entertainmentRanking || null }))
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development' && !(error instanceof Error && error.name === 'AbortError')) console.debug('[home entertainment ranking]', error)
+      }
+    }
     const refresh = () => {
-      if (document.visibilityState !== 'hidden') void load()
+      if (document.visibilityState !== 'hidden') {
+        void load()
+        void loadEntertainmentRanking()
+      }
     }
     void load()
+    void loadEntertainmentRanking()
     window.addEventListener('checkin:completed', refresh)
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)

@@ -1070,6 +1070,7 @@ model GuessSongSession {
   @@index([userId, mode, status])
   @@index([riskScore, createdAt])
   @@index([isValid, createdAt])
+  @@index([status, isValid, mode, questionCount, completedAt], map: "GuessSongSession_year_leaderboard_idx")
 }
 
 model GuessSongSessionQuestion {

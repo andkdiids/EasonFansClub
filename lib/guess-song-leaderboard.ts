@@ -1,4 +1,4 @@
-import type { GuessSongMode, GuessSongPeriodType } from '@prisma/client'
+import { Prisma, type GuessSongMode, type GuessSongPeriodType } from '@prisma/client'
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import { toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
@@ -88,7 +88,7 @@ type LeaderboardRow = ScoreRecord & {
     nickname: string
     username: string
     avatarUrl: string | null
-    Profile: { avatarUrl: string | null } | null
+    Profile: { displayName: string | null; avatarUrl: string | null } | null
   }
 }
 
@@ -113,6 +113,166 @@ function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remar
   }
 }
 
+type YearLeaderboardQueryRow = {
+  session_id: string
+  user_id: string
+  mode: GuessSongMode
+  score: number
+  correct_count: number
+  max_streak: number
+  total_play_count: number
+  completed_at: Date
+  leaderboard_rank: number | bigint
+  uid: number
+  nickname: string
+  username: string
+  avatar_url: string | null
+  profile_display_name: string | null
+  profile_avatar_url: string | null
+}
+
+function toYearLeaderboardRow(row: YearLeaderboardQueryRow) {
+  const leaderboardRow: LeaderboardRow = {
+    userId: row.user_id,
+    mode: toPublicGuessSongMode(row.mode) as GuessSongMode,
+    score: row.score,
+    correctCount: row.correct_count,
+    maxStreak: row.max_streak,
+    totalPlayCount: row.total_play_count,
+    achievedAt: row.completed_at,
+    User: {
+      id: row.user_id,
+      uid: row.uid,
+      nickname: row.nickname,
+      username: row.username,
+      avatarUrl: row.avatar_url,
+      Profile: row.profile_display_name === null && row.profile_avatar_url === null
+        ? null
+        : { displayName: row.profile_display_name, avatarUrl: row.profile_avatar_url },
+    },
+  }
+
+  return {
+    row: leaderboardRow,
+    rank: Number(row.leaderboard_rank),
+  }
+}
+
+async function getYearGuessSongLeaderboard(input: {
+  userId: string
+  mode: GuessSongPublicMode
+  modeFilter: GuessSongMode[]
+  periodKey: string
+  start: Date
+  end: Date
+}) {
+  const questionCountFilter = input.mode === 'EASY'
+    ? Prisma.sql`AND s.questionCount IS NULL`
+    : Prisma.empty
+  const selectedRows = await prisma.$queryRaw<YearLeaderboardQueryRow[]>(Prisma.sql`
+    WITH eligible_sessions AS (
+      SELECT
+        s.id AS session_id,
+        s.userId AS user_id,
+        s.mode,
+        s.score,
+        s.correctCount AS correct_count,
+        s.maxStreak AS max_streak,
+        s.totalPlayCount AS total_play_count,
+        s.completedAt AS completed_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY s.userId
+          ORDER BY
+            s.score DESC,
+            s.correctCount DESC,
+            s.maxStreak DESC,
+            s.totalPlayCount ASC,
+            s.completedAt ASC,
+            s.id ASC
+        ) AS user_rank
+      FROM \`GuessSongSession\` AS s
+      WHERE s.status = 'COMPLETED'
+        AND s.isValid = TRUE
+        AND s.riskScore < ${GUESS_SONG_RISK_THRESHOLD}
+        AND s.completedAt >= ${input.start}
+        AND s.completedAt < ${input.end}
+        AND s.mode IN (${Prisma.join(input.modeFilter)})
+        ${questionCountFilter}
+    ),
+    best_sessions AS (
+      SELECT
+        session_id,
+        user_id,
+        mode,
+        score,
+        correct_count,
+        max_streak,
+        total_play_count,
+        completed_at
+      FROM eligible_sessions
+      WHERE user_rank = 1
+    ),
+    ranked_sessions AS (
+      SELECT
+        session_id,
+        user_id,
+        mode,
+        score,
+        correct_count,
+        max_streak,
+        total_play_count,
+        completed_at,
+        ROW_NUMBER() OVER (
+          ORDER BY
+            score DESC,
+            correct_count DESC,
+            max_streak DESC,
+            total_play_count ASC,
+            completed_at ASC,
+            session_id ASC
+        ) AS leaderboard_rank
+      FROM best_sessions
+    )
+    SELECT
+      ranked.session_id,
+      ranked.user_id,
+      ranked.mode,
+      ranked.score,
+      ranked.correct_count,
+      ranked.max_streak,
+      ranked.total_play_count,
+      ranked.completed_at,
+      ranked.leaderboard_rank,
+      u.uid,
+      u.nickname,
+      u.username,
+      u.avatarUrl AS avatar_url,
+      p.displayName AS profile_display_name,
+      p.avatarUrl AS profile_avatar_url
+    FROM ranked_sessions AS ranked
+    INNER JOIN \`User\` AS u ON u.id = ranked.user_id
+    LEFT JOIN \`Profile\` AS p ON p.userId = ranked.user_id
+    WHERE ranked.leaderboard_rank <= 10 OR ranked.user_id = ${input.userId}
+    ORDER BY ranked.leaderboard_rank ASC
+    LIMIT 11
+  `)
+
+  const rankedRows = selectedRows.map(toYearLeaderboardRow)
+  const topRows = rankedRows.filter((item) => item.rank <= 10)
+  const ownRow = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
+  const remarkTargets = [...topRows, ...(ownRow && ownRow.rank > 10 ? [ownRow] : [])]
+  const remarkMap = await loadFriendRemarkMap(input.userId, remarkTargets.map((item) => item.row.userId))
+
+  return {
+    periodType: 'YEAR' as const,
+    periodKey: input.periodKey,
+    mode: input.mode,
+    algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
+    rows: topRows.map((item) => serializeRow(item.row, item.rank, input.userId, remarkMap)),
+    currentUser: ownRow ? serializeRow(ownRow.row, ownRow.rank, input.userId, remarkMap) : null,
+  }
+}
+
 export async function getGuessSongLeaderboard(input: {
   userId: string
   periodType: GuessSongPeriodType | 'YEAR'
@@ -122,98 +282,53 @@ export async function getGuessSongLeaderboard(input: {
   const modeFilter: GuessSongMode[] = input.mode === 'EASY'
     ? ['EASY', 'ENDLESS']
     : [input.mode as GuessSongMode]
-  const legacySimpleFilter = input.mode === 'EASY' ? { questionCount: null } : {}
-  let periodKey: string
-  let rows: LeaderboardRow[]
 
   if (input.periodType === 'YEAR') {
     const { start, end, periodKey: yearKey } = getGuessSongPeriod('YEAR', input.now)
-    periodKey = yearKey
-    const sessions = await prisma.guessSongSession.findMany({
-      where: {
-        status: 'COMPLETED',
+    return getYearGuessSongLeaderboard({
+      userId: input.userId,
+      mode: input.mode,
+      modeFilter,
+      periodKey: yearKey,
+      start,
+      end,
+    })
+  }
+
+  const periodKey = getGuessSongPeriod(input.periodType, input.now).periodKey
+  const entries = await prisma.guessSongLeaderboardEntry.findMany({
+    where: {
+      periodType: input.periodType,
+      periodKey,
+      mode: { in: modeFilter },
+      GuessSongSession: {
         isValid: true,
         riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
-        completedAt: { gte: start, lt: end },
-        mode: { in: modeFilter },
-        ...legacySimpleFilter,
+        ...(input.mode === 'EASY' ? { questionCount: null } : {}),
       },
-      select: {
-        userId: true,
-        mode: true,
-        score: true,
-        correctCount: true,
-        maxStreak: true,
-        totalPlayCount: true,
-        completedAt: true,
-        User: {
-          select: {
-            id: true,
-            uid: true,
-            nickname: true,
-            username: true,
-            avatarUrl: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
-          },
+    },
+    include: {
+      User: {
+        select: {
+          id: true,
+          uid: true,
+          nickname: true,
+          username: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-    })
-    // 年榜：按当前模式统计，每个用户只取最高分的那一局（非累计求和）
-    const best = new Map<string, LeaderboardRow>()
-    for (const session of sessions) {
-      const candidate: LeaderboardRow = {
-        userId: session.userId,
-        mode: toPublicGuessSongMode(session.mode) as GuessSongMode,
-        User: session.User,
-        score: session.score,
-        correctCount: session.correctCount,
-        maxStreak: session.maxStreak,
-        totalPlayCount: session.totalPlayCount,
-        achievedAt: session.completedAt!,
-      }
-      const current = best.get(session.userId)
-      if (!current || compareGuessSongScores(candidate, current) < 0) {
-        best.set(session.userId, candidate)
-      }
-    }
-    rows = [...best.values()]
-  } else {
-    const resolved = getGuessSongPeriod(input.periodType, input.now)
-    periodKey = resolved.periodKey
-    const entries = await prisma.guessSongLeaderboardEntry.findMany({
-      where: {
-        periodType: input.periodType,
-        periodKey,
-        mode: { in: modeFilter },
-        GuessSongSession: {
-          isValid: true,
-          riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
-          ...(input.mode === 'EASY' ? { questionCount: null } : {}),
-        },
-      },
-      include: {
-        User: {
-          select: {
-            id: true,
-            uid: true,
-            nickname: true,
-            username: true,
-            avatarUrl: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
-          },
-        },
-      },
-      take: 1000,
-    })
+    },
+    take: 1000,
+  })
     // 周榜/月榜：guessSongLeaderboardEntry 已存储该用户该模式该周期的最高单局成绩，直接采用（非累计）
-    const bestByUser = new Map<string, LeaderboardRow>()
-    for (const entry of entries) {
-      const candidate = { ...entry, mode: toPublicGuessSongMode(entry.mode) as GuessSongMode }
-      const current = bestByUser.get(candidate.userId)
-      if (!current || compareGuessSongScores(candidate, current) < 0) bestByUser.set(candidate.userId, candidate)
-    }
-    rows = [...bestByUser.values()]
+  const bestByUser = new Map<string, LeaderboardRow>()
+  for (const entry of entries) {
+    const candidate = { ...entry, mode: toPublicGuessSongMode(entry.mode) as GuessSongMode }
+    const current = bestByUser.get(candidate.userId)
+    if (!current || compareGuessSongScores(candidate, current) < 0) bestByUser.set(candidate.userId, candidate)
   }
+  const rows = [...bestByUser.values()]
 
   rows.sort(compareGuessSongScores)
   const remarkMap = await loadFriendRemarkMap(input.userId, rows.map((row) => row.userId))

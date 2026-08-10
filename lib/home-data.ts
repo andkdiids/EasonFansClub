@@ -283,14 +283,17 @@ export async function getHomeTodayEvents() {
 }
 
 export async function getHomeEntertainmentRanking(userId?: string) {
-  const ranking = await safeDb(
-    'GuessSongLeaderboard home.ranking',
-    getGuessSongLeaderboard({ userId: userId || '', periodType: 'YEAR', mode: 'EASY' }),
-    null,
-    8000,
-  )
-  if (!ranking) return null
-  return { periodType: ranking.periodType, periodKey: ranking.periodKey, mode: ranking.mode, rows: ranking.rows.slice(0, 5), currentUser: userId ? ranking.currentUser : null }
+  const cacheKey = `home.entertainmentRanking:${getShanghaiDateKey(new Date())}:${userId || 'anonymous'}`
+  return cachedHomeData(cacheKey, async () => {
+    const ranking = await safeDb(
+      'GuessSongLeaderboard home.ranking',
+      getGuessSongLeaderboard({ userId: userId || '', periodType: 'YEAR', mode: 'EASY' }),
+      null,
+      8000,
+    )
+    if (!ranking) return null
+    return { periodType: ranking.periodType, periodKey: ranking.periodKey, mode: ranking.mode, rows: ranking.rows.slice(0, 5), currentUser: userId ? ranking.currentUser : null }
+  })
 }
 
 // 生日奖励（徽章 + 通知）每日最多触发一次，由首页加载自然带起，无需 cron。
