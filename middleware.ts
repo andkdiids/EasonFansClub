@@ -14,6 +14,7 @@ const publicExactPaths = new Set([
   '/favicon.ico',
   '/robots.txt',
   '/manifest.webmanifest',
+  '/d89ed4255676640e037130589550e237.txt',
 ])
 
 const publicPathPrefixes = [
