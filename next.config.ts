@@ -3,7 +3,7 @@ import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
 
 const nextConfig: NextConfig = {
   experimental: {
-    middlewareClientMaxBodySize: '110mb',
+    middlewareClientMaxBodySize: '256mb',
   },
   serverExternalPackages: [
     '@prisma/client',

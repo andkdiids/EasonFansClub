@@ -8,11 +8,10 @@ import { requireAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
 
-// Keep this below Next's default request parser threshold; quality is protected
-// by the high-quality transform and master upload, not by accepting oversized
-// multipart bodies and hoping the proxy will pass them through.
-const MAX_IMAGE_SIZE = 8 * 1024 * 1024
-const MAX_VIDEO_SIZE = 8 * 1024 * 1024
+// Keep the per-file cap at 200 MB while leaving multipart/proxy headroom at 256 MB.
+// Existing format detection and high-quality processing rules remain unchanged.
+const MAX_IMAGE_SIZE = 200 * 1024 * 1024
+const MAX_VIDEO_SIZE = 200 * 1024 * 1024
 const MAX_IMAGE_EDGE = 2560
 const IMAGE_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif'])
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/apng'])
@@ -150,7 +149,7 @@ export async function POST(request: Request) {
   const isVideoFile = file.type.startsWith('video/') || /\.(mp4|webm)$/i.test(file.name)
   const maxSize = isVideoFile ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE
   if (file.size === 0 || file.size > maxSize) {
-    return NextResponse.json({ message: 'Hero 媒体文件不能超过 8MB' }, { status: 400 })
+    return NextResponse.json({ message: 'Hero 媒体文件不能超过 200MB' }, { status: 400 })
   }
 
   try {
