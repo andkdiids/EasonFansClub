@@ -64,3 +64,11 @@ test('注册和登录页面复用共享手机号选择器，服务端不再固�
   assert.match(users, /getPhoneLookupVariants/)
   for (const route of [prepare, complete, loginRoute]) assert.doesNotMatch(route, /\^1\\d\{10\}\$/)
 })
+
+test('注册和登录共享紧凑区号触发器，且展开面板保留足够宽度', () => {
+  const selector = source('components/InternationalPhoneInput.tsx')
+  assert.match(selector, /relative w-\[72px\] shrink-0/)
+  assert.match(selector, /h-11 w-full min-w-0[^\n]*px-2\.5[^\n]*pr-6/)
+  assert.match(selector, /absolute right-2 top-1\/2/)
+  assert.match(selector, /w-\[min\(280px,calc\(100vw-2rem\)\)\]/)
+})
