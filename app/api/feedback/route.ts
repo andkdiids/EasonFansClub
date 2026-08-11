@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { safeDb } from '@/lib/db-timeout'
+import { formatBeijingMonthDayTime } from '@/lib/beijing-time'
 import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
           actorId: guard.user.id,
           type: 'ADMIN' as const,
           title: '收到新的用户反馈',
-          content: `用户昵称：${guard.user.nickname}\n反馈标题：${title}\n提交时间：${now.toISOString()}`,
+          content: `用户昵称：${guard.user.nickname}\n反馈标题：${title}\n提交时间：${formatBeijingMonthDayTime(now)}`,
           link: '/admin/feedback',
           key: `feedback-new:${created.id}`,
         })),

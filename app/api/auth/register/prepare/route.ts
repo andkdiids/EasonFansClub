@@ -37,8 +37,9 @@ export async function POST(request: Request) {
     return errorResponse('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
   }
 
-  const nickname = getLoginAccountDisplay(body?.nickname || body?.username)
-  const accountValidation = validateLoginAccountValue(nickname)
+  const rawNickname = body?.nickname || body?.username
+  const nickname = getLoginAccountDisplay(rawNickname)
+  const accountValidation = validateLoginAccountValue(rawNickname)
   const usernameNormalized = accountValidation.usernameNormalized
   const email = normalizeText(body?.email).toLowerCase()
   const phone = normalizeText(body?.phone).replace(/\s+/g, '')

@@ -2,6 +2,7 @@
 
 import { useCallback, CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { createPortal } from 'react-dom'
 
 /**
  * 微信式表情面板（内联展开，非弹窗）：
@@ -49,6 +50,29 @@ export type PickerDataResponse = {
   fetchedAt?: string
 }
 
+export function getStickerPreviewPosition(
+  anchor: Pick<DOMRect, 'left' | 'top' | 'bottom' | 'width'>,
+  viewport: { width: number; height: number },
+  preferredSize = 180,
+) {
+  const edgeGap = 12
+  const size = Math.min(preferredSize, Math.max(0, viewport.width - edgeGap * 2))
+  const maxLeft = Math.max(edgeGap, viewport.width - size - edgeGap)
+  const left = Math.min(
+    Math.max(edgeGap, anchor.left + anchor.width / 2 - size / 2),
+    maxLeft,
+  )
+  const canFitAbove = anchor.top - size - edgeGap >= edgeGap
+  const top = canFitAbove
+    ? anchor.top - size - edgeGap
+    : Math.min(
+      Math.max(edgeGap, anchor.bottom + edgeGap),
+      Math.max(edgeGap, viewport.height - size - edgeGap),
+    )
+
+  return { left, top, size }
+}
+
 export function StickerPicker({
   open,
   onClose,
@@ -89,24 +113,64 @@ export function StickerPicker({
   const [preview, setPreview] = useState<PickerSticker | null>(null)
   const previewRef = useRef<PickerSticker | null>(null)
   const previewSourceRef = useRef<'touch' | 'mouse' | null>(null)
+  const previewAnchorRef = useRef<HTMLElement | null>(null)
+  const previewLayerRef = useRef<HTMLDivElement | null>(null)
+  const [previewPosition, setPreviewPosition] = useState<{ left: number; top: number; size: number } | null>(null)
 
-  const openPreview = useCallback((s: PickerSticker, source: 'touch' | 'mouse') => {
+  const updatePreviewPosition = useCallback(() => {
+    const anchor = previewAnchorRef.current
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    setPreviewPosition(getStickerPreviewPosition(rect, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
+  }, [])
+
+  const openPreview = useCallback((s: PickerSticker, source: 'touch' | 'mouse', anchor: HTMLElement) => {
     setPreview(s)
     previewRef.current = s
     previewSourceRef.current = source
+    previewAnchorRef.current = anchor
+    const rect = anchor.getBoundingClientRect()
+    setPreviewPosition(getStickerPreviewPosition(rect, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
   }, [])
   const closePreview = useCallback(() => {
     setPreview(null)
     previewRef.current = null
     previewSourceRef.current = null
+    previewAnchorRef.current = null
+    setPreviewPosition(null)
   }, [])
+
+  useEffect(() => {
+    if (!open) closePreview()
+  }, [open, closePreview])
+
+  useEffect(() => {
+    if (!preview) return
+    const update = () => updatePreviewPosition()
+    window.addEventListener('resize', update)
+    document.addEventListener('scroll', update, true)
+    update()
+    return () => {
+      window.removeEventListener('resize', update)
+      document.removeEventListener('scroll', update, true)
+    }
+  }, [preview, updatePreviewPosition])
 
   // 点击面板外部或按 Esc 关闭（内联面板，没有遮罩层可以点）
   useEffect(() => {
     if (!open) return
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      // 大图预览展示时，点击遮罩不应关闭整个面板（预览优先关闭）
-      if (previewRef.current) return
+      if (previewRef.current) {
+        const target = event.target as Node
+        if (!previewLayerRef.current?.contains(target) && !rootRef.current?.contains(target)) closePreview()
+        return
+      }
       if (!rootRef.current?.contains(event.target as Node)) onClose()
     }
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -244,13 +308,34 @@ export function StickerPicker({
 
   if (!open) return null
 
-  return (
+  const previewLayer = preview && previewPosition ? (
     <div
-      ref={rootRef}
-      className={panelClassName}
-      role="dialog"
-      aria-label="表情面板"
+      ref={previewLayerRef}
+      className="pointer-events-none rounded-2xl bg-white p-3 shadow-2xl ring-1 ring-black/10"
+      role="img"
+      aria-label={preview.name || '表情预览'}
+      style={{
+        position: 'fixed',
+        left: previewPosition.left,
+        top: previewPosition.top,
+        zIndex: 1000,
+        width: previewPosition.size,
+        height: previewPosition.size,
+      }}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={preview.url} alt={preview.name || '表情'} className="block h-full w-full object-contain" draggable={false} />
+    </div>
+  ) : null
+
+  return (
+    <>
+      <div
+        ref={rootRef}
+        className={panelClassName}
+        role="dialog"
+        aria-label="表情面板"
+      >
       {/* 顶部标题栏：当前表情包 + 关闭（压缩上下空白） */}
       <header className="flex items-center justify-between border-b border-black/5 bg-white px-3 py-1.5">
           <div className="min-w-0 flex-1">
@@ -315,7 +400,7 @@ export function StickerPicker({
                   <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">无匹配表情</p>
                 ) : (
                   searchResults.map((s) => (
-                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} />
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} />
                   ))
                 )}
               </div>
@@ -328,7 +413,7 @@ export function StickerPicker({
                   <p className="col-span-full w-full py-10 text-center text-sm text-slate-400">这个表情包还没有表情</p>
                 ) : (
                   currentStickers.map((s) => (
-                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} previewing={preview?.id === s.id} />
+                    <StickerCell key={s.id} sticker={s} onSelect={() => onSelectSticker(s)} onPreview={openPreview} />
                   ))
                 )}
               </div>
@@ -420,7 +505,9 @@ export function StickerPicker({
             +
           </Link>
         </nav>
-    </div>
+      </div>
+      {previewLayer && typeof document !== 'undefined' ? createPortal(previewLayer, document.body) : null}
+    </>
   )
 }
 
@@ -510,12 +597,10 @@ function StickerCell({
   sticker,
   onSelect,
   onPreview,
-  previewing,
 }: {
   sticker: PickerSticker
   onSelect: () => void
-  onPreview: (sticker: PickerSticker, source: 'touch' | 'mouse') => void
-  previewing: boolean
+  onPreview: (sticker: PickerSticker, source: 'touch' | 'mouse', anchor: HTMLElement) => void
 }) {
   const timerRef = useRef<number | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
@@ -532,10 +617,11 @@ function StickerCell({
     // 仅移动端（touch）需要长按预览；桌面尺寸已足够大，直接点击发送。
     if (e.pointerType === 'touch') {
       startRef.current = { x: e.clientX, y: e.clientY }
+      const anchor = e.currentTarget
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null
         didPreviewRef.current = true
-        onPreview(sticker, 'touch')
+        onPreview(sticker, 'touch', anchor)
       }, 500)
     }
   }
@@ -571,13 +657,6 @@ function StickerCell({
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={sticker.url} alt={sticker.name || ''} className={desktopImgClass()} loading="lazy" />
-      {/* 微信式长按预览气泡：跟随当前表情按钮，移动端长按时出现，松手/移开即关闭 */}
-      {previewing ? (
-        <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-xl bg-white p-3 shadow-lg">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={sticker.url} alt={sticker.name || '表情'} className="block h-[180px] w-[180px] rounded-md object-contain" />
-        </span>
-      ) : null}
     </button>
   )
 }

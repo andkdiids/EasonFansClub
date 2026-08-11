@@ -5,6 +5,7 @@ import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificati
 import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
+import { validateLoginAccountValue } from '@/lib/login-account'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -75,6 +76,7 @@ export async function PATCH(request: Request) {
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)
+  const rawNickname = typeof body?.nickname === 'string' ? body.nickname : ''
   const nickname = sanitizeText(body?.nickname, 32)
   const bio = sanitizeText(body?.bio, 300)
   if (await containsSensitiveContent(bio)) return NextResponse.json({ message: '个人简介包含违禁词，无法保存' }, { status: 400 })
@@ -129,6 +131,11 @@ export async function PATCH(request: Request) {
   })
 
   if (!current) return NextResponse.json({ message: '账号不存在' }, { status: 404 })
+
+  if (rawNickname && rawNickname !== current.nickname) {
+    const nicknameValidation = validateLoginAccountValue(rawNickname)
+    if (nicknameValidation.error) return NextResponse.json({ message: nicknameValidation.error }, { status: 400 })
+  }
 
   if (email !== undefined && data.email !== current.email) {
     if (data.email) {

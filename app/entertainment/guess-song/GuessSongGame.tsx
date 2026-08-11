@@ -29,7 +29,7 @@ type SessionState = {
   id: string
   mode: Mode
   modeLabel: string
-  status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'EXPIRED' | 'CHEAT_DETECTED'
+  status: 'IN_PROGRESS' | 'PAUSED' | 'COMPLETED' | 'ABANDONED' | 'EXPIRED' | 'CHEAT_DETECTED'
   riskScore: number
   isValid: boolean
   clientSessionToken: string
@@ -44,6 +44,7 @@ type SessionState = {
   currentPosition: number
   totalQuestions: number | null
   expiresAt: string
+  pausedAt: string | null
   completedAt: string | null
   question: SessionQuestion | null
 }
@@ -100,6 +101,9 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
   const [error, setError] = useState('')
   const [exitOpen, setExitOpen] = useState(false)
   const [exiting, setExiting] = useState(false)
+  const [pauseOpen, setPauseOpen] = useState(false)
+  const [pausing, setPausing] = useState(false)
+  const [resuming, setResuming] = useState(false)
   const [forceEnded, setForceEnded] = useState(false)
   const [cheatDetected, setCheatDetected] = useState(false)
   const [cheatCountdown, setCheatCountdown] = useState(10)
@@ -251,6 +255,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         remainingPlayCount: number
         answerDeadlineAt: string | null
         answerAvailableAt: string | null
+        expiresAt: string
         cheatDetected?: boolean
         exitAfterSeconds?: number
       }>(`/api/entertainment/guess-song/sessions/${session.id}/play`, {
@@ -278,6 +283,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       setSession((current) => current?.question ? {
         ...current,
         totalPlayCount: current.totalPlayCount + 1,
+        expiresAt: data.expiresAt,
         question: {
           ...current.question,
           playCount: data.playCount,
@@ -286,6 +292,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
            answerAvailableAt: data.answerAvailableAt,
         },
       } : current)
+      setForceEnded(false)
       const audio = new Audio()
       audio.preload = 'auto'
       audio.playbackRate = 1
@@ -459,6 +466,48 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     return () => window.clearTimeout(timer)
   }, [answerResult, continueGame, nextSession])
 
+  function requestPause() {
+    if (!session || session.status !== 'IN_PROGRESS' || pausing || answering || skipPending || answerResult) return
+    setPauseOpen(true)
+  }
+
+  async function confirmPause() {
+    if (!session || session.status !== 'IN_PROGRESS' || pausing) return
+    setPausing(true)
+    stopAudio()
+    setError('')
+    try {
+      const data = await api<{ session: SessionState }>(`/api/entertainment/guess-song/sessions/${session.id}/pause`, { method: 'POST' })
+      setSession(data.session)
+      setAnswerResult(null)
+      setNextSession(null)
+      setSkipPending(false)
+      setPauseOpen(false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '暂停游戏失败，请重试')
+    } finally {
+      setPausing(false)
+    }
+  }
+
+  async function resumePausedGame() {
+    if (!session || session.status !== 'PAUSED' || resuming) return
+    setResuming(true)
+    setError('')
+    try {
+      const data = await api<{ session: SessionState }>(`/api/entertainment/guess-song/sessions/${session.id}/resume`, { method: 'POST' })
+      setSession(data.session)
+      setAnswerResult(null)
+      setNextSession(null)
+      setForceEnded(false)
+      setStartedQuestionId(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '恢复游戏失败，请重试')
+    } finally {
+      setResuming(false)
+    }
+  }
+
   function requestExit() {
     if (session?.status === 'COMPLETED') {
       stopAudio()
@@ -573,6 +622,32 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     )
   }
 
+  if (session.status === 'PAUSED') {
+    const pausedAt = session.pausedAt
+      ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(session.pausedAt))
+      : '刚刚'
+    return (
+      <main className="guess-paused-screen">
+        <section className="guess-paused-card" role="status" aria-live="polite">
+          <span>GAME SAVED</span>
+          <h1>游戏已暂停</h1>
+          <p>当前游戏进度已安全保存，下次进入听听时可以继续。</p>
+          <div className="guess-paused-stats">
+            <div><span>当前分数</span><b>{session.score}</b></div>
+            <div><span>连续答对</span><b>{session.currentStreak}</b></div>
+            <div><span>当前题目</span><b>第 {session.currentPosition} 题</b></div>
+          </div>
+          <p>暂停时间：{pausedAt}</p>
+          {error ? <p className="guess-play-message is-error" role="alert">{error}</p> : null}
+          <div className="guess-paused-actions">
+            <button type="button" onClick={() => void resumePausedGame()} disabled={resuming}>{resuming ? '恢复中…' : '继续游戏'}</button>
+            <button type="button" onClick={leaveGameRoute} disabled={resuming}>返回模式选择</button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   const question = session.question
   const expired = session.expiresAt ? new Date(session.expiresAt).getTime() <= Date.now() : false
   const gameEnded = session.status === 'EXPIRED' || !question || expired || forceEnded
@@ -594,7 +669,8 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
 
   return (
   <main className="games-page games-center-background games-full-width immersive-game-layout guess-play-page">
-      <button type="button" className="game-exit-button" onClick={requestExit} aria-label="退出游戏">← <span>退出游戏</span></button>
+      <button type="button" className="game-exit-button" onClick={requestExit} aria-label="结束本局">← <span>结束本局</span></button>
+      <button type="button" className="game-pause-button" onClick={requestPause} disabled={pausing || answering || skipPending || Boolean(answerResult)} aria-label="暂停游戏">{pausing ? '保存中…' : '暂停游戏'}</button>
       <div className={`guess-play-shell ${answerResult?.answerStatus === 'WRONG' ? 'is-wrong' : ''}`}>
         <GuessHeader
           mode={`${session.modeLabel}模式`}
@@ -660,15 +736,28 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
           />
         ) : null}
       </div>
+      {pauseOpen ? (
+        <div className="game-exit-dialog-backdrop" role="presentation">
+          <section className="game-exit-dialog guess-session-pause-dialog" role="dialog" aria-modal="true" aria-labelledby="guess-pause-title">
+            <span>PAUSE SESSION</span>
+            <h2 id="guess-pause-title">暂停游戏？</h2>
+            <p>当前游戏进度会保存，下次进入听听时可以继续游戏。</p>
+            <div>
+              <button type="button" onClick={() => setPauseOpen(false)} disabled={pausing}>取消</button>
+              <button type="button" onClick={() => void confirmPause()} disabled={pausing}>{pausing ? '保存中…' : '确认暂停'}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {exitOpen ? (
         <div className="game-exit-dialog-backdrop" role="presentation">
           <section className="game-exit-dialog" role="dialog" aria-modal="true" aria-labelledby="game-exit-title">
-            <span>LEAVE SESSION</span>
-            <h2 id="game-exit-title">退出当前游戏？</h2>
-            <p>本局未完成的进度不会计入成绩。</p>
+            <span>END SESSION</span>
+            <h2 id="game-exit-title">结束当前游戏？</h2>
+            <p>本局未完成的进度将被放弃，之后无法继续恢复。</p>
             <div>
               <button type="button" onClick={() => setExitOpen(false)} disabled={exiting}>继续游戏</button>
-              <button type="button" onClick={() => void confirmExit()} disabled={exiting}>{exiting ? '正在退出…' : '确认退出'}</button>
+              <button type="button" onClick={() => void confirmExit()} disabled={exiting}>{exiting ? '正在结束…' : '确认结束本局'}</button>
             </div>
           </section>
         </div>

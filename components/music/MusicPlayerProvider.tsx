@@ -212,6 +212,10 @@ type PlayerContextValue = {
   next: () => Promise<void>
 }
 
+type MiniPlayerPosition = { x: number; y: number }
+
+const MINI_PLAYER_STORAGE_KEY = 'easmusic:mini-player-ui'
+
 const MusicPlayerContext = createContext<PlayerContextValue | null>(null)
 
 export function MusicPlayerProvider({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -241,8 +245,42 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const [elapsed, setElapsed] = useState(0)
   const [duration, setDuration] = useState(60)
   const [expanded, setExpanded] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+  const [miniPlayerPosition, setMiniPlayerPosition] = useState<MiniPlayerPosition | null>(null)
+  const [miniPlayerHydrated, setMiniPlayerHydrated] = useState(false)
 
   trackRef.current = track
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(MINI_PLAYER_STORAGE_KEY) || 'null') as {
+        collapsed?: unknown
+        x?: unknown
+        y?: unknown
+      } | null
+      if (typeof stored?.collapsed === 'boolean') setCollapsed(stored.collapsed)
+      if (typeof stored?.x === 'number' && Number.isFinite(stored.x) && typeof stored?.y === 'number' && Number.isFinite(stored.y)) {
+        setMiniPlayerPosition({ x: stored.x, y: stored.y })
+      }
+    } catch {
+      // The player keeps its default position when localStorage is unavailable.
+    } finally {
+      setMiniPlayerHydrated(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!miniPlayerHydrated) return
+    try {
+      window.localStorage.setItem(MINI_PLAYER_STORAGE_KEY, JSON.stringify({
+        collapsed,
+        x: miniPlayerPosition?.x ?? null,
+        y: miniPlayerPosition?.y ?? null,
+      }))
+    } catch {
+      // Position persistence is optional and must not affect playback.
+    }
+  }, [collapsed, miniPlayerHydrated, miniPlayerPosition])
 
   const reportAudioAnalysisMode = useCallback((mode: AudioAnalysisMode, details: AudioAnalysisModeDetails = {}) => {
     const previousMode = audioAnalysisModeRef.current
@@ -756,8 +794,12 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
           playing={playing}
           loading={loading}
           expanded={expanded}
+          collapsed={collapsed}
+          position={miniPlayerPosition}
           progress={Math.min(100, elapsed / duration * 100)}
           onToggleExpanded={() => setExpanded((value) => !value)}
+          onToggleCollapsed={() => setCollapsed((value) => !value)}
+          onPositionChange={setMiniPlayerPosition}
           onTogglePlayback={() => void playTrack(track)}
           onPrevious={() => void move(-1)}
           onNext={() => void move(1)}

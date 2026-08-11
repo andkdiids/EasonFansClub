@@ -20,6 +20,17 @@ type LobbySummary = {
     maxStreak: number
   } | null
   activeSessions: Array<{ id: string; mode: Mode; currentPosition: number }>
+  pausedSessions: Array<{
+    id: string
+    mode: Mode
+    score: number
+    currentStreak: number
+    wrongCount: number
+    livesRemaining: number
+    currentPosition: number
+    pausedAt: string
+    expiresAt: string
+  }>
 }
 
 const modes: Array<{ mode: Mode; label: string; detail: string }> = [
@@ -36,6 +47,15 @@ async function request<T>(url: string, init?: RequestInit) {
   return payload.data
 }
 
+function formatPausedAt(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
 export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
   const router = useRouter()
   const [summary, setSummary] = useState<LobbySummary | null>(null)
@@ -43,6 +63,8 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
   const [error, setError] = useState('')
   const [panel, setPanel] = useState<null | 'records'>(null)
   const [ruleOpen, setRuleOpen] = useState(false)
+  const [pausedChoice, setPausedChoice] = useState<LobbySummary['pausedSessions'][number] | null>(null)
+  const [newGameConfirmOpen, setNewGameConfirmOpen] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -69,7 +91,7 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
     }
   }, [ruleOpen])
 
-  async function start(mode: Mode) {
+  async function beginSession(mode: Mode, replacePausedSessionId?: string) {
     if (starting) return
     setStarting(mode)
     setError('')
@@ -77,13 +99,59 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
       const data = await request<{ resumed: boolean; session: { id: string } }>('/api/entertainment/guess-song/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, clientFlowNonce: createUUID() }),
+        body: JSON.stringify({ mode, clientFlowNonce: createUUID(), ...(replacePausedSessionId ? { replacePausedSessionId } : {}) }),
       })
       router.push(`/games/guess-song/play?session=${encodeURIComponent(data.session.id)}&from=detail`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法开始游戏')
       setStarting(null)
     }
+  }
+
+  function start(mode: Mode) {
+    if (starting) return
+    const paused = summary?.pausedSessions.find((item) => item.mode === mode)
+    if (paused) {
+      setPausedChoice(paused)
+      setNewGameConfirmOpen(false)
+      return
+    }
+    void beginSession(mode)
+  }
+
+  async function resumePausedSession() {
+    if (!pausedChoice || starting) return
+    setStarting(pausedChoice.mode)
+    setError('')
+    try {
+      const data = await request<{ session: { id: string } }>(`/api/entertainment/guess-song/sessions/${pausedChoice.id}/resume`, {
+        method: 'POST',
+      })
+      router.push(`/games/guess-song/play?session=${encodeURIComponent(data.session.id)}&from=detail`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法恢复暂停存档')
+      setStarting(null)
+      setPausedChoice(null)
+    }
+  }
+
+  function openNewGameConfirmation() {
+    if (!pausedChoice) return
+    setNewGameConfirmOpen(true)
+  }
+
+  function cancelPausedChoice() {
+    if (starting) return
+    setPausedChoice(null)
+    setNewGameConfirmOpen(false)
+  }
+
+  function confirmNewGame() {
+    if (!pausedChoice) return
+    const choice = pausedChoice
+    setPausedChoice(null)
+    setNewGameConfirmOpen(false)
+    void beginSession(choice.mode, choice.id)
   }
 
   function scrollToDifficulty() {
@@ -134,6 +202,40 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
           </div>
         </div>
       ) : null}
+      {pausedChoice && !newGameConfirmOpen ? (
+        <div className="guess-session-choice-backdrop" role="presentation" onClick={cancelPausedChoice}>
+          <section className="guess-session-choice-modal" role="dialog" aria-modal="true" aria-labelledby="guess-session-choice-title" onClick={(event) => event.stopPropagation()}>
+            <span>PAUSED SESSION</span>
+            <h3 id="guess-session-choice-title">发现未完成的游戏</h3>
+            <p>你还有一局已暂停的游戏，可以继续之前的进度，或开始新游戏。</p>
+            <dl>
+              <div><dt>当前分数</dt><dd>{pausedChoice.score}</dd></div>
+              <div><dt>连续答对</dt><dd>{pausedChoice.currentStreak}</dd></div>
+              <div><dt>当前题目</dt><dd>第 {pausedChoice.currentPosition} 题</dd></div>
+              <div><dt>暂停时间</dt><dd>{formatPausedAt(pausedChoice.pausedAt)}</dd></div>
+            </dl>
+            <div className="guess-session-choice-actions">
+              <button type="button" onClick={cancelPausedChoice} disabled={Boolean(starting)}>取消</button>
+              <button type="button" onClick={openNewGameConfirmation} disabled={Boolean(starting)}>新游戏</button>
+              <button type="button" className="is-primary" onClick={() => void resumePausedSession()} disabled={Boolean(starting)}>{starting ? '处理中…' : '继续游戏'}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {pausedChoice && newGameConfirmOpen ? (
+        <div className="guess-session-choice-backdrop" role="presentation" onClick={() => setNewGameConfirmOpen(false)}>
+          <section className="guess-session-choice-modal" role="dialog" aria-modal="true" aria-labelledby="guess-new-game-title" onClick={(event) => event.stopPropagation()}>
+            <span>NEW SESSION</span>
+            <h3 id="guess-new-game-title">开始新游戏？</h3>
+            <p>你当前还有一局未完成的游戏。开始新游戏后，原有游戏存档将被放弃，且无法恢复。</p>
+            <p className="guess-session-choice-highlight">当前分数：{pausedChoice.score} · 连续答对：{pausedChoice.currentStreak}</p>
+            <div className="guess-session-choice-actions">
+              <button type="button" onClick={() => setNewGameConfirmOpen(false)} disabled={Boolean(starting)}>取消</button>
+              <button type="button" className="is-danger" onClick={confirmNewGame} disabled={Boolean(starting)}>{starting ? '处理中…' : '确认开始新游戏'}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {ruleOpen ? (
         <div className="game-rules-modal-backdrop" role="presentation" onClick={() => setRuleOpen(false)}>
           <div className="game-rules-modal" role="dialog" aria-modal="true" aria-labelledby="game-rules-title" onClick={(event) => event.stopPropagation()}>
@@ -170,9 +272,10 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
           <div>
             {modes.map((item) => {
               const active = summary?.activeSessions.find((entry) => entry.mode === item.mode)
+              const paused = summary?.pausedSessions.find((entry) => entry.mode === item.mode)
               const unavailable = item.mode === 'EXPERT' && summary?.expertEnabled === false
               return (
-                <button key={item.mode} type="button" onClick={() => void start(item.mode)} disabled={Boolean(starting) || unavailable}>
+                <button key={item.mode} type="button" onClick={() => void start(item.mode)} disabled={Boolean(starting) || unavailable} aria-label={paused ? `继续${item.label}存档` : undefined}>
                   <span>{item.label}挑战</span>
                   <strong>{item.label}</strong>
                   <small>{unavailable ? '当前暂未开放' : item.detail}</small>

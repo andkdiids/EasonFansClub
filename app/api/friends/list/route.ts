@@ -19,20 +19,22 @@ export async function GET(request: Request) {
 
   if (q) return searchUsers(user.id, q)
 
-  const [rows, growthLevels] = await Promise.all([
+  const friendshipWhere = {
+    OR: [
+      { userAId: user.id, User_Friendship_userBIdToUser: activeUserWhere },
+      { userBId: user.id, User_Friendship_userAIdToUser: activeUserWhere },
+    ],
+  }
+  const [rows, total, growthLevels] = await Promise.all([
     prisma.friendship.findMany({
-      where: {
-        OR: [
-          { userAId: user.id, User_Friendship_userBIdToUser: activeUserWhere },
-          { userBId: user.id, User_Friendship_userAIdToUser: activeUserWhere },
-        ],
-      },
+      where: friendshipWhere,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         User_Friendship_userAIdToUser: { select: publicFriendSelect },
         User_Friendship_userBIdToUser: { select: publicFriendSelect },
       },
     }),
+    prisma.friendship.count({ where: friendshipWhere }),
     listGrowthLevels().catch(() => [...defaultGrowthLevels]),
   ])
   // Load all friendships before paging.  Paging by friendship.createdAt first
@@ -114,7 +116,7 @@ export async function GET(request: Request) {
     }
   })
 
-  return NextResponse.json({ friends, page, hasMore: pageStart + pageSize < orderedFriendRows.length }, { headers: privateHeaders })
+  return NextResponse.json({ friends, page, total, hasMore: pageStart + pageSize < total }, { headers: privateHeaders })
 }
 
 async function searchUsers(currentUserId: string, q: string) {

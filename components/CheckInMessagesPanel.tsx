@@ -128,6 +128,7 @@ export function CheckInMessagesPanel({
   const [replyTargets, setReplyTargets] = useState<Record<string, { id: string; name: string } | null>>({})
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const [page, setPage] = useState(1)
+  const [recentlyCreatedMessageId, setRecentlyCreatedMessageId] = useState<string | null>(null)
   const [focusError, setFocusError] = useState('')
   // 管理员删除留言：第一次点击只打开确认框，确认后才调用管理接口。
   const [deleteTarget, setDeleteTarget] = useState<CheckInDisplayMessageItem | null>(null)
@@ -137,6 +138,7 @@ export function CheckInMessagesPanel({
   // likeCtx 的 value 在每次点赞后都会更换身份（覆盖层变化），同步 effect / loadMessages
   // 只能通过 ref 访问它，否则点赞会反复触发「重置分页 + 用服务端旧值覆盖点赞状态」。
   const likeCtxRef = useRef(likeCtx)
+  const recentlyCreatedMessageRef = useRef<CheckInDisplayMessageItem | null>(null)
   const initialQueryRef = useRef({ date: initialDate, sort: initialSort })
   useEffect(() => {
     likeCtxRef.current = likeCtx
@@ -148,8 +150,15 @@ export function CheckInMessagesPanel({
   const visibleMessages = useMemo(() => {
     const safePage = Math.min(Math.max(page, 1), totalPages)
     const start = (safePage - 1) * previewPageSize
-    return messages.slice(start, start + previewPageSize)
-  }, [messages, page, previewPageSize, totalPages])
+    const pagedMessages = messages.slice(start, start + previewPageSize)
+    const recentMessage = recentlyCreatedMessageId
+      ? messages.find((item) => item.id === recentlyCreatedMessageId)
+      : null
+    if (recentMessage && !pagedMessages.some((item) => item.id === recentMessage.id)) {
+      return [recentMessage, ...pagedMessages]
+    }
+    return pagedMessages
+  }, [messages, page, previewPageSize, recentlyCreatedMessageId, totalPages])
   const pageNumbers = useMemo(() => {
     const maxVisible = 5
     const start = Math.max(1, Math.min(page - 2, totalPages - maxVisible + 1))
@@ -188,7 +197,15 @@ export function CheckInMessagesPanel({
       setDate(data.date || nextDate)
       setSort(data.sort === 'hot' ? 'hot' : 'latest')
       const incoming = Array.isArray(data.messages) ? data.messages : []
-      setMessages(incoming)
+      const localMessage = recentlyCreatedMessageRef.current
+      const merged = localMessage && !incoming.some((item: CheckInDisplayMessageItem) => item.id === localMessage.id)
+        ? [...incoming, localMessage].sort((left, right) => compareCheckInMessages(left, right, nextSort))
+        : incoming
+      setMessages(merged)
+      if (localMessage && incoming.some((item: CheckInDisplayMessageItem) => item.id === localMessage.id)) {
+        recentlyCreatedMessageRef.current = null
+        setRecentlyCreatedMessageId(null)
+      }
       // 服务端重载后，用服务端最新 likeCount / liked 刷新共享覆盖层，
       // 确保服务端数据成为权威源，避免旧缓存覆盖新数据（如他人点赞）。
       likeCtxRef.current.reconcileLikes(incoming.map((item: CheckInDisplayMessageItem) => ({
@@ -210,6 +227,10 @@ export function CheckInMessagesPanel({
     setDate(initialDate)
     setSort(initialSort)
     setMessages(initialMessages)
+    if (recentlyCreatedMessageRef.current && initialMessages.some((item) => item.id === recentlyCreatedMessageRef.current?.id)) {
+      recentlyCreatedMessageRef.current = null
+      setRecentlyCreatedMessageId(null)
+    }
     // 用服务端初始数据刷新覆盖层（首次挂载时覆盖层为空，属 no-op；父组件重渲染传入新初始数据时保持服务端权威）。
     // 注意：不依赖 likeCtx——点赞会改变覆盖层导致 likeCtx 更换身份，若列入依赖会在每次点赞后
     // 重跑本 effect，用过期的 initialMessages 覆盖刚写入的点赞状态并把分页重置回第一页。
@@ -274,11 +295,12 @@ export function CheckInMessagesPanel({
         : createdMessage
       if (!displayMessage) return
 
+      recentlyCreatedMessageRef.current = displayMessage
+      setRecentlyCreatedMessageId(displayMessage.id)
       setMessages((current) => {
         if (current.some((item) => item.id === displayMessage.id)) return current
         return [...current, displayMessage].sort((left, right) => compareCheckInMessages(left, right, sort))
       })
-      setPage(1)
     }
     function handleDayChanged(event: Event) {
       const detail = (event as CustomEvent<{ date?: string }>).detail

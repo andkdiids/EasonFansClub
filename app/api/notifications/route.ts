@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getUnreadNotificationCount, listUnifiedNotifications, markAllUnifiedNotificationsRead, markUnifiedNotificationRead } from '@/lib/notifications'
+import { getUnreadNotificationCount, listUnifiedNotificationsPage, markAllUnifiedNotificationsRead, markUnifiedNotificationRead, parseNotificationCategory } from '@/lib/notifications'
 import { requireUser } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 
 const NOTIFICATION_ID_BATCH_LIMIT = 100
-const NOTIFICATION_PAGE_SIZE = 50
+const NOTIFICATION_PAGE_SIZE = 20
+const MAX_NOTIFICATION_PAGE_SIZE = 50
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
 export const dynamic = 'force-dynamic'
@@ -17,16 +18,22 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const unreadOnly = searchParams.get('unread') === '1'
-  const limit = Math.min(Math.max(Number(searchParams.get('limit') || NOTIFICATION_PAGE_SIZE), 1), NOTIFICATION_PAGE_SIZE)
-  const notifications = await listUnifiedNotifications(guard.user.id, { unreadOnly, limit })
+  const pageSize = Math.min(Math.max(Number(searchParams.get('pageSize') || NOTIFICATION_PAGE_SIZE), 1), MAX_NOTIFICATION_PAGE_SIZE)
+  const requestedPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const category = parseNotificationCategory(searchParams.get('category'))
+  const result = await listUnifiedNotificationsPage(guard.user.id, { unreadOnly, page: requestedPage, pageSize, category })
   const unreadCount = await getUnreadNotificationCount(guard.user.id)
 
   return NextResponse.json({
-    notifications,
+    notifications: result.items,
+    items: result.items,
     unreadCount,
-    page: 1,
-    limit,
-    hasMore: notifications.length >= limit,
+    page: result.page,
+    pageSize: result.pageSize,
+    limit: result.pageSize,
+    total: result.total,
+    totalPages: result.totalPages,
+    hasMore: result.page < result.totalPages,
   }, { headers: privateHeaders })
 }
 

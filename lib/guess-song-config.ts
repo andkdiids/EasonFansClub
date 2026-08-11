@@ -4,9 +4,11 @@ import { MUSIC_AUDIO_MAX_FILE_SIZE } from '@/lib/music-upload-constraints'
 export const GUESS_SONG_BASE_SCORE = 100
 export const GUESS_SONG_ENDLESS_COMBO_INTERVAL = 10
 export const GUESS_SONG_ENDLESS_COMBO_BONUS = 270
+export const GUESS_SONG_PAUSED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 export const GUESS_SONG_PUBLIC_MODES = ['EASY', 'ADVANCED', 'HARD', 'EXPERT'] as const
 export type GuessSongPublicMode = typeof GUESS_SONG_PUBLIC_MODES[number]
+export const GUESS_SONG_SIMPLE_MODE: GuessSongPublicMode = 'EASY'
 
 export const GUESS_SONG_MODE_CONFIG = {
   EASY: {
@@ -91,6 +93,11 @@ export function isGuessSongMode(value: unknown): value is GuessSongMode {
 
 export function isGuessSongPublicMode(value: unknown): value is GuessSongPublicMode {
   return typeof value === 'string' && (GUESS_SONG_PUBLIC_MODES as readonly string[]).includes(value)
+}
+
+/** Returns the database values represented by one public mode. */
+export function getGuessSongDatabaseModes(mode: GuessSongPublicMode): GuessSongMode[] {
+  return mode === GUESS_SONG_SIMPLE_MODE ? ['EASY', 'ENDLESS'] : [mode]
 }
 
 /** ENDLESS remains a database-compatible legacy value, but is exposed as the new simple mode. */

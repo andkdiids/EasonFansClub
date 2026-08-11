@@ -41,14 +41,14 @@ export async function GET(request: Request) {
     ] } : {}),
   }
   const orderBy: Prisma.PostOrderByWithRelationInput[] = sort === 'latest-reply'
-    ? [{ isPinned: 'desc' }, { updatedAt: 'desc' }]
+    ? [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { updatedAt: 'desc' }]
     : sort === 'most-replies'
       ? [{ replyCount: 'desc' }, { createdAt: 'desc' }]
       : sort === 'featured'
-        ? [{ createdAt: 'desc' }]
+        ? [{ isPinned: 'desc' }, { createdAt: 'desc' }]
         : sort === 'pinned'
           ? [{ createdAt: 'desc' }]
-          : [{ isPinned: 'desc' }, { createdAt: 'desc' }]
+          : [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }]
 
   const { total, totalPages, page, rows } = await prisma.$transaction(async (tx) => {
     const total = await tx.post.count({ where })

@@ -2,11 +2,15 @@ import { prisma } from '@/lib/prisma'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
-import type { NotificationType, Prisma, SystemNotificationType } from '@prisma/client'
+import { Prisma, type NotificationType, type SystemNotificationType } from '@prisma/client'
 import { parseNotificationReplyTarget, type NotificationReplyTarget } from '@/lib/notification-target'
+import { compareNotificationOrder } from '@/lib/notification-order'
+import { clampPaginationPage } from '@/lib/pagination'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
+export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system'] as const
+export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
 
 const personalTypeLabels: Record<string, string> = {
@@ -54,6 +58,7 @@ export function getUnreadNotificationWhere(userId: string, extra: Prisma.Notific
 }
 
 export function getNotificationCategoryFilter(category: string): Prisma.NotificationWhereInput {
+  if (category === 'all') return {}
   if (category === 'reply') return { type: 'REPLY' }
   if (category === 'like') return { type: 'LIKE' }
   if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW'] } }
@@ -61,8 +66,44 @@ export function getNotificationCategoryFilter(category: string): Prisma.Notifica
   if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
   return {
     type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE'] },
-    NOT: { link: { startsWith: '/feedback/' } },
+    OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }],
   }
+}
+
+export function parseNotificationCategory(value: unknown): NotificationCategory {
+  return notificationCategoryValues.includes(value as NotificationCategory)
+    ? value as NotificationCategory
+    : 'all'
+}
+
+function getSystemNotificationCategoryFilter(category: NotificationCategory): Prisma.SystemNotificationWhereInput {
+  if (category === 'all') return {}
+  if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
+  if (category === 'system') return { OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }
+  return { id: { in: [] } }
+}
+
+// These clauses contain only fixed, code-defined category values. They let the
+// database page the union of personal and system notifications before the
+// application loads actor/target details, so an unread row can never be left
+// behind on a later page.
+function getPersonalNotificationCategorySql(category: NotificationCategory) {
+  switch (category) {
+    case 'reply': return Prisma.raw("AND n.type = 'REPLY'")
+    case 'like': return Prisma.raw("AND n.type = 'LIKE'")
+    case 'friend': return Prisma.raw("AND n.type IN ('FRIEND_REQUEST', 'FOLLOW')")
+    case 'messages': return Prisma.raw("AND n.type = 'MESSAGE'")
+    case 'feedback': return Prisma.raw("AND n.link LIKE '/feedback/%'")
+    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    default: return Prisma.empty
+  }
+}
+
+function getSystemNotificationCategorySql(category: NotificationCategory) {
+  if (category === 'feedback') return Prisma.raw("AND sn.link LIKE '/feedback/%'")
+  if (category === 'system') return Prisma.raw("AND (sn.link IS NULL OR sn.link NOT LIKE '/feedback/%')")
+  if (category !== 'all') return Prisma.raw('AND 1 = 0')
+  return Prisma.empty
 }
 
 export const FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX = 'friend-request:'
@@ -308,18 +349,86 @@ export async function getUnreadNotificationCount(userId: string) {
   return (await getUnreadSummary(userId)).total
 }
 
-export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number } = {}) {
+export type UnifiedNotificationPage = {
+  items: UnifiedNotification[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  unreadCount: number
+}
+
+type NotificationPageRow = {
+  id: string
+  source: string
+  isRead: boolean | number
+  createdAt: Date | string
+}
+
+export async function listUnifiedNotificationsPage(userId: string, options: {
+  unreadOnly?: boolean
+  page?: number
+  pageSize?: number
+  category?: NotificationCategory
+} = {}): Promise<UnifiedNotificationPage> {
   await reconcileStalePersonalNotifications(userId)
   const now = new Date()
-  const limit = Math.min(Math.max(options.limit || MAX_NOTIFICATION_PAGE_SIZE, 1), MAX_NOTIFICATION_PAGE_SIZE)
+  const category = parseNotificationCategory(options.category)
+  const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || 20) || 20, 1), MAX_NOTIFICATION_PAGE_SIZE)
+  const personalCategory = category === 'all' ? {} : getNotificationCategoryFilter(category)
+  const systemCategory = getSystemNotificationCategoryFilter(category)
+  const personalWhere = getNotificationVisibilityFilter(userId, {
+    ...personalCategory,
+    ...(options.unreadOnly ? { isRead: false } : {}),
+  })
+  const systemWhere = {
+    ...effectiveSystemNotificationWhere(now),
+    type: { not: 'UPDATE' as const },
+    ...systemCategory,
+    ...(options.unreadOnly ? { SystemNotificationRead: { none: { userId } } } : {}),
+  }
+  const [personalTotal, systemTotal, personalUnread, systemUnread] = await Promise.all([
+    prisma.notification.count({ where: personalWhere }),
+    prisma.systemNotification.count({ where: systemWhere }),
+    prisma.notification.count({ where: getNotificationVisibilityFilter(userId, { ...personalCategory, isRead: false }) }),
+    prisma.systemNotification.count({ where: { ...systemWhere, SystemNotificationRead: { none: { userId } } } }),
+  ])
+  const total = personalTotal + systemTotal
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const page = clampPaginationPage(options.page || 1, totalPages)
+  const offset = (page - 1) * pageSize
+  const personalCategorySql = getPersonalNotificationCategorySql(category)
+  const systemCategorySql = getSystemNotificationCategorySql(category)
+  const unreadPersonalSql = options.unreadOnly ? Prisma.sql`AND n.isRead = 0` : Prisma.empty
+  const unreadSystemSql = options.unreadOnly ? Prisma.sql`AND snr.id IS NULL` : Prisma.empty
+  const rows = await prisma.$queryRaw<NotificationPageRow[]>(Prisma.sql`
+    SELECT n.id AS id, 'personal' AS source, n.isRead AS isRead, n.createdAt AS createdAt
+    FROM Notification n
+    WHERE n.recipientId = ${userId}
+      ${personalCategorySql}
+      ${unreadPersonalSql}
+    UNION ALL
+    SELECT sn.id AS id, 'system' AS source,
+      CASE WHEN snr.id IS NULL THEN 0 ELSE 1 END AS isRead,
+      COALESCE(sn.publishAt, sn.createdAt) AS createdAt
+    FROM SystemNotification sn
+    LEFT JOIN SystemNotificationRead snr
+      ON snr.notificationId = sn.id AND snr.userId = ${userId}
+    WHERE sn.published = 1
+      AND sn.publishAt <= ${now}
+      AND (sn.expireAt IS NULL OR sn.expireAt > ${now})
+      AND sn.type <> 'UPDATE'
+      ${systemCategorySql}
+      ${unreadSystemSql}
+    ORDER BY isRead ASC, createdAt DESC, source ASC, id ASC
+    LIMIT ${pageSize} OFFSET ${offset}
+  `)
+
+  const personalIds = rows.filter((row) => row.source === 'personal').map((row) => row.id)
+  const systemIds = rows.filter((row) => row.source === 'system').map((row) => row.id)
   const [personal, system] = await Promise.all([
-    prisma.notification.findMany({
-      where: {
-        ...getNotificationVisibilityFilter(userId),
-        ...(options.unreadOnly ? { isRead: false } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
+    personalIds.length ? prisma.notification.findMany({
+      where: { recipientId: userId, id: { in: personalIds } },
       select: {
         id: true,
         type: true,
@@ -329,7 +438,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         isRead: true,
         createdAt: true,
         readAt: true,
-          User_Notification_actorIdToUser: {
+        User_Notification_actorIdToUser: {
           select: {
             id: true,
             uid: true,
@@ -339,15 +448,9 @@ export async function listUnifiedNotifications(userId: string, options: { unread
           },
         },
       },
-    }),
-    prisma.systemNotification.findMany({
-      where: {
-        ...effectiveSystemNotificationWhere(now),
-        type: { not: 'UPDATE' },
-        ...(options.unreadOnly ? { SystemNotificationRead: { none: { userId } } } : {}),
-      },
-      orderBy: effectiveSystemNotificationOrder,
-      take: limit,
+    }) : [],
+    systemIds.length ? prisma.systemNotification.findMany({
+      where: { id: { in: systemIds }, ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, ...systemCategory },
       select: {
         id: true,
         type: true,
@@ -361,14 +464,17 @@ export async function listUnifiedNotifications(userId: string, options: { unread
         createdAt: true,
         SystemNotificationRead: { where: { userId }, select: { readAt: true }, take: 1 },
       },
-    }),
+    }) : [],
   ])
 
   const actorIds = personal.flatMap((item) => item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
   const remarkMap = await loadFriendRemarkMap(userId, actorIds)
-
-  const merged: UnifiedNotification[] = [
-    ...personal.map((item) => {
+  const personalById = new Map(personal.map((item) => [item.id, item]))
+  const systemById = new Map(system.map((item) => [item.id, item]))
+  const merged: UnifiedNotification[] = rows.flatMap((row): UnifiedNotification[] => {
+    if (row.source === 'personal') {
+      const item = personalById.get(row.id)
+      if (!item) return []
       const actor = item.User_Notification_actorIdToUser
       const actorName = actor
         ? resolveFriendDisplayName({
@@ -378,13 +484,13 @@ export async function listUnifiedNotifications(userId: string, options: { unread
             remarkMap,
           })
         : null
-      return {
+      return [{
         id: item.id,
         source: 'personal' as const,
         type: item.type,
         typeLabel: getNotificationTypeLabel(item.type, item.link, 'personal'),
         category: getNotificationCategory(item.type, item.link),
-        title: resolveNotificationActorText(item.title, actorName) || item.title,
+        title: resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, item.link, 'personal'),
         content: resolveNotificationActorText(item.content, actorName),
         link: item.link,
         targetUrl: item.link,
@@ -405,41 +511,37 @@ export async function listUnifiedNotifications(userId: string, options: { unread
           targetUrl: item.link,
         }),
         replyDisabledReason: null,
-      }
-    }),
-    ...system.map((item) => {
-      const targetUrl = item.buttonUrl || item.link
-      const isRead = item.SystemNotificationRead.length > 0
-      return {
-        id: item.id,
-        source: 'system' as const,
-        type: item.type,
-        typeLabel: getNotificationTypeLabel(item.type, targetUrl, 'system'),
-        category: getNotificationCategory(item.type, targetUrl),
-        title: item.title,
-        content: item.content,
-        link: targetUrl,
-        targetUrl,
-        actorName: null,
-        actorUid: null,
-        actorAvatarUrl: null,
-        popup: item.popup,
-        sticky: item.sticky,
-        isRead,
-        read: isRead,
-        createdAt: item.publishAt || item.createdAt,
-        readAt: item.SystemNotificationRead[0]?.readAt || null,
-        replyTarget: null,
-        replyDisabledReason: null,
-      }
-    }),
-  ]
+      } satisfies UnifiedNotification]
+    }
+    const item = systemById.get(row.id)
+    if (!item) return []
+    const targetUrl = item.buttonUrl || item.link
+    const isRead = item.SystemNotificationRead.length > 0
+    return [{
+      id: item.id,
+      source: 'system' as const,
+      type: item.type,
+      typeLabel: getNotificationTypeLabel(item.type, targetUrl, 'system'),
+      category: getNotificationCategory(item.type, targetUrl),
+      title: item.title || getNotificationTypeLabel(item.type, targetUrl, 'system'),
+      content: item.content || null,
+      link: targetUrl,
+      targetUrl,
+      actorName: null,
+      actorUid: null,
+      actorAvatarUrl: null,
+      popup: item.popup,
+      sticky: item.sticky,
+      isRead,
+      read: isRead,
+      createdAt: item.publishAt || item.createdAt,
+      readAt: item.SystemNotificationRead[0]?.readAt || null,
+      replyTarget: null,
+      replyDisabledReason: null,
+    } satisfies UnifiedNotification]
+  }).sort(compareNotificationOrder)
 
-  const visible = merged
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, limit)
-
-  const targets = visible.flatMap((item) => item.replyTarget ? [item.replyTarget] : [])
+  const targets = merged.flatMap((item) => item.replyTarget ? [item.replyTarget] : [])
   const postTargets = targets.filter((target) => target.kind === 'post')
   const dailyTargets = targets.filter((target) => target.kind === 'daily-message')
   const feedbackTargets = targets.filter((target) => target.kind === 'feedback')
@@ -463,7 +565,7 @@ export async function listUnifiedNotifications(userId: string, options: { unread
     }) : [],
   ])
 
-  return visible.map((item) => {
+  const items = merged.map((item) => {
     const target = item.replyTarget
     if (!target) return item
     if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) {
@@ -484,6 +586,17 @@ export async function listUnifiedNotifications(userId: string, options: { unread
     }
     return item
   })
+
+  return { items, total, page, pageSize, totalPages, unreadCount: personalUnread + systemUnread }
+}
+
+export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number } = {}) {
+  const page = await listUnifiedNotificationsPage(userId, {
+    unreadOnly: options.unreadOnly,
+    page: 1,
+    pageSize: options.limit || MAX_NOTIFICATION_PAGE_SIZE,
+  })
+  return page.items
 }
 
 export async function listPopupSystemNotifications(userId: string, limit = 5) {

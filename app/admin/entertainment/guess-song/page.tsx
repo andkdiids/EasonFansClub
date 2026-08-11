@@ -1,6 +1,7 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { AdminGuessSongManager } from './AdminGuessSongManager'
+import { GuessSongLeaderboardManager } from './GuessSongLeaderboardManager'
 import { GuessSongRiskManager } from './GuessSongRiskManager'
 
 export const dynamic = 'force-dynamic'
@@ -10,6 +11,7 @@ export default async function AdminGuessSongPage() {
   return (
     <>
       <AdminGuessSongManager />
+      <GuessSongLeaderboardManager />
       <GuessSongRiskManager />
     </>
   )

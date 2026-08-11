@@ -1,5 +1,26 @@
 export const loginAccountMinLength = 2
 export const loginAccountMaxLength = 16
+export const loginAccountCharacterError = '用户名不能包含空格或特殊符号，可使用中文、英文字母、数字和 Emoji。'
+
+// Match one username token at a time. Letters and numbers are accepted
+// directly; emoji may include variation selectors, skin-tone modifiers and
+// ZWJ-linked emoji. Punctuation, separators and ordinary symbols do not
+// match this expression.
+const emojiBase = '(?:\\p{Extended_Pictographic}|[\\u{1F1E6}-\\u{1F1FF}])'
+const emojiTail = '(?:[\\uFE0E\\uFE0F\\u{1F3FB}-\\u{1F3FF}])*'
+const usernameTokenPattern = new RegExp(
+  `(?:\\p{N}\\uFE0F\\u20E3|[\\p{L}\\p{N}\\p{M}]|${emojiBase}${emojiTail}(?:\\u200D${emojiBase}${emojiTail})*)`,
+  'gu',
+)
+
+function hasValidUsernameCharacters(value: string) {
+  if (!value) return false
+  usernameTokenPattern.lastIndex = 0
+  let consumed = ''
+  let match: RegExpExecArray | null
+  while ((match = usernameTokenPattern.exec(value))) consumed += match[0]
+  return consumed === value
+}
 
 export function getLoginAccountDisplay(value: unknown) {
   return String(value ?? '').trim()
@@ -10,11 +31,15 @@ export function normalizeLoginAccount(value: unknown) {
 }
 
 export function validateLoginAccountValue(value: unknown) {
+  const raw = typeof value === 'string' ? value : String(value ?? '')
   const account = getLoginAccountDisplay(value)
   const usernameNormalized = normalizeLoginAccount(account)
   const displayLength = Array.from(account).length
   const normalizedLength = Array.from(usernameNormalized).length
-  if (!account) return { account, usernameNormalized, error: '请输入登录账号' }
+  if (!account) return { account, usernameNormalized, error: raw ? loginAccountCharacterError : '请输入登录账号' }
+  if (raw !== account || !hasValidUsernameCharacters(raw)) {
+    return { account, usernameNormalized, error: loginAccountCharacterError }
+  }
   if (displayLength < loginAccountMinLength || displayLength > loginAccountMaxLength || normalizedLength < loginAccountMinLength || normalizedLength > loginAccountMaxLength) {
     return { account, usernameNormalized, error: '登录账号长度需要 2-16 个字符' }
   }

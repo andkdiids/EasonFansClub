@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
-import { getCheckInMessage } from '@/lib/checkin-messages'
+import { getCheckInMessage, invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience } from '@/lib/growth'
@@ -211,10 +211,12 @@ export async function POST(request: Request) {
     await tx.friendActivity.create({
       data: {
         actorId: user.id,
+        type: 'CHECKIN',
         checkInId: checkIn.id,
         dailyMessageId,
         mood: mood?.key ?? null,
         content: message || null,
+        targetUrl: `/checkin?date=${todayKey}${dailyMessageId ? `&message=${dailyMessageId}` : ''}`,
       },
     })
 
@@ -260,77 +262,69 @@ export async function POST(request: Request) {
     throw error
   }
 
+  invalidateCheckInMessagesCache()
   const createdMessage = result.dailyMessageId
-    ? await safeDb(
-        'DailyMessage.findUnique checkinApi.createdMessage',
-        getCheckInMessage({
-          messageId: result.dailyMessageId,
-          selectedDate: today,
-          nextDate: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-          viewerId: user.id,
-          viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
-        }),
-        null,
-        8000,
-      )
+    ? await getCheckInMessage({
+        messageId: result.dailyMessageId,
+        selectedDate: today,
+        nextDate: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+        viewerId: user.id,
+        viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
+      }).catch((error) => {
+        console.error('[checkin] failed to load created daily message', error)
+        return null
+      })
     : null
 
 const [verifyCheckIn, verifyUser] = await Promise.all([
-  prisma.checkIn.findUnique({
-    where: {
-      userId_checkinDateKey: {
-        userId: user.id,
-        checkinDateKey: todayKey,
+  safeDb(
+    'CheckIn.findUnique checkinApi.postVerify',
+    prisma.checkIn.findUnique({
+      where: {
+        userId_checkinDateKey: {
+          userId: user.id,
+          checkinDateKey: todayKey,
+        },
       },
-    },
-    select: {
-      id: true,
-      checkDate: true,
-      points: true,
-      exp: true,
-      mood: true,
-      message: true,
-      streakDay: true,
-      createdAt: true,
-    },
-  }),
-
-  prisma.user.findUnique({
-    where: {
-      id: user.id,
-    },
-    select: {
-      points: true,
-      exp: true,
-      experience: true,
-      level: true,
-      consecutiveDays: true,
-    },
-  }),
+      select: {
+        id: true,
+        checkDate: true,
+        points: true,
+        exp: true,
+        mood: true,
+        message: true,
+        streakDay: true,
+        createdAt: true,
+      },
+    }),
+    null,
+  ),
+  safeDb(
+    'User.findUnique checkinApi.postVerify',
+    prisma.user.findUnique({
+      where: {
+        id: user.id,
+      },
+      select: {
+        points: true,
+        exp: true,
+        experience: true,
+        level: true,
+        consecutiveDays: true,
+      },
+    }),
+    null,
+  ),
 ])
 
-if (!verifyCheckIn) {
-  console.error('[checkin.verify.failed]', {
-    userId: user.id,
-    todayKey,
-  })
+const verifyMatchesTransaction = Boolean(
+  verifyCheckIn
+  && verifyCheckIn.id === result.checkIn.id
+  && verifyCheckIn.points === result.checkIn.points
+  && verifyCheckIn.exp === result.checkIn.exp,
+)
 
-  return NextResponse.json(
-    {
-      message: '签到保存失败，请刷新后重试',
-      checkedToday: false,
-    },
-    {
-      status: 500,
-    },
-  )
-}
-
-if (
-  verifyCheckIn.id !== result.checkIn.id
-  || verifyCheckIn.points !== result.checkIn.points
-  || verifyCheckIn.exp !== result.checkIn.exp
-) {
+if (verifyCheckIn && !verifyMatchesTransaction) {
   console.error('[checkin.verify.mismatch]', {
     userId: user.id,
     todayKey,
@@ -345,10 +339,11 @@ if (
       exp: verifyCheckIn.exp,
     },
   })
-  return NextResponse.json(
-    { message: '签到数据校验不一致，请刷新后重试', checkedToday: false },
-    { status: 500 },
-  )
+} else if (!verifyCheckIn) {
+  console.warn('[checkin.verify.unavailable]', {
+    userId: user.id,
+    todayKey,
+  })
 }
 
 
@@ -400,10 +395,10 @@ return NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
-    todayCheckIn: verifyCheckIn,
+    todayCheckIn: result.checkIn,
     mood,
-    gainedPoints: verifyCheckIn.points,
-    gainedExp: verifyCheckIn.exp,
+    gainedPoints: result.checkIn.points,
+    gainedExp: result.checkIn.exp,
     bonus: result.bonus,
     ordinaryRegistrationFee: result.ordinaryRegistrationFee,
     streakBonusRegistrationFee: result.streakBonusRegistrationFee,
@@ -412,10 +407,10 @@ return NextResponse.json({
     consecutiveDays: result.streaks.currentStreak,
     currentStreak: result.streaks.currentStreak,
     longestStreak: result.streaks.longestStreak,
-points: verifyUser?.points ?? result.user.points,
-exp: verifyUser?.exp ?? result.user.exp,
-experience: verifyUser?.experience ?? result.user.experience,
-level: verifyUser?.level ?? result.user.level,
+    points: verifyUser?.points ?? result.user.points,
+    exp: verifyUser?.exp ?? result.user.exp,
+    experience: verifyUser?.experience ?? result.user.experience,
+    level: verifyUser?.level ?? result.user.level,
     created: true,
   })
 }

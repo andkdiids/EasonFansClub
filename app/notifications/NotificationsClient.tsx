@@ -4,12 +4,11 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
 import { profileImageUrl } from '@/lib/images'
-import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
-
-type NotificationCategory = 'all' | 'reply' | 'like' | 'friend' | 'messages' | 'feedback' | 'system'
+import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
@@ -110,8 +109,15 @@ type NotificationReadResponse = {
 }
 
 // 本地即时递减未读数（分类角标同步），随后由 unread-summary:refresh 触发的服务端拉取校正为权威值。
-const NOTIFICATION_LIST_LIMIT = 50
+const NOTIFICATION_LIST_PAGE_SIZE = 20
 const OPTIMISTIC_READ_STORAGE_KEY = 'notifications:optimistic-read'
+
+type NotificationPagination = {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
 
 function notificationKey(item: Pick<UnifiedNotification, 'id' | 'source'>) {
   return `${item.source}:${item.id}`
@@ -179,26 +185,32 @@ function incrementUnreadSummary(base: UnreadSummary, items: UnifiedNotification[
 
 export function NotificationsClient({
   initialNotifications,
+  initialPagination,
+  initialCategory = 'all',
   siteLogoUrl,
 }: {
   initialNotifications: UnifiedNotification[]
+  initialPagination: NotificationPagination
+  initialCategory?: NotificationCategory
   siteLogoUrl?: string | null
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { summary: sharedSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
   const [notifications, setNotifications] = useState(initialNotifications)
+  const [pagination, setPagination] = useState(initialPagination)
   const [summaryOverride, setSummaryOverride] = useState<UnreadSummary | null>(null)
   const unreadSummary = summaryOverride || sharedSummary
   const unreadCount = unreadSummary.total
-  const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all')
+  const [activeCategory, setActiveCategory] = useState<NotificationCategory>(initialCategory)
   const [isUpdating, setIsUpdating] = useState(false)
   const [replyingKey, setReplyingKey] = useState<string | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [replyStatus, setReplyStatus] = useState<Record<string, string>>({})
   const [sendingReply, setSendingReply] = useState<string | null>(null)
   const optimisticReadRef = useRef<Map<string, Date>>(new Map())
-  const notificationListRequestRef = useRef<Promise<void> | null>(null)
+  const notificationListRequestRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const notificationListRequestSequenceRef = useRef(0)
   // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
   const markingReadRef = useRef<Set<string>>(new Set())
   // 清除二次确认：第一次点击只打开确认框，确认后才真正调用删除接口。
@@ -206,7 +218,7 @@ export function NotificationsClient({
   const [isClearing, setIsClearing] = useState(false)
   const [actionError, setActionError] = useState('')
 
-  const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[]) => {
+  const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[], nextPagination?: NotificationPagination) => {
     const merged = serverNotifications.map((item) => {
       const key = notificationKey(item)
       if (isNotificationRead(item)) {
@@ -219,29 +231,60 @@ export function NotificationsClient({
         : item
     })
     setNotifications(merged)
+    if (nextPagination) setPagination(nextPagination)
   }, [])
 
-  const refreshNotifications = useCallback(() => {
-    if (notificationListRequestRef.current) return notificationListRequestRef.current
+  const currentPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const buildNotificationHref = useCallback((page: number, category = activeCategory) => {
+    const next = new URLSearchParams(searchParams.toString())
+    if (page <= 1) next.delete('page')
+    else next.set('page', String(page))
+    if (category === 'all') next.delete('category')
+    else next.set('category', category)
+    const query = next.toString()
+    return `/notifications${query ? `?${query}` : ''}`
+  }, [activeCategory, searchParams])
+
+  const refreshNotifications = useCallback((force = false) => {
+    const requestKey = `${currentPage}:${activeCategory}`
+    if (!force && notificationListRequestRef.current?.key === requestKey) return notificationListRequestRef.current.promise
+    const requestSequence = ++notificationListRequestSequenceRef.current
     const request = (async () => {
       try {
-        const response = await fetch(`/api/notifications?limit=${NOTIFICATION_LIST_LIMIT}`, {
+        const params = new URLSearchParams({ page: String(currentPage), pageSize: String(NOTIFICATION_LIST_PAGE_SIZE) })
+        if (activeCategory !== 'all') params.set('category', activeCategory)
+        const response = await fetch(`/api/notifications?${params.toString()}`, {
           cache: 'no-store',
         })
         if (!response.ok) return
-        const data = await response.json().catch(() => null) as { notifications?: UnifiedNotification[] } | null
-        if (Array.isArray(data?.notifications)) mergeServerNotifications(data.notifications)
+        const data = await response.json().catch(() => null) as {
+          notifications?: UnifiedNotification[]
+          page?: number
+          pageSize?: number
+          total?: number
+          totalPages?: number
+        } | null
+        if (requestSequence !== notificationListRequestSequenceRef.current) return
+        if (Array.isArray(data?.notifications)) {
+          const nextPagination = typeof data.page === 'number' && typeof data.pageSize === 'number' && typeof data.total === 'number' && typeof data.totalPages === 'number'
+            ? { page: data.page, pageSize: data.pageSize, total: data.total, totalPages: data.totalPages }
+            : undefined
+          mergeServerNotifications(data.notifications, nextPagination)
+          if (nextPagination && nextPagination.page !== currentPage) {
+            router.replace(buildNotificationHref(nextPagination.page), { scroll: false })
+          }
+        }
         await refreshUnreadSummary()
       } catch {
         // The server-rendered list remains usable when a background refresh fails.
       }
     })()
-    notificationListRequestRef.current = request
+    notificationListRequestRef.current = { key: requestKey, promise: request }
     void request.finally(() => {
-      if (notificationListRequestRef.current === request) notificationListRequestRef.current = null
+      if (notificationListRequestRef.current?.promise === request) notificationListRequestRef.current = null
     })
     return request
-  }, [mergeServerNotifications, refreshUnreadSummary])
+  }, [activeCategory, buildNotificationHref, currentPage, mergeServerNotifications, refreshUnreadSummary, router])
 
   useEffect(() => {
     try {
@@ -254,8 +297,8 @@ export function NotificationsClient({
     } catch {
       // Ignore malformed return state.
     }
-    mergeServerNotifications(initialNotifications)
-  }, [initialNotifications, mergeServerNotifications])
+    mergeServerNotifications(initialNotifications, initialPagination)
+  }, [initialNotifications, initialPagination, mergeServerNotifications])
 
   useEffect(() => {
     const sync = () => {
@@ -330,9 +373,18 @@ export function NotificationsClient({
   }, [activeCategory, notifications])
 
   useEffect(() => {
-    const requestedCategory = searchParams.get('category') as NotificationCategory | null
-    if (requestedCategory && requestedCategory in categoryLabels) setActiveCategory(requestedCategory)
+    setActiveCategory(parseNotificationCategory(searchParams.get('category')))
   }, [searchParams])
+
+  function goToPage(nextPage: number) {
+    const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), Math.max(1, pagination.totalPages))
+    router.push(buildNotificationHref(safePage), { scroll: true })
+  }
+
+  function selectCategory(category: NotificationCategory) {
+    setActiveCategory(category)
+    router.push(buildNotificationHref(1, category), { scroll: true })
+  }
 
   async function markRead(item: UnifiedNotification): Promise<boolean> {
     if (isNotificationRead(item)) return true
@@ -383,6 +435,7 @@ export function NotificationsClient({
         : row))
       // 未读数立即减 1（本地），随后由 Provider 重新拉取的服务端汇总校正。
       window.dispatchEvent(new Event('unread-summary:refresh'))
+      await refreshNotifications(true)
       return true
     } catch (reason) {
       optimisticReadRef.current.delete(itemKey)
@@ -501,7 +554,7 @@ export function NotificationsClient({
       window.dispatchEvent(new Event('unread-summary:refresh'))
       await refreshUnreadSummary()
       setSummaryOverride(null)
-      router.refresh()
+      await refreshNotifications(true)
     } catch {
       optimisticItems.forEach((item) => {
         const key = notificationKey(item)
@@ -596,14 +649,14 @@ export function NotificationsClient({
               handleCardActivate()
             }
           }}
-          className={`notification-list-item group flex min-w-0 gap-3 rounded-sm border p-4 transition sm:gap-4 sm:p-5 ${
+          className={`notification-list-item group flex min-w-0 gap-2.5 rounded-sm border p-3 transition sm:gap-3 sm:p-3.5 ${
             isNotificationRead(item) ? 'is-read' : 'is-unread'
           } ${emphasisClass} ${target ? 'cursor-pointer' : ''}`}
         >
           {/* 头像区 */}
           <div className="relative shrink-0">
             {systemLike ? (
-              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-50 p-2 ring-1 ring-slate-200 sm:h-12 sm:w-12">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-50 p-1.5 ring-1 ring-slate-200 sm:h-10 sm:w-10">
                 {siteLogoUrl ? (
                   <img src={siteLogoUrl} alt="私家E院" className="h-full w-full object-contain" />
                 ) : (
@@ -611,12 +664,12 @@ export function NotificationsClient({
                 )}
               </span>
             ) : (
-              <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl bg-brand-950 text-sm font-black text-white sm:h-12 sm:w-12">
+              <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-950 text-xs font-black text-white sm:h-10 sm:w-10">
                 {profileImageUrl(item.actorAvatarUrl) ? <img src={profileImageUrl(item.actorAvatarUrl)!} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
               </span>
             )}
             {!systemLike && !isBirthday ? (
-              <span className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-sky-100 text-[11px] font-black text-brand-700">
+              <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-sky-100 text-[10px] font-black text-brand-700">
                 {typeIcon[category] || 'i'}
               </span>
             ) : null}
@@ -625,11 +678,11 @@ export function NotificationsClient({
           {/* 内容区：标题 + 正文 + 智能入口 */}
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
-              {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2.5 py-1 text-[11px] font-black text-white">未读</span> : null}
+              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
+              {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">未读</span> : null}
             </div>
-            <h2 className={`notification-title mt-2 break-words text-base sm:text-lg ${titleClass}`}>{item.title}</h2>
-            {item.content ? <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
+            <h2 className={`notification-title mt-1 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
+            {item.content ? <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-slate-600">{item.content}</p> : null}
 
             {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
             {smartEntry?.action === 'dock' ? (
@@ -640,7 +693,7 @@ export function NotificationsClient({
                   void markRead(item)
                   window.dispatchEvent(new Event('friend-dock:open'))
                 }}
-                className="mt-3 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
+                className="mt-2 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
               >
                 {smartEntry.label} →
               </button>
@@ -651,16 +704,16 @@ export function NotificationsClient({
                   event.stopPropagation()
                   openNotification(event, item)
                 }}
-                className="mt-3 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
+                className="mt-2 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
               >
                 {smartEntry.label} →
               </Link>
             ) : null}
 
             {/* 时间区（固定内容区底部）+ 操作按钮（流式排布，移动端自动换行，无横向滚动） */}
-            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
-              <time className="text-xs font-bold text-slate-400">{formatTime(item.createdAt)}</time>
-              <div className="flex flex-wrap items-center gap-1.5">
+            <div className="mt-auto flex flex-wrap items-center justify-between gap-1.5 pt-2">
+              <time className="text-[11px] font-bold text-slate-400">{formatTime(item.createdAt)}</time>
+              <div className="flex flex-wrap items-center gap-1">
                 {item.replyTarget && !item.replyDisabledReason ? (
                   <button
                     type="button"
@@ -668,7 +721,7 @@ export function NotificationsClient({
                       event.stopPropagation()
                       setReplyingKey((current) => current === itemKey ? null : itemKey)
                     }}
-                    className="min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700"
+                    className="min-h-8 rounded-sm border border-sky-100 bg-white px-2.5 py-1 text-[11px] font-black text-brand-700"
                   >
                     直接回复
                   </button>
@@ -682,7 +735,7 @@ export function NotificationsClient({
                       event.stopPropagation()
                       void markRead(item)
                     }}
-                    className="min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="min-h-8 rounded-sm border border-sky-100 bg-white px-2.5 py-1 text-[11px] font-black text-brand-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     已读
                   </button>
@@ -700,7 +753,7 @@ export function NotificationsClient({
                       items: [item],
                     })
                   }}
-                  className="min-h-9 rounded-sm border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-slate-500 hover:text-red-600"
+                  className="min-h-8 rounded-sm border border-sky-100 bg-white px-2.5 py-1 text-[11px] font-black text-slate-500 hover:text-red-600"
                 >
                   清除
                 </button>
@@ -780,7 +833,7 @@ export function NotificationsClient({
           <button
             key={category}
             type="button"
-            onClick={() => setActiveCategory(category)}
+            onClick={() => selectCategory(category)}
             className={`rounded-none border-b-2 px-4 py-2 text-sm font-black transition ${
               activeCategory === category
                 ? 'border-brand-700 text-brand-700'
@@ -792,7 +845,7 @@ export function NotificationsClient({
         ))}
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {activeCategory === 'messages' ? (
           <div className="rounded-[24px] border border-sky-100 bg-white/82 p-8 text-center">
             <p className="text-lg font-black text-brand-950">未读私信 {unreadSummary.messages} 条</p>
@@ -814,6 +867,16 @@ export function NotificationsClient({
           </div>
         )}
       </div>
+
+      {activeCategory !== 'messages' && pagination.totalPages > 1 ? (
+        <Pagination
+          currentPage={pagination.page}
+          totalPages={pagination.totalPages}
+          onPageChange={goToPage}
+          disabled={isUpdating}
+          ariaLabel="通知分页"
+        />
+      ) : null}
 
       <div className="sr-only" aria-live="polite">未读通知 {unreadCount}</div>
       <ConfirmDialog

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FormError } from '@/components/FormError'
+import { validateLoginAccountValue } from '@/lib/login-account'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import type { RegistrationAvailabilityPayload, RegistrationMode } from '@/lib/registration'
 
@@ -264,7 +265,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   function validateRegistrationFields() {
     const nextErrors: RegisterErrors = {}
-    const username = form.nickname.trim()
+    const username = form.nickname
+    const usernameValidation = validateLoginAccountValue(username)
     const password = form.password
     const confirmPassword = form.confirmPassword
     const email = form.email.trim().toLowerCase()
@@ -273,6 +275,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     const agreementAccepted = form.acceptedAgreement
 
     if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
+    if (!nextErrors.nickname && usernameValidation.error) nextErrors.nickname = usernameValidation.error
     const phone = normalizePhone(form.phone)
     if (!phone) nextErrors.phone = '请输入手机号'
     else if (!/^1\d{10}$/.test(phone)) nextErrors.phone = '请输入 11 位中国大陆手机号'

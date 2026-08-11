@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
@@ -6,6 +7,57 @@ import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
+
+const wallRowInclude = {
+  User_ProfileWallMessage_senderIdToUser: {
+    select: {
+      id: true,
+      uid: true,
+      nickname: true,
+      avatarUrl: true,
+      role: true,
+      Profile: { select: { displayName: true, avatarUrl: true } },
+    },
+  },
+  ProfileWallLike: {
+    orderBy: { createdAt: 'desc' as const },
+    take: 10,
+    select: {
+      userId: true,
+      User: {
+        select: {
+          uid: true,
+          nickname: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
+    },
+  },
+} as const
+
+type WallRow = Prisma.ProfileWallMessageGetPayload<{ include: typeof wallRowInclude }>
+type WallLiker = WallRow['ProfileWallLike'][number]
+type WallNode = { row: WallRow; children: WallNode[]; commentCount: number }
+type SerializedWallMessage = {
+  id: string
+  content: string
+  parentId: string | null
+  createdAt: string
+  updatedAt: string
+  canDelete: boolean
+  liked: boolean
+  likeCount: number
+  likers: Array<{ uid: number; nickname: string; displayName: string; avatarUrl: string | null }>
+  commentCount: number
+  sender: {
+    uid: number
+    nickname: string
+    avatarUrl: string | null
+    profile: { displayName: string | null; avatarUrl: string | null } | null
+  }
+  children: SerializedWallMessage[]
+}
 
 function canManageWallMessage(user: { id: string; role: string } | null, senderId: string, receiverId: string) {
   return Boolean(user && (user.id === senderId || user.id === receiverId || user.role === 'ADMIN' || user.role === 'SUPER_ADMIN'))
@@ -28,6 +80,90 @@ async function canViewWall(viewerId: string | null, receiver: { id: string; Prof
   return isFriend(viewerId, receiver.id)
 }
 
+function buildWallTree(rows: WallRow[]) {
+  const childrenByParent = new Map<string, WallRow[]>()
+  for (const row of rows) {
+    if (!row.parentId) continue
+    const children = childrenByParent.get(row.parentId) || []
+    children.push(row)
+    childrenByParent.set(row.parentId, children)
+  }
+  for (const children of childrenByParent.values()) {
+    children.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+  }
+
+  const buildNode = (row: WallRow, ancestors: Set<string>): WallNode => {
+    const nextAncestors = new Set(ancestors).add(row.id)
+    const children = (childrenByParent.get(row.id) || [])
+      .filter((child) => !nextAncestors.has(child.id))
+      .map((child) => buildNode(child, nextAncestors))
+    return {
+      row,
+      children,
+      commentCount: children.reduce((total, child) => total + 1 + child.commentCount, 0),
+    }
+  }
+
+  return rows
+    .filter((row) => !row.parentId)
+    .map((row) => buildNode(row, new Set()))
+}
+
+function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remarkMap: ReadonlyMap<string, string>) {
+  return likes.map((like) => ({
+    uid: like.User.uid,
+    nickname: like.User.nickname,
+    displayName: resolveFriendDisplayName({
+      viewerId: viewerId || undefined,
+      targetUserId: like.userId,
+      fallbackName: getPublicUserDisplayName(like.User),
+      remarkMap,
+    }),
+    avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+  }))
+}
+
+function serializeWallNode(
+  node: WallNode,
+  viewer: { id: string; role: string } | null,
+  receiverId: string,
+  isOwner: boolean,
+  viewerLikedIds: ReadonlySet<string>,
+  remarkMap: ReadonlyMap<string, string>,
+): SerializedWallMessage {
+  const sender = node.row.User_ProfileWallMessage_senderIdToUser
+  const displayName = resolveFriendDisplayName({
+    viewerId: viewer?.id,
+    targetUserId: node.row.senderId,
+    fallbackName: getPublicUserDisplayName(sender),
+    remarkMap,
+  })
+
+  return {
+    id: node.row.id,
+    content: node.row.content,
+    parentId: node.row.parentId,
+    createdAt: node.row.createdAt.toISOString(),
+    updatedAt: node.row.updatedAt.toISOString(),
+    canDelete: canManageWallMessage(viewer, node.row.senderId, receiverId),
+    liked: viewerLikedIds.has(node.row.id),
+    likeCount: node.row.likeCount,
+    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, viewer?.id || null, remarkMap) : [],
+    commentCount: node.commentCount,
+    sender: {
+      uid: sender.uid,
+      nickname: sender.nickname,
+      avatarUrl: sender.avatarUrl,
+      profile: sender.Profile ? { ...sender.Profile, displayName } : null,
+    },
+    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, remarkMap)),
+  }
+}
+
+async function loadWallMessage(id: string) {
+  return prisma.profileWallMessage.findUnique({ where: { id }, include: wallRowInclude })
+}
+
 export async function GET(request: Request) {
   const viewer = await getCurrentUser()
   const { searchParams } = new URL(request.url)
@@ -36,89 +172,21 @@ export async function GET(request: Request) {
 
   const receiver = await prisma.user.findFirst({
     where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    select: {
-      id: true,
-      Profile: { select: { wallVisibility: true } },
-    },
+    select: { id: true, Profile: { select: { wallVisibility: true } } },
   })
   if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const canView = await canViewWall(viewer?.id || null, receiver)
-  if (!canView) {
-    return NextResponse.json({ message: '你没有权限查看该留言墙' }, { status: 403 })
-  }
+  if (!canView) return NextResponse.json({ message: '你没有权限查看该留言墙' }, { status: 403 })
 
-  // 仅墙主人可查看点赞者具体身份；他人仅能看到点赞数量，不可枚举是谁点的赞。
   const isOwner = viewer?.id === receiver.id
-
   const rows = await prisma.profileWallMessage.findMany({
-    where: { receiverId: receiver.id, parentId: null, deletedAt: null },
-    orderBy: { createdAt: 'desc' },
-    take: 30,
-    include: {
-      User_ProfileWallMessage_senderIdToUser: {
-        select: {
-          id: true,
-          uid: true,
-          nickname: true,
-          avatarUrl: true,
-          role: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
-        },
-      },
-      other_ProfileWallMessage: {
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'asc' },
-        take: 20,
-        include: {
-          // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由下方批量查询判断。
-          ProfileWallLike: {
-            orderBy: { createdAt: 'desc' as const },
-            take: 10,
-            select: {
-              userId: true,
-              User: {
-                select: {
-                  uid: true,
-                  nickname: true,
-                  avatarUrl: true,
-                  Profile: { select: { displayName: true, avatarUrl: true } },
-                },
-              },
-            },
-          },
-          User_ProfileWallMessage_senderIdToUser: {
-            select: {
-              id: true,
-              uid: true,
-              nickname: true,
-              avatarUrl: true,
-              role: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
-            },
-          },
-        },
-      },
-      ProfileWallLike: {
-        orderBy: { createdAt: 'desc' as const },
-        take: 10,
-        select: {
-          userId: true,
-          User: {
-            select: {
-              uid: true,
-              nickname: true,
-              avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
-            },
-          },
-        },
-      },
-    },
+    where: { receiverId: receiver.id, deletedAt: null },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 300,
+    include: wallRowInclude,
   })
-
-  // 当前用户对这些留言的点赞：一次批量查询（避免 N+1），保持 liked ⇔ 当前用户已点赞 的既有契约。
-  const allMessageIds = rows.flatMap((item) => [item.id, ...item.other_ProfileWallMessage.map((child) => child.id)])
+  const allMessageIds = rows.map((row) => row.id)
   const viewerLikes = viewer && allMessageIds.length
     ? await prisma.profileWallLike.findMany({
         where: { userId: viewer.id, messageId: { in: allMessageIds } },
@@ -127,78 +195,16 @@ export async function GET(request: Request) {
     : []
   const viewerLikedIds = new Set(viewerLikes.map((like) => like.messageId))
   const displayNameUserIds = [
-    ...rows.flatMap((item) => [
-      item.User_ProfileWallMessage_senderIdToUser.id,
-      ...item.other_ProfileWallMessage.map((child) => child.User_ProfileWallMessage_senderIdToUser.id),
-    ]),
-    ...rows.flatMap((item) => [
-      ...item.ProfileWallLike.map((like) => like.userId),
-      ...item.other_ProfileWallMessage.flatMap((child) => child.ProfileWallLike.map((like) => like.userId)),
-    ]),
+    ...rows.map((row) => row.senderId),
+    ...rows.flatMap((row) => row.ProfileWallLike.map((like) => like.userId)),
   ]
   const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
-
-  // 序列化为 LikeAvatars 的 LikeAvatarUser 结构（与每日留言 / 帖子点赞列表保持一致）。
-  function serializeWallLikers(likes: Array<{ userId: string; User: { uid: number; nickname: string; avatarUrl: string | null; Profile: { displayName: string | null; avatarUrl: string | null } | null } }>) {
-    return likes.map((like) => ({
-      uid: like.User.uid,
-      nickname: like.User.nickname,
-      displayName: resolveFriendDisplayName({
-        viewerId: viewer?.id,
-        targetUserId: like.userId,
-        fallbackName: getPublicUserDisplayName(like.User),
-        remarkMap,
-      }),
-      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
-    }))
-  }
+  const tree = buildWallTree(rows)
 
   return NextResponse.json({
     visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
     canPost: Boolean(viewer && receiver.Profile?.wallVisibility !== 'CLOSED'),
-    messages: rows.map((item) => ({
-      ...item,
-      sender: {
-        ...item.User_ProfileWallMessage_senderIdToUser,
-        profile: item.User_ProfileWallMessage_senderIdToUser.Profile ? {
-          ...item.User_ProfileWallMessage_senderIdToUser.Profile,
-          displayName: resolveFriendDisplayName({
-            viewerId: viewer?.id,
-            targetUserId: item.senderId,
-            fallbackName: getPublicUserDisplayName(item.User_ProfileWallMessage_senderIdToUser),
-            remarkMap,
-          }),
-        } : item.User_ProfileWallMessage_senderIdToUser.Profile,
-      },
-      createdAt: item.createdAt.toISOString(),
-      updatedAt: item.updatedAt.toISOString(),
-      canDelete: canManageWallMessage(viewer, item.senderId, item.receiverId),
-      liked: viewerLikedIds.has(item.id),
-      likers: isOwner ? serializeWallLikers(item.ProfileWallLike) : [],
-      commentCount: item.other_ProfileWallMessage.length,
-      children: item.other_ProfileWallMessage.map((child) => ({
-        ...child,
-        sender: {
-          ...child.User_ProfileWallMessage_senderIdToUser,
-          profile: child.User_ProfileWallMessage_senderIdToUser.Profile ? {
-            ...child.User_ProfileWallMessage_senderIdToUser.Profile,
-            displayName: resolveFriendDisplayName({
-              viewerId: viewer?.id,
-              targetUserId: child.senderId,
-              fallbackName: getPublicUserDisplayName(child.User_ProfileWallMessage_senderIdToUser),
-              remarkMap,
-            }),
-          } : child.User_ProfileWallMessage_senderIdToUser.Profile,
-        },
-        children: [],
-        createdAt: child.createdAt.toISOString(),
-        updatedAt: child.updatedAt.toISOString(),
-        canDelete: canManageWallMessage(viewer, child.senderId, child.receiverId),
-        liked: viewerLikedIds.has(child.id),
-        likers: isOwner ? serializeWallLikers(child.ProfileWallLike) : [],
-        commentCount: 0,
-      })),
-    })),
+    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, remarkMap)),
   })
 }
 
@@ -210,11 +216,8 @@ export async function POST(request: Request) {
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null
   const rawContent = sanitizeText(body?.content, 500)
-  if (await containsSensitiveContent(rawContent)) {
-    return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
-  }
-  const content = rawContent
-  if (!content) return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
+  if (await containsSensitiveContent(rawContent)) return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
+  if (!rawContent) return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
   if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
@@ -224,26 +227,30 @@ export async function POST(request: Request) {
   if (!receiver) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const canView = await canViewWall(viewer.id, receiver)
-  if (!canView || receiver.Profile?.wallVisibility === 'CLOSED') {
-    return NextResponse.json({ message: '留言墙暂未开放' }, { status: 403 })
-  }
+  if (!canView || receiver.Profile?.wallVisibility === 'CLOSED') return NextResponse.json({ message: '留言墙暂未开放' }, { status: 403 })
 
-  let parentMessage: { id: string; senderId: string; parentId: string | null } | null = null
+  let parentMessage: { id: string; senderId: string } | null = null
   if (parentId) {
     parentMessage = await prisma.profileWallMessage.findFirst({
       where: { id: parentId, receiverId: receiver.id, deletedAt: null },
-      select: { id: true, senderId: true, parentId: true },
+      select: { id: true, senderId: true },
     })
     if (!parentMessage) return NextResponse.json({ message: '要回复的留言不存在' }, { status: 404 })
   }
 
   const message = await prisma.$transaction(async (tx) => {
-    const threadParentId = parentMessage?.parentId || parentMessage?.id || null
     const created = await tx.profileWallMessage.create({
-      data: { senderId: viewer.id, receiverId: receiver.id, parentId: threadParentId, content },
+      data: { senderId: viewer.id, receiverId: receiver.id, parentId: parentMessage?.id || null, content: rawContent },
       select: { id: true },
     })
-    await tx.friendActivity.create({ data: { actorId: viewer.id, type: 'PROFILE_WALL', content, targetUrl: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}` } })
+    await tx.friendActivity.create({
+      data: {
+        actorId: viewer.id,
+        type: 'PROFILE_WALL',
+        content: rawContent,
+        targetUrl: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}`,
+      },
+    })
     const recipientId = parentMessage?.senderId || receiver.id
     if (recipientId !== viewer.id) {
       await tx.notification.create({
@@ -260,5 +267,17 @@ export async function POST(request: Request) {
     return created
   })
 
-  return NextResponse.json({ message: '留言已发布', id: message.id }, { status: 201 })
+  const createdRow = await loadWallMessage(message.id)
+  if (!createdRow) return NextResponse.json({ message: '留言已保存，但读取新留言失败' }, { status: 500 })
+  const remarkMap = await loadFriendRemarkMap(viewer.id, [createdRow.senderId])
+  const wallMessage = serializeWallNode(
+    { row: createdRow, children: [], commentCount: 0 },
+    viewer,
+    receiver.id,
+    viewer.id === receiver.id,
+    new Set<string>(),
+    remarkMap,
+  )
+
+  return NextResponse.json({ message: '留言已发布', id: message.id, wallMessage }, { status: 201 })
 }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Poi
 import { useRouter } from 'next/navigation'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { profileImageUrl } from '@/lib/images'
+import { validateLoginAccountValue } from '@/lib/login-account'
 
 type InitialProfile = {
   nickname: string
@@ -525,6 +526,13 @@ export function ProfileSettingsForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const nicknameValidation = form.nickname !== initialProfile.nickname
+      ? validateLoginAccountValue(form.nickname)
+      : null
+    if (nicknameValidation?.error) {
+      setError(nicknameValidation.error)
+      return
+    }
     setIsSaving(true)
     setMessage('')
     setError('')
@@ -654,9 +662,12 @@ export function ProfileSettingsForm({
             <span className="text-sm font-black text-slate-700">昵称</span>
             <input
               value={form.nickname}
-              onChange={(event) => update('nickname', event.target.value)}
+              onChange={(event) => {
+                update('nickname', event.target.value)
+                setError(event.target.value === initialProfile.nickname ? '' : validateLoginAccountValue(event.target.value).error || '')
+              }}
               minLength={2}
-              maxLength={32}
+              maxLength={16}
               className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none transition focus:border-brand-700"
               placeholder="请输入昵称"
             />

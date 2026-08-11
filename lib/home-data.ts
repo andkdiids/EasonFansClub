@@ -2,7 +2,8 @@ import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
-import { getGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
+import { GUESS_SONG_SIMPLE_MODE } from '@/lib/guess-song-config'
+import { getGuessSongPersonalBest } from '@/lib/guess-song-leaderboard'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
@@ -283,17 +284,15 @@ export async function getHomeTodayEvents() {
 }
 
 export async function getHomeEntertainmentRanking(userId?: string) {
-  const cacheKey = `home.entertainmentRanking:${getShanghaiDateKey(new Date())}:${userId || 'anonymous'}`
-  return cachedHomeData(cacheKey, async () => {
-    const ranking = await safeDb(
-      'GuessSongLeaderboard home.ranking',
-      getGuessSongLeaderboard({ userId: userId || '', periodType: 'YEAR', mode: 'EASY' }),
-      null,
-      8000,
-    )
-    if (!ranking) return null
-    return { periodType: ranking.periodType, periodKey: ranking.periodKey, mode: ranking.mode, rows: ranking.rows.slice(0, 5), currentUser: userId ? ranking.currentUser : null }
-  })
+  if (!userId) return null
+  const personalBest = await safeDb(
+    'GuessSongSession home.personalBest',
+    getGuessSongPersonalBest({ userId, mode: GUESS_SONG_SIMPLE_MODE }),
+    null,
+    8000,
+  )
+  if (!personalBest) return null
+  return { periodType: 'HISTORY', periodKey: 'ALL', mode: GUESS_SONG_SIMPLE_MODE, rows: [personalBest], currentUser: personalBest }
 }
 
 // 生日奖励（徽章 + 通知）每日最多触发一次，由首页加载自然带起，无需 cron。

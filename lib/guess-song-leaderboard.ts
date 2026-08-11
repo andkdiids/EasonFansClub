@@ -1,6 +1,6 @@
 import { Prisma, type GuessSongMode, type GuessSongPeriodType } from '@prisma/client'
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
-import { toPublicGuessSongMode } from '@/lib/guess-song-config'
+import { getGuessSongDatabaseModes, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
@@ -14,8 +14,8 @@ type ScoreRecord = {
   achievedAt: Date
 }
 
-export async function recordGuessSongLeaderboard(sessionId: string) {
-  const session = await prisma.guessSongSession.findUnique({
+export async function recordGuessSongLeaderboard(sessionId: string, db: Prisma.TransactionClient | typeof prisma = prisma) {
+  const session = await db.guessSongSession.findUnique({
     where: { id: sessionId },
     select: {
       id: true,
@@ -32,7 +32,7 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
       questionCount: true,
     },
   })
-  if (!session || session.status !== 'COMPLETED' || !session.completedAt) return
+  if (!session || !['COMPLETED', 'EXPIRED'].includes(session.status) || !session.completedAt) return
   if (!session.isValid || session.riskScore >= GUESS_SONG_RISK_THRESHOLD) return
   // Historical ten-question EASY sessions remain in history but must not enter
   // the replacement infinite simple leaderboard.
@@ -58,9 +58,9 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
         periodKey,
       },
     }
-    const existing = await prisma.guessSongLeaderboardEntry.findUnique({ where })
+    const existing = await db.guessSongLeaderboardEntry.findUnique({ where })
     if (!existing) {
-      await prisma.guessSongLeaderboardEntry.create({
+      await db.guessSongLeaderboardEntry.create({
         data: {
           userId: session.userId,
           sessionId: session.id,
@@ -71,7 +71,7 @@ export async function recordGuessSongLeaderboard(sessionId: string) {
         },
       })
     } else if (isGuessSongScoreBetter(score, existing)) {
-      await prisma.guessSongLeaderboardEntry.update({
+      await db.guessSongLeaderboardEntry.update({
         where,
         data: { sessionId: session.id, ...score },
       })
@@ -111,6 +111,63 @@ function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remar
     totalPlayCount: row.totalPlayCount,
     achievedAt: row.achievedAt.toISOString(),
   }
+}
+
+export async function getGuessSongPersonalBest(input: {
+  userId: string
+  mode: GuessSongPublicMode
+}) {
+  const session = await prisma.guessSongSession.findFirst({
+    where: {
+      userId: input.userId,
+      mode: { in: getGuessSongDatabaseModes(input.mode) },
+      status: { in: ['COMPLETED', 'EXPIRED'] },
+      completedAt: { not: null },
+      isValid: true,
+      riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+      ...(input.mode === GUESS_SONG_SIMPLE_MODE ? { questionCount: null } : {}),
+    },
+    orderBy: [
+      { score: 'desc' },
+      { correctCount: 'desc' },
+      { maxStreak: 'desc' },
+      { totalPlayCount: 'asc' },
+      { completedAt: 'asc' },
+      { id: 'asc' },
+    ],
+    select: {
+      userId: true,
+      mode: true,
+      score: true,
+      correctCount: true,
+      maxStreak: true,
+      totalPlayCount: true,
+      completedAt: true,
+      User: {
+        select: {
+          id: true,
+          uid: true,
+          nickname: true,
+          username: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, avatarUrl: true } },
+        },
+      },
+    },
+  })
+  if (!session?.completedAt) return null
+
+  const remarkMap = await loadFriendRemarkMap(input.userId, [session.User.id])
+  return serializeRow({
+    userId: session.userId,
+    mode: session.mode,
+    score: session.score,
+    correctCount: session.correctCount,
+    maxStreak: session.maxStreak,
+    totalPlayCount: session.totalPlayCount,
+    achievedAt: session.completedAt,
+    User: session.User,
+  }, 1, input.userId, remarkMap)
 }
 
 type YearLeaderboardQueryRow = {
@@ -166,7 +223,7 @@ async function getYearGuessSongLeaderboard(input: {
   start: Date
   end: Date
 }) {
-  const questionCountFilter = input.mode === 'EASY'
+  const questionCountFilter = input.mode === GUESS_SONG_SIMPLE_MODE
     ? Prisma.sql`AND s.questionCount IS NULL`
     : Prisma.empty
   const selectedRows = await prisma.$queryRaw<YearLeaderboardQueryRow[]>(Prisma.sql`
@@ -191,7 +248,7 @@ async function getYearGuessSongLeaderboard(input: {
             s.id ASC
         ) AS user_rank
       FROM \`GuessSongSession\` AS s
-      WHERE s.status = 'COMPLETED'
+      WHERE s.status IN ('COMPLETED', 'EXPIRED')
         AND s.isValid = TRUE
         AND s.riskScore < ${GUESS_SONG_RISK_THRESHOLD}
         AND s.completedAt >= ${input.start}
@@ -279,9 +336,7 @@ export async function getGuessSongLeaderboard(input: {
   mode: GuessSongPublicMode
   now?: Date
 }) {
-  const modeFilter: GuessSongMode[] = input.mode === 'EASY'
-    ? ['EASY', 'ENDLESS']
-    : [input.mode as GuessSongMode]
+  const modeFilter: GuessSongMode[] = getGuessSongDatabaseModes(input.mode)
 
   if (input.periodType === 'YEAR') {
     const { start, end, periodKey: yearKey } = getGuessSongPeriod('YEAR', input.now)
@@ -304,7 +359,7 @@ export async function getGuessSongLeaderboard(input: {
       GuessSongSession: {
         isValid: true,
         riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
-        ...(input.mode === 'EASY' ? { questionCount: null } : {}),
+        ...(input.mode === GUESS_SONG_SIMPLE_MODE ? { questionCount: null } : {}),
       },
     },
     include: {

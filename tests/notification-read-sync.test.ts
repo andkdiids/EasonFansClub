@@ -13,8 +13,10 @@ test('通知卡片、乐观计数和返回页面使用同一已读状态', () =>
   assert.match(client, /persistOptimisticRead\(itemKey, optimisticReadAt\)/)
   assert.match(client, /window\.addEventListener\('pageshow', sync\)/)
   assert.match(client, /window\.addEventListener\('unread-summary:refresh', sync\)/)
-  assert.match(client, /fetch\(`\/api\/notifications\?limit=\$\{NOTIFICATION_LIST_LIMIT\}`,[\s\S]*cache: 'no-store'/)
-  assert.match(client, /mergeServerNotifications\(initialNotifications\)/)
+  assert.match(client, /new URLSearchParams\(\{ page: String\(currentPage\), pageSize: String\(NOTIFICATION_LIST_PAGE_SIZE\) \}\)/)
+  assert.match(client, /fetch\(`\/api\/notifications\?\$\{params\.toString\(\)\}`,[\s\S]*cache: 'no-store'/)
+  assert.match(client, /mergeServerNotifications\(initialNotifications, initialPagination\)/)
+  assert.match(client, /await refreshNotifications\(true\)/)
   assert.match(client, /setNotifications\(previousNotifications\)/)
 })
 
@@ -24,7 +26,10 @@ test('通知列表 API 禁止缓存，返回服务端最新已读字段', () => 
 
   assert.match(route, /export const dynamic = 'force-dynamic'/)
   assert.match(route, /Cache-Control.*private, no-store/)
+  assert.match(route, /totalPages/)
+  assert.match(route, /pageSize/)
   assert.match(service, /isRead: item\.isRead/)
   assert.match(service, /read: item\.isRead/)
   assert.match(service, /readAt: item\.readAt/)
+  assert.match(service, /ORDER BY isRead ASC, createdAt DESC/)
 })

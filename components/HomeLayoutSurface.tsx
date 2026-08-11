@@ -164,7 +164,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const todayTouchStart = useRef<{ x: number; y: number } | null>(null)
   const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
-  const topRanking = data.entertainmentRanking?.rows[0] || null
+  const topRanking = data.entertainmentRanking?.currentUser || null
   const dailyMusicCoverUrl = data.dailyMusic?.album.coverUrl || null
 
   useEffect(() => {
@@ -203,12 +203,14 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     void loadEntertainmentRanking()
     window.addEventListener('checkin:completed', refresh)
     window.addEventListener('focus', refresh)
+    window.addEventListener('pageshow', refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => {
       disposed = true
       controller.abort()
       window.removeEventListener('checkin:completed', refresh)
       window.removeEventListener('focus', refresh)
+      window.removeEventListener('pageshow', refresh)
       document.removeEventListener('visibilitychange', refresh)
     }
   }, [])

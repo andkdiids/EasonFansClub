@@ -4,7 +4,9 @@ import {
   GUESS_SONG_ANSWER_SECONDS,
   GUESS_SONG_INITIAL_LIVES,
   GUESS_SONG_MODE_CONFIG,
+  GUESS_SONG_PAUSED_RETENTION_MS,
   calculateGuessSongScore,
+  getGuessSongDatabaseModes,
   isGuessSongMode,
   normalizeGuessSongAnswer,
   toPublicGuessSongMode,
@@ -97,6 +99,50 @@ function parseOptions(value: Prisma.JsonValue): OptionSnapshot[] {
 
 function sessionExpiry(mode: GuessSongMode, now: Date) {
   return new Date(now.getTime() + GUESS_SONG_MODE_CONFIG[mode].sessionMinutes * 60_000)
+}
+
+function pausedSessionExpiry(now: Date) {
+  return new Date(now.getTime() + GUESS_SONG_PAUSED_RETENTION_MS)
+}
+
+function pausedSessionStartedAt(expiresAt: Date) {
+  return new Date(expiresAt.getTime() - GUESS_SONG_PAUSED_RETENTION_MS)
+}
+
+async function abandonExpiredPausedSessions(
+  userId: string,
+  modes?: GuessSongMode[],
+  now = new Date(),
+) {
+  return prisma.guessSongSession.updateMany({
+    where: {
+      userId,
+      status: 'PAUSED',
+      expiresAt: { lte: now },
+      ...(modes && modes.length > 0
+        ? { mode: modes.length === 1 ? modes[0] : { in: modes } }
+        : {}),
+    },
+    data: { status: 'ABANDONED', activeKey: null },
+  })
+}
+
+async function expireGuessSongSession(sessionId: string, now: Date) {
+  return prisma.$transaction(async (tx) => {
+    const expired = await tx.guessSongSession.updateMany({
+      where: { id: sessionId, status: 'IN_PROGRESS', expiresAt: { lte: now } },
+      data: { status: 'EXPIRED', completedAt: now, activeKey: null },
+    })
+    if (expired.count === 1) await recordGuessSongLeaderboard(sessionId, tx)
+    return expired.count === 1
+  })
+}
+
+function normalizeGuessSongSessionMode(requestedMode: unknown) {
+  if (!isGuessSongMode(requestedMode)) throw new GuessSongServiceError('璇烽€夋嫨鏈夋晥娓告垙妯″紡')
+  // ENDLESS is kept only for old database rows and old deep links. A new start
+  // through that legacy value opens the replacement simple challenge instead.
+  return (requestedMode === 'ENDLESS' ? 'EASY' : requestedMode) as GuessSongMode
 }
 
 async function createSessionQuestion(
@@ -218,6 +264,40 @@ async function createNextInfiniteQuestion(
   })
 }
 
+async function createGuessSongSessionInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    userId: string
+    mode: GuessSongMode
+    now: Date
+    autoEnabled: boolean
+  },
+) {
+  const config = GUESS_SONG_MODE_CONFIG[input.mode]
+  const created = await tx.guessSongSession.create({
+    data: {
+      userId: input.userId,
+      activeKey: `${input.userId}:${input.mode}`,
+      mode: input.mode,
+      clientSessionNonce: createClientSessionNonce(),
+      clientSessionTokenIssuedAt: input.now,
+      livesRemaining: config.maxWrongCount || GUESS_SONG_INITIAL_LIVES,
+      questionCount: null,
+      expiresAt: sessionExpiry(input.mode, input.now),
+      startedAt: input.now,
+    },
+  })
+  await createNextInfiniteQuestion(
+    tx,
+    created.id,
+    1,
+    undefined,
+    input.mode,
+    input.autoEnabled,
+  )
+  return created
+}
+
 export async function createOrResumeGuessSongSession(
   userId: string,
   requestedMode: unknown,
@@ -226,11 +306,25 @@ export async function createOrResumeGuessSongSession(
   if (!isGuessSongMode(requestedMode)) throw new GuessSongServiceError('请选择有效游戏模式')
   // ENDLESS is kept only for old database rows and old deep links. A new start
   // through that legacy value opens the replacement simple challenge instead.
-  const mode: GuessSongMode = requestedMode === 'ENDLESS' ? 'EASY' : requestedMode
+  const mode = normalizeGuessSongSessionMode(requestedMode)
+  const databaseModes = getGuessSongDatabaseModes(toPublicGuessSongMode(mode))
+  await abandonExpiredPausedSessions(userId, databaseModes, now)
+  const paused = await prisma.guessSongSession.findFirst({
+    where: {
+      userId,
+      mode: databaseModes.length === 1 ? databaseModes[0] : { in: databaseModes },
+      status: 'PAUSED',
+      expiresAt: { gt: now },
+    },
+    orderBy: { updatedAt: 'desc' },
+  })
+  if (paused) {
+    throw new GuessSongServiceError('发现已暂停的游戏，请先选择继续或开始新游戏', 409, 'PAUSED_SESSION_EXISTS')
+  }
   const active = await prisma.guessSongSession.findFirst({
     where: {
       userId,
-      mode: mode === 'EASY' ? { in: ['EASY', 'ENDLESS'] } : mode,
+      mode: databaseModes.length === 1 ? databaseModes[0] : { in: databaseModes },
       status: 'IN_PROGRESS',
     },
     orderBy: { createdAt: 'desc' },
@@ -239,7 +333,7 @@ export async function createOrResumeGuessSongSession(
     return { resumed: true, session: await getGuessSongSessionState(userId, active.id, now) }
   }
   if (active) {
-    await prisma.guessSongSession.update({ where: { id: active.id }, data: { status: 'EXPIRED', activeKey: null } })
+    await expireGuessSongSession(active.id, now)
   }
 
   const quizConfig = await getGuessSongQuizConfigOrDefault()
@@ -252,28 +346,128 @@ export async function createOrResumeGuessSongSession(
 
   try {
     const session = await prisma.$transaction(async (tx) => {
-      const created = await tx.guessSongSession.create({
-        data: {
-          userId,
-          activeKey: `${userId}:${mode}`,
-          mode,
-          clientSessionNonce: createClientSessionNonce(),
-          clientSessionTokenIssuedAt: now,
-          livesRemaining: config.maxWrongCount || GUESS_SONG_INITIAL_LIVES,
-          questionCount: null,
-          expiresAt: sessionExpiry(mode, now),
-          startedAt: now,
-        },
+      return createGuessSongSessionInTransaction(tx, {
+        userId,
+        mode,
+        now,
+        autoEnabled: quizConfig.enabled,
       })
-
-      await createNextInfiniteQuestion(tx, created.id, 1, undefined, mode, quizConfig.enabled)
-      return created
     })
     return { resumed: false, session: await getGuessSongSessionState(userId, session.id, now) }
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const concurrent = await prisma.guessSongSession.findUnique({
         where: { activeKey: `${userId}:${mode}` },
+      })
+      if (concurrent) {
+        if (concurrent.status === 'PAUSED') {
+          throw new GuessSongServiceError('发现已暂停的游戏，请先选择继续或开始新游戏', 409, 'PAUSED_SESSION_EXISTS')
+        }
+        return { resumed: true, session: await getGuessSongSessionState(userId, concurrent.id, now) }
+      }
+    }
+    throw error
+  }
+}
+
+export async function startNewGuessSongSession(
+  userId: string,
+  requestedMode: unknown,
+  replacePausedSessionId: unknown,
+  now = new Date(),
+) {
+  const mode = normalizeGuessSongSessionMode(requestedMode)
+  const pausedSessionId = typeof replacePausedSessionId === 'string'
+    ? replacePausedSessionId.trim()
+    : ''
+  if (!pausedSessionId) {
+    throw new GuessSongServiceError('开始新游戏前缺少要覆盖的暂停存档', 400, 'PAUSED_SESSION_REQUIRED')
+  }
+  const databaseModes = getGuessSongDatabaseModes(toPublicGuessSongMode(mode))
+  await abandonExpiredPausedSessions(userId, databaseModes, now)
+
+  const quizConfig = await getGuessSongQuizConfigOrDefault()
+  if (mode === 'EXPERT' && !quizConfig.expertEnabled) {
+    throw new GuessSongServiceError('专家模式当前未开放', 409, 'EXPERT_DISABLED')
+  }
+  const candidates = await findEligibleQuestions(mode, quizConfig.enabled)
+  if (candidates.length === 0) {
+    throw new GuessSongServiceError(`${GUESS_SONG_MODE_CONFIG[mode].label}模式暂无可用题目`, 409, 'QUESTION_POOL_EMPTY')
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const active = await tx.guessSongSession.findFirst({
+        where: {
+          userId,
+          mode: databaseModes.length === 1 ? databaseModes[0] : { in: databaseModes },
+          status: 'IN_PROGRESS',
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (active) {
+        if (active.expiresAt > now) {
+          return { resumed: true as const, sessionId: active.id }
+        }
+        const expired = await tx.guessSongSession.updateMany({
+          where: { id: active.id, status: 'IN_PROGRESS', expiresAt: { lte: now } },
+          data: { status: 'EXPIRED', completedAt: now, activeKey: null },
+        })
+        if (expired.count === 1) await recordGuessSongLeaderboard(active.id, tx)
+      }
+
+      const paused = await tx.guessSongSession.findUnique({
+        where: { id: pausedSessionId },
+        select: { id: true, userId: true, mode: true, status: true, expiresAt: true },
+      })
+      if (!paused || paused.userId !== userId || !databaseModes.includes(paused.mode)) {
+        throw new GuessSongServiceError('暂停存档不存在或不属于当前模式', 404, 'PAUSED_SESSION_NOT_FOUND')
+      }
+      if (paused.status !== 'PAUSED') {
+        if (paused.status === 'IN_PROGRESS') {
+          return { resumed: true as const, sessionId: paused.id }
+        }
+        throw new GuessSongServiceError('暂停存档已经结束，无法覆盖', 409, 'PAUSED_SESSION_NOT_ACTIVE')
+      }
+      if (paused.expiresAt <= now) {
+        const expired = await tx.guessSongSession.updateMany({
+          where: { id: paused.id, userId, status: 'PAUSED', expiresAt: { lte: now } },
+          data: { status: 'ABANDONED', activeKey: null },
+        })
+        if (expired.count === 1) {
+          throw new GuessSongServiceError('暂停存档已过期，请重新开始', 410, 'PAUSED_SESSION_EXPIRED')
+        }
+        throw new GuessSongServiceError('暂停存档状态已改变，请刷新后重试', 409, 'PAUSED_SESSION_CHANGED')
+      }
+
+      const abandoned = await tx.guessSongSession.updateMany({
+        where: { id: paused.id, userId, status: 'PAUSED', expiresAt: { gt: now } },
+        data: { status: 'ABANDONED', activeKey: null },
+      })
+      if (abandoned.count !== 1) {
+        const current = await tx.guessSongSession.findUnique({ where: { id: paused.id }, select: { status: true } })
+        if (current?.status === 'IN_PROGRESS') return { resumed: true as const, sessionId: paused.id }
+        throw new GuessSongServiceError('暂停存档状态已改变，请刷新后重试', 409, 'PAUSED_SESSION_CHANGED')
+      }
+
+      const created = await createGuessSongSessionInTransaction(tx, {
+        userId,
+        mode,
+        now,
+        autoEnabled: quizConfig.enabled,
+      })
+      return { resumed: false as const, sessionId: created.id }
+    })
+    return { resumed: result.resumed, session: await getGuessSongSessionState(userId, result.sessionId, now) }
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const concurrent = await prisma.guessSongSession.findFirst({
+        where: {
+          userId,
+          mode: databaseModes.length === 1 ? databaseModes[0] : { in: databaseModes },
+          status: 'IN_PROGRESS',
+        },
+        orderBy: { createdAt: 'desc' },
       })
       if (concurrent) {
         return { resumed: true, session: await getGuessSongSessionState(userId, concurrent.id, now) }
@@ -292,8 +486,19 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     throw new GuessSongServiceError('场次不存在或不属于当前用户', 404, 'SESSION_NOT_FOUND')
   }
   if (session.status === 'IN_PROGRESS' && session.expiresAt <= now) {
-    await prisma.guessSongSession.update({ where: { id: session.id }, data: { status: 'EXPIRED', activeKey: null } })
+    await expireGuessSongSession(session.id, now)
     throw new GuessSongServiceError('本场游戏已过期，请重新开始', 410, 'SESSION_EXPIRED')
+  }
+
+  if (session.status === 'PAUSED' && session.expiresAt <= now) {
+    const abandoned = await prisma.guessSongSession.updateMany({
+      where: { id: session.id, userId, status: 'PAUSED', expiresAt: { lte: now } },
+      data: { status: 'ABANDONED', activeKey: null },
+    })
+    if (abandoned.count === 1) {
+      throw new GuessSongServiceError('暂停存档已过期，请重新开始', 410, 'PAUSED_SESSION_EXPIRED')
+    }
+    throw new GuessSongServiceError('暂停存档状态已改变，请刷新后重试', 409, 'PAUSED_SESSION_CHANGED')
   }
 
   const clientCredentials = await ensureClientSessionCredentials(session, null, now)
@@ -332,6 +537,7 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
     currentPosition: session.currentPosition,
     totalQuestions: session.questionCount ?? null,
     expiresAt: session.expiresAt.toISOString(),
+    pausedAt: session.status === 'PAUSED' ? pausedSessionStartedAt(session.expiresAt).toISOString() : null,
     completedAt: session.completedAt?.toISOString() ?? null,
     question: session.status === 'IN_PROGRESS' && currentQuestion
       ? {
@@ -349,6 +555,97 @@ export async function getGuessSongSessionState(userId: string, sessionId: string
         }
       : null,
   }
+}
+
+export async function pauseGuessSongSession(userId: string, sessionId: string, now = new Date()) {
+  await prisma.$transaction(async (tx) => {
+    const session = await tx.guessSongSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, userId: true, status: true, mode: true, expiresAt: true },
+    })
+    if (!session || session.userId !== userId) {
+      throw new GuessSongServiceError('场次不存在或不属于当前用户', 404, 'SESSION_NOT_FOUND')
+    }
+    if (session.status === 'PAUSED') {
+      if (session.expiresAt <= now) {
+        const abandoned = await tx.guessSongSession.updateMany({
+          where: { id: session.id, userId, status: 'PAUSED', expiresAt: { lte: now } },
+          data: { status: 'ABANDONED', activeKey: null },
+        })
+        if (abandoned.count === 1) {
+          throw new GuessSongServiceError('暂停存档已过期，请重新开始', 410, 'PAUSED_SESSION_EXPIRED')
+        }
+        throw new GuessSongServiceError('暂停存档状态已改变，请刷新后重试', 409, 'PAUSED_SESSION_CHANGED')
+      }
+      return
+    }
+    if (session.status !== 'IN_PROGRESS') {
+      throw new GuessSongServiceError('本场游戏已经结束，无法暂停', 409, 'SESSION_NOT_ACTIVE')
+    }
+    if (session.expiresAt <= now) {
+      const expired = await tx.guessSongSession.updateMany({
+        where: { id: session.id, userId, status: 'IN_PROGRESS', expiresAt: { lte: now } },
+        data: { status: 'EXPIRED', completedAt: now, activeKey: null },
+      })
+      if (expired.count === 1) await recordGuessSongLeaderboard(session.id, tx)
+      throw new GuessSongServiceError('本场游戏已过期，请重新开始', 410, 'SESSION_EXPIRED')
+    }
+    const updated = await tx.guessSongSession.updateMany({
+      where: { id: session.id, userId, status: 'IN_PROGRESS', expiresAt: { gt: now } },
+      data: { status: 'PAUSED', expiresAt: pausedSessionExpiry(now) },
+    })
+    if (updated.count === 1) return
+
+    const current = await tx.guessSongSession.findUnique({ where: { id: session.id }, select: { status: true } })
+    if (current?.status === 'PAUSED') return
+    throw new GuessSongServiceError('场次状态已改变，请刷新后重试', 409, 'SESSION_STATE_CHANGED')
+  })
+  return { session: await getGuessSongSessionState(userId, sessionId, now) }
+}
+
+export async function resumeGuessSongSession(userId: string, sessionId: string, now = new Date()) {
+  await prisma.$transaction(async (tx) => {
+    const session = await tx.guessSongSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, userId: true, status: true, mode: true, expiresAt: true },
+    })
+    if (!session || session.userId !== userId) {
+      throw new GuessSongServiceError('场次不存在或不属于当前用户', 404, 'SESSION_NOT_FOUND')
+    }
+    if (session.status === 'PAUSED') {
+      if (session.expiresAt <= now) {
+        const abandoned = await tx.guessSongSession.updateMany({
+          where: { id: session.id, userId, status: 'PAUSED', expiresAt: { lte: now } },
+          data: { status: 'ABANDONED', activeKey: null },
+        })
+        if (abandoned.count === 1) {
+          throw new GuessSongServiceError('暂停存档已过期，请重新开始', 410, 'PAUSED_SESSION_EXPIRED')
+        }
+        throw new GuessSongServiceError('暂停存档状态已改变，请刷新后重试', 409, 'PAUSED_SESSION_CHANGED')
+      }
+      const resumed = await tx.guessSongSession.updateMany({
+        where: { id: session.id, userId, status: 'PAUSED', expiresAt: { gt: now } },
+        data: { status: 'IN_PROGRESS', expiresAt: sessionExpiry(session.mode, now) },
+      })
+      if (resumed.count === 1) return
+      const current = await tx.guessSongSession.findUnique({ where: { id: session.id }, select: { status: true } })
+      if (current?.status === 'IN_PROGRESS') return
+      throw new GuessSongServiceError('暂停存档状态已改变，请刷新后重试', 409, 'PAUSED_SESSION_CHANGED')
+    }
+    if (session.status === 'IN_PROGRESS') {
+      if (session.expiresAt <= now) {
+        const expired = await tx.guessSongSession.updateMany({
+          where: { id: session.id, userId, status: 'IN_PROGRESS', expiresAt: { lte: now } },
+          data: { status: 'EXPIRED', completedAt: now, activeKey: null },
+        })
+        if (expired.count === 1) await recordGuessSongLeaderboard(session.id, tx)
+        throw new GuessSongServiceError('本场游戏已过期，请重新开始', 410, 'SESSION_EXPIRED')
+      }
+      return
+    }
+    throw new GuessSongServiceError('本场游戏已经结束，无法继续', 409, 'SESSION_NOT_RESUMABLE')
+  })
+  return { session: await getGuessSongSessionState(userId, sessionId, now) }
 }
 
 async function getPlayableVariant(userId: string, sessionId: string, publicQuestionId: string, now: Date) {
@@ -370,7 +667,7 @@ async function getPlayableVariant(userId: string, sessionId: string, publicQuest
     throw new GuessSongServiceError('本场游戏已经结束', 409, 'SESSION_FINISHED')
   }
   if (sessionQuestion.GuessSongSession.expiresAt <= now) {
-    await prisma.guessSongSession.update({ where: { id: sessionId }, data: { status: 'EXPIRED', activeKey: null } })
+    await expireGuessSongSession(sessionId, now)
     throw new GuessSongServiceError('本场游戏已过期', 410, 'SESSION_EXPIRED')
   }
   if (sessionQuestion.position !== sessionQuestion.GuessSongSession.currentPosition || sessionQuestion.answeredAt) {
@@ -451,6 +748,7 @@ export async function requestGuessSongPlayback(input: {
         where: { id: playable.sessionQuestion.id },
         select: { playCount: true, maxPlayCount: true, answerDeadlineAt: true },
       })
+      const refreshedExpiresAt = sessionExpiry(playable.sessionQuestion.GuessSongSession.mode, now)
       await Promise.all([
         tx.guessSongPlayRequest.create({
           data: {
@@ -462,7 +760,11 @@ export async function requestGuessSongPlayback(input: {
         }),
         tx.guessSongSession.update({
           where: { id: input.sessionId },
-          data: { totalPlayCount: { increment: 1 } },
+          data: {
+            totalPlayCount: { increment: 1 },
+            // expiresAt is a sliding inactivity deadline, not a fixed game cap.
+            expiresAt: refreshedExpiresAt,
+          },
         }),
         tx.guessSongQuestion.update({
           where: { id: playable.sessionQuestion.questionId },
@@ -474,6 +776,7 @@ export async function requestGuessSongPlayback(input: {
         remainingPlayCount: after.maxPlayCount - after.playCount,
         answerDeadlineAt: after.answerDeadlineAt?.toISOString() ?? null,
         answerAvailableAt: answerDeadlineAtToAvailableAt(after.answerDeadlineAt),
+        expiresAt: refreshedExpiresAt.toISOString(),
       }
     })
     const risk = await GuessSongRiskService.assess({
@@ -507,10 +810,11 @@ export async function requestGuessSongPlayback(input: {
           expiresIn: signedUrlExpires,
           durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
           playCount: existing.playCountAfter,
-          remainingPlayCount: playable.sessionQuestion.maxPlayCount - existing.playCountAfter,
-          answerDeadlineAt: playable.sessionQuestion.answerDeadlineAt?.toISOString() ?? null,
-          answerAvailableAt: answerDeadlineAtToAvailableAt(playable.sessionQuestion.answerDeadlineAt),
-        }
+           remainingPlayCount: playable.sessionQuestion.maxPlayCount - existing.playCountAfter,
+           answerDeadlineAt: playable.sessionQuestion.answerDeadlineAt?.toISOString() ?? null,
+           answerAvailableAt: answerDeadlineAtToAvailableAt(playable.sessionQuestion.answerDeadlineAt),
+           expiresAt: sessionExpiry(playable.sessionQuestion.GuessSongSession.mode, now).toISOString(),
+         }
       }
     }
     throw error
@@ -567,6 +871,16 @@ export async function answerGuessSongQuestion(input: {
   now?: Date
 }) {
   const now = input.now ?? new Date()
+  const preflightSession = await prisma.guessSongSession.findUnique({
+    where: { id: input.sessionId },
+    select: { userId: true, status: true, expiresAt: true },
+  })
+  if (preflightSession?.userId === input.userId
+    && preflightSession.status === 'IN_PROGRESS'
+    && preflightSession.expiresAt <= now) {
+    await expireGuessSongSession(input.sessionId, now)
+    throw new GuessSongServiceError('本场游戏已过期', 410, 'SESSION_EXPIRED')
+  }
   let outcome: AnswerOutcome
   try {
     outcome = await prisma.$transaction<AnswerOutcome>(async (tx) => {
@@ -581,7 +895,6 @@ export async function answerGuessSongQuestion(input: {
       throw new GuessSongServiceError('当前题目不存在或不属于当前用户', 404, 'QUESTION_NOT_FOUND')
     }
     if (question.GuessSongSession.expiresAt <= now) {
-      await tx.guessSongSession.update({ where: { id: input.sessionId }, data: { status: 'EXPIRED', activeKey: null } })
       throw new GuessSongServiceError('本场游戏已过期', 410, 'SESSION_EXPIRED')
     }
     if (question.GuessSongSession.status !== 'IN_PROGRESS') {
@@ -704,6 +1017,8 @@ export async function answerGuessSongQuestion(input: {
         maxStreak: Math.max(question.GuessSongSession.maxStreak, nextStreak),
         livesRemaining,
         currentPosition: completed ? question.position : question.position + 1,
+        // Refresh the inactivity deadline after every server-confirmed answer.
+        expiresAt: sessionExpiry(question.GuessSongSession.mode, now),
         ...(completed ? { status: 'COMPLETED', completedAt: now, activeKey: null } : {}),
       },
     })
@@ -789,7 +1104,7 @@ export async function answerGuessSongQuestion(input: {
 
 export async function abandonGuessSongSession(userId: string, sessionId: string) {
   const updated = await prisma.guessSongSession.updateMany({
-    where: { id: sessionId, userId, status: 'IN_PROGRESS' },
+    where: { id: sessionId, userId, status: { in: ['IN_PROGRESS', 'PAUSED'] } },
     data: { status: 'ABANDONED', activeKey: null },
   })
   if (updated.count !== 1) {
@@ -801,7 +1116,8 @@ export async function abandonGuessSongSession(userId: string, sessionId: string)
 export async function getGuessSongLobbySummary(userId: string, now = new Date()) {
   const week = getGuessSongPeriod('WEEK', now)
   const month = getGuessSongPeriod('MONTH', now)
-  const [weeklyEntries, monthlyEntries, recentSessionRow, activeSessionRows, quizConfig] = await Promise.all([
+  await abandonExpiredPausedSessions(userId, undefined, now)
+  const [weeklyEntries, monthlyEntries, recentSessionRow, activeSessionRows, pausedSessionRows, quizConfig] = await Promise.all([
     prisma.guessSongLeaderboardEntry.findMany({
       where: {
         userId,
@@ -838,6 +1154,20 @@ export async function getGuessSongLobbySummary(userId: string, now = new Date())
       where: { userId, status: 'IN_PROGRESS', expiresAt: { gt: now } },
       select: { id: true, mode: true, currentPosition: true, expiresAt: true },
     }),
+    prisma.guessSongSession.findMany({
+      where: { userId, status: 'PAUSED', expiresAt: { gt: now } },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        mode: true,
+        score: true,
+        currentStreak: true,
+        wrongCount: true,
+        livesRemaining: true,
+        currentPosition: true,
+        expiresAt: true,
+      },
+    }),
     getGuessSongQuizConfigOrDefault(),
   ])
   const recentSession = recentSessionRow
@@ -847,11 +1177,18 @@ export async function getGuessSongLobbySummary(userId: string, now = new Date())
     ...item,
     mode: toPublicGuessSongMode(item.mode),
   }))
+  const pausedSessions = pausedSessionRows.map((item) => ({
+    ...item,
+    mode: toPublicGuessSongMode(item.mode),
+    pausedAt: pausedSessionStartedAt(item.expiresAt).toISOString(),
+    expiresAt: item.expiresAt.toISOString(),
+  }))
   return {
     expertEnabled: quizConfig.expertEnabled,
     weeklyBest: weeklyEntries[0]?.score ?? null,
     monthlyBest: monthlyEntries[0]?.score ?? null,
     recentSession,
     activeSessions,
+    pausedSessions,
   }
 }

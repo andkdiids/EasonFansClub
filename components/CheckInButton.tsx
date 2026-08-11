@@ -173,17 +173,10 @@ export function CheckInButton({
         return
       }
 
-      // POST成功后重新读取数据库真实状态
-const verifyResponse = await fetch('/api/checkin', {
-  cache: 'no-store',
-})
-
-const verifyData = await verifyResponse.json().catch(() => null)
-
-if (!verifyResponse.ok || !verifyData?.checkedToday || !verifyData.todayCheckIn) {
-  setError('签到成功，但状态同步失败，请刷新页面')
-  return
-}
+      if (!data?.checkedToday || !data.todayCheckIn) {
+        setError('签到状态异常，请刷新后重试')
+        return
+      }
 
 const elapsed = Date.now() - submittingStartTime
 const remaining = 1000 - elapsed
@@ -191,43 +184,47 @@ const remaining = 1000 - elapsed
 if (remaining > 0) {
   await new Promise((resolve) => setTimeout(resolve, remaining))
 }
-const nextCheckIn = verifyData.todayCheckIn || null
+      const nextCheckIn = data.todayCheckIn || null
 
-setTodayCheckIn(nextCheckIn)
+      setTodayCheckIn(nextCheckIn)
 
-const nextStats = {
-  level: verifyData.level ?? stats.level,
-  points: verifyData.points ?? stats.points,
-  exp: verifyData.exp ?? stats.exp,
-  consecutiveDays:
-    verifyData.consecutiveDays ?? stats.consecutiveDays,
-}
+      const nextStats = {
+        level: data.level ?? stats.level,
+        points: data.points ?? stats.points,
+        exp: data.exp ?? stats.exp,
+        consecutiveDays: data.consecutiveDays ?? stats.consecutiveDays,
+      }
 
-setStats(nextStats)
+      setStats(nextStats)
 
-onStateChange?.({
-  todayCheckIn: nextCheckIn,
-  stats: nextStats,
-  created: true,
-  todayCount:
-    typeof verifyData.todayCount === 'number'
-      ? verifyData.todayCount
-      : undefined,
-  totalCheckIns:
-    typeof verifyData.totalCheckIns === 'number'
-      ? verifyData.totalCheckIns
-      : undefined,
+      onStateChange?.({
+        todayCheckIn: nextCheckIn,
+        stats: nextStats,
+        created: true,
+        todayCount: typeof data.todayCount === 'number' ? data.todayCount : undefined,
+        totalCheckIns: typeof data.totalCheckIns === 'number' ? data.totalCheckIns : undefined,
       })
       
       const streakBonus = Number(data.streakBonusRegistrationFee) || 0
       const feeMessage = `今日挂号成功，获得 +${nextCheckIn.points} 挂号费、+${nextCheckIn.exp} 经验`
       setMessage(streakBonus ? `${feeMessage}（含长期患者奖励 +${streakBonus} 挂号费）` : feeMessage)
+      let createdMessage = data.dailyMessage || null
+      if (!createdMessage && data.dailyMessageId) {
+        const messagesResponse = await fetch(
+          `/api/checkin/messages?date=${encodeURIComponent(data.checkDate)}&scope=public`,
+          { cache: 'no-store' },
+        )
+        const messagesData = await messagesResponse.json().catch(() => null)
+        createdMessage = Array.isArray(messagesData?.messages)
+          ? messagesData.messages.find((item: { id?: unknown }) => item.id === data.dailyMessageId) || null
+          : null
+      }
       window.dispatchEvent(
         new CustomEvent('checkin:completed', {
           detail: {
             date: data.checkDate,
             hasMessage: Boolean(data.dailyMessageId),
-            dailyMessage: data.dailyMessage || null,
+            dailyMessage: createdMessage,
           },
         }),
       )

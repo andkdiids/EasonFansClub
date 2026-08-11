@@ -2570,6 +2570,7 @@ enum GuessSongProcessingStatus {
 
 enum GuessSongSessionStatus {
   IN_PROGRESS
+  PAUSED
   COMPLETED
   ABANDONED
   EXPIRED

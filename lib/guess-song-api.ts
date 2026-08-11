@@ -2,11 +2,17 @@ import { NextResponse } from 'next/server'
 import { GuessSongServiceError } from '@/lib/guess-song-session'
 
 export function guessSongOk<T>(data: T, status = 200) {
-  return NextResponse.json({ ok: true, data, error: null }, { status })
+  return NextResponse.json(
+    { ok: true, data, error: null },
+    { status, headers: { 'Cache-Control': 'private, no-store' } },
+  )
 }
 
 export function guessSongError(error: string, status: number, code?: string) {
-  return NextResponse.json({ ok: false, data: null, error, code }, { status })
+  return NextResponse.json(
+    { ok: false, data: null, error, code },
+    { status, headers: { 'Cache-Control': 'private, no-store' } },
+  )
 }
 
 export function handleGuessSongError(error: unknown, operation: string) {

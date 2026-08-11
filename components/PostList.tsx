@@ -40,9 +40,10 @@ export function PostList({
   currentUserId,
   emptyText = '暂时还没有帖子。',
   onBoardSelect,
+  onPostOpen,
   responsiveColumns = false,
   total,
-}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string; emptyText?: string; onBoardSelect?: (slug: string) => void; responsiveColumns?: boolean; total?: number }>) {
+}: Readonly<{ posts: PostItem[]; canManage?: boolean; currentUserId?: string; emptyText?: string; onBoardSelect?: (slug: string) => void; onPostOpen?: () => void; responsiveColumns?: boolean; total?: number }>) {
   const [visiblePosts, setVisiblePosts] = useState(posts)
 
   useEffect(() => setVisiblePosts(posts), [posts])
@@ -67,7 +68,7 @@ export function PostList({
         const canDelete = canManage || Boolean(currentUserId && post.author.id === currentUserId)
         return (
           <article key={post.id} data-post-id={post.id} className="post-list-item relative min-w-0">
-            <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} className="absolute inset-0 z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
+            <Link href={`/posts/${post.id}`} aria-label={`查看帖子：${post.title}`} onClick={onPostOpen} className="absolute inset-0 z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
             <div className="post-list-tags relative z-30 flex w-fit flex-wrap items-center gap-2">
               {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
               {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}

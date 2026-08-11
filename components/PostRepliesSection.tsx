@@ -360,6 +360,16 @@ export function PostRepliesSection({
 
   return (
     <section className="post-replies-section space-y-3">
+      {currentUserId && !replyTo ? (
+        <ReplyForm
+          postId={postId}
+          onReplyCancel={() => setReplyTo(null)}
+          onReplyCreated={addReply}
+        />
+      ) : !currentUserId ? (
+        <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
+      ) : null}
+
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
       {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
       {hotReplyIds?.length ? (
@@ -384,15 +394,6 @@ export function PostRepliesSection({
         </div>
       )}
 
-      {currentUserId && !replyTo ? (
-        <ReplyForm
-          postId={postId}
-          onReplyCancel={() => setReplyTo(null)}
-          onReplyCreated={addReply}
-        />
-      ) : !currentUserId ? (
-        <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
-      ) : null}
     </section>
   )
 }

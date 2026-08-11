@@ -79,7 +79,7 @@ test('四种长期模式每题最多播放5次', () => {
   assert.equal(GUESS_SONG_MODE_CONFIG.EASY.maxWrongCount, 3)
   assert.equal(GUESS_SONG_MODE_CONFIG.ADVANCED.maxWrongCount, 3)
   assert.equal(GUESS_SONG_MODE_CONFIG.HARD.maxWrongCount, 3)
-  assert.equal(GUESS_SONG_MODE_CONFIG.EXPERT.maxWrongCount, 5)
+  assert.equal(GUESS_SONG_MODE_CONFIG.EXPERT.maxWrongCount, 3)
 })
 
 test('并发播放由条件更新和唯一幂等键双重限制', () => {
@@ -206,9 +206,10 @@ test('专家搜索接口只返回公开 EasMusic 曲目候选', () => {
   assert.match(route, /take: 12/)
 })
 
-test('未完成场次不写排行榜', () => {
+test('只有服务端确认结束或失效结算的场次才写排行榜', () => {
   const leaderboard = source('lib/guess-song-leaderboard.ts')
-  assert.match(leaderboard, /session\.status !== 'COMPLETED'/)
+  assert.match(leaderboard, /\['COMPLETED', 'EXPIRED'\]/)
+  assert.doesNotMatch(leaderboard, /session\.status === 'IN_PROGRESS'/)
 })
 
 test('周榜按北京时间周一切换', () => {

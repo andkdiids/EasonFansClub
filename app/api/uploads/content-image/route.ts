@@ -13,14 +13,31 @@ const CONTENT_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024 // 8MB（原始上传上限�
 // 注意：sharp 的 metadata.format 为 'jpeg'/'png'/'webp'/'gif' 等，不以 'image' 开头。
 const ALLOWED_IMAGE_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif', 'avif'])
 
+function isMultipartFile(value: FormDataEntryValue | null): value is File {
+  return Boolean(
+    value
+      && typeof value !== 'string'
+      && typeof value.size === 'number'
+      && typeof value.arrayBuffer === 'function',
+  )
+}
+
 export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
-  const form = await request.formData().catch(() => null)
+  let form: FormData | null = null
+  try {
+    form = await request.formData()
+  } catch {
+    return NextResponse.json({ message: '图片上传请求无效，请重新选择图片' }, { status: 400 })
+  }
   const file = form?.get('file')
-  if (!(file instanceof File)) {
+  if (file === null || typeof file === 'string') {
     return NextResponse.json({ message: '未收到图片文件' }, { status: 400 })
+  }
+  if (!isMultipartFile(file)) {
+    return NextResponse.json({ message: '图片文件无效，请重新选择图片' }, { status: 400 })
   }
   if (file.size > CONTENT_IMAGE_MAX_FILE_SIZE) {
     return NextResponse.json({ message: '图片不能超过 8MB' }, { status: 400 })

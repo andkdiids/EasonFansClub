@@ -68,6 +68,10 @@ export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): Anonym
 const checkInMessagesCacheTtlMs = Number(process.env.CHECKIN_MESSAGES_CACHE_TTL_MS || 10000)
 const checkInMessagesCache = new Map<string, { expiresAt: number; promise: Promise<CheckInMessagesResult> }>()
 
+export function invalidateCheckInMessagesCache() {
+  checkInMessagesCache.clear()
+}
+
 export async function getCheckInMessages({
   selectedDate,
   nextDate,

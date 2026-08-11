@@ -88,6 +88,7 @@ export function FriendDock({
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
+  const [friendTotal, setFriendTotal] = useState(0)
   const [loadingList, setLoadingList] = useState(false)
   const [profileFriend, setProfileFriend] = useState<FriendDockUser | null>(null)
   const [conversationId, setConversationId] = useState('')
@@ -188,6 +189,7 @@ export function FriendDock({
         return
       }
       const incoming = Array.isArray(data.friends) ? data.friends as FriendDockUser[] : []
+      if (Number.isSafeInteger(data.total) && data.total >= 0) setFriendTotal(data.total)
       const preserveLoadedPages = silent && friendListPageRef.current > 1 && !append
       if (preserveLoadedPages) {
         const current = friendsRef.current
@@ -750,6 +752,7 @@ export function FriendDock({
               </button>
             </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
+          {!chatFriend ? <span className="friend-dock-count">{friendTotal}个病友</span> : null}
           <div className="friend-dock-header-actions">
             {!chatFriend ? (
               <Link

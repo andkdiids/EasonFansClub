@@ -15,16 +15,69 @@ type WallSender = {
 
 type WallMessage = {
   id: string
+  parentId: string | null
   content: string
   createdAt: string
+  updatedAt?: string
   canDelete: boolean
   liked: boolean
   likeCount: number
-  /** 最新点赞用户（最多 10 个，朋友圈式头像展示）。 */
   likers?: LikeAvatarUser[]
   commentCount: number
   sender: WallSender
   children?: WallMessage[]
+}
+
+function findWallMessage(messages: WallMessage[], id: string): WallMessage | null {
+  for (const message of messages) {
+    if (message.id === id) return message
+    const child = findWallMessage(message.children || [], id)
+    if (child) return child
+  }
+  return null
+}
+
+function findRootId(messages: WallMessage[], id: string): string | null {
+  for (const root of messages) {
+    if (root.id === id) return root.id
+    if (findWallMessage(root.children || [], id)) return root.id
+  }
+  return null
+}
+
+function insertWallMessage(messages: WallMessage[], created: WallMessage) {
+  if (!created.parentId) return { messages: [created, ...messages], inserted: true, rootId: created.id }
+
+  let inserted = false
+  const insert = (items: WallMessage[]): WallMessage[] => items.map((item) => {
+    if (item.id === created.parentId) {
+      inserted = true
+      return { ...item, children: [...(item.children || []), created], commentCount: item.commentCount + 1 }
+    }
+    const children = insert(item.children || [])
+    return children === (item.children || []) ? item : { ...item, children }
+  })
+  const nextMessages = insert(messages)
+  const withCommentCounts = (items: WallMessage[]): WallMessage[] => items.map((item) => {
+    const children = withCommentCounts(item.children || [])
+    return {
+      ...item,
+      children,
+      commentCount: children.reduce((total, child) => total + 1 + child.commentCount, 0),
+    }
+  })
+  const normalizedMessages = withCommentCounts(nextMessages)
+  return { messages: normalizedMessages, inserted, rootId: inserted ? findRootId(normalizedMessages, created.id) : null }
+}
+
+function flattenReplies(children: WallMessage[], parentName: string) {
+  const flattened: Array<{ message: WallMessage; replyToName: string }> = []
+  for (const child of children) {
+    const childName = child.sender.profile?.displayName || child.sender.nickname
+    flattened.push({ message: child, replyToName: parentName })
+    flattened.push(...flattenReplies(child.children || [], childName))
+  }
+  return flattened
 }
 
 export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receiverUid: number; focusId?: string; isOwner?: boolean }) {
@@ -54,16 +107,17 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   }, [receiverUid])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
   useEffect(() => {
     if (!focusId || loading) return
-    const hasTarget = messages.some((message) => message.id === focusId || message.children?.some((child) => child.id === focusId))
-    if (!hasTarget) {
+    const rootId = findRootId(messages, focusId)
+    if (!rootId) {
       setError('该内容已被删除或无法查看')
       return
     }
+    if (rootId !== focusId) setExpanded((current) => ({ ...current, [rootId]: true }))
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(`wall-message-${focusId}`)
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -88,9 +142,18 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || '留言发布失败')
+      const created = data.wallMessage as WallMessage | undefined
       setContent('')
       setReplyTo(null)
-      await load()
+      if (!created?.id) {
+        await load()
+      } else {
+        setMessages((current) => {
+          const result = insertWallMessage(current, created)
+          if (result.inserted && result.rootId) setExpanded((expandedState) => ({ ...expandedState, [result.rootId!]: true }))
+          return result.inserted ? result.messages : current
+        })
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '留言发布失败')
     } finally {
@@ -130,9 +193,7 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
           {replyTo ? (
             <p className="mb-2 text-xs font-black text-brand-700">
               回复 @{replyTo.name}
-              <button className="ml-2 underline" onClick={() => setReplyTo(null)} type="button">
-                取消
-              </button>
+              <button className="ml-2 underline" onClick={() => setReplyTo(null)} type="button">取消</button>
             </p>
           ) : null}
           <textarea
@@ -165,6 +226,7 @@ function WallMessageCard({ message, expanded, isOwner = false, onToggleComments,
   const name = message.sender.profile?.displayName || message.sender.nickname
   const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   const children = message.children || []
+  const replyCount = message.commentCount || children.length
 
   return (
     <article id={`wall-message-${message.id}`} className="scroll-mt-20 rounded-2xl border border-sky-100 bg-white p-3 shadow-sm">
@@ -173,31 +235,62 @@ function WallMessageCard({ message, expanded, isOwner = false, onToggleComments,
           <SafeAvatar src={avatar} name={name} uid={message.sender.uid} className="h-full w-full" />
         </a>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <a href={`/user/${formatUid(message.sender.uid)}`} className="font-black text-brand-950">{name}</a>
-            <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(message.sender.uid)}</span>
-            <span className="text-xs font-bold text-slate-400">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
-          </div>
+          <WallMessageHeader message={message} name={name} />
           <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-700">{message.content}</p>
-          <div className="mt-2 flex gap-3">
+          <WallMessageActions message={message} replyCount={replyCount} expanded={Boolean(expanded[message.id])} onToggleComments={onToggleComments} onLike={onLike} onReply={onReply} onDelete={onDelete} />
+          {isOwner ? <LikeAvatars likers={message.likers || []} totalCount={message.likeCount} listUrl={`/api/profile-wall/${message.id}/like`} className="mt-1.5" /> : null}
+          {children.length && expanded[message.id] ? (
+            <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
+              {flattenReplies(children, name).map(({ message: child, replyToName }) => <WallReplyCard key={child.id} message={child} replyToName={replyToName} isOwner={isOwner} onLike={onLike} onReply={onReply} onDelete={onDelete} />)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function WallMessageHeader({ message, name }: { message: WallMessage; name: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <a href={`/user/${formatUid(message.sender.uid)}`} className="font-black text-brand-950">{name}</a>
+      <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(message.sender.uid)}</span>
+      <span className="text-xs font-bold text-slate-400">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
+    </div>
+  )
+}
+
+function WallMessageActions({ message, replyCount, expanded, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; replyCount: number; expanded: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
+  const name = message.sender.profile?.displayName || message.sender.nickname
+  return (
+    <div className="mt-2 flex flex-wrap gap-3">
+      <button onClick={() => void onLike(message.id)} className="text-xs font-black text-brand-700" type="button">{message.liked ? '取消点赞' : '点赞'} {message.likeCount}</button>
+      {replyCount > 0 ? <button onClick={() => onToggleComments(message.id)} className="text-xs font-black text-brand-700" type="button">{expanded ? '收起回复' : `查看 ${replyCount} 条回复`}</button> : null}
+      <button onClick={() => onReply({ id: message.id, name })} className="text-xs font-black text-brand-700" type="button">回复</button>
+      {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
+    </div>
+  )
+}
+
+function WallReplyCard({ message, replyToName, isOwner, onLike, onReply, onDelete }: { message: WallMessage; replyToName: string; isOwner: boolean; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
+  const name = message.sender.profile?.displayName || message.sender.nickname
+  const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
+  return (
+    <article id={`wall-message-${message.id}`} className="rounded-xl bg-sky-50/60 p-2.5">
+      <div className="flex gap-2.5">
+        <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-white">
+          <SafeAvatar src={avatar} name={name} uid={message.sender.uid} className="h-full w-full" />
+        </a>
+        <div className="min-w-0 flex-1">
+          <WallMessageHeader message={message} name={name} />
+          <p className="mt-1 text-xs font-bold text-brand-700">回复 @{replyToName}</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-700">{message.content}</p>
+          <div className="mt-2 flex flex-wrap gap-3">
             <button onClick={() => void onLike(message.id)} className="text-xs font-black text-brand-700" type="button">{message.liked ? '取消点赞' : '点赞'} {message.likeCount}</button>
-            <button onClick={() => onToggleComments(message.id)} className="text-xs font-black text-brand-700" type="button">评论 {message.commentCount || children.length}</button>
             <button onClick={() => onReply({ id: message.id, name })} className="text-xs font-black text-brand-700" type="button">回复</button>
             {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
           </div>
-          {isOwner ? (
-            <LikeAvatars
-              likers={message.likers || []}
-              totalCount={message.likeCount}
-              listUrl={`/api/profile-wall/${message.id}/like`}
-              className="mt-1.5"
-            />
-          ) : null}
-          {children.length && expanded[message.id] ? (
-            <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
-              {children.map((child) => <WallMessageCard key={child.id} message={child} expanded={{ ...expanded, [child.id]: true }} onToggleComments={onToggleComments} onLike={onLike} onReply={onReply} onDelete={onDelete} />)}
-            </div>
-          ) : null}
+          {isOwner ? <LikeAvatars likers={message.likers || []} totalCount={message.likeCount} listUrl={`/api/profile-wall/${message.id}/like`} className="mt-1.5" /> : null}
         </div>
       </div>
     </article>

@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { PostList } from '@/components/PostList'
+import { Pagination } from '@/components/ui/Pagination'
 import type { ForumFeedResponse, ForumSort } from '@/lib/forum'
-import { buildForumHref, getForumPageWindow, parseForumSort } from '@/lib/forum'
+import { buildForumHref, parseForumSort } from '@/lib/forum'
 
 const sortOptions: Array<[ForumSort, string]> = [
   ['latest', '最新'],
@@ -45,10 +46,27 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   const [error, setError] = useState('')
   const requestSequence = useRef(0)
   const contentRef = useRef<HTMLDivElement>(null)
+  const scrollRestoreAttemptedRef = useRef(false)
 
   function updateQuery(values: Record<string, string | number | null>) {
     if (previewMode) return
-    router.push(buildForumHref(pathname, searchParams.toString(), values), { scroll: false })
+    router.push(buildForumHref(pathname, searchParams.toString(), values), { scroll: true })
+  }
+
+  function goToForumPage(nextPage: number) {
+    const query = queryString
+    const page = nextPage
+    router.push(buildForumHref(pathname, query, { page }), { scroll: true })
+  }
+
+  function saveScrollForPost() {
+    try {
+      const key = `forum-scroll:${window.location.pathname}${window.location.search}`
+      window.sessionStorage.setItem(key, JSON.stringify({ scrollY: window.scrollY }))
+      window.history.replaceState({ ...(window.history.state || {}), __forumDetailReturnKey: key }, '', window.location.href)
+    } catch {
+      // Scroll restoration is an enhancement; navigation remains usable if storage is unavailable.
+    }
   }
 
   useEffect(() => setSearchValue(query), [query])
@@ -62,7 +80,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
       if (value) next.set('query', value)
       else next.delete('query')
       next.delete('page')
-      router.push(`${pathname}${next.size ? `?${next.toString()}` : ''}`, { scroll: false })
+      router.push(`${pathname}${next.size ? `?${next.toString()}` : ''}`, { scroll: true })
     }, 350)
     return () => window.clearTimeout(timer)
   }, [pathname, previewMode, query, queryString, router, searchValue])
@@ -94,6 +112,51 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
       })
     return () => controller.abort()
   }, [board, page, previewMode, query, sort])
+
+  useEffect(() => {
+    if (previewMode || !data || loading || data.page === page) return
+    router.replace(buildForumHref(pathname, queryString, { page: data.page }), { scroll: false })
+  }, [data, loading, page, pathname, previewMode, queryString, router])
+
+  useEffect(() => {
+    scrollRestoreAttemptedRef.current = false
+    if (previewMode || !data || loading || scrollRestoreAttemptedRef.current) return
+    const key = `forum-scroll:${pathname}${queryString ? `?${queryString}` : ''}`
+
+    function restoreScrollIfReturning() {
+      if (scrollRestoreAttemptedRef.current) return
+      const state = window.history.state as { __forumDetailReturnKey?: string } | null
+      if (state?.__forumDetailReturnKey !== key) return
+      const raw = window.sessionStorage.getItem(key)
+      if (!raw) return
+      let target = 0
+      try {
+        target = Number((JSON.parse(raw) as { scrollY?: number }).scrollY)
+      } catch {
+        return
+      }
+      if (!Number.isFinite(target) || target < 0) return
+
+      let frame = 0
+      const restore = () => {
+        frame += 1
+        const contentReady = document.documentElement.scrollHeight >= target + window.innerHeight
+        if (!contentReady && frame < 5) {
+          window.requestAnimationFrame(restore)
+          return
+        }
+        window.scrollTo({ top: target, behavior: 'auto' })
+        scrollRestoreAttemptedRef.current = true
+        window.sessionStorage.removeItem(key)
+        window.history.replaceState({ ...(window.history.state || {}), __forumDetailReturnKey: undefined }, '', window.location.href)
+      }
+      window.requestAnimationFrame(restore)
+    }
+
+    restoreScrollIfReturning()
+    window.addEventListener('pageshow', restoreScrollIfReturning)
+    return () => window.removeEventListener('pageshow', restoreScrollIfReturning)
+  }, [data, loading, pathname, previewMode, queryString])
 
   const createHref = board ? `/posts/new?board=${encodeURIComponent(board)}` : '/posts/new'
   const emptyText = sort === 'featured' ? '当前筛选下暂无精华帖子' : sort === 'pinned' ? '当前筛选下暂无置顶帖子' : '当前筛选下暂无帖子'
@@ -133,28 +196,18 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         {loading && !data ? <div className="forum-loading" aria-label="正在加载"><div /><div /><div /></div> : null}
         {error ? <div className="flat-error-state">{error}</div> : null}
         {loading && data ? <p aria-live="polite" className="forum-loading-note">正在加载第 {page} 页…</p> : null}
-        {!error && data ? <PostList posts={data.posts} total={data.total} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} /> : null}
+        {!error && data ? <PostList posts={data.posts} total={data.total} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} onPostOpen={saveScrollForPost} /> : null}
         {data && data.totalPages > 1 ? (
-          <nav aria-label="论坛分页" className="forum-pagination flex flex-wrap items-center justify-center">
-            <ForumPageLink label="首页" page={1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} edge />
-            <ForumPageLink label="上一页" page={page - 1} currentPage={page} disabled={page <= 1 || loading} pathname={pathname} query={queryString} />
-            {getForumPageWindow(page, data.totalPages).map((pageNumber) => (
-              <ForumPageLink key={pageNumber} label={String(pageNumber)} page={pageNumber} currentPage={page} disabled={loading} pathname={pathname} query={queryString} numbered />
-            ))}
-            <ForumPageLink label="下一页" page={page + 1} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} />
-            <ForumPageLink label="末页" page={data.totalPages} currentPage={page} disabled={page >= data.totalPages || loading} pathname={pathname} query={queryString} edge />
-          </nav>
+          <Pagination
+            currentPage={data.page}
+            totalPages={data.totalPages}
+            onPageChange={goToForumPage}
+            disabled={loading}
+            ariaLabel="论坛分页"
+            className="forum-pagination"
+          />
         ) : null}
       </div>
     </section>
   )
-}
-
-function ForumPageLink({ label, page, currentPage, disabled, pathname, query, numbered = false, edge = false }: { label: string; page: number; currentPage: number; disabled: boolean; pathname: string; query: string; numbered?: boolean; edge?: boolean }) {
-  const className = numbered
-    ? `grid h-10 min-w-10 place-items-center rounded-full px-2 text-xs font-black ${page === currentPage ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'}`
-    : `grid min-h-10 place-items-center rounded-full bg-sky-50 px-3 py-2 text-xs font-black text-brand-700 ${edge ? 'forum-pagination-edge' : ''}`
-  if (page === currentPage) return <span aria-current="page" className={className}>{label}</span>
-  if (disabled) return <span aria-disabled="true" className={`${className} cursor-not-allowed opacity-40`}>{label}</span>
-  return <Link href={buildForumHref(pathname, query, { page })} scroll={false} className={className}>{label}</Link>
 }
