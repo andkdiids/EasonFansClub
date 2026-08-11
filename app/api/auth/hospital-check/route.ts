@@ -4,6 +4,7 @@ import { consumeHospitalCheckStartRateLimit } from '@/lib/registration-rate-limi
 import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { createUUID } from '@/lib/utils/uuid'
+import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
@@ -18,6 +19,9 @@ function handleError(error: unknown, requestId = createUUID()) {
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
+  const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return NextResponse.json({ message: availabilityError.message, code: availabilityError.code, ...availabilityError.meta }, { status: availabilityError.status, headers: noStoreHeaders })
   const startedAt = Date.now()
   const body = await request.json().catch(() => null)
   const suppliedRequestId = String(body?.requestId ?? '').trim()
@@ -46,6 +50,9 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
+  const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return NextResponse.json({ message: availabilityError.message, code: availabilityError.code, ...availabilityError.meta }, { status: availabilityError.status, headers: noStoreHeaders })
   try {
     const url = new URL(request.url)
     const registrationToken = url.searchParams.get('registrationToken')?.trim() || ''

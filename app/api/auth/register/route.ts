@@ -10,7 +10,7 @@ import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-a
 import { MySqlAdvisoryLockBusyError, createMySqlAdvisoryLockName, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
-import { getRegistrationPolicy } from '@/lib/registration'
+import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { MAX_UID } from '@/lib/uid'
@@ -71,6 +71,10 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json().catch(() => null)
+    const policy = await getRegistrationPolicy()
+    const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+    if (availabilityError) return jsonError(availabilityError.message, availabilityError.status, availabilityError.code, {}, availabilityError.meta)
+
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() || ''
     const idempotencyKeyHash = idempotencyKey.length >= 16 && idempotencyKey.length <= 128 ? hashToken(idempotencyKey) : null
     if (idempotencyKeyHash) {
@@ -81,8 +85,7 @@ export async function POST(request: Request) {
       if (replayUser) return authenticatedResponse(request, replayUser, 200, { message: '注册已完成，正在进入私家E院', idempotentReplay: true })
     }
 
-    const policy = await getRegistrationPolicy()
-    if (!policy.allowRegister || policy.registrationMode === 'CLOSED' || !policy.allowEmailRegistration) {
+    if (policy.registrationClosed || !policy.allowEmailRegistration) {
       return jsonError('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
     }
 

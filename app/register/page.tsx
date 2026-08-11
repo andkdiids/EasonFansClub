@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
 import { getRegistrationPolicy } from '@/lib/registration'
+import { serializeRegistrationAvailability } from '@/lib/registration-availability'
 import { getSiteAppearance } from '@/lib/site-config'
 import { RegisterForm } from './RegisterForm'
 
@@ -41,6 +42,7 @@ export default async function RegisterPage() {
           envForcedClosed: policy.envForcedClosed,
           requireSecurityQuestionsForNewUsers: policy.requireSecurityQuestionsForNewUsers,
           ehospitalCheckEnabled: policy.ehospitalCheckEnabled,
+          registrationAvailability: serializeRegistrationAvailability(policy.registrationAvailability),
         }}
       />
     </AuthFormShell>

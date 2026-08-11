@@ -1,6 +1,39 @@
 import { prisma } from '@/lib/prisma'
 import { getAccountSecuritySettings } from '@/lib/account-security'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
+import type { Prisma } from '@prisma/client'
+import {
+  isValidRegistrationControlMode,
+  isValidRegistrationControlOverride,
+  resolveRegistrationAvailability,
+  type RegistrationAvailability,
+  type RegistrationControlSettings,
+} from '@/lib/registration-availability'
+
+export {
+  formatBeijingDateTimeDisplay,
+  formatBeijingDateTimeInput,
+  getRegistrationAvailabilityError,
+  isValidRegistrationControlMode,
+  isValidRegistrationControlOverride,
+  parseBeijingDateTime,
+  parseRegistrationControlInput,
+  registrationAvailabilityStatuses,
+  registrationControlModes,
+  registrationControlOverrides,
+  resolveRegistrationAvailability,
+  serializeRegistrationAvailability,
+  serializeRegistrationControlSettings,
+} from '@/lib/registration-availability'
+export type {
+  RegistrationAvailability,
+  RegistrationAvailabilityPayload,
+  RegistrationAvailabilityStatus,
+  RegistrationControlMode,
+  RegistrationControlOverride,
+  RegistrationControlPayload,
+  RegistrationControlSettings,
+} from '@/lib/registration-availability'
 
 export const registrationModes = ['PHONE', 'EMAIL', 'BOTH', 'CLOSED'] as const
 export type RegistrationMode = (typeof registrationModes)[number]
@@ -15,6 +48,13 @@ export const registrationModeLabels: Record<RegistrationMode, string> = {
 
 const registrationModeSettingKey = 'registration.mode'
 const registrationLimitSettingKey = 'registrationLimitEnabled'
+
+const registrationControlSettingDefinitions = {
+  mode: { key: 'registration.control.mode', defaultValue: 'MANUAL', label: '注册开放模式' },
+  opensAt: { key: 'registration.control.opensAt', defaultValue: '', label: '注册开放开始时间' },
+  closesAt: { key: 'registration.control.closesAt', defaultValue: '', label: '注册开放结束时间' },
+  override: { key: 'registration.control.override', defaultValue: 'NONE', label: '注册开放状态覆盖' },
+} as const
 
 export function isValidRegistrationMode(value: unknown): value is RegistrationMode {
   return typeof value === 'string' && registrationModes.includes(value as RegistrationMode)
@@ -82,18 +122,77 @@ export async function setRegistrationLimitEnabled(enabled: boolean) {
   })
 }
 
+function parseStoredDate(value: string | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+export async function getRegistrationControlSettings(): Promise<RegistrationControlSettings> {
+  const rows = await prisma.siteSetting.findMany({
+    where: { key: { in: Object.values(registrationControlSettingDefinitions).map((item) => item.key) } },
+    select: { key: true, value: true },
+  })
+  const values = new Map(rows.map((row) => [row.key, row.value]))
+  const modeValue = values.get(registrationControlSettingDefinitions.mode.key)
+  const overrideValue = values.get(registrationControlSettingDefinitions.override.key)
+  return {
+    mode: isValidRegistrationControlMode(modeValue) ? modeValue : 'MANUAL',
+    opensAt: parseStoredDate(values.get(registrationControlSettingDefinitions.opensAt.key)),
+    closesAt: parseStoredDate(values.get(registrationControlSettingDefinitions.closesAt.key)),
+    override: isValidRegistrationControlOverride(overrideValue) ? overrideValue : 'NONE',
+  }
+}
+
+export async function setRegistrationControlSettings(
+  settings: RegistrationControlSettings,
+  database: Pick<Prisma.TransactionClient, 'siteSetting'> = prisma,
+) {
+  const values = {
+    mode: settings.mode,
+    opensAt: settings.opensAt?.toISOString() || '',
+    closesAt: settings.closesAt?.toISOString() || '',
+    override: settings.override,
+  }
+  await Promise.all(Object.entries(registrationControlSettingDefinitions).map(([name, definition]) => database.siteSetting.upsert({
+    where: { key: definition.key },
+    update: { value: values[name as keyof typeof values], valueType: 'TEXT', group: 'system', label: definition.label },
+    create: { key: definition.key, value: values[name as keyof typeof values], valueType: 'TEXT', group: 'system', label: definition.label },
+  })))
+}
+
+/**
+ * The single server-side source of truth for the current registration window.
+ * Callers may pass the already-loaded settings from getRegistrationPolicy so
+ * the policy path does not issue a second configuration query.
+ */
+export async function getRegistrationAvailability(input: {
+  baseRegistrationOpen: boolean
+  settings?: RegistrationControlSettings
+  now?: Date
+}): Promise<RegistrationAvailability> {
+  const settings = input.settings || await getRegistrationControlSettings()
+  return resolveRegistrationAvailability({ settings, baseRegistrationOpen: input.baseRegistrationOpen, now: input.now })
+}
+
 export async function getRegistrationPolicy() {
   const allowRegister = isRegisterEnvAllowed()
-  const registrationMode = await getStoredRegistrationMode()
   const enableTurnstile = isTurnstileEnabled()
-  const [securitySettings, hospitalConfig, registrationLimitEnabled] = await Promise.all([
+  const [registrationMode, registrationControl, securitySettings, hospitalConfig, registrationLimitEnabled] = await Promise.all([
+    getStoredRegistrationMode(),
+    getRegistrationControlSettings(),
     getAccountSecuritySettings(),
     getEHospitalCheckConfig(),
     getRegistrationLimitEnabled(),
   ])
   const allowPhoneRegistration = allowRegister && (registrationMode === 'PHONE' || registrationMode === 'BOTH')
-  const allowEmailRegistration = allowRegister && (registrationMode === 'EMAIL' || registrationMode === 'BOTH')
-  const registrationClosed = !allowRegister || registrationMode === 'CLOSED' || (!allowPhoneRegistration && !allowEmailRegistration)
+  const legacyEmailRegistrationEnabled = registrationMode === 'EMAIL' || registrationMode === 'BOTH'
+  // The emergency OPEN action is allowed to recover from the legacy CLOSED
+  // switch without rewriting the legacy registration-channel setting.
+  const allowEmailRegistration = allowRegister && (legacyEmailRegistrationEnabled || (registrationMode === 'CLOSED' && registrationControl.override === 'OPEN'))
+  const baseRegistrationOpen = allowEmailRegistration
+  const registrationAvailability = await getRegistrationAvailability({ settings: registrationControl, baseRegistrationOpen })
+  const registrationClosed = !registrationAvailability.isOpen
 
   return {
     allowRegister,
@@ -102,6 +201,8 @@ export async function getRegistrationPolicy() {
     allowPhoneRegistration,
     allowEmailRegistration,
     registrationClosed,
+    registrationControl,
+    registrationAvailability,
     enableTurnstile,
     turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '',
     envForcedClosed: !allowRegister,

@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server'
 import { answerEHospitalCheck, EHospitalCheckError } from '@/lib/ehospital-check'
 import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
+import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
+  const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return NextResponse.json({ message: availabilityError.message, code: availabilityError.code, ...availabilityError.meta }, { status: availabilityError.status, headers: noStoreHeaders })
   try {
     const body = await request.json().catch(() => null)
     const registrationToken = String(body?.registrationToken ?? '').trim()

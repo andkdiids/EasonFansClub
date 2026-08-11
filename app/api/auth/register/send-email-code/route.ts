@@ -3,7 +3,7 @@ import { sendRegistrationVerificationCode } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, createRegistrationCode, hashRegistrationCode, REGISTRATION_CODE_TTL_MS } from '@/lib/registration-draft'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
-import { getRegistrationLimitEnabled } from '@/lib/registration'
+import { getRegistrationAvailabilityError, getRegistrationLimitEnabled, getRegistrationPolicy } from '@/lib/registration'
 import { checkDailyRegistrationEmailCodeLimit, recordSuccessfulRegistrationEmailCodeSend } from '@/lib/registration-rate-limit'
 import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { findActiveConflict } from '@/lib/users'
@@ -12,13 +12,17 @@ import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
-function errorResponse(message: string, status: number, code: string, errors: Record<string, string> = {}) {
-  return NextResponse.json({ ok: false, message, code, errors }, { status, headers: noStoreHeaders })
+function errorResponse(message: string, status: number, code: string, errors: Record<string, string> = {}, meta: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: false, message, code, errors, ...meta }, { status, headers: noStoreHeaders })
 }
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
+
+  const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return errorResponse(availabilityError.message, availabilityError.status, availabilityError.code, {}, availabilityError.meta)
 
   const body = await request.json().catch(() => null)
   const registrationToken = normalizeText(body?.registrationToken)

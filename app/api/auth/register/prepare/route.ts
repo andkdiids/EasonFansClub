@@ -4,7 +4,7 @@ import { hashSecurityQuestions, parseSecurityQuestions, validateSecurityQuestion
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, REGISTRATION_DRAFT_TTL_MS } from '@/lib/registration-draft'
-import { getRegistrationPolicy } from '@/lib/registration'
+import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
@@ -14,8 +14,8 @@ import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
-function errorResponse(message: string, status: number, code: string, errors: Record<string, string> = {}) {
-  return NextResponse.json({ message, code, errors }, { status, headers: noStoreHeaders })
+function errorResponse(message: string, status: number, code: string, errors: Record<string, string> = {}, meta: Record<string, unknown> = {}) {
+  return NextResponse.json({ message, code, errors, ...meta }, { status, headers: noStoreHeaders })
 }
 
 function unicodeLength(value: string) {
@@ -28,6 +28,8 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null)
   const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return errorResponse(availabilityError.message, availabilityError.status, availabilityError.code, {}, availabilityError.meta)
 
   // The registration flow now always uses email verification. Phone is required
   // as a login/recovery field and is deliberately not a verification channel.

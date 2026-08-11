@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashRegistrationCode, normalizeRegistrationCode } from '@/lib/registration-draft'
+import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 
@@ -9,6 +10,10 @@ const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
+
+  const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return NextResponse.json({ message: availabilityError.message, code: availabilityError.code, ...availabilityError.meta }, { status: availabilityError.status, headers: noStoreHeaders })
 
   const body = await request.json().catch(() => null)
   const registrationToken = String(body?.registrationToken ?? '').trim()

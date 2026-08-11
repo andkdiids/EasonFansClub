@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FormError } from '@/components/FormError'
-import type { RegistrationMode } from '@/lib/registration'
+import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
+import type { RegistrationAvailabilityPayload, RegistrationMode } from '@/lib/registration'
 
 declare global {
   interface Window {
@@ -26,6 +27,7 @@ type RegisterPolicy = {
   envForcedClosed: boolean
   requireSecurityQuestionsForNewUsers: boolean
   ehospitalCheckEnabled: boolean
+  registrationAvailability: RegistrationAvailabilityPayload
 }
 
 type RegisterErrors = Partial<Record<
@@ -70,6 +72,14 @@ type PreparedRegistration = {
 const errorFieldOrder: Array<keyof RegisterErrors> = [
   'nickname', 'phone', 'password', 'confirmPassword', 'email', 'securityQuestions', 'acceptedAgreement', 'turnstileToken', 'hospitalCheck', 'emailCode', 'form',
 ]
+
+function formatCountdown(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remainder = seconds % 60
+  return [hours, minutes, remainder].map((value) => String(value).padStart(2, '0')).join(':')
+}
 
 function unicodeLength(value: string) {
   return Array.from(value).length
@@ -121,6 +131,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [hospitalNextState, setHospitalNextState] = useState<HospitalState | null>(null)
   const [errors, setErrors] = useState<RegisterErrors>({})
   const [message, setMessage] = useState('')
+  const [registrationAvailability, setRegistrationAvailability] = useState(policy.registrationAvailability)
+  const [registrationClock, setRegistrationClock] = useState(() => Date.now())
   const [isPreparing, setIsPreparing] = useState(false)
   const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -138,7 +150,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const mountedRef = useRef(true)
   const automaticEmailKeyRef = useRef('')
   const registrationRestoreInitializedRef = useRef(false)
-  const shouldRenderTurnstile = policy.enableTurnstile && Boolean(policy.turnstileSiteKey) && !policy.registrationClosed
+  const registrationIsOpen = registrationAvailability.isOpen && policy.allowEmailRegistration
+  const shouldRenderTurnstile = policy.enableTurnstile && Boolean(policy.turnstileSiteKey) && registrationIsOpen
   const hospitalPassed = !policy.ehospitalCheckEnabled || hospitalState?.status === 'PASSED'
   const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed
   const isRegistrationComplete = Object.keys(validateRegistrationFields()).length === 0
@@ -163,6 +176,33 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   useEffect(() => {
     if (registrationReadyToCollapse) setRegistrationDetailsExpanded(false)
   }, [registrationReadyToCollapse])
+
+  useEffect(() => {
+    if (registrationAvailability.status !== 'WAITING' && registrationAvailability.status !== 'OPEN') return
+    let disposed = false
+    const refreshRegistrationAvailability = async () => {
+      try {
+        const response = await fetch('/api/auth/register/status', { cache: 'no-store', headers: { Accept: 'application/json' } })
+        const data = await response.json().catch(() => ({})) as { data?: RegistrationAvailabilityPayload }
+        if (!disposed && response.ok && data.data) setRegistrationAvailability(data.data)
+      } catch {
+        // The server remains the source of truth; the next poll retries.
+      }
+    }
+    void refreshRegistrationAvailability()
+    const timer = window.setInterval(() => { void refreshRegistrationAvailability() }, 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [registrationAvailability.status])
+
+  useEffect(() => {
+    if (registrationAvailability.status !== 'WAITING') return
+    setRegistrationClock(Date.now())
+    const timer = window.setInterval(() => setRegistrationClock(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [registrationAvailability.status])
 
   useEffect(() => {
     if (!shouldRenderTurnstile || !turnstileRef.current || widgetIdRef.current) return
@@ -983,8 +1023,26 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
   }, [clearHospitalAudioTimer, hospitalModalOpen, hospitalQuestionId, hospitalAudioUrl, hospitalState, playHospitalAudio])
 
-  if (policy.registrationClosed || !policy.allowEmailRegistration) {
-    return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">网站当前暂未开放邮箱验证注册，请关注后续公告。</div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
+  if (!registrationIsOpen) {
+    if (registrationAvailability.mode === 'SCHEDULED' && registrationAvailability.status === 'WAITING') {
+      const opensAt = registrationAvailability.opensAt ? new Date(registrationAvailability.opensAt).getTime() : NaN
+      const secondsUntilOpen = Number.isFinite(opensAt) ? Math.max(0, (opensAt - registrationClock) / 1000) : 0
+      return (
+        <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-amber-900">
+          <p className="text-sm font-black">本轮开放注册时间</p>
+          <p className="text-xl font-black leading-8">{formatBeijingDateTimeDisplay(registrationAvailability.opensAt)}</p>
+          <p className="text-xs font-black text-amber-800">北京时间</p>
+          <p className="text-sm font-bold leading-6">注册入口将在开放时间自动开启，请在开放时间后完成入院登记。</p>
+          <p className="text-xs font-black text-amber-800">距离开放还有 <span className="font-mono text-base">{formatCountdown(secondsUntilOpen)}</span></p>
+        </div>
+      )
+    }
+
+    if (registrationAvailability.mode === 'SCHEDULED' && registrationAvailability.status === 'ENDED') {
+      return <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-bold leading-6 text-slate-700"><p className="font-black text-slate-900">本轮注册已结束</p><p>下一次开放时间请留意后续公告。</p></div>
+    }
+
+    return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">注册暂未开放。</div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
   }
 
   const hospitalLabel = !policy.ehospitalCheckEnabled

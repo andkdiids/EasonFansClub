@@ -1,13 +1,25 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getRegistrationAvailabilityError, getRegistrationPolicy, serializeRegistrationAvailability } from '@/lib/registration'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
+export const dynamic = 'force-dynamic'
+
+export async function GET() {
+  const policy = await getRegistrationPolicy()
+  return NextResponse.json({ ok: true, data: serializeRegistrationAvailability(policy.registrationAvailability) }, { headers: noStoreHeaders })
+}
+
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
+
+  const policy = await getRegistrationPolicy()
+  const availabilityError = getRegistrationAvailabilityError(policy.registrationAvailability)
+  if (availabilityError) return NextResponse.json({ message: availabilityError.message, code: availabilityError.code, ...availabilityError.meta }, { status: availabilityError.status, headers: noStoreHeaders })
 
   const body = await request.json().catch(() => null)
   const token = String(body?.registrationToken ?? '').trim()

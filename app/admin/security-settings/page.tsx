@@ -1,8 +1,9 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { getAccountSecuritySettings } from '@/lib/account-security'
-import { getRegistrationPolicy } from '@/lib/registration'
+import { getRegistrationPolicy, serializeRegistrationAvailability, serializeRegistrationControlSettings } from '@/lib/registration'
 import { RegistrationSettingsForm } from '../settings/RegistrationSettingsForm'
+import { RegistrationControlForm } from './RegistrationControlForm'
 import { SecuritySettingsForm } from './SecuritySettingsForm'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,12 @@ export default async function AdminSecuritySettingsPage() {
       </section>
       <section id="security-settings" className="scroll-mt-24">
         <SecuritySettingsForm initial={settings} />
+      </section>
+      <section id="registration-open-control" className="scroll-mt-24">
+        <RegistrationControlForm
+          initialControl={serializeRegistrationControlSettings(policy.registrationControl)}
+          initialAvailability={serializeRegistrationAvailability(policy.registrationAvailability)}
+        />
       </section>
     </main>
   )
