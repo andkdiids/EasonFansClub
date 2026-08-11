@@ -50,12 +50,26 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .prescription-lyric cite { display:block; max-width:720px; margin:12px auto 0; color:var(--foreground-muted); font-size:12px; font-style:normal; text-align:right; }
 .prescription-lyric p { margin:16px 0 0; color:var(--foreground-muted); font-size:13px; }
 .prescription-card>footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 20px; border-top:1px solid var(--border); padding:13px 18px; color:var(--foreground-muted); font-size:10px; }
-.prescription-save-action { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-left:auto; }
-.prescription-save-button { min-height:36px; border:1px solid var(--success); border-radius:2px; padding:0 14px; color:var(--success); background:transparent; font-size:11px; font-weight:850; cursor:pointer; }
+.prescription-save-action { position:relative; z-index:1; display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-left:auto; }
+.prescription-save-button { position:relative; z-index:1; min-height:36px; border:1px solid var(--success); border-radius:2px; padding:0 14px; color:var(--success); background:transparent; font-size:11px; font-weight:850; cursor:pointer; pointer-events:auto; touch-action:manipulation; }
 .prescription-save-button:hover:not(:disabled) { color:var(--surface); background:var(--success); }
 .prescription-save-button:disabled { cursor:wait; opacity:.62; }
 .prescription-save-message { color:var(--foreground-muted); font-size:10px; }
 .daily-prescription-footer { display:flex; justify-content:flex-end; margin-top:4px; }
+.prescription-preview-backdrop { position:fixed; z-index:100000; inset:0; display:flex; align-items:center; justify-content:center; padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); background:rgba(2,8,18,.74); pointer-events:auto; touch-action:manipulation; }
+.prescription-preview-dialog { width:min(960px,100%); max-height:calc(100dvh - 32px); overflow:auto; border:1px solid var(--border-strong); border-radius:16px; padding:20px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 24px 80px rgba(0,0,0,.36); }
+.prescription-preview-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.prescription-preview-header p { margin:0; color:var(--success); font-size:10px; font-weight:850; letter-spacing:.16em; }
+.prescription-preview-header h2 { margin:6px 0 0; font-size:22px; }
+.prescription-preview-close { display:grid; width:40px; height:40px; flex:none; place-items:center; border:1px solid var(--border); border-radius:50%; color:var(--foreground-muted); background:transparent; font-size:24px; line-height:1; cursor:pointer; touch-action:manipulation; }
+.prescription-preview-hint { margin:12px 0 0; color:var(--foreground-muted); font-size:12px; }
+.prescription-preview-image-wrap { display:flex; max-height:calc(100dvh - 245px); align-items:center; justify-content:center; margin-top:16px; overflow:auto; border:1px solid var(--border); padding:8px; background:var(--background); }
+.prescription-preview-image { display:block; width:min(100%,900px); height:auto; max-height:calc(100dvh - 265px); object-fit:contain; -webkit-touch-callout:default; user-select:none; touch-action:pinch-zoom; }
+.prescription-preview-message { min-height:18px; margin:10px 0 0; color:var(--foreground-muted); font-size:11px; text-align:center; }
+.prescription-preview-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:12px; }
+.prescription-preview-actions button { min-height:40px; border:1px solid var(--border-strong); border-radius:2px; padding:0 14px; color:var(--foreground); background:var(--surface); font-size:11px; font-weight:850; cursor:pointer; touch-action:manipulation; }
+.prescription-preview-actions .prescription-preview-share { border-color:var(--success); color:var(--surface); background:var(--success); }
+.prescription-preview-actions .prescription-preview-dismiss { color:var(--foreground-muted); background:transparent; }
 :root[data-theme='midnight'] .prescription-card { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
 :root[data-theme='midnight'] .prescription-card :where(blockquote,strong,p) { color:inherit; }
 :root[data-theme='midnight'] .prescription-points strong { color:var(--primary); }
@@ -71,6 +85,13 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
   .prescription-card { margin:14px; }
   .prescription-card>header { align-items:flex-start; flex-direction:column; }
   .prescription-lyric blockquote { font-size:18px; }
+  .prescription-preview-backdrop { align-items:flex-end; padding:0; }
+  .prescription-preview-dialog { width:100%; max-height:100dvh; border-right:0; border-bottom:0; border-bottom-right-radius:0; border-bottom-left-radius:0; border-radius:20px 20px 0 0; padding:18px 14px calc(16px + env(safe-area-inset-bottom)); }
+  .prescription-preview-image-wrap { max-height:calc(100dvh - 230px); margin-top:14px; padding:4px; }
+  .prescription-preview-image { max-height:calc(100dvh - 250px); }
+  .prescription-preview-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .prescription-preview-actions button { width:100%; }
+  .prescription-preview-actions .prescription-preview-dismiss { grid-column:1 / -1; }
 }
 
 :root {

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useEffect, useState } from 'react'
 
 export type PrescriptionImageData = Readonly<{
   dateKey: string
@@ -224,6 +225,28 @@ function drawPrescriptionCanvas(data: PrescriptionImageData, palette: Prescripti
   return canvas
 }
 
+type GeneratedPrescriptionImage = Readonly<{
+  blob: Blob
+  filename: string
+  previewSrc: string
+  previewSrcIsObjectUrl: boolean
+}>
+
+type ShareResult = 'shared' | 'unsupported' | 'cancelled' | 'failed'
+
+function dataUrlToBlob(dataUrl: string) {
+  const separatorIndex = dataUrl.indexOf(',')
+  if (separatorIndex < 0) throw new Error('PRESCRIPTION_DATA_URL_INVALID')
+
+  const header = dataUrl.slice(0, separatorIndex)
+  const payload = dataUrl.slice(separatorIndex + 1)
+  const mimeType = header.match(/^data:([^;]+);base64$/)?.[1] || 'image/png'
+  const binary = atob(payload)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return new Blob([bytes], { type: mimeType })
+}
+
 function canvasToBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -234,6 +257,7 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
 }
 
 function downloadBlob(blob: Blob, filename: string) {
+  if (typeof URL.createObjectURL !== 'function') throw new Error('BLOB_DOWNLOAD_UNAVAILABLE')
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -251,60 +275,215 @@ function isMobileBrowser() {
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
-async function savePrescriptionImage(data: PrescriptionImageData) {
-  if (document.fonts?.ready) await document.fonts.ready
-
+async function generatePrescriptionImage(data: PrescriptionImageData): Promise<GeneratedPrescriptionImage> {
+  const mobile = isMobileBrowser()
   const theme = readWebsiteTheme()
   const canvas = drawPrescriptionCanvas(data, readPalette(theme))
-  const blob = await canvasToBlob(canvas)
-  const filename = `私家E院-每日处方-${data.dateKey}.png`
+  let previewSrc = ''
+  let previewSrcIsObjectUrl = false
 
-  if (isMobileBrowser() && typeof navigator.share === 'function') {
-    try {
-      const file = new File([blob], filename, { type: 'image/png' })
-      const canShareFile = typeof navigator.canShare !== 'function'
-        || navigator.canShare({ files: [file] })
-      if (canShareFile) {
-        await navigator.share({
-          files: [file],
-          title: '今日处方',
-          text: '私家E院 · 今日处方',
-        })
-        return 'shared' as const
-      }
-    } catch (reason) {
-      if (reason instanceof DOMException && reason.name === 'AbortError') return 'cancelled' as const
-    }
+  try {
+    // toDataURL is synchronous and keeps the mobile preview independent of blob URL downloads.
+    previewSrc = canvas.toDataURL('image/png')
+  } catch (error) {
+    console.error('[daily-prescription-save]', error)
   }
 
-  downloadBlob(blob, filename)
-  return 'downloaded' as const
+  const blob = mobile && previewSrc ? dataUrlToBlob(previewSrc) : await canvasToBlob(canvas)
+  const filename = `私家E院-每日处方-${data.dateKey}.png`
+
+  if (!previewSrc) {
+    if (typeof URL.createObjectURL !== 'function') throw new Error('PRESCRIPTION_PREVIEW_UNAVAILABLE')
+    previewSrc = URL.createObjectURL(blob)
+    previewSrcIsObjectUrl = true
+  }
+
+  return { blob, filename, previewSrc, previewSrcIsObjectUrl }
+}
+
+function shareableFile(image: GeneratedPrescriptionImage) {
+  if (typeof File === 'undefined') return null
+
+  try {
+    const file = new File([image.blob], image.filename, { type: 'image/png' })
+    if (typeof navigator.canShare === 'function' && !navigator.canShare({ files: [file] })) return null
+    return file
+  } catch (error) {
+    console.error('[daily-prescription-save]', error)
+    return null
+  }
+}
+
+async function tryShareImage(image: GeneratedPrescriptionImage): Promise<ShareResult> {
+  if (!isMobileBrowser() || typeof navigator.share !== 'function') return 'unsupported'
+
+  const file = shareableFile(image)
+  if (!file) return 'unsupported'
+
+  try {
+    await navigator.share({
+      files: [file],
+      title: '私家E院 · 每日处方',
+      text: '私家E院 · 每日处方',
+    })
+    return 'shared'
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === 'AbortError') return 'cancelled'
+    console.error('[daily-prescription-save]', reason)
+    return 'failed'
+  }
 }
 
 export function SavePrescriptionButton({ data }: { data: PrescriptionImageData }) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [preview, setPreview] = useState<GeneratedPrescriptionImage | null>(null)
+  const [previewMessage, setPreviewMessage] = useState('')
+
+  useEffect(() => {
+    if (!preview) return undefined
+
+    const previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreview(null)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape)
+      document.body.style.overflow = previousBodyOverflow
+      if (preview.previewSrcIsObjectUrl) URL.revokeObjectURL(preview.previewSrc)
+    }
+  }, [preview])
 
   async function handleSave() {
     if (saving) return
     setSaving(true)
-    setMessage('')
+    setMessage('正在生成图片…')
     try {
-      const result = await savePrescriptionImage(data)
-      setMessage(result === 'shared' ? '已打开分享面板' : result === 'cancelled' ? '已取消分享' : '图片已下载')
-    } catch {
-      setMessage('保存失败，请重试')
+      // Let React paint the loading state before the synchronous mobile canvas work starts.
+      await new Promise<void>((resolve) => {
+        if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => resolve())
+        else window.setTimeout(resolve, 0)
+      })
+      const image = await generatePrescriptionImage(data)
+
+      if (!isMobileBrowser()) {
+        try {
+          downloadBlob(image.blob, image.filename)
+          setMessage('图片已生成，正在下载')
+        } catch (error) {
+          console.error('[daily-prescription-save]', error)
+          setPreview(image)
+          setPreviewMessage('图片已生成，但当前浏览器不支持自动下载，请长按图片保存')
+          setMessage('图片已生成')
+        }
+        return
+      }
+
+      const shareResult = await tryShareImage(image)
+      if (shareResult === 'shared') {
+        setMessage('图片已生成，已打开分享面板')
+        return
+      }
+
+      setPreview(image)
+      setPreviewMessage(
+        shareResult === 'cancelled'
+          ? '已取消分享，请长按图片保存'
+          : shareResult === 'failed'
+            ? '分享未完成，请长按图片保存'
+            : '当前浏览器不支持直接分享，请长按图片保存',
+      )
+      setMessage('图片已生成')
+    } catch (error) {
+      console.error('[daily-prescription-save]', error)
+      setMessage('生成失败，请重试')
     } finally {
       setSaving(false)
     }
   }
 
+  async function handlePreviewShare() {
+    if (!preview) return
+    setPreviewMessage('正在打开分享面板…')
+    const result = await tryShareImage(preview)
+    if (result === 'shared') {
+      setPreviewMessage('已打开分享面板')
+    } else if (result === 'cancelled') {
+      setPreviewMessage('已取消分享，请长按图片保存')
+    } else if (result === 'failed') {
+      setPreviewMessage('分享未完成，请长按图片保存')
+    } else {
+      setPreviewMessage('当前浏览器不支持直接分享，请长按图片保存')
+    }
+  }
+
+  function handlePreviewDownload() {
+    if (!preview) return
+    try {
+      downloadBlob(preview.blob, preview.filename)
+      setPreviewMessage('已尝试下载；如果没有保存，请长按图片保存')
+    } catch (error) {
+      console.error('[daily-prescription-save]', error)
+      setPreviewMessage('当前浏览器不支持直接下载，请长按图片保存')
+    }
+  }
+
+  function closePreview() {
+    setPreview(null)
+    setPreviewMessage('')
+  }
+
+  const previewPortal = preview && typeof document !== 'undefined'
+    ? createPortal(
+      <div
+        className="prescription-preview-backdrop"
+        role="presentation"
+        onClick={(event) => { if (event.target === event.currentTarget) closePreview() }}
+      >
+        <section className="prescription-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="prescription-preview-title">
+          <header className="prescription-preview-header">
+            <div>
+              <p>DAILY PRESCRIPTION</p>
+              <h2 id="prescription-preview-title">处方图片已生成</h2>
+            </div>
+            <button type="button" className="prescription-preview-close" onClick={closePreview} aria-label="关闭处方图片预览">×</button>
+          </header>
+          <p className="prescription-preview-hint">长按图片即可保存到手机相册</p>
+          <div className="prescription-preview-image-wrap">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview.previewSrc} alt="今日处方图片" className="prescription-preview-image" />
+          </div>
+          <p className="prescription-preview-message" role="status">{previewMessage}</p>
+          <div className="prescription-preview-actions">
+            <button type="button" className="prescription-preview-share" onClick={() => void handlePreviewShare()}>分享处方</button>
+            <button type="button" className="prescription-preview-download" onClick={handlePreviewDownload}>下载图片</button>
+            <button type="button" className="prescription-preview-dismiss" onClick={closePreview}>关闭</button>
+          </div>
+        </section>
+      </div>,
+      document.body,
+    )
+    : null
+
   return (
-    <span className="prescription-save-action">
-      <button type="button" className="prescription-save-button" onClick={() => void handleSave()} disabled={saving}>
-        {saving ? '生成中…' : '保存处方'}
-      </button>
-      {message ? <span className="prescription-save-message" role="status">{message}</span> : null}
-    </span>
+    <>
+      <span className="prescription-save-action">
+        <button
+          type="button"
+          className="prescription-save-button"
+          data-prescription-save-button="true"
+          onClick={() => void handleSave()}
+          disabled={saving}
+          aria-busy={saving}
+        >
+          {saving ? '正在生成图片…' : '保存处方'}
+        </button>
+        {message ? <span className="prescription-save-message" role="status">{message}</span> : null}
+      </span>
+      {previewPortal}
+    </>
   )
 }
