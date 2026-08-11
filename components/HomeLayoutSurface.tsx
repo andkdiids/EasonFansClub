@@ -9,6 +9,7 @@ import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/Music
 import { getPageLayoutModules } from '@/components/page-layout/PageLayoutRenderer'
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
+import { parseCalendarDate } from '@/lib/calendar-date'
 import { formatUid } from '@/lib/uid'
 
 const homeText = {
@@ -105,9 +106,9 @@ function formatTodayDate(year: number, month: number, day: number) {
 }
 
 function yearsFromToday(value: string) {
-  const eventDate = new Date(value)
-  const today = new Date()
-  return Math.max(0, today.getFullYear() - eventDate.getFullYear())
+  const eventDate = parseCalendarDate(value)
+  const today = parseCalendarDate(new Date())
+  return Math.max(0, today.year - eventDate.year)
 }
 
 function HomeDailyMusicPreview({ music }: { music: DailyMusic }) {

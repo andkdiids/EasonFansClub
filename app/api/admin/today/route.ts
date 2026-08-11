@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
-import { isTodayEventType, parseTodayDate } from '@/lib/today'
+import { getTodayEventDateKey, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -33,7 +33,7 @@ function serializeEvent(event: TodayEventRow) {
   const { SubmittedBy, ...data } = event
   return {
     ...data,
-    date: event.date.toISOString(),
+    date: getTodayEventDateKey(event.date, event.month, event.day),
     imageUrl: publicImageUrl(event.imageUrl),
     submittedBy: SubmittedBy ? { uid: SubmittedBy.uid, name: SubmittedBy.Profile?.displayName || SubmittedBy.nickname } : null,
   }

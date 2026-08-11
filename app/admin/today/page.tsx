@@ -1,5 +1,6 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
+import { getTodayEventDateKey } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { TodayAdminManager, type AdminTodayEvent } from './TodayAdminManager'
@@ -14,6 +15,8 @@ export default async function AdminTodayPage() {
     select: {
       id: true,
       date: true,
+      month: true,
+      day: true,
       type: true,
       title: true,
       content: true,
@@ -27,7 +30,7 @@ export default async function AdminTodayPage() {
   })
   const initial: AdminTodayEvent[] = events.map(({ SubmittedBy, ...event }) => ({
     ...event,
-    date: event.date.toISOString(),
+    date: getTodayEventDateKey(event.date, event.month, event.day),
     imageUrl: publicImageUrl(event.imageUrl),
     submittedBy: SubmittedBy ? { uid: SubmittedBy.uid, name: SubmittedBy.Profile?.displayName || SubmittedBy.nickname } : null,
   }))

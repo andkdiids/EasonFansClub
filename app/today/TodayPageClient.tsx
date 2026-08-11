@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { formatCalendarDate, parseCalendarDate } from '@/lib/calendar-date'
 
 export type TodayEventView = {
   id: string
@@ -34,11 +35,11 @@ const types = [
 ] as const
 
 function yearsFromToday(year: number) {
-  return Math.max(0, new Date().getFullYear() - year)
+  return Math.max(0, parseCalendarDate(new Date()).year - year)
 }
 
 function formatEventDate(event: TodayEventView) {
-  return `${event.year}年${String(event.month).padStart(2, '0')}月${String(event.day).padStart(2, '0')}日`
+  return formatCalendarDate(event.date)
 }
 
 export function TodayPageClient({ month, day, initialEvents }: { month: number; day: number; initialEvents: TodayEventView[] }) {

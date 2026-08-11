@@ -1,6 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { isTodayEventSource, isTodayEventType, parseTodayDate } from '@/lib/today'
+import { getTodayEventDateKey, isTodayEventSource, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -43,10 +43,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       ...(status === 'PENDING' ? { reviewedAt: null, reviewedById: null, rejectionReason: null } : {}),
       ...(reviewed ? { reviewedAt: new Date(), reviewedById: guard.user.id, rejectionReason: status === 'REJECTED' ? sanitizeText(body?.rejectionReason, 1000) || null : null } : {}),
     },
-    select: { id: true, status: true, title: true, date: true },
+    select: { id: true, status: true, title: true, date: true, month: true, day: true },
   })
   revalidatePath('/today')
-  return NextResponse.json({ event: { ...updated, date: updated.date.toISOString() } })
+  return NextResponse.json({ event: { ...updated, date: getTodayEventDateKey(updated.date, updated.month, updated.day) } })
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {

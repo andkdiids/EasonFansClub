@@ -1,10 +1,10 @@
-import { getShanghaiDateKey } from '@/lib/checkin'
+import { parseCalendarDate } from '@/lib/calendar-date'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
-import { getTodayMonthDay, type TodayEventSourceValue, type TodayEventTypeValue } from '@/lib/today'
+import { getTodayEventDateParts, getTodayMonthDay, type TodayEventSourceValue, type TodayEventTypeValue } from '@/lib/today'
 
 export type TodayEventRecord = {
   id: string
@@ -22,14 +22,8 @@ export type TodayEventRecord = {
   href: string | null
 }
 
-function dateOnly(value: Date) {
-  return getShanghaiDateKey(value)
-}
-
 function dateParts(value: Date) {
-  const key = dateOnly(value)
-  const [year, month, day] = key.split('-').map(Number)
-  return { key, year, month, day }
+  return parseCalendarDate(value)
 }
 
 function isTodayMonthDay(value: Date, month: number, day: number) {
@@ -67,7 +61,7 @@ async function loadManualTodayEvents(month: number, day: number) {
   )
 
   return rows.map((event) => {
-    const parts = dateParts(event.date)
+    const parts = getTodayEventDateParts(event.date, event.month, event.day)
     return {
       id: event.id,
       date: parts.key,
