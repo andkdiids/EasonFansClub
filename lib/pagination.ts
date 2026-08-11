@@ -5,6 +5,14 @@ export function clampPaginationPage(page: number, totalPages: number) {
   return Math.min(Math.max(1, Math.trunc(page) || 1), safeTotal)
 }
 
+export function parsePaginationJump(value: string, totalPages: number) {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const parsed = Number(trimmed)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return null
+  return clampPaginationPage(parsed, totalPages)
+}
+
 /**
  * Build a compact page-number model without duplicating the first or last
  * page when they are already part of the seven-page window.

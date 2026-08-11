@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { MusicCoverUploader } from '@/app/admin/music/MusicCoverUploader'
 import { MultiDatePicker } from '@/components/music/live/MultiDatePicker'
+import { Pagination } from '@/components/ui/Pagination'
 import { concertPosterSourceLabel, type ConcertPosterSource } from '@/lib/music-concert-poster'
 
 type Tour = { id: string; name: string }
@@ -306,7 +307,19 @@ export function AdminConcertManager() {
         {posterPanelOpen ? <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><p className="text-sm font-black text-brand-950">上传一张海报并应用到已选 {selectedCount} 个场次</p><div className="mt-3 max-w-xs"><MusicCoverUploader key={selectedIds[0] || 'batch-poster'} entityType="concert" entityId={selectedIds[0] || 'batch'} currentUrl={batchPosterUrl || null} onUploaded={setBatchPosterUrl} /></div><button type="button" onClick={() => void bulkAction('poster', { posterUrl: batchPosterUrl })} disabled={!batchPosterUrl || busy} className="mt-3 rounded-lg bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-40">应用到所选场次</button></div> : null}
         {copySetlistOpen ? <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm font-black text-brand-950">从当前巡演选择歌单来源</p><button type="button" onClick={() => setCopySetlistOpen(false)} className="text-xs font-black text-slate-500">取消</button></div><select aria-label="批量复制歌单来源" value={copySourceId} onChange={(event) => setCopySourceId(event.target.value)} className={`${field} mt-3`}><option value="">请选择来源场次</option>{copySourceConcerts.map((row) => <option key={row.id} value={row.id}>{row.tour.name} · {row.city} · {formatDate(row.concertDate)} · {sessionLabel(row)}</option>)}</select><button type="button" onClick={() => void bulkAction('copy-setlist', { sourceConcertId: copySourceId })} disabled={!copySourceId || busy} className="mt-3 rounded-lg bg-sky-700 px-4 py-2 text-sm font-black text-white disabled:opacity-40">复制到已选场次</button><p className="mt-2 text-xs font-bold text-slate-500">普通歌单、Encore、顺序和标记都会复制；来源场次不会修改。</p></div> : null}
         <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-sky-50 text-xs font-black text-brand-950"><tr><th className="w-10 p-3"><input ref={selectAllRef} type="checkbox" checked={allFilteredSelected} onChange={() => void toggleSelectAll()} aria-label="全选当前筛选结果" /></th>{['编号', '日期', '城市', '场馆', '状态', '海报', '操作'].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{browseConcerts.map((concert) => <tr key={concert.id} className="border-t border-sky-100"><td className="p-3"><input type="checkbox" checked={selectedIds.includes(concert.id)} onChange={() => toggleSelected(concert.id)} aria-label={`选择 ${formatDate(concert.concertDate)} ${concert.city}`} /></td><td className="p-3 font-black">{sessionLabel(concert)}</td><td className="p-3 whitespace-nowrap">{formatDate(concert.concertDate)}</td><td className="p-3 font-black">{concert.city}</td><td className="max-w-52 break-words p-3">{concert.venue || '—'}</td><td className="p-3">{concert.status === 'PUBLISHED' ? '已发布' : '草稿 / 待定'}</td><td className="p-3 text-xs">{concert.resolvedPosterUrl ? `有 · ${concertPosterSourceLabel(concert.posterSource || 'system')}` : '无'}</td><td className="p-3"><div className="flex flex-wrap gap-2"><Link href={`/admin/music/concerts/${concert.id}`} className="rounded-lg bg-brand-950 px-3 py-2 font-black text-white">编辑</Link><button type="button" onClick={() => void remove(concert)} className="rounded-lg bg-red-50 px-3 py-2 font-black text-red-700">删除</button></div></td></tr>)}</tbody></table>{!browseConcerts.length ? <p className="mt-4 text-sm font-bold text-slate-500">当前筛选没有场次。</p> : null}</div>
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm font-black text-slate-600"><span>第 {pagination.page} / {pagination.totalPages} 页</span><div className="flex gap-2"><button type="button" onClick={() => { setFilters((current) => ({ ...current, page: current.page - 1 })); setSelectedIds([]) }} disabled={pagination.page <= 1 || busy} className="rounded-lg bg-sky-50 px-4 py-2 text-brand-700 disabled:opacity-40">上一页</button><button type="button" onClick={() => { setFilters((current) => ({ ...current, page: current.page + 1 })); setSelectedIds([]) }} disabled={pagination.page >= pagination.totalPages || busy} className="rounded-lg bg-sky-50 px-4 py-2 text-brand-700 disabled:opacity-40">下一页</button></div></div>
+        {pagination.totalPages > 1 ? (
+          <Pagination
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            onPageChange={(nextPage) => {
+              setFilters((current) => ({ ...current, page: nextPage }))
+              setSelectedIds([])
+            }}
+            disabled={busy}
+            ariaLabel="巡演场次分页"
+            className="admin-concert-pagination"
+          />
+        ) : null}
       </>}
     </section>
 

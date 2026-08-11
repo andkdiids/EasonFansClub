@@ -1,6 +1,7 @@
 import type { Prisma, User } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { normalizeLoginAccount } from '@/lib/login-account'
+import { getPhoneLookupVariants, type PhoneCountryCode } from '@/lib/phone-number'
 
 export const inactiveUserStatuses = ['BANNED', 'DELETED', 'MERGED', 'DISABLED'] as const
 
@@ -40,12 +41,13 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
   const normalized = identifier.trim()
   const lower = normalized.toLowerCase()
   const normalizedAccount = normalizeLoginAccount(identifier)
+  const phoneVariants = getPhoneLookupVariants(normalized)
 
   const user = await prisma.user.findFirst({
     where: {
       status: 'ACTIVE',
       isDeleted: false,
-      OR: [{ phone: normalized }, { email: lower }, { usernameNormalized: normalizedAccount }],
+      OR: [...phoneVariants.map((phone) => ({ phone })), { email: lower }, { usernameNormalized: normalizedAccount }],
     },
     select: {
       id: true,
@@ -64,14 +66,15 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
   return user
 }
 
-export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email' | 'account', identifier: string) {
+export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email' | 'account', identifier: string, phoneCountry: PhoneCountryCode = 'CN') {
   const normalized = identifier.trim()
   const lookup = identifierType === 'email' ? normalized.toLowerCase() : identifierType === 'account' ? normalizeLoginAccount(identifier) : normalized
+  const phoneVariants = identifierType === 'phone' ? getPhoneLookupVariants(identifier, phoneCountry) : []
 
   const user = await prisma.user.findFirst({
     where: {
       isDeleted: false,
-      ...(identifierType === 'email' ? { email: lookup } : identifierType === 'phone' ? { phone: lookup } : { usernameNormalized: lookup }),
+      ...(identifierType === 'email' ? { email: lookup } : identifierType === 'phone' ? { phone: { in: phoneVariants.length ? phoneVariants : [lookup] } } : { usernameNormalized: lookup }),
     },
     select: {
       id: true,
@@ -94,12 +97,13 @@ export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' 
 }
 
 export async function findActiveConflict(input: { phone?: string | null; email?: string | null }) {
+  const phoneVariants = input.phone ? getPhoneLookupVariants(input.phone) : []
   return prisma.user.findFirst({
     where: {
       status: 'ACTIVE',
       isDeleted: false,
       OR: [
-        ...(input.phone ? [{ phone: input.phone }] : []),
+        ...phoneVariants.map((phone) => ({ phone })),
         ...(input.email ? [{ email: input.email.toLowerCase() }] : []),
       ],
     },

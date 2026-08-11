@@ -5,8 +5,11 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { LikeButton } from '@/components/PostActions'
+import { SafeAvatar } from '@/components/SafeAvatar'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { getPageLayoutModules } from '@/components/page-layout/PageLayoutRenderer'
+import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMode } from '@/lib/guess-song-config'
+import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
@@ -34,9 +37,11 @@ const homeText = {
   todayMore: '与你常在',
   noToday: '今天还没有历史记录，先留下一个占位。',
   entertainment: '娱乐天空',
-  simpleBest: '简单模式最高分',
   rankingMore: '进入游戏中心',
-  noRanking: '暂无简单模式成绩，快去挑战吧。',
+  rankingBest: '历史最高分',
+  noRanking: '暂无成绩，快去挑战吧。',
+  rankingLoading: '正在读取历史成绩...',
+  rankingUnavailable: '成绩暂时无法读取，请稍后刷新。',
   randomAlbums: '每日推荐专辑',
   albumsMore: '更多',
   featured: '精选',
@@ -72,10 +77,25 @@ type Stats = { consecutiveDays: number; checkIns: { id: string }[]; _count: { ch
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
 type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; album: { id: string; name: string; coverUrl: string | null } }
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
-type RankingRow = { rank: number; userId: string; uid: number; nickname: string; avatarUrl: string | null; score: number; correctCount: number; maxStreak: number; totalPlayCount: number; achievedAt: string }
-type EntertainmentRanking = { periodType: string; periodKey: string; mode: string; rows: RankingRow[]; currentUser: RankingRow | null }
+type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
 type HomeConcert = { id: string; title: string; concertDate: string; city: string; venue: string | null; tourName: string; posterUrl: string | null; href: string }
 type Payload = { posts: Post[]; activities: unknown[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; entertainmentRanking: EntertainmentRanking | null; concerts: HomeConcert[] }
+
+const modeLabels = Object.fromEntries(
+  GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, GUESS_SONG_MODE_CONFIG[mode].label]),
+) as Record<GuessSongPublicMode, string>
+
+function emptyEntertainmentModes() {
+  return Object.fromEntries(GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, null])) as Record<GuessSongPublicMode, GuessSongModeHighScore | null>
+}
+
+const loadingEntertainmentRanking: EntertainmentRanking = {
+  status: 'loading',
+  periodType: 'HISTORY',
+  periodKey: 'ALL',
+  modes: emptyEntertainmentModes(),
+  mobileBest: null,
+}
 
 function useDevice(): PageLayoutDevice {
   const [device, setDevice] = useState<PageLayoutDevice>('desktop')
@@ -109,6 +129,15 @@ function yearsFromToday(value: string) {
   const eventDate = parseCalendarDate(value)
   const today = parseCalendarDate(new Date())
   return Math.max(0, today.year - eventDate.year)
+}
+
+function EntertainmentScoreUser({ score }: { score: GuessSongModeHighScore }) {
+  return (
+    <div className="home-entertainment-score-user" title={score.user.name}>
+      <span className="home-entertainment-score-avatar"><SafeAvatar src={score.user.avatarUrl} name={score.user.name} uid={score.user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
+      <span className="home-entertainment-score-username">{score.user.name}</span>
+    </div>
+  )
 }
 
 function HomeDailyMusicPreview({ music }: { music: DailyMusic }) {
@@ -155,7 +184,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const items = useMemo(() => getPageLayoutModules(layoutConfig, device, 'home'), [layoutConfig, device])
   const layoutModule = (key: string) => items.find((item) => item.key === key)
   const visible = (key: string) => Boolean(layoutModule(key))
-  const [data, setData] = useState<Payload>({ posts: [], activities: [], albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], entertainmentRanking: null, concerts: [] })
+  const [data, setData] = useState<Payload>({ posts: [], activities: [], albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], entertainmentRanking: loadingEntertainmentRanking, concerts: [] })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
@@ -164,7 +193,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const todayTouchStart = useRef<{ x: number; y: number } | null>(null)
   const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
-  const topRanking = data.entertainmentRanking?.currentUser || null
+  const topRanking = data.entertainmentRanking?.mobileBest || null
+  const entertainmentModes = data.entertainmentRanking?.modes || emptyEntertainmentModes()
   const dailyMusicCoverUrl = data.dailyMusic?.album.coverUrl || null
 
   useEffect(() => {
@@ -176,7 +206,10 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         if (!response.ok) throw new Error('home request failed')
         const nextData = await response.json() as Payload
         if (!disposed) {
-          setData({ ...nextData, concerts: nextData.concerts || [] })
+          // The main home payload intentionally keeps entertainment ranking in
+          // its own request. Do not let its legacy null field overwrite the
+          // independently loaded result.
+          setData((current) => ({ ...nextData, concerts: nextData.concerts || [], entertainmentRanking: current.entertainmentRanking }))
           setFailed(false)
         }
       } catch (error) {
@@ -186,11 +219,17 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     async function loadEntertainmentRanking() {
       try {
         const response = await fetch('/api/home/entertainment-ranking', { cache: 'no-store', signal: controller.signal })
-        if (!response.ok) return
+        if (!response.ok) {
+          if (!disposed) setData((current) => ({ ...current, entertainmentRanking: { ...loadingEntertainmentRanking, status: 'unavailable' } }))
+          return
+        }
         const nextData = await response.json() as { entertainmentRanking?: Payload['entertainmentRanking'] }
-        if (!disposed) setData((current) => ({ ...current, entertainmentRanking: nextData.entertainmentRanking || null }))
+        if (!disposed) setData((current) => ({ ...current, entertainmentRanking: nextData.entertainmentRanking || { ...loadingEntertainmentRanking, status: 'unavailable' } }))
       } catch (error) {
-        if (process.env.NODE_ENV === 'development' && !(error instanceof Error && error.name === 'AbortError')) console.debug('[home entertainment ranking]', error)
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          if (!disposed) setData((current) => ({ ...current, entertainmentRanking: { ...loadingEntertainmentRanking, status: 'unavailable' } }))
+          if (process.env.NODE_ENV === 'development') console.debug('[home entertainment ranking]', error)
+        }
       }
     }
     const refresh = () => {
@@ -281,7 +320,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
 
   const renderDailyMusicPanel = () => (
     <section className="community-panel music-panel home-daily-music-panel" aria-label="EasMusic 今日推荐">
-      <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'}>{homeText.viewDetails} →</Link></header>
+      <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'} className="home-module-entry">{homeText.viewDetails} {'>>'}</Link></header>
       {data.dailyMusic ? <div className="home-daily-music">
         <div className="home-daily-music-cover">
           {dailyMusicCoverUrl ? <Image src={dailyMusicCoverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" className="object-cover" onError={() => { if (process.env.NODE_ENV === 'development') console.log('album cover load failed', dailyMusicCoverUrl) }} /> : <span aria-hidden="true">♫</span>}
@@ -299,14 +338,28 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
 
   const renderEntertainmentPanel = () => (
     <section className="community-panel home-entertainment-panel" aria-label="Entertainment ranking">
-      <header><h2>{homeText.entertainment}</h2><Link href="/games">{homeText.rankingMore} →</Link></header>
+      <header><h2>{homeText.entertainment}</h2><Link href="/games" className="home-module-entry">{homeText.rankingMore} {'>>'}</Link></header>
       <div className="home-entertainment-content">
-        {topRanking ? <>
-          <span>{homeText.simpleBest}</span>
-          <strong>{fmt(topRanking.score)} <small>分</small></strong>
-          <p>{topRanking.nickname}</p>
-          <small>{shortDate(topRanking.achievedAt)}</small>
-        </> : <p className="community-empty home-entertainment-empty">{homeText.noRanking}</p>}
+        <div className="home-entertainment-mobile-score">
+          {data.entertainmentRanking?.status === 'ready' && topRanking ? <>
+            <span className="home-entertainment-ranking-caption">{homeText.rankingBest}</span>
+            <EntertainmentScoreUser score={topRanking} />
+            <strong className="home-entertainment-mobile-mode">{modeLabels[topRanking.mode]}模式</strong>
+            <strong className="home-entertainment-mobile-score-value">{fmt(topRanking.score)} <small>分</small></strong>
+          </> : data.entertainmentRanking?.status === 'empty' ? <p className="community-empty home-entertainment-empty">{homeText.noRanking}</p> : data.entertainmentRanking?.status === 'unavailable' ? <p className="community-empty home-entertainment-empty">{homeText.rankingUnavailable}</p> : <p className="community-empty home-entertainment-empty">{homeText.rankingLoading}</p>}
+        </div>
+        <div className="home-entertainment-desktop-scores">
+          {data.entertainmentRanking?.status === 'ready' ? GUESS_SONG_PUBLIC_MODES.map((mode) => {
+            const score = entertainmentModes[mode]
+            return <div className="home-entertainment-mode-score" key={mode}>
+              <span className="home-entertainment-mode-label">{modeLabels[mode]}模式</span>
+              {score ? <>
+                <EntertainmentScoreUser score={score} />
+                <strong className="home-entertainment-mode-score-value">{fmt(score.score)} <small>分</small></strong>
+              </> : <span className="home-entertainment-mode-empty">暂无成绩</span>}
+            </div>
+          }) : <p className="community-empty home-entertainment-empty">{data.entertainmentRanking?.status === 'empty' ? homeText.noRanking : data.entertainmentRanking?.status === 'unavailable' ? homeText.rankingUnavailable : homeText.rankingLoading}</p>}
+        </div>
         <Link href="/games" className="hero-primary-button home-entertainment-button">{homeText.rankingMore} →</Link>
       </div>
     </section>
@@ -317,7 +370,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     const events = data.todayEvents
     return (
       <section className={`community-panel concert-panel home-today-panel${device === 'mobile' ? ' mb-5' : ''}`} aria-label="Today in history">
-        <header><h2>{homeText.today}</h2><Link href="/today">{homeText.todayMore} →</Link></header>
+        <header><h2>{homeText.today}</h2><Link href="/today" className="home-module-entry">{homeText.todayMore} {'>>'}</Link></header>
         <div className="home-today-content">
         {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
         {events.length > 0 && events.length <= 2 ? (
@@ -417,14 +470,14 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           </div>
         </section>
 
-        {visible('home.featuredPosts') || visible('home.latestPosts') ? <section className="community-panel posts-panel home-full-panel" aria-label="Featured posts"><header><h2>{layoutModule('home.featuredPosts')?.title || '精选帖子'}</h2><Link href="/forum">{homeText.more} →</Link></header><div className="post-list">{data.posts.slice(0, 4).map((post) => <article data-featured-post-card key={post.id}><Link data-post-card-link href={`/posts/${post.id}`} className="post-row-link absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2" aria-label={`View post: ${post.title}`} /><div className="post-copy pointer-events-none relative z-[2]"><h3>
+        {visible('home.featuredPosts') || visible('home.latestPosts') ? <section className="community-panel posts-panel home-full-panel" aria-label="Featured posts"><header><h2>{layoutModule('home.featuredPosts')?.title || '精选帖子'}</h2><Link href="/forum" className="home-module-entry">更多内容 {'>>'}</Link></header><div className="post-list">{data.posts.slice(0, 4).map((post) => <article data-featured-post-card key={post.id}><Link data-post-card-link href={`/posts/${post.id}`} className="post-row-link absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2" aria-label={`View post: ${post.title}`} /><div className="post-copy pointer-events-none relative z-[2]"><h3>
   {post.isPinned ? <b>{homeText.pinned}</b> : post.isFeatured ? <b>{homeText.featured}</b> : null}
   <span className="post-board-name">[{post.board.name}]</span>
   {post.title}
 </h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]">{post.author.profile?.displayName || post.author.nickname}</Link> · {new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]"><span>Reply {post.replyCount}</span><span>Views {fmt(post.viewCount)}</span><div data-post-like-control className="pointer-events-auto relative z-[3]"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /></div></div></article>)}{!data.posts.length && !failed ? <p className="community-empty">{siteConfig.text.emptyText}</p> : null}</div></section> : null}
 
         <section className="community-panel concert-panel home-full-panel home-concerts-section" aria-label="Hot concerts">
-          <header><h2>{homeText.hotConcerts}</h2><Link href="/music/concerts">{homeText.concertsMore} →</Link></header>
+          <header><h2>{homeText.hotConcerts}</h2><Link href="/music/concerts" className="home-module-entry">{homeText.concertsMore} {'>>'}</Link></header>
           <div className="home-concert-grid">
             {data.concerts.map((concert) => <Link key={concert.id} href={concert.href} className="home-concert-card">
               <span className="home-concert-cover">{concert.posterUrl ? <Image src={concert.posterUrl} alt={`${concert.title} poster`} fill sizes="72px" className="object-cover" /> : 'Eason'}</span>

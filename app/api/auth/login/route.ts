@@ -6,6 +6,7 @@ import { DbTimeoutError, withDbTimeout } from '@/lib/db-timeout'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { findCompleteUserByLoginIdentifier } from '@/lib/users'
+import { DEFAULT_PHONE_COUNTRY, getPhoneValidationMessage, isSupportedPhoneCountry, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
@@ -33,35 +34,36 @@ function databaseUnavailableResponse() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => null)
-   const identifierType =
-  body?.identifierType === 'email'
-    ? 'email'
-    : 'phone'
+    const identifierType = body?.identifierType === 'email' ? 'email' : 'phone'
+    const rawIdentifier = normalizeText(body?.identifier)
+    const requestedPhoneCountry: PhoneCountryCode = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
+    let identifier = identifierType === 'email' ? rawIdentifier.toLowerCase() : rawIdentifier
+    const password = typeof body?.password === 'string' ? body.password : ''
 
-const identifier = identifierType === 'email'
-  ? normalizeText(body?.identifier).toLowerCase()
-  : normalizeText(body?.identifier)
-
-const password = typeof body?.password === 'string' ? body.password : ''
-
-    if (!identifier || !password) {
+    if (!rawIdentifier || !password) {
       return NextResponse.json(
         { message: '请填写账号和密码', errors: { form: '请填写账号和密码' } },
         { status: 400, headers: noStoreHeaders },
       )
     }
 
+    if (identifierType === 'phone') {
+      const phone = normalizePhoneNumber(rawIdentifier, requestedPhoneCountry)
+      if (!phone) {
+        const message = getPhoneValidationMessage(requestedPhoneCountry)
+        return NextResponse.json({ message, errors: { identifier: message } }, { status: 400, headers: noStoreHeaders })
+      }
+      identifier = phone.e164
+    }
+
     const user = await withDbTimeout(
       'login.user-query',
-      findCompleteUserByLoginIdentifier(identifierType, identifier),
+      findCompleteUserByLoginIdentifier(identifierType, identifier, requestedPhoneCountry),
       loginUserQueryTimeoutMs,
     )
 
     if (!user) {
-      const message =
-  identifierType === 'email'
-    ? '邮箱未注册'
-    : '手机号未注册'
+      const message = identifierType === 'email' ? '邮箱未注册' : '手机号未注册'
       return NextResponse.json(
         { message, errors: { identifier: message } },
         { status: 401, headers: noStoreHeaders },

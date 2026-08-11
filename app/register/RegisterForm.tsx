@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FormError } from '@/components/FormError'
+import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { validateLoginAccountValue } from '@/lib/login-account'
+import { getPhoneInputParts, getPhoneValidationMessage, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import type { RegistrationAvailabilityPayload, RegistrationMode } from '@/lib/registration'
 
@@ -86,10 +88,6 @@ function unicodeLength(value: string) {
   return Array.from(value).length
 }
 
-function normalizePhone(value: string) {
-  return value.trim().replace(/\s+/g, '')
-}
-
 function makeRequestKey() {
   return typeof window.crypto?.randomUUID === 'function'
     ? window.crypto.randomUUID()
@@ -112,6 +110,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     acceptedAgreement: false,
     securityQuestions: [{ question: '', answer: '' }],
   })
+  const [phoneCountry, setPhoneCountry] = useState<PhoneCountryCode>('CN')
   const [turnstileToken, setTurnstileToken] = useState('')
   const [draftToken, setDraftToken] = useState('')
   const [emailCode, setEmailCode] = useState('')
@@ -276,9 +275,9 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
     if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
     if (!nextErrors.nickname && usernameValidation.error) nextErrors.nickname = usernameValidation.error
-    const phone = normalizePhone(form.phone)
-    if (!phone) nextErrors.phone = '请输入手机号'
-    else if (!/^1\d{10}$/.test(phone)) nextErrors.phone = '请输入 11 位中国大陆手机号'
+    const phone = normalizePhoneNumber(form.phone, phoneCountry)
+    if (!form.phone.trim()) nextErrors.phone = '请输入手机号'
+    else if (!phone) nextErrors.phone = getPhoneValidationMessage(phoneCountry)
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '请输入有效邮箱'
     if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
     if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
@@ -325,7 +324,13 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         credentials: 'same-origin',
         cache: 'no-store',
         signal: controller.signal,
-        body: JSON.stringify({ ...form, registrationType: 'EMAIL', turnstileToken }),
+        body: JSON.stringify({
+          ...form,
+          phone: normalizePhoneNumber(form.phone, phoneCountry)?.e164 || form.phone,
+          phoneCountry,
+          registrationType: 'EMAIL',
+          turnstileToken,
+        }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -343,10 +348,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       setEmailVerified(recoveredEmailVerified)
       setEmailCodeSent(recoveredEmailVerified)
       if (data.draft) {
+        const restoredPhone = getPhoneInputParts(data.draft.phone || form.phone, phoneCountry)
+        setPhoneCountry(restoredPhone.country)
         setForm((current) => ({
           ...current,
           nickname: data.draft.nickname || current.nickname,
-          phone: data.draft.phone || current.phone,
+          phone: restoredPhone.value || current.phone,
           email: preparedEmail,
           acceptedAgreement: typeof data.draft.acceptedAgreement === 'boolean' ? data.draft.acceptedAgreement : current.acceptedAgreement,
         }))
@@ -393,19 +400,19 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function sendEmailCode(token = draftToken, emailOverride = form.email, automatic = false) {
     const email = emailOverride.trim().toLowerCase()
-    const phone = normalizePhone(form.phone)
+    const phone = normalizePhoneNumber(form.phone, phoneCountry)
     if (!token) {
       setErrors({ form: '请先完成注册资料并开始 E院体检' })
       return false
     }
-    if (!phone) {
+    if (!form.phone.trim()) {
       const nextErrors = { phone: '请输入手机号' }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return false
     }
-    if (!/^1\d{10}$/.test(phone)) {
-      const nextErrors = { phone: '请输入 11 位中国大陆手机号' }
+    if (!phone) {
+      const nextErrors = { phone: getPhoneValidationMessage(phoneCountry) }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return false
@@ -720,15 +727,15 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     if (isSubmitting || submitLockedRef.current) return
     if (!draftToken) return setErrors({ form: '请先完成 E院体检' })
     if (!hospitalPassed) return setErrors({ hospitalCheck: '请先完成并通过 E院体检' })
-    const phone = normalizePhone(form.phone)
-    if (!phone) {
+    const phone = normalizePhoneNumber(form.phone, phoneCountry)
+    if (!form.phone.trim()) {
       const nextErrors = { phone: '请输入手机号' }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return
     }
-    if (!/^1\d{10}$/.test(phone)) {
-      const nextErrors = { phone: '请输入 11 位中国大陆手机号' }
+    if (!phone) {
+      const nextErrors = { phone: getPhoneValidationMessage(phoneCountry) }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return
@@ -750,7 +757,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         credentials: 'same-origin',
         cache: 'no-store',
         signal: controller.signal,
-        body: JSON.stringify({ registrationToken: draftToken, registrationType: 'EMAIL', nickname: form.nickname, phone: form.phone, email: form.email, password: form.password, confirmPassword: form.confirmPassword }),
+        body: JSON.stringify({ registrationToken: draftToken, registrationType: 'EMAIL', nickname: form.nickname, phone: phone.e164, phoneCountry: phone.country, email: form.email, password: form.password, confirmPassword: form.confirmPassword }),
       })
       const data = await response.json().catch(() => ({}))
       if (!mountedRef.current) return
@@ -892,7 +899,11 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       }).then(async (response) => {
         const data = await response.json().catch(() => ({}))
         if (!response.ok || !mountedRef.current) return
-        if (data.draft) setForm((current) => ({ ...current, nickname: data.draft.nickname || current.nickname, phone: data.draft.phone || current.phone, email: data.draft.email || current.email, acceptedAgreement: typeof data.draft.acceptedAgreement === 'boolean' ? data.draft.acceptedAgreement : current.acceptedAgreement }))
+        if (data.draft) {
+          const restoredPhone = getPhoneInputParts(data.draft.phone || form.phone, phoneCountry)
+          setPhoneCountry(restoredPhone.country)
+          setForm((current) => ({ ...current, nickname: data.draft.nickname || current.nickname, phone: restoredPhone.value || current.phone, email: data.draft.email || current.email, acceptedAgreement: typeof data.draft.acceptedAgreement === 'boolean' ? data.draft.acceptedAgreement : current.acceptedAgreement }))
+        }
         setEmailVerified(Boolean(data.emailVerified))
         setEmailCodeSent(Boolean(data.emailVerified))
         if (data.hospital?.status === 'STARTED' && savedSessionId && data.hospital.sessionId === savedSessionId) {
@@ -1081,7 +1092,22 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block"><span className="text-sm font-bold text-white">用户名 / 昵称</span><input value={form.nickname} onChange={(event) => updateField('nickname', event.target.value)} data-register-field="nickname" autoComplete="nickname" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="2-16 个字符" /><FormError message={errors.nickname} /></label>
-              <label className="block"><span className="text-sm font-bold text-white">手机号</span><input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} type="tel" autoComplete="tel" required data-register-field="phone" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="用于登录和找回账号" /><FormError message={errors.phone} /></label>
+              <div className="block">
+                <label htmlFor="register-phone" className="text-sm font-bold text-white">手机号</label>
+                <InternationalPhoneInput
+                  id="register-phone"
+                  value={form.phone}
+                  country={phoneCountry}
+                  onChange={(value) => updateField('phone', value)}
+                  onCountryChange={setPhoneCountry}
+                  required
+                  autoComplete="tel"
+                  inputClassName="w-full border-sky-100 bg-white outline-none ring-brand-500/20 focus:ring-4"
+                  data-register-field="phone"
+                  placeholder="用于登录和找回账号"
+                />
+                <FormError message={errors.phone} />
+              </div>
               <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="至少 8 位" /><FormError message={errors.password} /></label>
               <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="再次输入密码" /><FormError message={errors.confirmPassword} /></label>
               <label className="block sm:col-span-2"><span className="text-sm font-bold text-white">邮箱 <small className="font-normal text-white/60">（必填）</small></span><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" autoComplete="email" data-register-field="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 disabled:bg-emerald-50" placeholder="用于最终验证码验证" /><FormError message={errors.email} /></label>

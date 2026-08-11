@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState, type FormEvent } from 'react'
+import { Pagination } from '@/components/ui/Pagination'
 
 type FeedbackItem = {
   id: string
@@ -44,6 +45,8 @@ const typeOptions = [
   ['OTHER', '其他'],
 ]
 
+const FEEDBACK_PAGE_SIZE = 20
+
 function formatTime(value?: string | null) {
   if (!value) return '暂无'
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
@@ -62,7 +65,6 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
   const [loading, setLoading] = useState(true)
   const [replying, setReplying] = useState(false)
   const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
 
   useEffect(() => {
@@ -88,11 +90,10 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
     if (type) params.set('type', type)
     if (q) params.set('q', q)
     params.set('page', String(nextPage))
-    params.set('pageSize', '20')
+    params.set('pageSize', String(FEEDBACK_PAGE_SIZE))
     try {
       const data = await requestJson(`/api/admin/feedback?${params.toString()}`)
       setItems(data.feedbacks || [])
-      setHasMore(Boolean(data.hasMore))
       setTotal(Number(data.total || 0))
       if (!selectedId && data.feedbacks?.[0]) setSelectedId(data.feedbacks[0].id)
     } catch (err) {
@@ -191,11 +192,16 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
                 <p className="mt-1 text-xs font-bold text-slate-400">更新：{formatTime(item.updatedAt)}</p>
               </button>
             ))}
-            <div className="flex items-center justify-between gap-2 pt-2 text-xs font-bold text-slate-500">
-              <button disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-full bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">上一页</button>
-              <span>第 {page} 页 / 共 {total} 条</span>
-              <button disabled={!hasMore || loading} onClick={() => setPage((current) => current + 1)} className="rounded-full bg-sky-50 px-3 py-2 font-black text-brand-700 disabled:opacity-40">下一页</button>
-            </div>
+            {total > FEEDBACK_PAGE_SIZE ? (
+              <Pagination
+                currentPage={page}
+                totalPages={Math.max(1, Math.ceil(total / FEEDBACK_PAGE_SIZE))}
+                onPageChange={setPage}
+                disabled={loading}
+                ariaLabel="反馈分页"
+                className="admin-feedback-pagination"
+              />
+            ) : null}
           </div>
         </aside>
 

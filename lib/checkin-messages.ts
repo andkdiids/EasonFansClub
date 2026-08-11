@@ -6,6 +6,18 @@ export type CheckInMessageSort = 'latest' | 'hot'
 
 type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncached>>
 export type CheckInMessageItem = CheckInMessagesResult[number]
+export const CHECK_IN_MESSAGE_PAGE_SIZE = 5
+export type CheckInMessagePagination = {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  hasMore: boolean
+}
+export type CheckInMessagesPage = {
+  messages: CheckInMessageItem[]
+  pagination: CheckInMessagePagination
+}
 
 export type AnonymousCheckInMessageItem = {
   id: string
@@ -68,8 +80,60 @@ export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): Anonym
 const checkInMessagesCacheTtlMs = Number(process.env.CHECKIN_MESSAGES_CACHE_TTL_MS || 10000)
 const checkInMessagesCache = new Map<string, { expiresAt: number; promise: Promise<CheckInMessagesResult> }>()
 
+const checkInCommentUserSelect = {
+  id: true,
+  uid: true,
+  nickname: true,
+  avatarUrl: true,
+  level: true,
+  Profile: { select: { displayName: true, avatarUrl: true } },
+} as const
+
 export function invalidateCheckInMessagesCache() {
   checkInMessagesCache.clear()
+}
+
+function buildCheckInMessagesWhere({
+  messageId,
+  selectedDate,
+  nextDate,
+  userIds,
+}: {
+  messageId?: string
+  selectedDate: Date
+  nextDate: Date
+  userIds?: string[]
+}) {
+  return {
+    ...(messageId ? { id: messageId } : {}),
+    date: { gte: selectedDate, lt: nextDate },
+    isDeleted: false,
+    moderationStatus: 'APPROVED' as const,
+    ...(userIds ? { userId: { in: userIds } } : {}),
+    User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
+  }
+}
+
+function getCheckInMessagesOrderBy(sort: CheckInMessageSort) {
+  return sort === 'hot'
+    ? [
+        { isAdminMessage: 'desc' as const },
+        { sort: 'asc' as const },
+        { isPinned: 'desc' as const },
+        { isFeatured: 'desc' as const },
+        { likeCount: 'desc' as const },
+        { commentCount: 'desc' as const },
+        { createdAt: 'desc' as const },
+        { id: 'desc' as const },
+      ]
+    : [
+        { isAdminMessage: 'desc' as const },
+        { sort: 'asc' as const },
+        { isPinned: 'desc' as const },
+        { isFeatured: 'desc' as const },
+        { createdAt: 'desc' as const },
+        { id: 'desc' as const },
+      ]
 }
 
 export async function getCheckInMessages({
@@ -79,6 +143,8 @@ export async function getCheckInMessages({
   viewerId,
   viewerCanModerate = false,
   userIds,
+  page = 1,
+  pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
 }: {
   selectedDate: Date
   nextDate: Date
@@ -86,7 +152,11 @@ export async function getCheckInMessages({
   viewerId: string
   viewerCanModerate?: boolean
   userIds?: string[]
+  page?: number
+  pageSize?: number
 }): Promise<CheckInMessagesResult> {
+  const safePage = Math.max(1, Math.trunc(page) || 1)
+  const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || CHECK_IN_MESSAGE_PAGE_SIZE))
   const userScope = userIds === undefined
     ? 'public'
     : `friends:${[...userIds].sort().join(',') || 'none'}`
@@ -97,17 +167,78 @@ export async function getCheckInMessages({
     viewerId,
     viewerCanModerate ? 'moderator' : 'member',
     userScope,
+    safePage,
+    safePageSize,
   ].join(':')
   const now = Date.now()
   const cached = checkInMessagesCache.get(cacheKey)
   if (cached && cached.expiresAt > now) return cached.promise
 
-  const promise = getCheckInMessagesUncached({ selectedDate, nextDate, sort, viewerId, viewerCanModerate, userIds }).catch((error) => {
+  const promise = getCheckInMessagesUncached({
+    selectedDate,
+    nextDate,
+    sort,
+    viewerId,
+    viewerCanModerate,
+    userIds,
+    skip: (safePage - 1) * safePageSize,
+    take: safePageSize,
+  }).catch((error) => {
     checkInMessagesCache.delete(cacheKey)
     throw error
   })
   checkInMessagesCache.set(cacheKey, { expiresAt: now + checkInMessagesCacheTtlMs, promise })
   return promise
+}
+
+export async function getCheckInMessagesPage({
+  selectedDate,
+  nextDate,
+  sort,
+  viewerId,
+  viewerCanModerate = false,
+  userIds,
+  page = 1,
+  pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
+}: {
+  selectedDate: Date
+  nextDate: Date
+  sort: CheckInMessageSort
+  viewerId: string
+  viewerCanModerate?: boolean
+  userIds?: string[]
+  page?: number
+  pageSize?: number
+}): Promise<CheckInMessagesPage> {
+  const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || CHECK_IN_MESSAGE_PAGE_SIZE))
+  const safeRequestedPage = Math.max(1, Math.trunc(page) || 1)
+  if (userIds && userIds.length === 0) {
+    return {
+      messages: [],
+      pagination: { page: 1, pageSize: safePageSize, total: 0, totalPages: 1, hasMore: false },
+    }
+  }
+
+  const total = await prisma.dailyMessage.count({
+    where: buildCheckInMessagesWhere({ selectedDate, nextDate, userIds }),
+  })
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
+  const safePage = Math.min(safeRequestedPage, totalPages)
+  const messages = await getCheckInMessages({
+    selectedDate,
+    nextDate,
+    sort,
+    viewerId,
+    viewerCanModerate,
+    userIds,
+    page: safePage,
+    pageSize: safePageSize,
+  })
+
+  return {
+    messages,
+    pagination: { page: safePage, pageSize: safePageSize, total, totalPages, hasMore: safePage < totalPages },
+  }
 }
 
 export async function getCheckInMessage({
@@ -116,15 +247,18 @@ export async function getCheckInMessage({
   nextDate,
   viewerId,
   viewerCanModerate = false,
+  focusCommentId,
 }: {
   messageId: string
   selectedDate: Date
   nextDate: Date
   viewerId: string
   viewerCanModerate?: boolean
+  focusCommentId?: string
 }): Promise<CheckInMessageItem | null> {
   const messages = await getCheckInMessagesUncached({
     messageId,
+    focusCommentId,
     selectedDate,
     nextDate,
     sort: 'latest',
@@ -136,36 +270,34 @@ export async function getCheckInMessage({
 
 async function getCheckInMessagesUncached({
   messageId,
+  focusCommentId,
   selectedDate,
   nextDate,
   sort,
   viewerId,
   viewerCanModerate,
   userIds,
+  skip,
+  take,
 }: {
   messageId?: string
+  focusCommentId?: string
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
   viewerId: string
   viewerCanModerate: boolean
   userIds?: string[]
+  skip?: number
+  take?: number
 }) {
   if (userIds && userIds.length === 0) return []
 
   const rows = await prisma.dailyMessage.findMany({
-    where: {
-      ...(messageId ? { id: messageId } : {}),
-      date: { gte: selectedDate, lt: nextDate },
-      isDeleted: false,
-      moderationStatus: 'APPROVED',
-      ...(userIds ? { userId: { in: userIds } } : {}),
-      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    },
-    orderBy: sort === 'hot'
-      ? [{ isAdminMessage: 'desc' }, { sort: 'asc' }, { isPinned: 'desc' }, { isFeatured: 'desc' }, { likeCount: 'desc' }, { commentCount: 'desc' }, { createdAt: 'desc' }]
-      : [{ isAdminMessage: 'desc' }, { sort: 'asc' }, { isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
-    take: 30,
+    where: buildCheckInMessagesWhere({ messageId, selectedDate, nextDate, userIds }),
+    orderBy: getCheckInMessagesOrderBy(sort),
+    ...(typeof skip === 'number' ? { skip } : {}),
+    take: messageId ? 1 : take ?? CHECK_IN_MESSAGE_PAGE_SIZE,
     include: {
       User: {
         select: {
@@ -198,38 +330,71 @@ async function getCheckInMessagesUncached({
         where: { isDeleted: false },
         orderBy: { createdAt: 'asc' },
         take: 50,
-        include: {
-          User: {
-            select: {
-              id: true,
-              uid: true,
-              nickname: true,
-              avatarUrl: true,
-              level: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
-            },
-          },
-        },
+        include: { User: { select: checkInCommentUserSelect } },
       },
     },
   })
 
+  // Notification links may target an older reply that falls outside the first
+  // 50 replies returned for a message. Load that exact visible reply as well,
+  // so a valid notification target cannot be mistaken for a deleted reply.
+  const focusedComment = messageId && focusCommentId
+    ? await prisma.dailyMessageComment.findFirst({
+        where: { id: focusCommentId, messageId, isDeleted: false },
+        include: { User: { select: checkInCommentUserSelect } },
+      })
+    : null
+  const focusedComments = focusedComment ? [focusedComment] : []
+  const focusedCommentIds = new Set(focusedComments.map((comment) => comment.id))
+  let parentId = focusedComment?.parentId || null
+  // A notification can point to an old nested reply that is outside the
+  // normal first-50 comment window. Load its visible ancestor chain as well;
+  // otherwise the reply has no root in the client tree and cannot be rendered.
+  while (parentId && focusedComments.length < 20 && !focusedCommentIds.has(parentId)) {
+    const parent = await prisma.dailyMessageComment.findFirst({
+      where: { id: parentId, messageId, isDeleted: false },
+      include: { User: { select: checkInCommentUserSelect } },
+    })
+    if (!parent) break
+    focusedComments.push(parent)
+    focusedCommentIds.add(parent.id)
+    parentId = parent.parentId
+  }
+  // If a visible reply's deleted/inaccessible parent stopped the chain, make
+  // the first visible node a root for this read-only view so the target itself
+  // remains reachable instead of silently disappearing from the tree.
+  const focusedCommentsForDisplay = focusedComments.map((comment) => (
+    comment.parentId && !focusedCommentIds.has(comment.parentId)
+      ? { ...comment, parentId: null }
+      : comment
+  ))
+  const rowsWithFocus = focusedCommentsForDisplay.length
+    ? rows.map((row) => row.id !== messageId
+      ? row
+      : {
+          ...row,
+          DailyMessageComment: [...row.DailyMessageComment, ...focusedCommentsForDisplay]
+            .filter((comment, index, all) => all.findIndex((candidate) => candidate.id === comment.id) === index)
+            .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()),
+        })
+    : rows
+
   // 当前用户对这些留言的点赞：一次批量查询（避免 N+1），保持 likes.length > 0 ⇔ 当前用户已点赞 的既有契约。
-  const viewerLikes = rows.length
+  const viewerLikes = rowsWithFocus.length
     ? await prisma.dailyMessageLike.findMany({
-        where: { userId: viewerId, messageId: { in: rows.map((row) => row.id) } },
+        where: { userId: viewerId, messageId: { in: rowsWithFocus.map((row) => row.id) } },
         select: { id: true, messageId: true },
       })
     : []
   const viewerLikeIdByMessage = new Map(viewerLikes.map((like) => [like.messageId, like.id]))
   const displayNameUserIds = [
-    ...rows.map((item) => item.userId),
-    ...rows.flatMap((item) => item.DailyMessageLike.map((like) => like.userId)),
-    ...rows.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
+    ...rowsWithFocus.map((item) => item.userId),
+    ...rowsWithFocus.flatMap((item) => item.DailyMessageLike.map((like) => like.userId)),
+    ...rowsWithFocus.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
   ]
   const remarkMap = await loadFriendRemarkMap(viewerId, displayNameUserIds)
 
-  return rows.map((item) => {
+  return rowsWithFocus.map((item) => {
     const authorName = resolveFriendDisplayName({
       viewerId,
       targetUserId: item.userId,
@@ -281,4 +446,22 @@ async function getCheckInMessagesUncached({
       })),
     }
   })
+}
+
+export type CheckInReplyStatus = 'visible' | 'deleted' | 'unavailable'
+
+export async function getCheckInReplyStatus({ messageId, commentId }: { messageId: string; commentId: string }): Promise<CheckInReplyStatus> {
+  const comment = await prisma.dailyMessageComment.findUnique({
+    where: { id: commentId },
+    select: {
+      messageId: true,
+      isDeleted: true,
+      DailyMessage: { select: { isDeleted: true, moderationStatus: true } },
+    },
+  })
+
+  if (!comment || comment.messageId !== messageId || comment.DailyMessage.isDeleted || comment.DailyMessage.moderationStatus !== 'APPROVED') {
+    return 'unavailable'
+  }
+  return comment.isDeleted ? 'deleted' : 'visible'
 }

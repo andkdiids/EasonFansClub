@@ -101,7 +101,11 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         return payload as ForumFeedResponse
       })
       .then((payload) => {
-        if (sequence === requestSequence.current) setData(payload)
+        if (sequence !== requestSequence.current) return
+        setData(payload)
+        if (payload.page !== page) {
+          router.replace(buildForumHref(pathname, queryString, { page: payload.page }), { scroll: false })
+        }
       })
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === 'AbortError') return
@@ -111,12 +115,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         if (sequence === requestSequence.current) setLoading(false)
       })
     return () => controller.abort()
-  }, [board, page, previewMode, query, sort])
-
-  useEffect(() => {
-    if (previewMode || !data || loading || data.page === page) return
-    router.replace(buildForumHref(pathname, queryString, { page: data.page }), { scroll: false })
-  }, [data, loading, page, pathname, previewMode, queryString, router])
+  }, [board, page, pathname, previewMode, query, queryString, router, sort])
 
   useEffect(() => {
     scrollRestoreAttemptedRef.current = false
@@ -199,7 +198,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
         {!error && data ? <PostList posts={data.posts} total={data.total} emptyText={emptyText} responsiveColumns onBoardSelect={(slug) => updateQuery({ board: slug, page: null })} onPostOpen={saveScrollForPost} /> : null}
         {data && data.totalPages > 1 ? (
           <Pagination
-            currentPage={data.page}
+            currentPage={page}
             totalPages={data.totalPages}
             onPageChange={goToForumPage}
             disabled={loading}

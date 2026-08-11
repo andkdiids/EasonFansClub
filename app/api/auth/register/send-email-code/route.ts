@@ -8,6 +8,7 @@ import { checkDailyRegistrationEmailCodeLimit, recordSuccessfulRegistrationEmail
 import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { findActiveConflict } from '@/lib/users'
 import { hashToken } from '@/lib/tokens'
+import { getPhoneValidationMessage, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -35,9 +36,12 @@ export async function POST(request: Request) {
   const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash: hashToken(registrationToken) } })
   if (!draft || draft.completedAt) return errorResponse('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND')
   if (draft.expiresAt <= new Date()) return errorResponse('注册验证已过期，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_EXPIRED')
-  const draftPhone = normalizeText(draft.phone).replace(/\s+/g, '')
-  if (!draftPhone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
-  if (!/^1\d{10}$/.test(draftPhone)) return errorResponse('请输入 11 位中国大陆手机号', 400, 'INVALID_PHONE', { phone: '请输入 11 位中国大陆手机号' })
+  const draftPhone = normalizePhoneNumber(draft.phone)
+  if (!draft.phone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+  if (!draftPhone) {
+    const message = getPhoneValidationMessage()
+    return errorResponse(message, 400, 'INVALID_PHONE', { phone: message })
+  }
 
   const config = await getEHospitalCheckConfig()
   if (config.enabled) {
@@ -51,6 +55,7 @@ export async function POST(request: Request) {
 
   const email = requestedEmail || draft.email
   const emailChanged = email !== draft.email
+  const phoneChanged = draft.phone !== draftPhone.e164
   if (emailChanged) {
     const duplicate = await findActiveConflict({ email })
     if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
@@ -81,7 +86,8 @@ export async function POST(request: Request) {
     where: { id: draft.id },
     data: {
       email,
-      identityHash: emailChanged ? getRegistrationIdentityHash(email, draft.phone) : draft.identityHash,
+      phone: draftPhone.e164,
+      identityHash: emailChanged || phoneChanged ? getRegistrationIdentityHash(email, draftPhone.e164) : draft.identityHash,
       emailCodeHash: hashRegistrationCode(registrationToken, 'EMAIL', code),
       emailCodeExpiresAt: expiresAt,
       emailVerifiedAt: emailChanged ? null : draft.emailVerifiedAt,

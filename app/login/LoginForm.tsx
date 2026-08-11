@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { FormError } from '@/components/FormError'
+import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
+import { getPhoneInputParts, getPhoneValidationMessage, isLikelyPhoneInput, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import Link from 'next/link'
 
 type LoginErrors = Partial<{
@@ -14,8 +16,8 @@ type IdentifierType = 'phone' | 'email'
 
 function inferIdentifierType(value: string): IdentifierType {
   if (value.includes('@')) return 'email'
-  if (/^\+?\d{7,}$/.test(value)) return 'phone'
- return 'phone'
+  if (isLikelyPhoneInput(value)) return 'phone'
+  return 'phone'
 }
 
 function safeRedirectPath(path?: string) {
@@ -26,6 +28,9 @@ function safeRedirectPath(path?: string) {
 export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redirectTo?: string; initialAccount?: string }>) {
   const normalizedInitialAccount = initialAccount.trim().slice(0, 254)
   const [identifierType, setIdentifierType] = useState<IdentifierType>(inferIdentifierType(normalizedInitialAccount))
+  const initialPhoneParts = getPhoneInputParts(normalizedInitialAccount)
+  const [phoneCountry, setPhoneCountry] = useState<PhoneCountryCode>(initialPhoneParts.country)
+  const [phoneValue, setPhoneValue] = useState(inferIdentifierType(normalizedInitialAccount) === 'phone' ? initialPhoneParts.value : '')
   const [errors, setErrors] = useState<LoginErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -33,16 +38,18 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
     if (normalizedInitialAccount) {
       const initialType = inferIdentifierType(normalizedInitialAccount)
       setIdentifierType(initialType)
+      if (initialType === 'phone') {
+        const parts = getPhoneInputParts(normalizedInitialAccount)
+        setPhoneCountry(parts.country)
+        setPhoneValue(parts.value)
+      }
       window.localStorage.setItem('ecfc-login-type', initialType)
       return
     }
     const saved = window.localStorage.getItem('ecfc-login-type')
 
-if (saved === 'phone' || saved === 'email') {
-  setIdentifierType(saved)
-} else {
-  setIdentifierType('phone')
-}
+    if (saved === 'phone' || saved === 'email') setIdentifierType(saved)
+    else setIdentifierType('phone')
   }, [normalizedInitialAccount])
 
   function chooseType(type: IdentifierType) {
@@ -56,16 +63,28 @@ if (saved === 'phone' || saved === 'email') {
 
     const form = event.currentTarget
     const formData = new FormData(form)
-    const identifier = String(formData.get('identifier') || '').trim()
+    const rawIdentifier = (identifierType === 'phone' ? phoneValue : String(formData.get('identifier') || '')).trim()
     const password = String(formData.get('password') || '')
 
-    if (!identifier || !password) {
+    if (!rawIdentifier || !password) {
       setErrors({
         form: '请填写账号和密码',
-        ...(!identifier ? { identifier: identifierType === 'email' ? '请输入邮箱' : identifierType === 'phone' ? '请输入手机号' : '请输入登录账号' } : {}),
+        ...(!rawIdentifier ? { identifier: identifierType === 'email' ? '请输入邮箱' : '请输入手机号' } : {}),
         ...(!password ? { password: '请输入密码' } : {}),
       })
       return
+    }
+
+    let identifier = rawIdentifier
+    let requestPhoneCountry: PhoneCountryCode | undefined
+    if (identifierType === 'phone') {
+      const phone = normalizePhoneNumber(rawIdentifier, phoneCountry)
+      if (!phone) {
+        setErrors({ identifier: getPhoneValidationMessage(phoneCountry) })
+        return
+      }
+      identifier = phone.e164
+      requestPhoneCountry = phone.country
     }
 
     setErrors({})
@@ -80,7 +99,7 @@ if (saved === 'phone' || saved === 'email') {
         credentials: 'same-origin',
         cache: 'no-store',
         signal: controller.signal,
-        body: JSON.stringify({ identifierType, identifier, password }),
+        body: JSON.stringify({ identifierType, identifier, password, ...(requestPhoneCountry ? { phoneCountry: requestPhoneCountry } : {}) }),
       })
 
       const data = await response.json().catch(() => ({}))
@@ -120,24 +139,40 @@ if (saved === 'phone' || saved === 'email') {
         ))}
       </div>
 
-      <label className="block" htmlFor="login-identifier">
+      <div className="block">
         <span className="text-sm font-bold text-slate-700">{identifierType === 'email' ? '邮箱' : identifierType === 'phone' ? '手机号' : '登录账号'}</span>
-        <input
-          id="login-identifier"
-          name="identifier"
-          type={identifierType === 'email' ? 'email' : identifierType === 'phone' ? 'tel' : 'text'}
-          autoComplete="username"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          enterKeyHint="next"
-          required
-          defaultValue={normalizedInitialAccount}
-          className="auth-input mt-2 w-full"
-          placeholder={identifierType === 'email' ? '请输入已验证邮箱' : identifierType === 'phone' ? '请输入已绑定手机号' : '请输入登录账号'}
-        />
+        {identifierType === 'phone' ? (
+          <InternationalPhoneInput
+            id="login-identifier"
+            name="identifier"
+            value={phoneValue}
+            country={phoneCountry}
+            onChange={setPhoneValue}
+            onCountryChange={setPhoneCountry}
+            required
+            autoComplete="username"
+            inputClassName="auth-input w-full"
+            placeholder="请输入已绑定手机号"
+          />
+        ) : (
+          <input
+            key={identifierType}
+            id="login-identifier"
+            name="identifier"
+            type="email"
+            autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="next"
+            required
+            defaultValue={normalizedInitialAccount}
+            className="auth-input mt-2 w-full"
+            placeholder="请输入已验证邮箱"
+          />
+        )}
         <FormError message={errors.identifier} />
-      </label>
+      </div>
 
       <div className="text-right"><Link href="/forgot-password" className="text-sm font-black text-brand-700 hover:underline">忘记密码？</Link></div>
 

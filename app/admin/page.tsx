@@ -81,6 +81,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     items: [
       { href: '/admin/entertainment/lyrics', title: '歌词处方库', desc: '维护娱乐天空每日抽奖使用的歌词处方。' },
       { href: '/admin/entertainment/guess-song', title: '听听题库', desc: '维护听听题目、答案与私有音频变体。' },
+      { href: '/admin/entertainment/guess-song/leaderboard', title: '听听排行榜', desc: '管理听听周榜、月榜、年榜和成绩补分。' },
       { href: '/admin/entertainment/guess-song#game-config', title: '游戏相关配置', desc: '沿用听听管理页中的游戏配置入口。' },
       { href: '/admin/music/songs', title: '曲库管理', desc: '从 EasMusic 歌曲库维护游戏可用曲目。' },
     ],

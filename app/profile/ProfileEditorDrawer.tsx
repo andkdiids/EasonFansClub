@@ -6,6 +6,12 @@ import { usePathname, useRouter } from 'next/navigation'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
 
 type InitialProfile = {
+  username: string
+  usernameChange: {
+    lastChangedAt: string | null
+    nextAllowedAt: string | null
+    canChange: boolean
+  }
   nickname: string
   avatarUrl: string
   backgroundUrl: string

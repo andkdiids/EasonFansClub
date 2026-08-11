@@ -1,3 +1,5 @@
+import { normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
+
 export type AuthFieldErrors = Partial<{
   username: string
   email: string
@@ -15,6 +17,7 @@ export function validateRegisterInput(input: {
   username: string
   email: string
   phone: string
+  phoneCountry?: PhoneCountryCode
   password: string
   nickname: string
 }) {
@@ -25,7 +28,7 @@ export function validateRegisterInput(input: {
   if (input.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) {
     errors.email = '邮箱格式不正确'
   }
-  if (input.phone && !/^1\d{10}$/.test(input.phone)) {
+  if (input.phone && !normalizePhoneNumber(input.phone, input.phoneCountry)) {
     errors.phone = '手机号格式不正确'
   }
   if (input.password.length < 8) errors.password = '密码至少需要 8 位'

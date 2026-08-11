@@ -184,6 +184,36 @@ export type UnreadSummary = {
   total: number
 }
 
+type DailyCommentNotificationRow = {
+  id: string
+  messageId: string
+  isDeleted: boolean
+  DailyMessage: { isDeleted: boolean }
+}
+
+async function loadDailyNotificationComments(
+  targets: Array<Extract<NotificationReplyTarget, { kind: 'daily-message' }>>,
+  label: string,
+) {
+  if (!targets.length) return { rows: [] as DailyCommentNotificationRow[], failed: false }
+
+  try {
+    const rows = await prisma.dailyMessageComment.findMany({
+      where: { id: { in: Array.from(new Set(targets.map((target) => target.parentId))) } },
+      select: {
+        id: true,
+        messageId: true,
+        isDeleted: true,
+        DailyMessage: { select: { isDeleted: true } },
+      },
+    })
+    return { rows, failed: false }
+  } catch (error) {
+    console.error(`[notifications:${label}:daily-comment-lookup-failed]`, error)
+    return { rows: [] as DailyCommentNotificationRow[], failed: true }
+  }
+}
+
 async function reconcileStalePersonalNotifications(userId: string) {
   const unread = await prisma.notification.findMany({
     where: getUnreadNotificationWhere(userId),
@@ -224,7 +254,7 @@ async function reconcileStalePersonalNotifications(userId: string) {
     item.type === 'FRIEND_REQUEST' && !item.key && item.title === '好友申请' && item.actorId ? [item.actorId] : []
   ))
 
-  const [requests, legacyIncomingRequests, postReplies, dailyComments, feedbacks, wallMessages] = await Promise.all([
+  const [requests, legacyIncomingRequests, postReplies, dailyCommentLookup, feedbacks, wallMessages] = await Promise.all([
     requestIds.length ? prisma.friendRequest.findMany({
       where: { id: { in: Array.from(new Set(requestIds)) } },
       select: { id: true, status: true, senderId: true, receiverId: true },
@@ -237,10 +267,7 @@ async function reconcileStalePersonalNotifications(userId: string) {
       where: { id: { in: postTargets.map((target) => target.parentId) }, isDeleted: false },
       select: { id: true, postId: true },
     }) : [],
-    dailyTargets.length ? prisma.dailyMessageComment.findMany({
-      where: { id: { in: dailyTargets.map((target) => target.parentId) }, isDeleted: false, DailyMessage: { isDeleted: false } },
-      select: { id: true, messageId: true },
-    }) : [],
+    loadDailyNotificationComments(dailyTargets, 'reconcile'),
     feedbackTargets.length ? prisma.feedback.findMany({
       where: { id: { in: feedbackTargets.map((target) => target.resourceId) }, userId },
       select: { id: true },
@@ -250,6 +277,7 @@ async function reconcileStalePersonalNotifications(userId: string) {
       select: { id: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
     }) : [],
   ])
+  const dailyComments = dailyCommentLookup.rows
 
   const requestById = new Map(requests.map((request) => [request.id, request]))
   const pendingLegacyIncomingRequests = new Map(legacyIncomingRequests
@@ -279,7 +307,7 @@ async function reconcileStalePersonalNotifications(userId: string) {
 
     if (!target) continue
     if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) staleIds.add(item.id)
-    if (target.kind === 'daily-message' && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId)) staleIds.add(item.id)
+    if (target.kind === 'daily-message' && !dailyCommentLookup.failed && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId && !comment.isDeleted && !comment.DailyMessage.isDeleted)) staleIds.add(item.id)
     if (target.kind === 'feedback' && !feedbacks.some((feedback) => feedback.id === target.resourceId)) staleIds.add(item.id)
     if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)) staleIds.add(item.id)
   }
@@ -546,15 +574,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const dailyTargets = targets.filter((target) => target.kind === 'daily-message')
   const feedbackTargets = targets.filter((target) => target.kind === 'feedback')
   const wallTargets = targets.filter((target) => target.kind === 'profile-wall')
-  const [postReplies, dailyComments, feedbacks, wallMessages] = await Promise.all([
+  const [postReplies, dailyCommentLookup, feedbacks, wallMessages] = await Promise.all([
     postTargets.length ? prisma.reply.findMany({
       where: { id: { in: postTargets.map((target) => target.parentId) }, isDeleted: false },
       select: { id: true, postId: true },
     }) : [],
-    dailyTargets.length ? prisma.dailyMessageComment.findMany({
-      where: { id: { in: dailyTargets.map((target) => target.parentId) }, isDeleted: false, DailyMessage: { isDeleted: false } },
-      select: { id: true, messageId: true },
-    }) : [],
+    loadDailyNotificationComments(dailyTargets, 'list'),
     feedbackTargets.length ? prisma.feedback.findMany({
       where: { id: { in: feedbackTargets.map((target) => target.resourceId) }, userId },
       select: { id: true, status: true },
@@ -564,6 +589,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       select: { id: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
     }) : [],
   ])
+  const dailyComments = dailyCommentLookup.rows
 
   const items = merged.map((item) => {
     const target = item.replyTarget
@@ -571,8 +597,11 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) {
       return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
     }
-    if (target.kind === 'daily-message' && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId)) {
-      return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
+    if (target.kind === 'daily-message') {
+      if (dailyCommentLookup.failed) return { ...item, replyDisabledReason: '暂时无法加载回复，请稍后重试' }
+      const comment = dailyComments.find((row) => row.id === target.parentId && row.messageId === target.resourceId)
+      if (!comment) return { ...item, replyDisabledReason: '你暂时无法查看这条回复' }
+      if (comment.isDeleted || comment.DailyMessage.isDeleted) return { ...item, replyDisabledReason: '该回复已被删除' }
     }
     if (target.kind === 'feedback') {
       const feedback = feedbacks.find((row) => row.id === target.resourceId)

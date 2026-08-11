@@ -1,6 +1,7 @@
 import type { GuessSongMode, GuessSongPeriodType } from '@prisma/client'
 import {
   GUESS_SONG_BASE_SCORE,
+  GUESS_SONG_ADMIN_MAX_BONUS_CORRECT_ANSWERS,
   getGuessSongDatabaseModes,
   isGuessSongPublicMode,
   type GuessSongPublicMode,
@@ -8,10 +9,12 @@ import {
   calculateGuessSongScore,
 } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod } from '@/lib/guess-song-period'
+import { getGuessSongDeletedYearSessionIds, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { prisma } from '@/lib/prisma'
 
-export const GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS = 20
+export type GuessSongAdminPeriodType = GuessSongPeriodType | 'YEAR'
+export const GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS = GUESS_SONG_ADMIN_MAX_BONUS_CORRECT_ANSWERS
 export const GUESS_SONG_ADMIN_MAX_STARTING_STREAK = 1000
 
 export class GuessSongAdminLeaderboardError extends Error {
@@ -25,7 +28,8 @@ function assertPublicMode(value: unknown): asserts value is GuessSongPublicMode 
   if (!isGuessSongPublicMode(value)) throw new GuessSongAdminLeaderboardError('请选择有效听听模式')
 }
 
-function assertPeriodType(value: unknown): asserts value is GuessSongPeriodType {
+function assertPeriodType(value: unknown): asserts value is GuessSongAdminPeriodType {
+  if (value === 'YEAR') return
   if (value !== 'WEEK' && value !== 'MONTH') throw new GuessSongAdminLeaderboardError('请选择有效榜单周期')
 }
 
@@ -69,14 +73,20 @@ export function calculateGuessSongAdminCompensation(input: {
   }
 }
 
-function getPeriodBounds(periodType: GuessSongPeriodType, periodKey: string | null | undefined) {
+function getPeriodBounds(periodType: GuessSongAdminPeriodType, periodKey: string | null | undefined) {
   const current = getGuessSongPeriod(periodType)
   if (!periodKey) return current
-  const validFormat = periodType === 'WEEK' ? /^\d{4}-\d{2}-\d{2}$/ : /^\d{4}-\d{2}$/
+  const validFormat = periodType === 'WEEK'
+    ? /^\d{4}-\d{2}-\d{2}$/
+    : periodType === 'MONTH'
+      ? /^\d{4}-\d{2}$/
+      : /^\d{4}$/
   if (!validFormat.test(periodKey)) throw new GuessSongAdminLeaderboardError('榜单周期标识无效')
   const reference = periodType === 'WEEK'
     ? new Date(`${periodKey}T12:00:00+08:00`)
-    : new Date(`${periodKey}-15T12:00:00+08:00`)
+    : periodType === 'MONTH'
+      ? new Date(`${periodKey}-15T12:00:00+08:00`)
+      : new Date(`${periodKey}-07-01T12:00:00+08:00`)
   const selected = getGuessSongPeriod(periodType, reference)
   if (selected.periodKey !== periodKey) throw new GuessSongAdminLeaderboardError('榜单周期标识无效')
   return selected
@@ -99,7 +109,7 @@ type AdminEntry = {
   id: string
   userId: string
   mode: GuessSongMode
-  periodType: GuessSongPeriodType
+  periodType: GuessSongAdminPeriodType
   periodKey: string
   score: number
   correctCount: number
@@ -115,7 +125,55 @@ type AdminEntry = {
     avatarUrl: string | null
     Profile: { displayName: string | null; avatarUrl: string | null } | null
   }
-  GuessSongSession: { status: string; completedAt: Date | null }
+  GuessSongSession: {
+    id: string
+    status: string
+    completedAt: Date | null
+    mode: GuessSongMode
+    score: number
+    correctCount: number
+    maxStreak: number
+    totalPlayCount: number
+    isValid: boolean
+    riskScore: number
+    questionCount: number | null
+    updatedAt: Date
+    createdAt: Date
+  }
+}
+
+type YearSession = {
+  id: string
+  userId: string
+  mode: GuessSongMode
+  status: string
+  score: number
+  correctCount: number
+  maxStreak: number
+  totalPlayCount: number
+  completedAt: Date
+  updatedAt: Date
+  createdAt: Date
+  User: AdminEntry['User']
+}
+
+function compareYearSessions(left: YearSession, right: YearSession) {
+  return compareGuessSongScores(
+    {
+      score: left.score,
+      correctCount: left.correctCount,
+      maxStreak: left.maxStreak,
+      totalPlayCount: left.totalPlayCount,
+      achievedAt: left.completedAt,
+    },
+    {
+      score: right.score,
+      correctCount: right.correctCount,
+      maxStreak: right.maxStreak,
+      totalPlayCount: right.totalPlayCount,
+      achievedAt: right.completedAt,
+    },
+  )
 }
 
 function serializeEntry(entry: AdminEntry, entryIds: string[]) {
@@ -142,6 +200,30 @@ function serializeEntry(entry: AdminEntry, entryIds: string[]) {
   }
 }
 
+function serializeYearSession(session: YearSession, periodKey: string) {
+  return {
+    id: session.id,
+    entryIds: [],
+    userId: session.userId,
+    uid: session.User.uid,
+    nickname: session.User.nickname,
+    username: session.User.username,
+    displayName: session.User.Profile?.displayName || session.User.nickname,
+    avatarUrl: session.User.Profile?.avatarUrl || session.User.avatarUrl,
+    mode: toPublicGuessSongMode(session.mode),
+    databaseMode: session.mode,
+    periodType: 'YEAR' as const,
+    periodKey,
+    score: session.score,
+    correctCount: session.correctCount,
+    maxStreak: session.maxStreak,
+    totalPlayCount: session.totalPlayCount,
+    achievedAt: session.completedAt.toISOString(),
+    sessionId: session.id,
+    sessionStatus: session.status,
+  }
+}
+
 export async function listGuessSongAdminLeaderboard(input: {
   mode: unknown
   periodType: unknown
@@ -152,12 +234,75 @@ export async function listGuessSongAdminLeaderboard(input: {
   assertPeriodType(input.periodType)
   const period = getPeriodBounds(input.periodType, input.periodKey)
   const modeValues = getGuessSongDatabaseModes(input.mode)
+  if (input.periodType === 'YEAR') {
+    const sessions = await prisma.guessSongSession.findMany({
+      where: {
+        mode: { in: modeValues },
+        status: { in: ['COMPLETED', 'EXPIRED'] },
+        completedAt: { gte: period.start, lt: period.end },
+        isValid: true,
+        riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+        ...(input.mode === 'EASY' ? { questionCount: null } : {}),
+        User: userSearchFilter(input.query || ''),
+      },
+      select: {
+        id: true,
+        userId: true,
+        mode: true,
+        status: true,
+        score: true,
+        correctCount: true,
+        maxStreak: true,
+        totalPlayCount: true,
+        completedAt: true,
+        updatedAt: true,
+        createdAt: true,
+        User: {
+          select: {
+            id: true,
+            uid: true,
+            nickname: true,
+            username: true,
+            avatarUrl: true,
+            Profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
+      orderBy: [
+        { score: 'desc' },
+        { correctCount: 'desc' },
+        { maxStreak: 'desc' },
+        { totalPlayCount: 'asc' },
+        { completedAt: 'asc' },
+        { id: 'asc' },
+      ],
+    })
+    const deletedSessionIds = await getGuessSongDeletedYearSessionIds(period.periodKey)
+    const bestByUser = new Map<string, YearSession>()
+    for (const session of sessions as YearSession[]) {
+      if (deletedSessionIds.has(session.id)) continue
+      const current = bestByUser.get(session.userId)
+      if (!current || compareYearSessions(session, current) < 0) bestByUser.set(session.userId, session)
+    }
+    return {
+      mode: input.mode,
+      periodType: input.periodType,
+      periodKey: period.periodKey,
+      rows: [...bestByUser.values()]
+        .sort(compareYearSessions)
+        .map((session) => serializeYearSession(session, period.periodKey)),
+    }
+  }
   const rows = await prisma.guessSongLeaderboardEntry.findMany({
     where: {
       mode: { in: modeValues },
       periodType: input.periodType,
       periodKey: period.periodKey,
       User: userSearchFilter(input.query || ''),
+      GuessSongSession: {
+        isValid: true,
+        riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+      },
     },
     include: {
       User: {
@@ -170,7 +315,23 @@ export async function listGuessSongAdminLeaderboard(input: {
           Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
-      GuessSongSession: { select: { status: true, completedAt: true } },
+      GuessSongSession: {
+        select: {
+          id: true,
+          status: true,
+          completedAt: true,
+          mode: true,
+          score: true,
+          correctCount: true,
+          maxStreak: true,
+          totalPlayCount: true,
+          isValid: true,
+          riskScore: true,
+          questionCount: true,
+          updatedAt: true,
+          createdAt: true,
+        },
+      },
     },
     orderBy: [{ score: 'desc' }, { achievedAt: 'asc' }],
     take: 500,
@@ -197,15 +358,6 @@ export async function listGuessSongAdminLeaderboard(input: {
   }
 }
 
-function sessionPeriodFilter(period: { start: Date; end: Date }) {
-  return {
-    OR: [
-      { completedAt: { gte: period.start, lt: period.end } },
-      { completedAt: null, createdAt: { gte: period.start, lt: period.end } },
-    ],
-  }
-}
-
 export async function deleteGuessSongAdminLeaderboard(input: {
   adminId: string
   userId: string
@@ -224,9 +376,50 @@ export async function deleteGuessSongAdminLeaderboard(input: {
   return prisma.$transaction(async (tx) => {
     const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
     if (!target) throw new GuessSongAdminLeaderboardError('用户不存在', 404, 'USER_NOT_FOUND')
+    if (periodType === 'YEAR') {
+      const deletedSessionIds = await getGuessSongDeletedYearSessionIds(period.periodKey)
+      const candidates = await tx.guessSongSession.findMany({
+        where: {
+          userId: input.userId,
+          mode: { in: getGuessSongDatabaseModes(mode) },
+          status: { in: ['COMPLETED', 'EXPIRED'] },
+          completedAt: { gte: period.start, lt: period.end },
+          isValid: true,
+          riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+          ...(mode === 'EASY' ? { questionCount: null } : {}),
+        },
+        orderBy: [
+          { score: 'desc' },
+          { correctCount: 'desc' },
+          { maxStreak: 'desc' },
+          { totalPlayCount: 'asc' },
+          { completedAt: 'asc' },
+          { id: 'asc' },
+        ],
+        take: 1000,
+      })
+      const source = candidates.find((session) => !deletedSessionIds.has(session.id))
+      if (!source) throw new GuessSongAdminLeaderboardError('YEAR leaderboard score not found', 404, 'SCORE_NOT_FOUND')
+      await tx.adminActionLog.create({
+        data: {
+          adminId: input.adminId,
+          targetUserId: input.userId,
+          action: 'GUESS_SONG_DELETE_SCORE',
+          detail: {
+            mode,
+            periodType,
+            periodKey: period.periodKey,
+            beforeScore: source.score,
+            sessionId: source.id,
+            reason,
+          },
+        },
+      })
+      return { deletedCount: 1, mode, periodType, periodKey: period.periodKey }
+    }
     const entries = await tx.guessSongLeaderboardEntry.findMany({
       where: { userId: input.userId, mode: { in: getGuessSongDatabaseModes(mode) }, periodType, periodKey: period.periodKey },
-      select: { id: true, score: true, mode: true },
+      select: { id: true, score: true, mode: true, sessionId: true },
     })
     if (!entries.length) throw new GuessSongAdminLeaderboardError('该用户没有对应榜单成绩', 404, 'SCORE_NOT_FOUND')
     const beforeScore = Math.max(...entries.map((entry) => entry.score))
@@ -244,11 +437,100 @@ export async function deleteGuessSongAdminLeaderboard(input: {
           periodKey: period.periodKey,
           beforeScore,
           deletedEntryIds: entries.map((entry) => entry.id),
+          sessionIds: entries.map((entry) => entry.sessionId),
           reason,
         },
       },
     })
     return { deletedCount: entries.length, mode, periodType, periodKey: period.periodKey }
+  })
+}
+
+async function addGuessSongAdminYearScore(input: {
+  adminId: string
+  userId: string
+  mode: GuessSongPublicMode
+  periodKey: string
+  period: { start: Date; end: Date }
+  correctAnswers: number
+  startingStreak: number
+  reason: string
+}) {
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
+    if (!target) throw new GuessSongAdminLeaderboardError('USER_NOT_FOUND', 404, 'USER_NOT_FOUND')
+    const deletedSessionIds = await getGuessSongDeletedYearSessionIds(input.periodKey)
+    const candidates = await tx.guessSongSession.findMany({
+      where: {
+        userId: input.userId,
+        mode: { in: getGuessSongDatabaseModes(input.mode) },
+        status: { in: ['COMPLETED', 'EXPIRED'] },
+        completedAt: { gte: input.period.start, lt: input.period.end },
+        isValid: true,
+        riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+        ...(input.mode === 'EASY' ? { questionCount: null } : {}),
+      },
+      orderBy: [
+        { score: 'desc' },
+        { correctCount: 'desc' },
+        { maxStreak: 'desc' },
+        { totalPlayCount: 'asc' },
+        { completedAt: 'asc' },
+        { id: 'asc' },
+      ],
+      take: 1000,
+    })
+    const source = candidates.find((session) => !deletedSessionIds.has(session.id))
+    if (!source) throw new GuessSongAdminLeaderboardError('SCORE_NOT_FOUND', 404, 'SCORE_NOT_FOUND')
+    const compensation = calculateGuessSongAdminCompensation({
+      mode: source.mode,
+      correctAnswers: input.correctAnswers,
+      startingStreak: input.startingStreak,
+    })
+    const afterScore = source.score + compensation.totalScore
+    const afterCorrectCount = source.correctCount + compensation.correctAnswers
+    const afterMaxStreak = Math.max(source.maxStreak, input.startingStreak + compensation.correctAnswers)
+    await tx.guessSongSession.update({
+      where: { id: source.id },
+      data: { score: afterScore, correctCount: afterCorrectCount, maxStreak: afterMaxStreak },
+    })
+    await recordGuessSongLeaderboard(source.id, tx)
+    const affectedPeriods = ['WEEK', 'MONTH'].map((periodType) => ({
+      periodType,
+      periodKey: getGuessSongPeriod(periodType as GuessSongPeriodType, source.completedAt!).periodKey,
+      score: afterScore,
+    }))
+    await tx.adminActionLog.create({
+      data: {
+        adminId: input.adminId,
+        targetUserId: input.userId,
+        action: 'GUESS_SONG_ADD_SCORE',
+        detail: {
+          mode: input.mode,
+          periodType: 'YEAR',
+          periodKey: input.periodKey,
+          beforeScore: source.score,
+          adjustment: compensation,
+          afterScore,
+          beforeCorrectCount: source.correctCount,
+          afterCorrectCount,
+          beforeMaxStreak: source.maxStreak,
+          afterMaxStreak,
+          sourceSessionId: source.id,
+          affectedPeriods,
+          reason: input.reason,
+        },
+      },
+    })
+    return {
+      mode: input.mode,
+      periodType: 'YEAR' as const,
+      periodKey: input.periodKey,
+      compensation,
+      beforeScore: source.score,
+      afterScore,
+      affectedPeriods,
+    }
   })
 }
 
@@ -272,13 +554,44 @@ export async function addGuessSongAdminScore(input: {
   const correctAnswers = assertPositiveInteger(input.correctAnswers, '补回答对题数', GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS)
   const startingStreak = assertNonNegativeInteger(input.startingStreak, '补分前连击', GUESS_SONG_ADMIN_MAX_STARTING_STREAK)
 
+  if (periodType === 'YEAR') {
+    return addGuessSongAdminYearScore({
+      adminId: input.adminId,
+      userId: input.userId,
+      mode,
+      periodKey: period.periodKey,
+      period,
+      correctAnswers,
+      startingStreak,
+      reason,
+    })
+  }
+
   return prisma.$transaction(async (tx) => {
     const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
     if (!target) throw new GuessSongAdminLeaderboardError('用户不存在', 404, 'USER_NOT_FOUND')
     const modeValues = getGuessSongDatabaseModes(mode)
     const entries = await tx.guessSongLeaderboardEntry.findMany({
-      where: { userId: input.userId, mode: { in: modeValues }, periodType, periodKey: period.periodKey },
-      include: { GuessSongSession: { select: { status: true, mode: true } } },
+      where: { userId: input.userId, mode: { in: modeValues }, periodType: periodType as GuessSongPeriodType, periodKey: period.periodKey },
+      include: {
+        GuessSongSession: {
+          select: {
+            id: true,
+            status: true,
+            completedAt: true,
+            mode: true,
+            score: true,
+            correctCount: true,
+            maxStreak: true,
+            totalPlayCount: true,
+            isValid: true,
+            riskScore: true,
+            questionCount: true,
+            updatedAt: true,
+            createdAt: true,
+          },
+        },
+      },
       orderBy: [{ score: 'desc' }, { achievedAt: 'asc' }],
     })
     const candidate = entries[0]
@@ -290,46 +603,44 @@ export async function addGuessSongAdminScore(input: {
           isValid: true,
           riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
           score: { gt: 0 },
-          status: { in: ['COMPLETED', 'EXPIRED', 'IN_PROGRESS'] },
-          ...sessionPeriodFilter(period),
+          status: { in: ['COMPLETED', 'EXPIRED'] },
+          completedAt: { gte: period.start, lt: period.end },
+          ...(mode === 'EASY' ? { questionCount: null } : {}),
         },
         orderBy: [{ score: 'desc' }, { updatedAt: 'asc' }],
       })
     if (!entries.length && !candidate) throw new GuessSongAdminLeaderboardError('找不到可补分的有效听听记录', 404, 'SCORE_NOT_FOUND')
 
-    const baseMode = entries[0]?.GuessSongSession.mode || candidate?.mode || mode as GuessSongMode
-    const compensation = calculateGuessSongAdminCompensation({ mode: baseMode, correctAnswers, startingStreak })
-    const baseScore = entries[0]?.score ?? candidate?.score ?? 0
-    const afterScore = baseScore + compensation.totalScore
-    const beforeCorrectCount = entries[0]?.correctCount ?? candidate?.correctCount ?? 0
-    const beforeMaxStreak = entries[0]?.maxStreak ?? candidate?.maxStreak ?? 0
-    const afterMaxStreak = Math.max(beforeMaxStreak, startingStreak + correctAnswers)
     const targetEntry = entries[0]
-    if (targetEntry) {
-      await tx.guessSongLeaderboardEntry.update({
-        where: { id: targetEntry.id },
-        data: {
-          score: afterScore,
-          correctCount: beforeCorrectCount + correctAnswers,
-          maxStreak: afterMaxStreak,
-        },
-      })
-    } else if (candidate) {
-      await tx.guessSongLeaderboardEntry.create({
-        data: {
-          userId: input.userId,
-          sessionId: candidate.id,
-          mode: toPublicGuessSongMode(candidate.mode) as GuessSongMode,
-          periodType,
-          periodKey: period.periodKey,
-          score: afterScore,
-          correctCount: beforeCorrectCount + correctAnswers,
-          maxStreak: afterMaxStreak,
-          totalPlayCount: candidate.totalPlayCount,
-          achievedAt: candidate.completedAt || candidate.updatedAt || candidate.createdAt,
-        },
-      })
+    const sourceSession = targetEntry?.GuessSongSession || candidate
+    if (!sourceSession || !['COMPLETED', 'EXPIRED'].includes(sourceSession.status) || !sourceSession.completedAt) {
+      throw new GuessSongAdminLeaderboardError('SCORE_NOT_FOUND', 404, 'SCORE_NOT_FOUND')
     }
+    if (sourceSession.mode === 'EASY' && sourceSession.questionCount !== null) {
+      throw new GuessSongAdminLeaderboardError('SCORE_NOT_FOUND', 404, 'SCORE_NOT_FOUND')
+    }
+    const baseMode = sourceSession.mode
+    const compensation = calculateGuessSongAdminCompensation({ mode: baseMode, correctAnswers, startingStreak })
+    const baseScore = Math.max(targetEntry?.score ?? 0, sourceSession.score)
+    const afterScore = baseScore + compensation.totalScore
+    const beforeCorrectCount = Math.max(targetEntry?.correctCount ?? 0, sourceSession.correctCount)
+    const afterCorrectCount = beforeCorrectCount + correctAnswers
+    const beforeMaxStreak = Math.max(targetEntry?.maxStreak ?? 0, sourceSession.maxStreak)
+    const afterMaxStreak = Math.max(beforeMaxStreak, startingStreak + correctAnswers)
+    await tx.guessSongSession.update({
+      where: { id: sourceSession.id },
+      data: {
+        score: afterScore,
+        correctCount: afterCorrectCount,
+        maxStreak: afterMaxStreak,
+      },
+    })
+    await recordGuessSongLeaderboard(sourceSession.id, tx)
+    const affectedPeriods = ['WEEK', 'MONTH'].map((affectedPeriodType) => ({
+      periodType: affectedPeriodType,
+      periodKey: getGuessSongPeriod(affectedPeriodType as GuessSongPeriodType, sourceSession.completedAt!).periodKey,
+      score: afterScore,
+    }))
     await tx.adminActionLog.create({
       data: {
         adminId: input.adminId,
@@ -343,14 +654,23 @@ export async function addGuessSongAdminScore(input: {
           adjustment: compensation,
           afterScore,
           beforeCorrectCount,
-          afterCorrectCount: beforeCorrectCount + correctAnswers,
+          afterCorrectCount,
           beforeMaxStreak,
           afterMaxStreak,
-          sessionId: targetEntry?.sessionId || candidate?.id || null,
+          sourceSessionId: sourceSession.id,
+          affectedPeriods,
           reason,
         },
       },
     })
-    return { mode, periodType, periodKey: period.periodKey, compensation, beforeScore: baseScore, afterScore }
+    return {
+      mode,
+      periodType,
+      periodKey: period.periodKey,
+      compensation,
+      beforeScore: baseScore,
+      afterScore,
+      affectedPeriods,
+    }
   })
 }

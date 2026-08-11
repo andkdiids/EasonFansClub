@@ -6,6 +6,7 @@ import { getGrowthSummarySafe } from '@/lib/growth'
 import { profileImageUrl } from '@/lib/images'
 import { loadProfileRecentMessages } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
+import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     select: {
       id: true,
       uid: true,
+      username: true,
+      usernameChangedAt: true,
       nickname: true,
       avatarUrl: true,
       backgroundUrl: true,
@@ -53,12 +56,19 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
+  const usernameChange = getUsernameChangeAvailability(profile.usernameChangedAt)
   const [growth, recentMessages] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessages(profile.id, user.id),
   ])
 
   const profileEditorInitialProfile = {
+    username: profile.username,
+    usernameChange: {
+      lastChangedAt: usernameChange.lastChangedAt ? usernameChange.lastChangedAt.toISOString() : null,
+      nextAllowedAt: usernameChange.nextAllowedAt ? usernameChange.nextAllowedAt.toISOString() : null,
+      canChange: usernameChange.canChange,
+    },
     nickname: displayName,
     avatarUrl: avatar || '',
     backgroundUrl: background || '',

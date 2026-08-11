@@ -18,10 +18,10 @@ test('点赞接口事务内返回权威 isLiked / likeCount，且不会减成负
 test('面板同步 effect 不依赖不稳定的 likeCtx，点赞不再触发分页重置与旧数据覆盖', () => {
   assert.match(panel, /const likeCtxRef = useRef\(likeCtx\)/)
   // 初始数据同步 effect 只跟随真正的服务端 props 变化
-  assert.match(panel, /\}, \[initialDate, initialMessages, initialSort\]\)/)
+  assert.match(panel, /\}, \[initialDate, initialMessages, initialPagination, initialSort\]\)/)
   assert.ok(!panel.includes('[initialDate, initialMessages, initialSort, likeCtx]'))
   // loadMessages 同样不把 likeCtx 列入依赖
-  assert.match(panel, /\}, \[date, isLoading, scope, sort\]\)/)
+  assert.match(panel, /\}, \[date, isLoading, page, scope, serverPaginated, sort\]\)/)
   assert.ok(!panel.includes('[date, isLoading, scope, sort, likeCtx]'))
   // 覆盖层刷新统一走 ref，避免 effect 因 likeCtx 身份变化而重跑
   assert.match(panel, /likeCtxRef\.current\.reconcileLikes/)

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
 
@@ -30,25 +30,34 @@ export async function GET(request: Request) {
   const nextDate = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000)
   const sort: CheckInMessageSort = url.searchParams.get('sort') === 'hot' ? 'hot' : 'latest'
   const scope = url.searchParams.get('scope') === 'friends' ? 'friends' : 'public'
+  const page = Math.max(1, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1)
 
   try {
     const friendIds = scope === 'friends'
       ? await withDbTimeout('Friendship.findMany checkin.messages.api', getFriendIds(user.id))
       : undefined
-    const messages = await withDbTimeout(
-      'DailyMessage.findMany checkin.messages.api',
-      getCheckInMessages({
+    const messagePage = await withDbTimeout(
+      'DailyMessage.page checkin.messages.api',
+      getCheckInMessagesPage({
         selectedDate,
         nextDate,
         sort,
         viewerId: user.id,
         viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
         userIds: friendIds,
+        page,
       }),
     )
 
     return NextResponse.json(
-      { date: formatBeijingDate(selectedDate), sort, scope, messages },
+      {
+        date: formatBeijingDate(selectedDate),
+        sort,
+        scope,
+        messages: messagePage.messages,
+        pagination: messagePage.pagination,
+        ...messagePage.pagination,
+      },
       { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } },
     )
   } catch (error) {

@@ -20,6 +20,8 @@ type StickerFile = {
 
 const MAX_FILES = 60
 const MIN_FILES = 6
+const RECOMMENDED_MIN_FILES = 12
+const RECOMMENDED_MAX_FILES = 24
 
 const COVER_STATIC_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const COVER_STATIC_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
@@ -176,6 +178,19 @@ export function StickerPackUploader() {
     setStickerFiles((prev) => prev.map((s) => (s.id === id ? { ...s, name: value.slice(0, 4) } : s)))
   }
 
+  function getStickerCountHint(count: number) {
+    if (count >= RECOMMENDED_MIN_FILES && count <= RECOMMENDED_MAX_FILES) {
+      return `已选择 ${count} 张，当前数量在建议范围内`
+    }
+    if (count >= MIN_FILES && count < RECOMMENDED_MIN_FILES) {
+      return `已选择 ${count} 张，建议上传 ${RECOMMENDED_MIN_FILES}–${RECOMMENDED_MAX_FILES} 张；当前数量仍可提交`
+    }
+    if (count > RECOMMENDED_MAX_FILES && count <= MAX_FILES) {
+      return `已选择 ${count} 张，建议上传 ${RECOMMENDED_MIN_FILES}–${RECOMMENDED_MAX_FILES} 张；当前数量仍可提交`
+    }
+    return `建议上传 ${RECOMMENDED_MIN_FILES}–${RECOMMENDED_MAX_FILES} 张（非强制），每个合集最少 ${MIN_FILES} 张、最多 ${MAX_FILES} 张`
+  }
+
   async function submit() {
     setError(null)
     if (!name.trim()) return setError('请填写表情包名称')
@@ -282,7 +297,7 @@ export function StickerPackUploader() {
             className="hidden"
             onChange={onStickerPick}
           />
-          <p className="mt-2 text-xs font-bold text-slate-400">已选择 {stickerFiles.length} 张</p>
+          <p className="mt-2 text-xs font-bold text-slate-400">{getStickerCountHint(stickerFiles.length)}</p>
         </div>
 
         {stickerFiles.length > 0 ? (

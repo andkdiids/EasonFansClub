@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { getCheckInMessages, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
@@ -24,7 +24,7 @@ function parseDate(value?: string) {
   return date
 }
 
-export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string; message?: string; focus?: string }> }) {
+export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string; page?: string; message?: string; focus?: string }> }) {
   const sessionUser = await getCurrentUser()
   if (!sessionUser) redirect('/login')
 
@@ -59,9 +59,11 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey(today)
   const sort: CheckInMessageSort = params.sort === 'hot' ? 'hot' : 'latest'
+  const requestedMessagePage = Math.max(1, Number.parseInt(params.page || '1', 10) || 1)
+  const emptyMessagePagination: CheckInMessagePagination = { page: 1, pageSize: CHECK_IN_MESSAGE_PAGE_SIZE, total: 0, totalPages: 1, hasMore: false }
 
   const friendIdsPromise = safeDb('Friendship.findMany checkin.friendIds', getFriendIds(sessionUser.id), [], 3000)
-  const [user, activeUsers, todayCount, todayCheckIn, selectedMessages, friendIds, moodStats, checkInHistory] = await Promise.all([
+  const [user, activeUsers, todayCount, todayCheckIn, selectedMessagePage, friendIds, moodStats, checkInHistory] = await Promise.all([
     withDbTimeout(
       'User.findUnique checkin.user',
       prisma.user.findUnique({
@@ -84,15 +86,16 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       8000,
     ),
     safeDb(
-      'DailyMessage.findMany checkin.messages',
-      getCheckInMessages({
+      'DailyMessage.page checkin.messages',
+      getCheckInMessagesPage({
         selectedDate,
         nextDate,
         sort,
         viewerId: sessionUser.id,
         viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+        page: requestedMessagePage,
       }),
-      [],
+      { messages: [], pagination: emptyMessagePagination },
       8000,
     ),
     friendIdsPromise,
@@ -108,18 +111,47 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     safeDb('CheckIn.findMany checkin.history', prisma.checkIn.findMany({ where: { userId: sessionUser.id }, select: { checkinDateKey: true } }), []),
   ])
   const friendMessages = await safeDb(
-    'DailyMessage.findMany checkin.friendMessages',
-    getCheckInMessages({
+    'DailyMessage.page checkin.friendMessages',
+    getCheckInMessagesPage({
       selectedDate,
       nextDate,
       sort,
       viewerId: sessionUser.id,
       viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
       userIds: friendIds,
+      page: 1,
     }),
-    [],
+    { messages: [], pagination: emptyMessagePagination },
     8000,
   )
+  const selectedMessages = selectedMessagePage.messages
+  let messagesForDisplay = selectedMessages
+  let focusErrorKind: 'load' | 'deleted' | 'unavailable' | undefined
+  if (notificationMessageId) {
+    try {
+      const focusedMessage = await getCheckInMessage({
+        messageId: notificationMessageId,
+        focusCommentId: notificationFocusId || undefined,
+        selectedDate,
+        nextDate,
+        viewerId: sessionUser.id,
+        viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+      })
+      if (focusedMessage) {
+        messagesForDisplay = selectedMessages.some((item) => item.id === focusedMessage.id)
+          ? selectedMessages.map((item) => item.id === focusedMessage.id ? focusedMessage : item)
+          : [focusedMessage, ...selectedMessages]
+      }
+      if (notificationFocusId) {
+        const replyStatus = await getCheckInReplyStatus({ messageId: notificationMessageId, commentId: notificationFocusId })
+        if (replyStatus === 'deleted') focusErrorKind = 'deleted'
+        if (replyStatus === 'unavailable' || (replyStatus === 'visible' && !focusedMessage)) focusErrorKind = 'unavailable'
+      }
+    } catch (error) {
+      console.error('[checkin:notification-target-load-failed]', { messageId: notificationMessageId, focusId: notificationFocusId, error })
+      focusErrorKind = 'load'
+    }
+  }
   if (!user) redirect('/login')
 
   const streaks = calculateCheckinStreaks(checkInHistory.map((item) => item.checkinDateKey))
@@ -147,8 +179,10 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           totalCheckIns={streaks.totalDays}
           moodIndex={moodIndex}
           todayCheckIn={todayCheckInPayload}
-          selectedMessages={selectedMessages}
-          friendMessages={friendMessages}
+          selectedMessages={messagesForDisplay}
+          selectedMessagesPagination={selectedMessagePage.pagination}
+          friendMessages={friendMessages.messages}
+          friendMessagesPagination={friendMessages.pagination}
           selectedDateValue={selectedDateValue}
           todayValue={todayValue}
           sort={sort}
@@ -163,6 +197,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           sessionUserRole={sessionUser.role}
           focusMessageId={params.message?.slice(0, 80)}
           focusCommentId={params.focus?.slice(0, 80)}
+          focusErrorKind={focusErrorKind}
         />
       </main>
     </>

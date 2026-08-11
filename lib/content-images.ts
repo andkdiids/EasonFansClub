@@ -3,6 +3,23 @@ import { publicImageUrl } from '@/lib/images'
 export const MAX_CONTENT_IMAGES = 4
 const imageMarker = /\n?\[\[content-image:([^\]]+)\]\]/g
 
+export function reorderContentImageUrls(urls: readonly string[], fromIndex: number, targetIndex: number) {
+  if (
+    fromIndex < 0
+    || fromIndex >= urls.length
+    || targetIndex < 0
+    || targetIndex > urls.length
+    || fromIndex === targetIndex
+    || fromIndex + 1 === targetIndex
+  ) return [...urls]
+
+  const next = [...urls]
+  const [moved] = next.splice(fromIndex, 1)
+  const insertionIndex = targetIndex > fromIndex ? targetIndex - 1 : targetIndex
+  next.splice(Math.max(0, Math.min(insertionIndex, next.length)), 0, moved)
+  return next
+}
+
 export function parseContentImageUrls(value: unknown) {
   if (!Array.isArray(value)) return []
   return value.slice(0, MAX_CONTENT_IMAGES).map((item) => publicImageUrl(item)).filter((item): item is string => Boolean(item))

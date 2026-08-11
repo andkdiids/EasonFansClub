@@ -1,13 +1,126 @@
 import { NextResponse } from 'next/server'
-import { ProfileWallVisibility } from '@prisma/client'
+import { Prisma, ProfileWallVisibility } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 import { validateLoginAccountValue } from '@/lib/login-account'
+import { getUsernameChangeAvailability } from '@/lib/username-change'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
+
+type UsernameChangeErrorCode =
+  | 'ACCOUNT_NOT_FOUND'
+  | 'USERNAME_CHANGE_COOLDOWN'
+  | 'USERNAME_UNCHANGED'
+  | 'USERNAME_ALREADY_EXISTS'
+
+class UsernameChangeError extends Error {
+  constructor(
+    readonly code: UsernameChangeErrorCode,
+    message: string,
+    readonly nextAllowedAt: Date | null = null,
+  ) {
+    super(message)
+  }
+}
+
+function serializeUsernameChange(lastChangedAt: Date | null | undefined, now = new Date()) {
+  const availability = getUsernameChangeAvailability(lastChangedAt, now)
+  return {
+    lastChangedAt: availability.lastChangedAt?.toISOString() || null,
+    nextAllowedAt: availability.nextAllowedAt?.toISOString() || null,
+    canChange: availability.canChange,
+  }
+}
+
+function usernameChangeErrorResponse(error: UsernameChangeError) {
+  const status =
+    error.code === 'ACCOUNT_NOT_FOUND'
+      ? 404
+      : error.code === 'USERNAME_ALREADY_EXISTS' || error.code === 'USERNAME_CHANGE_COOLDOWN'
+        ? 409
+        : 400
+
+  return NextResponse.json({
+    message: error.message,
+    code: error.code,
+    ...(error.nextAllowedAt ? { nextAllowedAt: error.nextAllowedAt.toISOString() } : {}),
+  }, { status })
+}
+
+async function updateUsername(userId: string, rawUsername: unknown) {
+  const validation = validateLoginAccountValue(rawUsername)
+  if (validation.error) {
+    return NextResponse.json({ message: validation.error, code: 'USERNAME_INVALID' }, { status: 400 })
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, uid: true, username: true, usernameNormalized: true, usernameChangedAt: true },
+      })
+      if (!current) throw new UsernameChangeError('ACCOUNT_NOT_FOUND', '账号不存在')
+
+      if (validation.usernameNormalized === current.usernameNormalized) {
+        throw new UsernameChangeError('USERNAME_UNCHANGED', '新用户名不能与当前用户名相同')
+      }
+
+      const now = new Date()
+      const availability = getUsernameChangeAvailability(current.usernameChangedAt, now)
+      if (!availability.canChange) {
+        throw new UsernameChangeError('USERNAME_CHANGE_COOLDOWN', '用户名每个月只能修改一次', availability.nextAllowedAt)
+      }
+
+      const conflict = await tx.user.findUnique({
+        where: { usernameNormalized: validation.usernameNormalized },
+        select: { id: true },
+      })
+      if (conflict) throw new UsernameChangeError('USERNAME_ALREADY_EXISTS', '该用户名已被使用')
+
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          username: validation.account,
+          usernameNormalized: validation.usernameNormalized,
+          usernameChangedAt: now,
+        },
+        select: { id: true, uid: true, username: true, usernameChangedAt: true },
+      })
+
+      return {
+        profile: updated,
+        usernameChange: serializeUsernameChange(updated.usernameChangedAt, now),
+      }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    invalidateCurrentUserCache(userId)
+    return NextResponse.json(result)
+  } catch (error) {
+    if (error instanceof UsernameChangeError) return usernameChangeErrorResponse(error)
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return usernameChangeErrorResponse(new UsernameChangeError('USERNAME_ALREADY_EXISTS', '该用户名已被使用'))
+    }
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      const latest = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { usernameChangedAt: true },
+      })
+      const availability = getUsernameChangeAvailability(latest?.usernameChangedAt)
+      if (latest && !availability.canChange) {
+        return usernameChangeErrorResponse(new UsernameChangeError('USERNAME_CHANGE_COOLDOWN', '用户名每个月只能修改一次', availability.nextAllowedAt))
+      }
+      return NextResponse.json({ message: '用户名修改未完成，请稍后重试', code: 'USERNAME_CHANGE_CONFLICT' }, { status: 409 })
+    }
+
+    console.error('[users/me.username]', error)
+    return NextResponse.json({ message: '用户名修改失败，请稍后重试', code: 'USERNAME_CHANGE_FAILED' }, { status: 500 })
+  }
+}
 
 export async function GET() {
   const guard = await requireUser()
@@ -37,6 +150,7 @@ export async function GET() {
       birthMonth: true,
       birthDay: true,
       birthdaySetAt: true,
+      usernameChangedAt: true,
       Profile: true,
       UserBadge: {
         where: { isHidden: false },
@@ -55,7 +169,7 @@ export async function GET() {
   })
 
   if (!profile) return NextResponse.json({ profile: null })
-  const { Profile, UserBadge, _count, ...user } = profile
+  const { Profile, UserBadge, _count, usernameChangedAt, ...user } = profile
   return NextResponse.json({
     profile: {
       ...user,
@@ -68,6 +182,7 @@ export async function GET() {
         following: _count.Follow_Follow_followerIdToUser,
       },
     },
+    usernameChange: serializeUsernameChange(usernameChangedAt),
   })
 }
 
@@ -76,6 +191,10 @@ export async function PATCH(request: Request) {
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)
+  if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'newUsername')) {
+    return updateUsername(guard.user.id, body.newUsername)
+  }
+
   const rawNickname = typeof body?.nickname === 'string' ? body.nickname : ''
   const nickname = sanitizeText(body?.nickname, 32)
   const bio = sanitizeText(body?.bio, 300)

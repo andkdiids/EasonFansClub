@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+const read = (path: string) => readFileSync(path, 'utf8')
+
+test('post detail images use a constrained desktop gallery without enlarging small images', () => {
+  const postPage = read('app/posts/[postId]/page.tsx')
+
+  assert.match(postPage, /post-media-grid mt-6 grid w-full max-w-\[40rem\] items-start gap-3 sm:grid-cols-2/)
+  assert.match(postPage, /buttonClassName="block w-full max-w-full[^\"]*cursor-zoom-in/)
+  assert.match(postPage, /imageClassName="block h-auto max-h-\[70vh\] w-auto max-w-full[^\"]*object-contain sm:max-h-\[28rem\]"/)
+})
+
+test('notification cards use compact flow layout while retaining shared rendering', () => {
+  const notifications = read('app/notifications/NotificationsClient.tsx')
+
+  assert.match(notifications, /notification-list-item group flex min-w-0 gap-2 rounded-sm border p-2\.5 transition sm:gap-2\.5 sm:p-3/)
+  assert.match(notifications, /<div className="mt-1 flex flex-wrap items-center justify-between gap-1\.5 pt-1">/)
+  assert.doesNotMatch(notifications, /<div className="mt-auto flex flex-wrap items-center justify-between/)
+  assert.match(notifications, /<section className="notification-center space-y-3">/)
+})
+
+test('home module entry links share the >> label and no-movement hover rule', () => {
+  const home = read('components/HomeLayoutSurface.tsx')
+  const css = read('app/globals.css')
+  const entryCount = home.match(/className="home-module-entry"/g) || []
+  const markerCount = home.match(/\{'>>'\}/g) || []
+
+  assert.equal(entryCount.length, 5)
+  assert.equal(markerCount.length, 5)
+  assert.match(home, />更多内容 \{'>>'\}<\/Link>/)
+  assert.match(css, /\.community-panel > header a\.home-module-entry:hover,[\s\S]*\.community-panel > header a\.home-module-entry:focus-visible/)
+
+  const entryRule = css.match(/\.community-panel > header a\.home-module-entry \{([\s\S]*?)\}/)?.[1] || ''
+  assert.ok(entryRule)
+  assert.doesNotMatch(entryRule, /transform\s*:/)
+})

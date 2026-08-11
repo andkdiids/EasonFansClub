@@ -649,14 +649,14 @@ export function NotificationsClient({
               handleCardActivate()
             }
           }}
-          className={`notification-list-item group flex min-w-0 gap-2.5 rounded-sm border p-3 transition sm:gap-3 sm:p-3.5 ${
+          className={`notification-list-item group flex min-w-0 gap-2 rounded-sm border p-2.5 transition sm:gap-2.5 sm:p-3 ${
             isNotificationRead(item) ? 'is-read' : 'is-unread'
           } ${emphasisClass} ${target ? 'cursor-pointer' : ''}`}
         >
           {/* 头像区 */}
           <div className="relative shrink-0">
             {systemLike ? (
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-50 p-1.5 ring-1 ring-slate-200 sm:h-10 sm:w-10">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-slate-50 p-1 ring-1 ring-slate-200 sm:h-9 sm:w-9">
                 {siteLogoUrl ? (
                   <img src={siteLogoUrl} alt="私家E院" className="h-full w-full object-contain" />
                 ) : (
@@ -664,7 +664,7 @@ export function NotificationsClient({
                 )}
               </span>
             ) : (
-              <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-950 text-xs font-black text-white sm:h-10 sm:w-10">
+              <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-950 text-xs font-black text-white sm:h-9 sm:w-9">
                 {profileImageUrl(item.actorAvatarUrl) ? <img src={profileImageUrl(item.actorAvatarUrl)!} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
               </span>
             )}
@@ -677,12 +677,12 @@ export function NotificationsClient({
 
           {/* 内容区：标题 + 正文 + 智能入口 */}
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
               {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">未读</span> : null}
             </div>
-            <h2 className={`notification-title mt-1 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
-            {item.content ? <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-slate-600">{item.content}</p> : null}
+            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
+            {item.content ? <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600">{item.content}</p> : null}
 
             {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
             {smartEntry?.action === 'dock' ? (
@@ -693,7 +693,7 @@ export function NotificationsClient({
                   void markRead(item)
                   window.dispatchEvent(new Event('friend-dock:open'))
                 }}
-                className="mt-2 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
+                className="mt-1 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
               >
                 {smartEntry.label} →
               </button>
@@ -704,14 +704,14 @@ export function NotificationsClient({
                   event.stopPropagation()
                   openNotification(event, item)
                 }}
-                className="mt-2 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
+                className="mt-1 inline-flex w-fit items-center gap-1 rounded-sm bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 ring-1 ring-sky-100 hover:bg-sky-100"
               >
                 {smartEntry.label} →
               </Link>
             ) : null}
 
             {/* 时间区（固定内容区底部）+ 操作按钮（流式排布，移动端自动换行，无横向滚动） */}
-            <div className="mt-auto flex flex-wrap items-center justify-between gap-1.5 pt-2">
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-1.5 pt-1">
               <time className="text-[11px] font-bold text-slate-400">{formatTime(item.createdAt)}</time>
               <div className="flex flex-wrap items-center gap-1">
                 {item.replyTarget && !item.replyDisabledReason ? (
@@ -794,7 +794,7 @@ export function NotificationsClient({
   }
 
   return (
-    <section className="notification-center space-y-5">
+    <section className="notification-center space-y-3">
       <div className="rounded-[28px] border border-sky-100 bg-white/78 p-5 shadow-sm shadow-sky-900/5 backdrop-blur-xl sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

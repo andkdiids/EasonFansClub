@@ -5,6 +5,7 @@ export const GUESS_SONG_BASE_SCORE = 100
 export const GUESS_SONG_ENDLESS_COMBO_INTERVAL = 10
 export const GUESS_SONG_ENDLESS_COMBO_BONUS = 270
 export const GUESS_SONG_PAUSED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+export const GUESS_SONG_ADMIN_MAX_BONUS_CORRECT_ANSWERS = 1000
 
 export const GUESS_SONG_PUBLIC_MODES = ['EASY', 'ADVANCED', 'HARD', 'EXPERT'] as const
 export type GuessSongPublicMode = typeof GUESS_SONG_PUBLIC_MODES[number]
@@ -109,9 +110,36 @@ export function isGuessSongInfiniteMode(mode: GuessSongMode) {
   return GUESS_SONG_MODE_CONFIG[mode].questionCount === null
 }
 
+const guessSongVersionMarker = '(?:\\b(?:live|acoustic|remix|demo)(?:\\s+version|版)?(?![A-Za-z])|\\bstudio\\s+version\\b|\\bremastered\\b|现场(?:版)?|演唱会(?:版)?|国语版|粤语版|双语版)'
+const guessSongVersionYear = '(?:19|20)\\d{2}'
+const guessSongSeparator = '[\\s\\-_–—_/·:：|,，]+'
+const bracketedGuessSongVersionSuffix = new RegExp(
+  `(?:\\([^()]*?(?:${guessSongVersionMarker}|${guessSongVersionYear})[^()]*\\)|\\[[^\\[\\]]*?(?:${guessSongVersionMarker}|${guessSongVersionYear})[^\\[\\]]*\\]|（[^（）]*?(?:${guessSongVersionMarker}|${guessSongVersionYear})[^（）]*）|【[^【】]*?(?:${guessSongVersionMarker}|${guessSongVersionYear})[^【】]*】)\\s*$`,
+  'iu',
+)
+const plainGuessSongVersionSuffix = new RegExp(
+  `${guessSongSeparator}(?:(?:${guessSongVersionYear}${guessSongSeparator})?${guessSongVersionMarker}(?:${guessSongSeparator}${guessSongVersionYear})?)\\s*$`,
+  'iu',
+)
+// A bare "Title 2010" can be part of the official title (for example,
+// "陈奕迅：DUO 2010"). Only strip a year when punctuation clearly marks it as
+// a release/version suffix; bracketed years are handled above.
+const plainGuessSongYearSuffix = new RegExp(`[\\-_–—_/·:：|,，]+\\s*${guessSongVersionYear}(?:年)?\\s*$`, 'iu')
+
+function stripGuessSongVersionSuffix(value: string) {
+  let current = value.normalize('NFKC').trim()
+  let previous = ''
+  while (current && current !== previous) {
+    previous = current
+    current = current.replace(bracketedGuessSongVersionSuffix, '').trim()
+    current = current.replace(plainGuessSongVersionSuffix, '').trim()
+    current = current.replace(plainGuessSongYearSuffix, '').trim()
+  }
+  return current
+}
+
 export function normalizeGuessSongAnswer(value: string) {
-  return value
-    .normalize('NFKC')
+  return stripGuessSongVersionSuffix(value)
     .toLocaleLowerCase('zh-CN')
     .replace(/[\s\p{P}\p{S}]+/gu, '')
 }

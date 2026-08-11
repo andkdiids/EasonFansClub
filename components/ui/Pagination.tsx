@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type FormEvent } from 'react'
-import { getPaginationItems, type PaginationItem } from '@/lib/pagination'
+import { getPaginationItems, parsePaginationJump, type PaginationItem } from '@/lib/pagination'
 
 type PaginationProps = {
   currentPage: number
@@ -29,11 +29,9 @@ export function Pagination({
 
   function handleJump(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const value = jumpValue.trim()
-    if (!/^\d+$/.test(value)) return
-    const parsed = Number(value)
-    if (!Number.isSafeInteger(parsed) || parsed < 1) return
-    onPageChange(Math.min(parsed, safeTotal))
+    const page = parsePaginationJump(jumpValue, safeTotal)
+    if (page === null) return
+    onPageChange(page)
     setJumpValue('')
   }
 

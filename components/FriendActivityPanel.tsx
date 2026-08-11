@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { Pagination } from '@/components/ui/Pagination'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -166,11 +167,16 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
       </div>
 
       {compact ? <Link href="/friends/activity" className="mt-5 flex min-h-11 items-center justify-center border-t border-sky-100 pt-5 text-sm font-black text-brand-700">查看更多动态</Link> : null}
-      {!compact && !loading && !failed && pagination.totalPages > 1 ? <nav aria-label="好友动态分页" className="mt-5 flex items-center justify-center gap-4 border-t border-sky-100 pt-5">
-        <button type="button" disabled={!pagination.hasPrevious} onClick={() => setPage((current) => Math.max(1, current - 1))} className="min-h-11 rounded-xl border border-sky-100 bg-white px-4 text-sm font-black text-brand-700 disabled:opacity-40">上一页</button>
-        <span className="text-sm font-black text-brand-950">{pagination.page} / {pagination.totalPages}</span>
-        <button type="button" disabled={!pagination.hasNext} onClick={() => setPage((current) => current + 1)} className="min-h-11 rounded-xl border border-sky-100 bg-white px-4 text-sm font-black text-brand-700 disabled:opacity-40">下一页</button>
-      </nav> : null}
+      {!compact && !loading && !failed && pagination.totalPages > 1 ? (
+        <Pagination
+          currentPage={pagination.page}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
+          disabled={loading}
+          ariaLabel="好友动态分页"
+          className="friend-activity-pagination"
+        />
+      ) : null}
     </section>
   )
 }

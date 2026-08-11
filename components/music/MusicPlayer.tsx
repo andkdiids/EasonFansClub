@@ -73,7 +73,7 @@ export function MusicPlayer({
           disabled={!previewUrl || (active && player.loading)}
           onClick={() => void togglePlayback()}
           aria-label={previewUrl ? playing ? '暂停试听' : '播放 60 秒试听' : '暂无试听片段'}
-          className="grid h-12 min-w-28 place-items-center rounded-full bg-white px-5 text-sm font-black text-[#07182d] disabled:cursor-not-allowed disabled:opacity-50"
+          className="grid h-12 min-w-28 place-items-center rounded-full bg-white px-5 text-sm font-black text-brand-950 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {previewUrl ? active && player.loading ? '加载中…' : playing ? '暂停' : '播放试听' : '暂无试听'}
         </button>

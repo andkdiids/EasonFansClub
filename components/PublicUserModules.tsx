@@ -49,6 +49,7 @@ function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
 
 export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: string; isSelf: boolean; recentMessages?: ProfileRecentMessage[] }) {
   const [active, setActive] = useState<ModuleKey>('posts')
+  const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
   const [cache, setCache] = useState<CacheState>(() => ({
     'recent-messages': { loading: false, failed: false, items: recentMessages },
   }))
@@ -103,13 +104,33 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: s
 <div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5">
       {state?.failed ? <ModuleFallback /> : null}
         {state?.loading || !state ? <ModuleFallback title="正在加载..." /> : null}
-        {state && !state.loading && !state.failed ? <ModuleContent moduleKey={active} items={state.items} isSelf={isSelf} /> : null}
+        {state && !state.loading && !state.failed ? (
+          <ModuleContent
+            moduleKey={active}
+            items={state.items}
+            isSelf={isSelf}
+            expandedRecentMessages={expandedRecentMessages}
+            onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
+          />
+        ) : null}
       </div>
     </section>
   )
 }
 
-function ModuleContent({ moduleKey, items, isSelf }: { moduleKey: ModuleKey; items: ModuleItem[]; isSelf: boolean }) {
+function ModuleContent({
+  moduleKey,
+  items,
+  isSelf,
+  expandedRecentMessages,
+  onToggleRecentMessage,
+}: {
+  moduleKey: ModuleKey
+  items: ModuleItem[]
+  isSelf: boolean
+  expandedRecentMessages: Record<string, boolean>
+  onToggleRecentMessage: (messageId: string) => void
+}) {
   if (!items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
 
   if (moduleKey === 'posts') {
@@ -159,7 +180,35 @@ function ModuleContent({ moduleKey, items, isSelf }: { moduleKey: ModuleKey; ite
               <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('zh-CN')}</time>
             </div>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.content}</p>
-            <p className="mt-2 text-xs font-bold text-slate-500">赞 {message.likeCount} · 回复 {message.commentCount}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
+              <span>赞 {message.likeCount}</span>
+              {message.commentCount > 0 || message.comments.length > 0 ? (
+                <button type="button" onClick={() => onToggleRecentMessage(message.id)} className="text-brand-700">
+                  回复 {message.commentCount}
+                  <span className="ml-1">{expandedRecentMessages[message.id] ? '收起' : '查看'}</span>
+                </button>
+              ) : <span>回复 0</span>}
+            </div>
+            {expandedRecentMessages[message.id] ? (
+              <ul className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
+                {message.comments.length ? message.comments.map((comment) => (
+                  <li key={comment.id} className="flex gap-2">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
+                      {comment.authorAvatarUrl ? <img src={comment.authorAvatarUrl} alt={comment.authorName} className="h-full w-full object-cover" /> : (comment.authorName || 'E').slice(0, 1)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-black text-brand-950">{comment.authorName}</span>
+                        <time className="text-[11px] font-bold text-slate-400">{new Date(comment.createdAt).toLocaleString('zh-CN')}</time>
+                      </div>
+                      <p className="mt-0.5 break-words text-sm font-bold leading-5 text-slate-600">{comment.content}</p>
+                    </div>
+                  </li>
+                )) : (
+                  <li className="text-xs font-bold text-slate-400">暂无可见回复</li>
+                )}
+              </ul>
+            ) : null}
           </article>
         ))}
       </div>

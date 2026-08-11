@@ -7,8 +7,9 @@ import { LikeAvatars } from '@/components/LikeAvatars'
 import { useCheckInLike } from '@/components/checkin-like-context'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { Pagination } from '@/components/ui/Pagination'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
-import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
@@ -21,10 +22,12 @@ function beijingDateTime(value: string) {
   return formatBeijingDateTime(value)
 }
 
-function updateUrl(date: string, sort: CheckInMessageSort) {
+function updateUrl(date: string, sort: CheckInMessageSort, page = 1) {
   const url = new URL(window.location.href)
   url.searchParams.set('date', date)
   url.searchParams.set('sort', sort)
+  if (page > 1) url.searchParams.set('page', String(page))
+  else url.searchParams.delete('page')
   window.history.pushState(null, '', `${url.pathname}?${url.searchParams.toString()}`)
 }
 
@@ -97,12 +100,14 @@ export function CheckInMessagesPanel({
   scope = 'public',
   emptyText,
   initialMessages,
+  initialPagination,
   initialDate,
   maxDate,
   initialSort,
   previewMode = false,
   focusMessageId,
   focusCommentId,
+  focusErrorKind,
   canManageMessages = false,
 }: Readonly<{
   title?: string
@@ -111,12 +116,14 @@ export function CheckInMessagesPanel({
   scope?: 'public' | 'friends'
   emptyText?: string
   initialMessages: CheckInDisplayMessageItem[]
+  initialPagination?: CheckInMessagePagination
   initialDate: string
   maxDate: string
   initialSort: CheckInMessageSort
   previewMode?: boolean
   focusMessageId?: string
   focusCommentId?: string
+  focusErrorKind?: 'load' | 'deleted' | 'unavailable'
   /** 服务端根据当前登录用户角色计算的管理员标记：是否显示留言删除入口（接口侧仍独立鉴权）。 */
   canManageMessages?: boolean
 }>) {
@@ -125,6 +132,7 @@ export function CheckInMessagesPanel({
   const [messages, setMessages] = useState<CheckInDisplayMessageItem[]>(initialMessages)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [pagination, setPagination] = useState<CheckInMessagePagination | null>(initialPagination || null)
   const [replyTargets, setReplyTargets] = useState<Record<string, { id: string; name: string } | null>>({})
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const [page, setPage] = useState(1)
@@ -145,12 +153,14 @@ export function CheckInMessagesPanel({
   })
   const isCompact = density !== 'normal'
   const isMinimal = density === 'minimal'
+  const serverPaginated = Boolean(initialPagination && !previewMode)
   const previewPageSize = previewMode ? (isMinimal ? 1 : isCompact ? 2 : messagesPerPage) : messagesPerPage
-  const totalPages = Math.max(1, Math.ceil(messages.length / previewPageSize))
+  const activePageSize = serverPaginated ? pagination?.pageSize || messagesPerPage : previewPageSize
+  const totalPages = serverPaginated ? pagination?.totalPages || 1 : Math.max(1, Math.ceil(messages.length / previewPageSize))
   const visibleMessages = useMemo(() => {
     const safePage = Math.min(Math.max(page, 1), totalPages)
-    const start = (safePage - 1) * previewPageSize
-    const pagedMessages = messages.slice(start, start + previewPageSize)
+    const start = (safePage - 1) * activePageSize
+    const pagedMessages = serverPaginated ? messages : messages.slice(start, start + activePageSize)
     const recentMessage = recentlyCreatedMessageId
       ? messages.find((item) => item.id === recentlyCreatedMessageId)
       : null
@@ -158,25 +168,22 @@ export function CheckInMessagesPanel({
       return [recentMessage, ...pagedMessages]
     }
     return pagedMessages
-  }, [messages, page, previewPageSize, recentlyCreatedMessageId, totalPages])
-  const pageNumbers = useMemo(() => {
-    const maxVisible = 5
-    const start = Math.max(1, Math.min(page - 2, totalPages - maxVisible + 1))
-    const end = Math.min(totalPages, start + maxVisible - 1)
-    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
-  }, [page, totalPages])
+  }, [activePageSize, messages, page, recentlyCreatedMessageId, serverPaginated, totalPages])
 
   const loadMessages = useCallback(async (
     nextDate = date,
     nextSort = sort,
     syncUrl = true,
     resetPage = true,
+    requestedPage = resetPage ? 1 : page,
   ) => {
     if (isLoading) return
 
     setError('')
     setIsLoading(true)
+    const nextPage = serverPaginated ? Math.max(1, Math.trunc(requestedPage) || 1) : 1
     const params = new URLSearchParams({ date: nextDate, sort: nextSort, scope })
+    if (serverPaginated) params.set('page', String(nextPage))
 
     try {
       const response = await fetch(`/api/checkin/messages?${params.toString()}`, {
@@ -202,6 +209,13 @@ export function CheckInMessagesPanel({
         ? [...incoming, localMessage].sort((left, right) => compareCheckInMessages(left, right, nextSort))
         : incoming
       setMessages(merged)
+      const nextPagination = data.pagination as CheckInMessagePagination | undefined
+      if (serverPaginated && nextPagination) {
+        setPagination(nextPagination)
+        setPage(nextPagination.page)
+      } else if (resetPage) {
+        setPage(1)
+      }
       if (localMessage && incoming.some((item: CheckInDisplayMessageItem) => item.id === localMessage.id)) {
         recentlyCreatedMessageRef.current = null
         setRecentlyCreatedMessageId(null)
@@ -213,20 +227,29 @@ export function CheckInMessagesPanel({
         likeCount: item.likeCount,
         liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
       })))
-      if (resetPage) setPage(1)
-      if (syncUrl) updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest')
+      if (syncUrl) updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest', serverPaginated ? nextPagination?.page || nextPage : 1)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '留言列表暂时无法加载，请稍后重试')
     } finally {
       setIsLoading(false)
     }
-  }, [date, isLoading, scope, sort])
+  }, [date, isLoading, page, scope, serverPaginated, sort])
+
+  function handlePageChange(nextPage: number) {
+    const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), totalPages)
+    if (serverPaginated) {
+      void loadMessages(date, sort, true, false, safePage)
+      return
+    }
+    setPage(safePage)
+  }
 
   useEffect(() => {
     const queryChanged = initialQueryRef.current.date !== initialDate || initialQueryRef.current.sort !== initialSort
     setDate(initialDate)
     setSort(initialSort)
     setMessages(initialMessages)
+    setPagination(initialPagination || null)
     if (recentlyCreatedMessageRef.current && initialMessages.some((item) => item.id === recentlyCreatedMessageRef.current?.id)) {
       recentlyCreatedMessageRef.current = null
       setRecentlyCreatedMessageId(null)
@@ -239,9 +262,10 @@ export function CheckInMessagesPanel({
       likeCount: item.likeCount,
       liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
     })))
-    if (queryChanged) setPage(1)
+    if (initialPagination) setPage(initialPagination.page)
+    else if (queryChanged) setPage(1)
     initialQueryRef.current = { date: initialDate, sort: initialSort }
-  }, [initialDate, initialMessages, initialSort])
+  }, [initialDate, initialMessages, initialPagination, initialSort])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -249,37 +273,54 @@ export function CheckInMessagesPanel({
 
   useEffect(() => {
     if (previewMode || (!focusMessageId && !focusCommentId)) return
+    if (focusErrorKind === 'load') {
+      setFocusError(focusCommentId ? '暂时无法加载回复，请稍后重试' : '暂时无法加载留言，请稍后重试')
+      return
+    }
+    if (focusCommentId && (focusErrorKind === 'deleted' || focusErrorKind === 'unavailable')) {
+      setFocusError(focusErrorKind === 'deleted' ? '该回复已被删除' : '你暂时无法查看这条回复')
+      return
+    }
     const messageIndex = messages.findIndex((item) =>
       item.id === focusMessageId || item.comments.some((comment) => comment.id === focusCommentId),
     )
     if (messageIndex < 0) {
-      setFocusError('该内容已被删除或无法查看')
+      setFocusError(focusCommentId
+        ? focusErrorKind === 'deleted' ? '该回复已被删除' : '你暂时无法查看这条回复'
+        : '该内容已被删除或无法查看')
       return
     }
     setFocusError('')
-    setPage(Math.floor(messageIndex / previewPageSize) + 1)
+    if (!serverPaginated && page !== Math.floor(messageIndex / previewPageSize) + 1) {
+      setPage(Math.floor(messageIndex / previewPageSize) + 1)
+      return
+    }
     const message = messages[messageIndex]
     if (focusCommentId) {
       const commentMap = buildCommentMap(message.comments)
       let current = commentMap.get(focusCommentId)
       if (current) {
         while (current.parentId && commentMap.has(current.parentId)) current = commentMap.get(current.parentId)!
-        setExpandedReplies((value) => ({ ...value, [current!.id]: true }))
+        if (current.id !== focusCommentId && !expandedReplies[current.id]) {
+          setExpandedReplies((value) => ({ ...value, [current!.id]: true }))
+          return
+        }
       }
     }
-    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      const target = document.getElementById(focusCommentId ? `comment-${focusCommentId}` : `message-${message.id}`)
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      target?.classList.add('notification-focus-target')
-    }))
-    const timer = window.setTimeout(() => {
-      document.getElementById(focusCommentId ? `comment-${focusCommentId}` : `message-${message.id}`)?.classList.remove('notification-focus-target')
-    }, 2600)
+    const targetElementId = focusCommentId ? `comment-${focusCommentId}` : `message-${message.id}`
+    let highlightTimer: number | undefined
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetElementId)
+      if (!target) return
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.classList.add('notification-focus-target')
+      highlightTimer = window.setTimeout(() => target.classList.remove('notification-focus-target'), 2600)
+    })
     return () => {
       window.cancelAnimationFrame(frame)
-      window.clearTimeout(timer)
+      if (highlightTimer !== undefined) window.clearTimeout(highlightTimer)
     }
-  }, [focusCommentId, focusMessageId, messages, previewMode, previewPageSize])
+  }, [expandedReplies, focusCommentId, focusErrorKind, focusMessageId, messages, page, previewMode, previewPageSize, serverPaginated])
 
   useEffect(() => {
     if (previewMode) return
@@ -591,46 +632,15 @@ export function CheckInMessagesPanel({
           <div className="checkin-messages-empty rounded-2xl p-8 text-center font-bold text-slate-500">{emptyText || '这一天还没有病友留言。'}</div>
         )}
       </div>
-      {messages.length > previewPageSize ? (
-        <nav className={`${isMinimal ? 'mt-1 gap-1' : 'mt-3 gap-1.5'} flex shrink-0 flex-wrap items-center justify-center`} aria-label="病友留言分页">
-          <button
-            type="button"
-            onClick={() => setPage(1)}
-            disabled={page === 1}
-            className={`${isMinimal ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'} rounded-full bg-sky-50 font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-45`}
-          >
-            首页
-          </button>
-          <button
-            type="button"
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-            disabled={page === 1}
-            className={`${isMinimal ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'} rounded-full bg-sky-50 font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-45`}
-          >
-            上一页
-          </button>
-          {pageNumbers.map((pageNumber) => (
-            <button
-              key={pageNumber}
-              type="button"
-              onClick={() => setPage(pageNumber)}
-              className={`grid ${isMinimal ? 'h-6 min-w-6 px-1.5 text-[10px]' : 'h-8 min-w-8 px-2.5 text-xs'} place-items-center rounded-full font-black transition ${
-                pageNumber === page ? 'bg-brand-950 text-white shadow-sm' : 'bg-sky-50 text-brand-700 hover:bg-sky-100'
-              }`}
-              aria-current={pageNumber === page ? 'page' : undefined}
-            >
-              {pageNumber}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-            disabled={page === totalPages}
-            className={`${isMinimal ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'} rounded-full bg-sky-50 font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-45`}
-          >
-            下一页
-          </button>
-        </nav>
+      {totalPages > 1 ? (
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          disabled={isLoading}
+          ariaLabel="病友留言分页"
+          className={isMinimal ? 'checkin-message-pagination checkin-message-pagination--minimal' : 'checkin-message-pagination'}
+        />
       ) : null}
       <ConfirmDialog
         open={Boolean(deleteTarget)}

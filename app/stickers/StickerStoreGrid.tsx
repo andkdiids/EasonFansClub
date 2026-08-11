@@ -2,7 +2,9 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { Pagination } from '@/components/ui/Pagination'
 import type { StorePackItem } from '@/lib/sticker-center'
 
 export function StickerStoreGrid(props: {
@@ -15,8 +17,13 @@ export function StickerStoreGrid(props: {
   category: string | null
 }) {
   const { packs, total, page, totalPages, sort, category } = props
+  const router = useRouter()
   const [busy, setBusy] = useState<string | null>(null)
   const [localPacks, setLocalPacks] = useState<StorePackItem[]>(packs)
+
+  useEffect(() => {
+    setLocalPacks(packs)
+  }, [packs])
 
   async function toggleAdd(pack: StorePackItem) {
     if (busy) return
@@ -35,6 +42,12 @@ export function StickerStoreGrid(props: {
     } finally {
       setBusy(null)
     }
+  }
+
+  function goToPage(nextPage: number) {
+    const params = new URLSearchParams({ sort, page: String(nextPage) })
+    if (category) params.set('category', category)
+    router.push(`/stickers?${params.toString()}`)
   }
 
   return (
@@ -109,17 +122,13 @@ export function StickerStoreGrid(props: {
       )}
 
       {totalPages > 1 ? (
-        <nav className="flex flex-wrap items-center justify-center gap-2 text-sm font-bold">
-          {Array.from({ length: totalPages }, (_, i) => i + 1).slice(0, 12).map((p) => (
-            <Link
-              key={p}
-              href={`/stickers?sort=${sort}${category ? `&category=${encodeURIComponent(category)}` : ''}&page=${p}`}
-              className={p === page ? 'pill-active' : 'pill'}
-            >
-              {p}
-            </Link>
-          ))}
-        </nav>
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          onPageChange={goToPage}
+          ariaLabel="表情包商店分页"
+          className="sticker-store-pagination"
+        />
       ) : null}
     </section>
   )

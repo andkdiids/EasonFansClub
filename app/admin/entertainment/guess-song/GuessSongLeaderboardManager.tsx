@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { GUESS_SONG_ADMIN_MAX_BONUS_CORRECT_ANSWERS } from '@/lib/guess-song-config'
 
 type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT'
-type Period = 'WEEK' | 'MONTH'
+type Period = 'WEEK' | 'MONTH' | 'YEAR'
 type Row = {
   id: string
   entryIds: string[]
@@ -32,6 +33,7 @@ const modeLabels: Record<Mode, string> = { EASY: '简单', ADVANCED: '进阶', H
 const periods: Array<{ value: Period; label: string }> = [
   { value: 'WEEK', label: '本周榜' },
   { value: 'MONTH', label: '本月榜' },
+  { value: 'YEAR', label: '年度榜' },
 ]
 
 async function request<T>(url: string, init?: RequestInit) {
@@ -131,6 +133,8 @@ export function GuessSongLeaderboardManager() {
     if (!confirmed) return
     const reasonText = window.prompt('请输入删除原因（必填）', '错误成绩删除')
     if (!reasonText?.trim()) return
+    const secondConfirmed = window.confirm(`请再次确认删除 ${row.displayName} 的${modeLabels[mode]}${periods.find((item) => item.value === period)?.label || ''}成绩 ${row.score} 分。\n\n删除原因：${reasonText.trim()}`)
+    if (!secondConfirmed) return
     const key = `delete:${row.id}`
     setBusyKey(key)
     setError('')
@@ -195,7 +199,7 @@ export function GuessSongLeaderboardManager() {
               </div>
               {adjusting ? (
                 <div className="mt-3 grid gap-2 rounded-lg border border-brand-100 bg-white p-3 sm:grid-cols-[auto_auto_1fr_auto] sm:items-end">
-                  <label className="text-xs font-bold text-slate-600">补回答对题数<select value={correctAnswers} onChange={(event) => setCorrectAnswers(Number(event.target.value))} className="mt-1 block rounded-lg border border-slate-200 px-2 py-2 text-sm">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} 题</option>)}</select></label>
+                  <label className="text-xs font-bold text-slate-600">补回答对题数<input type="number" min={1} max={GUESS_SONG_ADMIN_MAX_BONUS_CORRECT_ANSWERS} step={1} inputMode="numeric" value={correctAnswers} onChange={(event) => setCorrectAnswers(Number(event.target.value))} className="mt-1 block w-28 rounded-lg border border-slate-200 px-2 py-2 text-sm" /></label>
                   <label className="text-xs font-bold text-slate-600">补分前连击<select value={startingStreak} onChange={(event) => setStartingStreak(Number(event.target.value))} className="mt-1 block rounded-lg border border-slate-200 px-2 py-2 text-sm">{streakOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                   <label className="text-xs font-bold text-slate-600">原因<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={200} placeholder="系统异常未结算" className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" /></label>
                   <button type="button" onClick={() => void addScore(row)} disabled={busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{busy ? '处理中…' : '确认补分'}</button>

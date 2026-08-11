@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import {
+  calculateGuessSongAdminCompensation,
+  GuessSongAdminLeaderboardError,
+  GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS,
+} from '../lib/guess-song-admin-leaderboard'
+import { getGuessSongPeriod } from '../lib/guess-song-period'
 
 const root = process.cwd()
 const source = (path: string) => readFileSync(`${root}/${path}`, 'utf8')
@@ -41,6 +47,62 @@ test('guess-song leaderboard admin actions are permissioned, rule-based and audi
   assert.match(service, /tx\.adminActionLog\.create/)
   assert.match(service, /tx\.\$transaction|prisma\.\$transaction/)
   assert.doesNotMatch(route, /body\?\.score/)
-  assert.doesNotMatch(ui, /type="number"/)
+  assert.match(ui, /type="number"/)
+  assert.match(ui, /GUESS_SONG_ADMIN_MAX_BONUS_CORRECT_ANSWERS/)
   assert.match(ui, /补回答对题数/)
+})
+
+test('guess-song leaderboard administration is a standalone page with all three periods', () => {
+  const questionBank = source('app/admin/entertainment/guess-song/page.tsx')
+  const leaderboardPage = source('app/admin/entertainment/guess-song/leaderboard/page.tsx')
+  const navigation = source('app/admin/page.tsx')
+  const permissions = source('lib/admin-permission-config.ts')
+  const manager = source('app/admin/entertainment/guess-song/GuessSongLeaderboardManager.tsx')
+  assert.doesNotMatch(questionBank, /GuessSongLeaderboardManager/)
+  assert.match(leaderboardPage, /GuessSongLeaderboardManager/)
+  assert.match(leaderboardPage, /guess-song\/leaderboard/)
+  assert.match(navigation, /guess-song\/leaderboard/)
+  assert.match(permissions, /'\/admin\/entertainment\/guess-song\/leaderboard': 'entertainment_manage'/)
+  assert.match(manager, /type Period = 'WEEK' \| 'MONTH' \| 'YEAR'/)
+  assert.match(manager, /value: 'YEAR'/)
+})
+
+test('补分上限放宽但仍只接受合法整数，且每十题连击奖励保持不变', () => {
+  assert.ok(GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS >= 1000)
+  const compensation = calculateGuessSongAdminCompensation({ mode: 'EASY', correctAnswers: 21, startingStreak: 0 })
+  assert.equal(compensation.baseScore, 2100)
+  assert.equal(compensation.comboBonus, 540)
+  assert.equal(compensation.totalScore, 2640)
+
+  for (const correctAnswers of [20, 21, 50, 100, 200, 500, GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS]) {
+    assert.equal(calculateGuessSongAdminCompensation({ mode: 'EASY', correctAnswers, startingStreak: 0 }).correctAnswers, correctAnswers)
+  }
+  for (const correctAnswers of [0, -1, 20.5, Number.NaN, Number.POSITIVE_INFINITY, GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS + 1]) {
+    assert.throws(
+      () => calculateGuessSongAdminCompensation({ mode: 'EASY', correctAnswers, startingStreak: 0 }),
+      GuessSongAdminLeaderboardError,
+    )
+  }
+})
+
+test('补分更新源会话并通过原有记录服务同步周榜月榜，年榜使用同一源数据', () => {
+  const service = source('lib/guess-song-admin-leaderboard.ts')
+  const leaderboard = source('lib/guess-song-leaderboard.ts')
+  assert.match(service, /tx\.guessSongSession\.update\(/)
+  assert.match(service, /recordGuessSongLeaderboard\(sourceSession\.id, tx\)/)
+  assert.match(service, /const affectedPeriods = \['WEEK', 'MONTH'\]/)
+  assert.match(service, /periodType: 'YEAR'/)
+  assert.match(leaderboard, /s\.score/)
+  assert.match(leaderboard, /getGuessSongDeletedYearSessionIds\(yearKey\)/)
+})
+
+test('听听周月年周期统一按北京时间计算并在周期切换后使用新 periodKey', () => {
+  const instant = new Date('2026-08-12T00:30:00Z')
+  assert.equal(getGuessSongPeriod('WEEK', instant).periodKey, '2026-08-10')
+  assert.equal(getGuessSongPeriod('MONTH', instant).periodKey, '2026-08')
+  assert.equal(getGuessSongPeriod('YEAR', instant).periodKey, '2026')
+  assert.equal(getGuessSongPeriod('WEEK', new Date('2026-08-16T15:59:59Z')).periodKey, '2026-08-10')
+  assert.equal(getGuessSongPeriod('WEEK', new Date('2026-08-16T16:00:00Z')).periodKey, '2026-08-17')
+  assert.equal(getGuessSongPeriod('MONTH', new Date('2026-08-31T15:59:59Z')).periodKey, '2026-08')
+  assert.equal(getGuessSongPeriod('MONTH', new Date('2026-08-31T16:00:00Z')).periodKey, '2026-09')
 })

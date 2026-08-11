@@ -1,10 +1,26 @@
 import { Prisma, type GuessSongMode, type GuessSongPeriodType } from '@prisma/client'
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
-import { getGuessSongDatabaseModes, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
+import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { prisma } from '@/lib/prisma'
+
+export async function getGuessSongDeletedYearSessionIds(periodKey?: string) {
+  const logs = await prisma.adminActionLog.findMany({
+    where: { action: 'GUESS_SONG_DELETE_SCORE' },
+    select: { detail: true },
+  })
+  const deleted = new Set<string>()
+  for (const log of logs) {
+    if (!log.detail || typeof log.detail !== 'object' || Array.isArray(log.detail)) continue
+    const detail = log.detail as Record<string, unknown>
+    if (detail.periodType === 'YEAR' && (!periodKey || detail.periodKey === periodKey) && typeof detail.sessionId === 'string') {
+      deleted.add(detail.sessionId)
+    }
+  }
+  return deleted
+}
 
 type ScoreRecord = {
   score: number
@@ -12,6 +28,196 @@ type ScoreRecord = {
   maxStreak: number
   totalPlayCount: number
   achievedAt: Date
+}
+
+export type GuessSongModeHighScore = {
+  mode: GuessSongPublicMode
+  score: number
+  correctCount: number
+  maxStreak: number
+  totalPlayCount: number
+  achievedAt: string
+  userId: string
+  uid: number
+  username: string
+  displayName: string | null
+  nickname: string
+  avatarUrl: string | null
+  user: {
+    id: string
+    uid: number
+    username: string
+    displayName: string | null
+    nickname: string
+    name: string
+    avatarUrl: string | null
+  }
+}
+
+export type GuessSongModeHighScores = {
+  status: 'ready' | 'empty' | 'unavailable'
+  periodType: 'HISTORY'
+  periodKey: 'ALL'
+  modes: Record<GuessSongPublicMode, GuessSongModeHighScore | null>
+  mobileBest: GuessSongModeHighScore | null
+}
+
+function emptyGuessSongModeHighScores(status: GuessSongModeHighScores['status']): GuessSongModeHighScores {
+  return {
+    status,
+    periodType: 'HISTORY',
+    periodKey: 'ALL',
+    modes: Object.fromEntries(GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, null])) as GuessSongModeHighScores['modes'],
+    mobileBest: null,
+  }
+}
+
+/**
+ * Builds the complete four-mode result from already-ranked records.
+ * GUESS_SONG_PUBLIC_MODES supplies the stable mode order used for mobile ties.
+ */
+export function buildGuessSongModeHighScores(rows: readonly GuessSongModeHighScore[]): GuessSongModeHighScores {
+  const modes = emptyGuessSongModeHighScores('empty').modes
+  for (const row of rows) {
+    if (modes[row.mode] === null) modes[row.mode] = row
+  }
+
+  const available = GUESS_SONG_PUBLIC_MODES
+    .map((mode) => modes[mode])
+    .filter((row): row is GuessSongModeHighScore => row !== null)
+  const mobileBest = available.reduce<GuessSongModeHighScore | null>((best, row) => {
+    // Strictly greater keeps the existing mode order when scores tie.
+    return !best || row.score > best.score ? row : best
+  }, null)
+
+  return {
+    status: mobileBest ? 'ready' : 'empty',
+    periodType: 'HISTORY',
+    periodKey: 'ALL',
+    modes,
+    mobileBest,
+  }
+}
+
+function serializeModeHighScore(
+  row: {
+    userId: string
+    mode: GuessSongMode
+    score: number
+    correctCount: number
+    maxStreak: number
+    totalPlayCount: number
+    completedAt: Date | null
+    User: {
+      id: string
+      uid: number
+      nickname: string
+      username: string
+      avatarUrl: string | null
+      Profile: { displayName: string | null; avatarUrl: string | null } | null
+    }
+  },
+  publicMode: GuessSongPublicMode,
+  viewerId: string | undefined,
+  remarkMap: ReadonlyMap<string, string>,
+): GuessSongModeHighScore | null {
+  if (!row.completedAt) return null
+  const name = resolveFriendDisplayName({
+    viewerId,
+    targetUserId: row.User.id,
+    fallbackName: getPublicUserDisplayName(row.User),
+    remarkMap,
+  })
+  const avatarUrl = row.User.Profile?.avatarUrl || row.User.avatarUrl
+  return {
+    mode: publicMode,
+    score: row.score,
+    correctCount: row.correctCount,
+    maxStreak: row.maxStreak,
+    totalPlayCount: row.totalPlayCount,
+    achievedAt: row.completedAt.toISOString(),
+    userId: row.User.id,
+    uid: row.User.uid,
+    username: row.User.username,
+    displayName: row.User.Profile?.displayName || null,
+    nickname: name,
+    avatarUrl,
+    user: {
+      id: row.User.id,
+      uid: row.User.uid,
+      username: row.User.username,
+      displayName: row.User.Profile?.displayName || null,
+      nickname: row.User.nickname,
+      name,
+      avatarUrl,
+    },
+  }
+}
+
+/**
+ * Returns the all-time top record for each public mode, including the user
+ * relation from that exact record. The ordering mirrors the formal historical
+ * leaderboard ordering and the query is deliberately uncached so fresh scores
+ * and profile changes appear on the next homepage refresh.
+ */
+export async function getGuessSongModeHighScores(viewerId?: string): Promise<GuessSongModeHighScores> {
+  try {
+    const deletedSessionIds = await getGuessSongDeletedYearSessionIds()
+    const deletedSessionFilter = deletedSessionIds.size > 0
+      ? { id: { notIn: [...deletedSessionIds] } }
+      : {}
+    const rows = await Promise.all(GUESS_SONG_PUBLIC_MODES.map(async (publicMode) => {
+      const row = await prisma.guessSongSession.findFirst({
+        where: {
+          ...deletedSessionFilter,
+          mode: { in: getGuessSongDatabaseModes(publicMode) },
+          status: { in: ['COMPLETED', 'EXPIRED'] },
+          completedAt: { not: null },
+          isValid: true,
+          riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+          ...(publicMode === GUESS_SONG_SIMPLE_MODE ? { questionCount: null } : {}),
+        },
+        orderBy: [
+          { score: 'desc' },
+          { correctCount: 'desc' },
+          { maxStreak: 'desc' },
+          { totalPlayCount: 'asc' },
+          { completedAt: 'asc' },
+          { id: 'asc' },
+        ],
+        select: {
+          userId: true,
+          mode: true,
+          score: true,
+          correctCount: true,
+          maxStreak: true,
+          totalPlayCount: true,
+          completedAt: true,
+          User: {
+            select: {
+              id: true,
+              uid: true,
+              nickname: true,
+              username: true,
+              avatarUrl: true,
+              Profile: { select: { displayName: true, avatarUrl: true } },
+            },
+          },
+        },
+      })
+      return row ? { publicMode, row } : null
+    }))
+
+    const availableRows = rows.filter((item): item is NonNullable<typeof item> => item !== null && item.row.completedAt !== null)
+    const remarkMap = await loadFriendRemarkMap(viewerId, availableRows.map(({ row }) => row.User.id))
+    const serializedRows = availableRows
+      .map(({ publicMode, row }) => serializeModeHighScore(row, publicMode, viewerId, remarkMap))
+      .filter((row): row is GuessSongModeHighScore => row !== null)
+    return buildGuessSongModeHighScores(serializedRows)
+  } catch (error) {
+    console.error('[guess-song.home-mode-high-scores]', error)
+    return emptyGuessSongModeHighScores('unavailable')
+  }
 }
 
 export async function recordGuessSongLeaderboard(sessionId: string, db: Prisma.TransactionClient | typeof prisma = prisma) {
@@ -222,9 +428,13 @@ async function getYearGuessSongLeaderboard(input: {
   periodKey: string
   start: Date
   end: Date
+  excludedSessionIds: ReadonlySet<string>
 }) {
   const questionCountFilter = input.mode === GUESS_SONG_SIMPLE_MODE
     ? Prisma.sql`AND s.questionCount IS NULL`
+    : Prisma.empty
+  const deletedSessionFilter = input.excludedSessionIds.size > 0
+    ? Prisma.sql`AND s.id NOT IN (${Prisma.join([...input.excludedSessionIds])})`
     : Prisma.empty
   const selectedRows = await prisma.$queryRaw<YearLeaderboardQueryRow[]>(Prisma.sql`
     WITH eligible_sessions AS (
@@ -255,6 +465,7 @@ async function getYearGuessSongLeaderboard(input: {
         AND s.completedAt < ${input.end}
         AND s.mode IN (${Prisma.join(input.modeFilter)})
         ${questionCountFilter}
+        ${deletedSessionFilter}
     ),
     best_sessions AS (
       SELECT
@@ -340,6 +551,7 @@ export async function getGuessSongLeaderboard(input: {
 
   if (input.periodType === 'YEAR') {
     const { start, end, periodKey: yearKey } = getGuessSongPeriod('YEAR', input.now)
+    const excludedSessionIds = await getGuessSongDeletedYearSessionIds(yearKey)
     return getYearGuessSongLeaderboard({
       userId: input.userId,
       mode: input.mode,
@@ -347,6 +559,7 @@ export async function getGuessSongLeaderboard(input: {
       periodKey: yearKey,
       start,
       end,
+      excludedSessionIds,
     })
   }
 

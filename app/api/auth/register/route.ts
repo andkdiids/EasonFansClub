@@ -15,6 +15,7 @@ import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { MAX_UID } from '@/lib/uid'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
+import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, getPhoneValidationMessage, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -94,11 +95,13 @@ export async function POST(request: Request) {
     const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash: hashToken(registrationToken) } })
     if (!draft || draft.completedAt) return jsonError('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND', { form: '注册验证已失效，请重新填写注册资料' })
     if (draft.expiresAt <= new Date()) return jsonError('注册验证已过期，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_EXPIRED', { form: '注册验证已过期，请重新填写注册资料' })
-    const submittedPhone = normalizeText(body?.phone).replace(/\s+/g, '')
-    const draftPhone = normalizeText(draft.phone).replace(/\s+/g, '')
-    if (!submittedPhone || !draftPhone) return jsonError('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
-    if (!/^1\d{10}$/.test(submittedPhone) || !/^1\d{10}$/.test(draftPhone)) return jsonError('请输入 11 位中国大陆手机号', 400, 'INVALID_PHONE', { phone: '请输入 11 位中国大陆手机号' })
-    if (submittedPhone !== draftPhone) return jsonError('注册手机号已变化，请重新开始验证', 400, 'PHONE_CHANGED', { phone: '注册手机号已变化，请重新开始验证' })
+    const requestedPhoneCountry = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
+    const rawSubmittedPhone = normalizeText(body?.phone)
+    const submittedPhone = normalizePhoneNumber(rawSubmittedPhone, requestedPhoneCountry)
+    const draftPhone = normalizePhoneNumber(draft.phone, requestedPhoneCountry)
+    if (!rawSubmittedPhone || !draft.phone) return jsonError('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+    if (!submittedPhone || !draftPhone) return jsonError(getPhoneValidationMessage(requestedPhoneCountry), 400, 'INVALID_PHONE', { phone: getPhoneValidationMessage(requestedPhoneCountry) })
+    if (submittedPhone.e164 !== draftPhone.e164) return jsonError('注册手机号已变化，请重新开始验证', 400, 'PHONE_CHANGED', { phone: '注册手机号已变化，请重新开始验证' })
     if (!draft.emailVerifiedAt) return jsonError('请先完成邮箱验证码验证', 409, 'EMAIL_VERIFICATION_REQUIRED', { emailCode: '请先完成邮箱验证码验证' })
 
     const hospitalConfig = await getEHospitalCheckConfig()
@@ -116,7 +119,8 @@ export async function POST(request: Request) {
     const usernameNormalized = accountValidation.usernameNormalized
     const nickname = getLoginAccountDisplay(body?.nickname || username)
     const email = draft.email
-    const phone = draftPhone
+    const phone = draftPhone.e164
+    const phoneVariants = getPhoneLookupVariants(phone, draftPhone.country)
     const password = normalizeText(body?.password)
     const confirmPassword = normalizeText(body?.confirmPassword)
     const errors: Record<string, string> = {}
@@ -131,7 +135,7 @@ export async function POST(request: Request) {
       findActiveConflict({ phone: phone || null, email }),
       findLoginAccountConflict(usernameNormalized),
     ])
-    if (duplicate?.phone && duplicate.phone === phone) return jsonError('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
+    if (duplicate?.phone && phoneVariants.includes(duplicate.phone)) return jsonError('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
     if (duplicate?.email === email) return jsonError('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
     if (accountDuplicate) return jsonError('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
 
@@ -150,12 +154,12 @@ export async function POST(request: Request) {
         where: {
           status: 'ACTIVE',
           isDeleted: false,
-          OR: [{ email }, { phone }],
+          OR: [{ email }, ...phoneVariants.map((phoneValue) => ({ phone: phoneValue }))],
         },
         select: { email: true, phone: true },
       })
       if (concurrentDuplicate?.email === email) throw new RegistrationConflictError('email')
-      if (concurrentDuplicate?.phone === phone) throw new RegistrationConflictError('phone')
+      if (concurrentDuplicate?.phone && phoneVariants.includes(concurrentDuplicate.phone)) throw new RegistrationConflictError('phone')
       const concurrentUsername = await tx.user.findUnique({ where: { usernameNormalized: draft.usernameNormalized }, select: { id: true } })
       if (concurrentUsername) throw new RegistrationConflictError('username')
 

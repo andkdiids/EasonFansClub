@@ -10,6 +10,7 @@ import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { createPlainToken, hashToken } from '@/lib/tokens'
 import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
+import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, getPhoneValidationMessage, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -42,7 +43,10 @@ export async function POST(request: Request) {
   const accountValidation = validateLoginAccountValue(rawNickname)
   const usernameNormalized = accountValidation.usernameNormalized
   const email = normalizeText(body?.email).toLowerCase()
-  const phone = normalizeText(body?.phone).replace(/\s+/g, '')
+  const rawPhone = normalizeText(body?.phone)
+  const requestedPhoneCountry = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
+  const normalizedPhone = normalizePhoneNumber(rawPhone, requestedPhoneCountry)
+  const phone = normalizedPhone?.e164 || rawPhone.replace(/\s+/g, '')
   const password = normalizeText(body?.password)
   const confirmPassword = normalizeText(body?.confirmPassword)
   const acceptedAgreement = Boolean(body?.acceptedAgreement)
@@ -52,8 +56,8 @@ export async function POST(request: Request) {
   if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error) {
     errors.nickname = '用户名 / 昵称需要 2-16 个字符'
   }
-  if (!phone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
-  if (!/^1\d{10}$/.test(phone)) errors.phone = '请输入 11 位中国大陆手机号'
+  if (!rawPhone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+  if (!normalizedPhone) errors.phone = getPhoneValidationMessage(requestedPhoneCountry)
   if (!email) errors.email = '请填写邮箱'
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = '请输入有效邮箱'
   if (!password || password.length < 8) errors.password = '密码至少需要 8 位'
@@ -68,14 +72,15 @@ export async function POST(request: Request) {
   const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
   if (!turnstile.success) return errorResponse(turnstile.message || '人机验证失败', 400, 'TURNSTILE_FAILED', { turnstileToken: turnstile.message || '人机验证失败' })
 
-  const draftIdentityFilter = [{ email }, { phone }]
+  const phoneVariants = getPhoneLookupVariants(phone, normalizedPhone?.country || requestedPhoneCountry)
+  const draftIdentityFilter = [{ email }, ...phoneVariants.map((phoneValue) => ({ phone: phoneValue }))]
   const [duplicate, accountDuplicate, recoverableDraft, existingDrafts] = await Promise.all([
     findActiveConflict({ phone: phone || null, email }),
     findLoginAccountConflict(usernameNormalized),
     prisma.registrationDraft.findFirst({
       where: {
         email,
-        phone,
+        phone: { in: phoneVariants },
         completedAt: null,
         expiresAt: { gt: new Date() },
         EHospitalCheckSession: { some: { status: 'PASSED' } },
@@ -104,7 +109,7 @@ export async function POST(request: Request) {
       select: { id: true },
     }),
   ])
-  if (duplicate?.phone && duplicate.phone === phone) return errorResponse('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
+  if (duplicate?.phone && phoneVariants.includes(duplicate.phone)) return errorResponse('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
   if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
   if (accountDuplicate) return errorResponse('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
   if (recoverableDraft && (await verifyPassword(password, recoverableDraft.passwordHash)).valid) {

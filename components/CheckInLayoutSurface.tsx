@@ -11,7 +11,7 @@ import type {
   PageLayoutModuleDensity,
   PageLayoutModuleRenderer,
 } from '@/components/page-layout/PageLayoutRenderer'
-import type { CheckInDisplayMessageItem, CheckInMessageItem, CheckInMessageSort } from '@/lib/checkin-messages'
+import type { CheckInDisplayMessageItem, CheckInMessageItem, CheckInMessagePagination, CheckInMessageSort } from '@/lib/checkin-messages'
 import type { PageLayoutConfig } from '@/lib/page-layout/types'
 
 export type TodayCheckInPayload = TodayCheckIn
@@ -26,7 +26,9 @@ export type CheckInLayoutModuleProps = {
   moodIndex: number
   todayCheckIn: TodayCheckInPayload
   selectedMessages: CheckInDisplayMessageItem[]
+  selectedMessagesPagination?: CheckInMessagePagination
   friendMessages: CheckInMessageItem[]
+  friendMessagesPagination?: CheckInMessagePagination
   selectedDateValue: string
   todayValue: string
   sort: CheckInMessageSort
@@ -41,6 +43,7 @@ export type CheckInLayoutModuleProps = {
   checkinMoodEnabled?: boolean
   focusMessageId?: string
   focusCommentId?: string
+  focusErrorKind?: 'load' | 'deleted' | 'unavailable'
   previewMode?: boolean
 }
 
@@ -174,7 +177,9 @@ export function createCheckInLayoutModules({
   totalCheckIns,
   todayCheckIn,
   selectedMessages,
+  selectedMessagesPagination,
   friendMessages,
+  friendMessagesPagination,
   selectedDateValue,
   todayValue,
   sort,
@@ -184,6 +189,7 @@ export function createCheckInLayoutModules({
   previewMode = false,
   focusMessageId,
   focusCommentId,
+  focusErrorKind,
 }: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
   // 管理员（ADMIN / SUPER_ADMIN）可在挂号页删除留言；仅控制按钮展示，接口侧仍独立鉴权。
   const canManageMessages = sessionUserRole === 'ADMIN' || sessionUserRole === 'SUPER_ADMIN'
@@ -207,12 +213,14 @@ export function createCheckInLayoutModules({
             density={density}
             scope="public"
             initialMessages={selectedMessages}
+            initialPagination={selectedMessagesPagination}
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}
             previewMode={previewMode}
             focusMessageId={focusMessageId}
             focusCommentId={focusCommentId}
+            focusErrorKind={focusErrorKind}
             canManageMessages={canManageMessages}
           />
         ),
@@ -222,6 +230,7 @@ export function createCheckInLayoutModules({
             density={density}
             scope="friends"
             initialMessages={friendMessages}
+            initialPagination={friendMessagesPagination}
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}

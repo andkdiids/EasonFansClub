@@ -95,11 +95,13 @@ export default async function TrendingPostsPage({
       )}
 
       {(page > 1 || data.hasMore) ? (
-        <nav aria-label="热门帖子分页" className="flex items-center justify-center gap-3">
-          {page > 1 ? <Link href={rangeHref(range, page - 1)} className="border border-sky-200 bg-white px-4 py-2 text-sm font-black text-brand-700">上一页</Link> : null}
-          <span className="text-sm font-black text-slate-500">第 {page} 页</span>
-          {data.hasMore ? <Link href={rangeHref(range, page + 1)} className="border border-sky-200 bg-white px-4 py-2 text-sm font-black text-brand-700">下一页</Link> : null}
-        </nav>
+        <div className="pagination-wrap trending-pagination">
+          <nav aria-label="热门帖子分页" className="pagination-nav">
+            {page > 1 ? <Link href={rangeHref(range, page - 1)} className="pagination-edge">上一页</Link> : null}
+            <span aria-current="page" className="pagination-page is-current">{page}</span>
+            {data.hasMore ? <Link href={rangeHref(range, page + 1)} className="pagination-edge">下一页</Link> : null}
+          </nav>
+        </div>
       ) : null}
     </main>
   )

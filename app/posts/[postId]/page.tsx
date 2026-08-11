@@ -542,14 +542,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             </div>
           ) : null}
           {post.PostMedia.length ? (
-            <div className="post-media-grid mt-6 grid items-start gap-3 sm:grid-cols-2">
+            <div className="post-media-grid mt-6 grid w-full max-w-[40rem] items-start gap-3 sm:grid-cols-2">
               {post.PostMedia.map((item, index) =>
                 isSupabaseStorageUrl(item.url) ? (
                   <div key={item.id} className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm font-bold text-slate-500">
                     图片已失效，请重新编辑帖子上传
                   </div>
                 ) : (
-                  <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-fit max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="h-auto w-auto max-w-full bg-transparent" />
+                  <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-full max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="block h-auto max-h-[70vh] w-auto max-w-full bg-transparent object-contain sm:max-h-[28rem]" />
                 ),
               )}
             </div>

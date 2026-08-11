@@ -7,6 +7,12 @@ import { profileImageUrl } from '@/lib/images'
 import { validateLoginAccountValue } from '@/lib/login-account'
 
 type InitialProfile = {
+  username: string
+  usernameChange: {
+    lastChangedAt: string | null
+    nextAllowedAt: string | null
+    canChange: boolean
+  }
   nickname: string
   avatarUrl: string
   backgroundUrl: string
@@ -181,6 +187,24 @@ function daysForMonth(month: number | null): number {
   return days[month - 1]
 }
 
+function formatUsernameChangeDate(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const year = parts.find((part) => part.type === 'year')?.value || ''
+  const month = parts.find((part) => part.type === 'month')?.value || ''
+  const day = parts.find((part) => part.type === 'day')?.value || ''
+  const currentYear = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date())
+  return `${year === currentYear ? '' : `${year}年`}${month}月${day}日`
+}
+
 async function cropAvatarToWebp(crop: CropState) {
   const image = await loadImage(crop.url)
   const canvas = document.createElement('canvas')
@@ -291,6 +315,12 @@ export function ProfileSettingsForm({
   const [form, setForm] = useState(initialProfile)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [usernameChange, setUsernameChange] = useState(initialProfile.usernameChange)
+  const [usernameDraft, setUsernameDraft] = useState(initialProfile.username)
+  const [usernameError, setUsernameError] = useState('')
+  const [isEditingUsername, setIsEditingUsername] = useState(false)
+  const [showUsernameConfirm, setShowUsernameConfirm] = useState(false)
+  const [isSavingUsername, setIsSavingUsername] = useState(false)
   const [uploading, setUploading] = useState<UploadKind | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [crop, setCrop] = useState<CropState | null>(null)
@@ -524,6 +554,92 @@ export function ProfileSettingsForm({
     }
   }
 
+  function beginUsernameEdit() {
+    if (!usernameChange.canChange || isSavingUsername) return
+    setUsernameDraft(form.username)
+    setUsernameError('')
+    setIsEditingUsername(true)
+  }
+
+  function cancelUsernameEdit() {
+    if (isSavingUsername) return
+    setUsernameDraft(form.username)
+    setUsernameError('')
+    setShowUsernameConfirm(false)
+    setIsEditingUsername(false)
+  }
+
+  function requestUsernameChange() {
+    const validation = validateLoginAccountValue(usernameDraft)
+    if (validation.error) {
+      setUsernameError(validation.error)
+      return
+    }
+    if (validation.usernameNormalized === validateLoginAccountValue(form.username).usernameNormalized) {
+      setUsernameError('新用户名不能与当前用户名相同')
+      return
+    }
+    setUsernameError('')
+    setShowUsernameConfirm(true)
+  }
+
+  async function confirmUsernameChange() {
+    if (isSavingUsername) return
+
+    const validation = validateLoginAccountValue(usernameDraft)
+    if (validation.error) {
+      setUsernameError(validation.error)
+      setShowUsernameConfirm(false)
+      return
+    }
+
+    setIsSavingUsername(true)
+    setUsernameError('')
+    try {
+      const response = await fetch('/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newUsername: validation.account }),
+      })
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        if (data?.code === 'USERNAME_CHANGE_COOLDOWN' && data?.nextAllowedAt) {
+          setUsernameChange((current) => ({
+            ...current,
+            nextAllowedAt: data.nextAllowedAt,
+            canChange: false,
+          }))
+        }
+        setUsernameError(data?.message || '用户名修改失败，请稍后重试')
+        return
+      }
+
+      const nextUsername = typeof data?.profile?.username === 'string' ? data.profile.username : ''
+      const nextUsernameChange = data?.usernameChange
+      if (!nextUsername || !nextUsernameChange || typeof nextUsernameChange.canChange !== 'boolean') {
+        setUsernameError('用户名已提交，但页面没有收到最新状态，请刷新后确认')
+        return
+      }
+
+      setForm((current) => ({
+        ...current,
+        username: nextUsername,
+        usernameChange: nextUsernameChange,
+      }))
+      setUsernameChange(nextUsernameChange)
+      setUsernameDraft(nextUsername)
+      setIsEditingUsername(false)
+      setShowUsernameConfirm(false)
+      setMessage('用户名已更新，下次可修改时间为一个月后')
+      router.refresh()
+    } catch {
+      setUsernameError('网络连接中断，用户名未修改，请稍后重试')
+    } finally {
+      setIsSavingUsername(false)
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nicknameValidation = form.nickname !== initialProfile.nickname
@@ -656,6 +772,65 @@ export function ProfileSettingsForm({
                 className="sr-only"
               />
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-sky-100 bg-white/78 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-slate-700">用户名</p>
+                <p className="mt-2 break-all text-base font-black text-brand-950" aria-readonly="true">{form.username}</p>
+              </div>
+              <button
+                type="button"
+                onClick={beginUsernameEdit}
+                disabled={!usernameChange.canChange || isSavingUsername}
+                className={`shrink-0 rounded-xl px-4 py-2 text-sm font-black transition ${usernameChange.canChange ? 'bg-sky-100 text-brand-950 hover:bg-sky-200' : 'cursor-not-allowed bg-slate-100 text-slate-400'}`}
+              >
+                更改用户名
+              </button>
+            </div>
+
+            {usernameChange.canChange ? (
+              <p className="mt-2 text-xs font-bold leading-5 text-slate-500">用户名用于登录，不是昵称。每个月只能修改一次。</p>
+            ) : usernameChange.nextAllowedAt ? (
+              <p className="mt-2 text-xs font-black leading-5 text-slate-500">下次更名时间为：{formatUsernameChangeDate(usernameChange.nextAllowedAt)}</p>
+            ) : null}
+
+            {isEditingUsername ? (
+              <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/55 p-3">
+                <label className="block">
+                  <span className="text-xs font-black text-slate-600">新的用户名</span>
+                  <input
+                    value={usernameDraft}
+                    onChange={(event) => {
+                      setUsernameDraft(event.target.value)
+                      setUsernameError(validateLoginAccountValue(event.target.value).error || '')
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        requestUsernameChange()
+                      }
+                    }}
+                    minLength={2}
+                    maxLength={16}
+                    autoComplete="off"
+                    autoFocus
+                    className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold outline-none transition focus:border-brand-700"
+                    placeholder="请输入新的用户名"
+                  />
+                </label>
+                {usernameError ? <p className="mt-2 text-xs font-black leading-5 text-red-600">{usernameError}</p> : null}
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={cancelUsernameEdit} disabled={isSavingUsername} className="rounded-full bg-white px-4 py-2 text-xs font-black text-brand-700 disabled:opacity-60">
+                    取消
+                  </button>
+                  <button type="button" onClick={requestUsernameChange} disabled={isSavingUsername} className="rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white disabled:opacity-60">
+                    确认修改
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <label className="block">
@@ -811,6 +986,34 @@ export function ProfileSettingsForm({
           </button>
         </div>
       </form>
+
+      {showUsernameConfirm ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="username-change-confirm-title" className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl">
+            <h3 id="username-change-confirm-title" className="text-xl font-black text-brand-950">确认更改用户名？</h3>
+            <p className="mt-3 text-sm font-bold leading-6 text-slate-600">用户名每个月只能修改一次。本次修改成功后，下次需要等待一个月。</p>
+            <dl className="mt-4 space-y-2 rounded-2xl bg-sky-50/70 p-3 text-sm">
+              <div className="flex gap-3">
+                <dt className="shrink-0 font-bold text-slate-500">当前用户名</dt>
+                <dd className="min-w-0 break-all font-black text-brand-950">{form.username}</dd>
+              </div>
+              <div className="flex gap-3">
+                <dt className="shrink-0 font-bold text-slate-500">新用户名</dt>
+                <dd className="min-w-0 break-all font-black text-brand-950">{usernameDraft}</dd>
+              </div>
+            </dl>
+            {usernameError ? <p className="mt-3 text-sm font-black leading-6 text-red-600">{usernameError}</p> : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowUsernameConfirm(false)} disabled={isSavingUsername} className="rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700 disabled:opacity-60">
+                再想想
+              </button>
+              <button type="button" onClick={confirmUsernameChange} disabled={isSavingUsername} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
+                {isSavingUsername ? '提交中…' : '确认更改'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {crop ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">

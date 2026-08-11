@@ -13,6 +13,7 @@ export type ProfileRecentMessage = {
   commentCount: number
   comments: Array<{
     id: string
+    parentId: string | null
     content: string
     createdAt: string
     authorName: string
@@ -30,6 +31,7 @@ export async function loadProfileRecentMessages(userId: string, viewerId?: strin
     commentCount: number
     DailyMessageComment: Array<{
       id: string
+      parentId: string | null
       content: string
       createdAt: Date
       User: {
@@ -58,6 +60,7 @@ export async function loadProfileRecentMessages(userId: string, viewerId?: strin
           orderBy: { createdAt: 'asc' },
           select: {
             id: true,
+            parentId: true,
             content: true,
             createdAt: true,
             User: {
@@ -94,6 +97,7 @@ export async function loadProfileRecentMessages(userId: string, viewerId?: strin
     commentCount: message.commentCount,
     comments: message.DailyMessageComment.map((comment) => ({
       id: comment.id,
+      parentId: comment.parentId,
       content: comment.content,
       createdAt: comment.createdAt.toISOString(),
       authorName: resolveFriendDisplayName({
