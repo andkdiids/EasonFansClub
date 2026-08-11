@@ -1,6 +1,4 @@
 export const POINTS = {
-  postCreateExperience: 5,
-  replyCreateExperience: 2,
   dailyCheckInMin: 3,
   dailyCheckInMax: 7,
   postLikeReceived: 1,

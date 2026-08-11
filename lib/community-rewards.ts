@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { getShanghaiDateKey, parseBeijingDate } from '@/lib/checkin'
-import { awardExperience } from '@/lib/growth'
+import { awardExperience, EXPERIENCE_REWARD_SOURCES } from '@/lib/growth'
 import { awardRegistrationFee, reverseRegistrationFee } from '@/lib/registration-fee'
 
 export const COMMUNITY_REWARD_POINTS = {
@@ -254,7 +254,7 @@ export async function awardFeaturedPostRewards(
     amount: COMMUNITY_REWARD_POINTS.featuredPostExperience,
     type: 'ACTIVITY',
     description: '帖子被设为精华',
-    sourceType: 'FEATURED_POST',
+    sourceType: EXPERIENCE_REWARD_SOURCES.FEATURED_POST,
     sourceId: input.postId,
     now,
   })

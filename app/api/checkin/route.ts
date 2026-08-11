@@ -6,7 +6,7 @@ import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOf
 import { getCheckInMessage } from '@/lib/checkin-messages'
 import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
-import { awardExperience, getRandomCheckInExperience } from '@/lib/growth'
+import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience } from '@/lib/growth'
 import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
@@ -184,7 +184,7 @@ export async function POST(request: Request) {
       amount: requestedExp,
       type: 'CHECKIN',
       description: '每日挂号',
-      sourceType: 'DAILY_CHECKIN',
+      sourceType: EXPERIENCE_REWARD_SOURCES.CHECK_IN,
       sourceId: createdCheckIn.id,
     })
     const gainedExp = expAward.amount

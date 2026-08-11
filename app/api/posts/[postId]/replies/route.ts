@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { awardCommunityCommentRewards } from '@/lib/community-rewards'
-import { awardExperience } from '@/lib/growth'
-import { POINTS } from '@/lib/points'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
@@ -235,13 +233,6 @@ export async function POST(request: Request, { params }: Params) {
       data: { replyCount: { increment: 1 } },
     })
     await tx.friendActivity.create({ data: { actorId: user.id, type: 'COMMENT', content: stickerId ? '[表情]' : textContent, targetUrl: `/posts/${postId}?focus=${createdReply.id}` } })
-
-    await awardExperience(tx, {
-      userId: user.id,
-      amount: POINTS.replyCreateExperience,
-      type: 'COMMENT',
-      description: '回复帖子',
-    })
 
     const communityReward = await awardCommunityCommentRewards(tx, {
       commentId: createdReply.id,

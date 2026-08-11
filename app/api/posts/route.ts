@@ -3,8 +3,6 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
-import { awardExperience } from '@/lib/growth'
-import { POINTS } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
@@ -209,13 +207,6 @@ export async function POST(request: Request) {
           data: { postCount: { increment: 1 } },
         })
       }
-
-      await awardExperience(tx, {
-        userId: user.id,
-        amount: POINTS.postCreateExperience,
-        type: 'POST',
-        description: '发布帖子',
-      })
 
       return { post }
     })

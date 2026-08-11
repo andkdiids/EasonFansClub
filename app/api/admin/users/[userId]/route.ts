@@ -148,7 +148,6 @@ export async function PATCH(request: Request, context: RouteContext) {
     canPlayFullMusic?: boolean
     status?: UserStatus
     level?: number
-    exp?: number
     isDeleted?: boolean
     deletedAt?: Date | null
     nicknameChangedAt?: Date | null
@@ -159,7 +158,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (body.role !== 'ADMIN' && body.role !== 'SUPER_ADMIN') data.canPlayFullMusic = false
   }
   if (body?.level !== undefined) data.level = Number(body.level)
-  if (body?.exp !== undefined) data.exp = Number(body.exp)
+  if (body?.exp !== undefined || body?.experience !== undefined || body?.experiencePoints !== undefined) {
+    return NextResponse.json({ message: '经验值只能通过每日挂号或精华帖子奖励增加' }, { status: 400 })
+  }
   const targetPoints = body?.points === undefined ? undefined : Number(body.points)
   if (targetPoints !== undefined && (!Number.isSafeInteger(targetPoints) || targetPoints < 0)) {
     return NextResponse.json({ message: '挂号费余额必须是非负整数' }, { status: 400 })

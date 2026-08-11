@@ -5,6 +5,17 @@ import { defaultGrowthLevels, resolveGrowthLevelName } from '@/lib/growth-displa
 export const dailyExpLimit = 30
 export { defaultGrowthLevels, resolveGrowthLevelName }
 
+export const EXPERIENCE_REWARD_SOURCES = {
+  CHECK_IN: 'CHECK_IN',
+  FEATURED_POST: 'FEATURED_POST',
+} as const
+
+export type ExperienceRewardSource = typeof EXPERIENCE_REWARD_SOURCES[keyof typeof EXPERIENCE_REWARD_SOURCES]
+
+export function isAllowedExperienceRewardSource(value: unknown): value is ExperienceRewardSource {
+  return value === EXPERIENCE_REWARD_SOURCES.CHECK_IN || value === EXPERIENCE_REWARD_SOURCES.FEATURED_POST
+}
+
 export type GrowthLevel = {
   level: number
   name: string
@@ -80,13 +91,21 @@ export async function awardExperience(
   input: {
     userId: string
     amount: number
-    type: ExperienceLogType
+    type: Extract<ExperienceLogType, 'CHECKIN' | 'ACTIVITY'>
     description: string
     now?: Date
-    sourceType?: string
-    sourceId?: string
+    sourceType: ExperienceRewardSource
+    sourceId: string
   },
 ) {
+  if (!isAllowedExperienceRewardSource(input.sourceType) || typeof input.sourceId !== 'string' || !input.sourceId.trim()) {
+    throw new Error('INVALID_EXPERIENCE_REWARD_SOURCE')
+  }
+  const expectedType = input.sourceType === EXPERIENCE_REWARD_SOURCES.CHECK_IN ? 'CHECKIN' : 'ACTIVITY'
+  if (input.type !== expectedType) {
+    throw new Error('INVALID_EXPERIENCE_REWARD_SOURCE')
+  }
+
   const requestedAmount = Math.max(0, Math.floor(input.amount || 0))
   const date = getBeijingDayStart(input.now || new Date())
   const existing = await tx.dailyExperienceRecord.findUnique({
