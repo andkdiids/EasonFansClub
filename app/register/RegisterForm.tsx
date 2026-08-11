@@ -1038,7 +1038,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }, [clearHospitalAudioTimer, hospitalModalOpen, hospitalQuestionId, hospitalAudioUrl, hospitalState, playHospitalAudio])
 
   if (!registrationIsOpen) {
-    if (registrationAvailability.mode === 'SCHEDULED' && registrationAvailability.status === 'WAITING') {
+    if (registrationAvailability.mode === 'ONE_TIME' && registrationAvailability.status === 'WAITING') {
       const opensAt = registrationAvailability.opensAt ? new Date(registrationAvailability.opensAt).getTime() : NaN
       const secondsUntilOpen = Number.isFinite(opensAt) ? Math.max(0, (opensAt - registrationClock) / 1000) : 0
       return (
@@ -1052,7 +1052,19 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       )
     }
 
-    if (registrationAvailability.mode === 'SCHEDULED' && registrationAvailability.status === 'ENDED') {
+    if (registrationAvailability.mode === 'DAILY_SCHEDULE' && registrationAvailability.status === 'WAITING') {
+      const nextChangeAt = registrationAvailability.nextChangeAt ? new Date(registrationAvailability.nextChangeAt) : null
+      return (
+        <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-amber-900">
+          <p className="text-sm font-black">每日定时注册</p>
+          <p className="text-sm font-bold leading-6">今日开放时段：{registrationAvailability.dailySchedule.map((window) => `${window.start}–${window.end}`).join('、') || '未设置'}</p>
+          {nextChangeAt ? <p className="text-sm font-bold leading-6">下一次开放：{formatBeijingDateTimeDisplay(nextChangeAt)}</p> : null}
+          <p className="text-xs font-black text-amber-800">北京时间（Asia/Shanghai）</p>
+        </div>
+      )
+    }
+
+    if (registrationAvailability.mode === 'ONE_TIME' && registrationAvailability.status === 'ENDED') {
       return <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-bold leading-6 text-slate-700"><p className="font-black text-slate-900">本轮注册已结束</p><p>下一次开放时间请留意后续公告。</p></div>
     }
 

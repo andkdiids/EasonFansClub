@@ -4,20 +4,28 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('每日处方只展示图片并通过分享菜单处理分享', () => {
+test('每日处方预览只展示图片和右上角关闭入口', () => {
   const source = read('components/games/SavePrescriptionButton.tsx')
+  const css = read('app/globals.css')
 
   assert.doesNotMatch(source, /下载图片/)
   assert.doesNotMatch(source, /downloadBlob/)
   assert.doesNotMatch(source, /navigator\.canShare/)
   assert.match(source, /setPreview\(image\)/)
-  assert.match(source, /shareMenuOpen/)
-  assert.match(source, /分享给好友/)
-  assert.match(source, /分享到朋友圈/)
-  assert.match(source, /updateAppMessageShareData/)
-  assert.match(source, /updateTimelineShareData/)
-  assert.match(source, /navigator\.share/)
-  assert.match(source, /copyShareLink/)
+  assert.match(source, /prescription-preview-close/)
+  assert.match(source, /右键点击图片，可复制或保存图片/)
+  assert.match(source, /长按图片可保存或转发/)
+  assert.match(source, /prescription-preview-hint-desktop/)
+  assert.match(source, /prescription-preview-hint-mobile/)
+  assert.doesNotMatch(source, /分享处方|分享给好友|分享到朋友圈/)
+  assert.doesNotMatch(source, /navigator\.share|copyShareLink|configureWechatShare|shareMenuOpen|sharing/)
+  assert.doesNotMatch(source, /window\.innerWidth/)
+  assert.doesNotMatch(source, /onContextMenu|onTouchStart|preventDefault\(/)
+  assert.doesNotMatch(css, /prescription-preview-actions|prescription-share-menu/)
+  assert.match(css, /\.prescription-preview-hint-mobile \{ display:none; \}/)
+  assert.match(css, /\.prescription-preview-hint-desktop \{ display:none; \}/)
+  assert.doesNotMatch(css, /\.prescription-preview-backdrop[^}]*touch-action:/)
+  assert.doesNotMatch(css, /\.prescription-preview-image[^}]*touch-action:/)
 })
 
 test('挂号通知会按留言和回复 ID 定向加载，不受默认分页窗口影响', () => {

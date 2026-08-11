@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import { MusicCover } from '@/components/music/MusicCover'
 
 type MiniPlayerPosition = { x: number; y: number }
@@ -25,17 +25,34 @@ type MusicMiniPlayerProps = {
 }
 
 const PLAYER_EDGE_GAP = 12
+const DRAG_THRESHOLD = 5
+
+type DragState = {
+  pointerId: number
+  pointerStartX: number
+  pointerStartY: number
+  offsetX: number
+  offsetY: number
+  startX: number
+  startY: number
+  width: number
+  height: number
+  position: MiniPlayerPosition
+  moved: boolean
+}
 
 export function MusicMiniPlayer(props: Readonly<MusicMiniPlayerProps>) {
   const playerRef = useRef<HTMLElement | null>(null)
-  const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
+  const dragRef = useRef<DragState | null>(null)
+  const pendingTransformRef = useRef<{ x: number; y: number } | null>(null)
+  const frameRef = useRef<number | null>(null)
   const [dragging, setDragging] = useState(false)
   const { collapsed, expanded, position, onPositionChange } = props
 
-  const clampPosition = useCallback((next: MiniPlayerPosition): MiniPlayerPosition => {
-    const rect = playerRef.current?.getBoundingClientRect()
-    const width = rect?.width || Math.min(420, window.innerWidth - PLAYER_EDGE_GAP * 2)
-    const height = rect?.height || (collapsed ? 72 : 150)
+  const clampPosition = useCallback((next: MiniPlayerPosition, size?: { width: number; height: number }): MiniPlayerPosition => {
+    const rect = size ? null : playerRef.current?.getBoundingClientRect()
+    const width = size?.width || rect?.width || Math.min(420, window.innerWidth - PLAYER_EDGE_GAP * 2)
+    const height = size?.height || rect?.height || (collapsed ? 72 : 150)
     return {
       x: Math.min(Math.max(PLAYER_EDGE_GAP, next.x), Math.max(PLAYER_EDGE_GAP, window.innerWidth - width - PLAYER_EDGE_GAP)),
       y: Math.min(Math.max(PLAYER_EDGE_GAP, next.y), Math.max(PLAYER_EDGE_GAP, window.innerHeight - height - PLAYER_EDGE_GAP)),
@@ -45,6 +62,7 @@ export function MusicMiniPlayer(props: Readonly<MusicMiniPlayerProps>) {
   useEffect(() => {
     if (!position) return
     const clamp = () => {
+      if (dragRef.current) return
       const next = clampPosition(position)
       if (next.x !== position.x || next.y !== position.y) onPositionChange(next)
     }
@@ -53,31 +71,95 @@ export function MusicMiniPlayer(props: Readonly<MusicMiniPlayerProps>) {
     return () => window.removeEventListener('resize', clamp)
   }, [clampPosition, expanded, onPositionChange, position])
 
+  const applyPendingTransform = useCallback(() => {
+    frameRef.current = null
+    const offset = pendingTransformRef.current
+    const element = playerRef.current
+    if (!offset || !element) return
+    element.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0)`
+  }, [])
+
+  const scheduleTransform = useCallback((offset: { x: number; y: number }) => {
+    pendingTransformRef.current = offset
+    if (frameRef.current !== null) return
+    frameRef.current = window.requestAnimationFrame(applyPendingTransform)
+  }, [applyPendingTransform])
+
+  const flushTransform = useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+    applyPendingTransform()
+  }, [applyPendingTransform])
+
+  useLayoutEffect(() => {
+    if (!dragRef.current && !dragging) playerRef.current?.style.removeProperty('transform')
+  }, [dragging, position])
+
+  useEffect(() => () => {
+    if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current)
+  }, [])
+
   function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
     if (event.button !== 0) return
-    const rect = playerRef.current?.getBoundingClientRect()
-    if (!rect) return
+    const playerElement = playerRef.current
+    if (!playerElement) return
+    const rect = playerElement.getBoundingClientRect()
     dragRef.current = {
       pointerId: event.pointerId,
+      pointerStartX: event.clientX,
+      pointerStartY: event.clientY,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
+      startX: rect.left,
+      startY: rect.top,
+      width: rect.width,
+      height: rect.height,
+      position: { x: rect.left, y: rect.top },
+      moved: false,
     }
+    pendingTransformRef.current = { x: 0, y: 0 }
+    playerElement.style.removeProperty('transform')
     event.currentTarget.setPointerCapture(event.pointerId)
     event.preventDefault()
-    setDragging(true)
   }
 
   function handlePointerMove(event: PointerEvent<HTMLButtonElement>) {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
-    props.onPositionChange(clampPosition({
+    const deltaX = event.clientX - drag.pointerStartX
+    const deltaY = event.clientY - drag.pointerStartY
+    if (!drag.moved && Math.hypot(deltaX, deltaY) <= DRAG_THRESHOLD) return
+    const justStarted = !drag.moved
+    drag.moved = true
+    const next = clampPosition({
       x: event.clientX - drag.offsetX,
       y: event.clientY - drag.offsetY,
-    }))
+    }, drag)
+    drag.position = next
+    scheduleTransform({ x: next.x - drag.startX, y: next.y - drag.startY })
+    if (justStarted) setDragging(true)
+    event.preventDefault()
   }
 
   function finishPointer(event: PointerEvent<HTMLButtonElement>) {
-    if (dragRef.current?.pointerId !== event.pointerId) return
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (drag.moved) {
+      const next = event.type === 'pointercancel'
+        ? drag.position
+        : clampPosition({
+            x: event.clientX - drag.offsetX,
+            y: event.clientY - drag.offsetY,
+          }, drag)
+      drag.position = next
+      pendingTransformRef.current = { x: next.x - drag.startX, y: next.y - drag.startY }
+      flushTransform()
+      onPositionChange(next)
+    } else {
+      pendingTransformRef.current = null
+    }
     dragRef.current = null
     setDragging(false)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
@@ -114,6 +196,7 @@ export function MusicMiniPlayer(props: Readonly<MusicMiniPlayerProps>) {
           <button type="button" className="h-10 min-w-10" onClick={props.onTogglePlayback} aria-label={props.playing ? '暂停' : '播放'}>
             {props.loading ? '…' : props.playing ? 'Ⅱ' : '▶'}
           </button>
+          <button type="button" className="easmusic-player-close-button h-10 min-w-10 shrink-0 text-slate-300" onPointerDown={(event) => event.stopPropagation()} onClick={props.onClose} aria-label="关闭播放器">×</button>
         </div>
       ) : (
         <>
@@ -145,7 +228,7 @@ export function MusicMiniPlayer(props: Readonly<MusicMiniPlayerProps>) {
             {props.expanded ? <button type="button" className="h-11 w-11" onClick={props.onPrevious} aria-label="上一首">‹</button> : null}
             <button type="button" className="h-11 min-w-11" onClick={props.onTogglePlayback} aria-label={props.playing ? '暂停' : '播放'}>{props.loading ? '…' : props.playing ? 'Ⅱ' : '▶'}</button>
             {props.expanded ? <button type="button" className="h-11 w-11" onClick={props.onNext} aria-label="下一首">›</button> : null}
-            <button type="button" className="h-11 w-11 text-slate-300" onClick={props.onClose} aria-label="关闭播放器">×</button>
+            <button type="button" className="easmusic-player-close-button h-11 w-11 text-slate-300" onPointerDown={(event) => event.stopPropagation()} onClick={props.onClose} aria-label="关闭播放器">×</button>
           </div>
         </>
       )}

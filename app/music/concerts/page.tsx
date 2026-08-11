@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
-import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { ConcertCategoryCards } from '@/components/music/ConcertCategoryCards'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
@@ -38,7 +37,6 @@ export default async function MusicConcertsPage() {
   }))
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <div className="flex flex-wrap items-center justify-between gap-3"><Link href="/music" className="text-sm font-black text-sky-300/80">← 返回 EasMusic</Link><Link href="/music/live/me" className="rounded-full border border-sky-200/20 bg-sky-200/[0.07] px-4 py-2 text-sm font-black text-sky-100">我的现场 →</Link></div>
-    <div className="mt-6"><MusicSectionNavigation /></div>
     <header className="py-12 sm:py-16">
       <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">EASON IN CONCERT ARCHIVE</p>
       <h1 className="mt-4 text-5xl font-black tracking-tight text-white sm:text-7xl">Eason in Concert</h1>

@@ -25,7 +25,7 @@ export function MusicAlbumArchiveShowcase({ carouselAlbums, albums }: Readonly<{
         {expanded ? '收起全部专辑' : `展开全部专辑 · ${albums.length}`}
       </button>
     </div>
-    {expanded ? <div className="mt-8 grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 md:grid-cols-5 xl:grid-cols-6">
+    {expanded ? <div className="mt-8 grid min-w-0 grid-cols-3 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 md:grid-cols-5 xl:grid-cols-6">
       {albums.map((album) => <MusicAlbumCard key={album.id} theme="dark" album={album} />)}
     </div> : null}
   </section>

@@ -6,7 +6,9 @@ import {
   parseBeijingDateTime,
   resolveRegistrationAvailability,
   serializeRegistrationAvailability,
+  serializeRegistrationControlSettings,
   type RegistrationControlSettings,
+  validateRegistrationDailySchedule,
 } from '../lib/registration-availability'
 
 const opensAt = parseBeijingDateTime('2026-08-11T15:00')
@@ -16,7 +18,7 @@ assert.ok(opensAt)
 assert.ok(closesAt)
 
 function settings(overrides: Partial<RegistrationControlSettings> = {}): RegistrationControlSettings {
-  return { mode: 'SCHEDULED', opensAt, closesAt, override: 'NONE', ...overrides }
+  return { mode: 'SCHEDULED', dailySchedule: [], opensAt, closesAt, override: 'NONE', ...overrides }
 }
 
 test('北京时间输入按 Asia/Shanghai 解析并保存为 UTC 对应时刻', () => {
@@ -48,6 +50,60 @@ test('环境或现有注册方式关闭时统一返回 CLOSED', () => {
   assert.equal(serializeRegistrationAvailability(availability).timezone, 'Asia/Shanghai')
 })
 
+function dailySettings(dailySchedule: RegistrationControlSettings['dailySchedule']): RegistrationControlSettings {
+  return { mode: 'DAILY_SCHEDULE', dailySchedule, opensAt: null, closesAt: null, override: 'NONE' }
+}
+
+function beijingTime(time: string, date = '2026-08-12') {
+  const value = parseBeijingDateTime(`${date}T${time}`)
+  assert.ok(value)
+  return value
+}
+
+test('每日定时模式按北京时间处理开放边界和下一次状态变化', () => {
+  const settings = dailySettings([{ start: '15:00', end: '23:50' }])
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('14:59') }).status, 'WAITING')
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('15:00') }).status, 'OPEN')
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('23:49') }).status, 'OPEN')
+  const closed = resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('23:50') })
+  assert.equal(closed.status, 'WAITING')
+  assert.equal(closed.nextChangeType, 'OPEN')
+  assert.equal(closed.nextChangeAt?.toISOString(), '2026-08-13T07:00:00.000Z')
+})
+
+test('每日定时模式正确处理跨午夜时段', () => {
+  const settings = dailySettings([{ start: '22:00', end: '02:00' }])
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('21:59') }).isOpen, false)
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('22:00') }).isOpen, true)
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('23:59') }).isOpen, true)
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('00:30', '2026-08-13') }).isOpen, true)
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('01:59', '2026-08-13') }).isOpen, true)
+  const closed = resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('02:00', '2026-08-13') })
+  assert.equal(closed.isOpen, false)
+  assert.equal(closed.nextChangeType, 'OPEN')
+})
+
+test('每日定时模式支持多个不重叠时段，并拒绝重叠但允许相邻', () => {
+  const settings = dailySettings([
+    { start: '10:00', end: '12:00' },
+    { start: '15:00', end: '18:00' },
+    { start: '20:00', end: '23:00' },
+  ])
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('11:00') }).isOpen, true)
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('13:00') }).isOpen, false)
+  assert.equal(resolveRegistrationAvailability({ settings, baseRegistrationOpen: true, now: beijingTime('20:30') }).isOpen, true)
+  assert.equal(validateRegistrationDailySchedule([{ start: '10:00', end: '12:00' }, { start: '12:00', end: '15:00' }]), null)
+  assert.match(String(validateRegistrationDailySchedule([{ start: '15:00', end: '18:00' }, { start: '17:00', end: '20:00' }])), /重叠/)
+  assert.match(String(validateRegistrationDailySchedule([{ start: '22:00', end: '02:00' }, { start: '01:00', end: '03:00' }])), /重叠/)
+})
+
+test('旧 SCHEDULED 配置兼容为 ONE_TIME，不改变一次性时间窗口', () => {
+  const availability = resolveRegistrationAvailability({ settings: settings(), baseRegistrationOpen: true, now: new Date('2026-08-11T07:30:00.000Z') })
+  assert.equal(availability.mode, 'ONE_TIME')
+  assert.equal(serializeRegistrationControlSettings(settings()).mode, 'ONE_TIME')
+  assert.deepEqual(serializeRegistrationAvailability(availability).dailySchedule, [])
+})
+
 test('注册推进接口都经过统一服务端状态门禁且状态接口禁止缓存', () => {
   const guardedFiles = [
     'app/api/auth/register/prepare/route.ts',
@@ -64,7 +120,10 @@ test('注册推进接口都经过统一服务端状态门禁且状态接口禁�
     assert.match(source, /getRegistrationPolicy/)
   }
   const statusRoute = readFileSync('app/api/auth/register/status/route.ts', 'utf8')
+  const adminControlRoute = readFileSync('app/api/admin/security-settings/route.ts', 'utf8')
   assert.match(readFileSync('lib/registration.ts', 'utf8'), /export async function getRegistrationAvailability/)
+  assert.match(adminControlRoute, /validateRegistrationControlSettings/)
+  assert.match(adminControlRoute, /parsed\.mode === 'ONE_TIME'/)
   assert.match(statusRoute, /export async function GET\(\)/)
   assert.match(statusRoute, /Cache-Control.*no-store/)
   assert.match(readFileSync('app/register/page.tsx', 'utf8'), /force-dynamic/)

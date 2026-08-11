@@ -231,8 +231,6 @@ type GeneratedPrescriptionImage = Readonly<{
   previewSrcIsObjectUrl: boolean
 }>
 
-type ShareResult = 'shared' | 'unsupported' | 'cancelled' | 'failed'
-
 function dataUrlToBlob(dataUrl: string) {
   const separatorIndex = dataUrl.indexOf(',')
   if (separatorIndex < 0) throw new Error('PRESCRIPTION_DATA_URL_INVALID')
@@ -286,127 +284,10 @@ async function generatePrescriptionImage(data: PrescriptionImageData): Promise<G
   return { blob, previewSrc, previewSrcIsObjectUrl }
 }
 
-type ShareChannel = 'friend' | 'timeline'
-
-type SharePayload = {
-  title: string
-  description: string
-  link: string
-}
-
-type WechatShareConfig = {
-  title: string
-  desc: string
-  link: string
-  imgUrl?: string
-  success?: () => void
-  cancel?: () => void
-  fail?: () => void
-}
-
-type WechatShareApi = {
-  ready?: (callback: () => void) => void
-  updateAppMessageShareData?: (config: WechatShareConfig) => void
-  updateTimelineShareData?: (config: WechatShareConfig) => void
-  onMenuShareAppMessage?: (config: WechatShareConfig) => void
-  onMenuShareTimeline?: (config: WechatShareConfig) => void
-}
-
-function getPrescriptionSharePayload(data: PrescriptionImageData): SharePayload {
-  const link = typeof window === 'undefined' ? '' : window.location.href
-  return {
-    title: `私家E院 · ${data.dateKey} 每日处方`,
-    description: data.lyric?.text
-      ? `今日歌词处方：${data.lyric.text}`
-      : '打开私家E院查看今日处方',
-    link,
-  }
-}
-
-function getWechatShareApi() {
-  if (typeof window === 'undefined') return null
-  const candidate = (window as Window & { wx?: unknown }).wx
-  return candidate && typeof candidate === 'object' ? candidate as WechatShareApi : null
-}
-
-function configureWechatShare(channel: ShareChannel, payload: SharePayload) {
-  const wx = getWechatShareApi()
-  if (!wx) return false
-
-  const method = channel === 'friend'
-    ? wx.updateAppMessageShareData || wx.onMenuShareAppMessage
-    : wx.updateTimelineShareData || wx.onMenuShareTimeline
-  if (typeof method !== 'function') return false
-
-  const configure = () => {
-    try {
-      method.call(wx, {
-        title: payload.title,
-        desc: payload.description,
-        link: payload.link,
-      })
-    } catch (error) {
-      console.error('[daily-prescription-share][wechat]', error)
-    }
-  }
-
-  try {
-    if (typeof wx.ready === 'function') wx.ready(configure)
-    else configure()
-    return true
-  } catch (error) {
-    console.error('[daily-prescription-share][wechat]', error)
-    return false
-  }
-}
-
-async function copyShareLink(link: string) {
-  if (!link) return false
-  if (typeof navigator.clipboard?.writeText === 'function') {
-    try {
-      await navigator.clipboard.writeText(link)
-      return true
-    } catch {
-      // Use the textarea fallback below for older mobile browsers and WebViews.
-    }
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = link
-  textarea.setAttribute('readonly', 'true')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  try {
-    return document.execCommand('copy')
-  } catch {
-    return false
-  } finally {
-    textarea.remove()
-  }
-}
-
-async function tryBrowserShare(payload: SharePayload): Promise<ShareResult> {
-  if (typeof navigator.share !== 'function') return 'unsupported'
-
-  try {
-    await navigator.share({ title: payload.title, text: payload.description, url: payload.link })
-    return 'shared'
-  } catch (reason) {
-    if (reason instanceof DOMException && reason.name === 'AbortError') return 'cancelled'
-    console.error('[daily-prescription-share]', reason)
-    return 'failed'
-  }
-}
-
 export function SavePrescriptionButton({ data }: { data: PrescriptionImageData }) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [preview, setPreview] = useState<GeneratedPrescriptionImage | null>(null)
-  const [previewMessage, setPreviewMessage] = useState('')
-  const [shareMenuOpen, setShareMenuOpen] = useState(false)
-  const [sharing, setSharing] = useState(false)
 
   useEffect(() => {
     if (!preview) return undefined
@@ -437,8 +318,6 @@ export function SavePrescriptionButton({ data }: { data: PrescriptionImageData }
       })
       const image = await generatePrescriptionImage(data)
       setPreview(image)
-      setShareMenuOpen(false)
-      setPreviewMessage('图片已生成，可长按图片保存')
       setMessage('图片已生成')
     } catch (error) {
       console.error('[daily-prescription-save]', error)
@@ -448,55 +327,8 @@ export function SavePrescriptionButton({ data }: { data: PrescriptionImageData }
     }
   }
 
-  function handlePreviewShare() {
-    if (!preview || sharing) return
-    setShareMenuOpen((value) => !value)
-    setPreviewMessage('')
-  }
-
-  async function handleShareChannel(channel: ShareChannel) {
-    if (!preview || sharing) return
-    setSharing(true)
-    setShareMenuOpen(false)
-    const payload = getPrescriptionSharePayload(data)
-    const configuredWechatShare = configureWechatShare(channel, payload)
-    if (configuredWechatShare) {
-      setPreviewMessage(channel === 'friend'
-        ? '分享内容已准备好，请点击右上角 ··· 发送给朋友'
-        : '分享内容已准备好，请点击右上角 ··· 分享到朋友圈')
-      setSharing(false)
-      return
-    }
-
-    const isWechat = /MicroMessenger/i.test(navigator.userAgent)
-    if (channel === 'friend' && !isWechat) {
-      const result = await tryBrowserShare(payload)
-      if (result === 'shared') setPreviewMessage('已打开系统分享面板')
-      else if (result === 'cancelled') setPreviewMessage('已取消分享')
-      else if (result === 'failed') setPreviewMessage('分享未完成，请稍后重试或复制链接')
-      else if (await copyShareLink(payload.link)) setPreviewMessage('当前浏览器不支持直接分享，链接已复制，可粘贴发送给好友')
-      else setPreviewMessage('当前浏览器不支持直接分享，请复制当前页面链接发送给好友')
-      setSharing(false)
-      return
-    }
-
-    const copied = await copyShareLink(payload.link)
-    if (copied) {
-      setPreviewMessage(channel === 'timeline'
-        ? '当前浏览器不支持朋友圈直达，链接已复制，请点击右上角 ··· 分享到朋友圈'
-        : '微信分享接口暂未配置，链接已复制，请点击右上角 ··· 发送给朋友')
-    } else {
-      setPreviewMessage(channel === 'timeline'
-        ? '请点击右上角 ··· 分享到朋友圈'
-        : '请点击右上角 ··· 发送给朋友')
-    }
-    setSharing(false)
-  }
-
   function closePreview() {
     setPreview(null)
-    setPreviewMessage('')
-    setShareMenuOpen(false)
   }
 
   const previewPortal = preview && typeof document !== 'undefined'
@@ -514,24 +346,12 @@ export function SavePrescriptionButton({ data }: { data: PrescriptionImageData }
             </div>
             <button type="button" className="prescription-preview-close" onClick={closePreview} aria-label="关闭处方图片预览">×</button>
           </header>
-          <p className="prescription-preview-hint">长按图片即可保存到手机相册</p>
+          <p className="prescription-preview-hint prescription-preview-hint-desktop">右键点击图片，可复制或保存图片</p>
+          <p className="prescription-preview-hint prescription-preview-hint-mobile">长按图片可保存或转发</p>
           <div className="prescription-preview-image-wrap">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={preview.previewSrc} alt="今日处方图片" className="prescription-preview-image" />
           </div>
-          <p className="prescription-preview-message" role="status">{previewMessage}</p>
-          <div className="prescription-preview-actions">
-            <button type="button" className="prescription-preview-share" onClick={() => void handlePreviewShare()}>分享处方</button>
-            <button type="button" className="prescription-preview-dismiss" onClick={closePreview}>关闭</button>
-          </div>
-          {shareMenuOpen ? (
-            <div className="prescription-share-menu" role="group" aria-label="选择分享方式">
-              <p>分享处方</p>
-              <button type="button" onClick={() => void handleShareChannel('friend')} disabled={sharing}>分享给好友</button>
-              <button type="button" onClick={() => void handleShareChannel('timeline')} disabled={sharing}>分享到朋友圈</button>
-              <button type="button" className="prescription-share-menu-cancel" onClick={() => setShareMenuOpen(false)} disabled={sharing}>取消</button>
-            </div>
-          ) : null}
         </section>
       </div>,
       document.body,

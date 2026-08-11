@@ -8,6 +8,8 @@ import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
+const PROFILE_WALL_PAGE_SIZE = 10
+
 const wallRowInclude = {
   User_ProfileWallMessage_senderIdToUser: {
     select: {
@@ -164,10 +166,35 @@ async function loadWallMessage(id: string) {
   return prisma.profileWallMessage.findUnique({ where: { id }, include: wallRowInclude })
 }
 
+function parseWallPage(value: string | null) {
+  const page = Number(value)
+  return Number.isSafeInteger(page) && page > 0 ? page : 1
+}
+
+async function findWallFocusRoot(focusId: string, receiverId: string) {
+  const visited = new Set<string>()
+  let currentId: string | null = focusId
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId)
+    const row: { id: string; parentId: string | null; createdAt: Date } | null = await prisma.profileWallMessage.findFirst({
+      where: { id: currentId, receiverId, deletedAt: null },
+      select: { id: true, parentId: true, createdAt: true },
+    })
+    if (!row) return null
+    if (!row.parentId) return row
+    currentId = row.parentId
+  }
+
+  return null
+}
+
 export async function GET(request: Request) {
   const viewer = await getCurrentUser()
   const { searchParams } = new URL(request.url)
   const uid = Number(searchParams.get('receiverUid'))
+  const requestedPage = parseWallPage(searchParams.get('wallPage'))
+  const focusId = searchParams.get('focusId')?.slice(0, 80) || null
   if (!Number.isSafeInteger(uid) || uid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   const receiver = await prisma.user.findFirst({
@@ -180,12 +207,45 @@ export async function GET(request: Request) {
   if (!canView) return NextResponse.json({ message: '你没有权限查看该留言墙' }, { status: 403 })
 
   const isOwner = viewer?.id === receiver.id
-  const rows = await prisma.profileWallMessage.findMany({
-    where: { receiverId: receiver.id, deletedAt: null },
+  const rootWhere = { receiverId: receiver.id, parentId: null, deletedAt: null } as const
+  const total = await prisma.profileWallMessage.count({ where: rootWhere })
+  const totalPages = Math.max(1, Math.ceil(total / PROFILE_WALL_PAGE_SIZE))
+  let page = Math.min(requestedPage, totalPages)
+
+  const focusRoot = focusId ? await findWallFocusRoot(focusId, receiver.id) : null
+  if (focusRoot) {
+    const rootsBeforeFocus = await prisma.profileWallMessage.count({
+      where: {
+        ...rootWhere,
+        OR: [
+          { createdAt: { gt: focusRoot.createdAt } },
+          { createdAt: focusRoot.createdAt, id: { gt: focusRoot.id } },
+        ],
+      },
+    })
+    page = Math.min(Math.floor(rootsBeforeFocus / PROFILE_WALL_PAGE_SIZE) + 1, totalPages)
+  }
+
+  const rootRows = await prisma.profileWallMessage.findMany({
+    where: rootWhere,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: 300,
+    skip: (page - 1) * PROFILE_WALL_PAGE_SIZE,
+    take: PROFILE_WALL_PAGE_SIZE,
     include: wallRowInclude,
   })
+
+  const rows: WallRow[] = [...rootRows]
+  let parentIds = rootRows.map((row) => row.id)
+  while (parentIds.length) {
+    const children = await prisma.profileWallMessage.findMany({
+      where: { receiverId: receiver.id, deletedAt: null, parentId: { in: parentIds } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: wallRowInclude,
+    })
+    if (!children.length) break
+    rows.push(...children)
+    parentIds = children.map((row) => row.id)
+  }
   const allMessageIds = rows.map((row) => row.id)
   const viewerLikes = viewer && allMessageIds.length
     ? await prisma.profileWallLike.findMany({
@@ -205,6 +265,14 @@ export async function GET(request: Request) {
     visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
     canPost: Boolean(viewer && receiver.Profile?.wallVisibility !== 'CLOSED'),
     messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, remarkMap)),
+    pagination: {
+      page,
+      pageSize: PROFILE_WALL_PAGE_SIZE,
+      total,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages,
+    },
   })
 }
 

@@ -1,8 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { Pagination } from '@/components/ui/Pagination'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
@@ -26,6 +28,29 @@ type WallMessage = {
   commentCount: number
   sender: WallSender
   children?: WallMessage[]
+}
+
+type WallPagination = {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  hasPrevious: boolean
+  hasNext: boolean
+}
+
+const EMPTY_WALL_PAGINATION: WallPagination = {
+  page: 1,
+  pageSize: 10,
+  total: 0,
+  totalPages: 1,
+  hasPrevious: false,
+  hasNext: false,
+}
+
+function parseWallPage(value: string | null) {
+  const page = Number(value)
+  return Number.isSafeInteger(page) && page > 0 ? page : 1
 }
 
 function findWallMessage(messages: WallMessage[], id: string): WallMessage | null {
@@ -81,6 +106,11 @@ function flattenReplies(children: WallMessage[], parentName: string) {
 }
 
 export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receiverUid: number; focusId?: string; isOwner?: boolean }) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const wallRef = useRef<HTMLElement | null>(null)
+  const wallPage = parseWallPage(searchParams.get('wallPage'))
   const [messages, setMessages] = useState<WallMessage[]>([])
   const [content, setContent] = useState('')
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
@@ -89,22 +119,40 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [pagination, setPagination] = useState<WallPagination>(EMPTY_WALL_PAGINATION)
+
+  const replaceWallPage = useCallback((nextPage: number, clearFocus = false) => {
+    const safePage = Math.max(1, Math.trunc(nextPage) || 1)
+    const params = new URLSearchParams(searchParams.toString())
+    if (safePage === 1) params.delete('wallPage')
+    else params.set('wallPage', String(safePage))
+    if (clearFocus) params.delete('focus')
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    wallRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [pathname, router, searchParams])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`/api/profile-wall?receiverUid=${receiverUid}`, { cache: 'no-store' })
+      const params = new URLSearchParams({ receiverUid: String(receiverUid), wallPage: String(wallPage) })
+      if (focusId) params.set('focusId', focusId)
+      const response = await fetch(`/api/profile-wall?${params.toString()}`, { cache: 'no-store' })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || '留言墙加载失败')
       setMessages(Array.isArray(data.messages) ? data.messages : [])
       setCanPost(Boolean(data.canPost))
+      if (data.pagination) {
+        setPagination(data.pagination as WallPagination)
+        if (data.pagination.page !== wallPage) replaceWallPage(data.pagination.page)
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '留言墙加载失败')
     } finally {
       setLoading(false)
     }
-  }, [receiverUid])
+  }, [focusId, receiverUid, replaceWallPage, wallPage])
 
   useEffect(() => {
     void load()
@@ -134,11 +182,12 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
     if (submitting || !content.trim()) return
     setSubmitting(true)
     setError('')
+    const parentId = replyTo?.id || null
     try {
       const response = await fetch('/api/profile-wall', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiverUid, content, parentId: replyTo?.id }),
+        body: JSON.stringify({ receiverUid, content, parentId }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || '留言发布失败')
@@ -146,7 +195,11 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
       setContent('')
       setReplyTo(null)
       if (!created?.id) {
-        await load()
+        if (parentId || wallPage === 1) await load()
+        else replaceWallPage(1)
+      } else if (!created.parentId) {
+        if (wallPage === 1) await load()
+        else replaceWallPage(1)
       } else {
         setMessages((current) => {
           const result = insertWallMessage(current, created)
@@ -180,7 +233,7 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   }
 
   return (
-    <section className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-5">
+    <section ref={wallRef} className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">留言墙</p>
@@ -218,6 +271,16 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
       <div className="mt-4 space-y-3">
         {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} isOwner={isOwner} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={setReplyTo} onDelete={remove} />)}
       </div>
+      {pagination.totalPages > 1 ? (
+        <Pagination
+          currentPage={pagination.page}
+          totalPages={pagination.totalPages}
+          onPageChange={(nextPage) => replaceWallPage(nextPage, true)}
+          disabled={loading || submitting}
+          ariaLabel="留言墙分页"
+          className="mt-4"
+        />
+      ) : null}
     </section>
   )
 }

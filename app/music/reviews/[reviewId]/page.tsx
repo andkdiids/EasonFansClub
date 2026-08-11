@@ -3,7 +3,6 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AlbumReviewActions } from '@/components/music/AlbumReviewActions'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
-import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { getCurrentUser } from '@/lib/auth'
 import { readAlbumReviewImages } from '@/lib/album-reviews'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
@@ -40,7 +39,6 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
   const images = readAlbumReviewImages(review.images)
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music/reviews" className="text-sm font-black text-sky-300/80">← 返回专辑鉴赏</Link>
-    <div className="mt-6"><MusicSectionNavigation /></div>
     <article className="mt-10 overflow-hidden rounded-[32px] border border-white/10 bg-[#08192b]/80 shadow-[0_30px_90px_rgba(0,0,0,.28)] backdrop-blur-xl">
       {(review.coverUrl || review.MusicAlbum.coverUrl) ? <div className="relative aspect-[16/8]"><Image src={(review.coverUrl || review.MusicAlbum.coverUrl)!} alt={review.title} fill priority sizes="(max-width: 767px) 100vw, 960px" className="object-cover" /><div className="absolute inset-0 bg-gradient-to-t from-[#08192b] via-transparent to-transparent" /></div> : null}
       <div className="p-6 sm:p-10">

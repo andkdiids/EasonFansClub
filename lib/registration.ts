@@ -3,8 +3,9 @@ import { getAccountSecuritySettings } from '@/lib/account-security'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
 import type { Prisma } from '@prisma/client'
 import {
-  isValidRegistrationControlMode,
   isValidRegistrationControlOverride,
+  normalizeRegistrationControlMode,
+  parseRegistrationDailyScheduleInput,
   resolveRegistrationAvailability,
   type RegistrationAvailability,
   type RegistrationControlSettings,
@@ -16,7 +17,10 @@ export {
   getRegistrationAvailabilityError,
   isValidRegistrationControlMode,
   isValidRegistrationControlOverride,
+  isValidRegistrationControlSettings,
+  normalizeRegistrationControlMode,
   parseBeijingDateTime,
+  parseRegistrationDailyScheduleInput,
   parseRegistrationControlInput,
   registrationAvailabilityStatuses,
   registrationControlModes,
@@ -24,8 +28,11 @@ export {
   resolveRegistrationAvailability,
   serializeRegistrationAvailability,
   serializeRegistrationControlSettings,
+  validateRegistrationControlSettings,
+  validateRegistrationDailySchedule,
 } from '@/lib/registration-availability'
 export type {
+  CanonicalRegistrationControlMode,
   RegistrationAvailability,
   RegistrationAvailabilityPayload,
   RegistrationAvailabilityStatus,
@@ -33,6 +40,7 @@ export type {
   RegistrationControlOverride,
   RegistrationControlPayload,
   RegistrationControlSettings,
+  RegistrationDailyScheduleWindow,
 } from '@/lib/registration-availability'
 
 export const registrationModes = ['PHONE', 'EMAIL', 'BOTH', 'CLOSED'] as const
@@ -51,6 +59,7 @@ const registrationLimitSettingKey = 'registrationLimitEnabled'
 
 const registrationControlSettingDefinitions = {
   mode: { key: 'registration.control.mode', defaultValue: 'MANUAL', label: '注册开放模式' },
+  dailySchedule: { key: 'registration.control.dailySchedule', defaultValue: '[]', label: '每日注册开放时段' },
   opensAt: { key: 'registration.control.opensAt', defaultValue: '', label: '注册开放开始时间' },
   closesAt: { key: 'registration.control.closesAt', defaultValue: '', label: '注册开放结束时间' },
   override: { key: 'registration.control.override', defaultValue: 'NONE', label: '注册开放状态覆盖' },
@@ -128,6 +137,15 @@ function parseStoredDate(value: string | undefined) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+function parseStoredDailySchedule(value: string | undefined) {
+  if (!value) return []
+  try {
+    return parseRegistrationDailyScheduleInput(JSON.parse(value)) || []
+  } catch {
+    return []
+  }
+}
+
 export async function getRegistrationControlSettings(): Promise<RegistrationControlSettings> {
   const rows = await prisma.siteSetting.findMany({
     where: { key: { in: Object.values(registrationControlSettingDefinitions).map((item) => item.key) } },
@@ -137,7 +155,8 @@ export async function getRegistrationControlSettings(): Promise<RegistrationCont
   const modeValue = values.get(registrationControlSettingDefinitions.mode.key)
   const overrideValue = values.get(registrationControlSettingDefinitions.override.key)
   return {
-    mode: isValidRegistrationControlMode(modeValue) ? modeValue : 'MANUAL',
+    mode: normalizeRegistrationControlMode(modeValue) || 'MANUAL',
+    dailySchedule: parseStoredDailySchedule(values.get(registrationControlSettingDefinitions.dailySchedule.key)),
     opensAt: parseStoredDate(values.get(registrationControlSettingDefinitions.opensAt.key)),
     closesAt: parseStoredDate(values.get(registrationControlSettingDefinitions.closesAt.key)),
     override: isValidRegistrationControlOverride(overrideValue) ? overrideValue : 'NONE',
@@ -149,7 +168,8 @@ export async function setRegistrationControlSettings(
   database: Pick<Prisma.TransactionClient, 'siteSetting'> = prisma,
 ) {
   const values = {
-    mode: settings.mode,
+    mode: normalizeRegistrationControlMode(settings.mode) || 'MANUAL',
+    dailySchedule: JSON.stringify(settings.dailySchedule || []),
     opensAt: settings.opensAt?.toISOString() || '',
     closesAt: settings.closesAt?.toISOString() || '',
     override: settings.override,

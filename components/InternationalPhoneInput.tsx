@@ -129,8 +129,8 @@ export function InternationalPhoneInput({
   }
 
   return (
-    <div className="flex min-w-0 gap-2">
-      <div ref={rootRef} className="relative w-[112px] shrink-0">
+    <div className="mt-1 flex min-w-0 items-stretch gap-2">
+      <div ref={rootRef} className="relative w-24 shrink-0">
         <input
           type="text"
           value={open ? query : `+${selectedCountry.dialCode}`}
@@ -150,10 +150,10 @@ export function InternationalPhoneInput({
           disabled={disabled}
           autoComplete="off"
           placeholder={`+${selectedCountry.dialCode}`}
-          className={`mt-1 w-full min-w-0 rounded-lg border border-sky-100 bg-white px-2 py-2 pr-6 text-center text-sm outline-none focus:ring-4 focus:ring-brand-500/20 ${countryInputClassName}`}
+          className={`box-border h-11 w-full min-w-0 rounded-lg border border-sky-100 bg-white px-3 py-0 pr-8 text-left text-sm outline-none focus:ring-4 focus:ring-brand-500/20 ${countryInputClassName}`}
           aria-label="国家或地区区号"
         />
-        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400" aria-hidden="true">⌄</span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" aria-hidden="true">⌄</span>
         {open ? (
           <div
             id={listId}
@@ -194,7 +194,7 @@ export function InternationalPhoneInput({
         autoComplete={autoComplete}
         required={required}
         disabled={disabled}
-        className={`mt-1 min-w-0 flex-1 rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 ${inputClassName}`}
+        className={`box-border h-11 min-w-0 flex-1 rounded-lg border border-sky-100 bg-white px-3 py-0 outline-none ring-brand-500/20 focus:ring-4 ${inputClassName}`}
         placeholder={placeholder}
         data-register-field={dataRegisterField}
         aria-label="手机号"

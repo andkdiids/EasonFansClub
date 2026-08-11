@@ -32,7 +32,6 @@ export function ConcertCategoryCards({
             }`}
           >
             <span className="truncate text-base font-black text-white">{category.name}</span>
-            <span className="mt-1 truncate text-xs font-bold text-sky-200/55">/music/live/{category.slug}</span>
             <span className="mt-2 inline-flex items-center gap-1 text-xs font-black text-sky-200/75">
               进入分类
               <span aria-hidden="true" className="transition-transform group-hover:translate-x-0.5">→</span>

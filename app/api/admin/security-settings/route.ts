@@ -8,6 +8,7 @@ import {
   serializeRegistrationAvailability,
   serializeRegistrationControlSettings,
   setRegistrationControlSettings,
+  validateRegistrationControlSettings,
 } from '@/lib/registration'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
@@ -31,6 +32,9 @@ export async function PUT(request: Request) {
     }
 
     const before = await getRegistrationControlSettings()
+    if (before.mode === 'DAILY_SCHEDULE' && action !== 'STOP_SCHEDULED') {
+      return NextResponse.json({ message: '每日定时模式请通过时间段自动控制；如需手动操作，请先切换为手动控制' }, { status: 400 })
+    }
     const next = action === 'OPEN_NOW'
       ? { ...before, override: 'OPEN' as const }
       : action === 'CLOSE_NOW'
@@ -63,23 +67,19 @@ export async function PUT(request: Request) {
 
   if (body && typeof body === 'object' && body.registrationControl) {
     const parsed = parseRegistrationControlInput(body.registrationControl)
-    if (!parsed) return NextResponse.json({ message: '注册开放时间格式不正确，请使用北京时间 YYYY-MM-DD HH:mm' }, { status: 400 })
-    if (parsed.mode === 'SCHEDULED' && (!parsed.opensAt || !parsed.closesAt)) {
-      return NextResponse.json({ message: '限时开放必须填写开始时间和结束时间' }, { status: 400 })
-    }
-    if (parsed.opensAt && parsed.closesAt && parsed.closesAt <= parsed.opensAt) {
-      return NextResponse.json({ message: '结束时间必须晚于开始时间' }, { status: 400 })
-    }
-    if (parsed.mode === 'SCHEDULED' && parsed.closesAt && parsed.closesAt <= new Date() && body.confirmEnded !== true) {
+    if (!parsed) return NextResponse.json({ message: '注册开放时间格式不正确，请使用北京时间 YYYY-MM-DD HH:mm；每日时段请使用 HH:mm' }, { status: 400 })
+    const validationError = validateRegistrationControlSettings(parsed)
+    if (validationError) return NextResponse.json({ message: validationError }, { status: 400 })
+    if (parsed.mode === 'ONE_TIME' && parsed.closesAt && parsed.closesAt <= new Date() && body.confirmEnded !== true) {
       return NextResponse.json({ message: '该注册时间段已经结束，请确认是否仍要保存', code: 'REGISTRATION_WINDOW_ALREADY_ENDED' }, { status: 400 })
     }
 
     const before = await getRegistrationControlSettings()
     const next = {
       ...parsed,
-      // Saving a scheduled window deliberately clears an old emergency
+      // Saving an automatic schedule deliberately clears an old emergency
       // override so the new window is evaluated immediately.
-      override: parsed.mode === 'SCHEDULED' ? 'NONE' as const : before.override,
+      override: parsed.mode === 'MANUAL' ? before.override : 'NONE' as const,
     }
     await prisma.$transaction(async (tx) => {
       await setRegistrationControlSettings(next, tx)

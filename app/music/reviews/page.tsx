@@ -1,7 +1,6 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
-import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 
@@ -18,7 +17,6 @@ export default async function AlbumReviewsPage() {
   ])
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music" className="text-sm font-black text-sky-300/80">← 返回 EasMusic</Link>
-    <div className="mt-6"><MusicSectionNavigation /></div>
     <header className="py-12 sm:py-16">
       <p className="text-xs font-black tracking-[0.24em] text-sky-300/65">ALBUM REVIEW ARCHIVE</p>
       <h1 className="mt-3 text-5xl font-black tracking-tight text-white sm:text-7xl">专辑鉴赏</h1>
