@@ -18,7 +18,13 @@ function isCosProxyPath(value: string) {
 
 function isCosHost(value: URL) {
   const hostname = value.hostname.toLowerCase()
-  return hostname === PUBLIC_COS_HOST || hostname.endsWith('.cos.ap-guangzhou.myqcloud.com')
+  return hostname === PUBLIC_COS_HOST
+}
+
+/** True when the browser should request the existing same-origin /cos proxy directly. */
+export function isPublicMediaProxyUrl(value?: string | null) {
+  const url = trimValue(value)
+  return Boolean(url && isCosProxyPath(url))
 }
 
 /**
@@ -28,7 +34,7 @@ function isCosHost(value: URL) {
  */
 export function toPublicMediaUrl(value?: string | null) {
   const url = trimValue(value)
-  if (!url || isCosProxyPath(url)) return url
+  if (!url || isPublicMediaProxyUrl(url)) return url
 
   try {
     const parsed = new URL(url)
@@ -51,7 +57,7 @@ export function toPublicMediaUrl(value?: string | null) {
  */
 export function toStoredMediaUrl(value?: string | null) {
   const url = trimValue(value)
-  if (!url || !isCosProxyPath(url)) return url
+  if (!url || !isPublicMediaProxyUrl(url)) return url
 
   try {
     const parsed = new URL(url, 'https://local.invalid')

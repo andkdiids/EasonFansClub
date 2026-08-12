@@ -28,6 +28,10 @@ const nextConfig: NextConfig = {
     ]
   },
   images: {
+    // /cos/* is served by the Nginx reverse proxy. Next's internal image
+    // optimizer cannot fetch that same-origin path directly and returns 400,
+    // so keep the browser request on the public proxy path.
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',

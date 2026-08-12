@@ -11,6 +11,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
 import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
+import { checkInMessageAuthorId, normalizeFriendCheckInMessages } from '@/lib/checkin-message-order'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -104,6 +105,7 @@ export function CheckInMessagesPanel({
   initialDate,
   maxDate,
   initialSort,
+  sessionUserId,
   previewMode = false,
   focusMessageId,
   focusCommentId,
@@ -120,6 +122,7 @@ export function CheckInMessagesPanel({
   initialDate: string
   maxDate: string
   initialSort: CheckInMessageSort
+  sessionUserId?: string
   previewMode?: boolean
   focusMessageId?: string
   focusCommentId?: string
@@ -146,11 +149,15 @@ export function CheckInMessagesPanel({
   // likeCtx 的 value 在每次点赞后都会更换身份（覆盖层变化），同步 effect / loadMessages
   // 只能通过 ref 访问它，否则点赞会反复触发「重置分页 + 用服务端旧值覆盖点赞状态」。
   const likeCtxRef = useRef(likeCtx)
+  const sessionUserIdRef = useRef(sessionUserId)
   const recentlyCreatedMessageRef = useRef<CheckInDisplayMessageItem | null>(null)
   const initialQueryRef = useRef({ date: initialDate, sort: initialSort })
   useEffect(() => {
     likeCtxRef.current = likeCtx
   })
+  useEffect(() => {
+    sessionUserIdRef.current = sessionUserId
+  }, [sessionUserId])
   const isCompact = density !== 'normal'
   const isMinimal = density === 'minimal'
   const serverPaginated = Boolean(initialPagination && !previewMode)
@@ -161,14 +168,19 @@ export function CheckInMessagesPanel({
     const safePage = Math.min(Math.max(page, 1), totalPages)
     const start = (safePage - 1) * activePageSize
     const pagedMessages = serverPaginated ? messages : messages.slice(start, start + activePageSize)
+    const normalizedMessages = scope === 'friends'
+      ? normalizeFriendCheckInMessages(pagedMessages, safePage, sessionUserId)
+      : pagedMessages
     const recentMessage = recentlyCreatedMessageId
       ? messages.find((item) => item.id === recentlyCreatedMessageId)
       : null
-    if (recentMessage && !pagedMessages.some((item) => item.id === recentMessage.id)) {
-      return [recentMessage, ...pagedMessages]
+    if (recentMessage && (scope !== 'friends' || safePage === 1) && !normalizedMessages.some((item) => item.id === recentMessage.id)) {
+      return scope === 'friends'
+        ? normalizeFriendCheckInMessages([recentMessage, ...normalizedMessages], safePage, sessionUserId)
+        : [recentMessage, ...normalizedMessages]
     }
-    return pagedMessages
-  }, [activePageSize, messages, page, recentlyCreatedMessageId, serverPaginated, totalPages])
+    return normalizedMessages
+  }, [activePageSize, messages, page, recentlyCreatedMessageId, scope, serverPaginated, sessionUserId, totalPages])
 
   const loadMessages = useCallback(async (
     nextDate = date,
@@ -208,7 +220,9 @@ export function CheckInMessagesPanel({
       const merged = localMessage && !incoming.some((item: CheckInDisplayMessageItem) => item.id === localMessage.id)
         ? [...incoming, localMessage].sort((left, right) => compareCheckInMessages(left, right, nextSort))
         : incoming
-      setMessages(merged)
+      setMessages(scope === 'friends'
+        ? normalizeFriendCheckInMessages(merged, nextPage, sessionUserIdRef.current)
+        : merged)
       const nextPagination = data.pagination as CheckInMessagePagination | undefined
       if (serverPaginated && nextPagination) {
         setPagination(nextPagination)
@@ -325,7 +339,7 @@ export function CheckInMessagesPanel({
   useEffect(() => {
     if (previewMode) return
     function handleCheckInCompleted(event: Event) {
-      if (scope !== 'public') return
+      if (scope !== 'public' && scope !== 'friends') return
       const detail = (event as CustomEvent<CheckInCompletedDetail>).detail
       const nextDate = detail?.date || maxDate
       const createdMessage = detail?.dailyMessage
@@ -335,6 +349,16 @@ export function CheckInMessagesPanel({
         ? anonymizeCheckInMessages([createdMessage])[0]
         : createdMessage
       if (!displayMessage) return
+
+      if (scope === 'friends') {
+        if (checkInMessageAuthorId(displayMessage) !== sessionUserIdRef.current) return
+        recentlyCreatedMessageRef.current = displayMessage
+        setRecentlyCreatedMessageId(displayMessage.id)
+        setPage(1)
+        setMessages([displayMessage])
+        void loadMessages(nextDate, sort, true, true, 1)
+        return
+      }
 
       recentlyCreatedMessageRef.current = displayMessage
       setRecentlyCreatedMessageId(displayMessage.id)

@@ -143,6 +143,7 @@ export async function getCheckInMessages({
   viewerId,
   viewerCanModerate = false,
   userIds,
+  orderByCreatedAtDesc = false,
   page = 1,
   pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
 }: {
@@ -152,6 +153,7 @@ export async function getCheckInMessages({
   viewerId: string
   viewerCanModerate?: boolean
   userIds?: string[]
+  orderByCreatedAtDesc?: boolean
   page?: number
   pageSize?: number
 }): Promise<CheckInMessagesResult> {
@@ -167,6 +169,7 @@ export async function getCheckInMessages({
     viewerId,
     viewerCanModerate ? 'moderator' : 'member',
     userScope,
+    orderByCreatedAtDesc ? 'createdAt' : 'display',
     safePage,
     safePageSize,
   ].join(':')
@@ -181,6 +184,7 @@ export async function getCheckInMessages({
     viewerId,
     viewerCanModerate,
     userIds,
+    orderByCreatedAtDesc,
     skip: (safePage - 1) * safePageSize,
     take: safePageSize,
   }).catch((error) => {
@@ -198,6 +202,7 @@ export async function getCheckInMessagesPage({
   viewerId,
   viewerCanModerate = false,
   userIds,
+  stickyUserId,
   page = 1,
   pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
 }: {
@@ -207,11 +212,66 @@ export async function getCheckInMessagesPage({
   viewerId: string
   viewerCanModerate?: boolean
   userIds?: string[]
+  /** Friends scope only: keep this user's latest valid message outside friend pagination. */
+  stickyUserId?: string
   page?: number
   pageSize?: number
 }): Promise<CheckInMessagesPage> {
   const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || CHECK_IN_MESSAGE_PAGE_SIZE))
   const safeRequestedPage = Math.max(1, Math.trunc(page) || 1)
+  if (stickyUserId && userIds !== undefined) {
+    const friendUserIds = [...new Set(userIds)].filter((userId) => userId !== stickyUserId)
+    const [friendTotal, stickyMessages] = await Promise.all([
+      friendUserIds.length
+        ? prisma.dailyMessage.count({
+            where: buildCheckInMessagesWhere({ selectedDate, nextDate, userIds: friendUserIds }),
+          })
+        : Promise.resolve(0),
+      getCheckInMessages({
+        selectedDate,
+        nextDate,
+        sort: 'latest',
+        viewerId,
+        viewerCanModerate,
+        userIds: [stickyUserId],
+        orderByCreatedAtDesc: true,
+        page: 1,
+        pageSize: 1,
+      }),
+    ])
+    const stickyMessage = stickyMessages[0] || null
+    const totalPages = Math.max(1, Math.ceil(friendTotal / safePageSize))
+    const safePage = Math.min(safeRequestedPage, totalPages)
+    const friendMessages = friendUserIds.length
+      ? await getCheckInMessages({
+          selectedDate,
+          nextDate,
+          sort,
+          viewerId,
+          viewerCanModerate,
+          userIds: friendUserIds,
+          page: safePage,
+          pageSize: safePageSize,
+        })
+      : []
+
+    return {
+      messages: stickyMessage && safePage === 1
+        ? [stickyMessage, ...friendMessages.filter((message) => message.id !== stickyMessage.id)]
+        : friendMessages.filter((message) => message.id !== stickyMessage?.id),
+      pagination: {
+        page: safePage,
+        pageSize: safePageSize,
+        // The sticky message is outside the friend offset/take window. totalPages
+        // intentionally follows friendTotal so page 2 starts at the next friend
+        // message without a duplicate or skipped row.
+        total: friendTotal + (stickyMessage ? 1 : 0),
+        totalPages,
+        hasMore: safePage < totalPages,
+      },
+    }
+  }
+
   if (userIds && userIds.length === 0) {
     return {
       messages: [],
@@ -277,6 +337,7 @@ async function getCheckInMessagesUncached({
   viewerId,
   viewerCanModerate,
   userIds,
+  orderByCreatedAtDesc,
   skip,
   take,
 }: {
@@ -288,6 +349,7 @@ async function getCheckInMessagesUncached({
   viewerId: string
   viewerCanModerate: boolean
   userIds?: string[]
+  orderByCreatedAtDesc?: boolean
   skip?: number
   take?: number
 }) {
@@ -295,7 +357,9 @@ async function getCheckInMessagesUncached({
 
   const rows = await prisma.dailyMessage.findMany({
     where: buildCheckInMessagesWhere({ messageId, selectedDate, nextDate, userIds }),
-    orderBy: getCheckInMessagesOrderBy(sort),
+    orderBy: orderByCreatedAtDesc
+      ? [{ createdAt: 'desc' as const }, { id: 'desc' as const }]
+      : getCheckInMessagesOrderBy(sort),
     ...(typeof skip === 'number' ? { skip } : {}),
     take: messageId ? 1 : take ?? CHECK_IN_MESSAGE_PAGE_SIZE,
     include: {

@@ -45,6 +45,7 @@ export async function GET(request: Request) {
         viewerId: user.id,
         viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
         userIds: friendIds,
+        stickyUserId: scope === 'friends' ? user.id : undefined,
         page,
       }),
     )

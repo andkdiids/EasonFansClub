@@ -119,6 +119,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       viewerId: sessionUser.id,
       viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
       userIds: friendIds,
+      stickyUserId: sessionUser.id,
       page: 1,
     }),
     { messages: [], pagination: emptyMessagePagination },

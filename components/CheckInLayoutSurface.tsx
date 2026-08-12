@@ -183,6 +183,7 @@ export function createCheckInLayoutModules({
   selectedDateValue,
   todayValue,
   sort,
+  sessionUserId,
   sessionUserRole,
   stats,
   checkinMoodEnabled = true,
@@ -217,6 +218,7 @@ export function createCheckInLayoutModules({
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}
+            sessionUserId={sessionUserId}
             previewMode={previewMode}
             focusMessageId={focusMessageId}
             focusCommentId={focusCommentId}
@@ -234,6 +236,7 @@ export function createCheckInLayoutModules({
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}
+            sessionUserId={sessionUserId}
             previewMode={previewMode}
             emptyText="暂无好友挂号留言"
             canManageMessages={canManageMessages}
