@@ -11,6 +11,10 @@ type ByteRange = {
 
 type RangeParseResult = ByteRange | { invalid: true } | null
 
+type ProtectedAudioOptions = {
+  cacheControl?: string
+}
+
 function jsonError(message: string, code: string, status: number, headers?: HeadersInit) {
   const responseHeaders = new Headers(headers)
   responseHeaders.set('Cache-Control', 'private, no-store')
@@ -44,9 +48,9 @@ function baseAudioHeaders(metadata: {
   contentType: string | null
   etag: string | null
   lastModified: string | null
-}, contentLength: number) {
+}, contentLength: number, cacheControl = 'private, no-store') {
   const headers = new Headers()
-  headers.set('Cache-Control', 'private, no-store')
+  headers.set('Cache-Control', cacheControl)
   headers.set('Content-Disposition', 'inline')
   headers.set('Content-Type', metadata.contentType || 'audio/mpeg')
   headers.set('Content-Length', String(contentLength))
@@ -60,7 +64,11 @@ function baseAudioHeaders(metadata: {
  * Stream a private Guess Song/COS object without exposing a COS URL or
  * buffering the object in the application process.
  */
-export async function streamProtectedGuessSongAudio(request: Request, key: string) {
+export async function streamProtectedGuessSongAudio(
+  request: Request,
+  key: string,
+  options: ProtectedAudioOptions = {},
+) {
   let metadata: Awaited<ReturnType<typeof getGuessSongObjectMetadata>>
   try {
     metadata = await getGuessSongObjectMetadata(key)
@@ -88,7 +96,7 @@ export async function streamProtectedGuessSongAudio(request: Request, key: strin
   const start = range?.start ?? 0
   const end = range?.end ?? Math.max(0, size - 1)
   const contentLength = range ? end - start + 1 : size
-  const headers = baseAudioHeaders(metadata, contentLength)
+  const headers = baseAudioHeaders(metadata, contentLength, options.cacheControl)
   const status = range ? 206 : 200
   if (range) headers.set('Content-Range', `bytes ${start}-${end}/${size}`)
 

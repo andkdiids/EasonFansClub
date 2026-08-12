@@ -27,6 +27,10 @@ import {
   isQuestionAttemptTokenValid,
   issueQuestionAttemptToken,
 } from '@/lib/guess-song-risk'
+import {
+  buildGuessSongMediaUrl,
+  getGuessSongMediaConfig,
+} from '@/lib/guess-song-media-ticket'
 import { prisma } from '@/lib/prisma'
 import { createUUID } from '@/lib/utils/uuid'
 
@@ -732,7 +736,16 @@ export async function requestGuessSongPlayback(input: {
     input.publicQuestionId,
     now,
   )
+  const mediaConfig = getGuessSongMediaConfig()
   const audioUrl = `/api/entertainment/guess-song/sessions/${encodeURIComponent(input.sessionId)}/audio?questionId=${encodeURIComponent(input.publicQuestionId)}&requestKey=${encodeURIComponent(input.requestKey)}`
+  const playbackUrl = mediaConfig.enabled
+    ? buildGuessSongMediaUrl({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      questionId: input.publicQuestionId,
+      requestKey: input.requestKey,
+    }, mediaConfig)
+    : audioUrl
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -818,7 +831,7 @@ export async function requestGuessSongPlayback(input: {
     })
     return {
       ...result,
-      audioUrl: risk.cheatDetected ? '' : audioUrl,
+      audioUrl: risk.cheatDetected ? '' : playbackUrl,
       durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
       cheatDetected: risk.cheatDetected,
       ...(risk.cheatDetected ? { exitAfterSeconds: risk.exitAfterSeconds } : {}),
@@ -835,7 +848,7 @@ export async function requestGuessSongPlayback(input: {
       })
       if (existing) {
         return {
-          audioUrl,
+          audioUrl: playbackUrl,
           durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
           playCount: existing.playCountAfter,
            remainingPlayCount: playable.sessionQuestion.maxPlayCount - existing.playCountAfter,

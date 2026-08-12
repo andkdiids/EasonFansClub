@@ -1,0 +1,106 @@
+# ECFC private Guess Song audio gateway example.
+#
+# This is a deployment template, not a live configuration. Keep the existing
+# public /media/ location unchanged and add only the private location below.
+# The media server must have auth_request and slice modules enabled.
+#
+# The two http-context directives below belong inside nginx's http {} block:
+#
+# proxy_cache_path /var/cache/nginx/ecfc-guess-song-audio
+#     levels=1:2
+#     keys_zone=ecfc_guess_song_audio:32m
+#     max_size=2g
+#     inactive=30m
+#     use_temp_path=off;
+#
+# log_format ecfc_media_private '$remote_addr $request_method $uri '
+#     '$status $upstream_cache_status $body_bytes_sent '
+#     'range="$http_range"';
+#
+# Store the separate MEDIA_GATEWAY_SECRET in a root-readable, permission-
+# restricted include. Never place COS credentials on this server.
+# The included file should contain only a deployment-time assignment, for example:
+#   set $media_gateway_secret 'replace-at-deploy-time';
+
+server {
+    listen 443 ssl http2;
+    server_name media.ecfc.fans;
+
+    include /etc/nginx/private/ecfc-media-gateway-secret.conf;
+
+    # Use the media server's real certificate paths here.
+    ssl_certificate /etc/letsencrypt/live/media.ecfc.fans/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/media.ecfc.fans/privkey.pem;
+
+    # Do not remove or replace the existing public /media/ proxy.
+
+    location ~ ^/private/guess-song/(?<guess_song_session>[^/]+)/(?<guess_song_question>[^/]+)$ {
+        # auth_request runs before the content phase, including before a cache hit.
+        auth_request /_ecfc_guess_song_media_auth;
+        auth_request_set $guess_song_cache_key $upstream_http_x_media_cache_key;
+
+        proxy_cache ecfc_guess_song_audio;
+        # The cache key is a server-generated hash of the resolved object key.
+        # It deliberately excludes ticket, user ID, requestKey, and COS signatures.
+        proxy_cache_key "$scheme|$host|guess-song|$guess_song_cache_key|$slice_range";
+        proxy_cache_methods GET HEAD;
+        proxy_cache_lock on;
+        proxy_cache_lock_timeout 10s;
+        proxy_cache_revalidate on;
+        proxy_cache_valid 200 206 10m;
+
+        # Cache full responses and normalized byte slices safely. A Range request
+        # is keyed by the trusted object hash plus this server-generated slice.
+        slice 1m;
+        proxy_set_header Range $slice_range;
+        proxy_set_header If-Range $http_if_range;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host ecfc.fans;
+        proxy_set_header X-Forwarded-Host media.ecfc.fans;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-ECFC-Media-Gateway $media_gateway_secret;
+        proxy_set_header X-ECFC-Media-Session-Id $guess_song_session;
+        proxy_set_header X-ECFC-Media-Question-Id $guess_song_question;
+        proxy_set_header X-ECFC-Media-Request-Key $arg_requestKey;
+        proxy_set_header X-ECFC-Media-Ticket $arg_ticket;
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        proxy_set_header Accept-Encoding "";
+
+        proxy_ssl_server_name on;
+        proxy_ssl_name ecfc.fans;
+        proxy_pass https://ecfc.fans/api/internal/media/guess-song/origin?sessionId=$guess_song_session&questionId=$guess_song_question;
+
+        # The internal origin is cacheable only behind this authenticated
+        # location. Do not allow browsers to retain or share private audio.
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "private, no-store" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        access_log /var/log/nginx/ecfc-media-private-audio.access.log ecfc_media_private;
+    }
+
+    location = /_ecfc_guess_song_media_auth {
+        internal;
+        proxy_pass https://ecfc.fans/api/internal/media/guess-song/authorize?sessionId=$guess_song_session&questionId=$guess_song_question;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host ecfc.fans;
+        proxy_set_header X-Forwarded-Host media.ecfc.fans;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-ECFC-Media-Session-Id $guess_song_session;
+        proxy_set_header X-ECFC-Media-Question-Id $guess_song_question;
+        proxy_set_header X-ECFC-Media-Request-Key $arg_requestKey;
+        proxy_set_header X-ECFC-Media-Ticket $arg_ticket;
+        proxy_set_header X-ECFC-Media-Gateway "";
+        access_log off;
+        proxy_ssl_server_name on;
+        proxy_ssl_name ecfc.fans;
+    }
+}

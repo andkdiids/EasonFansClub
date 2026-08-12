@@ -21,7 +21,11 @@ export function handleGuessSongError(error: unknown, operation: string) {
   }
   if (
     error instanceof Error
-    && (error.name === 'GuessSongAudioProcessingError' || error.name === 'GuessSongStorageError')
+    && (
+      error.name === 'GuessSongAudioProcessingError'
+      || error.name === 'GuessSongStorageError'
+      || error.name === 'GuessSongMediaTicketError'
+    )
   ) {
     return guessSongError(error.message, 503, error.name)
   }
