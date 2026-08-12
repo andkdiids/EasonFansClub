@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
 type Context = { params: Promise<{ tourId: string }> }
@@ -42,7 +43,7 @@ export async function GET(request: Request, { params }: Context) {
         lastDate: group.dates[group.dates.length - 1].toISOString().slice(0, 10),
       }))
       .sort((left, right) => left.firstDate.localeCompare(right.firstDate) || left.city.localeCompare(right.city, 'zh-CN'))
-    return NextResponse.json({ tour: data, cities })
+    return NextResponse.json({ tour: { ...data, posterUrl: toPublicMediaUrl(data.posterUrl) }, cities: cities.map((city) => ({ ...city, posterUrl: toPublicMediaUrl(city.posterUrl) })) })
   }
 
   const tour = await prisma.musicTour.findFirst({
@@ -66,9 +67,10 @@ export async function GET(request: Request, { params }: Context) {
     if (concert.posterUrl && !cityPosters.has(concert.city)) cityPosters.set(concert.city, concert.posterUrl)
   }
   return NextResponse.json({
-    tour: data,
+    tour: { ...data, posterUrl: toPublicMediaUrl(data.posterUrl) },
     concerts: MusicConcert.map(({ _count, ...concert }) => ({
       ...concert,
+      posterUrl: toPublicMediaUrl(concert.posterUrl),
       ...resolveConcertPoster({ posterUrl: concert.posterUrl, cityPosterUrl: cityPosters.get(concert.city), tourPosterUrl: data.posterUrl }),
       songCount: _count.MusicConcertSetlistItem,
       hasHighlights: _count.MusicConcertHighlight > 0,

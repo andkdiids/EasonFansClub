@@ -3,6 +3,7 @@ import { SignJWT, jwtVerify } from 'jose'
 import type { UserRole } from '@prisma/client'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { withDbTimeout } from '@/lib/db-timeout'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
 import { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
@@ -117,7 +118,7 @@ export async function getCurrentUser() {
         uid: user.uid,
         username: user.username,
         nickname: user.nickname,
-        avatarUrl: user.Profile?.avatarUrl || user.avatarUrl || null,
+        avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
         level: user.level,
         experience: user.experience,
         role: user.role,

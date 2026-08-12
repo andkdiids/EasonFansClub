@@ -12,6 +12,8 @@ import {
 } from '@/lib/registration-availability'
 
 export {
+  DEFAULT_REGISTRATION_CLOSED_MESSAGE,
+  DEFAULT_REGISTRATION_CLOSED_TITLE,
   formatBeijingDateTimeDisplay,
   formatBeijingDateTimeInput,
   getRegistrationAvailabilityError,
@@ -63,6 +65,8 @@ const registrationControlSettingDefinitions = {
   opensAt: { key: 'registration.control.opensAt', defaultValue: '', label: '注册开放开始时间' },
   closesAt: { key: 'registration.control.closesAt', defaultValue: '', label: '注册开放结束时间' },
   override: { key: 'registration.control.override', defaultValue: 'NONE', label: '注册开放状态覆盖' },
+  closedTitle: { key: 'registration.control.closedTitle', defaultValue: '当前暂停注册', label: '注册关闭标题' },
+  closedMessage: { key: 'registration.control.closedMessage', defaultValue: '注册入口目前暂时关闭，请稍后再来。', label: '注册关闭说明' },
 } as const
 
 export function isValidRegistrationMode(value: unknown): value is RegistrationMode {
@@ -160,6 +164,8 @@ export async function getRegistrationControlSettings(): Promise<RegistrationCont
     opensAt: parseStoredDate(values.get(registrationControlSettingDefinitions.opensAt.key)),
     closesAt: parseStoredDate(values.get(registrationControlSettingDefinitions.closesAt.key)),
     override: isValidRegistrationControlOverride(overrideValue) ? overrideValue : 'NONE',
+    closedTitle: values.get(registrationControlSettingDefinitions.closedTitle.key) || undefined,
+    closedMessage: values.get(registrationControlSettingDefinitions.closedMessage.key) || undefined,
   }
 }
 
@@ -173,6 +179,8 @@ export async function setRegistrationControlSettings(
     opensAt: settings.opensAt?.toISOString() || '',
     closesAt: settings.closesAt?.toISOString() || '',
     override: settings.override,
+    closedTitle: settings.closedTitle || '当前暂停注册',
+    closedMessage: settings.closedMessage || '注册入口目前暂时关闭，请稍后再来。',
   }
   await Promise.all(Object.entries(registrationControlSettingDefinitions).map(([name, definition]) => database.siteSetting.upsert({
     where: { key: definition.key },

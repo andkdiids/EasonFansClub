@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import {
   convertMusicCoverToWebp,
   MUSIC_COVER_MAX_FILE_SIZE,
@@ -95,7 +96,7 @@ async function uploadCover(request: Request) {
     console.info('[music-cover.complete]', { entityType, entityId })
     return NextResponse.json({
       success: true,
-      url,
+      url: toPublicMediaUrl(url) || url,
       format: 'webp',
       widthLimit: MUSIC_COVER_MAX_WIDTH,
       quality: MUSIC_COVER_QUALITY,

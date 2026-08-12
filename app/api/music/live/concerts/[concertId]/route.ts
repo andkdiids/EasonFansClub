@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
 type Context = { params: Promise<{ concertId: string }> }
@@ -33,9 +34,10 @@ export async function GET(_request: Request, { params }: Context) {
   return NextResponse.json({
     concert: {
       ...data,
-      tour: MusicTour,
-      cityPosterUrl: cityPoster?.posterUrl || null,
-      tourPosterUrl: MusicTour.posterUrl,
+      posterUrl: toPublicMediaUrl(data.posterUrl),
+      tour: { ...MusicTour, posterUrl: toPublicMediaUrl(MusicTour.posterUrl) },
+      cityPosterUrl: toPublicMediaUrl(cityPoster?.posterUrl),
+      tourPosterUrl: toPublicMediaUrl(MusicTour.posterUrl),
       resolvedPosterUrl: posterResolution.resolvedPosterUrl,
       posterSource: posterResolution.posterSource,
       setlist: MusicConcertSetlistItem.map(({ MusicSong, ...item }) => ({ ...item, song: MusicSong ? { id: MusicSong.id, title: MusicSong.title, releaseYear: MusicSong.releaseYear, album: MusicSong.MusicAlbum.name } : null })),

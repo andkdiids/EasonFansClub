@@ -795,7 +795,7 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
  *
  * 本项目里审核结果通知统一用 `type: 'ADMIN'` 存储，并通过 `link` 区分资源：
  *   - 帖子审核结果：link 以 `/posts/` 开头（无 key）
- *   - 表情包审核结果：link 为 `/profile/stickers`（key = `sticker-pack-review:*`）
+ *   - 表情包审核结果：link 为 `/profile/stickers...`（key = `sticker-pack-review:*`）
  *
  * 因此本函数把更新范围严格限定为 `type: 'ADMIN'` 且 `link` 满足上述前缀，
  * 不会触碰以下通知：点赞(LIKE)、评论回复(REPLY)、私信(MESSAGE)、好友(FRIEND_REQUEST/FOLLOW)、

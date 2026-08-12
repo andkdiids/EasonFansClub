@@ -20,10 +20,6 @@ import {
   GUESS_SONG_QUIZ_CONFIG_ID,
 } from '@/lib/guess-song-quiz-config'
 import {
-  createGuessSongSignedUrl,
-  getGuessSongSignedUrlExpires,
-} from '@/lib/guess-song-storage'
-import {
   GUESS_SONG_RISK_THRESHOLD,
   GuessSongRiskService,
   createClientSessionNonce,
@@ -683,6 +679,41 @@ async function getPlayableVariant(userId: string, sessionId: string, publicQuest
   return { sessionQuestion, variant }
 }
 
+export async function getGuessSongPlaybackSource(input: {
+  userId: string
+  sessionId: string
+  publicQuestionId: string
+  requestKey: string
+  now?: Date
+}) {
+  const requestKey = input.requestKey.trim()
+  if (!/^[a-zA-Z0-9-]{8,100}$/.test(requestKey)) {
+    throw new GuessSongServiceError('鎾斁璇锋眰鏍囪瘑鏃犳晥')
+  }
+  const playable = await getPlayableVariant(
+    input.userId,
+    input.sessionId,
+    input.publicQuestionId,
+    input.now ?? new Date(),
+  )
+  const playRequest = await prisma.guessSongPlayRequest.findUnique({
+    where: {
+      sessionQuestionId_requestKey: {
+        sessionQuestionId: playable.sessionQuestion.id,
+        requestKey,
+      },
+    },
+    select: { audioVariantId: true },
+  })
+  if (!playRequest || playRequest.audioVariantId !== playable.variant.id) {
+    throw new GuessSongServiceError('璇锋敹鍏堝畬鎴愭湁鏁堢殑鎾斁璇锋眰', 403, 'PLAY_REQUEST_REQUIRED')
+  }
+  return {
+    storagePath: playable.variant.storagePath,
+    durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
+  }
+}
+
 export async function requestGuessSongPlayback(input: {
   userId: string
   sessionId: string
@@ -701,8 +732,7 @@ export async function requestGuessSongPlayback(input: {
     input.publicQuestionId,
     now,
   )
-  const signedUrlExpires = getGuessSongSignedUrlExpires()
-  const signedUrl = await createGuessSongSignedUrl(playable.variant.storagePath, signedUrlExpires)
+  const audioUrl = `/api/entertainment/guess-song/sessions/${encodeURIComponent(input.sessionId)}/audio?questionId=${encodeURIComponent(input.publicQuestionId)}&requestKey=${encodeURIComponent(input.requestKey)}`
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -788,8 +818,7 @@ export async function requestGuessSongPlayback(input: {
     })
     return {
       ...result,
-      signedUrl: risk.cheatDetected ? '' : signedUrl,
-      expiresIn: risk.cheatDetected ? 0 : signedUrlExpires,
+      audioUrl: risk.cheatDetected ? '' : audioUrl,
       durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
       cheatDetected: risk.cheatDetected,
       ...(risk.cheatDetected ? { exitAfterSeconds: risk.exitAfterSeconds } : {}),
@@ -806,8 +835,7 @@ export async function requestGuessSongPlayback(input: {
       })
       if (existing) {
         return {
-          signedUrl,
-          expiresIn: signedUrlExpires,
+          audioUrl,
           durationSeconds: playable.sessionQuestion.playbackDurationSeconds,
           playCount: existing.playCountAfter,
            remainingPlayCount: playable.sessionQuestion.maxPlayCount - existing.playCountAfter,

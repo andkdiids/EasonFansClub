@@ -8,6 +8,7 @@ import { readAlbumReviewImages } from '@/lib/album-reviews'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,9 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
     fallbackName: getPublicUserDisplayName(review.User),
     remarkMap,
   })
-  const images = readAlbumReviewImages(review.images)
+  const images = readAlbumReviewImages(review.images).map((url) => toPublicMediaUrl(url) || url)
+  review.coverUrl = toPublicMediaUrl(review.coverUrl)
+  review.MusicAlbum.coverUrl = toPublicMediaUrl(review.MusicAlbum.coverUrl)
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music/reviews" className="text-sm font-black text-sky-300/80">← 返回专辑鉴赏</Link>
     <article className="mt-10 overflow-hidden rounded-[32px] border border-white/10 bg-[#08192b]/80 shadow-[0_30px_90px_rgba(0,0,0,.28)] backdrop-blur-xl">

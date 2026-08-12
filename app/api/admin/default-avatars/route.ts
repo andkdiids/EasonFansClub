@@ -19,10 +19,14 @@ async function guardAdmin() {
   return requireAdmin('site_config_manage')
 }
 
+function serializeAvatars(items: Awaited<ReturnType<typeof getDefaultAvatarPool>>) {
+  return items.map((item) => ({ ...item, url: publicImageUrl(item.url) || item.url }))
+}
+
 export async function GET() {
   const guard = await guardAdmin()
   if (!guard.user) return guard.response
-  return NextResponse.json({ avatars: await getDefaultAvatarPool() })
+  return NextResponse.json({ avatars: serializeAvatars(await getDefaultAvatarPool()) })
 }
 
 export async function POST(request: Request) {
@@ -73,6 +77,7 @@ export async function POST(request: Request) {
     avatars.push({ id: randomUUID(), url, enabled: true, createdAt: new Date().toISOString() })
     await saveDefaultAvatarPool(avatars)
     const assignedCount = await assignDefaultAvatarsToUnassignedUsers()
+    avatars.splice(0, avatars.length, ...serializeAvatars(avatars))
     return NextResponse.json({ avatars: avatars.filter((item) => !item.retired), assignedCount, message: '默认头像已转换为 WebP 并启用' }, { status: 201 })
   } catch (error) {
     console.error('[default-avatar] save avatar pool failed', error)
@@ -95,6 +100,7 @@ export async function PATCH(request: Request) {
   avatars[index] = { ...avatars[index], enabled: body.enabled }
   await saveDefaultAvatarPool(avatars)
   const assignedCount = body.enabled ? await assignDefaultAvatarsToUnassignedUsers() : 0
+  avatars.splice(0, avatars.length, ...serializeAvatars(avatars))
   return NextResponse.json({ avatars: avatars.filter((item) => !item.retired), assignedCount, message: body.enabled ? '默认头像已启用' : '默认头像已停用' })
 }
 
@@ -109,6 +115,7 @@ export async function DELETE(request: Request) {
   if (index < 0) return NextResponse.json({ message: '默认头像不存在' }, { status: 404 })
   avatars[index] = { ...avatars[index], enabled: false, retired: true }
   await saveDefaultAvatarPool(avatars)
+  avatars.splice(0, avatars.length, ...serializeAvatars(avatars))
 
   // 已分配头像继续引用原文件，因此这里只移出头像池，不删除存储对象。
   return NextResponse.json({ avatars: avatars.filter((item) => !item.retired), message: '默认头像已从分配池移除，已有用户头像保持不变' })

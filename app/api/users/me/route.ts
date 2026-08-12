@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma, ProfileWallVisibility } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
-import { profileImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl, storedImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 import { validateLoginAccountValue } from '@/lib/login-account'
@@ -226,8 +226,8 @@ export async function PATCH(request: Request) {
   if (nickname) data.nickname = nickname
   if (body?.bio !== undefined) data.bio = bio
   // 头像/背景图只允许保存有效 COS 等地址；失效的 Supabase 地址一律清空
-  if (body?.avatarUrl !== undefined) data.avatarUrl = profileImageUrl(avatarUrl)
-  if (body?.backgroundUrl !== undefined) data.backgroundUrl = profileImageUrl(backgroundUrl)
+  if (body?.avatarUrl !== undefined) data.avatarUrl = storedImageUrl(avatarUrl)
+  if (body?.backgroundUrl !== undefined) data.backgroundUrl = storedImageUrl(backgroundUrl)
   if (email !== undefined) {
     if (email && !isValidEmail(email)) {
       return NextResponse.json({ message: '请输入有效邮箱' }, { status: 400 })
@@ -354,6 +354,9 @@ export async function PATCH(request: Request) {
   })
 
   invalidateCurrentUserCache(guard.user.id)
+
+  profile.avatarUrl = publicImageUrl(profile.avatarUrl)
+  profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)
 
   let emailVerificationSent = false
   if (profile.email && profile.email !== current.email) {

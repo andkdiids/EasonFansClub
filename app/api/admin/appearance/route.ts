@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { clearSiteAppearanceCache, defaultSiteAppearance, getSiteAppearance, mergeSiteAppearanceConfig } from '@/lib/site-config'
+import { clearSiteAppearanceCache, defaultSiteAppearance, getSiteAppearance, mergeSiteAppearanceConfig, toPublicSiteAppearance } from '@/lib/site-config'
 import { requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -46,7 +46,7 @@ export async function PATCH(request: Request) {
   if (!rawConfig || typeof rawConfig !== 'object') {
     return NextResponse.json({ message: '配置格式不正确' }, { status: 400 })
   }
-  const config = mergeSiteAppearanceConfig(rawConfig)
+  let config = mergeSiteAppearanceConfig(rawConfig)
 
   await prisma.siteSetting.upsert({
     where: { key: 'site.appearance' },
@@ -65,6 +65,7 @@ export async function PATCH(request: Request) {
     },
   })
 
+  config = toPublicSiteAppearance(config)
   clearSiteAppearanceCache()
   revalidatePath('/', 'layout')
   revalidateTargets.forEach((path) => revalidatePath(path, 'page'))

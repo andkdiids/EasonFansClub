@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getTodayEventDateKey, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageUrl, storedImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
   const type = body?.type
   const title = sanitizeText(body?.title, 160)
   const content = sanitizeText(body?.content, 10_000)
-  const imageUrl = publicImageUrl(sanitizeText(body?.imageUrl, 1000))
+  const imageUrl = storedImageUrl(sanitizeText(body?.imageUrl, 1000))
   const reference = sanitizeText(body?.reference ?? body?.source, 500)
   const status = body?.status === 'PENDING' || body?.status === 'REJECTED' ? body.status : 'APPROVED'
   if (!date || !isTodayEventType(type) || title.length < 2 || content.length < 5) {

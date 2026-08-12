@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { resolveGrowthLevelName } from '@/lib/growth-display'
+import { publicImageUrl } from '@/lib/images'
 
 type ProfileHeaderProps = {
   displayName: string
@@ -86,23 +87,25 @@ export function ProfileHeader({
   const initial = formatUid(uid).slice(0, 1)
   const admissionInfo = formatAdmissionInfo(createdAt)
   const growthLevelName = resolveGrowthLevelName(level, levelName)
+  const publicAvatarUrl = publicImageUrl(avatarUrl)
+  const publicBackgroundUrl = publicImageUrl(backgroundUrl)
 
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
   <div
   className="profile-hero-background relative isolate flex h-[210px] w-full items-end justify-start overflow-hidden bg-slate-900 px-4 pb-3 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0 sm:pb-0"
   style={{
-    backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
+    backgroundImage: publicBackgroundUrl ? `url(${publicBackgroundUrl})` : undefined,
     backgroundSize: 'cover',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
   }}
 >
-        {!backgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
+        {!publicBackgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
         <div className="relative w-fit min-w-[190px] max-w-[min(320px,calc(100%_-_2rem))] rounded-sm border border-white/20 bg-black/60 p-4 text-left text-white sm:absolute sm:bottom-5 sm:left-5 sm:max-w-[380px] sm:p-3">
           <div className="flex min-w-0 flex-row items-center gap-2 sm:gap-3">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
+            {publicAvatarUrl ? (
+              <img src={publicAvatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
             ) : (
               <div className="grid h-[60px] w-[60px] shrink-0 place-items-center rounded-full border-2 border-white/85 bg-brand-950 text-xl font-black text-white shadow-lg shadow-slate-950/25">
                 {initial}

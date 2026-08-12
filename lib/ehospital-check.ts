@@ -1,7 +1,6 @@
 import { randomInt } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { getShanghaiDayRange } from '@/lib/checkin'
-import { createGuessSongSignedUrl, getGuessSongSignedUrlExpires } from '@/lib/guess-song-storage'
 import { createMySqlAdvisoryLockName, MySqlAdvisoryLockBusyError, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
 import { prisma } from '@/lib/prisma'
 import { createUUID } from '@/lib/utils/uuid'
@@ -318,10 +317,9 @@ async function buildPublicState(
     if (!variant || variant.purpose !== 'REGISTER_CHECK' || variant.durationSeconds !== EHOSPITAL_AUDIO_SECONDS) {
       throw new EHospitalCheckError('体检音频暂不可用，请稍后再试', 503, 'REGISTER_AUDIO_MISSING')
     }
-    const expiresIn = getGuessSongSignedUrlExpires()
     question = {
       questionId: current.publicId,
-      audioUrl: await createGuessSongSignedUrl(variant.storagePath, expiresIn),
+      audioUrl: `/api/auth/hospital-check/audio?sessionId=${encodeURIComponent(session.id)}&questionId=${encodeURIComponent(current.publicId)}`,
       options: current.options,
       audioSeconds: EHOSPITAL_AUDIO_SECONDS,
     }
@@ -573,4 +571,64 @@ export async function getEHospitalCheckState(input: {
     throw new EHospitalCheckError('体检场次不存在', 404, 'SESSION_NOT_FOUND')
   }
   return buildPublicState(session, await getEHospitalCheckConfig(), draft.identityHash, input.now ?? new Date())
+}
+
+/*
+export async function getEHospitalCheckAudioSource(input: {
+  sessionId: string
+  questionId: string
+  now?: Date
+}) {
+  const now = input.now ?? new Date()
+  const session = await prisma.eHospitalCheckSession.findUnique({ where: { id: input.sessionId } })
+  if (!session) throw new EHospitalCheckError('浣撴鍦烘涓嶅瓨鍦?, 404, 'SESSION_NOT_FOUND')
+  if (session.status !== 'STARTED') throw new EHospitalCheckError('鏈浣撴宸茬粡缁撴潫', 409, 'SESSION_FINISHED')
+  if (session.expiresAt <= now) {
+    await prisma.eHospitalCheckSession.updateMany({
+      where: { id: session.id, status: 'STARTED', expiresAt: { lte: now } },
+      data: { status: 'EXPIRED' },
+    })
+    throw new EHospitalCheckError('鏈浣撴宸茶繃鏈?, 410, 'SESSION_EXPIRED')
+  }
+
+  const question = parseQuestions(session.questions).find((item) => item.publicId === input.questionId)
+  if (!question) throw new EHospitalCheckError('浣撴棰樼洰涓嶅瓨鍦?, 404, 'QUESTION_NOT_FOUND')
+  const variant = await prisma.guessSongAudioVariant.findUnique({
+    where: { id: question.audioVariantId },
+    select: { storagePath: true, durationSeconds: true, purpose: true },
+  })
+  if (!variant || variant.purpose !== 'REGISTER_CHECK' || variant.durationSeconds !== EHOSPITAL_AUDIO_SECONDS) {
+    throw new EHospitalCheckError('浣撴闊抽鏆備笉鍙敤锛岃绋嶅悗鍐嶈瘯', 503, 'REGISTER_AUDIO_MISSING')
+  }
+  return { storagePath: variant.storagePath, durationSeconds: variant.durationSeconds }
+}
+*/
+
+export async function getEHospitalCheckAudioSource(input: {
+  sessionId: string
+  questionId: string
+  now?: Date
+}) {
+  const now = input.now ?? new Date()
+  const session = await prisma.eHospitalCheckSession.findUnique({ where: { id: input.sessionId } })
+  if (!session) throw new EHospitalCheckError('Hospital check session not found', 404, 'SESSION_NOT_FOUND')
+  if (session.status !== 'STARTED') throw new EHospitalCheckError('Hospital check session has finished', 409, 'SESSION_FINISHED')
+  if (session.expiresAt <= now) {
+    await prisma.eHospitalCheckSession.updateMany({
+      where: { id: session.id, status: 'STARTED', expiresAt: { lte: now } },
+      data: { status: 'EXPIRED' },
+    })
+    throw new EHospitalCheckError('Hospital check session expired', 410, 'SESSION_EXPIRED')
+  }
+
+  const question = parseQuestions(session.questions).find((item) => item.publicId === input.questionId)
+  if (!question) throw new EHospitalCheckError('Hospital check question not found', 404, 'QUESTION_NOT_FOUND')
+  const variant = await prisma.guessSongAudioVariant.findUnique({
+    where: { id: question.audioVariantId },
+    select: { storagePath: true, durationSeconds: true, purpose: true },
+  })
+  if (!variant || variant.purpose !== 'REGISTER_CHECK' || variant.durationSeconds !== EHOSPITAL_AUDIO_SECONDS) {
+    throw new EHospitalCheckError('Hospital check audio unavailable', 503, 'REGISTER_AUDIO_MISSING')
+  }
+  return { storagePath: variant.storagePath, durationSeconds: variant.durationSeconds }
 }

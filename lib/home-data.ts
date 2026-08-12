@@ -196,7 +196,7 @@ export async function getHomeActivities() {
     }),
     [],
     5000,
-  ))
+  ).then((activities) => activities.map((activity) => ({ ...activity, coverUrl: publicImageUrl(activity.coverUrl) }))))
 }
 
 export async function getHomeConcerts() {
@@ -255,7 +255,7 @@ export async function getHomeAlbums() {
     prisma.musicAlbum.findMany({
       where: { status: 'PUBLISHED', coverUrl: { not: null } },
       select: { id: true, name: true, releaseYear: true, coverUrl: true },
-    }).then((albums) => albums.sort((a, b) => dailyAlbumRank(a.id) - dailyAlbumRank(b.id)).slice(0, 6)),
+    }).then((albums) => albums.sort((a, b) => dailyAlbumRank(a.id) - dailyAlbumRank(b.id)).slice(0, 6).map((album) => ({ ...album, coverUrl: publicImageUrl(album.coverUrl) }))),
     [],
     5000,
   ))

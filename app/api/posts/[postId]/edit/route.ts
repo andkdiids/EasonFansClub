@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole, requireUser } from '@/lib/security'
-import { isSupabaseStorageUrl } from '@/lib/images'
+import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -51,7 +51,7 @@ export async function GET(_request: Request, { params }: Params) {
       status: post.status,
       media: post.PostMedia.map((media) => ({
         id: media.id,
-        url: media.url,
+        url: publicImageUrl(media.url) || media.url,
         sortOrder: media.sortOrder,
         broken: isSupabaseStorageUrl(media.url),
       })),

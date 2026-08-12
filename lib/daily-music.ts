@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { getMusicPlaybackUrl } from '@/lib/music-playback'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
 export const DAILY_MUSIC_ANONYMOUS_COOKIE = 'eason-daily-music-anonymous'
@@ -48,8 +49,8 @@ function serializeSong(song: DailySong) {
     artist: song.artist,
     releaseYear: song.releaseYear,
     lyrics: song.lyrics,
-    coverUrl: song.coverUrl || song.MusicAlbum.coverUrl,
-    album: { id: song.MusicAlbum.id, name: song.MusicAlbum.name, coverUrl: song.MusicAlbum.coverUrl },
+    coverUrl: toPublicMediaUrl(song.coverUrl || song.MusicAlbum.coverUrl),
+    album: { id: song.MusicAlbum.id, name: song.MusicAlbum.name, coverUrl: toPublicMediaUrl(song.MusicAlbum.coverUrl) },
     previewUrl: song.previewUrl ? `${getMusicPlaybackUrl(song.id)}?preview=1` : '',
     previewDuration: Math.min(60, Math.max(1, song.previewDuration || 60)),
     isFullPlayback: false,

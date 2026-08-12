@@ -9,6 +9,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +24,9 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
     getSiteAppearance(),
   ])
   if (!album) notFound()
+
+  const coverUrl = toPublicMediaUrl(album.coverUrl)
+  album.coverUrl = coverUrl
 
   const releaseLabel = formatMusicReleaseDate(album.releaseDate, album.releaseYear)
   const archiveDetails = [
@@ -72,7 +76,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
           title: song.title,
           artist: song.artist,
           albumName: album.name,
-          coverUrl: song.coverUrl || album.coverUrl,
+          coverUrl: toPublicMediaUrl(song.coverUrl || album.coverUrl),
           ...resolveMusicPlayback(song, currentUser),
           trackNumber: song.trackNumber,
           lyricist: song.lyricist,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getRegistrationAvailabilityError, getRegistrationPolicy, serializeRegistrationAvailability } from '@/lib/registration'
+import { getRegistrationAvailabilityError, getRegistrationPolicy, serializeRegistrationAvailability, serializeRegistrationControlSettings } from '@/lib/registration'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 
@@ -10,7 +10,13 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const policy = await getRegistrationPolicy()
-  return NextResponse.json({ ok: true, data: serializeRegistrationAvailability(policy.registrationAvailability) }, { headers: noStoreHeaders })
+  const registrationControl = serializeRegistrationControlSettings(policy.registrationControl)
+  return NextResponse.json({
+    ok: true,
+    data: serializeRegistrationAvailability(policy.registrationAvailability),
+    closedTitle: registrationControl.closedTitle,
+    closedMessage: registrationControl.closedMessage,
+  }, { headers: noStoreHeaders })
 }
 
 export async function POST(request: Request) {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -36,14 +37,16 @@ export async function GET() {
   return NextResponse.json({
     tours: tours.map(({ MusicConcert, _count, ...tour }) => ({
       ...tour,
+      posterUrl: toPublicMediaUrl(tour.posterUrl),
       ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
       concertCount: _count.MusicConcert,
       cityCount: new Set(MusicConcert.map((concert) => concert.city)).size,
     })),
     concerts: latestConcerts.map(({ MusicTour, _count, ...concert }) => ({
       ...concert,
+      posterUrl: toPublicMediaUrl(concert.posterUrl),
       ...resolveConcertPoster({ posterUrl: concert.posterUrl, cityPosterUrl: cityPosters.get(`${MusicTour.id}::${concert.city}`), tourPosterUrl: MusicTour.posterUrl }),
-      tour: MusicTour,
+      tour: { ...MusicTour, posterUrl: toPublicMediaUrl(MusicTour.posterUrl) },
       songCount: _count.MusicConcertSetlistItem,
     })),
   })

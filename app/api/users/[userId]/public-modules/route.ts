@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 
@@ -91,7 +92,7 @@ export async function GET(request: Request, context: RouteContext) {
       }),
       [],
     )
-    return NextResponse.json({ items: badges.map(({ Badge, ...item }) => ({ ...item, badge: Badge })) })
+    return NextResponse.json({ items: badges.map(({ Badge, ...item }) => ({ ...item, badge: { ...Badge, iconUrl: toPublicMediaUrl(Badge.iconUrl) } })) })
   }
 
   if (moduleKey === 'albums') {

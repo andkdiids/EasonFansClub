@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, normalizeHeroMediaAsset, heroFitModes, type HeroFitMode, type HeroMediaAsset, type SiteHeroSlide } from '@/lib/site-config'
 import { normalizeHeroMediaType, normalizeHeroScale } from '@/lib/hero-visuals'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -9,6 +10,31 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
+
+function publicHeroAsset(asset: HeroMediaAsset | null | undefined) {
+  if (!asset) return asset
+  return {
+    ...asset,
+    imageUrl: toPublicMediaUrl(asset.imageUrl) || '',
+    mediaUrl: toPublicMediaUrl(asset.mediaUrl) || '',
+    posterUrl: toPublicMediaUrl(asset.posterUrl) || '',
+    sourceUrl: toPublicMediaUrl(asset.sourceUrl) || '',
+    posterSourceUrl: toPublicMediaUrl(asset.posterSourceUrl) || '',
+  }
+}
+
+function publicHeroSlide(slide: SiteHeroSlide): SiteHeroSlide {
+  return {
+    ...slide,
+    imageUrl: toPublicMediaUrl(slide.imageUrl) || '',
+    mediaUrl: toPublicMediaUrl(slide.mediaUrl) || '',
+    posterUrl: toPublicMediaUrl(slide.posterUrl) || '',
+    sourceUrl: toPublicMediaUrl(slide.sourceUrl) || '',
+    posterSourceUrl: toPublicMediaUrl(slide.posterSourceUrl) || '',
+    desktopHeroMedia: publicHeroAsset(slide.desktopHeroMedia) as HeroMediaAsset | null | undefined,
+    mobileHeroMedia: publicHeroAsset(slide.mobileHeroMedia) as HeroMediaAsset | null | undefined,
+  }
+}
 
 function normalizeSlides(value: unknown): SiteHeroSlide[] {
   if (!Array.isArray(value)) return []
@@ -87,7 +113,7 @@ export async function GET() {
   const guard = await requireAdmin('home_manage')
   if (!guard.user) return guard.response
   const config = await getSiteAppearance({ cache: 'no-store' })
-  return NextResponse.json({ slides: [...config.heroSlides].sort((a, b) => a.sortOrder - b.sortOrder) }, { headers: noStoreHeaders })
+  return NextResponse.json({ slides: [...config.heroSlides].sort((a, b) => a.sortOrder - b.sortOrder).map(publicHeroSlide) }, { headers: noStoreHeaders })
 }
 
 export async function PATCH(request: Request) {
@@ -108,5 +134,6 @@ export async function PATCH(request: Request) {
   revalidatePath('/welcome')
   revalidatePath('/admin/home')
   revalidatePath('/admin/visuals/home')
+  config.heroSlides = config.heroSlides.map(publicHeroSlide)
   return NextResponse.json({ slides: config.heroSlides, message: '首页 Hero 已保存' })
 }

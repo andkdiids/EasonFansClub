@@ -11,6 +11,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
   ])
   if (!song) notFound()
 
-  const coverUrl = song.MusicAlbum.coverUrl
+  const coverUrl = toPublicMediaUrl(song.MusicAlbum.coverUrl)
   const releaseLabel = formatMusicReleaseDate(song.MusicAlbum.releaseDate, song.releaseYear)
   const tags = song.tags?.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) || []
   const credits = [

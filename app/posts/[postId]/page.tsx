@@ -10,7 +10,7 @@ import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
-import { isSupabaseStorageUrl, profileImageUrl } from '@/lib/images'
+import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getPostModerationAccess } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
@@ -445,7 +445,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
     ...reply,
     stickerId: reply.stickerId ?? null,
-    stickerUrl: reply.sticker?.url ?? null,
+    stickerUrl: publicImageUrl(reply.sticker?.url),
     author: User.status === 'ACTIVE' && !User.isDeleted
       ? { ...User, profile: User.Profile ? {
           ...User.Profile,
@@ -468,7 +468,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             fallbackName: getPublicUserDisplayName(like.User),
             remarkMap,
           }),
-          avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+          avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
         }))
       : [],
     mentions: ReplyMention.map(({ User_ReplyMention_mentionedUserIdToUser: mentionedUser, ...mention }) => ({
@@ -538,7 +538,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           {post.sticker?.url ? (
             <div className="mt-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" />
+              <img src={publicImageUrl(post.sticker.url) || post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" />
             </div>
           ) : null}
           {post.PostMedia.length ? (
@@ -549,7 +549,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
                     图片已失效，请重新编辑帖子上传
                   </div>
                 ) : (
-                  <ImageViewer key={item.id} src={item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-full max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="block h-auto max-h-[70vh] w-auto max-w-full bg-transparent object-contain sm:max-h-[28rem]" />
+                  <ImageViewer key={item.id} src={publicImageUrl(item.url) || item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-full max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="block h-auto max-h-[70vh] w-auto max-w-full bg-transparent object-contain sm:max-h-[28rem]" />
                 ),
               )}
             </div>
@@ -580,7 +580,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               uid: like.User.uid,
               nickname: like.User.nickname,
               displayName: like.User.Profile?.displayName || null,
-              avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+              avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
             }))}
             totalCount={post.likeCount}
             listUrl={`/api/posts/${post.id}/like`}

@@ -1,6 +1,7 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { prisma } from '@/lib/prisma'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { ConcertBadgeManager } from './ConcertBadgeManager'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +35,7 @@ export default async function AdminConcertBadgesPage() {
       musicTour: { select: { id: true, name: true } },
     },
   })) as BadgeRow[]
+  badges.forEach((badge) => { badge.iconUrl = toPublicMediaUrl(badge.iconUrl) })
 
   const tours = await prisma.musicTour.findMany({
     orderBy: { sortOrder: 'asc' },

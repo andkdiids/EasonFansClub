@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
-import { getRegistrationPolicy } from '@/lib/registration'
+import { getRegistrationPolicy, serializeRegistrationControlSettings } from '@/lib/registration'
 import { serializeRegistrationAvailability } from '@/lib/registration-availability'
 import { getSiteAppearance } from '@/lib/site-config'
 import { RegisterForm } from './RegisterForm'
@@ -10,6 +10,7 @@ export const revalidate = 0
 
 export default async function RegisterPage() {
   const [config, policy] = await Promise.all([getSiteAppearance(), getRegistrationPolicy()])
+  const registrationControl = serializeRegistrationControlSettings(policy.registrationControl)
 
   return (
     <AuthFormShell
@@ -43,6 +44,8 @@ export default async function RegisterPage() {
           requireSecurityQuestionsForNewUsers: policy.requireSecurityQuestionsForNewUsers,
           ehospitalCheckEnabled: policy.ehospitalCheckEnabled,
           registrationAvailability: serializeRegistrationAvailability(policy.registrationAvailability),
+          closedTitle: registrationControl.closedTitle,
+          closedMessage: registrationControl.closedMessage,
         }}
       />
     </AuthFormShell>

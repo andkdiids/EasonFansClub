@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
+import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -268,12 +269,16 @@ export async function POST(request: Request, { params }: Params) {
     reply: {
       ...serializedReply,
       stickerId: createdReply.stickerId || null,
-      stickerUrl: replySticker?.url ?? null,
+      stickerUrl: publicImageUrl(replySticker?.url),
       createdAt: serializedReply.createdAt.toISOString(),
       updatedAt: serializedReply.updatedAt.toISOString(),
       author: {
         ...replyAuthor,
-        profile: replyAuthor.Profile,
+        avatarUrl: publicImageUrl(replyAuthor.avatarUrl),
+        profile: replyAuthor.Profile ? {
+          ...replyAuthor.Profile,
+          avatarUrl: publicImageUrl(replyAuthor.Profile.avatarUrl),
+        } : null,
         Profile: undefined,
       },
       mentions: requestedMentions.flatMap((mention) => {

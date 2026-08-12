@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { clampForumPage, excerptForumPost, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
+import { clampForumPage, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
@@ -60,11 +61,10 @@ export async function GET(request: Request) {
       skip: getForumOffset(page, pageSize),
       take: pageSize,
       select: {
-        id: true, title: true, summary: true, content: true,
+        id: true, title: true,
         likeCount: true, replyCount: true, viewCount: true,
         isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
         Board: { select: { name: true, slug: true } },
-        sticker: { select: { url: true } },
         User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         Like: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
       },
@@ -78,12 +78,14 @@ export async function GET(request: Request) {
   return NextResponse.json({
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
-    posts: rows.map(({ summary, content, Like, User, Board, sticker, ...post }) => ({
+    posts: rows.map(({ Like, User, Board, ...post }) => ({
       ...post,
       author: {
         ...User,
+        avatarUrl: publicImageUrl(User.avatarUrl),
         profile: User.Profile ? {
           ...User.Profile,
+          avatarUrl: publicImageUrl(User.Profile.avatarUrl),
           displayName: resolveFriendDisplayName({
             viewerId: user?.id,
             targetUserId: User.id,
@@ -93,8 +95,6 @@ export async function GET(request: Request) {
         } : User.Profile,
       },
       board: Board,
-      content: excerptForumPost(summary || content),
-      stickerUrl: sticker?.url || null,
       likedByMe: Like.length > 0,
     })),
     total,

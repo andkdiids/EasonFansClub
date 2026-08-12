@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -24,7 +25,7 @@ export async function GET() {
       musicTour: { select: { id: true, name: true } },
     },
   })
-  return NextResponse.json({ badges })
+  return NextResponse.json({ badges: badges.map((badge) => ({ ...badge, iconUrl: toPublicMediaUrl(badge.iconUrl) })) })
 }
 
 /** 创建演唱会纪念徽章（category 固定为 CONCERT，必须关联巡演）。 */
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
         musicTour: { select: { id: true, name: true } },
       },
     })
+    badge.iconUrl = toPublicMediaUrl(badge.iconUrl)
     revalidatePath('/admin/music/badges')
     return NextResponse.json({ badge }, { status: 201 })
   } catch (error) {

@@ -6,6 +6,7 @@ import { BackButton } from '@/components/BackButton'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FeedbackImageUploader, type UploadedFeedbackAttachment } from '@/components/FeedbackImageUploader'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH } from '@/lib/feedback'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 type Attachment = { id?: string; url: string; mimeType?: string | null }
 type FeedbackReply = {
@@ -386,15 +387,16 @@ function FeedbackThread({
 }
 
 function Avatar({ user }: { user: { uid: number; nickname: string; avatarUrl?: string | null } }) {
+  const avatarUrl = toPublicMediaUrl(user.avatarUrl) || user.avatarUrl
   return (
     <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] text-white">
-      {user.avatarUrl ? <img src={user.avatarUrl} alt={user.nickname} className="h-full w-full object-cover" /> : String(user.uid).padStart(5, '0').slice(0, 1)}
+      {avatarUrl ? <img src={avatarUrl} alt={user.nickname} className="h-full w-full object-cover" /> : String(user.uid).padStart(5, '0').slice(0, 1)}
     </span>
   )
 }
 
 function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
-  const visible = attachments.filter((item) => item.url)
+  const visible = attachments.filter((item) => item.url).map((item) => ({ ...item, url: toPublicMediaUrl(item.url) || item.url }))
   if (!visible.length) return null
   return (
     <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">

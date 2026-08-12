@@ -11,7 +11,6 @@ import { formatUid } from '@/lib/uid'
 type PostItem = {
   id: string
   title: string
-  content: string
   likeCount: number
   favoriteCount?: number
   replyCount: number
@@ -21,7 +20,6 @@ type PostItem = {
   createdAt: Date | string
   updatedAt?: Date | string
   likedByMe?: boolean
-  stickerUrl?: string | null
   author: {
     id?: string
     uid?: number
@@ -77,13 +75,6 @@ export function PostList({
               </Link>
             </div>
             <h2 className="post-list-title pointer-events-none relative z-10 line-clamp-2">{post.title}</h2>
-            <p className="post-list-excerpt pointer-events-none relative z-10 line-clamp-2">{post.content}</p>
-            {post.stickerUrl ? (
-              <div className="pointer-events-none relative z-10 mt-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={post.stickerUrl} alt="表情" className="h-auto max-h-40 w-auto max-w-full rounded-lg bg-white object-contain" />
-              </div>
-            ) : null}
             <footer className="post-list-footer relative z-30 flex flex-wrap items-center gap-3">
               {post.author.uid !== undefined && !isArchivedAuthor ? (
                 <Link href={`/user/${formatUid(post.author.uid)}`} onClick={(event) => event.stopPropagation()} className="flex items-center gap-2 text-brand-950">

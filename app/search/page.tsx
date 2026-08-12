@@ -6,6 +6,7 @@ import { formatUid } from '@/lib/uid'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
 
@@ -95,6 +96,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     : [[], [], [], [], [], await prisma.searchKeyword.findMany({ orderBy: { count: 'desc' }, take: 8 })]
 
   const viewer = await getCurrentUser()
+  for (const album of albums) album.coverUrl = toPublicMediaUrl(album.coverUrl)
+  for (const song of songs) {
+    song.coverUrl = toPublicMediaUrl(song.coverUrl)
+    song.MusicAlbum.coverUrl = toPublicMediaUrl(song.MusicAlbum.coverUrl)
+  }
   const userIds = users.map((item) => item.id)
   const [friendships, sentRequests, receivedRequests, growthLevels] = await Promise.all([
     viewer && userIds.length ? prisma.friendship.findMany({ where: { OR: [{ userAId: viewer.id, userBId: { in: userIds } }, { userBId: viewer.id, userAId: { in: userIds } }] }, select: { userAId: true, userBId: true } }) : [],

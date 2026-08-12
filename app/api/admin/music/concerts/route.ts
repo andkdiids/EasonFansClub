@@ -9,6 +9,7 @@ import {
 } from '@/lib/music-concert-admin'
 import { parseLiveDate, parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
         posterUrl: cityPosters.get(group.city) || null,
       }))
       .sort((left, right) => left.city.localeCompare(right.city, 'zh-CN'))
-    return NextResponse.json({ cities })
+    return NextResponse.json({ cities: cities.map((city) => ({ ...city, posterUrl: toPublicMediaUrl(city.posterUrl) })) })
   }
 
   if (mode === 'copy-options') {
@@ -135,7 +136,8 @@ export async function GET(request: Request) {
   return NextResponse.json({
     concerts: concerts.map(({ MusicTour, _count, ...concert }) => ({
       ...concert,
-      tour: MusicTour,
+      posterUrl: toPublicMediaUrl(concert.posterUrl),
+      tour: { ...MusicTour, posterUrl: toPublicMediaUrl(MusicTour.posterUrl) },
       setlistCount: _count.MusicConcertSetlistItem,
       highlightCount: _count.MusicConcertHighlight,
       attendanceCount: _count.UserMusicConcert,
@@ -263,9 +265,10 @@ export async function POST(request: Request) {
     return { concerts }
   })
   if ('message' in result) return NextResponse.json({ message: result.message }, { status: 400 })
+  const publicConcerts = result.concerts.map((concert) => ({ ...concert, posterUrl: toPublicMediaUrl(concert.posterUrl) }))
   return NextResponse.json({
-    concerts: result.concerts,
-    concert: result.concerts[0],
+    concerts: publicConcerts,
+    concert: publicConcerts[0],
     inherited: setlistSource !== 'NEW',
     sourceConcertId: setlistSource === 'SOURCE' ? sourceConcertId : null,
     message: `已创建 ${result.concerts.length} 个场次${setlistSource === 'PREVIOUS' ? '，并继承上一场歌单' : setlistSource === 'SOURCE' ? '，并复制来源场次歌单' : ''}`,

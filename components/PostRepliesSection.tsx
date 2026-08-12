@@ -10,6 +10,7 @@ import { ReplyForm } from '@/components/ReplyForm'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
 import { profileImageUrl } from '@/lib/images'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { formatUid } from '@/lib/uid'
 import { splitContentImages } from '@/lib/content-images'
 
@@ -57,7 +58,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     likers: Array.isArray(reply.likers) ? reply.likers : [],
     createdAt: typeof reply.createdAt === 'string' || reply.createdAt instanceof Date ? reply.createdAt : new Date().toISOString(),
     stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
-    stickerUrl: typeof reply.stickerUrl === 'string' ? reply.stickerUrl : null,
+    stickerUrl: typeof reply.stickerUrl === 'string' ? toPublicMediaUrl(reply.stickerUrl) : null,
     mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
     author: {
       ...unavailableAuthor,

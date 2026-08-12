@@ -249,7 +249,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     let playRegistered = false
     try {
       const data = await api<{
-        signedUrl: string
+        audioUrl: string
         durationSeconds: number
         playCount: number
         remainingPlayCount: number
@@ -323,7 +323,7 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
         setAudioLoading(false)
         setAudioError('音频加载失败，请检查网络后重试')
       }, { once: true })
-      audio.src = data.signedUrl
+      audio.src = data.audioUrl
       audio.load()
       await audio.play()
     } catch (reason) {

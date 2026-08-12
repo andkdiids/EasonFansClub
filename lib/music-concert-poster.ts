@@ -31,7 +31,7 @@ export function resolveConcertPoster({ posterUrl, cityPosterUrl, tourPosterUrl }
     ['tour', tourPosterUrl],
   ]
   for (const [posterSource, value] of candidates) {
-    const resolvedPosterUrl = usablePosterUrl(value)
+    const resolvedPosterUrl = toPublicMediaUrl(usablePosterUrl(value))
     if (resolvedPosterUrl) return { resolvedPosterUrl, posterSource }
   }
   return { resolvedPosterUrl: null, posterSource: 'system' }
@@ -47,3 +47,4 @@ export function concertPosterSourceLabel(source: ConcertPosterSource) {
   if (source === 'tour') return '继承巡演默认海报'
   return '系统默认占位海报'
 }
+import { toPublicMediaUrl } from '@/lib/media-url'

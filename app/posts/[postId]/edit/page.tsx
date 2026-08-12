@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { PostEditForm, type ExistingMedia } from '@/components/PostEditForm'
 import { getCurrentUser } from '@/lib/auth'
-import { isSupabaseStorageUrl } from '@/lib/images'
+import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
 
@@ -51,7 +51,7 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
 
   const initialMedia: ExistingMedia[] = post.PostMedia.map((media) => ({
     id: media.id,
-    url: media.url,
+    url: publicImageUrl(media.url) || media.url,
     broken: isSupabaseStorageUrl(media.url),
   }))
 

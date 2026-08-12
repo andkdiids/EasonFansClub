@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
@@ -172,11 +173,11 @@ export async function GET(request: Request) {
     })),
     boards,
     tags,
-    albums,
+    albums: albums.map((album) => ({ ...album, coverUrl: toPublicMediaUrl(album.coverUrl) })),
     songs: songs.map(({ MusicAlbum, ...song }) => ({
       ...song,
-      coverUrl: song.coverUrl || MusicAlbum.coverUrl,
-      album: MusicAlbum,
+      coverUrl: toPublicMediaUrl(song.coverUrl || MusicAlbum.coverUrl),
+      album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
       hasPreview: Boolean(song.previewUrl),
       previewUrl: undefined,
     })),

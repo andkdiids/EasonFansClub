@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
+import { publicImageUrl } from '@/lib/images'
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/security'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
 
   const objectPath = `content/${guard.user.id}/${randomUUID()}.webp`
   try {
-    const url = await uploadSiteImage({ key: objectPath, body: webp, contentType: 'image/webp' })
+    const url = publicImageUrl(await uploadSiteImage({ key: objectPath, body: webp, contentType: 'image/webp' }))
     return NextResponse.json({ url, mimeType: 'image/webp' })
   } catch (error) {
     if (error instanceof SiteMediaStorageError) {

@@ -1,5 +1,5 @@
 import type { FeedbackStatus, FeedbackType, Prisma } from '@prisma/client'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageUrl, storedImageUrl } from '@/lib/images'
 
 export const FEEDBACK_DESCRIPTION_MIN_LENGTH = 10
 export const FEEDBACK_MAX_ATTACHMENTS = 5
@@ -207,7 +207,7 @@ export function parseFeedbackAttachments(value: unknown) {
   return value
     .slice(0, 5)
     .map((item) => ({
-      url: publicImageUrl(typeof item?.url === 'string' ? item.url : '') || '',
+      url: storedImageUrl(typeof item?.url === 'string' ? item.url : '') || '',
       mimeType: typeof item?.mimeType === 'string' ? item.mimeType.slice(0, 80) : null,
     }))
     .filter((item) => item.url)

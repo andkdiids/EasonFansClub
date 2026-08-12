@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -65,8 +66,10 @@ export async function GET() {
     const otherUser = other?.User
       ? {
           ...other.User,
+          avatarUrl: publicImageUrl(other.User.avatarUrl),
           Profile: other.User.Profile ? {
             ...other.User.Profile,
+            avatarUrl: publicImageUrl(other.User.Profile.avatarUrl),
             displayName: resolveFriendDisplayName({
               viewerId: user.id,
               targetUserId: other.User.id,

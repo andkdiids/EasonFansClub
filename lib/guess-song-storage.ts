@@ -1,4 +1,5 @@
 import COS from 'cos-nodejs-sdk-v5'
+import type { Stream } from 'node:stream'
 
 const DEFAULT_AUDIO_PREFIX = 'guess-song'
 const DEFAULT_SIGNED_URL_EXPIRES = 90
@@ -22,6 +23,12 @@ export type GuessSongCosClient = {
     ACL: 'private'
   }): Promise<unknown>
   getObject(params: { Bucket: string; Region: string; Key: string }): Promise<{ Body: Buffer }>
+  getObjectStream?: (params: {
+    Bucket: string
+    Region: string
+    Key: string
+    Range?: string
+  }) => Stream
   headObject(params: { Bucket: string; Region: string; Key: string }): Promise<{
     ETag?: string
     headers?: Record<string, string | string[] | undefined>
@@ -80,15 +87,16 @@ function getCosConfig(): CosConfig {
   }
 }
 
-function getCosClient() {
+function getCosClient(): GuessSongCosClient {
   if (cosClient) return cosClient
   const secretId = process.env.TENCENT_COS_SECRET_ID?.trim()
   const secretKey = process.env.TENCENT_COS_SECRET_KEY?.trim()
   if (!secretId || !secretKey) {
     throw new GuessSongStorageError('腾讯云 COS 音频存储尚未配置')
   }
-  cosClient = new COS({ SecretId: secretId, SecretKey: secretKey })
-  return cosClient
+  const client = new COS({ SecretId: secretId, SecretKey: secretKey })
+  cosClient = client
+  return client
 }
 
 function errorStatus(error: unknown) {
@@ -177,6 +185,20 @@ export function createGuessSongStorageAdapter(client: GuessSongCosClient, config
       }
     },
 
+    openStream(key: string, range?: string) {
+      if (!client.getObjectStream) {
+        throw new GuessSongStorageError('鑵捐浜?COS 闊抽娴佸紡鎺ュ彛鏈厤缃?')
+      }
+      try {
+        return client.getObjectStream({
+          ...objectParams(key),
+          ...(range ? { Range: range } : {}),
+        })
+      } catch (error) {
+        return storageFailure('璇诲彇娴?', error)
+      }
+    },
+
     signedUrl(key: string, expiresSeconds = config.signedUrlExpires) {
       try {
         return client.getObjectUrl({
@@ -237,6 +259,10 @@ export async function downloadGuessSongObject(key: string) {
 
 export async function getGuessSongObjectMetadata(key: string) {
   return getStorageAdapter().metadata(key)
+}
+
+export function openGuessSongObjectStream(key: string, range?: string) {
+  return getStorageAdapter().openStream(key, range)
 }
 
 export async function guessSongObjectExists(key: string) {

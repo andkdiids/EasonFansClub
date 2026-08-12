@@ -3,6 +3,7 @@
 import { useCallback, CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 /**
  * 微信式表情面板（内联展开，非弹窗）：
@@ -48,6 +49,26 @@ export type PickerDataResponse = {
   systemEmojis: string[]
   searchIndex: PickerSticker[]
   fetchedAt?: string
+}
+
+function normalizePickerData(value: PickerDataResponse): PickerDataResponse {
+  const normalizeSticker = (sticker: PickerSticker): PickerSticker => ({
+    ...sticker,
+    url: toPublicMediaUrl(sticker.url) || sticker.url,
+  })
+  return {
+    ...value,
+    packs: value.packs.map((pack) => ({
+      ...pack,
+      iconUrl: toPublicMediaUrl(pack.iconUrl),
+      coverUrl: toPublicMediaUrl(pack.coverUrl),
+    })),
+    stickersByPack: Object.fromEntries(
+      Object.entries(value.stickersByPack).map(([packId, stickers]) => [packId, stickers.map(normalizeSticker)]),
+    ),
+    recent: value.recent.map(normalizeSticker),
+    searchIndex: value.searchIndex.map(normalizeSticker),
+  }
 }
 
 export function getStickerPreviewPosition(
@@ -236,7 +257,7 @@ export function StickerPicker({
         setError(json.error || '加载失败，请稍后重试')
         return
       }
-      setData(json)
+      setData(normalizePickerData(json))
       // 默认始终进入系统 Emoji 面板（微信式体验）。
       // 记录第一个表情包 id 供用户主动点击 pack icon 时使用，但不自动切换到 pack 视图。
       const firstPack = json.packs[0]

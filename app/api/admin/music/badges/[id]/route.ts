@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -51,6 +52,7 @@ export async function PATCH(request: Request, { params }: Context) {
 
   try {
     const badge = await prisma.badge.update({ where: { id }, data, select: BADGE_SELECT })
+    badge.iconUrl = toPublicMediaUrl(badge.iconUrl)
     revalidatePath('/admin/music/badges')
     return NextResponse.json({ badge })
   } catch {

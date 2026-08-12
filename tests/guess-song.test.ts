@@ -277,7 +277,11 @@ test('用户不能访问其他人的场次', () => {
 test('签名地址只由服务端当前题对应变体路径生成', () => {
   const service = source('lib/guess-song-session.ts')
   const route = source('app/api/entertainment/guess-song/sessions/[sessionId]/play/route.ts')
-  assert.match(service, /createGuessSongSignedUrl\(playable\.variant\.storagePath, signedUrlExpires\)/)
+  const audioRoute = source('app/api/entertainment/guess-song/sessions/[sessionId]/audio/route.ts')
+  assert.match(service, /const audioUrl = `\/api\/entertainment\/guess-song\/sessions/)
+  assert.doesNotMatch(service, /createGuessSongSignedUrl/)
+  assert.match(audioRoute, /getGuessSongPlaybackSource/)
+  assert.match(audioRoute, /streamProtectedGuessSongAudio/)
   assert.doesNotMatch(route, /storagePath/)
 })
 
@@ -360,11 +364,13 @@ test('数据库只保存COS对象Key而不是永久URL', () => {
   assert.doesNotMatch(audio, /https?:\/\//)
 })
 
-test('用户播放使用环境变量有效期的COS临时签名URL', () => {
+test('用户播放使用同源受保护音频接口而不是COS临时签名URL', () => {
   const service = source('lib/guess-song-session.ts')
-  assert.match(service, /getGuessSongSignedUrlExpires\(\)/)
-  assert.match(service, /createGuessSongSignedUrl\(playable\.variant\.storagePath, signedUrlExpires\)/)
-  assert.doesNotMatch(service, /createGuessSongSignedUrl\([^)]*20\)/)
+  const route = source('app/api/entertainment/guess-song/sessions/[sessionId]/audio/route.ts')
+  assert.match(service, /audioUrl = `\/api\/entertainment\/guess-song\/sessions/)
+  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /streamProtectedGuessSongAudio\(request, source\.storagePath\)/)
+  assert.doesNotMatch(service, /createGuessSongSignedUrl/)
 })
 
 test('答题前响应和播放路由都不暴露对象Key', () => {
@@ -377,8 +383,11 @@ test('答题前响应和播放路由都不暴露对象Key', () => {
 
 test('后台试听仅签名数据库所属题目的变体且不增加播放次数', () => {
   const preview = source('app/api/admin/entertainment/guess-song/questions/[questionId]/preview/route.ts')
+  const audioRoute = source('app/api/admin/entertainment/guess-song/questions/[questionId]/preview/audio/route.ts')
   assert.match(preview, /questionId_durationSeconds/)
-  assert.match(preview, /createGuessSongSignedUrl\(variant\.storagePath, expiresIn\)/)
+  assert.match(preview, /audioUrl: `\/api\/admin\/entertainment\/guess-song\/questions/)
+  assert.match(audioRoute, /requireAdmin\('entertainment_manage'\)/)
+  assert.match(audioRoute, /streamProtectedGuessSongAudio\(request, variant\.storagePath\)/)
   assert.doesNotMatch(preview, /playCount.*increment|guessSongPlayRequest/)
 })
 

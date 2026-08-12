@@ -4,10 +4,19 @@ import {
   parseAlbumReviewImages,
   parseAlbumReviewStatus,
 } from '@/lib/album-reviews'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type Context = { params: Promise<{ reviewId: string }> }
+
+function publicReview(review: { coverUrl: string | null; images: unknown; [key: string]: unknown }) {
+  return {
+    ...review,
+    coverUrl: toPublicMediaUrl(review.coverUrl),
+    images: parseAlbumReviewImages(review.images).map((url) => toPublicMediaUrl(url) || url),
+  }
+}
 
 export async function PATCH(request: Request, { params }: Context) {
   const guard = await requireAdmin('music_manage')
@@ -41,7 +50,7 @@ export async function PATCH(request: Request, { params }: Context) {
       publishedAt: albumReviewPublishedAt(status, current.publishedAt),
     },
   })
-  return NextResponse.json({ review, message: '专辑鉴赏已保存' })
+  return NextResponse.json({ review: publicReview(review), message: '专辑鉴赏已保存' })
 }
 
 export async function DELETE(_: Request, { params }: Context) {

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
@@ -23,7 +24,7 @@ export async function GET() {
   })
 
   return NextResponse.json(
-    { boards },
+    { boards: boards.map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })) },
     { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600' } },
   )
 }

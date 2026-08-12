@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { optionalMusicText, parseMusicYear, parseOptionalDuration, parseTrackNumber } from '@/lib/music'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { deleteGuessSongObject } from '@/lib/guess-song-storage'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -46,6 +47,9 @@ export async function PATCH(request: Request, { params }: Context) {
       include: { MusicAlbum: true },
     })
     const { MusicAlbum, ...songData } = song
+    songData.coverUrl = toPublicMediaUrl(songData.coverUrl)
+    songData.previewUrl = toPublicMediaUrl(songData.previewUrl)
+    MusicAlbum.coverUrl = toPublicMediaUrl(MusicAlbum.coverUrl)
     return NextResponse.json({ song: { ...songData, album: MusicAlbum }, message: '歌曲已保存' })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return NextResponse.json({ message: '歌曲不存在' }, { status: 404 })

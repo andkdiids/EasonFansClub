@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageUrl, storedImageUrl } from '@/lib/images'
 import { uploadToCos, deleteFromCos, getCosUrl } from '@/lib/tencent-cos'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
@@ -145,9 +145,10 @@ export async function POST(request: Request) {
 
 
 
-  const safeUrl = publicImageUrl(url)
+  const safeUrl = storedImageUrl(url)
+  const browserUrl = publicImageUrl(url)
 
-  if (!safeUrl) {
+  if (!safeUrl || !browserUrl) {
 
     return NextResponse.json(
       { message: '图片 URL 无效' },
@@ -297,7 +298,7 @@ export async function POST(request: Request) {
 
 
   return NextResponse.json({
-    url:safeUrl,
+    url:browserUrl,
     mimeType:'image/webp'
   })
 

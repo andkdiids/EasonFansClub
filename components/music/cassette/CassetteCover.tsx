@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 const CASSETTE_COVER_PLACEHOLDER_SRC = '/easmusic/album-cover-placeholder.svg'
 
@@ -14,7 +15,7 @@ type CassetteCoverProps = Readonly<{
 }>
 
 export function CassetteCover({ src, alt, sizes, className, priority = false }: CassetteCoverProps) {
-  const normalizedSrc = src?.trim() || null
+  const normalizedSrc = toPublicMediaUrl(src)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
 
   useEffect(() => {

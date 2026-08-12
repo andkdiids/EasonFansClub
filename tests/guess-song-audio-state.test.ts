@@ -18,7 +18,7 @@ test('switching questions resets audio state and ignores stale audio errors', ()
 
 test('each requested clip gets a fresh src and load without auto-playing the next question', () => {
   assert.match(game, /const audio = new Audio\(\)/)
-  assert.match(game, /audio\.src = data\.signedUrl[\s\S]*audio\.load\(\)[\s\S]*await audio\.play\(\)/)
+  assert.match(game, /audio\.src = data\.audioUrl[\s\S]*audio\.load\(\)[\s\S]*await audio\.play\(\)/)
 
   const continueGame = game.slice(
     game.indexOf('const continueGame = useCallback'),

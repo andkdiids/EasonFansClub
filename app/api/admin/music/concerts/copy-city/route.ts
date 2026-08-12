@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { buildConcertSequenceUpdates, cloneSetlistItems, DEFAULT_CONCERT_COUNTRY, parseConcertDates } from '@/lib/music-concert-admin'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -117,6 +118,7 @@ export async function POST(request: Request) {
       }
       return tx.musicConcert.findMany({ where: { id: { in: createdIds } }, orderBy: [{ sortOrder: 'asc' }, { concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] })
     })
+    created.forEach((concert) => { concert.posterUrl = toPublicMediaUrl(concert.posterUrl) })
     return NextResponse.json(
       { concerts: created, message: `已将 ${sourceCity} 各场次按日期顺序复制到 ${targetCity}，生成 ${created.length} 个草稿场次` },
       { status: 201 },

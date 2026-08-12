@@ -1,3 +1,5 @@
+import { toPublicMediaUrl, toStoredMediaUrl } from '@/lib/media-url'
+
 const blockedLocalUploadPrefixes = ['/uploads/profile/', '/uploads/site/']
 
 const supabaseStorageMarkers = ['supabase.co', 'supabase.in', 'storage/v1/object']
@@ -6,7 +8,15 @@ export function publicImageUrl(value?: string | null) {
   const url = value?.trim()
   if (!url) return null
   if (blockedLocalUploadPrefixes.some((prefix) => url.startsWith(prefix))) return null
-  return url
+  return toPublicMediaUrl(url)
+}
+
+/** Keep validated image input in storage form rather than persisting a proxy path. */
+export function storedImageUrl(value?: string | null) {
+  const url = value?.trim()
+  if (!url) return null
+  if (blockedLocalUploadPrefixes.some((prefix) => url.startsWith(prefix))) return null
+  return toStoredMediaUrl(url)
 }
 
 // 旧 Supabase Storage 已停用且不可访问，历史地址一律视为失效

@@ -4,10 +4,19 @@ import {
   parseAlbumReviewImages,
   parseAlbumReviewStatus,
 } from '@/lib/album-reviews'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
+
+function publicReview(review: { coverUrl: string | null; images: unknown; [key: string]: unknown }) {
+  return {
+    ...review,
+    coverUrl: toPublicMediaUrl(review.coverUrl),
+    images: parseAlbumReviewImages(review.images).map((url) => toPublicMediaUrl(url) || url),
+  }
+}
 
 export async function GET() {
   const guard = await requireAdmin('music_manage')
@@ -24,7 +33,7 @@ export async function GET() {
     orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }],
     select: { id: true, name: true, releaseYear: true, coverUrl: true },
   })
-  return NextResponse.json({ reviews, albums })
+  return NextResponse.json({ reviews: reviews.map(publicReview), albums: albums.map((album) => ({ ...album, coverUrl: toPublicMediaUrl(album.coverUrl) })) })
 }
 
 export async function POST(request: Request) {
@@ -56,5 +65,5 @@ export async function POST(request: Request) {
       publishedAt: albumReviewPublishedAt(status),
     },
   })
-  return NextResponse.json({ review, message: '专辑鉴赏已创建' }, { status: 201 })
+  return NextResponse.json({ review: publicReview(review), message: '专辑鉴赏已创建' }, { status: 201 })
 }

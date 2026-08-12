@@ -8,6 +8,7 @@ import {
   getStickerUploadErrorResponse,
 } from '@/lib/sticker-upload'
 import { requireUser } from '@/lib/security'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
       const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
       return NextResponse.json({
         success: true,
-        url: result.url,
+        url: toPublicMediaUrl(result.url) || result.url,
         format: result.format,
         type: result.type,
         isAnimated: result.isAnimated,

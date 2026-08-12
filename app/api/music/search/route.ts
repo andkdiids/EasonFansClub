@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { buildMusicLyricSnippet } from '@/lib/music-search'
 import { sanitizeText } from '@/lib/security'
@@ -67,12 +68,12 @@ export async function GET(request: Request) {
   ])
   return NextResponse.json({
     query,
-    albums: albums.map((album) => ({ ...album, type: 'album' as const })),
+     albums: albums.map((album) => ({ ...album, coverUrl: toPublicMediaUrl(album.coverUrl), type: 'album' as const })),
     songs: songs.map(({ MusicAlbum, lyrics, previewUrl, ...song }) => ({
       ...song,
       type: 'song' as const,
-      coverUrl: song.coverUrl || MusicAlbum.coverUrl,
-      album: MusicAlbum,
+       coverUrl: toPublicMediaUrl(song.coverUrl || MusicAlbum.coverUrl),
+       album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
       hasPreview: Boolean(previewUrl),
       lyricSnippet: buildMusicLyricSnippet(lyrics, query),
     })),

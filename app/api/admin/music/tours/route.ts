@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { parseConcertCategory, parseLiveDate, parseLiveInteger, parsePublicationStatus } from '@/lib/music-live'
 import { CONCERT_CATEGORY_ENUM_TO_SLUG, slugToConcertCategoryEnum } from '@/lib/music-concert-category'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -13,7 +14,7 @@ export async function GET() {
     orderBy: [{ sortOrder: 'asc' }, { startDate: 'desc' }, { createdAt: 'asc' }],
     include: { _count: { select: { MusicConcert: true } } },
   })
-  return NextResponse.json({ tours: tours.map(({ _count, ...tour }) => ({ ...tour, concertCount: _count.MusicConcert })) })
+  return NextResponse.json({ tours: tours.map(({ _count, ...tour }) => ({ ...tour, posterUrl: toPublicMediaUrl(tour.posterUrl), concertCount: _count.MusicConcert })) })
 }
 
 // 解析分类：优先使用动态选中的 categoryId（关联 MusicConcertCategory），否则回退到旧枚举 category。
@@ -55,8 +56,9 @@ export async function POST(request: Request) {
       category: resolved.category,
       categoryId: resolved.categoryId,
       sortOrder,
-      status: parsePublicationStatus(body?.status),
-    },
-  })
+     status: parsePublicationStatus(body?.status),
+   },
+ })
+  tour.posterUrl = toPublicMediaUrl(tour.posterUrl)
   return NextResponse.json({ tour, message: '巡演已创建' }, { status: 201 })
 }

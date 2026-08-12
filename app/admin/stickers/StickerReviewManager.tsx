@@ -52,6 +52,10 @@ export function StickerReviewManager({ initialPacks }: { initialPacks: StickerPa
 
   async function review(id: string, action: 'approve' | 'reject', reason?: string) {
     setMessage(null)
+    if (action === 'reject' && !reason?.trim()) {
+      setMessage('请填写拒绝原因')
+      return
+    }
     setBusyId(id)
     try {
       const res = await fetch(`/api/admin/stickers/${id}`, {
@@ -225,7 +229,7 @@ function PackCard({
       ) : null}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        {pack.status !== 'APPROVED' ? (
+        {pack.status === 'PENDING' ? (
           <button
             type="button"
             disabled={busy}
@@ -241,7 +245,8 @@ function PackCard({
             <textarea
               value={rejectReason}
               onChange={(e) => onRejectReasonChange(e.target.value)}
-              placeholder="填写拒绝原因（可选）"
+              placeholder="填写拒绝原因（必填）"
+              maxLength={500}
               rows={2}
               className="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
             />
@@ -263,7 +268,7 @@ function PackCard({
             </button>
           </div>
         ) : (
-          pack.status !== 'REJECTED' && (
+            pack.status === 'PENDING' && (
             <button
               type="button"
               disabled={busy}

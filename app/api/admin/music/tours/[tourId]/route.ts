@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { parseConcertCategory, parseLiveDate, parseLiveInteger, parsePublicationStatus } from '@/lib/music-live'
 import { CONCERT_CATEGORY_ENUM_TO_SLUG, slugToConcertCategoryEnum } from '@/lib/music-concert-category'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -13,7 +14,7 @@ export async function GET(_request: Request, { params }: Context) {
   const { tourId } = await params
   const tour = await prisma.musicTour.findUnique({ where: { id: tourId }, include: { _count: { select: { MusicConcert: true } } } })
   if (!tour) return NextResponse.json({ message: '巡演不存在' }, { status: 404 })
-  return NextResponse.json({ tour: { ...tour, concertCount: tour._count.MusicConcert, _count: undefined } })
+  return NextResponse.json({ tour: { ...tour, posterUrl: toPublicMediaUrl(tour.posterUrl), concertCount: tour._count.MusicConcert, _count: undefined } })
 }
 
 // 解析分类：优先使用动态选中的 categoryId（关联 MusicConcertCategory），否则回退到旧枚举 category。
@@ -59,9 +60,10 @@ export async function PATCH(request: Request, { params }: Context) {
         category: resolved.category,
         categoryId: resolved.categoryId,
         sortOrder,
-        status: parsePublicationStatus(body?.status),
-      },
-    })
+       status: parsePublicationStatus(body?.status),
+     },
+   })
+    tour.posterUrl = toPublicMediaUrl(tour.posterUrl)
     return NextResponse.json({ tour, message: tour.status === 'PUBLISHED' ? '巡演已发布' : '巡演草稿已保存' })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return NextResponse.json({ message: '巡演不存在' }, { status: 404 })

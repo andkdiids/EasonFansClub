@@ -13,6 +13,7 @@ import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/gues
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { formatUid } from '@/lib/uid'
 
 const homeText = {
@@ -195,7 +196,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
   const topRanking = data.entertainmentRanking?.mobileBest || null
   const entertainmentModes = data.entertainmentRanking?.modes || emptyEntertainmentModes()
-  const dailyMusicCoverUrl = data.dailyMusic?.album.coverUrl || null
+  const dailyMusicCoverUrl = toPublicMediaUrl(data.dailyMusic?.album.coverUrl) || null
 
   useEffect(() => {
     const controller = new AbortController()

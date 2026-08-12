@@ -1,12 +1,20 @@
 'use client'
 
-import Image from 'next/image'
+import NextImage from 'next/image'
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ComponentProps } from 'react'
 import { useRouter } from 'next/navigation'
 import { generateArchiveSlug, buildConcertSlugPath } from '@/lib/music-slug'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { BatchAttendancePanel } from '@/components/music/live/BatchAttendancePanel'
+
+function PublicImage({ src, ...props }: ComponentProps<typeof NextImage>) {
+  const normalizedSrc = typeof src === 'string' ? toPublicMediaUrl(src) || src : src
+  return <NextImage {...props} src={normalizedSrc} />
+}
+
+const Image = PublicImage
 
 type RecordItem = {
   id: string

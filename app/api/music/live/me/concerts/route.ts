@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { parsePersonalPageSize, parsePositivePage, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore, normalizedCityKey } from '@/lib/music-personal-live'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireUser, sanitizeText } from '@/lib/security'
 
@@ -90,6 +91,7 @@ export async function GET(request: Request) {
         createdAt: row.createdAt,
         concert: {
           ...row.MusicConcert,
+          posterUrl: toPublicMediaUrl(row.MusicConcert.posterUrl),
           ...resolveConcertPoster({
             posterUrl: row.MusicConcert.posterUrl,
             cityPosterUrl: cityPosters.get(`${row.MusicConcert.tourId}::${normalizedCityKey(row.MusicConcert.city) || ''}`),
@@ -97,6 +99,7 @@ export async function GET(request: Request) {
           }),
           tour: {
             ...row.MusicConcert.MusicTour,
+            posterUrl: toPublicMediaUrl(row.MusicConcert.MusicTour.posterUrl),
             resolvedPosterUrl: resolveConcertPoster({ posterUrl: row.MusicConcert.MusicTour.posterUrl, cityPosterUrl: tourPosters.get(row.MusicConcert.tourId) }).resolvedPosterUrl,
           },
           MusicTour: undefined,

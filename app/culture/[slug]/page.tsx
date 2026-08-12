@@ -3,6 +3,7 @@ import { BackButton } from '@/components/BackButton'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
     },
   })
   if (!item) notFound()
+  item.coverUrl = toPublicMediaUrl(item.coverUrl)
   const remarkMap = await loadFriendRemarkMap(user.id, item.CultureComment.map((comment) => comment.User.id))
 
   const facts = [

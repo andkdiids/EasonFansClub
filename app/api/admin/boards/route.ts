@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { publicImageUrl, storedImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -40,7 +41,8 @@ export async function GET(request: Request) {
   })
   const hasMore = boards.length > limit
 
-  return NextResponse.json({ boards: hasMore ? boards.slice(0, limit) : boards, page, limit, hasMore })
+  const visibleBoards = hasMore ? boards.slice(0, limit) : boards
+  return NextResponse.json({ boards: visibleBoards.map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })), page, limit, hasMore })
 }
 
 export async function POST(request: Request) {
@@ -60,7 +62,7 @@ export async function POST(request: Request) {
       name,
       slug,
       description: sanitizeText(body?.description, 180) || null,
-      coverUrl: sanitizeText(body?.coverUrl, 500) || null,
+      coverUrl: storedImageUrl(sanitizeText(body?.coverUrl, 500)) || null,
       sortOrder: Number(body?.sortOrder || 0),
       categoryId: sanitizeText(body?.categoryId, 80) || null,
       parentId: sanitizeText(body?.parentId, 80) || null,
@@ -78,5 +80,5 @@ export async function POST(request: Request) {
     },
   })
 
-  return NextResponse.json({ board }, { status: 201 })
+  return NextResponse.json({ board: { ...board, coverUrl: publicImageUrl(board.coverUrl) } }, { status: 201 })
 }

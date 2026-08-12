@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { buildConcertSequenceUpdates, cloneSetlistItems, combineDateAndTime, DEFAULT_CONCERT_COUNTRY } from '@/lib/music-concert-admin'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { parseHighlights, parseLiveDate, parsePublicationStatus, parseSetlistItems } from '@/lib/music-live'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -46,9 +47,10 @@ export async function GET(_request: Request, { params }: Context) {
   const posterResolution = resolveConcertPoster({ posterUrl: concert.posterUrl, cityPosterUrl: cityPoster?.posterUrl, tourPosterUrl: MusicTour.posterUrl })
   return NextResponse.json({ concert: {
     ...data,
-    tour: MusicTour,
-    cityPosterUrl: cityPoster?.posterUrl || null,
-    tourPosterUrl: MusicTour.posterUrl,
+    posterUrl: toPublicMediaUrl(data.posterUrl),
+    tour: { ...MusicTour, posterUrl: toPublicMediaUrl(MusicTour.posterUrl) },
+    cityPosterUrl: toPublicMediaUrl(cityPoster?.posterUrl),
+    tourPosterUrl: toPublicMediaUrl(MusicTour.posterUrl),
     resolvedPosterUrl: posterResolution.resolvedPosterUrl,
     posterSource: posterResolution.posterSource,
     setlist: MusicConcertSetlistItem.map(({ MusicSong, ...item }) => ({ ...item, song: MusicSong ? { ...MusicSong, album: MusicSong.MusicAlbum.name, MusicAlbum: undefined } : null })),
@@ -109,6 +111,7 @@ export async function PATCH(request: Request, { params }: Context) {
       if (existingConcert.tourId !== tourId) await normalizeTourConcerts(tx, existingConcert.tourId)
       return tx.musicConcert.findUniqueOrThrow({ where: { id: updated.id } })
     })
+    concert.posterUrl = toPublicMediaUrl(concert.posterUrl)
     return NextResponse.json({ concert, message: concert.status === 'PUBLISHED' ? '场次已发布并保存' : '场次草稿已保存' })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return NextResponse.json({ message: '演唱会场次不存在' }, { status: 404 })

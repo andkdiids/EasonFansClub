@@ -49,7 +49,9 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
     case 'MESSAGE':
       return { label: '打开私信', action: 'dock' }
     case 'ADMIN':
-      return target ? { label: '查看帖子', href: target } : null
+      return target
+        ? { label: target.startsWith('/profile/stickers') ? '修改表情包' : '查看详情', href: target }
+        : null
     case 'BADGE':
       return { label: '查看徽章', href: '/profile/badges' }
     case 'BIRTHDAY_GREETING':

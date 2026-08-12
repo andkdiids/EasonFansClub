@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { STICKER_MAX_DESCRIPTION_LENGTH } from '@/lib/sticker-upload'
+import { toPublicMediaUrl } from '@/lib/media-url'
+import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,49 +35,62 @@ export async function PATCH(
     select: { id: true, status: true, name: true, creatorId: true },
   })
   if (!existing) return NextResponse.json({ message: '表情包不存在' }, { status: 404 })
+  if (existing.status !== 'PENDING') {
+    return NextResponse.json({ message: '该表情包当前不在待审核状态' }, { status: 409 })
+  }
 
   const reviewedAt = new Date()
   const rejectionReason = action === 'reject'
-    ? sanitizeText(body.rejectionReason, STICKER_MAX_DESCRIPTION_LENGTH)
+    ? sanitizeText(body.rejectionReason, 500)
     : null
+  if (action === 'reject' && !rejectionReason) {
+    return NextResponse.json({ message: '请填写拒绝原因' }, { status: 400 })
+  }
   const data = action === 'approve'
     ? { status: 'APPROVED' as const, reviewedAt, rejectionReason: null }
     : { status: 'REJECTED' as const, reviewedAt, rejectionReason }
 
   try {
-    const updated = await prisma.stickerPack.update({
-      where: { id },
-      data,
-      select: {
-        id: true,
-        name: true,
-        status: true,
-        rejectionReason: true,
-        reviewedAt: true,
-        creatorId: true,
-      },
-    })
-    // 审核结果通知（仅当状态实际变化时）
-    if (existing.status !== updated.status) {
+    const updated = await prisma.$transaction(async (tx) => {
+      const changed = await tx.stickerPack.updateMany({
+        where: { id, status: 'PENDING' },
+        data,
+      })
+      if (changed.count === 0) throw new Error('STICKER_PACK_NOT_PENDING')
+
+      const review = await tx.stickerPack.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          rejectionReason: true,
+          reviewedAt: true,
+          creatorId: true,
+        },
+      })
+      if (!review) throw new Error('STICKER_PACK_NOT_FOUND')
+
       const isApprove = action === 'approve'
       const title = isApprove
-        ? `你的表情包《${updated.name}》已通过审核`
-        : `你的表情包《${updated.name}》未通过审核`
+        ? `你的表情包《${review.name}》已通过审核`
+        : `你的表情包《${review.name}》未通过审核`
       const content = isApprove
         ? '已经上架表情商店，可在「我的表情包 → 我创建的表情包」查看详情。'
-        : `原因：${updated.rejectionReason || '内容不符合规范'}`
-      await prisma.notification.create({
+        : `原因：${review.rejectionReason || '内容不符合规范'}`
+      await tx.notification.create({
         data: {
-          recipientId: updated.creatorId,
+          recipientId: review.creatorId,
           actorId: guard.user.id,
           type: 'ADMIN',
           title,
           content,
-          link: '/profile/stickers',
-          key: `sticker-pack-review:${updated.id}:${updated.status.toLowerCase()}`,
+          link: getStickerPackReviewNotificationLink(review.id, review.status),
+          key: `sticker-pack-review:${review.id}:${review.status.toLowerCase()}:${reviewedAt.getTime()}`,
         },
       })
-    }
+      return review
+    })
     // 返回完整的 pack 给前端以刷新本地状态
     const pack = await prisma.stickerPack.findUnique({
       where: { id: updated.id },
@@ -99,8 +113,15 @@ export async function PATCH(
     })
     revalidatePath('/admin/stickers')
     revalidatePath('/profile/stickers')
+    revalidatePath(`/profile/stickers/${updated.id}/edit`)
     return NextResponse.json({ pack: pack ? serializePack(pack) : null })
   } catch (error) {
+    if (error instanceof Error && error.message === 'STICKER_PACK_NOT_PENDING') {
+      return NextResponse.json({ message: '该表情包已被其他管理员处理，请刷新列表' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'STICKER_PACK_NOT_FOUND') {
+      return NextResponse.json({ message: '表情包不存在' }, { status: 404 })
+    }
     console.error('[admin.sticker.review]', error)
     return NextResponse.json({ message: '审核失败，请稍后重试' }, { status: 500 })
   }
@@ -123,13 +144,13 @@ function serializePack(p: {
     id: p.id,
     name: p.name,
     description: p.description,
-    coverUrl: p.coverUrl,
+    coverUrl: toPublicMediaUrl(p.coverUrl),
     type: p.type,
     status: p.status,
     rejectionReason: p.rejectionReason,
     reviewedAt: p.reviewedAt ? p.reviewedAt.toISOString() : null,
     createdAt: p.createdAt.toISOString(),
     creator: p.creator,
-    stickers: p.stickers,
+    stickers: p.stickers.map((sticker) => ({ ...sticker, url: toPublicMediaUrl(sticker.url) || sticker.url })),
   }
 }

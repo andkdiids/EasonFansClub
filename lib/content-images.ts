@@ -1,4 +1,4 @@
-import { publicImageUrl } from '@/lib/images'
+import { publicImageUrl, storedImageUrl } from '@/lib/images'
 
 export const MAX_CONTENT_IMAGES = 4
 const imageMarker = /\n?\[\[content-image:([^\]]+)\]\]/g
@@ -22,7 +22,7 @@ export function reorderContentImageUrls(urls: readonly string[], fromIndex: numb
 
 export function parseContentImageUrls(value: unknown) {
   if (!Array.isArray(value)) return []
-  return value.slice(0, MAX_CONTENT_IMAGES).map((item) => publicImageUrl(item)).filter((item): item is string => Boolean(item))
+  return value.slice(0, MAX_CONTENT_IMAGES).map((item) => storedImageUrl(item)).filter((item): item is string => Boolean(item))
 }
 
 export function appendContentImages(content: string, urls: string[]) {

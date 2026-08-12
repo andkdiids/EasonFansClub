@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
 import { getCurrentUser } from '@/lib/auth'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { getMyLibraryPacks } from '@/lib/sticker-center'
 import { prisma } from '@/lib/prisma'
 import { MyStickerLibrary } from './MyStickerLibrary'
@@ -39,7 +40,7 @@ export default async function ProfileStickersPage() {
     rejectionReason: p.rejectionReason,
     reviewedAt: p.reviewedAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),
-    coverUrl: p.coverUrl,
+    coverUrl: toPublicMediaUrl(p.coverUrl),
     type: p.type,
     isOfficial: p.isOfficial,
   }))

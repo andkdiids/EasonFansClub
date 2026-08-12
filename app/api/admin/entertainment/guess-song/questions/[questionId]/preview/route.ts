@@ -1,8 +1,4 @@
 import { GUESS_SONG_AUDIO_DURATIONS } from '@/lib/guess-song-config'
-import {
-  createGuessSongSignedUrl,
-  getGuessSongSignedUrlExpires,
-} from '@/lib/guess-song-storage'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
 import { guessSongError, guessSongOk, handleGuessSongError } from '@/lib/guess-song-api'
@@ -25,11 +21,9 @@ export async function GET(request: Request, { params }: Context) {
       select: { storagePath: true },
     })
     if (!variant) return guessSongError('该音频变体不存在', 404)
-    const expiresIn = getGuessSongSignedUrlExpires()
     return guessSongOk({
-      signedUrl: await createGuessSongSignedUrl(variant.storagePath, expiresIn),
+      audioUrl: `/api/admin/entertainment/guess-song/questions/${encodeURIComponent(questionId)}/preview/audio?duration=${duration}`,
       durationSeconds: duration,
-      expiresIn,
     })
   } catch (error) {
     return handleGuessSongError(error, 'admin.audio.preview')

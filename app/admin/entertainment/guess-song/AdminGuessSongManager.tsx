@@ -487,10 +487,10 @@ export function AdminGuessSongManager() {
     stopPreview()
     setError('')
     try {
-      const data = await api<{ signedUrl: string }>(
+      const data = await api<{ audioUrl: string }>(
         `/api/admin/entertainment/guess-song/questions/${question.id}/preview?duration=${durationSeconds}`,
       )
-      const audio = new Audio(data.signedUrl)
+      const audio = new Audio(data.audioUrl)
       audio.onended = stopPreview
       audio.onerror = () => {
         stopPreview()

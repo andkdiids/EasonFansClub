@@ -18,6 +18,8 @@ export const registrationAvailabilityStatuses = ['CLOSED', 'WAITING', 'OPEN', 'E
 export type RegistrationAvailabilityStatus = (typeof registrationAvailabilityStatuses)[number]
 
 export const REGISTRATION_DAILY_SCHEDULE_MAX_WINDOWS = 10
+export const DEFAULT_REGISTRATION_CLOSED_TITLE = '当前暂停注册'
+export const DEFAULT_REGISTRATION_CLOSED_MESSAGE = '注册入口目前暂时关闭，请稍后再来。'
 
 export type RegistrationDailyScheduleWindow = {
   start: string
@@ -32,6 +34,8 @@ export type RegistrationControlSettings = {
   opensAt: Date | null
   closesAt: Date | null
   override: RegistrationControlOverride
+  closedTitle?: string
+  closedMessage?: string
 }
 
 export type RegistrationAvailability = {
@@ -68,6 +72,20 @@ export type RegistrationControlPayload = {
   opensAt: string
   closesAt: string
   override: RegistrationControlOverride
+  closedTitle: string
+  closedMessage: string
+}
+
+function normalizeRegistrationClosedTitle(value: unknown) {
+  const normalized = typeof value === 'string' ? value.trim().slice(0, 80) : ''
+  return normalized || DEFAULT_REGISTRATION_CLOSED_TITLE
+}
+
+function normalizeRegistrationClosedMessage(value: unknown) {
+  const normalized = typeof value === 'string'
+    ? value.replace(/\r\n?/g, '\n').trim().slice(0, 2000)
+    : ''
+  return normalized || DEFAULT_REGISTRATION_CLOSED_MESSAGE
 }
 
 const beijingDateTimePartsFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -238,10 +256,12 @@ export function serializeRegistrationControlSettings(value: RegistrationControlS
     opensAt: formatBeijingDateTimeInput(value.opensAt),
     closesAt: formatBeijingDateTimeInput(value.closesAt),
     override: value.override,
+    closedTitle: normalizeRegistrationClosedTitle(value.closedTitle),
+    closedMessage: normalizeRegistrationClosedMessage(value.closedMessage),
   }
 }
 
-export function parseRegistrationControlInput(value: unknown): Pick<RegistrationControlSettings, 'mode' | 'dailySchedule' | 'opensAt' | 'closesAt'> | null {
+export function parseRegistrationControlInput(value: unknown): Pick<RegistrationControlSettings, 'mode' | 'dailySchedule' | 'opensAt' | 'closesAt' | 'closedTitle' | 'closedMessage'> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
   const mode = normalizeRegistrationControlMode(input.mode)
@@ -257,7 +277,14 @@ export function parseRegistrationControlInput(value: unknown): Pick<Registration
   const hasInvalidOpen = input.opensAt !== undefined && input.opensAt !== null && input.opensAt !== '' && !opensAt
   const hasInvalidClose = input.closesAt !== undefined && input.closesAt !== null && input.closesAt !== '' && !closesAt
   if (hasInvalidOpen || hasInvalidClose || !dailySchedule) return null
-  return { mode, dailySchedule, opensAt, closesAt }
+  return {
+    mode,
+    dailySchedule,
+    opensAt,
+    closesAt,
+    closedTitle: normalizeRegistrationClosedTitle(input.closedTitle),
+    closedMessage: normalizeRegistrationClosedMessage(input.closedMessage),
+  }
 }
 
 type DailyScheduleOccurrence = {

@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { parseContentImageUrls } from '@/lib/content-images'
+import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
 
@@ -74,8 +75,10 @@ export async function GET(request: Request) {
       ...post,
       author: {
         ...User,
+        avatarUrl: publicImageUrl(User.avatarUrl),
         profile: User.Profile ? {
           ...User.Profile,
+          avatarUrl: publicImageUrl(User.Profile.avatarUrl),
           displayName: resolveFriendDisplayName({
             viewerId: viewer?.id,
             targetUserId: User.id,
@@ -86,7 +89,7 @@ export async function GET(request: Request) {
       },
       board: Board,
       content: summary || createSummary(content),
-      stickerUrl: sticker?.url || null,
+      stickerUrl: publicImageUrl(sticker?.url),
     }))
 
     return NextResponse.json(

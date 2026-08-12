@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
 import type { StickerReportReason } from '@prisma/client'
 
 /** 选择器可见表情：未隐藏、未下架、所属合集已通过审核。 */
@@ -67,7 +69,7 @@ function toPicker(sticker: {
   return {
     id: sticker.id,
     name: sticker.name,
-    url: sticker.url,
+    url: toPublicMediaUrl(sticker.url) || sticker.url,
     type: sticker.type,
     packId: sticker.packId,
   }
@@ -93,7 +95,7 @@ export async function getMyStickers(userId: string): Promise<StickerView[]> {
       createdAt: true,
     },
   })
-  return stickers.map((s) => ({ ...s, createdAt: s.createdAt.toISOString() }))
+  return stickers.map((s) => ({ ...s, url: toPublicMediaUrl(s.url) || s.url, createdAt: s.createdAt.toISOString() }))
 }
 
 /**
@@ -169,7 +171,7 @@ export async function getPickerData(userId: string): Promise<PickerData> {
     packs.push({
       id: pack.id,
       name: pack.name,
-      coverUrl: pack.coverUrl,
+      coverUrl: toPublicMediaUrl(pack.coverUrl),
       iconUrl: pack.stickers[0]?.url ?? pack.coverUrl,
       type: pack.type,
     })
@@ -346,7 +348,7 @@ export async function getAdminStickers(filter: AdminStickerFilter): Promise<Admi
   return stickers.map((s) => ({
     id: s.id,
     name: s.name,
-    url: s.url,
+    url: toPublicMediaUrl(s.url) || s.url,
     type: s.type,
     usageCount: s.usageCount,
     isHidden: s.isHidden,
@@ -521,7 +523,7 @@ export async function createOfficialSticker(input: {
   return {
     id: sticker.id,
     name: sticker.name,
-    url: sticker.url,
+    url: toPublicMediaUrl(sticker.url) || sticker.url,
     type: sticker.type,
     usageCount: sticker.usageCount,
     isHidden: sticker.isHidden,
@@ -642,7 +644,7 @@ export async function getStorePacks(opts: {
     id: pack.id,
     name: pack.name,
     description: pack.description,
-    coverUrl: pack.coverUrl,
+    coverUrl: toPublicMediaUrl(pack.coverUrl),
     iconUrl: null,
     type: pack.type,
     category: pack.category,
@@ -713,7 +715,7 @@ export async function getStorePackDetail(packId: string, userId: string | null):
     id: pack.id,
     name: pack.name,
     description: pack.description,
-    coverUrl: pack.coverUrl,
+    coverUrl: toPublicMediaUrl(pack.coverUrl),
     iconUrl: null,
     type: pack.type,
     category: pack.category,
@@ -811,7 +813,7 @@ export async function getMyLibraryPacks(userId: string): Promise<StorePackItem[]
     id: pack.id,
     name: pack.name,
     description: pack.description,
-    coverUrl: pack.coverUrl,
+    coverUrl: toPublicMediaUrl(pack.coverUrl),
     iconUrl: null,
     type: pack.type,
     category: pack.category,
@@ -951,7 +953,7 @@ export async function listReviewPacks(filter: 'PENDING' | 'APPROVED' | 'REJECTED
     id: p.id,
     name: p.name,
     description: p.description,
-    coverUrl: p.coverUrl,
+    coverUrl: toPublicMediaUrl(p.coverUrl),
     type: p.type,
     category: p.category,
     status: p.status as 'PENDING' | 'APPROVED' | 'REJECTED',
@@ -975,16 +977,19 @@ export async function reviewStickerPack(input: {
 }): Promise<{ status: 'APPROVED' | 'REJECTED'; packName: string }> {
   const pack = await prisma.stickerPack.findUnique({
     where: { id: input.packId },
-    select: { id: true, name: true, creatorId: true },
+    select: { id: true, name: true, creatorId: true, status: true },
   })
   if (!pack) throw new Error('表情包不存在')
+  if (pack.status !== 'PENDING') throw new Error('该表情包当前不在待审核状态')
+  const rejectionReason = input.reason?.trim().slice(0, 500) || ''
+  if (input.action === 'REJECT' && !rejectionReason) throw new Error('请填写拒绝原因')
   const now = new Date()
   const newStatus: 'APPROVED' | 'REJECTED' = input.action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
   await prisma.stickerPack.update({
     where: { id: input.packId },
     data: {
       status: newStatus,
-      rejectionReason: input.action === 'REJECT' ? (input.reason?.slice(0, 500) || '内容不符合规范') : null,
+      rejectionReason: input.action === 'REJECT' ? rejectionReason : null,
       reviewedAt: now,
     },
   })
@@ -992,7 +997,7 @@ export async function reviewStickerPack(input: {
   const content =
     input.action === 'APPROVE'
       ? '已经上架表情商店，快去查看吧！'
-      : `原因：${input.reason?.slice(0, 200) || '内容不符合规范'}`
+      : `原因：${rejectionReason}`
   await prisma.notification.create({
     data: {
       recipientId: pack.creatorId,
@@ -1000,8 +1005,8 @@ export async function reviewStickerPack(input: {
       type: 'ADMIN',
       title,
       content,
-      link: '/profile/stickers',
-      key: `sticker-pack-review:${input.packId}:${newStatus.toLowerCase()}`,
+      link: getStickerPackReviewNotificationLink(input.packId, newStatus),
+      key: `sticker-pack-review:${input.packId}:${newStatus.toLowerCase()}:${now.getTime()}`,
     },
   })
   return { status: newStatus, packName: pack.name }

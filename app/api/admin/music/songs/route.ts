@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { MUSIC_SOURCE_TYPES, optionalMusicText, parseMusicYear, parseOptionalDuration, parseTrackNumber } from '@/lib/music'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -46,6 +47,9 @@ export async function POST(request: Request) {
       include: { MusicAlbum: true },
     })
     const { MusicAlbum, ...songData } = song
+    songData.coverUrl = toPublicMediaUrl(songData.coverUrl)
+    songData.previewUrl = toPublicMediaUrl(songData.previewUrl)
+    MusicAlbum.coverUrl = toPublicMediaUrl(MusicAlbum.coverUrl)
     return NextResponse.json({ song: { ...songData, album: MusicAlbum }, message: '歌曲已创建' }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ message: '该专辑中已存在相同曲序或歌曲名称' }, { status: 409 })

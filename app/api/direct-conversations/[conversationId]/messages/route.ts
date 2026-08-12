@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { normalizeFriendPair } from '@/lib/friends'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
@@ -280,7 +281,7 @@ function serializeMessage(
     senderId: message.senderId,
     clientMessageId: message.clientMessageId,
     stickerId: message.stickerId,
-    stickerUrl: message.sticker?.url || null,
+    stickerUrl: toPublicMediaUrl(message.sticker?.url),
     createdAt: message.createdAt.toISOString(),
     readAt: message.senderId === currentUserId && peerLastReadAt && message.createdAt <= peerLastReadAt
       ? peerLastReadAt.toISOString()

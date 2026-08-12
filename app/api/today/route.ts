@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
-import { publicImageUrl } from '@/lib/images'
+import { storedImageUrl } from '@/lib/images'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { getTodayMonthDay, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { getTodayEventRecords } from '@/lib/today-events'
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   const type = body?.type
   const title = sanitizeText(body?.title, 160)
   const content = sanitizeText(body?.content, 10_000)
-  const imageUrl = publicImageUrl(sanitizeText(body?.imageUrl, 1000))
+  const imageUrl = storedImageUrl(sanitizeText(body?.imageUrl, 1000))
   const reference = sanitizeText(body?.reference ?? body?.source, 500)
   if (!date || !isTodayEventType(type) || title.length < 2 || content.length < 5) {
     return NextResponse.json({ message: '请填写有效日期、类型、标题和内容' }, { status: 400 })

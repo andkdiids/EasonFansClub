@@ -1,4 +1,5 @@
 import { safeDb } from '@/lib/db-timeout'
+import { toPublicMediaUrl, toStoredMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { defaultHeroVisuals, hasHeroMediaAsset, heroFitModes, normalizeHeroMediaType, normalizeHeroScale, type HeroFitMode, type HeroMediaAsset, type HeroMediaType, type HeroVisualKey, type SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
@@ -201,6 +202,10 @@ function textValue(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function storedMediaValue(value: unknown) {
+  return toStoredMediaUrl(textValue(value)) || ''
+}
+
 export function normalizeHeroMediaAsset(value: unknown, fallback: HeroMediaAsset | null = null): HeroMediaAsset | null {
   if (value === undefined) return fallback ? { ...fallback } : null
   if (value === null || typeof value !== 'object') return null
@@ -209,15 +214,15 @@ export function normalizeHeroMediaAsset(value: unknown, fallback: HeroMediaAsset
   const hasUrlFields = ['imageUrl', 'mediaUrl', 'posterUrl', 'sourceUrl', 'posterSourceUrl']
     .some((key) => Object.prototype.hasOwnProperty.call(row, key))
   const urlFallback = hasUrlFields ? null : fallback
-  const imageUrl = textValue(row.imageUrl) || (mediaType === 'STATIC_IMAGE' ? textValue(row.mediaUrl) : '') || urlFallback?.imageUrl || ''
-  const mediaUrl = textValue(row.mediaUrl) || (mediaType === 'STATIC_IMAGE' ? imageUrl : urlFallback?.mediaUrl || '')
+  const imageUrl = storedMediaValue(row.imageUrl) || (mediaType === 'STATIC_IMAGE' ? storedMediaValue(row.mediaUrl) : '') || urlFallback?.imageUrl || ''
+  const mediaUrl = storedMediaValue(row.mediaUrl) || (mediaType === 'STATIC_IMAGE' ? imageUrl : urlFallback?.mediaUrl || '')
   return {
     mediaType,
     imageUrl,
     mediaUrl,
-    posterUrl: textValue(row.posterUrl) || urlFallback?.posterUrl || '',
-    sourceUrl: textValue(row.sourceUrl) || urlFallback?.sourceUrl || '',
-    posterSourceUrl: textValue(row.posterSourceUrl) || urlFallback?.posterSourceUrl || '',
+    posterUrl: storedMediaValue(row.posterUrl) || urlFallback?.posterUrl || '',
+    sourceUrl: storedMediaValue(row.sourceUrl) || urlFallback?.sourceUrl || '',
+    posterSourceUrl: storedMediaValue(row.posterSourceUrl) || urlFallback?.posterSourceUrl || '',
   }
 }
 
@@ -229,13 +234,13 @@ export function getHeroMediaForDevice(slide: SiteHeroSlide | null | undefined, d
 
 function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
   const mediaType = normalizeHeroMediaType(item.mediaType)
-  const imageUrl = typeof item.imageUrl === 'string' ? item.imageUrl : ''
+  const imageUrl = storedMediaValue(item.imageUrl)
   const mediaUrl = typeof item.mediaUrl === 'string' && item.mediaUrl.trim()
-    ? item.mediaUrl.trim()
+    ? storedMediaValue(item.mediaUrl)
     : mediaType === 'STATIC_IMAGE' ? imageUrl : ''
-  const posterUrl = typeof item.posterUrl === 'string' ? item.posterUrl.trim() : ''
-  const sourceUrl = typeof item.sourceUrl === 'string' ? item.sourceUrl.trim() : ''
-  const posterSourceUrl = typeof item.posterSourceUrl === 'string' ? item.posterSourceUrl.trim() : ''
+  const posterUrl = storedMediaValue(item.posterUrl)
+  const sourceUrl = storedMediaValue(item.sourceUrl)
+  const posterSourceUrl = storedMediaValue(item.posterSourceUrl)
   const normalized: SiteHeroSlide = {
     ...item,
     imageUrl,
@@ -267,6 +272,67 @@ function normalizeHeroSlide(item: SiteHeroSlide): SiteHeroSlide {
   if (item.desktopFitMode !== undefined) normalized.desktopFitMode = enumValue(item.desktopFitMode, heroFitModes, 'COVER')
   if (item.mobileFitMode !== undefined) normalized.mobileFitMode = enumValue(item.mobileFitMode, heroFitModes, 'COVER')
   return normalized
+}
+
+function publicHeroMediaAsset(asset: HeroMediaAsset | null | undefined) {
+  if (!asset) return asset
+  return {
+    ...asset,
+    imageUrl: toPublicMediaUrl(asset.imageUrl) || '',
+    mediaUrl: toPublicMediaUrl(asset.mediaUrl) || '',
+    posterUrl: toPublicMediaUrl(asset.posterUrl) || '',
+    sourceUrl: toPublicMediaUrl(asset.sourceUrl) || '',
+    posterSourceUrl: toPublicMediaUrl(asset.posterSourceUrl) || '',
+  }
+}
+
+function publicHeroSlide(slide: SiteHeroSlide): SiteHeroSlide {
+  return {
+    ...slide,
+    imageUrl: toPublicMediaUrl(slide.imageUrl) || '',
+    mediaUrl: toPublicMediaUrl(slide.mediaUrl) || '',
+    posterUrl: toPublicMediaUrl(slide.posterUrl) || '',
+    sourceUrl: toPublicMediaUrl(slide.sourceUrl) || '',
+    posterSourceUrl: toPublicMediaUrl(slide.posterSourceUrl) || '',
+    desktopHeroMedia: publicHeroMediaAsset(slide.desktopHeroMedia) as HeroMediaAsset | null | undefined,
+    mobileHeroMedia: publicHeroMediaAsset(slide.mobileHeroMedia) as HeroMediaAsset | null | undefined,
+  }
+}
+
+function publicHeroVisual(visual: SiteHeroVisualConfig): SiteHeroVisualConfig {
+  return {
+    ...visual,
+    imageUrl: toPublicMediaUrl(visual.imageUrl) || '',
+    desktopHero: toPublicMediaUrl(visual.desktopHero) || '',
+    mobileHero: toPublicMediaUrl(visual.mobileHero) || '',
+    mediaUrl: toPublicMediaUrl(visual.mediaUrl) || '',
+    posterUrl: toPublicMediaUrl(visual.posterUrl) || '',
+    sourceUrl: toPublicMediaUrl(visual.sourceUrl) || '',
+    posterSourceUrl: toPublicMediaUrl(visual.posterSourceUrl) || '',
+    desktopHeroMedia: publicHeroMediaAsset(visual.desktopHeroMedia) as HeroMediaAsset | null | undefined,
+    mobileHeroMedia: publicHeroMediaAsset(visual.mobileHeroMedia) as HeroMediaAsset | null | undefined,
+  }
+}
+
+export function toPublicSiteAppearance(config: SiteAppearanceConfig): SiteAppearanceConfig {
+  return {
+    ...config,
+    images: {
+      logoUrl: toPublicMediaUrl(config.images.logoUrl) || '',
+      navLogoUrl: toPublicMediaUrl(config.images.navLogoUrl) || '',
+      loginBackgroundUrl: toPublicMediaUrl(config.images.loginBackgroundUrl) || '',
+      registerBackgroundUrl: toPublicMediaUrl(config.images.registerBackgroundUrl) || '',
+      defaultAvatarUrl: toPublicMediaUrl(config.images.defaultAvatarUrl) || '',
+      defaultProfileBackgroundUrl: toPublicMediaUrl(config.images.defaultProfileBackgroundUrl) || '',
+      checkinBackgroundUrl: toPublicMediaUrl(config.images.checkinBackgroundUrl) || '',
+      musicCoverUrl: toPublicMediaUrl(config.images.musicCoverUrl) || '',
+      activityCoverUrl: toPublicMediaUrl(config.images.activityCoverUrl) || '',
+    },
+    heroSlides: config.heroSlides.map(publicHeroSlide),
+    heroVisuals: Object.fromEntries(
+      Object.entries(config.heroVisuals).map(([key, visual]) => [key, publicHeroVisual(visual)]),
+    ) as Record<HeroVisualKey, SiteHeroVisualConfig>,
+  }
 }
 
 /** Resolves explicit per-slide media and composition settings for a Hero. */
@@ -368,7 +434,18 @@ function normalizeHeroVisual(key: HeroVisualKey, value: unknown, fallbackImageUr
 export function mergeSiteAppearanceConfig(value: unknown): SiteAppearanceConfig {
   if (!value || typeof value !== 'object') return defaultSiteAppearance
   const partial = value as Partial<SiteAppearanceConfig>
-  const images = { ...defaultSiteAppearance.images, ...(partial.images || {}) }
+  const rawImages = { ...defaultSiteAppearance.images, ...(partial.images || {}) }
+  const images = {
+    logoUrl: storedMediaValue(rawImages.logoUrl),
+    navLogoUrl: storedMediaValue(rawImages.navLogoUrl),
+    loginBackgroundUrl: storedMediaValue(rawImages.loginBackgroundUrl),
+    registerBackgroundUrl: storedMediaValue(rawImages.registerBackgroundUrl),
+    defaultAvatarUrl: storedMediaValue(rawImages.defaultAvatarUrl),
+    defaultProfileBackgroundUrl: storedMediaValue(rawImages.defaultProfileBackgroundUrl),
+    checkinBackgroundUrl: storedMediaValue(rawImages.checkinBackgroundUrl),
+    musicCoverUrl: storedMediaValue(rawImages.musicCoverUrl),
+    activityCoverUrl: storedMediaValue(rawImages.activityCoverUrl),
+  }
   const heroSlides = (partial.heroSlides?.length ? partial.heroSlides : defaultSiteAppearance.heroSlides).map((item) => {
     const normalized = normalizeHeroSlide(item)
     return normalized.href === '/boards/announcements' || normalized.href === '/boards/daily-chat' ? { ...normalized, href: '/forum' } : normalized
@@ -452,7 +529,7 @@ export async function getSiteAppearance(options: { cache?: 'default' | 'no-store
   ).then((setting) => {
     if (!setting?.value) return defaultSiteAppearance
     try {
-      return mergeSiteAppearanceConfig(JSON.parse(setting.value))
+      return toPublicSiteAppearance(mergeSiteAppearanceConfig(JSON.parse(setting.value)))
     } catch {
       return defaultSiteAppearance
     }

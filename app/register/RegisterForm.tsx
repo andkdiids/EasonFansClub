@@ -6,7 +6,7 @@ import { FormError } from '@/components/FormError'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { validateLoginAccountValue } from '@/lib/login-account'
 import { getPhoneInputParts, getPhoneValidationMessage, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
-import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
+import { DEFAULT_REGISTRATION_CLOSED_MESSAGE, DEFAULT_REGISTRATION_CLOSED_TITLE, formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import type { RegistrationAvailabilityPayload, RegistrationMode } from '@/lib/registration'
 
 declare global {
@@ -31,6 +31,8 @@ type RegisterPolicy = {
   requireSecurityQuestionsForNewUsers: boolean
   ehospitalCheckEnabled: boolean
   registrationAvailability: RegistrationAvailabilityPayload
+  closedTitle: string
+  closedMessage: string
 }
 
 type RegisterErrors = Partial<Record<
@@ -132,6 +134,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [errors, setErrors] = useState<RegisterErrors>({})
   const [message, setMessage] = useState('')
   const [registrationAvailability, setRegistrationAvailability] = useState(policy.registrationAvailability)
+  const [registrationClosedTitle, setRegistrationClosedTitle] = useState(policy.closedTitle || DEFAULT_REGISTRATION_CLOSED_TITLE)
+  const [registrationClosedMessage, setRegistrationClosedMessage] = useState(policy.closedMessage || DEFAULT_REGISTRATION_CLOSED_MESSAGE)
   const [registrationClock, setRegistrationClock] = useState(() => Date.now())
   const [isPreparing, setIsPreparing] = useState(false)
   const [isSendingEmail, setIsSendingEmail] = useState(false)
@@ -183,8 +187,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     const refreshRegistrationAvailability = async () => {
       try {
         const response = await fetch('/api/auth/register/status', { cache: 'no-store', headers: { Accept: 'application/json' } })
-        const data = await response.json().catch(() => ({})) as { data?: RegistrationAvailabilityPayload }
-        if (!disposed && response.ok && data.data) setRegistrationAvailability(data.data)
+        const data = await response.json().catch(() => ({})) as { data?: RegistrationAvailabilityPayload; closedTitle?: string; closedMessage?: string }
+        if (!disposed && response.ok && data.data) {
+          setRegistrationAvailability(data.data)
+          if (typeof data.closedTitle === 'string') setRegistrationClosedTitle(data.closedTitle || DEFAULT_REGISTRATION_CLOSED_TITLE)
+          if (typeof data.closedMessage === 'string') setRegistrationClosedMessage(data.closedMessage || DEFAULT_REGISTRATION_CLOSED_MESSAGE)
+        }
       } catch {
         // The server remains the source of truth; the next poll retries.
       }
@@ -864,6 +872,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   // Restore only after a hard reload of /register. A later visit in the same
   // document is a new registration flow and must not inherit old state.
   useEffect(() => {
+    if (!registrationIsOpen) return
     if (registrationRestoreInitializedRef.current) return
     registrationRestoreInitializedRef.current = true
     const navigation = window.performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
@@ -1038,12 +1047,16 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }, [clearHospitalAudioTimer, hospitalModalOpen, hospitalQuestionId, hospitalAudioUrl, hospitalState, playHospitalAudio])
 
   if (!registrationIsOpen) {
+    const closedTitle = registrationClosedTitle.trim() || DEFAULT_REGISTRATION_CLOSED_TITLE
+    const closedMessage = registrationClosedMessage.trim() || DEFAULT_REGISTRATION_CLOSED_MESSAGE
+
     if (registrationAvailability.mode === 'ONE_TIME' && registrationAvailability.status === 'WAITING') {
       const opensAt = registrationAvailability.opensAt ? new Date(registrationAvailability.opensAt).getTime() : NaN
       const secondsUntilOpen = Number.isFinite(opensAt) ? Math.max(0, (opensAt - registrationClock) / 1000) : 0
       return (
         <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-amber-900">
-          <p className="text-sm font-black">本轮开放注册时间</p>
+          <p className="text-xl font-black leading-8">{closedTitle}</p>
+          <p className="whitespace-pre-wrap break-words text-sm font-bold leading-6">{closedMessage}</p>
           <p className="text-xl font-black leading-8">{formatBeijingDateTimeDisplay(registrationAvailability.opensAt)}</p>
           <p className="text-xs font-black text-amber-800">北京时间</p>
           <p className="text-sm font-bold leading-6">注册入口将在开放时间自动开启，请在开放时间后完成入院登记。</p>
@@ -1056,7 +1069,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       const nextChangeAt = registrationAvailability.nextChangeAt ? new Date(registrationAvailability.nextChangeAt) : null
       return (
         <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-amber-900">
-          <p className="text-sm font-black">每日定时注册</p>
+          <p className="text-xl font-black leading-8">{closedTitle}</p>
+          <p className="whitespace-pre-wrap break-words text-sm font-bold leading-6">{closedMessage}</p>
           <p className="text-sm font-bold leading-6">今日开放时段：{registrationAvailability.dailySchedule.map((window) => `${window.start}–${window.end}`).join('、') || '未设置'}</p>
           {nextChangeAt ? <p className="text-sm font-bold leading-6">下一次开放：{formatBeijingDateTimeDisplay(nextChangeAt)}</p> : null}
           <p className="text-xs font-black text-amber-800">北京时间（Asia/Shanghai）</p>
@@ -1065,10 +1079,10 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     }
 
     if (registrationAvailability.mode === 'ONE_TIME' && registrationAvailability.status === 'ENDED') {
-      return <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-bold leading-6 text-slate-700"><p className="font-black text-slate-900">本轮注册已结束</p><p>下一次开放时间请留意后续公告。</p></div>
+      return <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-bold leading-6 text-slate-700"><p className="text-xl font-black leading-8 text-slate-900">{closedTitle}</p><p className="whitespace-pre-wrap break-words">{closedMessage}</p><p>下一次开放时间请留意后续公告。</p></div>
     }
 
-    return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">注册暂未开放。</div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
+    return <div className="space-y-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-amber-900"><p className="text-xl font-black leading-8">{closedTitle}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm font-bold leading-6">{closedMessage}</p></div>{policy.envForcedClosed ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">注册已被服务器环境变量强制关闭。</p> : null}</div>
   }
 
   const hospitalLabel = !policy.ehospitalCheckEnabled

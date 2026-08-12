@@ -1,5 +1,6 @@
 import type { GuessSongDifficulty } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { parseGuessSongQuestionInput } from '@/lib/guess-song-questions'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { guessSongError, guessSongOk, handleGuessSongError } from '@/lib/guess-song-api'
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
               id: true,
               title: true,
               sourceAudioRevision: true,
-              MusicAlbum: { select: { name: true } },
+              MusicAlbum: { select: { name: true, coverUrl: true } },
             },
           },
           GuessSongAudioVariant: { where: { purpose: 'GAME' }, orderBy: { durationSeconds: 'asc' } },
@@ -72,7 +73,7 @@ export async function GET(request: Request) {
       questions: questions.map(({ GuessSongAudioVariant, MusicSong, ...question }) => ({
         ...question,
         musicSong: MusicSong
-          ? { id: MusicSong.id, title: MusicSong.title, album: MusicSong.MusicAlbum }
+          ? { id: MusicSong.id, title: MusicSong.title, album: { ...MusicSong.MusicAlbum, coverUrl: toPublicMediaUrl(MusicSong.MusicAlbum.coverUrl) } }
           : null,
         sourceStale: Boolean(
           question.audioSourceType === 'EASMUSIC_SONG'
@@ -85,7 +86,7 @@ export async function GET(request: Request) {
         ...song,
         hasAudioSource: Boolean(sourceAudioPath),
         hasGuessClip: _count.GuessSongQuestion > 0,
-        album: MusicAlbum,
+        album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
       })),
     })
     response.headers.set('Cache-Control', 'private, no-store')

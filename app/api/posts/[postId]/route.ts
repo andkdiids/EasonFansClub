@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
-import { isSupabaseStorageUrl } from '@/lib/images'
+import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
@@ -86,8 +86,10 @@ export async function GET(_request: Request, { params }: Params) {
   const remarkMap = await loadFriendRemarkMap(viewer?.id, [User.id, ...Reply.map((reply) => reply.User.id)])
   const author = User.Profile ? {
     ...User,
+    avatarUrl: publicImageUrl(User.avatarUrl),
     Profile: {
       ...User.Profile,
+      avatarUrl: publicImageUrl(User.Profile.avatarUrl),
       displayName: resolveFriendDisplayName({
         viewerId: viewer?.id,
         targetUserId: User.id,
@@ -105,8 +107,10 @@ export async function GET(_request: Request, { params }: Params) {
         ...reply,
         author: replyAuthor.Profile ? {
           ...replyAuthor,
+          avatarUrl: publicImageUrl(replyAuthor.avatarUrl),
           Profile: {
             ...replyAuthor.Profile,
+            avatarUrl: publicImageUrl(replyAuthor.Profile.avatarUrl),
             displayName: resolveFriendDisplayName({
               viewerId: viewer?.id,
               targetUserId: replyAuthor.id,

@@ -2,7 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { getTodayEventDateKey, isTodayEventSource, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
-import { publicImageUrl } from '@/lib/images'
+import { storedImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ eventId: string }> }
@@ -36,7 +36,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       ...(body?.type !== undefined ? { type: body.type } : {}),
       ...(body?.title !== undefined ? { title: sanitizeText(body.title, 160) } : {}),
       ...(body?.content !== undefined ? { content: sanitizeText(body.content, 10_000) } : {}),
-      ...(body?.imageUrl !== undefined ? { imageUrl: publicImageUrl(sanitizeText(body.imageUrl, 1000)) } : {}),
+      ...(body?.imageUrl !== undefined ? { imageUrl: storedImageUrl(sanitizeText(body.imageUrl, 1000)) } : {}),
       ...(sourceReference !== undefined ? { reference: sanitizeText(sourceReference, 500) || null } : {}),
       ...(isTodayEventSource(body?.source) ? { source: body.source } : {}),
       ...(status !== undefined ? { status } : {}),

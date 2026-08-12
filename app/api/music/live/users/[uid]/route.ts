@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizedCityKey } from '@/lib/music-personal-live'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 
@@ -52,7 +53,7 @@ export async function GET(_request: Request, { params }: Context) {
   const tours = new Set(user.UserMusicConcert.map((record) => record.MusicConcert.MusicTour.id))
   const cities = new Set(user.UserMusicConcert.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
   return NextResponse.json({
-    user: { uid: user.uid, displayName, avatarUrl: user.Profile.avatarUrl },
+    user: { uid: user.uid, displayName, avatarUrl: publicImageUrl(user.Profile.avatarUrl) },
     stats: { concertCount: user.UserMusicConcert.length, tourCount: tours.size, cityCount: cities.size },
     records: user.UserMusicConcert.map((record) => ({
       concertId: record.MusicConcert.id,

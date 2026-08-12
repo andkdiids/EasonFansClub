@@ -61,7 +61,7 @@ export function RegistrationControlForm({ initialControl, initialAvailability }:
   const [error, setError] = useState('')
   const [busyAction, setBusyAction] = useState('')
 
-  function updateControl<Field extends 'mode' | 'opensAt' | 'closesAt' | 'dailySchedule'>(field: Field, value: RegistrationControlPayload[Field]) {
+  function updateControl<Field extends 'mode' | 'opensAt' | 'closesAt' | 'dailySchedule' | 'closedTitle' | 'closedMessage'>(field: Field, value: RegistrationControlPayload[Field]) {
     setControl((current) => ({ ...current, [field]: value }))
     setMessage('')
     setError('')
@@ -129,6 +129,8 @@ export function RegistrationControlForm({ initialControl, initialAvailability }:
             dailySchedule: control.mode === 'DAILY_SCHEDULE' ? control.dailySchedule : [],
             opensAt: oneTime ? control.opensAt : '',
             closesAt: oneTime ? control.closesAt : '',
+            closedTitle: control.closedTitle,
+            closedMessage: control.closedMessage,
           },
           confirmEnded,
         }),
@@ -254,6 +256,39 @@ export function RegistrationControlForm({ initialControl, initialAvailability }:
           <p className="text-xs font-bold leading-5 text-slate-500">注册入口将在开始时间自动开放，并在结束时间自动关闭。</p>
         </div>
       ) : null}
+
+      <div className="mt-5 space-y-4 rounded-2xl border border-sky-100 bg-white p-4">
+        <div>
+          <p className="text-sm font-black text-brand-950">注册关闭说明</p>
+          <p className="mt-1 text-xs font-bold leading-5 text-slate-500">注册关闭时展示给前台用户，支持普通换行；每日定时结束后同样使用这段说明。</p>
+        </div>
+        <label className="block text-sm font-black text-brand-950">
+          <span className="mb-2 block">注册关闭标题</span>
+          <input
+            value={control.closedTitle}
+            onChange={(event) => updateControl('closedTitle', event.target.value)}
+            maxLength={80}
+            className="block w-full rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-brand-700"
+            placeholder="当前暂停注册"
+          />
+        </label>
+        <label className="block text-sm font-black text-brand-950">
+          <span className="mb-2 block">注册关闭说明</span>
+          <textarea
+            value={control.closedMessage}
+            onChange={(event) => updateControl('closedMessage', event.target.value)}
+            maxLength={2000}
+            rows={5}
+            className="block w-full resize-y rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 text-slate-800 outline-none focus:border-brand-700"
+            placeholder="例如：今日注册人数较多，为保证服务器稳定，注册暂时关闭，预计明日下午重新开放。"
+          />
+        </label>
+        <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
+          <p className="text-xs font-black text-slate-500">前台关闭时将显示：</p>
+          <p className="mt-2 text-base font-black text-brand-950">{control.closedTitle || '当前暂停注册'}</p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{control.closedMessage || '注册入口目前暂时关闭，请稍后再来。'}</p>
+        </div>
+      </div>
 
       <div className="mt-5 space-y-3 rounded-2xl border border-sky-100 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

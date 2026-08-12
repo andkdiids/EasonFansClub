@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { convertMusicCoverToWebp, MUSIC_COVER_MAX_FILE_SIZE } from '@/lib/music-cover'
 import { isSupportedMusicCoverFile } from '@/lib/music-upload-constraints'
 import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage'
+import { publicImageUrl } from '@/lib/images'
 import { requireAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
 
     const objectPath = `badges/${guard.user.id}/${randomUUID()}.webp`
     try {
-      const url = await uploadSiteImage({ key: objectPath, body: output })
+      const url = publicImageUrl(await uploadSiteImage({ key: objectPath, body: output }))
       return NextResponse.json({ success: true, url, format: 'webp' })
     } catch (error) {
       return NextResponse.json(

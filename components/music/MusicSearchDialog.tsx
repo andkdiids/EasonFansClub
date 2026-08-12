@@ -1,10 +1,11 @@
 'use client'
 
-import Image from 'next/image'
+import NextImage from 'next/image'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type ComponentProps, type FormEvent } from 'react'
 import { generateArchiveSlug, buildConcertSlugPath } from '@/lib/music-slug'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 type Result = {
   query: string
@@ -14,6 +15,13 @@ type Result = {
   concerts: Array<{ id: string; type: 'concert'; title?: string | null; concertDate: string; city: string; venue?: string | null; stageType: 'NORMAL' | 'ENCORE' | 'FINAL'; tour: { id: string; name: string } }>
 }
 type MusicSearchDialogProps = { variant?: 'default' | 'glass'; label?: string }
+
+function PublicImage({ src, ...props }: ComponentProps<typeof NextImage>) {
+  const normalizedSrc = typeof src === 'string' ? toPublicMediaUrl(src) || src : src
+  return <NextImage {...props} src={normalizedSrc} />
+}
+
+const Image = PublicImage
 
 export function MusicSearchDialog({ variant = 'default', label = '搜索专辑、歌曲、现场' }: Readonly<MusicSearchDialogProps>) {
   const [mounted, setMounted] = useState(false)

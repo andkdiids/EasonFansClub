@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { SuperAdminUserActions } from '@/components/SuperAdminUserActions'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 
@@ -22,6 +23,7 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   })
   if (!user) notFound()
   const nickname = user.Profile?.displayName || user.nickname
+  if (user.Profile) user.Profile.avatarUrl = publicImageUrl(user.Profile.avatarUrl)
   const details = [['UID', formatUid(user.uid)], ['用户名', user.username], ['角色', user.role], ['状态', user.status], ['邮箱', user.email || '未绑定'], ['手机', user.phone || '未绑定'], ['等级', `Lv.${user.level}`], ['挂号费', String(user.points)]]
 
   return <><main className="mx-auto max-w-5xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">

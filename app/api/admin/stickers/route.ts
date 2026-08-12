@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { getAdminStickers, getHotStickers, createOfficialSticker, type AdminStickerFilter } from '@/lib/sticker-center'
 import {
   uploadStickerImage,
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
       category,
       type: result.type,
     })
-    return NextResponse.json({ sticker }, { status: 201 })
+    return NextResponse.json({ sticker: { ...sticker, url: toPublicMediaUrl(sticker.url) || sticker.url } }, { status: 201 })
   } catch (error) {
     console.error('[admin.sticker.create]', error)
     const failure = getStickerUploadErrorResponse(error)

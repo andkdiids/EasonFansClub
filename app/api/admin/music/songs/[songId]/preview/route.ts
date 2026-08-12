@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { NextResponse } from 'next/server'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { ensureAutoQuestionForSong } from '@/lib/guess-song-auto'
 import { MusicMediaStorageError, uploadMusicMedia } from '@/lib/music-media-storage'
 import {
@@ -136,7 +137,7 @@ async function uploadPreview(request: Request, { params }: { params: Promise<{ s
     console.info('[music-preview.complete]', { songId, sourceStored: true, guessClip })
     return NextResponse.json({
       success: true,
-      previewUrl,
+      previewUrl: toPublicMediaUrl(previewUrl) || previewUrl,
       previewDuration: processed.previewDuration,
       sourceDuration: Math.round(processed.durationMs / 100) / 10,
       sourceStored: true,

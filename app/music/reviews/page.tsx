@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +16,10 @@ export default async function AlbumReviewsPage() {
     }),
     getSiteAppearance(),
   ])
+  for (const review of reviews) {
+    review.coverUrl = toPublicMediaUrl(review.coverUrl)
+    review.MusicAlbum.coverUrl = toPublicMediaUrl(review.MusicAlbum.coverUrl)
+  }
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music" className="text-sm font-black text-sky-300/80">← 返回 EasMusic</Link>
     <header className="py-12 sm:py-16">

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
 
@@ -14,6 +15,14 @@ export async function GET() {
   })
 
   return NextResponse.json({
-    albums: albums.map(({ MusicSong, ...album }) => ({ ...album, songs: MusicSong })),
+    albums: albums.map(({ MusicSong, ...album }) => ({
+      ...album,
+      coverUrl: toPublicMediaUrl(album.coverUrl),
+      songs: MusicSong.map((song) => ({
+        ...song,
+        coverUrl: toPublicMediaUrl(song.coverUrl),
+        previewUrl: toPublicMediaUrl(song.previewUrl),
+      })),
+    })),
   })
 }
