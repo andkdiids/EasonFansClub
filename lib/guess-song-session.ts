@@ -924,7 +924,8 @@ export async function answerGuessSongQuestion(input: {
   }
   let outcome: AnswerOutcome
   try {
-    outcome = await prisma.$transaction<AnswerOutcome>(async (tx) => {
+    outcome = await prisma.$transaction(
+      async (tx) => {
     const question = await tx.guessSongSessionQuestion.findUnique({
       where: { publicId: input.publicQuestionId },
       include: {
@@ -1084,7 +1085,11 @@ export async function answerGuessSongQuestion(input: {
       ...getGuessSongAnswerDetails(question.GuessSongQuestion),
       awardedScore,
     }
-    })
+      },
+      {
+        timeout: 15000,
+      },
+    )
   } catch (error) {
     if (error instanceof GuessSongServiceError && error.code === 'QUESTION_ATTEMPT_TOKEN_INVALID') {
       const risk = await GuessSongRiskService.assess({
