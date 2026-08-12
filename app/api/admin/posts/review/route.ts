@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { buildPostReviewUpdate, isPostModerationStatus } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -120,9 +121,14 @@ export async function PATCH(request: Request) {
       if (updated.moderationStatus === 'APPROVED' && current.moderationStatus !== 'APPROVED') {
         await tx.friendActivity.create({ data: { actorId: current.authorId, type: 'POST', content: current.title, targetUrl: `/posts/${current.id}` } })
       }
-      return { post: updated, previousStatus: current.moderationStatus }
+      return {
+        post: updated,
+        previousStatus: current.moderationStatus,
+        notificationRecipientIds: statusChanged ? [guard.user.id, current.authorId] : [],
+      }
     })
     const post = result.post
+    emitRealtimeMany(result.notificationRecipientIds, 'notification')
     revalidatePath('/community')
     revalidatePath('/forum')
     revalidatePath('/admin/posts/review')

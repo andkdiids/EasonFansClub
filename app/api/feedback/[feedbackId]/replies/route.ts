@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { feedbackInclude, parseFeedbackAttachments, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
@@ -64,5 +65,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
     })
   })
 
+  void emitRealtimeToAdmins('feedback', { feedbackId })
   return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '回复已发送' })
 }

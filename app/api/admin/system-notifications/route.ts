@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { broadcastRealtimeChange } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import {
   parseSystemNotificationType,
@@ -104,6 +105,7 @@ export async function POST(request: Request) {
     },
     select: systemNotificationSelect,
   })
+  if (published && type !== 'UPDATE') broadcastRealtimeChange('notification')
 
   return NextResponse.json({ notification: serializeSystemNotification(notification), message: published ? '通知已发布' : '通知草稿已保存' }, { status: 201 })
 }
@@ -174,6 +176,7 @@ export async function PATCH(request: Request) {
   if (notification.type === 'UPDATE' && !notification.version) {
     return jsonError('更新日志必须填写版本号')
   }
+  if (notification.type !== 'UPDATE') broadcastRealtimeChange('notification')
 
   return NextResponse.json({ notification: serializeSystemNotification(notification), message: '通知已保存' })
 }
@@ -187,5 +190,6 @@ export async function DELETE(request: Request) {
   if (!id) return jsonError('通知不存在')
 
   await prisma.systemNotification.delete({ where: { id } })
+  broadcastRealtimeChange('notification')
   return NextResponse.json({ ok: true, message: '通知已删除' })
 }

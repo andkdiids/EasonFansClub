@@ -37,7 +37,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
     let cancelled = false
     let closeTimer: number | undefined
 
-    async function poll() {
+    async function loadPopup() {
       if (document.visibilityState === 'hidden') return
       const response = await fetch('/api/notifications/popup', { cache: 'no-store' }).catch(() => null)
       if (!response?.ok || cancelled) return
@@ -52,13 +52,23 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
       closeTimer = window.setTimeout(() => setToast(null), 10_000)
     }
 
-    const initialTimer = window.setTimeout(poll, 12_000)
-    const interval = window.setInterval(poll, 45_000)
+    const onRealtimeEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; changed?: string[]; source?: string }>).detail
+      const changed = detail?.changed || []
+      if (detail?.type === 'notification-changed' || changed.includes('notification') || changed.includes('friend-request') || changed.includes('feedback')) {
+        void loadPopup()
+      }
+    }
+
+    // A single bootstrap read keeps the existing toast behaviour after login;
+    // subsequent reads happen only after a server-pushed change event.
+    const initialTimer = window.setTimeout(() => void loadPopup(), 1000)
+    window.addEventListener('realtime:event', onRealtimeEvent)
     return () => {
       cancelled = true
       window.clearTimeout(initialTimer)
-      window.clearInterval(interval)
       window.clearTimeout(closeTimer)
+      window.removeEventListener('realtime:event', onRealtimeEvent)
     }
   }, [enabled])
 

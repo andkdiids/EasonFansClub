@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import sharp from 'sharp'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import {
   convertMusicCoverToWebp,
@@ -6,6 +7,8 @@ import {
   MUSIC_COVER_MAX_WIDTH,
   MUSIC_COVER_QUALITY,
 } from '@/lib/music-cover'
+import { createImageVariants } from '@/lib/image-webp'
+import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 import { MusicMediaStorageError, uploadMusicMedia } from '@/lib/music-media-storage'
 import { isSupportedMusicCoverFile } from '@/lib/music-upload-constraints'
 import { prisma } from '@/lib/prisma'
@@ -59,14 +62,26 @@ async function uploadCover(request: Request) {
         : await prisma.musicConcert.findUnique({ where: { id: entityId }, select: { id: true } })
   if (!exists) return failure(404, 'TARGET_NOT_FOUND', '封面目标不存在')
 
+  let rawBuffer: Buffer
   let output: Buffer
+  let generated: Awaited<ReturnType<typeof createImageVariants>>
   const processingStartedAt = Date.now()
   try {
-    output = await convertMusicCoverToWebp(Buffer.from(await file.arrayBuffer()))
+    rawBuffer = Buffer.from(await file.arrayBuffer())
+    const rawMetadata = await sharp(rawBuffer, { failOn: 'none', limitInputPixels: 40_000_000 }).metadata()
+    const preservesAlpha = rawMetadata.hasAlpha === true
+    output = preservesAlpha ? rawBuffer : await convertMusicCoverToWebp(rawBuffer)
+    generated = await createImageVariants(output, {
+      sourceMaxWidth: MUSIC_COVER_MAX_WIDTH,
+      sourceQuality: MUSIC_COVER_QUALITY,
+      variants: ['thumb-sm', 'thumb-md', 'card', 'large'],
+    })
     console.info('[music-cover.processed]', {
       entityType,
       entityId,
       outputSize: output.byteLength,
+      preservesAlpha,
+      variantSizes: Object.fromEntries(Object.entries(generated.variants).map(([key, body]) => [key, body.byteLength])),
       elapsedMs: Date.now() - processingStartedAt,
     })
   } catch (error) {
@@ -78,10 +93,22 @@ async function uploadCover(request: Request) {
   }
 
   const folder = entityType === 'album' ? 'albums' : entityType === 'song' ? 'songs' : entityType === 'tour' ? 'tours' : 'concerts'
-  const objectPath = `music-cover/${folder}/${entityId}/cover.webp`
+  const objectPath = `music-cover/${folder}/${entityId}/source.webp`
   try {
     const uploadStartedAt = Date.now()
-    const objectUrl = await uploadMusicMedia({ kind: 'cover', key: objectPath, body: output, contentType: 'image/webp' })
+    const originalContentType = file.type === 'image/png'
+      ? 'image/png'
+      : file.type === 'image/webp'
+        ? 'image/webp'
+        : 'image/jpeg'
+    const uploadResult = await uploadImageVariantFamily({
+      sourceObjectPath: objectPath,
+      original: rawBuffer,
+      originalContentType,
+      generated,
+      upload: ({ key, body, contentType }) => uploadMusicMedia({ kind: 'cover', key, body, contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp' }),
+    })
+    const objectUrl = uploadResult.sourceUrl
     console.info('[music-cover.cos-complete]', {
       entityType,
       entityId,

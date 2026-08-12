@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -25,11 +26,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
   const readAt = participant.lastReadAt && participant.lastReadAt > visibleMessage.createdAt
     ? participant.lastReadAt
     : visibleMessage.createdAt
+  let updated = false
   if (!participant.lastReadAt || readAt > participant.lastReadAt) {
     await prisma.conversationParticipant.update({
       where: { id: participant.id },
       data: { lastReadAt: readAt, isDeleted: false },
     })
+    updated = true
   }
+  if (updated) emitRealtime(user.id, 'message', { conversationId })
   return NextResponse.json({ readAt }, { headers: privateHeaders })
 }

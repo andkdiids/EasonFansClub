@@ -2,6 +2,8 @@
 
 import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, type TouchEvent, type WheelEvent } from 'react'
+import { publicImageOriginalUrl, publicImageVariantUrl } from '@/lib/image-variants'
+import { publicImageUrl } from '@/lib/images'
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 4
@@ -13,11 +15,13 @@ function clampZoom(value: number) {
 export function ImageViewer({
   src,
   alt,
+  previewSrc,
   imageClassName = 'h-auto max-h-[32rem] w-full object-contain',
   buttonClassName = 'block w-full cursor-zoom-in overflow-hidden bg-slate-100 text-left',
 }: Readonly<{
   src: string
   alt: string
+  previewSrc?: string
   imageClassName?: string
   buttonClassName?: string
 }>) {
@@ -25,6 +29,9 @@ export function ImageViewer({
   const [zoom, setZoom] = useState(1)
   const pinchDistanceRef = useRef<number | null>(null)
   const pinchZoomRef = useRef(1)
+  const publicSrc = publicImageUrl(src) || src
+  const renderPreviewSrc = previewSrc || publicImageVariantUrl(publicSrc, 'card') || publicSrc
+  const renderOriginalSrc = publicImageOriginalUrl(publicSrc) || publicSrc
 
   useEffect(() => {
     if (!open) return
@@ -99,7 +106,7 @@ export function ImageViewer({
           {/* The original URL is rendered directly so the viewer never downgrades image quality. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={src}
+            src={renderOriginalSrc}
             alt={alt}
             draggable={false}
             onDoubleClick={() => setZoom((value) => value === 1 ? 2 : 1)}
@@ -116,7 +123,7 @@ export function ImageViewer({
     <>
       <button type="button" onClick={() => setOpen(true)} className={buttonClassName} aria-label={`查看大图：${alt}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} draggable={false} className={imageClassName} />
+        <img src={renderPreviewSrc} alt={alt} draggable={false} loading="lazy" className={imageClassName} />
       </button>
       {viewer}
     </>

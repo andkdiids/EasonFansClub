@@ -9,6 +9,7 @@ import { getFriendIds } from '@/lib/friends'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,13 +48,17 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   }
   if (notificationTargetDate && notificationMessageId) {
     const dateKey = formatBeijingDate(notificationTargetDate)
-    await markPersonalNotificationsForTargetRead({
+    const markedNotifications = await markPersonalNotificationsForTargetRead({
       userId: sessionUser.id,
       linkPrefix: notificationFocusId
         ? `/checkin?date=${dateKey}&message=${notificationMessageId}&focus=${notificationFocusId}`
         : `/checkin?date=${dateKey}&message=${notificationMessageId}`,
       types: notificationFocusId ? ['REPLY', 'LIKE'] : ['LIKE'],
-    }).catch((error) => console.warn('[checkin:notifications:mark-read-failed]', { messageId: notificationMessageId, focusId: notificationFocusId, error }))
+    }).catch((error) => {
+      console.warn('[checkin:notifications:mark-read-failed]', { messageId: notificationMessageId, focusId: notificationFocusId, error })
+      return 0
+    })
+    if (markedNotifications > 0) emitRealtime(sessionUser.id, 'notification')
   }
   const nextDate = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000)
   const today = startOfLocalDay()

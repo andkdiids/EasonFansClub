@@ -1,16 +1,51 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { RealtimeClient, type RealtimeClientStatus, type RealtimeEventSource } from '@/lib/realtime-client'
+import { isRealtimeEvent, type RealtimeEvent } from '@/lib/realtime-protocol'
 import type { UnreadSummary } from '@/lib/notifications'
 
-const POLL_INTERVAL_MS = 30_000
+const emptySummary: UnreadSummary = {
+  notifications: 0,
+  system: 0,
+  replies: 0,
+  likes: 0,
+  feedbackReplies: 0,
+  feedback: 0,
+  friendRequests: 0,
+  directMessages: 0,
+  messages: 0,
+  total: 0,
+}
+
+const tabPresenceIntervalMs = 5000
+const tabPresenceTimeoutMs = 15_000
 
 type NotificationContextValue = {
   summary: UnreadSummary
   refresh: () => Promise<void>
+  realtimeStatus: RealtimeClientStatus
 }
 
+type RealtimeBrowserEvent = RealtimeEvent & {
+  source: RealtimeEventSource
+}
+
+type RealtimeCoordinationMessage = {
+  kind: 'presence' | 'event' | 'status' | 'refresh'
+  tabId: string
+  event?: RealtimeEvent
+  source?: RealtimeEventSource
+  status?: RealtimeClientStatus
+}
+
+const initialStatus: RealtimeClientStatus = { state: 'idle', failureCount: 0, fallbackActive: false }
 const NotificationContext = createContext<NotificationContextValue | null>(null)
+
+function createTabId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 
 export function NotificationProvider({
   children,
@@ -22,92 +57,162 @@ export function NotificationProvider({
   initialSummary: UnreadSummary
 }) {
   const [summary, setSummary] = useState(initialSummary)
-  const requestRef = useRef<Promise<void> | null>(null)
-  const controllerRef = useRef<AbortController | null>(null)
-
-  const refresh = useCallback(() => {
-    if (!userId || document.visibilityState !== 'visible') return Promise.resolve()
-    if (requestRef.current) return requestRef.current
-
-    const request = (async () => {
-      const controller = new AbortController()
-      controllerRef.current = controller
-      if (process.env.NODE_ENV === 'development') console.debug('[notification poll]', Date.now())
-      try {
-        const response = await fetch('/api/notifications/unread-summary', {
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-        if (!response.ok) return
-        const next = await response.json() as UnreadSummary
-        if (typeof next.total === 'number') setSummary(next)
-      } catch {
-        // A cancelled or temporarily unavailable refresh must not create another poller.
-      } finally {
-        if (controllerRef.current === controller) controllerRef.current = null
-      }
-    })()
-
-    requestRef.current = request
-    void request.finally(() => {
-      if (requestRef.current === request) requestRef.current = null
-    })
-    return request
-  }, [userId])
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeClientStatus>(initialStatus)
+  const tabIdRef = useRef('')
+  const initialSummaryRef = useRef(initialSummary)
+  const latestRealtimeAtRef = useRef(0)
 
   useEffect(() => {
-    setSummary(initialSummary)
+    initialSummaryRef.current = initialSummary
   }, [initialSummary])
 
   useEffect(() => {
-    if (!userId) return
-    let timer: number | null = null
-    const stopPolling = () => {
-      if (timer === null) return
-      window.clearInterval(timer)
-      timer = null
+    setSummary(userId ? initialSummaryRef.current : emptySummary)
+  }, [userId])
+
+  useEffect(() => {
+    if (!userId) {
+      setRealtimeStatus(initialStatus)
+      return
     }
-    const startPolling = () => {
-      if (timer !== null || document.visibilityState !== 'visible') return
-      timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
-    }
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') {
-        stopPolling()
-        return
-      }
-      startPolling()
-      void refresh()
-    }
-    const onRefresh = () => void refresh()
-    const channel = 'BroadcastChannel' in window
+
+    const tabId = tabIdRef.current || (tabIdRef.current = createTabId())
+    const realtimeChannel = 'BroadcastChannel' in window
+      ? new BroadcastChannel(`eason-realtime:${userId}`)
+      : null
+    const privateChannel = 'BroadcastChannel' in window
       ? new BroadcastChannel(`eason-private-sync:${userId}`)
       : null
-    if (channel) {
-      channel.onmessage = (event) => {
-        if (event.data?.userId !== userId) return
-        if (event.data?.type === 'logout') {
+    const peers = new Map<string, number>([[tabId, Date.now()]])
+    let leaderId = ''
+    let isLeader = !realtimeChannel
+    let presenceTimer: number | null = null
+
+    const post = (message: RealtimeCoordinationMessage) => realtimeChannel?.postMessage(message)
+    const announcePresence = () => {
+      peers.set(tabId, Date.now())
+      post({ kind: 'presence', tabId })
+    }
+
+    const applyEvent = (event: RealtimeEvent, source: RealtimeEventSource) => {
+      const eventTime = Date.parse(event.updatedAt)
+      if (Number.isFinite(eventTime) && eventTime < latestRealtimeAtRef.current) return
+      if (Number.isFinite(eventTime)) latestRealtimeAtRef.current = eventTime
+      if (event.type === 'unread-summary') setSummary(event.summary)
+      window.dispatchEvent(new CustomEvent<RealtimeBrowserEvent>('realtime:event', {
+        detail: { ...event, source },
+      }))
+    }
+
+    const client = new RealtimeClient({
+      onEvent: (event, source) => {
+        applyEvent(event, source)
+        if (isLeader) post({ kind: 'event', tabId, event, source })
+      },
+      onStatus: (status) => {
+        if (isLeader) post({ kind: 'status', tabId, status })
+        setRealtimeStatus(status)
+      },
+    })
+
+    const updateLeadership = () => {
+      const now = Date.now()
+      for (const [peerId, lastSeenAt] of peers) {
+        if (peerId !== tabId && now - lastSeenAt > tabPresenceTimeoutMs) peers.delete(peerId)
+      }
+      const nextLeaderId = Array.from(peers.keys()).sort()[0] || tabId
+      if (nextLeaderId === leaderId) return
+      leaderId = nextLeaderId
+      isLeader = leaderId === tabId
+      if (isLeader) client.start()
+      else client.stop()
+    }
+
+    const onRealtimeMessage = (message: MessageEvent<RealtimeCoordinationMessage>) => {
+      const data = message.data
+      if (!data || data.tabId === tabId) return
+      if (data.kind === 'presence') {
+        peers.set(data.tabId, Date.now())
+        updateLeadership()
+        return
+      }
+      if (data.kind === 'event' && data.event && isRealtimeEvent(data.event)) {
+        if (data.source) applyEvent(data.event, data.source)
+        return
+      }
+      if (data.kind === 'status' && data.tabId === leaderId && data.status) {
+        setRealtimeStatus(data.status)
+        return
+      }
+      if (data.kind === 'refresh' && isLeader && !client.isConnected) {
+        void client.requestSummary('manual')
+      }
+    }
+
+    const startIfLeader = () => {
+      if (isLeader) client.start()
+    }
+
+    const refresh = async () => {
+      if (!userId) return
+      if (client.isConnected) return
+      if (!isLeader) {
+        post({ kind: 'refresh', tabId })
+        return
+      }
+      await client.requestSummary('manual')
+    }
+
+    const onVisibilityChange = () => {
+      announcePresence()
+      if (document.visibilityState === 'visible' && isLeader) client.reconnectNow()
+    }
+    const onOnline = () => {
+      if (isLeader) client.reconnectNow()
+    }
+    const onLocalRefresh = () => void refresh()
+
+    realtimeChannel?.addEventListener('message', onRealtimeMessage)
+    if (privateChannel) {
+      privateChannel.onmessage = (event) => {
+        if (event.data?.type === 'logout' && event.data?.userId === userId) {
+          client.stop()
+          setSummary(emptySummary)
           window.location.reload()
           return
         }
         void refresh()
       }
     }
-
-    void refresh()
-    startPolling()
-    window.addEventListener('unread-summary:refresh', onRefresh)
+    window.addEventListener('unread-summary:refresh', onLocalRefresh)
     document.addEventListener('visibilitychange', onVisibilityChange)
-    return () => {
-      controllerRef.current?.abort()
-      channel?.close()
-      stopPolling()
-      window.removeEventListener('unread-summary:refresh', onRefresh)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-    }
-  }, [refresh, userId])
+    window.addEventListener('online', onOnline)
 
-  const value = useMemo(() => ({ summary, refresh }), [refresh, summary])
+    announcePresence()
+    updateLeadership()
+    startIfLeader()
+    presenceTimer = window.setInterval(() => {
+      announcePresence()
+      updateLeadership()
+    }, tabPresenceIntervalMs)
+
+    return () => {
+      if (presenceTimer !== null) window.clearInterval(presenceTimer)
+      client.stop()
+      realtimeChannel?.removeEventListener('message', onRealtimeMessage)
+      realtimeChannel?.close()
+      privateChannel?.close()
+      window.removeEventListener('unread-summary:refresh', onLocalRefresh)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [userId])
+
+  const refresh = useCallback(async () => {
+    window.dispatchEvent(new Event('unread-summary:refresh'))
+  }, [])
+
+  const value = useMemo(() => ({ summary, refresh, realtimeStatus }), [realtimeStatus, refresh, summary])
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>
 }
 

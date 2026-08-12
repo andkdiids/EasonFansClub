@@ -7,6 +7,7 @@ import {
   STICKER_MAX_FILE_SIZE,
   STICKER_UPLOAD_ACCEPT,
 } from '@/lib/sticker-upload-constraints'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type AdminSticker = {
   id: string
@@ -225,7 +226,7 @@ function ManagePanel({
           {stickers.map((s) => (
             <div key={s.id} className={`rounded-2xl border p-3 ${s.isHidden ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-white'}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.url} alt={s.name || '表情'} className="mx-auto h-20 w-20 rounded-lg bg-white object-contain" />
+              <img src={publicImageVariantUrl(s.url, 'thumb-sm') || s.url} alt={s.name || '表情'} className="mx-auto h-20 w-20 rounded-lg bg-white object-contain" loading="lazy" />
               <div className="mt-2 space-y-1 text-center">
                 <p className="truncate text-xs font-black text-slate-700">{s.name || '(未命名)'}</p>
                 <p className="text-[10px] font-bold text-slate-400">
@@ -386,7 +387,7 @@ function HotPanel({
             <li key={s.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3">
               <span className="w-6 text-center text-sm font-black text-brand-700">{i + 1}</span>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.url} alt={s.name || '表情'} className="h-12 w-12 rounded-lg bg-white object-contain" />
+              <img src={publicImageVariantUrl(s.url, 'thumb-sm') || s.url} alt={s.name || '表情'} className="h-12 w-12 rounded-lg bg-white object-contain" loading="lazy" />
               <span className="text-sm font-bold text-slate-700">{s.name || '(未命名)'}</span>
             </li>
           ))}

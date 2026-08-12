@@ -70,9 +70,7 @@ export async function getSessionUserFromCookie() {
   return verifySessionToken(token)
 }
 
-export async function getCurrentUser() {
-  const sessionUser = await getSessionUserFromCookie()
-
+async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
   if (!sessionUser) return null
 
   const now = Date.now()
@@ -136,6 +134,20 @@ export async function getCurrentUser() {
     console.error('[auth.currentUser]', error)
     throw new AuthServiceUnavailableError(undefined, { cause: error })
   }
+}
+
+/**
+ * Resolve a session token outside a Next request context, such as the custom
+ * Node WebSocket upgrade handler. The token is only the first step: the user
+ * is looked up again so deleted, disabled, or otherwise inactive accounts are
+ * rejected before a realtime connection is bound to an id.
+ */
+export async function getCurrentUserFromSessionToken(token?: string) {
+  return getCurrentUserForSessionUser(await verifySessionToken(token))
+}
+
+export async function getCurrentUser() {
+  return getCurrentUserForSessionUser(await getSessionUserFromCookie())
 }
 
 export { getSessionCookieOptions, getSessionCookieDeletionOptions } from '@/lib/auth-cookie'

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
@@ -79,10 +80,11 @@ export async function POST(_request: Request, context: RouteContext) {
 
     const likeCount = await tx.replyLike.count({ where: { replyId } })
     await tx.reply.update({ where: { id: replyId }, data: { likeCount } })
-    return { isLiked: !existing, likeCount }
+    return { isLiked: !existing, likeCount, notifiedUserId: !existing && reply.authorId !== guard.user.id ? reply.authorId : null }
   })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
+  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }
 

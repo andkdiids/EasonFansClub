@@ -5,6 +5,7 @@ import { useRef, useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export function ReplyForm({
   postId,
@@ -111,7 +112,7 @@ export function ReplyForm({
       {pendingSticker ? (
         <div className="mb-3 flex items-center gap-3 rounded-xl border border-brand-100 bg-sky-50 px-3 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={pendingSticker.url} alt={pendingSticker.name || '表情'} className="h-10 w-10 rounded-lg bg-white object-contain" />
+          <img src={publicImageVariantUrl(pendingSticker.url, 'thumb-sm') || pendingSticker.url} alt={pendingSticker.name || '表情'} className="h-10 w-10 rounded-lg bg-white object-contain" />
           <span className="text-sm font-bold text-slate-600">已选择表情，点击发布发送</span>
           <button type="button" onClick={() => setPendingSticker(null)} className="ml-auto text-sm font-black text-slate-400 hover:text-red-500">移除</button>
         </div>

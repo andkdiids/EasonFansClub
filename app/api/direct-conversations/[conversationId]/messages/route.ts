@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
@@ -120,6 +121,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         select: messageSelect,
       })
       if (existing) {
+        emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
         return NextResponse.json({
           success: true,
           duplicate: true,
@@ -147,6 +149,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         return created
       })
       await recordStickerUsage(user.id, stickerId)
+      emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
       return NextResponse.json({
         success: true,
         duplicate: false,
@@ -188,6 +191,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     })
     if (existing) {
       if (existing.content !== content) return messageFailure(409, 'DUPLICATE_MESSAGE', '该消息标识已被其他内容使用')
+      emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
       return NextResponse.json({
         success: true,
         duplicate: true,
@@ -214,6 +218,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       })
       return created
     })
+    emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
     return NextResponse.json({
       success: true,
       duplicate: false,

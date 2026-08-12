@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { formatDate } from '@/lib/format'
-import { profileImageUrl, publicImageUrl } from '@/lib/images'
+import { profileImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { getTrendingPosts, type TrendingRange } from '@/lib/trending-posts'
 import { getCurrentUser } from '@/lib/auth'
@@ -57,7 +58,7 @@ export default async function TrendingPostsPage({
         <section className="space-y-3" aria-label={`近 ${range} 天热门帖子`}>
           {posts.map((post) => {
             const avatar = profileImageUrl(post.authorAvatarUrl)
-            const image = publicImageUrl(post.imageUrl)
+            const image = publicImageVariantUrl(post.imageUrl, 'card')
             return (
               <article key={post.id} className="relative grid min-w-0 gap-4 border border-sky-100 bg-white/85 p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px] sm:p-5">
                 <Link href={`/posts/${post.id}`} className="absolute inset-0 z-[1]" aria-label={`查看帖子：${post.title}`} />
@@ -71,7 +72,7 @@ export default async function TrendingPostsPage({
                   <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-bold text-slate-500">
                     <span className="flex items-center gap-2 text-brand-950">
                       <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                        {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : formatUid(post.authorUid).slice(0, 1)}
+                        {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt="" className="h-full w-full object-cover" loading="lazy" /> : formatUid(post.authorUid).slice(0, 1)}
                       </span>
                       {post.authorName}
                     </span>
@@ -81,7 +82,7 @@ export default async function TrendingPostsPage({
                     <span>浏览 {post.viewCount}</span>
                   </div>
                 </div>
-                {image ? <div className="pointer-events-none order-first h-40 overflow-hidden bg-sky-50 sm:order-none sm:h-full sm:min-h-36"><img src={image} alt="" className="h-full w-full object-cover" /></div> : null}
+                {image ? <div className="pointer-events-none order-first h-40 overflow-hidden bg-sky-50 sm:order-none sm:h-full sm:min-h-36"><img src={image} alt="" className="h-full w-full object-cover" loading="lazy" /></div> : null}
               </article>
             )
           })}

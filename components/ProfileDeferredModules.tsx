@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { getMood } from '@/lib/daily'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type CheckIn = { id: string; checkDate: string; mood: string | null; streakDay: number }
 type ReplyItem = { id: string; content: string; createdAt: string; authorName: string; authorAvatarUrl: string | null }
@@ -176,7 +177,7 @@ export function ProfileRecentMessages() {
                   {item.comments.length ? item.comments.map((reply) => (
                     <li key={reply.id} className="flex gap-2">
                       <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
-                        {reply.authorAvatarUrl ? <img src={reply.authorAvatarUrl} alt={reply.authorName} className="h-full w-full object-cover" /> : (reply.authorName || '匿').slice(0, 1)}
+                        {reply.authorAvatarUrl ? <img src={publicImageVariantUrl(reply.authorAvatarUrl, 'avatar-md') || reply.authorAvatarUrl} alt={reply.authorName} className="h-full w-full object-cover" loading="lazy" /> : (reply.authorName || '匿').slice(0, 1)}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">

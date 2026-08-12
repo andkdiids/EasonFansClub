@@ -3,7 +3,7 @@ import { BackButton } from '@/components/BackButton'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +31,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
     },
   })
   if (!item) notFound()
-  item.coverUrl = toPublicMediaUrl(item.coverUrl)
+  item.coverUrl = publicImageVariantUrl(item.coverUrl, 'large')
   const remarkMap = await loadFriendRemarkMap(user.id, item.CultureComment.map((comment) => comment.User.id))
 
   const facts = [
@@ -49,7 +49,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
         <BackButton fallbackHref="/culture" />
         <section className="overflow-hidden rounded-[36px] border border-sky-100 bg-white/82 shadow-xl shadow-sky-900/5">
           <div className="aspect-[16/8] bg-gradient-to-br from-sky-100 via-white to-cyan-50">
-            {item.coverUrl ? <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover" /> : null}
+            {item.coverUrl ? <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover" loading="eager" /> : null}
           </div>
           <div className="p-7 sm:p-10">
             <p className="text-sm font-black uppercase tracking-[0.22em] text-sky-700">{typeText[item.type] || item.type}</p>

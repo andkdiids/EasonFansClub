@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 const CASSETTE_COVER_PLACEHOLDER_SRC = '/easmusic/album-cover-placeholder.svg'
 
@@ -15,7 +15,7 @@ type CassetteCoverProps = Readonly<{
 }>
 
 export function CassetteCover({ src, alt, sizes, className, priority = false }: CassetteCoverProps) {
-  const normalizedSrc = toPublicMediaUrl(src)
+  const normalizedSrc = publicImageVariantUrl(src, sizes === '44px' ? 'thumb-sm' : 'thumb-md')
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
 
   useEffect(() => {

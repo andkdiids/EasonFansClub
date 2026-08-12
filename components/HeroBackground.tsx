@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from 'react'
 import { publicImageUrl } from '@/lib/images'
+import { publicHeroVariantUrl, publicImageVariantUrl } from '@/lib/image-variants'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
 import {
   resolveHeroMediaLayout,
@@ -120,15 +121,23 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
   const mediaAsset = resolveHeroMediaAsset(visual, device, fallbackImageUrl || '')
   const mediaType: HeroMediaType = mediaAsset?.mediaType || 'STATIC_IMAGE'
   const imageUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.imageUrl || '', cacheBust))
-  const mediaUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.mediaUrl || (mediaType === 'STATIC_IMAGE' ? mediaAsset?.imageUrl : ''), cacheBust))
-  const fallbackUrl = publicImageUrl(cacheBustedUrl(
+  const mediaBaseUrl = publicImageUrl(cacheBustedUrl(mediaAsset?.mediaUrl || (mediaType === 'STATIC_IMAGE' ? mediaAsset?.imageUrl : ''), cacheBust))
+  const mediaUrl = mediaType === 'ANIMATED_IMAGE'
+    ? publicHeroVariantUrl(mediaBaseUrl, device === 'mobile' ? 'card' : 'hero') || mediaBaseUrl
+    : mediaBaseUrl
+  const fallbackBaseUrl = publicImageUrl(cacheBustedUrl(
     mediaAsset?.posterUrl
       || (mediaType === 'VIDEO' ? mediaAsset?.imageUrl : '')
       || (isHomeHero ? '' : fallbackImageUrl)
-      || (mediaType !== 'STATIC_IMAGE' ? mediaAsset?.imageUrl : ''),
+      || (mediaType !== 'STATIC_IMAGE' ? mediaAsset?.imageUrl || mediaAsset?.mediaUrl : ''),
     cacheBust,
   ))
-  const staticUrl = mediaType === 'STATIC_IMAGE' ? mediaUrl || imageUrl : fallbackUrl
+  const fallbackUrl = mediaType === 'ANIMATED_IMAGE'
+    ? publicHeroVariantUrl(fallbackBaseUrl, 'large') || publicImageVariantUrl(fallbackBaseUrl, 'large') || fallbackBaseUrl
+    : publicImageVariantUrl(fallbackBaseUrl, 'large') || fallbackBaseUrl
+  const staticUrl = mediaType === 'STATIC_IMAGE'
+    ? publicHeroVariantUrl(mediaUrl || imageUrl, device === 'mobile' ? 'card' : 'hero') || mediaUrl || imageUrl
+    : fallbackUrl
   const shouldAnimate = isPageVisible && isInViewport && !reducedMotion && !videoFailed
   const hasAnimatedImagePoster = Boolean(mediaType === 'ANIMATED_IMAGE' && fallbackUrl && fallbackUrl !== mediaUrl)
   const settings = resolveHeroMediaSettings({
@@ -280,6 +289,8 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
         className="hero-background-layer hero-background-poster"
         src={fallbackUrl}
         alt=""
+        loading={priority ? 'eager' : 'lazy'}
+        decoding="async"
         style={posterStyle}
         onLoad={(event) => handleImageLoad(event, true)}
       /> : null}
@@ -316,6 +327,8 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
         className="hero-background-layer hero-background-poster"
         src={fallbackUrl || undefined}
         alt=""
+        loading={priority ? 'eager' : 'lazy'}
+        decoding="async"
         style={posterStyle}
         onLoad={(event) => handleImageLoad(event, true)}
       /> : null}
@@ -325,6 +338,8 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
         style={mediaStyle}
         src={mediaUrl}
         alt=""
+        loading={priority ? 'eager' : 'lazy'}
+        decoding="async"
         draggable={false}
         onLoad={handleImageLoad}
       />
@@ -339,6 +354,8 @@ export function HeroBackground({ visual, fallbackImageUrl, className = '', prior
       style={mediaStyle}
       src={staticUrl}
       alt=""
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
       draggable={false}
       onLoad={handleImageLoad}
     />

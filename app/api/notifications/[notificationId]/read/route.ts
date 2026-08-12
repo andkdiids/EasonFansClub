@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { markUnifiedNotificationReadWithState } from '@/lib/notifications'
+import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 
 export async function POST(request: Request, { params }: { params: Promise<{ notificationId: string }> }) {
@@ -14,6 +15,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ not
   if (!result.ok) {
     return NextResponse.json({ message: '通知不存在或无权访问' }, { status: 404 })
   }
+  emitRealtime(guard.user.id, 'notification')
   const readAt = result.readAt?.toISOString() || null
   return NextResponse.json({
     ok: true,

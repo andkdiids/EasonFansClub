@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -28,6 +29,7 @@ export async function POST(
   if (pack.status !== 'REJECTED') return NextResponse.json({ message: '只有被退回的表情包可以重新提交审核' }, { status: 403 })
 
   try {
+    let administratorIds: string[] = []
     await prisma.$transaction(async (tx) => {
       const current = await tx.stickerPack.findFirst({
         where: { id: packId, creatorId: guard.user.id, status: 'REJECTED', isOfficial: false },
@@ -51,6 +53,7 @@ export async function POST(
         where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
         select: { id: true },
       })
+      administratorIds = administrators.map((administrator) => administrator.id)
       if (administrators.length) {
         await tx.notification.createMany({
           data: administrators.map((administrator) => ({
@@ -67,6 +70,7 @@ export async function POST(
       }
     })
 
+    emitRealtimeMany(administratorIds, 'notification')
     revalidatePath('/profile/stickers')
     revalidatePath(`/profile/stickers/${packId}/edit`)
     revalidatePath('/admin/stickers')

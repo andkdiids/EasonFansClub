@@ -14,6 +14,7 @@ type InitialProfile = {
   }
   nickname: string
   avatarUrl: string
+  defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
   email: string

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import type { StorePackItem } from '@/lib/sticker-center'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type UploadPack = {
   id: string
@@ -80,7 +81,7 @@ export function MyStickerLibrary({
                 <Link href={`/stickers/${pack.id}`} className="block aspect-square overflow-hidden bg-slate-50">
                   {pack.coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={pack.coverUrl} alt={pack.name} className="h-full w-full object-cover" loading="lazy" />
+                    <img src={publicImageVariantUrl(pack.coverUrl, 'thumb-md') || pack.coverUrl} alt={pack.name} className="h-full w-full object-cover" loading="lazy" />
                   ) : (
                     <div className="flex h-full items-center justify-center text-5xl">😊</div>
                   )}
@@ -116,7 +117,7 @@ export function MyStickerLibrary({
               <div className="h-20 w-20 flex-none overflow-hidden rounded-xl bg-slate-50">
                 {pack.coverUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pack.coverUrl} alt={pack.name} className="h-full w-full object-cover" loading="lazy" />
+                  <img src={publicImageVariantUrl(pack.coverUrl, 'thumb-sm') || pack.coverUrl} alt={pack.name} className="h-full w-full object-cover" loading="lazy" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-3xl">😊</div>
                 )}

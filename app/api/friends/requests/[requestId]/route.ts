@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { decideFriendRequest } from '@/lib/friends'
 import { getFriendRequestNotificationKey } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
@@ -18,13 +19,13 @@ export async function PATCH(request: Request, context: RouteContext) {
         where: { id: requestId, senderId: user.id, status: 'PENDING' },
         select: { id: true, receiverId: true, createdAt: true },
       })
-      if (!pending) return false
+      if (!pending) return null
 
       const updated = await tx.friendRequest.updateMany({
         where: { id: pending.id, senderId: user.id, status: 'PENDING' },
         data: { status: 'CANCELLED' },
       })
-      if (!updated.count) return false
+      if (!updated.count) return null
 
       const exactNotification = await tx.notification.findFirst({
         where: {
@@ -53,9 +54,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       if (notification) {
         await tx.notification.update({ where: { id: notification.id }, data: { isRead: true, readAt: new Date() } })
       }
-      return true
+      return { receiverId: pending.receiverId }
     })
     if (!cancelled) return NextResponse.json({ message: '好友申请不存在或已处理' }, { status: 404 })
+    emitRealtimeMany([user.id, cancelled.receiverId], 'friend-request', { requestId })
     return NextResponse.json({ message: '好友申请已取消' })
   }
   const action = body?.action === 'accept' ? 'accept' : 'reject'

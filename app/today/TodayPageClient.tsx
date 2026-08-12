@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { formatCalendarDate, parseCalendarDate } from '@/lib/calendar-date'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export type TodayEventView = {
   id: string
@@ -103,7 +104,7 @@ export function TodayPageClient({ month, day, initialEvents }: { month: number; 
           {item.imageUrl ? (
             <div className="today-poster-image-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: '8px' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={item.imageUrl} alt={item.title} className="today-poster-image" style={{ display: 'block', maxWidth: '100%', maxHeight: '640px', width: 'auto', height: 'auto', objectFit: 'contain' }} loading="lazy" />
+              <img src={publicImageVariantUrl(item.imageUrl, 'card') || item.imageUrl} alt={item.title} className="today-poster-image" style={{ display: 'block', maxWidth: '100%', maxHeight: '640px', width: 'auto', height: 'auto', objectFit: 'contain' }} loading="lazy" />
             </div>
           ) : (
             <div className="today-poster-image today-poster-image-empty" style={{ height: '240px', background: 'linear-gradient(135deg,#e0f2fe,#f1f5f9)' }} />

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { profileImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type AdminUser = {
   id: string
@@ -276,7 +277,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
                   <td className="rounded-l-2xl px-3 py-3">
                     <div className="flex items-center gap-3">
                       <div className="grid size-11 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
-                        {profileImageUrl(user.avatarUrl) ? <img src={profileImageUrl(user.avatarUrl)!} alt="" className="size-full object-cover" /> : formatUid(user.uid).slice(0, 1)}
+                        {profileImageUrl(user.avatarUrl) ? <img src={publicImageVariantUrl(user.avatarUrl, 'avatar-md') || profileImageUrl(user.avatarUrl)!} alt="" className="size-full object-cover" loading="lazy" /> : formatUid(user.uid).slice(0, 1)}
                       </div>
                       <div>
                         <p className="font-black text-brand-950">{user.nickname}</p>
@@ -368,7 +369,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
               <div className="mt-5 space-y-4">
                 <div className="flex items-center gap-4 rounded-2xl bg-sky-50 p-4">
                   <div className="grid size-16 place-items-center overflow-hidden rounded-full bg-brand-950 text-xl font-black text-white">
-                    {profileImageUrl(preview.user.avatarUrl) ? <img src={profileImageUrl(preview.user.avatarUrl)!} alt="" className="size-full object-cover" /> : formatUid(preview.user.uid).slice(0, 1)}
+                    {profileImageUrl(preview.user.avatarUrl) ? <img src={publicImageVariantUrl(preview.user.avatarUrl, 'avatar-md') || profileImageUrl(preview.user.avatarUrl)!} alt="" className="size-full object-cover" loading="lazy" /> : formatUid(preview.user.uid).slice(0, 1)}
                   </div>
                   <div>
                     <p className="text-xl font-black text-brand-950">{preview.user.nickname}</p>

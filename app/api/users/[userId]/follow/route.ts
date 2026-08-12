@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -37,6 +38,7 @@ export async function POST(_request: Request, context: RouteContext) {
       link: `/users/${guard.user.id}`,
     },
   })
+  emitRealtime(userId, 'notification')
 
   return NextResponse.json({ followed: true })
 }

@@ -45,7 +45,7 @@ export async function uploadMusicMedia(params: {
   kind: MusicMediaKind
   key: string
   body: Buffer
-  contentType: 'image/webp' | 'audio/mpeg'
+  contentType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' | 'audio/mpeg'
 }) {
   const config = getConfig()
   const key = params.key.trim().replace(/^\/+/, '')

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { formatUid } from '@/lib/uid'
 import type { ProfileRecentMessage } from '@/lib/profile-page'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
 type PostItem = {
@@ -194,7 +195,7 @@ function ModuleContent({
                 {message.comments.length ? message.comments.map((comment) => (
                   <li key={comment.id} className="flex gap-2">
                     <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
-                      {comment.authorAvatarUrl ? <img src={comment.authorAvatarUrl} alt={comment.authorName} className="h-full w-full object-cover" /> : (comment.authorName || 'E').slice(0, 1)}
+                      {comment.authorAvatarUrl ? <img src={publicImageVariantUrl(comment.authorAvatarUrl, 'avatar-md') || comment.authorAvatarUrl} alt={comment.authorName} className="h-full w-full object-cover" loading="lazy" /> : (comment.authorName || 'E').slice(0, 1)}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">

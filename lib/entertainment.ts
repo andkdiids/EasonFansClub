@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 
 export const EMPTY_LYRIC_MESSAGE = '今日处方暂未开具，请等待管理员补充歌词库'
+export const PRESCRIPTION_HISTORY_PAGE_SIZE = 12
 
 const dailyDrawInclude = {
   LyricPrescription: {
@@ -21,6 +22,31 @@ const dailyDrawInclude = {
 type DailyDrawWithLyric = Prisma.EntertainmentDailyDrawGetPayload<{
   include: typeof dailyDrawInclude
 }>
+
+const dailyDrawHistoryInclude = {
+  PointLog: {
+    select: {
+      points: true,
+      action: true,
+      createdAt: true,
+    },
+  },
+} satisfies Prisma.EntertainmentDailyDrawInclude
+
+type DailyDrawHistoryRow = Prisma.EntertainmentDailyDrawGetPayload<{
+  include: typeof dailyDrawHistoryInclude
+}>
+
+export type DailyPrescriptionHistoryRecord = {
+  id: string
+  dateKey: string
+  points: number
+  rewarded: boolean
+  rewardFromLedger: boolean
+  prescriptionCode: string
+  issuedAtBeijing: string
+  lyric: { text: string; songTitle: string; albumTitle: string | null } | null
+}
 
 export type LyricCandidate = {
   id: string
@@ -90,6 +116,52 @@ export async function getEntertainmentDailyDrawStatus(userId: string, now = new 
     availableLyricCount,
     draw: draw ? serializeDailyDraw(draw, user.points) : null,
     totalPoints: user.points,
+  }
+}
+
+function serializeDailyDrawHistory(draw: DailyDrawHistoryRow): DailyPrescriptionHistoryRecord {
+  const points = draw.PointLog?.points ?? draw.points
+  const lyric = draw.lyricText && draw.songTitle
+    ? { text: draw.lyricText, songTitle: draw.songTitle, albumTitle: draw.albumTitle }
+    : null
+
+  return {
+    id: draw.id,
+    dateKey: draw.dateKey,
+    points,
+    rewarded: points > 0,
+    rewardFromLedger: Boolean(draw.PointLog),
+    prescriptionCode: draw.prescriptionCode,
+    issuedAtBeijing: formatBeijingDateTimeMinute(draw.createdAt),
+    lyric,
+  }
+}
+
+export async function getEntertainmentDailyDrawHistory(userId: string, requestedPage = 1) {
+  const total = await prisma.entertainmentDailyDraw.count({ where: { userId } })
+  const totalPages = Math.max(1, Math.ceil(total / PRESCRIPTION_HISTORY_PAGE_SIZE))
+  const page = Math.min(
+    totalPages,
+    Math.max(1, Number.isSafeInteger(requestedPage) ? requestedPage : 1),
+  )
+  const draws = await prisma.entertainmentDailyDraw.findMany({
+    where: { userId },
+    orderBy: [{ dateKey: 'desc' }, { createdAt: 'desc' }],
+    skip: (page - 1) * PRESCRIPTION_HISTORY_PAGE_SIZE,
+    take: PRESCRIPTION_HISTORY_PAGE_SIZE,
+    include: dailyDrawHistoryInclude,
+  })
+
+  return {
+    records: draws.map(serializeDailyDrawHistory),
+    pagination: {
+      page,
+      pageSize: PRESCRIPTION_HISTORY_PAGE_SIZE,
+      total,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages,
+    },
   }
 }
 

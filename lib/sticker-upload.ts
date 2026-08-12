@@ -8,6 +8,8 @@ import {
   STICKER_UPLOAD_FAILED_MESSAGE,
   STICKER_UPLOAD_MIME_TYPES,
 } from '@/lib/sticker-upload-constraints'
+import { createAnimatedImageVariants, createImageVariants } from '@/lib/image-webp'
+import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 
 export {
   STICKER_FILE_TOO_LARGE_MESSAGE,
@@ -41,6 +43,14 @@ const ANIMATED_STICKER_COMPRESSION_PROFILES = [
   { width: 240, quality: 70 },
   { width: 200, quality: 60 },
 ] as const
+
+function imageContentType(format: string) {
+  if (format === 'jpeg' || format === 'jpg') return 'image/jpeg'
+  if (format === 'png') return 'image/png'
+  if (format === 'gif') return 'image/gif'
+  if (format === 'avif') return 'image/avif'
+  return 'image/webp'
+}
 
 export type StickerUploadErrorCode = 'FILE_TOO_LARGE' | 'UNSUPPORTED_FORMAT' | 'PROCESSING_FAILED' | 'SERVER_ERROR'
 
@@ -486,15 +496,34 @@ export async function uploadStickerImage(params: {
     const outputFormat: 'webp' | 'gif' | 'png' = outputIsAnimatedWebp ? 'webp' : sourceFormat
     const outputBody = outputFormat === 'webp' ? output : buffer
     const contentType = outputFormat === 'gif' ? 'image/gif' : outputFormat === 'png' ? 'image/png' : 'image/webp'
-    const objectPath = `stickers/${ownerId}/${randomUUID()}.${outputFormat}`
-    const url = await uploadSiteImage({ key: objectPath, body: outputBody, contentType })
-    return { url, format: outputFormat, type: 'GIF', isAnimated: true }
+    const generated = await createAnimatedImageVariants(outputBody, {
+      sourceMaxWidth: 320,
+      variants: ['thumb-sm', 'thumb-md', 'card'],
+    })
+    const family = await uploadImageVariantFamily({
+      sourceObjectPath: `stickers/${ownerId}/${randomUUID()}/source.webp`,
+      original: buffer,
+      originalContentType: imageContentType(format),
+      generated,
+      upload: ({ key, body, contentType: nextContentType }) => uploadSiteImage({ key, body, contentType: nextContentType }),
+    })
+    return { url: family.sourceUrl, format: 'webp', type: 'GIF', isAnimated: true }
   }
 
   const output = await convertStaticStickerToWebp(buffer)
-  const objectPath = `stickers/${ownerId}/${randomUUID()}.webp`
-  const url = await uploadSiteImage({ key: objectPath, body: output })
-  return { url, format: 'webp', type: 'STATIC', isAnimated: false }
+  const generated = await createImageVariants(output, {
+    sourceMaxWidth: STICKER_STATIC_MAX_WIDTH,
+    sourceQuality: 85,
+    variants: ['thumb-sm', 'thumb-md', 'card'],
+  })
+  const family = await uploadImageVariantFamily({
+    sourceObjectPath: `stickers/${ownerId}/${randomUUID()}/source.webp`,
+    original: buffer,
+    originalContentType: imageContentType(format),
+    generated,
+    upload: ({ key, body, contentType }) => uploadSiteImage({ key, body, contentType }),
+  })
+  return { url: family.sourceUrl, format: 'webp', type: 'STATIC', isAnimated: false }
 }
 
 export async function uploadStickerPackCover(params: {
@@ -509,7 +538,19 @@ export async function uploadStickerPackCover(params: {
   if (!STATIC_COVER_FORMATS.has(format) || isAnimatedSticker(format, metadata, buffer)) {
     throw new StickerUploadError('UNSUPPORTED_FORMAT', '封面必须使用静态图片')
   }
-  const output = await convertStaticStickerToWebp(buffer, { flatten: true })
-  const objectPath = `stickers/covers/${ownerId}/${randomUUID()}.webp`
-  return uploadSiteImage({ key: objectPath, body: output })
+  const preservesAlpha = metadata.hasAlpha === true
+  const output = await convertStaticStickerToWebp(buffer, preservesAlpha ? undefined : { flatten: true })
+  const generated = await createImageVariants(output, {
+    sourceMaxWidth: STICKER_STATIC_MAX_WIDTH,
+    sourceQuality: 85,
+    variants: ['thumb-sm', 'thumb-md', 'card'],
+  })
+  const family = await uploadImageVariantFamily({
+    sourceObjectPath: `stickers/covers/${ownerId}/${randomUUID()}/source.webp`,
+    original: buffer,
+    originalContentType: imageContentType(format),
+    generated,
+    upload: ({ key, body, contentType }) => uploadSiteImage({ key, body, contentType }),
+  })
+  return family.sourceUrl
 }

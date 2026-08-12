@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
+import sharp from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { requireUser } from '@/lib/security'
 import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
-import { normalizeImageToWebp, ImageNormalizeError } from '@/lib/image-webp'
+import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
+import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage'
 
 export const runtime = 'nodejs'
@@ -14,6 +16,13 @@ function errorDetail(error: unknown) {
 
 function developmentUploadMessage(detail: string) {
   return process.env.NODE_ENV === 'development' ? `图片上传失败：${detail}` : '图片上传失败，请稍后重试'
+}
+
+function imageContentType(format?: string | null) {
+  if (format === 'jpeg') return 'image/jpeg'
+  if (format === 'png') return 'image/png'
+  if (format === 'gif') return 'image/gif'
+  return 'image/webp'
 }
 
 export async function POST(request: Request) {
@@ -35,17 +44,19 @@ export async function POST(request: Request) {
 
   const uploadMeta = { filename: file.name, size: file.size, type: file.type }
 
-  // 统一在服务端转 WebP + 压缩，禁止原样存储 jpg/png/gif。
-  let webpBuffer: Buffer
+  let input: Buffer
+  let generated: Awaited<ReturnType<typeof createImageVariants>>
+  let originalContentType = 'image/webp'
   try {
-    webpBuffer = await normalizeImageToWebp(
-      Buffer.from(await file.arrayBuffer()),
-      { maxWidth: 1600, quality: 82 },
-    )
+    input = Buffer.from(await file.arrayBuffer())
+    const image = sharp(input, { animated: true, failOn: 'none', limitInputPixels: 100_000_000 })
+    const metadata = await image.metadata()
+    originalContentType = imageContentType(metadata.format)
+    const animated = isAnimatedImageInput(input, metadata)
+    generated = animated
+      ? await createAnimatedImageVariants(input, { sourceMaxWidth: 1600, variants: ['thumb-md', 'card', 'large'] })
+      : await createImageVariants(input, { sourceMaxWidth: 1600, sourceQuality: 82, variants: ['thumb-md', 'card', 'large'] })
   } catch (error) {
-    if (error instanceof ImageNormalizeError) {
-      return NextResponse.json({ message: error.message }, { status: 400 })
-    }
     const detail = errorDetail(error)
     console.error('[feedback-image.normalize]', { ...uploadMeta, error: detail })
     return NextResponse.json({
@@ -54,11 +65,17 @@ export async function POST(request: Request) {
     }, { status: 400 })
   }
 
-  const objectPath = `feedback/${guard.user.id}/feedback-${randomUUID()}.webp`
+  const objectPath = `feedback/${guard.user.id}/feedback-${randomUUID()}/source.webp`
   try {
-    const uploadResult = await uploadSiteImage({ key: objectPath, body: webpBuffer, contentType: 'image/webp' })
-    const url = publicImageUrl(uploadResult)
-    console.log('[feedback-image.upload]', { ...uploadMeta, uploadResult })
+    const family = await uploadImageVariantFamily({
+      sourceObjectPath: objectPath,
+      original: input,
+      originalContentType,
+      generated,
+      upload: ({ key, body, contentType }) => uploadSiteImage({ key, body, contentType }),
+    })
+    const url = publicImageUrl(family.sourceUrl)
+    console.log('[feedback-image.upload]', { ...uploadMeta, uploadResult: family.sourceUrl })
     if (!url) {
       return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
     }

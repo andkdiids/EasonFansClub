@@ -4,6 +4,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
@@ -245,6 +246,10 @@ export async function POST(request: Request, { params }: Params) {
     return {
       createdReply,
       rewardPoints: communityReward.commenterRewardPoints,
+      notificationRecipientIds: [
+        ...requestedMentions.map((mention) => mention.userId),
+        ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : []),
+      ],
     }
   })
 
@@ -256,6 +261,7 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const { createdReply, rewardPoints } = reply
+  emitRealtimeMany(reply.notificationRecipientIds, 'notification')
   const { User: replyAuthor, sticker: replySticker, ...serializedReply } = createdReply
   const mentionUserById = new Map(mentionedFriends.map((friend) => [friend.id, friend]))
   const remarkMap = await loadFriendRemarkMap(user.id, mentionedFriends.map((friend) => friend.id))

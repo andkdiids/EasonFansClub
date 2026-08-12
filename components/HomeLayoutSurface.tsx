@@ -13,7 +13,7 @@ import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/gues
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 
 const homeText = {
@@ -196,7 +196,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
   const topRanking = data.entertainmentRanking?.mobileBest || null
   const entertainmentModes = data.entertainmentRanking?.modes || emptyEntertainmentModes()
-  const dailyMusicCoverUrl = toPublicMediaUrl(data.dailyMusic?.album.coverUrl) || null
+  const dailyMusicCoverUrl = publicImageVariantUrl(data.dailyMusic?.album.coverUrl, 'thumb-sm') || null
 
   useEffect(() => {
     const controller = new AbortController()
@@ -324,7 +324,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'} className="home-module-entry">{homeText.viewDetails} {'>>'}</Link></header>
       {data.dailyMusic ? <div className="home-daily-music">
         <div className="home-daily-music-cover">
-          {dailyMusicCoverUrl ? <Image src={dailyMusicCoverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" className="object-cover" onError={() => { if (process.env.NODE_ENV === 'development') console.log('album cover load failed', dailyMusicCoverUrl) }} /> : <span aria-hidden="true">♫</span>}
+          {dailyMusicCoverUrl ? <Image src={dailyMusicCoverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" priority className="object-cover" onError={() => { if (process.env.NODE_ENV === 'development') console.log('album cover load failed', dailyMusicCoverUrl) }} /> : <span aria-hidden="true">♫</span>}
         </div>
         <div className="home-daily-music-copy">
           <span>{data.dailyMusic.artist}</span>
@@ -466,7 +466,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="每日推荐专辑">
           <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
           <div className="album-strip home-album-strip">
-            {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <Link key={album.id} href={`/music/album/${album.id}`}><span>{album.coverUrl ? <Image src={album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" className="object-cover" /> : '♫'}</span><strong>{album.name}</strong><small>{album.releaseYear}</small></Link>)}
+            {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <Link key={album.id} href={`/music/album/${album.id}`}><span>{album.coverUrl ? <Image src={publicImageVariantUrl(album.coverUrl, 'thumb-sm') || album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" loading="lazy" className="object-cover" /> : '♫'}</span><strong>{album.name}</strong><small>{album.releaseYear}</small></Link>)}
             {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
           </div>
         </section>
@@ -481,7 +481,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           <header><h2>{homeText.hotConcerts}</h2><Link href="/music/concerts" className="home-module-entry">{homeText.concertsMore} {'>>'}</Link></header>
           <div className="home-concert-grid">
             {data.concerts.map((concert) => <Link key={concert.id} href={concert.href} className="home-concert-card">
-              <span className="home-concert-cover">{concert.posterUrl ? <Image src={concert.posterUrl} alt={`${concert.title} poster`} fill sizes="72px" className="object-cover" /> : 'Eason'}</span>
+              <span className="home-concert-cover">{concert.posterUrl ? <Image src={publicImageVariantUrl(concert.posterUrl, 'thumb-sm') || concert.posterUrl} alt={`${concert.title} poster`} fill sizes="72px" loading="lazy" className="object-cover" /> : 'Eason'}</span>
               <span className="home-concert-copy"><time>{shortDate(concert.concertDate)}</time><strong>{concert.title}</strong><small>{concert.city}{concert.venue ? ` · ${concert.venue}` : ''}</small><small>{concert.tourName}</small></span>
             </Link>)}
             {!data.concerts.length && !failed ? <p className="community-empty">{homeText.noConcerts}</p> : null}

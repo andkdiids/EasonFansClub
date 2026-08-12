@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { feedbackInclude, parseFeedbackStatus, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -29,6 +30,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     feedback.FeedbackReply = feedback.FeedbackReply.map((reply) =>
       reply.authorRole === 'USER' ? { ...reply, isReadByAdmin: true } : reply,
     )
+    emitRealtime(guard.user.id, 'feedback', { feedbackId })
   }
 
   return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }) })
@@ -44,7 +46,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ fe
 
   if (!status) return NextResponse.json({ message: '请选择有效的反馈状态' }, { status: 400 })
 
-  const feedback = await prisma.feedback.findUnique({ where: { id: feedbackId }, select: { id: true } })
+  const feedback = await prisma.feedback.findUnique({ where: { id: feedbackId }, select: { id: true, userId: true } })
   if (!feedback) return NextResponse.json({ message: '反馈不存在' }, { status: 404 })
 
   const updated = await prisma.feedback.update({
@@ -56,5 +58,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ fe
     include: feedbackInclude,
   })
 
+  emitRealtime(feedback.userId, 'feedback', { feedbackId })
   return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '反馈状态已更新' })
 }

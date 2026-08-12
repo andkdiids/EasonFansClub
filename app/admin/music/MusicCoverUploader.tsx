@@ -15,6 +15,7 @@ import {
   isSupportedMusicCoverFile,
   MUSIC_COVER_MAX_FILE_SIZE,
 } from '@/lib/music-upload-constraints'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploaded }: Readonly<{
   entityType: 'album' | 'song' | 'tour' | 'concert'
@@ -120,7 +121,7 @@ export function MusicCoverUploader({ entityType, entityId, currentUrl, onUploade
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="relative aspect-square w-36 shrink-0 overflow-hidden rounded-2xl bg-white shadow-sm">
           {url
-            ? <Image src={url} alt="音乐封面" fill sizes="144px" className="object-cover" />
+            ? <Image src={publicImageVariantUrl(url, 'thumb-md') || url} alt="音乐封面" fill sizes="144px" className="object-cover" />
             : <div className="grid h-full place-items-center text-4xl text-brand-500">♫</div>}
         </div>
         <div className="min-w-0 flex-1">

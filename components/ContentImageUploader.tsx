@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { MAX_CONTENT_IMAGES, reorderContentImageUrls } from '@/lib/content-images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type PointerDragState = {
   pointerId: number
@@ -174,7 +175,7 @@ export function ContentImageUploader({ value, onChange }: Readonly<{ value: stri
               style={{ touchAction: 'none' }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" />
+              <img src={publicImageVariantUrl(url, 'thumb-md') || url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" loading="lazy" />
               <button
                 type="button"
                 onPointerDown={(event) => event.stopPropagation()}

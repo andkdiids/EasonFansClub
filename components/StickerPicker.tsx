@@ -3,6 +3,7 @@
 import { useCallback, CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { toPublicMediaUrl } from '@/lib/media-url'
 
 /**
@@ -345,7 +346,7 @@ export function StickerPicker({
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={preview.url} alt={preview.name || '表情'} className="block h-full w-full object-contain" draggable={false} />
+      <img src={publicImageVariantUrl(preview.url, 'card') || preview.url} alt={preview.name || '表情'} className="block h-full w-full object-contain" draggable={false} />
     </div>
   ) : null
 
@@ -507,7 +508,7 @@ export function StickerPicker({
                 >
                   {packIcon ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={packIcon} alt="" className="h-full w-full object-contain" loading="lazy" />
+                    <img src={publicImageVariantUrl(packIcon, 'thumb-sm') || packIcon} alt="" className="h-full w-full object-contain" loading="lazy" />
                   ) : (
                     <span className="text-base sm:text-lg">😊</span>
                   )}
@@ -580,7 +581,7 @@ function EmojiGrid({
                 aria-label={s.name || '表情'}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.url} alt={s.name || ''} className="h-full w-full object-contain p-0.5" loading="lazy" />
+                <img src={publicImageVariantUrl(s.url, 'thumb-sm') || s.url} alt={s.name || ''} className="h-full w-full object-contain p-0.5" loading="lazy" />
               </button>
             ))}
           </div>
@@ -677,7 +678,7 @@ function StickerCell({
       aria-label={sticker.name || '表情'}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={sticker.url} alt={sticker.name || ''} className={desktopImgClass()} loading="lazy" />
+      <img src={publicImageVariantUrl(sticker.url, 'thumb-sm') || sticker.url} alt={sticker.name || ''} className={desktopImgClass()} loading="lazy" />
     </button>
   )
 }

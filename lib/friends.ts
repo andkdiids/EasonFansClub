@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notifications'
+import { emitRealtimeMany } from '@/lib/realtime'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -115,6 +116,8 @@ export async function createFriendRequest(
     return request
   })
 
+  emitRealtimeMany([currentUser.id, receiver.id], 'friend-request', { requestId: friendRequest.id })
+
   return { status: 201 as const, body: { message: '好友申请已发送', status: 'OUTGOING_PENDING', request: friendRequest } }
 }
 
@@ -185,9 +188,14 @@ export async function decideFriendRequest(userId: string, requestId: string, act
       })
     }
 
-    return updated
+    return {
+      request: updated,
+      senderId: friendRequest.senderId,
+      receiverId: friendRequest.receiverId,
+    }
   })
 
   if (!result) return { status: 404 as const, body: { message: '好友申请不存在或已处理' } }
-  return { status: 200 as const, body: { request: result } }
+  emitRealtimeMany([result.senderId, result.receiverId], 'friend-request', { requestId })
+  return { status: 200 as const, body: { request: result.request } }
 }

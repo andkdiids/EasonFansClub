@@ -75,6 +75,17 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
     if (selectedId) loadDetail(selectedId)
   }, [selectedId])
 
+  useEffect(() => {
+    const onRealtimeEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ changed?: string[]; source?: string }>).detail
+      if (detail?.source !== 'fallback' && !detail?.changed?.includes('feedback')) return
+      void loadList()
+      if (selectedId) void loadDetail(selectedId)
+    }
+    window.addEventListener('realtime:event', onRealtimeEvent)
+    return () => window.removeEventListener('realtime:event', onRealtimeEvent)
+  }, [selectedId, page])
+
   async function requestJson(url: string, init?: RequestInit) {
     const response = await fetch(url, init)
     const data = await response.json().catch(() => null)

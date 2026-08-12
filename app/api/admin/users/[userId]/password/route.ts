@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { validateAdminResetPassword } from '@/lib/admin-user-advanced'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireSuperAdmin } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -61,6 +62,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     })
 
     invalidateCurrentUserCache(userId)
+    emitRealtime(userId, 'notification')
     return NextResponse.json({ user, message: '密码已重置，用户登录后需要重新设置密保问题' })
   } catch (error) {
     if (error instanceof Error && error.message === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })

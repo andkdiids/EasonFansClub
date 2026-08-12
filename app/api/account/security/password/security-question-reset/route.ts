@@ -5,6 +5,7 @@ import { validateNewPassword } from '@/lib/account-password'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { checkRateLimit, consumeRateLimit, getClientIp, recordRateLimitHit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
     await tx.notification.create({ data: { recipientId: user.id, type: 'SYSTEM', title: '密码重置成功', content: '您的登录密码已通过密保问题完成重置。如非本人操作，请及时联系管理员。', link: '/settings/security' } })
     await tx.accountSecurityLog.create({ data: { userId: user.id, action: 'PASSWORD_RESET_WITH_SECURITY_QUESTION', ipAddress: ip, userAgent: request.headers.get('user-agent')?.slice(0, 500), metadata: { method: 'SECURITY_QUESTION' } } })
   })
+  emitRealtime(user.id, 'notification')
   invalidateCurrentUserCache(user.id)
   return NextResponse.json({ message: '密码重置成功' })
 }

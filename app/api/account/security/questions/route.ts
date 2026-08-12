@@ -6,6 +6,7 @@ import {
   validateSecurityQuestions,
 } from '@/lib/account-security'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 
 export async function POST(request: Request) {
@@ -38,5 +39,6 @@ export async function POST(request: Request) {
     }
     throw error
   }
+  emitRealtime(guard.user.id, 'notification')
   return NextResponse.json({ message: '密保问题设置成功，今后不可修改' }, { status: 201 })
 }

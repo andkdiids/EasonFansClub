@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth'
 import { getStorePackDetail } from '@/lib/sticker-center'
 import { StickerPackDetailView } from './StickerPackDetailView'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,7 +42,7 @@ export default async function StickerPackDetailPage({ params }: { params: Promis
             <div className="aspect-square w-full overflow-hidden rounded-2xl bg-slate-100 sm:w-[180px]">
               {detail.coverUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={detail.coverUrl} alt={detail.name} className="h-full w-full object-cover" />
+                <img src={publicImageVariantUrl(detail.coverUrl, 'card') || detail.coverUrl} alt={detail.name} className="h-full w-full object-cover" loading="eager" />
               ) : (
                 <div className="flex h-full items-center justify-center text-6xl">😊</div>
               )}
@@ -79,7 +80,7 @@ export default async function StickerPackDetailPage({ params }: { params: Promis
             {detail.stickers.map((s) => (
               <div key={s.id} className="flex aspect-square items-center justify-center rounded-xl bg-slate-50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.url} alt={s.name || ''} className="h-12 w-12 object-contain" loading="lazy" />
+                <img src={publicImageVariantUrl(s.url, 'thumb-sm') || s.url} alt={s.name || ''} className="h-12 w-12 object-contain" loading="lazy" />
               </div>
             ))}
           </div>

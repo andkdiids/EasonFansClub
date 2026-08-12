@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl, type ImageVariant } from '@/lib/image-variants'
 
 type ConcertCoverProps = {
   src?: string | null
@@ -12,6 +13,7 @@ type ConcertCoverProps = {
   className?: string
   fallbackLabel?: string
   priority?: boolean
+  variant?: ImageVariant
 }
 
 /**
@@ -19,11 +21,12 @@ type ConcertCoverProps = {
  * poster. The foreground fills the card and crops only the overflow, while
  * the blurred copy remains available as a visual fallback layer.
  */
-export function ConcertCover({ src, resolvedPosterUrl, alt, sizes, className = '', fallbackLabel = '海报暂缺', priority = false }: Readonly<ConcertCoverProps>) {
+export function ConcertCover({ src, resolvedPosterUrl, alt, sizes, className = '', fallbackLabel = '海报暂缺', priority = false, variant = 'thumb-md' }: Readonly<ConcertCoverProps>) {
   const frameRef = useRef<HTMLSpanElement | null>(null)
   const [failed, setFailed] = useState(false)
   const [shouldLoad, setShouldLoad] = useState(priority)
-  const imageSrc = getRenderableImageSource(resolvedPosterUrl !== undefined ? resolvedPosterUrl : src)
+  const imageVariant = variant === 'thumb-md' && (sizes === '200px' || sizes.includes('260px')) ? 'large' : variant
+  const imageSrc = getRenderableImageSource(publicImageVariantUrl(resolvedPosterUrl !== undefined ? resolvedPosterUrl : src, imageVariant))
 
   useEffect(() => {
     setShouldLoad(priority)
@@ -47,7 +50,7 @@ export function ConcertCover({ src, resolvedPosterUrl, alt, sizes, className = '
   return <span ref={frameRef} className={`concert-cover ${className}`.trim()} data-concert-cover-loaded={loadedImageSrc && !failed ? 'true' : 'false'}>
     {loadedImageSrc && !failed ? <>
       <span className="concert-cover-backdrop" aria-hidden="true">
-        <Image src={loadedImageSrc} alt="" fill sizes={sizes} loading="lazy" className="concert-cover-backdrop-image" onError={() => setFailed(true)} />
+        <Image src={loadedImageSrc} alt="" fill sizes={sizes} priority={priority} loading={priority ? undefined : 'lazy'} className="concert-cover-backdrop-image" onError={() => setFailed(true)} />
       </span>
       <span className="concert-cover-backdrop-shade" aria-hidden="true" />
       <Image src={loadedImageSrc} alt={alt} fill priority={priority} loading={priority ? undefined : 'lazy'} sizes={sizes} className="concert-cover-foreground" style={{ objectFit: 'cover', objectPosition: 'center center' }} onError={() => setFailed(true)} />
@@ -58,14 +61,7 @@ export function ConcertCover({ src, resolvedPosterUrl, alt, sizes, className = '
 function getRenderableImageSource(value?: string | null) {
   const url = publicImageUrl(value)
   if (!url) return null
-  if (url.startsWith('/')) return url
-
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== 'https:') return null
-    if (!parsed.hostname.endsWith('.supabase.co') && !parsed.hostname.endsWith('.myqcloud.com')) return null
-    return url
-  } catch {
-    return null
-  }
+  // Public COS media is normalized to the same-origin /cos proxy before it
+  // reaches this component. Do not reintroduce direct COS URLs as a fallback.
+  return url.startsWith('/') ? url : null
 }

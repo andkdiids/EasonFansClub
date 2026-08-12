@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { feedbackInclude, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { requireAdmin } from '@/lib/security'
 
 export async function PATCH(_request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
@@ -10,7 +11,7 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ f
   const { feedbackId } = await params
   const feedback = await prisma.feedback.findUnique({
     where: { id: feedbackId },
-    select: { id: true, status: true },
+    select: { id: true, userId: true, status: true },
   })
 
   if (!feedback) return NextResponse.json({ message: '反馈不存在' }, { status: 404 })
@@ -24,5 +25,6 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ f
     include: feedbackInclude,
   })
 
+  emitRealtime(feedback.userId, 'feedback', { feedbackId })
   return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '已标记为已完成' })
 }

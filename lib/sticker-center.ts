@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { emitRealtime, emitRealtimeToAdmins } from '@/lib/realtime'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
@@ -901,6 +902,7 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
     }
     return pack
   })
+  void emitRealtimeToAdmins('notification')
   return { packId: result.id, status: 'PENDING' }
 }
 
@@ -1009,5 +1011,6 @@ export async function reviewStickerPack(input: {
       key: `sticker-pack-review:${input.packId}:${newStatus.toLowerCase()}:${now.getTime()}`,
     },
   })
+  emitRealtime(pack.creatorId, 'notification')
   return { status: newStatus, packName: pack.name }
 }

@@ -5,6 +5,7 @@ import { POINTS } from '@/lib/points'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
+import { emitRealtime } from '@/lib/realtime'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -99,10 +100,11 @@ export async function POST(_request: Request, { params }: Params) {
       }
     }
 
-    return { isLiked: true, likeCount: updatedPost.likeCount }
+    return { isLiked: true, likeCount: updatedPost.likeCount, notifiedUserId: post.authorId !== user.id ? post.authorId : null }
   })
 
   if (!result) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
+  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }
 

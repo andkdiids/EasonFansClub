@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { resolveGrowthLevelName } from '@/lib/growth-display'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type ProfileHeaderProps = {
   displayName: string
@@ -87,8 +87,8 @@ export function ProfileHeader({
   const initial = formatUid(uid).slice(0, 1)
   const admissionInfo = formatAdmissionInfo(createdAt)
   const growthLevelName = resolveGrowthLevelName(level, levelName)
-  const publicAvatarUrl = publicImageUrl(avatarUrl)
-  const publicBackgroundUrl = publicImageUrl(backgroundUrl)
+  const publicAvatarUrl = publicImageVariantUrl(avatarUrl, 'avatar-md')
+  const publicBackgroundUrl = publicImageVariantUrl(backgroundUrl, 'large')
 
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">

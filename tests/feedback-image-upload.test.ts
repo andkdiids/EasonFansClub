@@ -11,8 +11,10 @@ const uploader = read('components/FeedbackImageUploader.tsx')
 
 test('反馈图片接口复用当前 COS 存储链路并返回公开 URL', () => {
   assert.match(route, /formData\?\.get\('file'\)/)
-  assert.match(route, /uploadSiteImage\(\{ key: objectPath, body: webpBuffer, contentType: 'image\/webp' \}\)/)
-  assert.match(route, /const objectPath = `feedback\/\$\{guard\.user\.id\}\/feedback-\$\{randomUUID\(\)\}\.webp`/)
+  assert.match(route, /uploadImageVariantFamily/)
+  assert.match(route, /const objectPath = `feedback\/\$\{guard\.user\.id\}\/feedback-\$\{randomUUID\(\)\}\/source\.webp`/)
+  assert.match(route, /original: input/)
+  assert.match(route, /variants: \['thumb-md', 'card', 'large'\]/)
   assert.doesNotMatch(route, /SUPABASE_URL|storage\/v1\/object|supabasePublicObjectUrl/)
   assert.match(route, /const uploadMeta = \{ filename: file\.name, size: file\.size, type: file\.type \}/)
   assert.match(route, /console\.log\('\[feedback-image\.upload\]'[\s\S]*uploadResult/)

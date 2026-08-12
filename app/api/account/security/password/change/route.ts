@@ -4,6 +4,7 @@ import { validateNewPassword } from '@/lib/account-password'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 
 export async function POST(request: Request) {
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
     await tx.notification.create({ data: { recipientId: user.id, type: 'SYSTEM', title: '密码修改成功', content: '您的登录密码已通过原密码验证完成修改。如非本人操作，请及时联系管理员。', link: '/settings/security' } })
     await tx.accountSecurityLog.create({ data: { userId: user.id, action: 'PASSWORD_CHANGED_WITH_CURRENT_PASSWORD', ipAddress: ip, userAgent: request.headers.get('user-agent')?.slice(0, 500), metadata: { method: 'CURRENT_PASSWORD' } } })
   })
+  emitRealtime(user.id, 'notification')
   invalidateCurrentUserCache(user.id)
   return NextResponse.json({ message: '密码修改成功' })
 }

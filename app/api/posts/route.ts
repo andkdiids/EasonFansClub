@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { parseContentImageUrls } from '@/lib/content-images'
@@ -221,6 +222,7 @@ export async function POST(request: Request) {
     }
 
     const detailUrl = `/posts/${result.post.id}`
+    if (moderationStatus === 'PENDING') void emitRealtimeToAdmins('notification')
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)
     })

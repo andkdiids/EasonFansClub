@@ -8,6 +8,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
 import { profileImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
@@ -306,13 +307,20 @@ export function NotificationsClient({
     const sync = () => {
       if (document.visibilityState === 'visible') void refreshNotifications()
     }
+    const onRealtimeEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ initial?: boolean; source?: string }>).detail
+      if (detail?.initial) return
+      sync()
+    }
     void refreshNotifications()
     window.addEventListener('pageshow', sync)
     window.addEventListener('unread-summary:refresh', sync)
+    window.addEventListener('realtime:event', onRealtimeEvent)
     document.addEventListener('visibilitychange', sync)
     return () => {
       window.removeEventListener('pageshow', sync)
       window.removeEventListener('unread-summary:refresh', sync)
+      window.removeEventListener('realtime:event', onRealtimeEvent)
       document.removeEventListener('visibilitychange', sync)
     }
   }, [refreshNotifications])
@@ -660,14 +668,14 @@ export function NotificationsClient({
             {systemLike ? (
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-slate-50 p-1 ring-1 ring-slate-200 sm:h-9 sm:w-9">
                 {siteLogoUrl ? (
-                  <img src={siteLogoUrl} alt="私家E院" className="h-full w-full object-contain" />
+                  <img src={publicImageVariantUrl(siteLogoUrl, 'thumb-sm') || siteLogoUrl} alt="私家E院" className="h-full w-full object-contain" />
                 ) : (
                   <span className="ecfc-brand-icon" aria-hidden>Ｅ</span>
                 )}
               </span>
             ) : (
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-950 text-xs font-black text-white sm:h-9 sm:w-9">
-                {profileImageUrl(item.actorAvatarUrl) ? <img src={profileImageUrl(item.actorAvatarUrl)!} alt={item.actorName || item.title} className="h-full w-full object-cover" /> : getInitial(item.actorUid)}
+                {profileImageUrl(item.actorAvatarUrl) ? <img src={publicImageVariantUrl(item.actorAvatarUrl, 'avatar-md') || profileImageUrl(item.actorAvatarUrl)!} alt={item.actorName || item.title} className="h-full w-full object-cover" loading="lazy" /> : getInitial(item.actorUid)}
               </span>
             )}
             {!systemLike && !isBirthday ? (

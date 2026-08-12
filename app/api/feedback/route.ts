@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
 import { formatBeijingMonthDayTime } from '@/lib/beijing-time'
 import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
@@ -128,5 +129,6 @@ export async function POST(request: Request) {
     throw error
   }
 
+  void emitRealtimeToAdmins('feedback', { feedbackId: feedback.id })
   return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }), message: '反馈已提交' }, { status: 201 })
 }

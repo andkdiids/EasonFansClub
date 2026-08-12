@@ -1,7 +1,7 @@
 import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getGuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
@@ -196,7 +196,7 @@ export async function getHomeActivities() {
     }),
     [],
     5000,
-  ).then((activities) => activities.map((activity) => ({ ...activity, coverUrl: publicImageUrl(activity.coverUrl) }))))
+  ).then((activities) => activities.map((activity) => ({ ...activity, coverUrl: publicImageVariantUrl(activity.coverUrl, 'card') }))))
 }
 
 export async function getHomeConcerts() {
@@ -225,7 +225,7 @@ export async function getHomeConcerts() {
         city: concert.city,
         venue: concert.venue,
         tourName: concert.MusicTour.name,
-        posterUrl: publicImageUrl(posterUrl),
+        posterUrl: publicImageVariantUrl(posterUrl, 'thumb-sm'),
         href: buildConcertSlugPath(concert.MusicTour.name, concert.city, concert.concertDate, concert.stageType),
       }
     })),
@@ -255,7 +255,7 @@ export async function getHomeAlbums() {
     prisma.musicAlbum.findMany({
       where: { status: 'PUBLISHED', coverUrl: { not: null } },
       select: { id: true, name: true, releaseYear: true, coverUrl: true },
-    }).then((albums) => albums.sort((a, b) => dailyAlbumRank(a.id) - dailyAlbumRank(b.id)).slice(0, 6).map((album) => ({ ...album, coverUrl: publicImageUrl(album.coverUrl) }))),
+    }).then((albums) => albums.sort((a, b) => dailyAlbumRank(a.id) - dailyAlbumRank(b.id)).slice(0, 6).map((album) => ({ ...album, coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-sm') }))),
     [],
     5000,
   ))

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getUnreadNotificationCount, listUnifiedNotificationsPage, markAllUnifiedNotificationsRead, markUnifiedNotificationRead, parseNotificationCategory } from '@/lib/notifications'
 import { requireUser } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 
 const NOTIFICATION_ID_BATCH_LIMIT = 100
 const NOTIFICATION_PAGE_SIZE = 20
@@ -50,10 +51,12 @@ export async function PATCH(request: Request) {
 
   if (!ids.length) {
     await markAllUnifiedNotificationsRead(guard.user.id)
+    emitRealtime(guard.user.id, 'notification')
     return NextResponse.json({ ok: true })
   }
 
   await Promise.all(ids.map((item) => markUnifiedNotificationRead(guard.user.id, item.source || 'personal', item.id)))
+  emitRealtime(guard.user.id, 'notification')
   return NextResponse.json({ ok: true })
 }
 
@@ -67,5 +70,6 @@ export async function DELETE(request: Request) {
   const result = await prisma.notification.deleteMany({
     where: { recipientId: guard.user.id, ...(ids.length ? { id: { in: ids } } : {}) },
   })
+  emitRealtime(guard.user.id, 'notification')
   return NextResponse.json({ ok: true, deleted: result.count })
 }

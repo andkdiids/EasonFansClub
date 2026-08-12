@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Pagination } from '@/components/ui/Pagination'
 import type { StorePackItem } from '@/lib/sticker-center'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export function StickerStoreGrid(props: {
   packs: StorePackItem[]
@@ -77,7 +78,7 @@ export function StickerStoreGrid(props: {
               <div className="relative z-10 aspect-square overflow-hidden bg-slate-50 pointer-events-none">
                 {pack.coverUrl ? (
                   <Image
-                    src={pack.coverUrl}
+                    src={publicImageVariantUrl(pack.coverUrl, 'thumb-md') || pack.coverUrl}
                     alt={pack.name}
                     fill
                     sizes="(max-width: 639px) calc((100vw - 48px) / 3), (max-width: 767px) calc((100vw - 76px) / 4), (max-width: 1023px) calc((100vw - 104px) / 5), 160px"

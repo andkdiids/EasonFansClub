@@ -3,14 +3,14 @@
 import Link from 'next/link'
 import { useState, type CSSProperties } from 'react'
 import { formatTrackCount } from '@/lib/music-display'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export type MusicCarouselAlbum = { id: string; name: string; releaseYear: number; coverUrl: string; language: string; artist: string; songCount: number; releaseLabel: string }
 
 type MusicAlbumCardProps = { album: MusicCarouselAlbum; carouselIndex: number; offset: number; spacing: number; cardWidth: number; selected: boolean; disabled?: boolean; onActivate: () => void; cardRef: (element: HTMLDivElement | null) => void }
 
 export function MusicAlbum3DCard({ album, carouselIndex, offset, spacing, cardWidth, selected, disabled = false, onActivate, cardRef }: Readonly<MusicAlbumCardProps>) {
-  const coverUrl = toPublicMediaUrl(album.coverUrl) || album.coverUrl
+  const coverUrl = publicImageVariantUrl(album.coverUrl, 'thumb-md') || album.coverUrl
   const distance = Math.abs(offset)
   // 首帧样式在挂载时冻结;之后的位移、缩放、透明度由轮播 rAF 引擎直接写入 DOM(translate3d + scale,GPU 合成),不触发 React render
   const [initialStyle] = useState<CSSProperties>(() => {

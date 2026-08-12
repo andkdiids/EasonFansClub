@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
@@ -91,6 +92,7 @@ export async function PATCH(
       })
       return review
     })
+    emitRealtime(updated.creatorId, 'notification')
     // 返回完整的 pack 给前端以刷新本地状态
     const pack = await prisma.stickerPack.findUnique({
       where: { id: updated.id },

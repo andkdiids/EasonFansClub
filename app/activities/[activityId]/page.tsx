@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { formatDate } from '@/lib/format'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -12,13 +12,13 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
     where: { id: activityId, status: 'PUBLISHED' },
   })
   if (!activity) notFound()
-  const cover = publicImageUrl(activity.coverUrl)
+  const cover = publicImageVariantUrl(activity.coverUrl, 'large')
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-4xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
       <Link href="/activities" className="inline-flex text-sm font-black text-brand-700">← 返回活动中心</Link>
       <article className="overflow-hidden border border-sky-100 bg-white/85 shadow-sm">
-        {cover ? <img src={cover} alt={`${activity.title}活动封面`} className="max-h-[420px] w-full object-cover" /> : null}
+        {cover ? <img src={cover} alt={`${activity.title}活动封面`} className="max-h-[420px] w-full object-cover" loading="eager" /> : null}
         <div className="p-6 sm:p-8">
           <p className="text-xs font-black uppercase tracking-[0.2em] text-brand-700">Activity</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">{activity.title}</h1>

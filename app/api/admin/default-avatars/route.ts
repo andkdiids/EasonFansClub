@@ -6,8 +6,10 @@ import {
   getDefaultAvatarPool,
   saveDefaultAvatarPool,
 } from '@/lib/default-avatars'
+import { createImageVariants } from '@/lib/image-webp'
+import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 import { publicImageUrl } from '@/lib/images'
-import { describeCosError, getCosUrl, missingCosConfig, uploadToCos } from '@/lib/tencent-cos'
+import { describeCosError, missingCosConfig, uploadToCos } from '@/lib/tencent-cos'
 import { requireAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -47,29 +49,43 @@ export async function POST(request: Request) {
   if (!ALLOWED_TYPES.has(file.type)) return NextResponse.json({ message: `文件格式不支持（${file.type || '未知'}），仅支持 JPG、PNG 或 WebP 图片` }, { status: 400 })
   if (file.size > MAX_FILE_SIZE) return NextResponse.json({ message: '图片不能超过 8MB' }, { status: 413 })
 
+  const rawBuffer = Buffer.from(await file.arrayBuffer())
   let output: Buffer
+  let generated: Awaited<ReturnType<typeof createImageVariants>>
   try {
-    output = await sharp(Buffer.from(await file.arrayBuffer()), { failOn: 'none', limitInputPixels: 40_000_000 })
-      .rotate()
-      .flatten({ background: '#ffffff' })
-      .resize({ width: 1000, height: 1000, fit: 'cover', withoutEnlargement: true })
-      .webp({ quality: 86 })
-      .toBuffer()
+    const input = sharp(rawBuffer, { failOn: 'none', limitInputPixels: 40_000_000 })
+    const metadata = await input.metadata()
+    let pipeline = input.rotate().resize({ width: 1000, height: 1000, fit: 'cover', withoutEnlargement: true })
+    if (!metadata.hasAlpha) pipeline = pipeline.flatten({ background: '#ffffff' })
+    output = await pipeline.webp({ quality: 86 }).toBuffer()
+    generated = await createImageVariants(output, {
+      sourceMaxWidth: 1000,
+      sourceQuality: 86,
+      variants: ['avatar-sm', 'avatar-md'],
+    })
   } catch (error) {
     console.error('[default-avatar] sharp conversion failed', error)
     const detail = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ message: `sharp 转换 WebP 失败：${detail}` }, { status: 422 })
   }
 
-  const objectPath = `site/default-avatars/${randomUUID()}.webp`
+  const objectPath = `site/default-avatars/${randomUUID()}/source.webp`
+  let url: string | null = null
   try {
-    await uploadToCos({ key: objectPath, body: output, contentType: 'image/webp' })
+    const originalContentType = file.type === 'image/png' ? 'image/png' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg'
+    const family = await uploadImageVariantFamily({
+      sourceObjectPath: objectPath,
+      original: rawBuffer,
+      originalContentType,
+      generated,
+      upload: ({ key, body, contentType }) => uploadToCos({ key, body, contentType }),
+    })
+    url = publicImageUrl(family.sourceUrl)
   } catch (error) {
     console.error('[default-avatar] COS upload failed', error)
     return NextResponse.json({ message: `COS 上传失败：${describeCosError(error)}` }, { status: 502 })
   }
 
-  const url = publicImageUrl(getCosUrl(objectPath))
   if (!url) return NextResponse.json({ message: '默认头像地址无效' }, { status: 500 })
 
   try {

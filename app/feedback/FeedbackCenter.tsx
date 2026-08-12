@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FeedbackImageUploader, type UploadedFeedbackAttachment } from '@/components/FeedbackImageUploader'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH } from '@/lib/feedback'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type Attachment = { id?: string; url: string; mimeType?: string | null }
 type FeedbackReply = {
@@ -110,6 +111,17 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
 
   useEffect(() => {
     if (selectedId) loadDetail(selectedId)
+  }, [selectedId])
+
+  useEffect(() => {
+    const onRealtimeEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ changed?: string[]; source?: string }>).detail
+      if (detail?.source !== 'fallback' && !detail?.changed?.includes('feedback')) return
+      void loadFeedbacks()
+      if (selectedId) void loadDetail(selectedId)
+    }
+    window.addEventListener('realtime:event', onRealtimeEvent)
+    return () => window.removeEventListener('realtime:event', onRealtimeEvent)
   }, [selectedId])
 
   async function requestJson(url: string, init?: RequestInit) {
@@ -387,10 +399,10 @@ function FeedbackThread({
 }
 
 function Avatar({ user }: { user: { uid: number; nickname: string; avatarUrl?: string | null } }) {
-  const avatarUrl = toPublicMediaUrl(user.avatarUrl) || user.avatarUrl
+  const avatarUrl = publicImageVariantUrl(user.avatarUrl, 'avatar-md') || user.avatarUrl
   return (
     <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] text-white">
-      {avatarUrl ? <img src={avatarUrl} alt={user.nickname} className="h-full w-full object-cover" /> : String(user.uid).padStart(5, '0').slice(0, 1)}
+      {avatarUrl ? <img src={avatarUrl} alt={user.nickname} className="h-full w-full object-cover" loading="lazy" /> : String(user.uid).padStart(5, '0').slice(0, 1)}
     </span>
   )
 }
@@ -402,7 +414,7 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
     <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
       {visible.map((item) => (
         <Link key={item.id || item.url} href={item.url} target="_blank" className="block overflow-hidden rounded-2xl bg-white">
-          <img src={item.url} alt="反馈附件" className="h-28 w-full object-cover" />
+          <img src={publicImageVariantUrl(item.url, 'card') || item.url} alt="反馈附件" className="h-28 w-full object-cover" loading="lazy" />
         </Link>
       ))}
     </div>

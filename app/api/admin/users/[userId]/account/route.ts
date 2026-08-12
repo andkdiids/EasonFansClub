@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { maskLoginAccount, validateAdminLoginAccount } from '@/lib/login-account'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireSuperAdmin, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -49,6 +50,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     })
 
     invalidateCurrentUserCache(userId)
+    emitRealtime(userId, 'notification')
     return NextResponse.json({ user: result, message: '登录账号修改成功' })
   } catch (error) {
     const message = error instanceof Error ? error.message : ''

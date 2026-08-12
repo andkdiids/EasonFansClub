@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, type ChangeEvent } from 'react'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 import {
   isSupportedStickerFile,
@@ -285,7 +286,7 @@ export function StickerPackEditForm({ initialPack }: { initialPack: EditPack }) 
           {pack.stickers.map((sticker, index) => (
             <div key={sticker.id} className="relative flex min-w-0 flex-col items-center rounded-2xl border border-slate-100 bg-white p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={sticker.url} alt={sticker.name || `第 ${index + 1} 张表情`} className="h-20 w-20 rounded-lg object-contain" loading="lazy" />
+              <img src={publicImageVariantUrl(sticker.url, 'thumb-sm') || sticker.url} alt={sticker.name || `第 ${index + 1} 张表情`} className="h-20 w-20 rounded-lg object-contain" loading="lazy" />
               <p className="mt-1 w-full truncate text-center text-[11px] font-bold text-slate-500">{sticker.name || `第 ${index + 1} 张`}</p>
               {editable ? (
                 <button type="button" disabled={Boolean(busy)} onClick={() => void removeSticker(sticker.id)} className="mt-1 rounded-full px-2 py-1 text-[11px] font-black text-red-600 ring-1 ring-red-200 hover:bg-red-50 disabled:opacity-50">

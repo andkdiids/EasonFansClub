@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export type ExistingMedia = { id: string; url: string; broken: boolean }
 
@@ -107,7 +108,7 @@ export function PostEditForm({
                   </div>
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.url} alt="帖子图片" className="h-28 w-full object-cover" />
+                  <img src={publicImageVariantUrl(item.url, 'thumb-md') || item.url} alt="帖子图片" className="h-28 w-full object-cover" loading="lazy" />
                 )}
                 <button
                   type="button"
@@ -128,7 +129,7 @@ export function PostEditForm({
             {addImageUrls.map((url, index) => (
               <div key={url} className="relative overflow-hidden rounded-xl border border-brand-100">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt="新上传图片" className="h-28 w-full object-cover" />
+                <img src={publicImageVariantUrl(url, 'thumb-md') || url} alt="新上传图片" className="h-28 w-full object-cover" loading="lazy" />
                 <button
                   type="button"
                   onClick={() => removeAdded(index)}

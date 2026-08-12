@@ -1,8 +1,8 @@
 import { Prisma } from '@prisma/client'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { isSupabaseStorageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getMusicPlaybackUrl } from '@/lib/music-playback'
-import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
 export const DAILY_MUSIC_ANONYMOUS_COOKIE = 'eason-daily-music-anonymous'
@@ -23,9 +23,9 @@ const songSelect = {
 type DailySong = Prisma.MusicSongGetPayload<{ select: typeof songSelect }>
 
 function resolveDailyCoverUrl(songCoverUrl: string | null | undefined, albumCoverUrl: string | null | undefined) {
-  const songUrl = toPublicMediaUrl(songCoverUrl)
+  const songUrl = publicImageVariantUrl(songCoverUrl, 'thumb-sm')
   if (songUrl && !isSupabaseStorageUrl(songUrl)) return songUrl
-  return toPublicMediaUrl(albumCoverUrl)
+  return publicImageVariantUrl(albumCoverUrl, 'thumb-sm')
 }
 
 const dailyMusicCandidateWhere = {
@@ -57,7 +57,7 @@ function serializeSong(song: DailySong) {
     releaseYear: song.releaseYear,
     lyrics: song.lyrics,
     coverUrl: resolveDailyCoverUrl(song.coverUrl, song.MusicAlbum.coverUrl),
-    album: { id: song.MusicAlbum.id, name: song.MusicAlbum.name, coverUrl: toPublicMediaUrl(song.MusicAlbum.coverUrl) },
+    album: { id: song.MusicAlbum.id, name: song.MusicAlbum.name, coverUrl: publicImageVariantUrl(song.MusicAlbum.coverUrl, 'thumb-sm') },
     previewUrl: song.previewUrl ? `${getMusicPlaybackUrl(song.id)}?preview=1` : '',
     previewDuration: Math.min(60, Math.max(1, song.previewDuration || 60)),
     isFullPlayback: false,

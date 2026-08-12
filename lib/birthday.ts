@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { getTodayMonthDay } from '@/lib/today'
@@ -139,6 +140,7 @@ export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
         actorId: null,
       },
     })
+    emitRealtime(userId, 'notification')
     return true
   } catch (error) {
     console.error('[birthday.sendGreeting]', error)

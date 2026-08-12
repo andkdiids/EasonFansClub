@@ -9,7 +9,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,7 +25,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
   ])
   if (!album) notFound()
 
-  const coverUrl = toPublicMediaUrl(album.coverUrl)
+  const coverUrl = publicImageVariantUrl(album.coverUrl, 'large')
   album.coverUrl = coverUrl
 
   const releaseLabel = formatMusicReleaseDate(album.releaseDate, album.releaseYear)
@@ -46,7 +46,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
 
     <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
       <MusicDetailReveal direction="left" hover className="mx-auto w-full max-w-[320px]">
-        <MusicCover src={album.coverUrl} alt={`${album.name}专辑封面`} className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" />
+        <MusicCover src={album.coverUrl} alt={`${album.name}专辑封面`} variant="large" className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" priority />
       </MusicDetailReveal>
       <MusicDetailReveal direction="right" delay={0.08}>
         <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">ALBUM ARCHIVE · {album.language}</p>
@@ -76,7 +76,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
           title: song.title,
           artist: song.artist,
           albumName: album.name,
-          coverUrl: toPublicMediaUrl(song.coverUrl || album.coverUrl),
+          coverUrl: publicImageVariantUrl(song.coverUrl || album.coverUrl, 'thumb-sm'),
           ...resolveMusicPlayback(song, currentUser),
           trackNumber: song.trackNumber,
           lyricist: song.lyricist,

@@ -7,6 +7,7 @@ import { profileImageUrl } from '@/lib/images'
 import { loadProfileRecentMessages } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
+import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -57,9 +58,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
   const usernameChange = getUsernameChangeAvailability(profile.usernameChangedAt)
-  const [growth, recentMessages] = await Promise.all([
+  const [growth, recentMessages, defaultAvatarOptions] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessages(profile.id, user.id),
+    getDefaultAvatarOptions(),
   ])
 
   const profileEditorInitialProfile = {
@@ -71,6 +73,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     },
     nickname: displayName,
     avatarUrl: avatar || '',
+    defaultAvatarOptions,
     backgroundUrl: background || '',
     bio,
     email: profile.email || '',

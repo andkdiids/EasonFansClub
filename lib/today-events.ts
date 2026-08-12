@@ -1,6 +1,6 @@
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { safeDb } from '@/lib/db-timeout'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
@@ -71,7 +71,7 @@ async function loadManualTodayEvents(month: number, day: number) {
       type: event.type,
       title: event.title,
       content: event.content,
-      imageUrl: publicImageUrl(event.imageUrl),
+      imageUrl: publicImageVariantUrl(event.imageUrl, 'large'),
       source: event.source,
       reference: event.reference,
       status: 'APPROVED' as const,
@@ -127,7 +127,7 @@ async function loadAutomaticTodayEvents(month: number, day: number) {
       type: 'ALBUM',
       title: `《${album.name}》发行`,
       content: `${album.artist}专辑《${album.name}》于${parts.year}年发行。`,
-      imageUrl: publicImageUrl(album.coverUrl),
+      imageUrl: publicImageVariantUrl(album.coverUrl, 'large'),
       source: 'AUTO',
       reference: 'EasMusic',
       status: 'APPROVED',
@@ -149,7 +149,7 @@ async function loadAutomaticTodayEvents(month: number, day: number) {
       type: 'CONCERT',
       title,
       content: `${concert.MusicTour.name} · ${concert.city}${concert.venue ? ` · ${concert.venue}` : ''}`,
-      imageUrl: publicImageUrl(posterUrl),
+      imageUrl: publicImageVariantUrl(posterUrl, 'large'),
       source: 'AUTO',
       reference: 'MusicConcert',
       status: 'APPROVED',

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { feedbackInclude, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -19,9 +20,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     return NextResponse.json({ message: '反馈不存在，或你无权查看' }, { status: 404 })
   }
 
-  await prisma.$transaction([
-    prisma.feedback.update({
-      where: { id: feedback.id },
+  const [feedbackUpdate, replyUpdate, notificationUpdate] = await prisma.$transaction([
+    prisma.feedback.updateMany({
+      where: { id: feedback.id, userId: guard.user.id, userUnread: true },
       data: { userUnread: false },
     }),
     prisma.feedbackReply.updateMany({
@@ -37,11 +38,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
       data: { isRead: true, readAt: new Date() },
     }),
   ])
-  if (feedback.userUnread) {
+  if (feedback.userUnread || replyUpdate.count > 0) {
     feedback.userUnread = false
     feedback.FeedbackReply = feedback.FeedbackReply.map((reply) =>
       reply.authorRole === 'ADMIN' ? { ...reply, isReadByUser: true } : reply,
     )
+  }
+
+  if (feedbackUpdate.count > 0 || replyUpdate.count > 0 || notificationUpdate.count > 0) {
+    emitRealtime(guard.user.id, 'feedback', { feedbackId })
   }
 
   return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }) })

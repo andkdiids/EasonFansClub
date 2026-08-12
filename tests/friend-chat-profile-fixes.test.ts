@@ -109,10 +109,11 @@ test('单勾仅表示服务端保存未读，双勾表示对方已读', () => {
   assert.match(messages, /message\.createdAt <= peerLastReadAt/)
 })
 
-test('聊天使用3秒增量轮询、稳定游标、去重和失败退避', () => {
-  assert.match(friendDock, /window\.setTimeout\(poll, 3000\)/)
+test('聊天使用实时事件、稳定游标和去重', () => {
+  assert.match(friendDock, /realtime:event/)
+  assert.match(friendDock, /syncOpenConversation/)
+  assert.doesNotMatch(friendDock, /window\.setTimeout\(poll, 3000\)/)
   assert.match(friendDock, /document\.visibilityState === 'hidden'/)
-  assert.match(friendDock, /Math\.min\(15_000, delay \* 2\)/)
   assert.match(friendDock, /\?after=/)
   assert.match(messages, /createdAt: \{ gt: cursor\.createdAt \}/)
   assert.match(messages, /createdAt: cursor\.createdAt, id: \{ gt: cursor\.id \}/)
@@ -165,7 +166,8 @@ test('通知中心显示私信来源且总红点由统一汇总同步', () => {
   assert.match(notificationClient, /friend-dock:open/)
   assert.doesNotMatch(appShell, /\/api\/notifications\/unread-summary/)
   assert.match(notificationProvider, /eason-private-sync:\$\{userId\}/)
-  assert.match(notificationProvider, /window\.setInterval\(\(\) => void refresh\(\), POLL_INTERVAL_MS\)/)
+  assert.match(notificationProvider, /new RealtimeClient/)
+  assert.doesNotMatch(notificationProvider, /POLL_INTERVAL_MS/)
 })
 
 test('E院中心使用28px突出高度加10px间距避让中间按钮', () => {

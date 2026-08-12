@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 import { formatBeijingDate } from '@/lib/checkin'
@@ -66,6 +67,7 @@ export async function POST(request: Request, context: RouteContext) {
     }
   }
 
+  let notifiedUserId: string | null = null
   const comment = await prisma.$transaction(async (tx) => {
     const dailyMessage = await tx.dailyMessage.findUnique({
       where: { id: messageId },
@@ -90,6 +92,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const recipientId = parentComment?.authorId || dailyMessage.userId
     if (recipientId !== guard.user.id) {
+      notifiedUserId = recipientId
       await tx.notification.create({
         data: {
           recipientId,
@@ -107,5 +110,6 @@ export async function POST(request: Request, context: RouteContext) {
     return created
   })
 
+  if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   return NextResponse.json({ comment }, { status: 201 })
 }

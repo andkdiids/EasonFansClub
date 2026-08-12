@@ -17,6 +17,8 @@ import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
 import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
+import { publicImageVariantUrl } from '@/lib/image-variants'
+import { emitRealtime } from '@/lib/realtime'
 
 export const dynamic = 'force-dynamic'
 
@@ -392,11 +394,15 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
   const focusedReplyExists = Boolean(focusId && postReplies.some((reply) => reply.id === focusId))
   if (user && (!focusId || focusedReplyExists)) {
-    await markPersonalNotificationsForTargetRead({
+    const markedNotifications = await markPersonalNotificationsForTargetRead({
       userId: user.id,
       linkPrefix: focusId ? `/posts/${postId}?focus=${focusId}` : `/posts/${postId}`,
       types: focusId ? ['REPLY', 'LIKE'] : ['LIKE'],
-    }).catch((error) => console.warn('[post:notifications:mark-read-failed]', { postId, focusId, error }))
+    }).catch((error) => {
+      console.warn('[post:notifications:mark-read-failed]', { postId, focusId, error })
+      return 0
+    })
+    if (markedNotifications > 0) emitRealtime(user.id, 'notification')
   }
 
   const displayNameUserIds = [
@@ -431,7 +437,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
   const liked = viewerPostLiked
   const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
-  const authorAvatar = profileImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl)
+  const authorAvatar = publicImageVariantUrl(profileImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl), 'avatar-md')
   const authorName = resolveFriendDisplayName({
     viewerId: user?.id,
     targetUserId: post.User.id,
@@ -538,7 +544,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           {post.sticker?.url ? (
             <div className="mt-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={publicImageUrl(post.sticker.url) || post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" />
+              <img src={publicImageVariantUrl(post.sticker.url, 'thumb-md') || post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" loading="lazy" />
             </div>
           ) : null}
           {post.PostMedia.length ? (

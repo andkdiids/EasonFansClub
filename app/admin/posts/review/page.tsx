@@ -3,13 +3,15 @@ import { requireAdminPage } from '@/components/AdminAccess'
 import { publicImageUrl } from '@/lib/images'
 import { markModerationNotificationsRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { PostReviewManager, type ReviewPost } from './PostReviewManager'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminPostReviewPage() {
   const user = await requireAdminPage('/admin/posts/review', 'post_manage')
-  await markModerationNotificationsRead(user.id)
+  const markedNotifications = await markModerationNotificationsRead(user.id)
+  if (markedNotifications.count > 0) emitRealtime(user.id, 'notification')
   const posts = await prisma.post.findMany({
     where: { moderationStatus: 'PENDING', isDeleted: false },
     orderBy: { createdAt: 'desc' },

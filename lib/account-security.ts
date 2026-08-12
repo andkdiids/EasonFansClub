@@ -1,5 +1,6 @@
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import type { Prisma } from '@prisma/client'
 
 export const securityQuestionCount = 1
@@ -94,6 +95,7 @@ export async function ensureSecurityQuestionNotification(userId: string) {
       link: '/settings/security-questions',
     },
   })
+  emitRealtime(userId, 'notification')
 }
 
 const settingDefinitions = {

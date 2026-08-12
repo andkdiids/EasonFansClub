@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { isSupabaseStorageUrl } from '@/lib/images'
+import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 
 export const DEFAULT_AVATAR_SETTING_KEY = 'users.defaultAvatarPool'
 
@@ -10,6 +10,11 @@ export type DefaultAvatarItem = {
   enabled: boolean
   createdAt: string
   retired?: boolean
+}
+
+export type DefaultAvatarOption = {
+  id: string
+  url: string
 }
 
 type DefaultAvatarDatabase = Pick<Prisma.TransactionClient, 'siteSetting'>
@@ -46,6 +51,17 @@ export async function getDefaultAvatarPool(database: DefaultAvatarDatabase = pri
   return includeRetired ? pool : pool.filter((item) => !item.retired)
 }
 
+/** The single public read model used by registration, profile editing and admin tools. */
+export async function getDefaultAvatarOptions(database: DefaultAvatarDatabase = prisma): Promise<DefaultAvatarOption[]> {
+  const pool = await getDefaultAvatarPool(database)
+  return pool
+    .filter((item) => item.enabled && !isSupabaseStorageUrl(item.url))
+    .flatMap((item) => {
+      const url = publicImageUrl(item.url)
+      return url ? [{ id: item.id, url }] : []
+    })
+}
+
 export async function saveDefaultAvatarPool(items: DefaultAvatarItem[], database: DefaultAvatarDatabase = prisma) {
   await database.siteSetting.upsert({
     where: { key: DEFAULT_AVATAR_SETTING_KEY },
@@ -74,7 +90,9 @@ export async function chooseDefaultAvatar(database: DefaultAvatarDatabase = pris
 
 export async function isDefaultAvatarUrl(url?: string | null) {
   if (!url) return false
-  return (await getDefaultAvatarPool(prisma, true)).some((item) => item.url === url)
+  const candidate = publicImageUrl(url)
+  if (!candidate) return false
+  return (await getDefaultAvatarPool(prisma, true)).some((item) => publicImageUrl(item.url) === candidate)
 }
 
 export async function assignDefaultAvatarsToUnassignedUsers() {

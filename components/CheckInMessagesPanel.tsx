@@ -12,11 +12,17 @@ import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayou
 import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { checkInMessageAuthorId, normalizeFriendCheckInMessages } from '@/lib/checkin-message-order'
+import { getCheckInReplyToggleLabel, getVisibleCheckInReplyCount } from '@/lib/checkin-reply-display'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
 type DailyComment = CheckInDisplayMessageItem['comments'][number]
+type FlattenedDailyComment = {
+  comment: DailyComment
+  replyToName: string
+  isRoot: boolean
+}
 const messagesPerPage = 5
 
 function beijingDateTime(value: string) {
@@ -88,6 +94,26 @@ function buildCommentTree(comments: DailyComment[]) {
 
 function buildCommentMap(comments: DailyComment[]) {
   return new Map(comments.map((comment) => [comment.id, comment]))
+}
+
+function flattenCommentThread(
+  roots: DailyComment[],
+  commentTree: Map<string | null, DailyComment[]>,
+  messageAuthorName: string,
+) {
+  const flattened: FlattenedDailyComment[] = []
+  const visited = new Set<string>()
+
+  function visit(comment: DailyComment, replyToName: string, isRoot: boolean) {
+    if (visited.has(comment.id)) return
+    visited.add(comment.id)
+    flattened.push({ comment, replyToName, isRoot })
+    const childReplyToName = getCommentAuthorName(comment.author)
+    for (const child of commentTree.get(comment.id) || []) visit(child, childReplyToName, false)
+  }
+
+  for (const root of roots) visit(root, messageAuthorName, true)
+  return flattened
 }
 
 function getCommentAuthorName(author: DailyComment['author']) {
@@ -315,8 +341,8 @@ export function CheckInMessagesPanel({
       let current = commentMap.get(focusCommentId)
       if (current) {
         while (current.parentId && commentMap.has(current.parentId)) current = commentMap.get(current.parentId)!
-        if (current.id !== focusCommentId && !expandedReplies[current.id]) {
-          setExpandedReplies((value) => ({ ...value, [current!.id]: true }))
+        if (!expandedReplies[message.id]) {
+          setExpandedReplies((value) => ({ ...value, [message!.id]: true }))
           return
         }
       }
@@ -480,26 +506,16 @@ export function CheckInMessagesPanel({
           const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : '')
           const avatar = profileImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
-          const commentMap = buildCommentMap(item.comments)
           const rootComments = commentTree.get(null) || []
           const replyTarget = replyTargets[item.id] || null
           // 点赞展示状态：优先用共享覆盖层（双面板同步 / 翻页保留），否则用服务端初始值。
           const likeOverride = likeCtx.getLike(item.id)
           const effectiveLiked = likeOverride ? likeOverride.liked : ('liked' in item ? item.liked : item.likes.length > 0)
           const effectiveLikeCount = likeOverride ? likeOverride.likeCount : item.likeCount
-          const collectThreadComments = (rootId: string) => {
-            const result: Array<{ comment: DailyComment; replyToName: string }> = []
-            const visit = (parentId: string) => {
-              const parent = commentMap.get(parentId)
-              const parentName = parent ? getCommentAuthorName(parent.author) : ''
-              ;(commentTree.get(parentId) || []).forEach((child) => {
-                result.push({ comment: child, replyToName: parentName })
-                visit(child.id)
-              })
-            }
-            visit(rootId)
-            return result
-          }
+          const threadComments = flattenCommentThread(rootComments, commentTree, name)
+          const showAllReplies = Boolean(expandedReplies[item.id])
+          const visibleThreadComments = threadComments.slice(0, getVisibleCheckInReplyCount(threadComments.length, showAllReplies))
+          const replyToggleLabel = getCheckInReplyToggleLabel(threadComments.length, showAllReplies)
           return (
             <article key={item.id} id={`message-${item.id}`} className={`checkin-message-card ${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border shadow-sm`}>
               <div className={isMinimal ? 'flex gap-2' : 'flex gap-3'}>
@@ -538,26 +554,27 @@ export function CheckInMessagesPanel({
                     ) : null}
                   </div>
                   <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
-                  {rootComments.length && !isMinimal ? (
+                  {threadComments.length && !isMinimal ? (
                     <div className="checkin-comment-thread mt-2 space-y-2">
-                      {rootComments.map((comment) => {
+                      {visibleThreadComments.map(({ comment, replyToName, isRoot }) => {
                         const commentIdentity = 'uid' in comment.author ? comment.author : null
                         const commentName = getCommentAuthorName(comment.author)
                         const commentAvatar = profileImageUrl(commentIdentity?.profile?.avatarUrl || commentIdentity?.avatarUrl)
-                        const children = collectThreadComments(comment.id)
-                        const showAll = Boolean(expandedReplies[comment.id])
-                        const visibleChildren = showAll ? children : children.slice(0, 3)
                         return (
-                          <div key={comment.id} id={`comment-${comment.id}`} className="checkin-comment-card rounded-xl p-2 text-sm leading-6 text-slate-600">
+                          <div key={comment.id} id={`comment-${comment.id}`} className={`${isRoot ? 'checkin-comment-card' : 'checkin-reply-thread pl-3 sm:pl-4'} rounded-xl p-2 text-sm leading-6 text-slate-600`}>
                             <div className="flex items-start gap-2">
-                              {anonymous || !commentIdentity ? <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-100 text-xs">E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white"><SafeAvatar src={commentAvatar} name={commentName} uid={commentIdentity.uid} className="h-full w-full" textClassName="text-xs" /></a>}
+                              {anonymous || !commentIdentity ? <span className={`${isRoot ? 'h-8 w-8 text-xs' : 'h-6 w-6 text-[10px]'} grid shrink-0 place-items-center rounded-full bg-sky-100`}>E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className={`${isRoot ? 'h-8 w-8 text-xs' : 'h-6 w-6 text-[10px]'} grid shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 font-black text-white`}><SafeAvatar src={commentAvatar} name={commentName} uid={commentIdentity.uid} className="h-full w-full" textClassName={isRoot ? 'text-xs' : 'text-[10px]'} /></a>}
                               <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
+                                <div className={`${isRoot ? 'flex flex-wrap items-center gap-2' : 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs'}`}>
                                   {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950">{commentName}</a>}
+                                  {!isRoot && !anonymous && commentIdentity ? <span className="font-bold text-slate-400">Lv.{commentIdentity.level}</span> : null}
                                   <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
                                 </div>
-                                <p className="mt-1 whitespace-pre-wrap">{comment.content}</p>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <p className={`${isRoot ? 'text-sm' : 'text-sm'} mt-1 break-words whitespace-pre-wrap leading-6`}>
+                                  {!isRoot ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}
+                                  {comment.content}
+                                </p>
+                                <div className={`${isRoot ? 'mt-2 gap-2' : 'mt-1 gap-3'} flex flex-wrap items-center`}>
                                   <button
                                     type="button"
                                     onClick={() => setReplyTargets((current) => ({ ...current, [item.id]: { id: comment.id, name: commentName } }))}
@@ -566,63 +583,23 @@ export function CheckInMessagesPanel({
                                     回复
                                   </button>
                                   {comment.canDelete ? (
-                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} onDeleted={() => notifyCheckInMessagesChanged(item.id, date)} />
+                                    <DeleteCommentButton endpoint={`/api/daily-message-comments/${comment.id}`} variant={isRoot ? 'pill' : 'text'} onDeleted={() => notifyCheckInMessagesChanged(item.id, date)} />
                                   ) : null}
                                 </div>
-
-                                {visibleChildren.length ? (
-                                  <div className="checkin-reply-thread mt-2 space-y-1 pl-3 sm:pl-4">
-                                    {visibleChildren.map(({ comment: child, replyToName }) => {
-                                      const childIdentity = 'uid' in child.author ? child.author : null
-                                      const childName = getCommentAuthorName(child.author)
-                                      const childAvatar = profileImageUrl(childIdentity?.profile?.avatarUrl || childIdentity?.avatarUrl)
-                                      return (
-                                        <div key={child.id} id={`comment-${child.id}`} className="min-w-0 py-2">
-                                          <div className="flex min-w-0 items-start gap-2">
-                                            {anonymous || !childIdentity ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px]">E</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white"><SafeAvatar src={childAvatar} name={childName} uid={childIdentity.uid} className="h-full w-full" textClassName="text-[10px]" /></a>}
-                                            <div className="min-w-0 flex-1">
-                                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                                                {anonymous || !childIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(childIdentity.uid)}`} className="font-black text-brand-950">{childName}</a>}
-                                                {!anonymous && childIdentity ? <span className="font-bold text-slate-400">Lv.{childIdentity.level}</span> : null}
-                                                <span className="font-bold text-slate-400">{beijingDateTime(child.createdAt)}</span>
-                                              </div>
-                                              <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6">
-                                                <span className="font-black text-brand-700">回复 @{replyToName}：</span>
-                                                {child.content}
-                                              </p>
-                                              <div className="mt-1 flex flex-wrap items-center gap-3">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setReplyTargets((current) => ({ ...current, [item.id]: { id: child.id, name: childName } }))}
-                                                  className="text-xs font-black text-brand-700"
-                                                >
-                                                  回复
-                                                </button>
-                                                {child.canDelete ? (
-                                                  <DeleteCommentButton endpoint={`/api/daily-message-comments/${child.id}`} variant="text" onDeleted={() => notifyCheckInMessagesChanged(item.id, date)} />
-                                                ) : null}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )
-                                    })}
-                                    {children.length > 3 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !showAll }))}
-                                        className="text-xs font-black text-brand-700"
-                                      >
-                                        {showAll ? '收起回复' : `展开剩余 ${children.length - 3} 条回复`}
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                ) : null}
                               </div>
                             </div>
                           </div>
                         )
                       })}
+                      {replyToggleLabel ? (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedReplies((current) => ({ ...current, [item.id]: !showAllReplies }))}
+                          className="text-xs font-black text-brand-700"
+                        >
+                          {replyToggleLabel}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                   {!isMinimal ? <DailyMessageActions

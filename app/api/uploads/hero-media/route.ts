@@ -5,6 +5,7 @@ import { publicImageUrl } from '@/lib/images'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
 import { heroMediaTypes, normalizeHeroMediaType, type HeroMediaType } from '@/lib/hero-visuals'
 import { requireAdmin } from '@/lib/security'
+import { createAnimatedImageVariants, createImageVariants, type CreatedImageVariants } from '@/lib/image-webp'
 
 export const runtime = 'nodejs'
 
@@ -96,28 +97,6 @@ async function decodeImage(input: Buffer) {
   }
 }
 
-async function processStaticImage(input: Buffer, format: string) {
-  const pipeline = sharp(input, { failOn: 'none', limitInputPixels: 100_000_000 })
-    .rotate()
-    .resize({ width: MAX_IMAGE_EDGE, height: MAX_IMAGE_EDGE, fit: 'inside', withoutEnlargement: true })
-
-  if (format === 'jpeg') {
-    return { body: await pipeline.jpeg({ quality: 94, progressive: true }).toBuffer(), extension: 'jpg', contentType: 'image/jpeg' }
-  }
-  if (format === 'png') {
-    return { body: await pipeline.png({ compressionLevel: 9, adaptiveFiltering: true, palette: false }).toBuffer(), extension: 'png', contentType: 'image/png' }
-  }
-  if (format === 'webp') {
-    return { body: await pipeline.webp({ quality: 94, effort: 4 }).toBuffer(), extension: 'webp', contentType: 'image/webp' }
-  }
-  return { body: input, extension: extensionForImage(format), contentType: imageContentType(format) }
-}
-
-function keepSafeOutput(input: Buffer, output: Buffer) {
-  if (!output.length || output.length < input.length * 0.01) return input
-  return output
-}
-
 function validateRequestedType(requested: HeroMediaType | null, detected: HeroMediaType) {
   if (!requested || requested === detected) return null
   // File content is authoritative for animated images so GIF and Animated
@@ -159,6 +138,9 @@ export async function POST(request: Request) {
     let output: Buffer
     let contentType: string
     let extension: string
+    let originalExtension: string
+    let originalContentType: string
+    let imageVariants: CreatedImageVariants | null = null
 
     if (imageMetadata?.format && IMAGE_FORMATS.has(imageMetadata.format)) {
       const animated = isAnimatedImage(imageMetadata, input)
@@ -169,15 +151,38 @@ export async function POST(request: Request) {
       const typeError = kind === 'media' ? validateRequestedType(requestedType, detectedType) : null
       if (typeError) return NextResponse.json({ message: typeError }, { status: 400 })
 
-      if (animated) {
+      const canGenerateAnimatedVariants = animated && !(imageMetadata.format === 'png' && hasAnimatedPng(input))
+      if (animated && canGenerateAnimatedVariants) {
+        imageVariants = await createAnimatedImageVariants(input, {
+          sourceMaxWidth: MAX_IMAGE_EDGE,
+          sourceQuality: 86,
+          variants: ['hero', 'large', 'card'],
+        })
+        output = imageVariants.source
+        extension = 'webp'
+        contentType = 'image/webp'
+        originalExtension = extensionForImage(imageMetadata.format)
+        originalContentType = imageContentType(imageMetadata.format)
+      } else if (animated) {
+        // Sharp cannot reliably keep APNG frame disposal/blending semantics here;
+        // preserve the APNG bytes rather than risk silently reducing it to one frame.
         output = input
         extension = extensionForImage(imageMetadata.format)
         contentType = imageContentType(imageMetadata.format)
+        originalExtension = extension
+        originalContentType = contentType
       } else {
-        const processed = await processStaticImage(input, imageMetadata.format)
-        output = keepSafeOutput(input, processed.body)
-        extension = output === input ? extensionForImage(imageMetadata.format) : processed.extension
-        contentType = output === input ? imageContentType(imageMetadata.format) : processed.contentType
+        imageVariants = await createImageVariants(input, {
+          sourceMaxWidth: MAX_IMAGE_EDGE,
+          sourceMaxHeight: MAX_IMAGE_EDGE,
+          sourceQuality: 94,
+          variants: ['hero', 'large', 'card'],
+        })
+        output = imageVariants.source
+        extension = 'webp'
+        contentType = 'image/webp'
+        originalExtension = extensionForImage(imageMetadata.format)
+        originalContentType = imageContentType(imageMetadata.format)
         detectedType = 'STATIC_IMAGE'
       }
     } else if (isMp4(input) || isWebm(input)) {
@@ -187,6 +192,8 @@ export async function POST(request: Request) {
       output = input
       extension = isMp4(input) ? 'mp4' : 'webm'
       contentType = isMp4(input) ? 'video/mp4' : 'video/webm'
+      originalExtension = extension
+      originalContentType = contentType
     } else {
       const declaredType = typeof file.type === 'string' ? file.type.toLowerCase() : ''
       const message = IMAGE_MIME_TYPES.has(declaredType) || VIDEO_MIME_TYPES.has(declaredType)
@@ -196,10 +203,25 @@ export async function POST(request: Request) {
     }
 
     const objectId = randomUUID()
-    const originalPath = `page-visuals/${scope}/original/${objectId}.${extension}`
-    const optimizedPath = `page-visuals/${scope}/optimized/${objectId}.${extension}`
-    const sourceUrl = publicImageUrl(await uploadSiteImage({ key: originalPath, body: input, contentType }))
-    const url = publicImageUrl(await uploadSiteImage({ key: optimizedPath, body: output, contentType }))
+    const originalPath = `page-visuals/${scope}/original/${objectId}.${originalExtension}`
+    const sourceUrl = publicImageUrl(await uploadSiteImage({ key: originalPath, body: input, contentType: originalContentType }))
+    let url: string | null
+    let browserSize = output.byteLength
+    if (imageVariants) {
+      const optimizedRoot = `page-visuals/${scope}/optimized/${objectId}`
+      await uploadSiteImage({ key: `${optimizedRoot}/source.webp`, body: imageVariants.source, contentType: 'image/webp' })
+      const heroBody = imageVariants.variants.hero || imageVariants.source
+      const heroUrl = await uploadSiteImage({ key: `${optimizedRoot}/hero.webp`, body: heroBody, contentType: 'image/webp' })
+      await Promise.all([
+        uploadSiteImage({ key: `${optimizedRoot}/large.webp`, body: imageVariants.variants.large || imageVariants.source, contentType: 'image/webp' }),
+        uploadSiteImage({ key: `${optimizedRoot}/card.webp`, body: imageVariants.variants.card || imageVariants.source, contentType: 'image/webp' }),
+      ])
+      url = publicImageUrl(heroUrl)
+      browserSize = heroBody.byteLength
+    } else {
+      const optimizedPath = `page-visuals/${scope}/optimized/${objectId}.${extension}`
+      url = publicImageUrl(await uploadSiteImage({ key: optimizedPath, body: output, contentType }))
+    }
     if (!url || !sourceUrl) return NextResponse.json({ message: 'Hero 媒体地址无效' }, { status: 500 })
 
     return NextResponse.json({
@@ -209,7 +231,7 @@ export async function POST(request: Request) {
       contentType,
       format: extension,
       originalSize: input.byteLength,
-      size: output.byteLength,
+      size: browserSize,
       animated: kind === 'media' && detectedType === 'ANIMATED_IMAGE',
     })
   } catch (error) {

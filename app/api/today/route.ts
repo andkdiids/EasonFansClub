@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { storedImageUrl } from '@/lib/images'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { getTodayMonthDay, isTodayEventType, parseTodayDate } from '@/lib/today'
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
   }
 
   const moderationStatus = isSuperAdmin(guard.user) ? 'APPROVED' as const : 'PENDING' as const
+  let administratorIds: string[] = []
   const event = await prisma.$transaction(async (tx) => {
     const createdEvent = await tx.todayEvent.create({
       data: {
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
         },
         select: { id: true },
       })
+      administratorIds = admins.map((admin) => admin.id)
 
       if (admins.length) {
         await tx.notification.createMany({
@@ -88,6 +91,7 @@ export async function POST(request: Request) {
     return createdEvent
   })
 
+  emitRealtimeMany(administratorIds, 'notification')
   return NextResponse.json({
     event,
     message: moderationStatus === 'APPROVED' ? '今日内容已提交并直接发布' : '今日内容已提交，等待管理员审核',

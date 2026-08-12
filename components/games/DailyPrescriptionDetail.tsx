@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { SavePrescriptionButton } from './SavePrescriptionButton'
 
 type DrawResult = {
@@ -67,7 +68,11 @@ export function DailyPrescriptionDetail() {
 
   return (
     <section className="daily-game-panel">
-      <header><span>BEIJING TIME · DAILY</span><h2>今日处方</h2></header>
+      <header>
+        <span>BEIJING TIME · DAILY</span>
+        <h2>今日处方</h2>
+        <Link href="/prescription/history" className="daily-prescription-history-link">查看历史处方 →</Link>
+      </header>
       {error ? <p role="alert">{error}</p> : null}
       {!status?.draw ? (
         <button type="button" onClick={() => void draw()} disabled={loading}>

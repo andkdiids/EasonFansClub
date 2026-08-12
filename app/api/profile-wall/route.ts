@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
@@ -306,6 +307,7 @@ export async function POST(request: Request) {
     if (!parentMessage) return NextResponse.json({ message: '要回复的留言不存在' }, { status: 404 })
   }
 
+  let notifiedUserId: string | null = null
   const message = await prisma.$transaction(async (tx) => {
     const created = await tx.profileWallMessage.create({
       data: { senderId: viewer.id, receiverId: receiver.id, parentId: parentMessage?.id || null, content: rawContent },
@@ -321,20 +323,35 @@ export async function POST(request: Request) {
     })
     const recipientId = parentMessage?.senderId || receiver.id
     if (recipientId !== viewer.id) {
-      await tx.notification.create({
-        data: {
+      notifiedUserId = recipientId
+      const notificationKey = parentMessage
+        ? `profile-wall-reply:${created.id}`
+        : `profile-wall-message:${created.id}`
+      const notificationContent = parentMessage
+        ? `${viewer.nickname} 回复了你的留言：${rawContent.slice(0, 120)}`
+        : `${viewer.nickname} 给你留言了：${rawContent.slice(0, 120)}`
+
+      // Profile-wall interactions are reply-style notifications rather than
+      // direct messages. The unique key makes retrying this transaction
+      // idempotent without creating a second notification for one message.
+      await tx.notification.upsert({
+        where: { recipientId_key: { recipientId, key: notificationKey } },
+        update: {},
+        create: {
           recipientId,
           actorId: viewer.id,
-          type: 'MESSAGE',
+          type: 'REPLY',
           title: parentMessage ? '有人回复了你的留言' : '你的留言墙有新留言',
-          content: parentMessage ? `${viewer.nickname} 回复了你的留言` : `${viewer.nickname} 给你留言了`,
+          content: notificationContent,
           link: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}`,
+          key: notificationKey,
         },
       })
     }
     return created
   })
 
+  if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   const createdRow = await loadWallMessage(message.id)
   if (!createdRow) return NextResponse.json({ message: '留言已保存，但读取新留言失败' }, { status: 500 })
   const remarkMap = await loadFriendRemarkMap(viewer.id, [createdRow.senderId])

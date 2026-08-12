@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
 export async function GET(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
@@ -87,8 +88,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
     }
     const likeCount = await tx.profileWallLike.count({ where: { messageId } })
     await tx.profileWallMessage.update({ where: { id: messageId }, data: { likeCount } })
-    return { liked: !existing, likeCount }
+    return { liked: !existing, likeCount, notifiedUserId: !existing && message.senderId !== user.id ? message.senderId : null }
   })
 
+  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

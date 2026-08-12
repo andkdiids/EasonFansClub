@@ -18,6 +18,7 @@ import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
 import { profileImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 
@@ -47,8 +48,6 @@ const emptySummary: UnreadSummary = {
   messages: 0,
   total: 0,
 }
-
-const FRIEND_LIST_REFRESH_INTERVAL_MS = 3000
 
 function createMessageId() {
   const cryptoApi = globalThis.crypto
@@ -276,29 +275,6 @@ export function FriendDock({
     return () => controller.abort()
   }, [open, chatFriend, debouncedQuery, loadFriends])
 
-  // The list view has no open conversation to poll for incremental messages.
-  // Refresh its first server-sorted page while it is visible so a message from
-  // another user can move that friend to the top without a manual reload.
-  useEffect(() => {
-    if (!open || chatFriend || debouncedQuery) return
-    let stopped = false
-    let timer = 0
-    const poll = async () => {
-      if (stopped) return
-      if (document.visibilityState !== 'visible') {
-        timer = window.setTimeout(poll, FRIEND_LIST_REFRESH_INTERVAL_MS)
-        return
-      }
-      await loadFriends(1, false, undefined, true)
-      if (!stopped) timer = window.setTimeout(poll, FRIEND_LIST_REFRESH_INTERVAL_MS)
-    }
-    timer = window.setTimeout(poll, FRIEND_LIST_REFRESH_INTERVAL_MS)
-    return () => {
-      stopped = true
-      window.clearTimeout(timer)
-    }
-  }, [open, chatFriend, debouncedQuery, loadFriends])
-
   useEffect(() => {
     setOpen(false)
     setProfileFriend(null)
@@ -322,10 +298,16 @@ export function FriendDock({
     const refresh = () => {
       if (open && !chatFriend && !debouncedQuery) void loadFriends(1)
     }
+    const refreshFromRealtime = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; changed?: string[]; source?: string }>).detail
+      const changed = detail?.changed || []
+      if (detail?.source === 'fallback' || detail?.type === 'notification-changed' || changed.includes('message') || changed.includes('friend-request')) refresh()
+    }
     window.addEventListener('friend-dock:open', openDock)
     window.addEventListener('friend-dock:close', closeFromOtherOverlay)
     window.addEventListener('friend-remark:updated', updateRemark)
     window.addEventListener('friend-dock:refresh', refresh)
+    window.addEventListener('realtime:event', refreshFromRealtime)
     const channel = 'BroadcastChannel' in window
       ? new BroadcastChannel(`eason-private-sync:${currentUserId}`)
       : null
@@ -341,6 +323,7 @@ export function FriendDock({
       window.removeEventListener('friend-dock:close', closeFromOtherOverlay)
       window.removeEventListener('friend-remark:updated', updateRemark)
       window.removeEventListener('friend-dock:refresh', refresh)
+      window.removeEventListener('realtime:event', refreshFromRealtime)
     }
   }, [currentUserId, open, chatFriend, debouncedQuery, loadFriends, openFriendList, closeDock])
 
@@ -448,46 +431,43 @@ export function FriendDock({
     notifyClients('unread')
   }, [notifyClients])
 
+  const syncOpenConversation = useCallback(async (id: string) => {
+    if (!id || document.visibilityState === 'hidden') return
+    const controller = new AbortController()
+    try {
+      const params = cursorRef.current ? `?after=${encodeURIComponent(cursorRef.current)}` : ''
+      const response = await fetch(`/api/direct-conversations/${id}/messages${params}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      if (!response.ok) return
+      const data = await response.json()
+      mergeMessages(Array.isArray(data.messages) ? data.messages : [], data.peerLastReadAt)
+      if (data.cursor) cursorRef.current = data.cursor
+      if (Array.isArray(data.messages) && data.messages.some((message: Message) => message.senderId !== currentUserId)) {
+        const lastVisibleMessage = data.messages[data.messages.length - 1] as Message | undefined
+        if (lastVisibleMessage) await markConversationRead(id, lastVisibleMessage.id)
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) console.warn('[friend-dock.realtime-sync]', error)
+    } finally {
+      controller.abort()
+    }
+  }, [currentUserId, markConversationRead, mergeMessages])
+
   useEffect(() => {
     if (!open || !conversationId) return
-    let stopped = false
-    let controller: AbortController | null = null
-    let timer = 0
-    let delay = 3000
-    const poll = async () => {
-      if (stopped) return
-      if (document.visibilityState === 'hidden') {
-        timer = window.setTimeout(poll, 3000)
-        return
-      }
-      controller = new AbortController()
-      try {
-        const params = cursorRef.current ? `?after=${encodeURIComponent(cursorRef.current)}` : ''
-        const response = await fetch(`/api/direct-conversations/${conversationId}/messages${params}`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-        if (!response.ok) throw new Error('poll')
-        const data = await response.json()
-        mergeMessages(Array.isArray(data.messages) ? data.messages : [], data.peerLastReadAt)
-        if (data.cursor) cursorRef.current = data.cursor
-        if (Array.isArray(data.messages) && data.messages.some((message: Message) => message.senderId !== currentUserId)) {
-          const lastVisibleMessage = data.messages[data.messages.length - 1] as Message | undefined
-          if (lastVisibleMessage) await markConversationRead(conversationId, lastVisibleMessage.id)
-        }
-        delay = 3000
-      } catch (pollError) {
-        if (!(pollError instanceof DOMException && pollError.name === 'AbortError')) delay = Math.min(15_000, delay * 2)
-      }
-      if (!stopped) timer = window.setTimeout(poll, delay)
+    const onRealtimeEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; changed?: string[]; conversationIds?: string[]; source?: string }>).detail
+      const changed = detail?.changed || []
+      const matchesConversation = !detail?.conversationIds?.length || detail.conversationIds.includes(conversationId)
+      if (matchesConversation && (detail?.source === 'fallback' || detail?.type === 'notification-changed' || changed.includes('message'))) void syncOpenConversation(conversationId)
     }
-    timer = window.setTimeout(poll, 3000)
+    window.addEventListener('realtime:event', onRealtimeEvent)
     return () => {
-      stopped = true
-      controller?.abort()
-      window.clearTimeout(timer)
+      window.removeEventListener('realtime:event', onRealtimeEvent)
     }
-  }, [open, conversationId, currentUserId, markConversationRead, mergeMessages])
+  }, [conversationId, open, syncOpenConversation])
 
   function consumeBackdropEvent(event: ReactPointerEvent<HTMLDivElement> | ReactMouseEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget) return false
@@ -794,7 +774,7 @@ export function FriendDock({
                     const stickerImg = message.stickerUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={message.stickerUrl}
+                        src={publicImageVariantUrl(message.stickerUrl, 'thumb-md') || message.stickerUrl}
                         alt={message.content || '表情'}
                         className="max-w-[120px] max-h-[120px] rounded-lg object-contain sm:max-w-[150px] sm:max-h-[150px]"
                       />
@@ -872,7 +852,7 @@ export function FriendDock({
               {pendingSticker ? (
                 <span className="friend-chat-sticker-preview">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={pendingSticker.url} alt={pendingSticker.name || '表情'} />
+                  <img src={publicImageVariantUrl(pendingSticker.url, 'thumb-sm') || pendingSticker.url} alt={pendingSticker.name || '表情'} />
                   <button
                     type="button"
                     className="friend-chat-sticker-remove"

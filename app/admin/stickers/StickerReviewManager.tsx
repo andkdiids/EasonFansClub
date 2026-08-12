@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import type { StickerPackRow, StickerRow } from './page'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type StatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL'
 
@@ -188,7 +189,7 @@ function PackCard({
         {pack.coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={pack.coverUrl}
+            src={publicImageVariantUrl(pack.coverUrl, 'thumb-sm') || pack.coverUrl}
             alt={`${pack.name} 封面`}
             className="h-20 w-20 rounded-2xl border border-slate-100 object-cover"
           />
@@ -207,7 +208,7 @@ function PackCard({
               <figure key={sticker.id} className="flex flex-col items-center gap-1">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={sticker.url}
+                  src={publicImageVariantUrl(sticker.url, 'thumb-sm') || sticker.url}
                   alt={sticker.name || pack.name}
                   className="h-16 w-16 rounded-xl border border-slate-100 bg-white object-contain"
                 />

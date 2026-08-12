@@ -142,7 +142,10 @@ export function EntertainmentCenter() {
               <h2 id="daily-draw-title">每日抽奖</h2>
               <span>每日 00:00 按北京时间更新</span>
             </div>
-            <strong>今日剩余次数 {remaining}/1</strong>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link href="/prescription/history" className="text-xs font-black text-brand-700">历史处方 →</Link>
+              <strong>今日剩余次数 {remaining}/1</strong>
+            </div>
           </div>
 
           {loading ? <p className="daily-draw-loading">正在读取今日处方…</p> : null}

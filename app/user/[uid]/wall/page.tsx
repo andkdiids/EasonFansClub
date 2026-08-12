@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
+import { emitRealtime } from '@/lib/realtime'
 import { formatUid, parseUidParam } from '@/lib/uid'
 
 export const dynamic = 'force-dynamic'
@@ -24,11 +25,15 @@ export default async function ProfileWallPage({ params, searchParams }: { params
   ])
   if (!target) notFound()
   if (viewer && focusId) {
-    await markPersonalNotificationsForTargetRead({
+    const markedNotifications = await markPersonalNotificationsForTargetRead({
       userId: viewer.id,
       linkPrefix: `/user/${formatUid(target.uid)}/wall?focus=${focusId}`,
       types: ['REPLY', 'LIKE'],
-    }).catch((error) => console.warn('[profile-wall:notifications:mark-read-failed]', { targetUid: target.uid, focusId, error }))
+    }).catch((error) => {
+      console.warn('[profile-wall:notifications:mark-read-failed]', { targetUid: target.uid, focusId, error })
+      return 0
+    })
+    if (markedNotifications > 0) emitRealtime(viewer.id, 'notification')
   }
   const remarkMap = await loadFriendRemarkMap(viewer?.id, [target.id])
   const name = resolveFriendDisplayName({

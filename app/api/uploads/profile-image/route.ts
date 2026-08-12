@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
+import sharp from 'sharp'
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
-import { uploadToCos, deleteFromCos, getCosUrl } from '@/lib/tencent-cos'
+import { uploadToCos, deleteFromCos } from '@/lib/tencent-cos'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { isDefaultAvatarUrl } from '@/lib/default-avatars'
-import { normalizeImageToWebp, ImageNormalizeError } from '@/lib/image-webp'
+import { createAnimatedImageVariants, createImageVariants, ImageNormalizeError, isAnimatedImageInput } from '@/lib/image-webp'
+import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 
 export const runtime = 'nodejs'
 
@@ -96,8 +98,8 @@ export async function POST(request: Request) {
 
   const objectPath =
     kind === 'avatar'
-      ? `avatars/${guard.user.id}/${createCompatibleId()}.webp`
-      : `profiles/${guard.user.id}/background-${createCompatibleId()}.webp`
+      ? `avatars/${guard.user.id}/${createCompatibleId()}/source.webp`
+      : `profiles/${guard.user.id}/background-${createCompatibleId()}/source.webp`
 
 
 
@@ -106,22 +108,27 @@ export async function POST(request: Request) {
   try {
 
     const rawBuffer = Buffer.from(await file.arrayBuffer())
-    // 统一在服务端转 WebP + 等比压缩，禁止原样存储 jpg/png。
-    const webpBuffer = await normalizeImageToWebp(
-      rawBuffer,
-      kind === 'avatar'
-        ? { maxWidth: 512, maxHeight: 512, quality: 82 }
-        : { maxWidth: 1920, quality: 82 },
-    )
-
-    await uploadToCos({
-      key: objectPath,
-      body: webpBuffer,
-      contentType: 'image/webp',
+    const decoded = await sharp(rawBuffer, { animated: true, failOn: 'none', limitInputPixels: 100_000_000 }).metadata()
+    const variants = kind === 'avatar' ? ['avatar-sm', 'avatar-md'] as const : ['large'] as const
+    const generated = isAnimatedImageInput(rawBuffer, decoded)
+      ? await createAnimatedImageVariants(rawBuffer, {
+        sourceMaxWidth: kind === 'avatar' ? 512 : 1920,
+        variants,
+      })
+      : await createImageVariants(rawBuffer, {
+        sourceMaxWidth: kind === 'avatar' ? 512 : 1920,
+        sourceMaxHeight: kind === 'avatar' ? 512 : undefined,
+        sourceQuality: 82,
+        variants,
+      })
+    const uploadResult = await uploadImageVariantFamily({
+      sourceObjectPath: objectPath,
+      original: rawBuffer,
+      originalContentType: imageContentType(decoded.format),
+      generated,
+      upload: ({ key, body, contentType }) => uploadToCos({ key, body, contentType }),
     })
-
-
-    url = getCosUrl(objectPath)
+    url = uploadResult.sourceUrl
 
   } catch (error) {
 
@@ -285,7 +292,7 @@ export async function POST(request: Request) {
 
 
 
-      if(oldPath && oldPath!==newPath){
+      if(oldPath && oldPath!==newPath && !oldPath.endsWith('/source.webp')){
 
         void deleteFromCos(oldPath)
 
@@ -302,4 +309,11 @@ export async function POST(request: Request) {
     mimeType:'image/webp'
   })
 
+}
+
+function imageContentType(format?: string | null) {
+  if (format === 'jpeg') return 'image/jpeg'
+  if (format === 'png') return 'image/png'
+  if (format === 'gif') return 'image/gif'
+  return 'image/webp'
 }

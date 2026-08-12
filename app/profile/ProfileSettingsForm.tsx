@@ -15,6 +15,7 @@ type InitialProfile = {
   }
   nickname: string
   avatarUrl: string
+  defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
   email: string
@@ -330,6 +331,8 @@ export function ProfileSettingsForm({
   const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
+  const [pendingDefaultAvatarUrl, setPendingDefaultAvatarUrl] = useState<string | null>(null)
   const [backgroundPreview, setBackgroundPreview] = useState(initialProfile.backgroundUrl || '')
   
 
@@ -354,6 +357,22 @@ export function ProfileSettingsForm({
 
   function update<K extends keyof InitialProfile>(key: K, value: InitialProfile[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function openDefaultAvatarPicker() {
+    const currentUrl = profileImageUrl(form.avatarUrl)
+    const currentDefault = initialProfile.defaultAvatarOptions.find((item) => profileImageUrl(item.url) === currentUrl)
+    setPendingDefaultAvatarUrl(currentDefault?.url || null)
+    setAvatarPickerOpen(true)
+  }
+
+  function applyDefaultAvatar() {
+    if (!pendingDefaultAvatarUrl) return
+    if (crop?.url) resetCrop()
+    update('avatarUrl', pendingDefaultAvatarUrl)
+    setAvatarPickerOpen(false)
+    setMessage('已选择默认头像，点击“保存资料”后生效。')
+    setError('')
   }
 
   function resetCrop() {
@@ -688,6 +707,11 @@ export function ProfileSettingsForm({
         wallVisibility: data.profile.wallVisibility || current.wallVisibility,
       }))
     }
+    if (typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('profile-avatar-updated', {
+        detail: { avatarUrl: data?.profile?.avatarUrl || form.avatarUrl },
+      }))
+    }
     setMessage(data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')
     router.refresh()
     onSaved?.()
@@ -729,13 +753,54 @@ export function ProfileSettingsForm({
                   <SafeAvatar src={avatarPreview} name={form.nickname} className="h-full w-full" textClassName="text-2xl" />
                 </span>
                 <div className="min-w-0">
-                  <button type="button" onClick={() => avatarInputRef.current?.click()} className="rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm">
-                    {uploading === 'avatar' ? '上传中...' : '选择头像'}
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={uploading !== null} className="rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm disabled:cursor-not-allowed disabled:opacity-60">
+                      {uploading === 'avatar' ? '上传中...' : '上传头像'}
+                    </button>
+                    <button type="button" onClick={openDefaultAvatarPicker} disabled={uploading !== null} className="rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-black text-brand-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60">
+                      默认头像图库
+                    </button>
+                  </div>
                   <p className="mt-2 text-xs font-bold leading-5 text-slate-500">自动裁剪为 512 × 512，优先 WebP，原图最大 10MB。</p>
                   <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" onChange={openAvatarCrop} className="hidden" />
                 </div>
               </div>
+              {avatarPickerOpen ? (
+                <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/55 p-3" role="dialog" aria-label="默认头像图库">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-black text-brand-950">默认头像图库</p>
+                      <p className="mt-1 text-xs font-bold text-slate-500">头像来自网站当前启用的默认头像池。</p>
+                    </div>
+                    <button type="button" onClick={() => setAvatarPickerOpen(false)} className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-slate-500">关闭</button>
+                  </div>
+                  {initialProfile.defaultAvatarOptions.length ? (
+                    <>
+                      <div className="mt-3 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4 md:grid-cols-6">
+                        {initialProfile.defaultAvatarOptions.map((item) => {
+                          const selected = pendingDefaultAvatarUrl === item.url
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => setPendingDefaultAvatarUrl(item.url)}
+                              className={`aspect-square overflow-hidden rounded-full border-4 bg-white transition ${selected ? 'border-brand-700 ring-2 ring-brand-200' : 'border-white ring-1 ring-sky-100 hover:border-sky-200'}`}
+                            >
+                              <SafeAvatar src={profileImageUrl(item.url)} name="默认头像" className="h-full w-full" />
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <button type="button" onClick={applyDefaultAvatar} disabled={!pendingDefaultAvatarUrl} className="mt-3 min-h-10 w-full rounded-xl bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+                        使用此头像
+                      </button>
+                    </>
+                  ) : (
+                    <p className="mt-3 rounded-xl bg-white px-3 py-3 text-sm font-bold leading-6 text-slate-500">暂无可用默认头像，请联系管理员先补充头像图库。</p>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-2xl border border-white bg-white/78 p-4">

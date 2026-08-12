@@ -13,7 +13,7 @@ import { getEnabledConcertCategories } from '@/lib/music-concert-category'
 import { prisma } from '@/lib/prisma'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { getSiteAppearance } from '@/lib/site-config'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,8 +65,8 @@ export default async function MusicPage() {
     getSiteAppearance(),
     getEnabledConcertCategories().catch(() => []),
   ])
-  const carouselAlbums = albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: toPublicMediaUrl(album.coverUrl)!, songCount: album._count.MusicSong, releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear) }))
-  const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: toPublicMediaUrl(album.coverUrl), songCount: album._count.MusicSong }))
+  const carouselAlbums = albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-md')!, songCount: album._count.MusicSong, releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear) }))
+  const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-md'), songCount: album._count.MusicSong }))
   const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({
     ...tour,
     ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
@@ -84,7 +84,7 @@ export default async function MusicPage() {
       albumTitle: song.MusicAlbum.name,
       releaseYear: song.releaseYear,
       language: song.language,
-      coverUrl: toPublicMediaUrl(song.MusicAlbum.coverUrl || song.coverUrl),
+      coverUrl: publicImageVariantUrl(song.MusicAlbum.coverUrl || song.coverUrl, 'thumb-sm'),
       ...playback,
     }]
   })

@@ -4,11 +4,20 @@ import sharp from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
 import { requireAdmin } from '@/lib/security'
+import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
+import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 
 export const runtime = 'nodejs'
 
 const maxFileSize = 10 * 1024 * 1024
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+
+function imageContentType(format?: string | null) {
+  if (format === 'jpeg') return 'image/jpeg'
+  if (format === 'png') return 'image/png'
+  if (format === 'gif') return 'image/gif'
+  return 'image/webp'
+}
 
 async function requireSiteImageAdmin() {
   const siteConfigGuard = await requireAdmin('site_config_manage')
@@ -34,23 +43,42 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '图片不能超过 10MB' }, { status: 400 })
   }
 
-  let output: Buffer
+  let input: Buffer
+  let generated: Awaited<ReturnType<typeof createImageVariants>>
   try {
-    output = await sharp(Buffer.from(await file.arrayBuffer()), { failOn: 'none', limitInputPixels: 50_000_000 })
-      .rotate()
-      .resize({ width: 2400, height: 1600, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 84 })
-      .toBuffer()
+    input = Buffer.from(await file.arrayBuffer())
+    const image = sharp(input, { animated: true, failOn: 'none', limitInputPixels: 50_000_000 })
+    const metadata = await image.metadata()
+    const animated = isAnimatedImageInput(input, metadata)
+    generated = animated
+      ? await createAnimatedImageVariants(input, {
+        sourceMaxWidth: 2400,
+        variants: ['thumb-sm', 'thumb-md', 'card', 'large'],
+      })
+      : await createImageVariants(input, {
+        sourceMaxWidth: 2400,
+        sourceMaxHeight: 1600,
+        sourceQuality: 84,
+        variants: ['thumb-sm', 'thumb-md', 'card', 'large'],
+      })
   } catch (error) {
     console.error('[site-image.sharp]', error)
     return NextResponse.json({ message: '图片转换为 WebP 失败，请检查图片后重试' }, { status: 422 })
   }
 
   try {
-    const objectPath = `site/${randomUUID()}.webp`
-    const url = publicImageUrl(await uploadSiteImage({ key: objectPath, body: output }))
+    const objectPath = `site/${randomUUID()}/source.webp`
+    const metadata = await sharp(input, { animated: true, failOn: 'none', limitInputPixels: 50_000_000 }).metadata()
+    const uploadResult = await uploadImageVariantFamily({
+      sourceObjectPath: objectPath,
+      original: input,
+      originalContentType: imageContentType(metadata.format),
+      generated,
+      upload: ({ key, body, contentType }) => uploadSiteImage({ key, body, contentType }),
+    })
+    const url = publicImageUrl(uploadResult.sourceUrl)
     if (!url) return NextResponse.json({ message: '图片地址无效' }, { status: 500 })
-    return NextResponse.json({ url, mimeType: 'image/webp', format: 'webp' })
+    return NextResponse.json({ url, mimeType: 'image/webp', format: 'webp', originalSize: input.byteLength, size: generated.source.byteLength })
   } catch (error) {
     if (!(error instanceof SiteMediaStorageError)) console.error('[site-image.upload]', error)
     return NextResponse.json({ message: error instanceof Error ? error.message : '图片上传失败，请稍后重试' }, { status: 502 })

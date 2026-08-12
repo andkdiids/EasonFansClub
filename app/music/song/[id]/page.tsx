@@ -11,7 +11,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +27,8 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
   ])
   if (!song) notFound()
 
-  const coverUrl = toPublicMediaUrl(song.MusicAlbum.coverUrl)
+  const coverUrl = publicImageVariantUrl(song.MusicAlbum.coverUrl, 'large')
+  const playerCoverUrl = publicImageVariantUrl(song.MusicAlbum.coverUrl, 'thumb-sm')
   const releaseLabel = formatMusicReleaseDate(song.MusicAlbum.releaseDate, song.releaseYear)
   const tags = song.tags?.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) || []
   const credits = [
@@ -46,7 +47,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
 
     <section className="mt-8 grid items-center gap-9 md:grid-cols-[320px_minmax(0,1fr)] md:gap-14">
       <MusicDetailReveal direction="left" hover className="mx-auto w-full max-w-[320px]">
-        <MusicCover src={coverUrl} alt={`${song.MusicAlbum.name}专辑封面`} className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" />
+        <MusicCover src={coverUrl} alt={`${song.MusicAlbum.name}专辑封面`} variant="large" className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" priority />
       </MusicDetailReveal>
       <MusicDetailReveal direction="right" delay={0.08}>
         <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">SONG ARCHIVE</p>
@@ -63,7 +64,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
       <dl className="mt-7 grid gap-4 sm:grid-cols-2 md:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
     </MusicDetailReveal>
 
-    <div id="song-preview" className="mt-8 scroll-mt-24"><MusicPlayer id={song.id} title={song.title} artist={song.artist} albumName={song.MusicAlbum.name} coverUrl={coverUrl} sourceType={song.sourceType} previewUrl={playback.previewUrl} previewDuration={playback.previewDuration} isFullPlayback={playback.isFullPlayback} /></div>
+    <div id="song-preview" className="mt-8 scroll-mt-24"><MusicPlayer id={song.id} title={song.title} artist={song.artist} albumName={song.MusicAlbum.name} coverUrl={playerCoverUrl} sourceType={song.sourceType} previewUrl={playback.previewUrl} previewDuration={playback.previewDuration} isFullPlayback={playback.isFullPlayback} /></div>
     <PersonalSongHistory songId={song.id} />
 
     <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">

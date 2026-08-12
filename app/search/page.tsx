@@ -6,7 +6,7 @@ import { formatUid } from '@/lib/uid'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
-import { toPublicMediaUrl } from '@/lib/media-url'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
 
@@ -96,10 +96,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     : [[], [], [], [], [], await prisma.searchKeyword.findMany({ orderBy: { count: 'desc' }, take: 8 })]
 
   const viewer = await getCurrentUser()
-  for (const album of albums) album.coverUrl = toPublicMediaUrl(album.coverUrl)
+  for (const album of albums) album.coverUrl = publicImageVariantUrl(album.coverUrl, 'thumb-sm')
   for (const song of songs) {
-    song.coverUrl = toPublicMediaUrl(song.coverUrl)
-    song.MusicAlbum.coverUrl = toPublicMediaUrl(song.MusicAlbum.coverUrl)
+    song.coverUrl = publicImageVariantUrl(song.coverUrl || song.MusicAlbum.coverUrl, 'thumb-sm')
+    song.MusicAlbum.coverUrl = publicImageVariantUrl(song.MusicAlbum.coverUrl, 'thumb-sm')
   }
   const userIds = users.map((item) => item.id)
   const [friendships, sentRequests, receivedRequests, growthLevels] = await Promise.all([
@@ -164,14 +164,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               {albums.length ? <h2 className="pt-3 text-lg font-black text-brand-950">专辑</h2> : null}
               {albums.map((album) => (
                 <Link key={album.id} href={`/music/album/${album.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
-                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{album.coverUrl ? <Image src={album.coverUrl} alt="" fill sizes="56px" className="object-cover" /> : '♪'}</span>
+                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{album.coverUrl ? <Image src={album.coverUrl} alt="" fill sizes="56px" loading="lazy" className="object-cover" /> : '♪'}</span>
                   <span><strong className="block font-black text-slate-950">{album.name}</strong><small className="mt-1 block text-sm text-slate-500">{album.artist} · {album.releaseYear}</small></span>
                 </Link>
               ))}
               {songs.length ? <h2 className="pt-3 text-lg font-black text-brand-950">歌曲</h2> : null}
               {songs.map((song) => (
                 <Link key={song.id} href={`/music/song/${song.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
-                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{song.coverUrl || song.MusicAlbum.coverUrl ? <Image src={song.coverUrl || song.MusicAlbum.coverUrl || ''} alt="" fill sizes="56px" className="object-cover" /> : '♪'}</span>
+                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{song.coverUrl ? <Image src={song.coverUrl} alt="" fill sizes="56px" loading="lazy" className="object-cover" /> : '♪'}</span>
                   <span><strong className="block font-black text-slate-950">{song.title}</strong><small className="mt-1 block text-sm text-slate-500">{song.artist} · {song.MusicAlbum.name} · {song.previewUrl ? '支持试听' : '暂无试听'}</small></span>
                 </Link>
               ))}
@@ -205,7 +205,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       <article key={item.id} className="border-b border-sky-100 py-3 last:border-0">
                         <Link href={`/user/${formatUid(item.uid)}`} className="flex items-center gap-3 font-bold text-slate-700">
                           <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden bg-brand-950 text-white">
-                            {avatar ? <img src={avatar} alt={name} className="h-full w-full object-cover" /> : formatUid(item.uid).slice(0, 1)}
+                            {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt={name} className="h-full w-full object-cover" loading="lazy" /> : formatUid(item.uid).slice(0, 1)}
                           </span>
                           <span>
                             <strong className="block text-brand-950">{name}</strong>
