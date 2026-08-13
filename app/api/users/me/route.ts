@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 import { validateLoginAccountValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
+import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -209,6 +210,8 @@ export async function PATCH(request: Request) {
   const backgroundUrl = sanitizeText(body?.backgroundUrl, 500)
   const email = body?.email === undefined ? undefined : normalizeEmail(body.email)
   const phone = body?.phone === undefined ? undefined : sanitizeText(body.phone, 20).replace(/\s+/g, '')
+  const phoneCountry = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
+  const normalizedPhone = phone ? normalizePhoneNumber(phone, phoneCountry) : null
   const requestedWallVisibility = body?.wallVisibility === undefined ? undefined : sanitizeText(body.wallVisibility, 20)
   const wallVisibility = requestedWallVisibility as ProfileWallVisibility | undefined
 
@@ -241,10 +244,10 @@ export async function PATCH(request: Request) {
     data.email = email || null
   }
   if (phone !== undefined) {
-    if (phone && !/^1\d{10}$/.test(phone)) {
-      return NextResponse.json({ message: '请输入 11 位中国大陆手机号' }, { status: 400 })
+    if (phone && !normalizedPhone) {
+      return NextResponse.json({ message: '手机号格式不正确', code: 'INVALID_PHONE', errors: { phone: '手机号格式不正确' } }, { status: 400 })
     }
-    data.phone = phone || null
+    data.phone = normalizedPhone?.e164 || null
   }
   if (requestedWallVisibility !== undefined && !profileWallVisibilities.has(requestedWallVisibility)) {
     return NextResponse.json({ message: '留言墙隐私设置无效' }, { status: 400 })
@@ -273,14 +276,17 @@ export async function PATCH(request: Request) {
     data.emailVerifiedAt = null
   }
 
-  if (phone !== undefined && data.phone !== current.phone) {
-    if (data.phone) {
-      const existing = await prisma.user.findFirst({
-        where: { phone: data.phone, isDeleted: false, NOT: { id: guard.user.id } },
-        select: { id: true },
-      })
-      if (existing) return NextResponse.json({ message: '该手机号已被绑定' }, { status: 409 })
-    }
+  const currentPhoneE164 = current.phone ? normalizePhoneNumber(current.phone, phoneCountry)?.e164 : null
+  const phoneChanged = phone !== undefined && data.phone !== current.phone && data.phone !== currentPhoneE164
+  if (phone !== undefined && data.phone) {
+    const phoneVariants = getPhoneLookupVariants(data.phone, normalizedPhone?.country || phoneCountry)
+    const existing = await prisma.user.findFirst({
+      where: { phone: { in: phoneVariants }, isDeleted: false, NOT: { id: guard.user.id } },
+      select: { id: true },
+    })
+    if (existing) return NextResponse.json({ message: '该手机号已被绑定' }, { status: 409 })
+  }
+  if (phoneChanged) {
     data.phoneVerifiedAt = null
   }
 

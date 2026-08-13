@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { profileImageUrl } from '@/lib/images'
 import { validateLoginAccountValue } from '@/lib/login-account'
+import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 
 type InitialProfile = {
   username: string
@@ -172,8 +174,9 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
 
 function maskPhone(phone: string) {
   if (!phone) return '未绑定'
-  if (!/^1\d{10}$/.test(phone)) return phone
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+  const normalized = normalizePhoneNumber(phone)
+  if (!normalized) return phone
+  return `${normalized.dialCode}${normalized.nationalNumber.slice(0, 3)}****${normalized.nationalNumber.slice(-4)}`
 }
 
 function maskEmail(email: string) {
@@ -314,6 +317,9 @@ export function ProfileSettingsForm({
 }) {
   const router = useRouter()
   const [form, setForm] = useState(initialProfile)
+  const initialPhoneParts = getPhoneInputParts(initialProfile.phone)
+  const [phoneCountry, setPhoneCountry] = useState<PhoneCountryCode>(initialPhoneParts.country)
+  const [phoneValue, setPhoneValue] = useState(initialPhoneParts.value)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [usernameChange, setUsernameChange] = useState(initialProfile.usernameChange)
@@ -668,6 +674,12 @@ export function ProfileSettingsForm({
       setError(nicknameValidation.error)
       return
     }
+    const rawPhone = phoneValue.trim()
+    const normalizedPhone = rawPhone ? normalizePhoneNumber(rawPhone, phoneCountry) : null
+    if (rawPhone && !normalizedPhone) {
+      setError('手机号格式不正确')
+      return
+    }
     setIsSaving(true)
     setMessage('')
     setError('')
@@ -681,7 +693,8 @@ export function ProfileSettingsForm({
         avatarUrl: form.avatarUrl,
         backgroundUrl: form.backgroundUrl,
         email: form.email,
-        phone: form.phone,
+        phone: normalizedPhone?.e164 || '',
+        phoneCountry: normalizedPhone?.country || phoneCountry,
         wallVisibility: form.wallVisibility,
         // 生日仅在未设置时提交；已设置则由服务端忽略。
         ...(form.birthdaySetAt
@@ -706,6 +719,10 @@ export function ProfileSettingsForm({
         phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
         wallVisibility: data.profile.wallVisibility || current.wallVisibility,
       }))
+      const nextPhone = data.profile.phone || ''
+      const nextPhoneParts = getPhoneInputParts(nextPhone, phoneCountry)
+      setPhoneCountry(nextPhoneParts.country)
+      setPhoneValue(nextPhoneParts.value)
     }
     if (typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('profile-avatar-updated', {
@@ -1026,12 +1043,14 @@ export function ProfileSettingsForm({
               <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
                 {form.phone ? (form.phoneVerifiedAt ? '已验证' : '未验证，仅作为已绑定登录标识') : '未绑定'}
               </span>
-              <input
-                value={form.phone}
-                onChange={(event) => update('phone', event.target.value)}
-                type="tel"
-                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+              <InternationalPhoneInput
+                value={phoneValue}
+                country={phoneCountry}
+                onChange={setPhoneValue}
+                onCountryChange={setPhoneCountry}
+                disabled={isSaving || uploading !== null}
                 placeholder={form.phone ? '更换手机号' : '绑定手机号'}
+                inputClassName="mt-3"
               />
             </label>
           </div>

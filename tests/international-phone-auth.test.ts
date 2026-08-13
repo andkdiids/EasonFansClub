@@ -25,6 +25,15 @@ test('国际手机号按所选国家/地区解析并可从完整号码自动识�
   assert.equal(getPhoneInputParts('+852 9123 4567').value, '91234567')
 })
 
+test('个人资料编辑复用同一套国际手机号拆分、标准化和历史号码兼容规则', () => {
+  assert.deepEqual(getPhoneInputParts('+8613812345678'), { country: 'CN', value: '13812345678' })
+  assert.deepEqual(getPhoneInputParts('13812345678'), { country: 'CN', value: '13812345678' })
+  assert.equal(normalizePhoneNumber('13912345678', 'CN')?.e164, '+8613912345678')
+  assert.equal(normalizePhoneNumber('91234567', 'HK')?.e164, '+85291234567')
+  assert.equal(normalizePhoneNumber('7911123456', 'GB')?.e164, '+447911123456')
+  assert.deepEqual(getPhoneLookupVariants('+8613812345678', 'CN'), ['+8613812345678', '13812345678'])
+})
+
 test('常用国家/地区号码均可通过同一解析器校验', () => {
   const fixtures = [
     ['CN', '13800138000'],
