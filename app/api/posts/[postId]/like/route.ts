@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
-import { POINTS } from '@/lib/points'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
-import { awardRegistrationFee } from '@/lib/registration-fee'
 import { emitRealtime } from '@/lib/realtime'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -77,14 +75,6 @@ export async function POST(_request: Request, { params }: Params) {
     if (post.authorId !== user.id) {
       const author = await tx.user.findUnique({ where: { id: post.authorId }, select: { id: true } })
       if (author) {
-        await awardRegistrationFee(tx, {
-          userId: post.authorId,
-          requestedAmount: POINTS.postLikeReceived,
-          action: 'POST_LIKE_RECEIVED',
-          reason: '帖子收到点赞',
-          businessKey: `post-like-received:${postId}:${user.id}`,
-          postId,
-        })
         // 点赞通知：仅在「新建点赞」时生成一次（上面的 findUnique 已保证同一用户不会重复点赞），
         // 格式与回复点赞 / 每日留言点赞一致；link 指向帖子详情。
         await tx.notification.create({

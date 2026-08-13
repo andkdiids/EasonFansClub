@@ -7,8 +7,8 @@ export const LONG_TERM_PATIENT_STREAK_DAYS = 7
 export const LONG_TERM_PATIENT_DAILY_BONUS = 7
 export const HUNDRED_DAY_RECORD_REWARD = 100
 
-// Legacy labels stay readable for historical PointLog rows; the old post and
-// daily-comment actions are no longer written by the community routes.
+// Legacy labels stay readable for historical PointLog rows. In particular,
+// POST_LIKE_RECEIVED is no longer written by any current like route.
 export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
   POST_CREATE: '发帖奖励',
   REPLY_CREATE: '回复奖励',

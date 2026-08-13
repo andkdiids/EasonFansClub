@@ -40,12 +40,12 @@ test('统一挂号费服务不再计算所有来源合计每日 30 上限', () =
 test('所有真实挂号费收入入口接入统一流水服务', () => {
   for (const path of [
     'app/api/checkin/route.ts',
-    'app/api/posts/[postId]/like/route.ts',
     'lib/entertainment.ts',
     'lib/achievements.ts',
   ]) {
     assert.match(read(path), /awardRegistrationFee/)
   }
+  assert.doesNotMatch(read('app/api/posts/[postId]/like/route.ts'), /awardRegistrationFee|POST_LIKE_RECEIVED|postLikeReceived/)
   assert.match(read('app/api/admin/users/[userId]/route.ts'), /adjustRegistrationFeeBalance/)
   assert.match(read('app/api/posts/[postId]/replies/route.ts'), /awardCommunityCommentRewards/)
   assert.doesNotMatch(read('app/api/auth/register/route.ts'), /points:\s*\{\s*increment/)

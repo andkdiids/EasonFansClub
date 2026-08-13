@@ -67,8 +67,7 @@ test('发帖、评论、点赞相关接口不调用经验奖励；合法挂号�
     read('app/api/music/reviews/[reviewId]/interactions/route.ts'),
   ]
 
-  assert.doesNotMatch(postLikeRoute, /awardExperience|experience\s*:/)
-  assert.match(postLikeRoute, /awardRegistrationFee/)
+  assert.doesNotMatch(postLikeRoute, /awardExperience|awardRegistrationFee|POST_LIKE_RECEIVED|postLikeReceived|experience\s*:/)
   for (const route of likeRoutes) assert.doesNotMatch(route, /awardExperience|experience\s*:/)
 })
 

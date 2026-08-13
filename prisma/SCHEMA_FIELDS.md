@@ -14,7 +14,7 @@
 - `POST_CREATE`：发帖获得积分。
 - `REPLY_CREATE`：回复获得积分。
 - `DAILY_CHECK_IN`：每日签到获得积分。
-- `POST_LIKE_RECEIVED`：帖子被点赞后，帖子作者获得积分。
+- `POST_LIKE_RECEIVED`：历史兼容的旧流水类型；当前帖子点赞不会增加帖子作者或点赞者的挂号费，也不会增加经验值。
 - `ADMIN_ADJUST`：管理员手动调整积分。
 
 ### AdminActionType
@@ -156,7 +156,7 @@
 - 发帖 +5。
 - 回复 +2。
 - 签到 +10。
-- 帖子被点赞，帖子作者 +1。
+- `POST_LIKE_RECEIVED` 仅用于识别历史点赞奖励流水；当前帖子点赞不产生挂号费或经验值。
 - 管理员手动调整积分。
 
 ## AdminAction 管理员操作日志表

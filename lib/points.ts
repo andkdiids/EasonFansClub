@@ -1,7 +1,6 @@
 export const POINTS = {
   dailyCheckInMin: 3,
   dailyCheckInMax: 7,
-  postLikeReceived: 1,
 }
 
 export function getRandomCheckInPoints() {
