@@ -26,6 +26,14 @@ const publicPathPrefixes = [
   '/uploads/',
 ]
 
+// These endpoints perform their own gateway, ticket, and database checks.
+// They must bypass the generic browser-session middleware because the media
+// gateway deliberately does not forward the user's Cookie to the origin.
+const guessSongMediaGatewayPaths = new Set([
+  '/api/internal/media/guess-song/authorize',
+  '/api/internal/media/guess-song/origin',
+])
+
 const immutablePublicPathPrefixes = [
   '/easmusic/',
   '/images/cassette/',
@@ -132,6 +140,10 @@ export async function middleware(request: NextRequest) {
     secureUrl.hostname = requestHost
     secureUrl.port = ''
     return withNoStoreHeaders(NextResponse.redirect(secureUrl, 308))
+  }
+
+  if (guessSongMediaGatewayPaths.has(pathname)) {
+    return NextResponse.next()
   }
 
   if (isPublicPath(pathname)) {
