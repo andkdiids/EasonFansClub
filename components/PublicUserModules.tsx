@@ -1,10 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
+import { Pagination } from '@/components/ui/Pagination'
 import { formatUid } from '@/lib/uid'
-import type { ProfileRecentMessage } from '@/lib/profile-page'
+import { PROFILE_RECORD_PAGE_SIZE, type ProfileRecentMessage, type ProfileRecordPagination } from '@/lib/profile-page'
+import { scrollToSectionTop } from '@/lib/pagination'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
@@ -31,7 +33,17 @@ type FavoriteItem = {
   }
 }
 type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
-type CacheState = Record<string, { loading: boolean; failed: boolean; items: ModuleItem[] } | undefined>
+type PaginatedModuleKey = 'posts' | 'recent-messages'
+type ModuleState = { loading: boolean; failed: boolean; items: ModuleItem[]; pagination?: ProfileRecordPagination }
+type CacheState = Record<string, ModuleState | undefined>
+
+function isPaginatedModule(moduleKey: ModuleKey): moduleKey is PaginatedModuleKey {
+  return moduleKey === 'posts' || moduleKey === 'recent-messages'
+}
+
+function moduleCacheKey(moduleKey: ModuleKey, page: number) {
+  return isPaginatedModule(moduleKey) ? `${moduleKey}:${page}` : moduleKey
+}
 
 const tabs: Array<{ key: ModuleKey; selfLabel: string; otherLabel: string }> = [
   { key: 'posts', selfLabel: '发帖记录', otherLabel: '发帖记录' },
@@ -48,13 +60,17 @@ function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
   return isSelf ? tab?.selfLabel || '内容' : tab?.otherLabel || '内容'
 }
 
-export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: string; isSelf: boolean; recentMessages?: ProfileRecentMessage[] }) {
+export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMessagesPagination }: { uid: string; isSelf: boolean; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination }) {
   const [active, setActive] = useState<ModuleKey>('posts')
+  const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1 })
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
+  const modulesSectionRef = useRef<HTMLElement>(null)
+  const initialRecentPage = recentMessagesPagination?.page || 1
   const [cache, setCache] = useState<CacheState>(() => ({
-    'recent-messages': { loading: false, failed: false, items: recentMessages },
+    [moduleCacheKey('recent-messages', initialRecentPage)]: { loading: false, failed: false, items: recentMessages, pagination: recentMessagesPagination },
   }))
-  const state = cache[active]
+  const activePage = isPaginatedModule(active) ? modulePages[active] : 1
+  const state = cache[moduleCacheKey(active, activePage)]
 
   useEffect(() => {
     if (!isSelf) return
@@ -62,34 +78,60 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: s
     if (tabs.some((tab) => tab.key === requested)) setActive(requested as ModuleKey)
   }, [isSelf])
 
-  useEffect(() => {
-    if (active === 'recent-messages') return
-    if (cache[active]) return
-    const key = active
-    let cancelled = false
-    setCache((current) => ({ ...current, [key]: { loading: true, failed: false, items: [] } }))
+  const loadModule = useCallback(async (moduleKey: ModuleKey, requestedPage = 1, scrollAfterLoad = false) => {
+    const requestedCacheKey = moduleCacheKey(moduleKey, requestedPage)
+    setCache((current) => ({
+      ...current,
+      [requestedCacheKey]: {
+        loading: true,
+        failed: false,
+        items: current[requestedCacheKey]?.items || [],
+        pagination: current[requestedCacheKey]?.pagination,
+      },
+    }))
 
-    fetch(`/api/users/${uid}/public-modules?module=${key}`, { cache: 'no-store' })
-      .then((response) => {
-        if (!response.ok) throw new Error(key)
-        return response.json()
-      })
-      .then((data) => {
-        if (!cancelled) setCache((current) => ({ ...current, [key]: { loading: false, failed: false, items: data.items || [] } }))
-      })
-      .catch(() => {
-        if (!cancelled) setCache((current) => ({ ...current, [key]: { loading: false, failed: true, items: [] } }))
-      })
-
-    return () => {
-      cancelled = true
+    try {
+      const params = new URLSearchParams({ module: moduleKey })
+      if (isPaginatedModule(moduleKey)) {
+        params.set('page', String(Math.max(1, Math.trunc(requestedPage) || 1)))
+        params.set('pageSize', String(PROFILE_RECORD_PAGE_SIZE))
+      }
+      const response = await fetch(`/api/users/${uid}/public-modules?${params.toString()}`, { cache: 'no-store' })
+      if (!response.ok) throw new Error(moduleKey)
+      const data = await response.json() as { items?: ModuleItem[]; pagination?: ProfileRecordPagination }
+      const items = Array.isArray(data.items) ? data.items : []
+      const pagination = data.pagination
+      const resolvedPage = pagination?.page || requestedPage
+      const resolvedCacheKey = moduleCacheKey(moduleKey, resolvedPage)
+      setModulePages((current) => isPaginatedModule(moduleKey) ? { ...current, [moduleKey]: resolvedPage } : current)
+      setCache((current) => ({
+        ...current,
+        [requestedCacheKey]: { loading: false, failed: false, items, pagination },
+        [resolvedCacheKey]: { loading: false, failed: false, items, pagination },
+      }))
+      if (scrollAfterLoad) {
+        window.requestAnimationFrame(() => scrollToSectionTop(modulesSectionRef.current))
+      }
+    } catch {
+      setCache((current) => ({ ...current, [requestedCacheKey]: { loading: false, failed: true, items: [] } }))
     }
-    // cache is intentionally excluded so loading a tab does not retrigger the same request.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, uid])
+  }, [uid])
+
+  useEffect(() => {
+    if (state) return
+    void loadModule(active, activePage)
+  }, [active, activePage, loadModule, state])
+
+  function handlePageChange(nextPage: number) {
+    if (!isPaginatedModule(active) || !state?.pagination) return
+    const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), state.pagination.totalPages)
+    if (safePage === activePage) return
+    setModulePages((current) => ({ ...current, [active]: safePage }))
+    void loadModule(active, safePage, true)
+  }
 
   return (
-<section id="profile-modules" className="h-full min-w-0">
+<section ref={modulesSectionRef} id="profile-modules" className="h-full min-w-0 scroll-mt-24">
 <div className="flex flex-wrap gap-2 border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
           {tabs.map((tab) => (
           <button
@@ -110,6 +152,9 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [] }: { uid: s
             moduleKey={active}
             items={state.items}
             isSelf={isSelf}
+            pagination={state.pagination}
+            currentPage={activePage}
+            onPageChange={handlePageChange}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
           />
@@ -123,16 +168,31 @@ function ModuleContent({
   moduleKey,
   items,
   isSelf,
+  pagination,
+  currentPage,
+  onPageChange,
   expandedRecentMessages,
   onToggleRecentMessage,
 }: {
   moduleKey: ModuleKey
   items: ModuleItem[]
   isSelf: boolean
+  pagination?: ProfileRecordPagination
+  currentPage: number
+  onPageChange: (page: number) => void
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
 }) {
   if (!items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
+
+  const pageNavigation = isPaginatedModule(moduleKey) && pagination && pagination.totalPages > 1 ? (
+    <Pagination
+      currentPage={currentPage}
+      totalPages={pagination.totalPages}
+      onPageChange={onPageChange}
+      ariaLabel={moduleKey === 'posts' ? 'posts pagination' : 'check-in messages pagination'}
+    />
+  ) : null
 
   if (moduleKey === 'posts') {
     const posts = items as PostItem[]
@@ -149,6 +209,7 @@ function ModuleContent({
             <p className="mt-2 text-xs font-bold text-slate-500">回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</p>
           </Link>
         ))}
+        {pageNavigation}
       </div>
     )
   }
@@ -212,6 +273,7 @@ function ModuleContent({
             ) : null}
           </article>
         ))}
+        {pageNavigation}
       </div>
     )
   }

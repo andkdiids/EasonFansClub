@@ -1,5 +1,9 @@
 export type PaginationItem = number | 'ellipsis'
 
+export function scrollToSectionTop(element: { scrollIntoView: (options?: ScrollIntoViewOptions) => void } | null | undefined) {
+  element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 export function clampPaginationPage(page: number, totalPages: number) {
   const safeTotal = Math.max(1, Math.trunc(totalPages) || 1)
   return Math.min(Math.max(1, Math.trunc(page) || 1), safeTotal)

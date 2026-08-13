@@ -3,20 +3,31 @@ import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
+import { getProfileRecordPagination } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
 
+  const url = new URL(request.url)
+  const requestedPage = Math.max(1, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1)
   let messages
+  let pagination
   try {
+    const total = await withDbTimeout(
+      'profile.messages.count',
+      prisma.dailyMessage.count({ where: { userId: user.id, isDeleted: false } }),
+      8000,
+    )
+    pagination = getProfileRecordPagination(total, requestedPage)
     messages = await withDbTimeout(
       'profile.messages',
       prisma.dailyMessage.findMany({
       where: { userId: user.id, isDeleted: false },
       orderBy: { createdAt: 'desc' },
-      take: 5,
+      skip: (pagination.page - 1) * pagination.pageSize,
+      take: pagination.pageSize,
       select: {
         id: true,
         mood: true,
@@ -78,5 +89,5 @@ export async function GET() {
     })),
   }))
 
-  return NextResponse.json({ messages: mapped }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+  return NextResponse.json({ messages: mapped, pagination }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

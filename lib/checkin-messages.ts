@@ -8,6 +8,11 @@ export type CheckInMessageSort = 'latest' | 'hot'
 type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncached>>
 export type CheckInMessageItem = CheckInMessagesResult[number]
 export const CHECK_IN_MESSAGE_PAGE_SIZE = 5
+export const CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE = 7
+
+export function getCheckInMessagePageSize(isDesktop: boolean) {
+  return isDesktop ? CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE : CHECK_IN_MESSAGE_PAGE_SIZE
+}
 export type CheckInMessagePagination = {
   page: number
   pageSize: number

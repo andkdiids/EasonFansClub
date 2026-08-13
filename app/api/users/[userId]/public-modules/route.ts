@@ -4,6 +4,7 @@ import { safeDb } from '@/lib/db-timeout'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 
@@ -22,18 +23,23 @@ export async function GET(request: Request, context: RouteContext) {
   const { userId } = await context.params
   const { searchParams } = new URL(request.url)
   const moduleKey = searchParams.get('module') || 'posts'
+  const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
   const viewer = await getCurrentUser()
   const target = await safeDb('userModules.findUser', findPublicUserId(userId), null)
 
   if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   if (moduleKey === 'posts') {
+    const postWhere = { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: 'APPROVED' as const }
+    const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
+    const pagination = getProfileRecordPagination(total, page)
     const posts = await safeDb(
       'userModules.posts',
       prisma.post.findMany({
-        where: { authorId: target.id, isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' },
+        where: postWhere,
         orderBy: { createdAt: 'desc' },
-        take: 10,
+        skip: (pagination.page - 1) * pagination.pageSize,
+        take: pagination.pageSize,
         select: {
           id: true,
           title: true,
@@ -47,7 +53,19 @@ export async function GET(request: Request, context: RouteContext) {
       }),
       [],
     )
-    return NextResponse.json({ items: posts.map(({ Board, ...post }) => ({ ...post, content: publicContentImageMarkers(post.content), board: Board })) })
+    return NextResponse.json({
+      items: posts.map(({ Board, ...post }) => ({ ...post, content: publicContentImageMarkers(post.content), board: Board })),
+      pagination,
+    })
+  }
+
+  if (moduleKey === 'recent-messages') {
+    const result = await safeDb(
+      'userModules.recentMessages',
+      loadProfileRecentMessagesPage(target.id, viewer?.id, page),
+      { messages: [], pagination: getProfileRecordPagination(0, page) },
+    )
+    return NextResponse.json({ items: result.messages, pagination: result.pagination })
   }
 
   if (moduleKey === 'replies') {

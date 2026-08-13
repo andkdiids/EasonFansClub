@@ -1209,12 +1209,7 @@ img[data-allow-native-image-drag='true'] { -webkit-user-drag: auto; }
 }
 
 [data-layout-page='checkin'] .page-layout-auto-flow-desktop {
-  align-items: stretch;
-}
-
-[data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.publicMessages'] > *,
-[data-layout-page='checkin'] .page-layout-auto-flow-desktop > [data-layout-label='checkin.friendMessages'] > * {
-  height: 100% !important;
+  align-items: start;
 }
 
 .page-layout-grid {

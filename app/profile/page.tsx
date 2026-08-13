@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
 import { getGrowthSummarySafe } from '@/lib/growth'
 import { profileImageUrl } from '@/lib/images'
-import { loadProfileRecentMessages } from '@/lib/profile-page'
+import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
@@ -58,9 +58,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
   const usernameChange = getUsernameChangeAvailability(profile.usernameChangedAt)
-  const [growth, recentMessages, defaultAvatarOptions] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
-    loadProfileRecentMessages(profile.id, user.id),
+    loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
   ])
 
@@ -111,7 +111,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           friendStatus: 'NONE',
           initialRemark: null,
         }}
-        recentMessages={recentMessages}
+        recentMessages={recentMessagesPage.messages}
+        recentMessagesPagination={recentMessagesPage.pagination}
       />
     </>
   )

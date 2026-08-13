@@ -6,7 +6,7 @@ import { ProfileWall } from '@/components/ProfileWall'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import type { GrowthSummary } from '@/lib/growth'
 import { formatUid } from '@/lib/uid'
-import type { ProfileRecentMessage, ProfileWallVisibility } from '@/lib/profile-page'
+import type { ProfileRecentMessage, ProfileRecordPagination, ProfileWallVisibility } from '@/lib/profile-page'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -55,12 +55,14 @@ export function ProfilePageSurface({
   growth,
   relationship,
   recentMessages,
+  recentMessagesPagination,
   remarkEditor,
 }: {
   profile: ProfilePageSurfaceProfile
   growth: GrowthSummary
   relationship: ProfilePageSurfaceRelationship
   recentMessages: ProfileRecentMessage[]
+  recentMessagesPagination?: ProfileRecordPagination
   remarkEditor?: ReactNode
 }) {
   const { isSelf, isFriend, isBlocked, hasViewer, friendStatus } = relationship
@@ -119,7 +121,7 @@ export function ProfilePageSurface({
           {canViewWall ? <ProfileWall receiverUid={profile.uid} isOwner={isSelf} /> : <ClosedWall visibility={profile.wallVisibility} />}
         </div>
         <div className="min-w-0">
-          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} recentMessages={recentMessages} />
+          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} />
         </div>
       </section>
     </main>

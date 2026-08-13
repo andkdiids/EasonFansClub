@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getFriendIds } from '@/lib/friends'
 
@@ -31,6 +31,9 @@ export async function GET(request: Request) {
   const sort: CheckInMessageSort = url.searchParams.get('sort') === 'hot' ? 'hot' : 'latest'
   const scope = url.searchParams.get('scope') === 'friends' ? 'friends' : 'public'
   const page = Math.max(1, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1)
+  const pageSize = url.searchParams.get('pageSize') === String(CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE)
+    ? CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE
+    : CHECK_IN_MESSAGE_PAGE_SIZE
 
   try {
     const friendIds = scope === 'friends'
@@ -47,6 +50,7 @@ export async function GET(request: Request) {
         userIds: friendIds,
         stickyUserId: scope === 'friends' ? user.id : undefined,
         page,
+        pageSize,
       }),
     )
 

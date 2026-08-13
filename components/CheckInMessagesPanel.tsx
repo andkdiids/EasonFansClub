@@ -9,12 +9,13 @@ import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
-import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { anonymizeCheckInMessages, getCheckInMessagePageSize, CHECK_IN_MESSAGE_PAGE_SIZE, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { checkInMessageAuthorId, normalizeFriendCheckInMessages } from '@/lib/checkin-message-order'
 import { getCheckInReplyToggleLabel, getVisibleCheckInReplyCount } from '@/lib/checkin-reply-display'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
+import { scrollToSectionTop } from '@/lib/pagination'
 import { formatUid } from '@/lib/uid'
 
 type DailyComment = CheckInDisplayMessageItem['comments'][number]
@@ -23,7 +24,7 @@ type FlattenedDailyComment = {
   replyToName: string
   isRoot: boolean
 }
-const messagesPerPage = 5
+const messagesPerPage = CHECK_IN_MESSAGE_PAGE_SIZE
 
 function beijingDateTime(value: string) {
   return formatBeijingDateTime(value)
@@ -177,6 +178,9 @@ export function CheckInMessagesPanel({
   const likeCtxRef = useRef(likeCtx)
   const sessionUserIdRef = useRef(sessionUserId)
   const recentlyCreatedMessageRef = useRef<CheckInDisplayMessageItem | null>(null)
+  const messagesSectionRef = useRef<HTMLDivElement>(null)
+  const pageSizeRef = useRef(CHECK_IN_MESSAGE_PAGE_SIZE)
+  const currentPageRef = useRef(initialPagination?.page || 1)
   const initialQueryRef = useRef({ date: initialDate, sort: initialSort })
   useEffect(() => {
     likeCtxRef.current = likeCtx
@@ -214,14 +218,22 @@ export function CheckInMessagesPanel({
     syncUrl = true,
     resetPage = true,
     requestedPage = resetPage ? 1 : page,
+    requestedPageSize?: number,
+    scrollAfterLoad = false,
   ) => {
     if (isLoading) return
 
     setError('')
     setIsLoading(true)
     const nextPage = serverPaginated ? Math.max(1, Math.trunc(requestedPage) || 1) : 1
+    const nextPageSize = serverPaginated
+      ? Math.max(1, Math.trunc(requestedPageSize || pageSizeRef.current || messagesPerPage) || messagesPerPage)
+      : messagesPerPage
     const params = new URLSearchParams({ date: nextDate, sort: nextSort, scope })
-    if (serverPaginated) params.set('page', String(nextPage))
+    if (serverPaginated) {
+      params.set('page', String(nextPage))
+      params.set('pageSize', String(nextPageSize))
+    }
 
     try {
       const response = await fetch(`/api/checkin/messages?${params.toString()}`, {
@@ -251,6 +263,7 @@ export function CheckInMessagesPanel({
         : merged)
       const nextPagination = data.pagination as CheckInMessagePagination | undefined
       if (serverPaginated && nextPagination) {
+        pageSizeRef.current = nextPagination.pageSize
         setPagination(nextPagination)
         setPage(nextPagination.page)
       } else if (resetPage) {
@@ -268,6 +281,9 @@ export function CheckInMessagesPanel({
         liked: 'liked' in item ? item.liked : (Array.isArray((item as { likes?: unknown[] }).likes) ? ((item as { likes: unknown[] }).likes.length > 0) : false),
       })))
       if (syncUrl) updateUrl(data.date || nextDate, data.sort === 'hot' ? 'hot' : 'latest', serverPaginated ? nextPagination?.page || nextPage : 1)
+      if (scrollAfterLoad) {
+        window.requestAnimationFrame(() => scrollToSectionTop(messagesSectionRef.current))
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '留言列表暂时无法加载，请稍后重试')
     } finally {
@@ -278,10 +294,11 @@ export function CheckInMessagesPanel({
   function handlePageChange(nextPage: number) {
     const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), totalPages)
     if (serverPaginated) {
-      void loadMessages(date, sort, true, false, safePage)
+      void loadMessages(date, sort, true, false, safePage, undefined, true)
       return
     }
     setPage(safePage)
+    window.requestAnimationFrame(() => scrollToSectionTop(messagesSectionRef.current))
   }
 
   useEffect(() => {
@@ -290,6 +307,7 @@ export function CheckInMessagesPanel({
     setSort(initialSort)
     setMessages(initialMessages)
     setPagination(initialPagination || null)
+    pageSizeRef.current = initialPagination?.pageSize || messagesPerPage
     if (recentlyCreatedMessageRef.current && initialMessages.some((item) => item.id === recentlyCreatedMessageRef.current?.id)) {
       recentlyCreatedMessageRef.current = null
       setRecentlyCreatedMessageId(null)
@@ -306,6 +324,24 @@ export function CheckInMessagesPanel({
     else if (queryChanged) setPage(1)
     initialQueryRef.current = { date: initialDate, sort: initialSort }
   }, [initialDate, initialMessages, initialPagination, initialSort])
+
+  useEffect(() => {
+    if (previewMode || !serverPaginated) return
+    const mediaQuery = window.matchMedia('(min-width: 768px)')
+    const syncPageSize = () => {
+      const nextPageSize = getCheckInMessagePageSize(mediaQuery.matches)
+      if (pageSizeRef.current === nextPageSize) return
+      pageSizeRef.current = nextPageSize
+      void loadMessages(date, sort, true, false, currentPageRef.current, nextPageSize)
+    }
+    syncPageSize()
+    mediaQuery.addEventListener('change', syncPageSize)
+    return () => mediaQuery.removeEventListener('change', syncPageSize)
+  }, [date, initialPagination?.page, loadMessages, page, previewMode, serverPaginated, sort])
+
+  useEffect(() => {
+    currentPageRef.current = page
+  }, [page])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -450,7 +486,7 @@ export function CheckInMessagesPanel({
   }
 
   return (
-    <div className={`checkin-messages-panel ${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex h-full flex-col rounded-[24px] border shadow-sm ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
+    <div ref={messagesSectionRef} className={`checkin-messages-panel ${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex ${previewMode ? 'h-full' : ''} flex-col rounded-[24px] border shadow-sm scroll-mt-24 ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{scope === 'public' ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
@@ -499,7 +535,7 @@ export function CheckInMessagesPanel({
       {error ? <p className="mt-3 shrink-0 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
       {focusError ? <p className="mt-3 shrink-0 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">{focusError}</p> : null}
 
-      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} flex-1 ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
+      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} ${previewMode ? 'flex-1' : ''} ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMood(item.mood)
           const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null

@@ -4,7 +4,7 @@ import { FriendRemarkEditor } from '@/components/FriendRemarkEditor'
 import { getCurrentUser } from '@/lib/auth'
 import { getGrowthSummarySafe } from '@/lib/growth'
 import { profileImageUrl } from '@/lib/images'
-import { loadProfileRecentMessages } from '@/lib/profile-page'
+import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
@@ -113,9 +113,9 @@ export default async function PublicUserPage({ params }: PageProps) {
   const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
   const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const bio = user.Profile.bio || user.bio || ''
-  const [growth, recentMessages] = await Promise.all([
+  const [growth, recentMessagesPage] = await Promise.all([
     getGrowthSummarySafe(user.experience),
-    loadProfileRecentMessages(user.id, viewer?.id),
+    loadProfileRecentMessagesPage(user.id, viewer?.id),
   ])
   const friendStatus: 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED' = isFriend
     ? 'FRIEND'
@@ -151,7 +151,8 @@ export default async function PublicUserPage({ params }: PageProps) {
         friendStatus,
         initialRemark,
       }}
-      recentMessages={recentMessages}
+      recentMessages={recentMessagesPage.messages}
+      recentMessagesPagination={recentMessagesPage.pagination}
       remarkEditor={remarkEditor}
     />
   )
