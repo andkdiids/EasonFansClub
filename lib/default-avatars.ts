@@ -85,7 +85,7 @@ export async function chooseDefaultAvatar(database: DefaultAvatarDatabase = pris
   // 旧 Supabase 头像已失效，不再参与分配
   const enabled = (await getDefaultAvatarPool(database)).filter((item) => item.enabled && !isSupabaseStorageUrl(item.url))
   if (!enabled.length) return null
-  return enabled[Math.floor(Math.random() * enabled.length)]?.url || null
+  return publicImageUrl(enabled[Math.floor(Math.random() * enabled.length)]?.url) || null
 }
 
 export async function isDefaultAvatarUrl(url?: string | null) {
@@ -114,7 +114,7 @@ export async function assignDefaultAvatarsToUnassignedUsers() {
   if (!users.length) return 0
   await prisma.$transaction(users.map((user) => prisma.user.update({
     where: { id: user.id },
-    data: { avatarUrl: enabled[Math.floor(Math.random() * enabled.length)].url },
+    data: { avatarUrl: publicImageUrl(enabled[Math.floor(Math.random() * enabled.length)].url) },
   })))
   return users.length
 }

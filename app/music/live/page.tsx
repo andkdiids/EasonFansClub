@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getEnabledConcertCategories } from '@/lib/music-concert-category'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +34,7 @@ export default async function MusicLivePage() {
   ])
   const resolvedTours = tours.map(({ MusicConcert, _count, ...tour }) => ({
     ...tour,
+    posterUrl: toPublicMediaUrl(tour.posterUrl),
     ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
     concertCount: _count.MusicConcert,
     cityCount: new Set(MusicConcert.map((concert) => concert.city)).size,

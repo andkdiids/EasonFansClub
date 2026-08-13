@@ -12,6 +12,7 @@ import { resolveTourByArchiveSlug, resolveCityGroupSlug, buildCityGroupWhere } f
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getCurrentUser } from '@/lib/auth'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,6 +91,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
     getSiteAppearance(),
   ])
   if (!meta) return <ConcertNotFound />
+  const publicTourPosterUrl = toPublicMediaUrl(meta.posterUrl)
 
   const cityConcerts: CityConcert[] = meta.MusicConcert.map((concert) => {
     const items = concert.MusicConcertSetlistItem as unknown as SetlistItemForBlock[]
@@ -103,7 +105,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
       venue: concert.venue,
       sessionNumber: concert.sessionNumber,
       createdAt: concert.createdAt.toISOString(),
-      posterUrl: concert.posterUrl,
+      posterUrl: toPublicMediaUrl(concert.posterUrl),
       normal,
       encore,
       full: all,
@@ -141,7 +143,7 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
   const setlistItems = allSame ? (cityConcerts[0]?.full ?? []) : baseNormal
   const hasSetlist = cityConcerts.some((concert) => concert.full.length > 0)
   const cityPoster = cityConcerts.map((concert) => concert.posterUrl).find((posterUrl) => posterUrl?.trim()) || null
-  const resolvedCityPosterUrl = resolveConcertPoster({ cityPosterUrl: cityPoster, tourPosterUrl: meta.posterUrl }).resolvedPosterUrl
+  const resolvedCityPosterUrl = resolveConcertPoster({ cityPosterUrl: cityPoster, tourPosterUrl: publicTourPosterUrl }).resolvedPosterUrl
   const cityStartDate = cityConcerts[0]?.concertDate ?? null
   const cityEndDate = cityConcerts.at(-1)?.concertDate ?? cityStartDate
   // 从该城市所有场次提取第一个非空场馆作为「主要场馆」展示（仅展示用，不改数据库）

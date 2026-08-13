@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { SafeAvatar } from '@/components/SafeAvatar'
@@ -37,6 +37,11 @@ type WallPagination = {
   totalPages: number
   hasPrevious: boolean
   hasNext: boolean
+}
+
+type WallReplyTarget = {
+  id: string
+  name: string
 }
 
 const EMPTY_WALL_PAGINATION: WallPagination = {
@@ -113,13 +118,16 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   const wallPage = parseWallPage(searchParams.get('wallPage'))
   const [messages, setMessages] = useState<WallMessage[]>([])
   const [content, setContent] = useState('')
-  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
+  const [replyTarget, setReplyTarget] = useState<WallReplyTarget | null>(null)
+  const [replyContent, setReplyContent] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [canPost, setCanPost] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [replySubmitting, setReplySubmitting] = useState(false)
   const [error, setError] = useState('')
   const [pagination, setPagination] = useState<WallPagination>(EMPTY_WALL_PAGINATION)
+  const replyComposerRef = useRef<HTMLTextAreaElement | null>(null)
 
   const replaceWallPage = useCallback((nextPage: number, clearFocus = false) => {
     const safePage = Math.max(1, Math.trunc(nextPage) || 1)
@@ -178,39 +186,85 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
     }
   }, [focusId, loading, messages])
 
-  async function submit() {
+  useEffect(() => {
+    if (!replyTarget) return
+    const frame = window.requestAnimationFrame(() => replyComposerRef.current?.focus({ preventScroll: true }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [replyTarget])
+
+  function handleReply(target: WallReplyTarget) {
+    if (replyTarget?.id === target.id) {
+      setReplyTarget(null)
+      setReplyContent('')
+      return
+    }
+
+    setReplyTarget(target)
+    setReplyContent('')
+    const rootId = findRootId(messages, target.id)
+    if (rootId) setExpanded((current) => ({ ...current, [rootId]: true }))
+  }
+
+  function cancelReply() {
+    setReplyTarget(null)
+    setReplyContent('')
+  }
+
+  async function submitRoot() {
     if (submitting || !content.trim()) return
     setSubmitting(true)
     setError('')
-    const parentId = replyTo?.id || null
     try {
       const response = await fetch('/api/profile-wall', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiverUid, content, parentId }),
+        body: JSON.stringify({ receiverUid, content, parentId: null }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || '留言发布失败')
       const created = data.wallMessage as WallMessage | undefined
       setContent('')
-      setReplyTo(null)
       if (!created?.id) {
-        if (parentId || wallPage === 1) await load()
+        if (wallPage === 1) await load()
         else replaceWallPage(1)
       } else if (!created.parentId) {
         if (wallPage === 1) await load()
         else replaceWallPage(1)
-      } else {
-        setMessages((current) => {
-          const result = insertWallMessage(current, created)
-          if (result.inserted && result.rootId) setExpanded((expandedState) => ({ ...expandedState, [result.rootId!]: true }))
-          return result.inserted ? result.messages : current
-        })
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '留言发布失败')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function submitReply() {
+    if (replySubmitting || !replyTarget || !replyContent.trim()) return
+    setReplySubmitting(true)
+    setError('')
+    const parentId = replyTarget.id
+    try {
+      const response = await fetch('/api/profile-wall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiverUid, content: replyContent, parentId }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.message || '回复发布失败')
+      const created = data.wallMessage as WallMessage | undefined
+      if (!created?.id) throw new Error('回复已保存，但暂时无法更新当前线程')
+
+      setMessages((current) => {
+        const result = insertWallMessage(current, created)
+        if (result.inserted && result.rootId) setExpanded((expandedState) => ({ ...expandedState, [result.rootId!]: true }))
+        return result.inserted ? result.messages : current
+      })
+      setReplyContent('')
+      setReplyTarget(null)
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '回复发布失败')
+    } finally {
+      setReplySubmitting(false)
     }
   }
 
@@ -243,21 +297,15 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
 
       {canPost ? (
         <div className="mt-4 rounded-2xl bg-sky-50/75 p-3">
-          {replyTo ? (
-            <p className="mb-2 text-xs font-black text-brand-700">
-              回复 @{replyTo.name}
-              <button className="ml-2 underline" onClick={() => setReplyTo(null)} type="button">取消</button>
-            </p>
-          ) : null}
           <textarea
             value={content}
             onChange={(event) => setContent(event.target.value.slice(0, 500))}
             className="min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none"
-            placeholder="留下你的留言..."
+            placeholder="发表新的一级留言..."
           />
           <div className="mt-2 flex items-center justify-between gap-3">
             <span className="text-xs font-bold text-slate-400">{content.length}/500</span>
-            <button onClick={submit} disabled={submitting || !content.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
+            <button onClick={submitRoot} disabled={submitting || !content.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
               {submitting ? '发布中...' : '发布'}
             </button>
           </div>
@@ -269,14 +317,14 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
       {!loading && !messages.length ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">暂无留言</p> : null}
 
       <div className="mt-4 space-y-3">
-        {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} isOwner={isOwner} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={setReplyTo} onDelete={remove} />)}
+        {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} isOwner={isOwner} canReply={canPost} replyTarget={replyTarget} replyContent={replyContent} replySubmitting={replySubmitting} replyComposerRef={replyComposerRef} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={handleReply} onReplyChange={setReplyContent} onReplySubmit={submitReply} onReplyCancel={cancelReply} onDelete={remove} />)}
       </div>
       {pagination.totalPages > 1 ? (
         <Pagination
           currentPage={pagination.page}
           totalPages={pagination.totalPages}
           onPageChange={(nextPage) => replaceWallPage(nextPage, true)}
-          disabled={loading || submitting}
+          disabled={loading || submitting || replySubmitting}
           ariaLabel="留言墙分页"
           className="mt-4"
         />
@@ -285,7 +333,32 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   )
 }
 
-function WallMessageCard({ message, expanded, isOwner = false, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; isOwner?: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
+function WallInlineReplyComposer({ target, value, submitting, textareaRef, onChange, onSubmit, onCancel }: { target: WallReplyTarget; value: string; submitting: boolean; textareaRef: RefObject<HTMLTextAreaElement | null>; onChange: (value: string) => void; onSubmit: () => void; onCancel: () => void }) {
+  return (
+    <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
+      <p className="text-xs font-black text-brand-700">回复 @{target.name}</p>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value.slice(0, 500))}
+        className="mt-2 min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none placeholder:text-slate-400"
+        placeholder="请输入回复内容..."
+        aria-label={`回复 @${target.name}`}
+      />
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-bold text-slate-400">{value.length}/500</span>
+        <div className="flex items-center gap-2">
+          <button onClick={onCancel} className="rounded-full border border-sky-200 px-4 py-2 text-xs font-black text-brand-700" type="button">取消</button>
+          <button onClick={onSubmit} disabled={submitting || !value.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
+            {submitting ? '发送中...' : '发送'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WallMessageCard({ message, expanded, isOwner = false, canReply, replyTarget, replyContent, replySubmitting, replyComposerRef, onToggleComments, onLike, onReply, onReplyChange, onReplySubmit, onReplyCancel, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; isOwner?: boolean; canReply: boolean; replyTarget: WallReplyTarget | null; replyContent: string; replySubmitting: boolean; replyComposerRef: RefObject<HTMLTextAreaElement | null>; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: WallReplyTarget) => void; onReplyChange: (value: string) => void; onReplySubmit: () => void; onReplyCancel: () => void; onDelete: (id: string) => void }) {
   const name = message.sender.profile?.displayName || message.sender.nickname
   const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   const children = message.children || []
@@ -302,9 +375,10 @@ function WallMessageCard({ message, expanded, isOwner = false, onToggleComments,
           <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-700">{message.content}</p>
           <WallMessageActions message={message} replyCount={replyCount} expanded={Boolean(expanded[message.id])} onToggleComments={onToggleComments} onLike={onLike} onReply={onReply} onDelete={onDelete} />
           {isOwner ? <LikeAvatars likers={message.likers || []} totalCount={message.likeCount} listUrl={`/api/profile-wall/${message.id}/like`} className="mt-1.5" /> : null}
+          {canReply && replyTarget?.id === message.id ? <WallInlineReplyComposer target={replyTarget} value={replyContent} submitting={replySubmitting} textareaRef={replyComposerRef} onChange={onReplyChange} onSubmit={onReplySubmit} onCancel={onReplyCancel} /> : null}
           {children.length && expanded[message.id] ? (
             <div className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3">
-              {flattenReplies(children, name).map(({ message: child, replyToName }) => <WallReplyCard key={child.id} message={child} replyToName={replyToName} isOwner={isOwner} onLike={onLike} onReply={onReply} onDelete={onDelete} />)}
+              {flattenReplies(children, name).map(({ message: child, replyToName }) => <WallReplyCard key={child.id} message={child} replyToName={replyToName} isOwner={isOwner} canReply={canReply} replyTarget={replyTarget} replyContent={replyContent} replySubmitting={replySubmitting} replyComposerRef={replyComposerRef} onLike={onLike} onReply={onReply} onReplyChange={onReplyChange} onReplySubmit={onReplySubmit} onReplyCancel={onReplyCancel} onDelete={onDelete} />)}
             </div>
           ) : null}
         </div>
@@ -323,7 +397,7 @@ function WallMessageHeader({ message, name }: { message: WallMessage; name: stri
   )
 }
 
-function WallMessageActions({ message, replyCount, expanded, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; replyCount: number; expanded: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
+function WallMessageActions({ message, replyCount, expanded, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; replyCount: number; expanded: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: WallReplyTarget) => void; onDelete: (id: string) => void }) {
   const name = message.sender.profile?.displayName || message.sender.nickname
   return (
     <div className="mt-2 flex flex-wrap gap-3">
@@ -335,7 +409,7 @@ function WallMessageActions({ message, replyCount, expanded, onToggleComments, o
   )
 }
 
-function WallReplyCard({ message, replyToName, isOwner, onLike, onReply, onDelete }: { message: WallMessage; replyToName: string; isOwner: boolean; onLike: (id: string) => void; onReply: (target: { id: string; name: string }) => void; onDelete: (id: string) => void }) {
+function WallReplyCard({ message, replyToName, isOwner, canReply, replyTarget, replyContent, replySubmitting, replyComposerRef, onLike, onReply, onReplyChange, onReplySubmit, onReplyCancel, onDelete }: { message: WallMessage; replyToName: string; isOwner: boolean; canReply: boolean; replyTarget: WallReplyTarget | null; replyContent: string; replySubmitting: boolean; replyComposerRef: RefObject<HTMLTextAreaElement | null>; onLike: (id: string) => void; onReply: (target: WallReplyTarget) => void; onReplyChange: (value: string) => void; onReplySubmit: () => void; onReplyCancel: () => void; onDelete: (id: string) => void }) {
   const name = message.sender.profile?.displayName || message.sender.nickname
   const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   return (
@@ -354,6 +428,7 @@ function WallReplyCard({ message, replyToName, isOwner, onLike, onReply, onDelet
             {message.canDelete ? <button onClick={() => onDelete(message.id)} className="text-xs font-black text-red-600" type="button">删除</button> : null}
           </div>
           {isOwner ? <LikeAvatars likers={message.likers || []} totalCount={message.likeCount} listUrl={`/api/profile-wall/${message.id}/like`} className="mt-1.5" /> : null}
+          {canReply && replyTarget?.id === message.id ? <WallInlineReplyComposer target={replyTarget} value={replyContent} submitting={replySubmitting} textareaRef={replyComposerRef} onChange={onReplyChange} onSubmit={onReplySubmit} onCancel={onReplyCancel} /> : null}
         </div>
       </div>
     </article>

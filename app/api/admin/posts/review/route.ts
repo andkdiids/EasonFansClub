@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
+import { publicContentImageMarkers } from '@/lib/content-images'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { buildPostReviewUpdate, isPostModerationStatus } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
@@ -30,6 +31,8 @@ type ReviewPostRow = Prisma.PostGetPayload<{ select: typeof reviewSelect }>
 function serializePost(post: ReviewPostRow) {
   return {
     ...post,
+    content: publicContentImageMarkers(post.content),
+    summary: post.summary ? publicContentImageMarkers(post.summary) : post.summary,
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
     User: { ...post.User, Profile: post.User.Profile ? { ...post.User.Profile, avatarUrl: profileImageUrl(post.User.Profile.avatarUrl) } : null },

@@ -41,7 +41,7 @@ export async function PATCH(request: Request, { params }: Context) {
   const endDate = parseLiveDate(body?.endDate)
   const sortOrder = parseLiveInteger(body?.sortOrder)
   const hasCoverUrl = Boolean(body && typeof body === 'object' && ('coverUrl' in body || 'posterUrl' in body))
-  const posterUrl = sanitizeText(body?.coverUrl ?? body?.posterUrl, 1000) || null
+  const posterUrl = toPublicMediaUrl(sanitizeText(body?.coverUrl ?? body?.posterUrl, 1000)) || null
   if (!name) return NextResponse.json({ message: '请填写巡演名称' }, { status: 400 })
   if (startDate === undefined || endDate === undefined || (startDate && endDate && startDate > endDate)) return NextResponse.json({ message: '巡演日期无效' }, { status: 400 })
   if (sortOrder === undefined) return NextResponse.json({ message: '排序必须是非负整数' }, { status: 400 })

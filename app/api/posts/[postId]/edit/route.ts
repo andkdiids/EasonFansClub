@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { publicContentImageMarkers } from '@/lib/content-images'
 import { isAdminRole, requireUser } from '@/lib/security'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 
@@ -45,7 +46,7 @@ export async function GET(_request: Request, { params }: Params) {
     post: {
       id: post.id,
       title: post.title,
-      content: post.content,
+      content: publicContentImageMarkers(post.content),
       boardId: post.boardId,
       moderationStatus: post.moderationStatus,
       status: post.status,

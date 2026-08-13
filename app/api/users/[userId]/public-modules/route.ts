@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
+import { publicContentImageMarkers } from '@/lib/content-images'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
@@ -46,7 +47,7 @@ export async function GET(request: Request, context: RouteContext) {
       }),
       [],
     )
-    return NextResponse.json({ items: posts.map(({ Board, ...post }) => ({ ...post, board: Board })) })
+    return NextResponse.json({ items: posts.map(({ Board, ...post }) => ({ ...post, content: publicContentImageMarkers(post.content), board: Board })) })
   }
 
   if (moduleKey === 'replies') {
@@ -60,7 +61,7 @@ export async function GET(request: Request, context: RouteContext) {
       }),
       [],
     )
-    return NextResponse.json({ items: replies.map(({ Post, ...reply }) => ({ ...reply, post: Post })) })
+    return NextResponse.json({ items: replies.map(({ Post, ...reply }) => ({ ...reply, content: publicContentImageMarkers(reply.content), post: Post })) })
   }
 
   if (moduleKey === 'achievements') {
@@ -140,6 +141,7 @@ export async function GET(request: Request, context: RouteContext) {
         ...favorite,
         post: {
           ...Post,
+          content: publicContentImageMarkers(Post.content),
           author: {
             ...Post.User,
             profile: Post.User.Profile ? {

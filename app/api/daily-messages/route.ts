@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { startOfLocalDay, startOfYesterday } from '@/lib/checkin'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(request: Request) {
@@ -81,8 +82,14 @@ export async function GET(request: Request) {
       ...message,
       user: {
         ...User,
+        avatarUrl: publicImageUrl(User.avatarUrl),
+        Profile: User.Profile ? {
+          ...User.Profile,
+          avatarUrl: publicImageUrl(User.Profile.avatarUrl),
+        } : User.Profile,
         profile: User.Profile ? {
           ...User.Profile,
+          avatarUrl: publicImageUrl(User.Profile.avatarUrl),
           displayName: resolveFriendDisplayName({
             viewerId: viewer?.id,
             targetUserId: User.id,
@@ -95,8 +102,13 @@ export async function GET(request: Request) {
         ...comment,
         user: {
           ...commentUser,
+          Profile: commentUser.Profile ? {
+            ...commentUser.Profile,
+            avatarUrl: publicImageUrl(commentUser.Profile.avatarUrl),
+          } : commentUser.Profile,
           profile: commentUser.Profile ? {
             ...commentUser.Profile,
+            avatarUrl: publicImageUrl(commentUser.Profile.avatarUrl),
             displayName: resolveFriendDisplayName({
               viewerId: viewer?.id,
               targetUserId: commentUser.id,

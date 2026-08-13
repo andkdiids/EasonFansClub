@@ -67,7 +67,7 @@ export async function POST(request: Request) {
             title: `${targetCity}站`,
             countryOrRegion: source.countryOrRegion || DEFAULT_CONCERT_COUNTRY,
             venue: options.venue ? (source.venue || null) : null,
-            posterUrl: options.poster ? (source.posterUrl || null) : null,
+            posterUrl: options.poster ? (toPublicMediaUrl(source.posterUrl) || null) : null,
             description: options.description ? (source.description || null) : null,
             status: 'DRAFT',
             sessionNumber: null,

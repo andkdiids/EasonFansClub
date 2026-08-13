@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getFriendIds } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 const DEFAULT_LIMIT = 20
@@ -89,8 +90,10 @@ export async function GET(request: Request) {
       createdAt: item.createdAt.toISOString(),
       actor: {
         ...item.User,
+        avatarUrl: publicImageUrl(item.User.avatarUrl),
         profile: item.User.Profile ? {
           ...item.User.Profile,
+          avatarUrl: publicImageUrl(item.User.Profile.avatarUrl),
           displayName: resolveFriendDisplayName({
             viewerId: viewer.id,
             targetUserId: item.actorId,

@@ -77,7 +77,16 @@ export async function GET(request: Request) {
     },
   })
 
-  return NextResponse.json({ packs })
+  return NextResponse.json({
+    packs: packs.map((pack) => ({
+      ...pack,
+      coverUrl: toPublicMediaUrl(pack.coverUrl),
+      stickers: pack.stickers.map((sticker) => ({
+        ...sticker,
+        url: toPublicMediaUrl(sticker.url) || sticker.url,
+      })),
+    })),
+  })
 }
 
 /**

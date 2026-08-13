@@ -5,8 +5,9 @@ import Link from 'next/link'
 import { FormError } from '@/components/FormError'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { validateLoginAccountValue } from '@/lib/login-account'
-import { getPhoneInputParts, getPhoneValidationMessage, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
+import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import { DEFAULT_REGISTRATION_CLOSED_MESSAGE, DEFAULT_REGISTRATION_CLOSED_TITLE, formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
+import { REGISTRATION_PASSWORD_LENGTH_ERROR, REGISTRATION_PASSWORD_MIN_LENGTH, REGISTRATION_PASSWORD_MISMATCH_ERROR, validateRegistrationPasswordFields } from '@/lib/registration-password'
 import type { RegistrationAvailabilityPayload, RegistrationMode } from '@/lib/registration'
 
 declare global {
@@ -115,6 +116,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const [phoneCountry, setPhoneCountry] = useState<PhoneCountryCode>('CN')
   const [turnstileToken, setTurnstileToken] = useState('')
   const [draftToken, setDraftToken] = useState('')
+  const [hospitalDraftOnly, setHospitalDraftOnly] = useState(false)
   const [emailCode, setEmailCode] = useState('')
   const [emailCodeSent, setEmailCodeSent] = useState(false)
   const [emailVerified, setEmailVerified] = useState(false)
@@ -147,6 +149,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const audioGenerationId = useRef(0)
   const audioTimerRef = useRef<number | null>(null)
   const draftTokenRef = useRef('')
+  const hospitalDraftOnlyRef = useRef(false)
   const requestControllerRef = useRef<AbortController | null>(null)
   const idempotencyKeyRef = useRef('')
   const submitLockedRef = useRef(false)
@@ -157,9 +160,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   const registrationIsOpen = registrationAvailability.isOpen && policy.allowEmailRegistration
   const shouldRenderTurnstile = policy.enableTurnstile && Boolean(policy.turnstileSiteKey) && registrationIsOpen
   const hospitalPassed = !policy.ehospitalCheckEnabled || hospitalState?.status === 'PASSED'
-  const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed
-  const isRegistrationComplete = Object.keys(validateRegistrationFields()).length === 0
-  const canStartHospitalCheck = isRegistrationComplete && !hospitalPassed && !hospitalLoading && !isPreparing
+  const registrationReadyToCollapse = Boolean(draftToken) && hospitalPassed && !hospitalDraftOnly
+  const canStartHospitalCheck = !hospitalPassed && !hospitalLoading && !isPreparing
   const hospitalQuestionId = hospitalState?.question?.questionId || ''
   const hospitalAudioUrl = hospitalState?.question?.audioUrl || ''
 
@@ -245,8 +247,26 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }
 
   function updateField(field: keyof typeof form, value: string | boolean) {
+    const nextPassword = field === 'password' && typeof value === 'string' ? value : form.password
+    const nextConfirmPassword = field === 'confirmPassword' && typeof value === 'string' ? value : form.confirmPassword
+    const nextPasswordError = nextPassword && nextPassword.length < REGISTRATION_PASSWORD_MIN_LENGTH ? REGISTRATION_PASSWORD_LENGTH_ERROR : undefined
+    const nextConfirmPasswordError = nextPassword && nextConfirmPassword && nextConfirmPassword !== nextPassword ? REGISTRATION_PASSWORD_MISMATCH_ERROR : undefined
     setForm((current) => ({ ...current, [field]: value }))
-    setErrors((current) => ({ ...current, [field]: undefined }))
+    setErrors((current) => ({
+      ...current,
+      [field]: undefined,
+      ...(field === 'password' ? { password: nextPasswordError } : {}),
+      ...(field === 'password' || field === 'confirmPassword' ? { confirmPassword: nextConfirmPasswordError } : {}),
+    }))
+  }
+
+  function setHospitalDraftMode(value: boolean) {
+    hospitalDraftOnlyRef.current = value
+    setHospitalDraftOnly(value)
+    try {
+      if (value) window.sessionStorage.setItem('eason.register.hospitalDraftOnly', '1')
+      else window.sessionStorage.removeItem('eason.register.hospitalDraftOnly')
+    } catch { /* optional */ }
   }
 
   function rememberDraftToken(token: string, source: string) {
@@ -258,6 +278,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   function clearRegistrationDraftToken() {
     draftTokenRef.current = ''
     setDraftToken('')
+    setHospitalDraftMode(false)
     try {
       window.sessionStorage.removeItem('eason.register.draftToken')
       window.sessionStorage.removeItem('eason.register.hospitalSessionId')
@@ -281,14 +302,12 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     const securityAnswer = form.securityQuestions[0]?.answer.trim() || ''
     const agreementAccepted = form.acceptedAgreement
 
-    if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名 / 昵称需要 2-16 个字符'
+    if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名格式不正确'
     if (!nextErrors.nickname && usernameValidation.error) nextErrors.nickname = usernameValidation.error
     const phone = normalizePhoneNumber(form.phone, phoneCountry)
-    if (!form.phone.trim()) nextErrors.phone = '请输入手机号'
-    else if (!phone) nextErrors.phone = getPhoneValidationMessage(phoneCountry)
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '请输入有效邮箱'
-    if (!password || password.length < 8) nextErrors.password = '密码至少需要 8 位'
-    if (confirmPassword !== password) nextErrors.confirmPassword = '两次输入的密码不一致'
+    if (!form.phone.trim() || !phone) nextErrors.phone = '手机号格式错误'
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '邮箱格式错误'
+    Object.assign(nextErrors, validateRegistrationPasswordFields(password, confirmPassword))
     if (!agreementAccepted) nextErrors.acceptedAgreement = '请先勾选用户协议'
     if (policy.requireSecurityQuestionsForNewUsers && (!securityQuestion || !securityAnswer)) nextErrors.securityQuestions = '请完整填写密保问题和答案'
     return nextErrors
@@ -300,9 +319,65 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     return nextErrors
   }
 
+  async function prepareHospitalDraft(forceNewDraft = false) {
+    const existingDraftToken = forceNewDraft ? '' : (hospitalDraftOnlyRef.current ? draftTokenRef.current || draftToken : '')
+    if (existingDraftToken) return existingDraftToken
+    if (shouldRenderTurnstile && !turnstileToken) {
+      const nextErrors = { turnstileToken: '请先完成人机验证' }
+      setErrors(nextErrors)
+      focusFirstError(nextErrors)
+      return null
+    }
+
+    setErrors({})
+    setIsPreparing(true)
+    const controller = new AbortController()
+    requestControllerRef.current = controller
+    const timeoutId = window.setTimeout(() => controller.abort(), 30000)
+    try {
+      const response = await fetch('/api/auth/register/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': makeRequestKey() },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: controller.signal,
+        body: JSON.stringify({ hospitalOnly: true, turnstileToken }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        const nextErrors = { form: data.message || 'E院体检准备失败，请稍后重试', ...data.errors }
+        setErrors(nextErrors)
+        focusFirstError(nextErrors)
+        return null
+      }
+      const token = String(data.registrationToken || '')
+      if (!token) {
+        setErrors({ form: 'E院体检准备失败，请稍后重试' })
+        return null
+      }
+      rememberDraftToken(token, 'prepareHospitalDraft')
+      setHospitalDraftMode(true)
+      setEmailVerified(false)
+      setEmailCodeSent(false)
+      try { window.sessionStorage.setItem('eason.register.draftToken', token) } catch { /* optional */ }
+      window.turnstile?.reset(widgetIdRef.current)
+      setTurnstileToken('')
+      setMessage(data.message || '请完成 E院体检，体检通过后填写注册资料')
+      return token
+    } catch (error) {
+      setErrors({ form: error instanceof Error && error.name === 'AbortError' ? '请求超时，请稍后重试' : '网络连接失败，请稍后重试' })
+      return null
+    } finally {
+      window.clearTimeout(timeoutId)
+      requestControllerRef.current = null
+      if (mountedRef.current) setIsPreparing(false)
+    }
+  }
+
   async function prepareRegistration(forceNewDraft = false) {
     const existingDraftToken = forceNewDraft ? '' : draftTokenRef.current || draftToken
-    if (existingDraftToken) {
+    const updatingHospitalDraft = hospitalDraftOnlyRef.current || hospitalDraftOnly
+    if (existingDraftToken && !updatingHospitalDraft) {
       draftTokenRef.current = existingDraftToken
       if (draftToken !== existingDraftToken) setDraftToken(existingDraftToken)
       logHospitalClient('draftToken value exists', { source: draftTokenRef.current === draftToken ? 'state' : 'ref', exists: true })
@@ -335,20 +410,24 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         body: JSON.stringify({
           ...form,
           phone: normalizePhoneNumber(form.phone, phoneCountry)?.e164 || form.phone,
-          phoneCountry,
-          registrationType: 'EMAIL',
-          turnstileToken,
-        }),
+           phoneCountry,
+           registrationType: 'EMAIL',
+           turnstileToken,
+           registrationToken: updatingHospitalDraft ? existingDraftToken : undefined,
+         }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        const nextErrors = { form: data.message || '注册资料保存失败', ...data.errors }
+        const nextErrors = data.errors && Object.keys(data.errors).length
+          ? data.errors
+          : { form: data.message || '注册资料保存失败' }
         setErrors(nextErrors)
         focusFirstError(nextErrors)
         return null
       }
       const token = String(data.registrationToken || '')
       rememberDraftToken(token, 'prepareRegistration')
+      setHospitalDraftMode(Boolean(data.hospitalOnly))
       logHospitalClient('draft created', { exists: Boolean(token), expiresAt: data.expiresAt || null })
       const recoveredHospitalPassed = data.hospital?.status === 'PASSED'
       const recoveredEmailVerified = Boolean(data.emailVerified)
@@ -407,29 +486,42 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }
 
   async function sendEmailCode(token = draftToken, emailOverride = form.email, automatic = false) {
+    let activeToken = token
+    if (hospitalDraftOnlyRef.current || hospitalDraftOnly) {
+      const preparation = await prepareRegistration()
+      if (!preparation) return false
+      activeToken = preparation.token
+      emailOverride = preparation.email
+    }
+    if (!activeToken) {
+      const preparation = await prepareRegistration()
+      if (!preparation) return false
+      activeToken = preparation.token
+      emailOverride = preparation.email
+    }
     const email = emailOverride.trim().toLowerCase()
     const phone = normalizePhoneNumber(form.phone, phoneCountry)
-    if (!token) {
+    if (!activeToken) {
       setErrors({ form: '请先完成注册资料并开始 E院体检' })
       return false
     }
     if (!form.phone.trim()) {
-      const nextErrors = { phone: '请输入手机号' }
+      const nextErrors = { phone: '手机号格式错误' }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return false
     }
     if (!phone) {
-      const nextErrors = { phone: getPhoneValidationMessage(phoneCountry) }
+      const nextErrors = { phone: '手机号格式错误' }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return false
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setErrors({ email: '请输入有效邮箱' })
+      setErrors({ email: '邮箱格式错误' })
       return false
     }
-    const automaticKey = `${token}:${email}`
+    const automaticKey = `${activeToken}:${email}`
     if (automatic && automaticEmailKeyRef.current === automaticKey) return false
     if (automatic) automaticEmailKeyRef.current = automaticKey
     setIsSendingEmail(true)
@@ -440,12 +532,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         cache: 'no-store',
-        body: JSON.stringify({ registrationToken: token, email }),
+        body: JSON.stringify({ registrationToken: activeToken, email }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         if (automatic) automaticEmailKeyRef.current = ''
-        const nextErrors = { form: data.message || '邮箱验证码发送失败', ...data.errors }
+        const nextErrors = data.errors && Object.keys(data.errors).length
+          ? data.errors
+          : { form: data.message || '邮箱验证码发送失败' }
         setErrors(nextErrors)
         return false
       }
@@ -467,25 +561,22 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function startHospitalCheck() {
     logHospitalClient('start hospital check clicked')
-    const clientErrors = validateRegistrationFields()
-    if (Object.keys(clientErrors).length) {
-      setErrors(clientErrors)
-      focusFirstError(clientErrors)
-      return
-    }
     setErrors({})
     setHospitalLoading(true)
     try {
-      const preparation = await prepareRegistration()
+      const hasDraft = Boolean(draftTokenRef.current || draftToken)
+      let preparation: PreparedRegistration | null = null
+      if (hospitalDraftOnlyRef.current || hospitalDraftOnly || !hasDraft) {
+        const token = await prepareHospitalDraft()
+        if (token) preparation = { token, email: '', emailVerified: false, hospitalPassed: false }
+      } else {
+        preparation = await prepareRegistration()
+      }
       const token = preparation?.token || ''
       logHospitalClient('start hospital check token check', { exists: Boolean(token), refExists: Boolean(draftTokenRef.current) })
       if (!preparation) return
       if (preparation.hospitalPassed) {
         if (!preparation.emailVerified) await sendEmailCode(token, preparation.email, true)
-        return
-      }
-      if (!policy.ehospitalCheckEnabled) {
-        await sendEmailCode(token, form.email, true)
         return
       }
       setSelectedAnswer('')
@@ -537,11 +628,15 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       logHospitalClient('hospital-check response json', { requestId, data })
       if (!response.ok) {
         if (response.status === 410 || data.code === 'REGISTRATION_DRAFT_EXPIRED' || data.code === 'REGISTRATION_DRAFT_NOT_FOUND') {
+          const wasHospitalDraftOnly = hospitalDraftOnlyRef.current || hospitalDraftOnly
           clearRegistrationDraftToken()
           setHospitalState(null)
           setHospitalStage('intro')
 
-          const refreshed = await prepareRegistration(true)
+          const refreshedToken = wasHospitalDraftOnly ? await prepareHospitalDraft(true) : null
+          const refreshed = wasHospitalDraftOnly
+            ? (refreshedToken ? { token: refreshedToken, email: '', emailVerified: false, hospitalPassed: false } : null)
+            : await prepareRegistration(true)
           if (!refreshed || retryCount >= 1) {
             setHospitalModalOpen(false)
             setErrors({ hospitalCheck: '注册验证已过期，请重新点击开始体检' })
@@ -662,7 +757,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
   }, [clearHospitalAudioTimer, hospitalState, playHospitalAudio])
 
   async function answerHospitalQuestion() {
-    if (!hospitalState?.question || !hasPlayed || answering || hospitalAnswerResult || !selectedAnswer || !draftToken) return
+    const registrationToken = draftTokenRef.current || draftToken
+    if (!hospitalState?.question || !hasPlayed || answering || hospitalAnswerResult || !selectedAnswer || !registrationToken) return
     setAnswering(true)
     try {
       const response = await fetch('/api/auth/hospital-check/answer', {
@@ -670,7 +766,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         cache: 'no-store',
-        body: JSON.stringify({ registrationToken: draftToken, sessionId: hospitalState.sessionId, questionId: hospitalState.question.questionId, optionKey: selectedAnswer }),
+        body: JSON.stringify({ registrationToken, sessionId: hospitalState.sessionId, questionId: hospitalState.question.questionId, optionKey: selectedAnswer }),
       })
       const data = await response.json().catch(() => ({})) as HospitalAnswerResponse
       if (!response.ok) {
@@ -701,7 +797,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     setHospitalState(nextState)
     if (nextState.status === 'PASSED') {
       setHospitalModalOpen(false)
-      void sendEmailCode(draftToken, form.email, true)
+      setMessage('E院体检已通过，请填写注册资料')
     }
   }
 
@@ -733,17 +829,23 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   async function completeRegistration(afterEmailVerification = false) {
     if (isSubmitting || submitLockedRef.current) return
-    if (!draftToken) return setErrors({ form: '请先完成 E院体检' })
+    let activeToken = draftTokenRef.current || draftToken
+    if (hospitalDraftOnlyRef.current || hospitalDraftOnly) {
+      const preparation = await prepareRegistration()
+      if (!preparation) return
+      activeToken = preparation.token
+    }
+    if (!activeToken) return setErrors({ form: '请先完成 E院体检' })
     if (!hospitalPassed) return setErrors({ hospitalCheck: '请先完成并通过 E院体检' })
-    const phone = normalizePhoneNumber(form.phone, phoneCountry)
-    if (!form.phone.trim()) {
-      const nextErrors = { phone: '请输入手机号' }
-      setErrors(nextErrors)
-      focusFirstError(nextErrors)
+    const clientErrors = validateClientForm(false)
+    if (Object.keys(clientErrors).length) {
+      setErrors(clientErrors)
+      focusFirstError(clientErrors)
       return
     }
+    const phone = normalizePhoneNumber(form.phone, phoneCountry)
     if (!phone) {
-      const nextErrors = { phone: getPhoneValidationMessage(phoneCountry) }
+      const nextErrors = { phone: '手机号格式错误' }
       setErrors(nextErrors)
       focusFirstError(nextErrors)
       return
@@ -765,12 +867,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
         credentials: 'same-origin',
         cache: 'no-store',
         signal: controller.signal,
-        body: JSON.stringify({ registrationToken: draftToken, registrationType: 'EMAIL', nickname: form.nickname, phone: phone.e164, phoneCountry: phone.country, email: form.email, password: form.password, confirmPassword: form.confirmPassword }),
+        body: JSON.stringify({ registrationToken: activeToken, registrationType: 'EMAIL', nickname: form.nickname, phone: phone.e164, phoneCountry: phone.country, email: form.email, password: form.password, confirmPassword: form.confirmPassword }),
       })
       const data = await response.json().catch(() => ({}))
       if (!mountedRef.current) return
       if (!response.ok) {
-        const nextErrors = { form: data.message || '注册失败', ...data.errors }
+        const nextErrors = data.errors && Object.keys(data.errors).length
+          ? data.errors
+          : { form: data.message || '注册失败' }
         setErrors(nextErrors)
         focusFirstError(nextErrors)
         submitLockedRef.current = false
@@ -780,6 +884,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       try {
         window.sessionStorage.removeItem('eason.register.draftToken')
         window.sessionStorage.removeItem('eason.register.hospitalSessionId')
+        window.sessionStorage.removeItem('eason.register.hospitalDraftOnly')
       } catch { /* optional */ }
       window.setTimeout(() => window.location.assign('/welcome'), 450)
     } catch (error) {
@@ -819,11 +924,15 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
       if (!response.ok) {
         if (response.status === 410) {
+          const wasHospitalDraftOnly = hospitalDraftOnlyRef.current || hospitalDraftOnly
           clearRegistrationDraftToken()
           setHospitalState(null)
           setHospitalStage('intro')
 
-          const refreshed = await prepareRegistration(true)
+          const refreshedToken = wasHospitalDraftOnly ? await prepareHospitalDraft(true) : null
+          const refreshed = wasHospitalDraftOnly
+            ? (refreshedToken ? { token: refreshedToken, email: '', emailVerified: false, hospitalPassed: false } : null)
+            : await prepareRegistration(true)
           if (!refreshed || retryCount >= 1) {
             setHospitalModalOpen(false)
             setErrors({ hospitalCheck: '注册验证已过期，请重新点击开始体检' })
@@ -884,6 +993,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     try {
       const savedToken = window.sessionStorage.getItem('eason.register.draftToken') || ''
       const savedSessionId = window.sessionStorage.getItem('eason.register.hospitalSessionId') || ''
+      const savedHospitalDraftOnly = window.sessionStorage.getItem('eason.register.hospitalDraftOnly') === '1'
       if (!shouldRestore) {
         if (savedToken || savedSessionId) {
           clearRegistrationDraftToken()
@@ -899,6 +1009,7 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       }
       setDraftToken(savedToken)
       draftTokenRef.current = savedToken
+      setHospitalDraftMode(savedHospitalDraftOnly)
       logHospitalClient('draftToken value exists', { source: 'sessionStorage', exists: Boolean(savedToken) })
       void fetch('/api/auth/register/status', {
         method: 'POST',
@@ -908,14 +1019,29 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       }).then(async (response) => {
         const data = await response.json().catch(() => ({}))
         if (!response.ok || !mountedRef.current) return
-        if (data.draft) {
+        if (data.expired) {
+          clearRegistrationDraftToken()
+          setHospitalState(null)
+          setHospitalStage('intro')
+          setMessage('注册体检已过期，请重新开始 E院体检')
+          return
+        }
+        const restoredHospitalDraftOnly = Boolean(data.draft?.hospitalOnly || savedHospitalDraftOnly)
+        setHospitalDraftMode(restoredHospitalDraftOnly)
+        if (data.draft && !restoredHospitalDraftOnly) {
           const restoredPhone = getPhoneInputParts(data.draft.phone || form.phone, phoneCountry)
           setPhoneCountry(restoredPhone.country)
           setForm((current) => ({ ...current, nickname: data.draft.nickname || current.nickname, phone: restoredPhone.value || current.phone, email: data.draft.email || current.email, acceptedAgreement: typeof data.draft.acceptedAgreement === 'boolean' ? data.draft.acceptedAgreement : current.acceptedAgreement }))
         }
         setEmailVerified(Boolean(data.emailVerified))
         setEmailCodeSent(Boolean(data.emailVerified))
-        if (data.hospital?.status === 'STARTED' && savedSessionId && data.hospital.sessionId === savedSessionId) {
+        const hospitalSessionExpired = Boolean(data.hospital?.expiresAt && new Date(data.hospital.expiresAt).getTime() <= Date.now())
+        if (hospitalSessionExpired) {
+          setHospitalState(null)
+          setHospitalStage('intro')
+          setHospitalModalOpen(false)
+          setMessage('E院体检已过期，请重新开始体检')
+        } else if (data.hospital?.status === 'STARTED' && savedSessionId && data.hospital.sessionId === savedSessionId) {
           await restoreHospitalSession(savedToken, savedSessionId)
         } else if (data.hospital?.status === 'PASSED' || data.hospital?.status === 'FAILED') {
           const score = Number(data.hospital.score || 0)
@@ -933,8 +1059,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
             question: null,
           }
           setHospitalState(summary)
-          if (data.hospital.status === 'PASSED' && !data.emailVerified) void sendEmailCode(savedToken, data.draft?.email || '', true)
-        } else if (!policy.ehospitalCheckEnabled && !data.emailVerified) {
+          if (data.hospital.status === 'PASSED' && !data.emailVerified && !restoredHospitalDraftOnly) void sendEmailCode(savedToken, data.draft?.email || '', true)
+        } else if (!policy.ehospitalCheckEnabled && !data.emailVerified && !restoredHospitalDraftOnly) {
           void sendEmailCode(savedToken, data.draft?.email || '', true)
         }
       }).catch(() => null)
@@ -1100,7 +1226,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
       <form className="register-form space-y-3" onSubmit={(event) => { event.preventDefault(); void completeRegistration() }}>
         <div data-register-field="form" tabIndex={-1}><FormError message={errors.form} /></div>
 
-        {registrationReadyToCollapse && !registrationDetailsExpanded ? (
+        {!hospitalPassed ? (
+          <section className="rounded-xl border border-white/25 bg-white/10 p-3" aria-labelledby="ehospital-step-title">
+            <h2 id="ehospital-step-title" className="text-base font-black text-white">第一步：E院体检</h2>
+            <p className="mt-1 text-xs font-bold leading-5 text-white/80">请先完成 E院体检。体检通过后，才会显示注册资料填写和邮箱验证。</p>
+          </section>
+        ) : null}
+
+        {hospitalPassed ? (registrationReadyToCollapse && !registrationDetailsExpanded ? (
           <section className="rounded-xl border border-emerald-100/40 bg-emerald-50/10 p-3" aria-labelledby="registration-summary-title">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1134,26 +1267,27 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
                 />
                 <FormError message={errors.phone} />
               </div>
-              <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="至少 8 位" /><FormError message={errors.password} /></label>
-              <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="再次输入密码" /><FormError message={errors.confirmPassword} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="请输入密码（至少8位）" /><FormError message={errors.password} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="请再次输入密码" /><FormError message={errors.confirmPassword} /></label>
               <label className="block sm:col-span-2"><span className="text-sm font-bold text-white">邮箱 <small className="font-normal text-white/60">（必填）</small></span><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" autoComplete="email" data-register-field="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 disabled:bg-emerald-50" placeholder="用于最终验证码验证" /><FormError message={errors.email} /></label>
             </div>
 
-            {policy.requireSecurityQuestionsForNewUsers ? <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-2 rounded-xl border border-white/20 bg-white/10 p-3"><p className="text-sm font-black text-white">设置密保问题</p><div className="grid gap-2 sm:grid-cols-2"><input value={form.securityQuestions[0].question} onChange={(event) => updateSecurityQuestion('question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="密保问题" /><input value={form.securityQuestions[0].answer} onChange={(event) => updateSecurityQuestion('answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="答案" /></div><FormError message={errors.securityQuestions} /></fieldset> : null}
-            {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[52px]" /> : null}<FormError message={errors.turnstileToken} />
+             {policy.requireSecurityQuestionsForNewUsers ? <fieldset data-register-field="securityQuestions" tabIndex={-1} className="space-y-2 rounded-xl border border-white/20 bg-white/10 p-3"><p className="text-sm font-black text-white">设置密保问题</p><div className="grid gap-2 sm:grid-cols-2"><input value={form.securityQuestions[0].question} onChange={(event) => updateSecurityQuestion('question', event.target.value)} maxLength={120} className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="密保问题" /><input value={form.securityQuestions[0].answer} onChange={(event) => updateSecurityQuestion('answer', event.target.value)} maxLength={200} autoComplete="off" className="w-full rounded-lg border border-sky-100 px-3 py-2 text-sm font-bold outline-none" placeholder="答案" /></div><FormError message={errors.securityQuestions} /></fieldset> : null}
             <label className="flex items-start gap-2 rounded-xl bg-white/10 p-3 text-xs font-bold text-white"><input type="checkbox" checked={form.acceptedAgreement} onChange={(event) => updateField('acceptedAgreement', event.target.checked)} data-register-field="acceptedAgreement" className="mt-1" /><span className="leading-5">我已阅读并同意<Link href="/user-agreement" target="_blank" rel="noopener noreferrer" className="font-black underline underline-offset-2">《私家E院用户协议》</Link>和社区管理规范。</span></label><FormError message={errors.acceptedAgreement} />
-          </>
-        )}
+            </>
+         ) ) : null}
+
+        {shouldRenderTurnstile ? <div ref={turnstileRef} data-register-field="turnstileToken" tabIndex={-1} className="min-h-[52px]" /> : null}<FormError message={errors.turnstileToken} />
 
         <section className="rounded-xl border border-white/25 bg-white/10 p-3" aria-labelledby="ehospital-title">
           <div className="flex items-center justify-between gap-3"><div><h2 id="ehospital-title" className="text-base font-black text-white">🏥 E院体检</h2><p className="mt-1 text-xs font-bold leading-5 text-white/80">为了确认你是真正了解 Eason 的粉丝，注册前需要完成一次 E院体检。</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${hospitalPassed ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-brand-700'}`}>{hospitalLabel}</span></div>
-          {policy.ehospitalCheckEnabled ? <><button type="button" onClick={() => void startHospitalCheck()} disabled={!canStartHospitalCheck} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{hospitalLoading || isPreparing ? '准备中…' : isRegistrationComplete && hospitalState?.status === 'STARTED' ? '继续体检' : isRegistrationComplete && hospitalState?.status === 'FAILED' ? '重新体检' : '开始体检'}</button>{!isRegistrationComplete ? <p className="mt-2 text-xs font-bold text-amber-200">请填写完整注册信息后开始 E院体检。</p> : null}</> : <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white/80">管理员已关闭 E院体检，本次注册将直接进入邮箱验证。</p>}
+           {policy.ehospitalCheckEnabled ? <><button type="button" onClick={() => void startHospitalCheck()} disabled={!canStartHospitalCheck} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{hospitalLoading || isPreparing ? '准备中…' : hospitalState?.status === 'STARTED' ? '继续体检' : hospitalState?.status === 'FAILED' ? '重新体检' : '开始体检'}</button></> : <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white/80">管理员已关闭 E院体检，本次注册将直接进入邮箱验证。</p>}
           <FormError message={errors.hospitalCheck} />
         </section>
 
-        {draftToken && hospitalPassed ? <section className="rounded-xl border border-emerald-100/40 bg-emerald-50/10 p-3" aria-labelledby="email-check-title">
+        {hospitalPassed && (draftToken || !policy.ehospitalCheckEnabled) ? <section className="rounded-xl border border-emerald-100/40 bg-emerald-50/10 p-3" aria-labelledby="email-check-title">
           <div className="flex items-center justify-between gap-2"><h2 id="email-check-title" className="text-sm font-black text-white">邮箱验证码</h2>{emailVerified ? <span className="text-xs font-black text-emerald-200">✅ 已验证</span> : null}</div>
-          {emailCodeSent ? <p className="mt-1 text-xs font-bold text-emerald-100">验证码已发送至：{form.email}</p> : <p className="mt-1 text-xs font-bold text-white/75">体检通过后自动发送验证码。</p>}
+          {emailCodeSent ? <p className="mt-1 text-xs font-bold text-emerald-100">验证码已发送至：{form.email}</p> : <p className="mt-1 text-xs font-bold text-white/75">填写注册资料后，点击发送验证码。</p>}
           <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="min-w-0 flex-1 rounded-lg border border-sky-100 bg-white px-3 py-2 text-sm text-slate-900 outline-none disabled:bg-emerald-50" placeholder="邮箱地址" /><button type="button" onClick={() => { setEmailEditing(true); setEmailVerified(false); setEmailCodeSent(false); setEmailCode(''); setMessage('请填写新的邮箱后重新发送验证码') }} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-brand-700">修改邮箱</button></div>
           {emailEditing || !emailCodeSent ? <button type="button" onClick={() => void sendEmailCode()} disabled={isSendingEmail} className="mt-2 rounded-full bg-white px-4 py-2 text-xs font-black text-brand-700 disabled:opacity-50">{isSendingEmail ? '发送中…' : emailCodeSent ? '重新发送验证码' : '发送验证码'}</button> : <button type="button" onClick={() => void sendEmailCode()} disabled={isSendingEmail || emailVerified} className="mt-2 rounded-full border border-white/40 px-4 py-2 text-xs font-black text-white disabled:opacity-50">{isSendingEmail ? '发送中…' : '重新发送验证码'}</button>}
           {emailCodeSent && !emailVerified ? <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input value={emailCode} onChange={(event) => setEmailCode(event.target.value)} data-register-field="emailCode" inputMode="numeric" maxLength={6} className="min-w-0 flex-1 rounded-lg border border-sky-100 bg-white px-3 py-2 text-sm text-slate-900 outline-none" placeholder="输入 6 位验证码" /><button type="button" onClick={() => void verifyEmailCode()} className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-black text-white">验证并完成注册</button></div> : null}

@@ -28,9 +28,8 @@ const nextConfig: NextConfig = {
     ]
   },
   images: {
-    // /cos/* is served by the Nginx reverse proxy. Next's internal image
-    // optimizer cannot fetch that same-origin path directly and returns 400,
-    // so keep the browser request on the public proxy path.
+    // Media assets are served by the public proxy. Keep image requests on the
+    // original media URL instead of sending them through Next's optimizer.
     unoptimized: true,
     remotePatterns: [
       {
@@ -40,6 +39,10 @@ const nextConfig: NextConfig = {
       {
         protocol: 'https',
         hostname: '**.myqcloud.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'media.ecfc.fans',
       },
     ],
   },

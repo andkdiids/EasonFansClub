@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import type { LikeAvatarUser } from '@/components/LikeAvatars'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
@@ -459,6 +460,27 @@ async function getCheckInMessagesUncached({
   const remarkMap = await loadFriendRemarkMap(viewerId, displayNameUserIds)
 
   return rowsWithFocus.map((item) => {
+    const publicUser = {
+      ...item.User,
+      avatarUrl: publicImageUrl(item.User.avatarUrl),
+      Profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl) } : item.User.Profile,
+    }
+    const publicLikes = item.DailyMessageLike.map((like) => ({
+      ...like,
+      User: {
+        ...like.User,
+        avatarUrl: publicImageUrl(like.User.avatarUrl),
+        Profile: like.User.Profile ? { ...like.User.Profile, avatarUrl: publicImageUrl(like.User.Profile.avatarUrl) } : like.User.Profile,
+      },
+    }))
+    const publicComments = item.DailyMessageComment.map((comment) => ({
+      ...comment,
+      User: {
+        ...comment.User,
+        avatarUrl: publicImageUrl(comment.User.avatarUrl),
+        Profile: comment.User.Profile ? { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) } : comment.User.Profile,
+      },
+    }))
     const authorName = resolveFriendDisplayName({
       viewerId,
       targetUserId: item.userId,
@@ -467,9 +489,12 @@ async function getCheckInMessagesUncached({
     })
     return {
       ...item,
+      User: publicUser,
+      DailyMessageLike: publicLikes,
+      DailyMessageComment: publicComments,
       author: {
-        ...item.User,
-        profile: item.User.Profile ? { ...item.User.Profile, displayName: authorName } : item.User.Profile,
+        ...publicUser,
+        profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl), displayName: authorName } : item.User.Profile,
       },
       likes: viewerLikeIdByMessage.has(item.id) ? [{ id: viewerLikeIdByMessage.get(item.id)! }] : [],
       likers: item.DailyMessageLike.map((like) => ({
@@ -481,7 +506,7 @@ async function getCheckInMessagesUncached({
           fallbackName: getPublicUserDisplayName(like.User),
           remarkMap,
         }),
-        avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+        avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl || null),
       })),
       favorites: item.DailyMessageFavorite,
       canDelete: viewerCanModerate || item.userId === viewerId,
@@ -492,9 +517,10 @@ async function getCheckInMessagesUncached({
       comments: item.DailyMessageComment.map((comment) => ({
         ...comment,
         author: {
-          ...comment.User,
+          ...publicComments.find((candidate) => candidate.id === comment.id)!.User,
           profile: comment.User.Profile ? {
             ...comment.User.Profile,
+            avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl),
             displayName: resolveFriendDisplayName({
               viewerId,
               targetUserId: comment.User.id,

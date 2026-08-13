@@ -3,14 +3,15 @@ import { NextResponse } from 'next/server'
 import { hashSecurityQuestions, parseSecurityQuestions, validateSecurityQuestions } from '@/lib/account-security'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
-import { getRegistrationIdentityHash, REGISTRATION_DRAFT_TTL_MS } from '@/lib/registration-draft'
+import { getHospitalOnlyDraftValues, getRegistrationIdentityHash, isHospitalOnlyDraft, REGISTRATION_DRAFT_TTL_MS } from '@/lib/registration-draft'
 import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
-import { rejectInvalidRequestOrigin } from '@/lib/security'
+import { validateRegistrationPasswordFields } from '@/lib/registration-password'
+import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { createPlainToken, hashToken } from '@/lib/tokens'
 import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
-import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, getPhoneValidationMessage, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
+import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -38,7 +39,45 @@ export async function POST(request: Request) {
     return errorResponse('当前暂未开放邮箱验证注册', 403, 'EMAIL_REGISTRATION_DISABLED')
   }
 
+  if (body?.hospitalOnly === true) {
+    if (!policy.ehospitalCheckEnabled) return errorResponse('E院体检当前未开放', 403, 'EHOSPITAL_CHECK_DISABLED')
+    const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
+    if (!turnstile.success) return errorResponse(turnstile.message || '人机验证失败', 400, 'TURNSTILE_FAILED', { turnstileToken: turnstile.message || '人机验证失败' })
+
+    const clientIp = getClientIp(request)
+    const identityHash = getRegistrationIdentityHash('hospital-only', clientIp)
+    const draftToken = createPlainToken(32)
+    const placeholder = getHospitalOnlyDraftValues(identityHash)
+    const passwordHash = await hashPassword(createPlainToken(32))
+    const now = new Date()
+    const draft = await prisma.registrationDraft.create({
+      data: {
+        tokenHash: hashToken(draftToken),
+        registrationType: 'EMAIL',
+        ...placeholder,
+        passwordHash,
+        securityQuestions: Prisma.JsonNull,
+        acceptedAgreement: false,
+        emailCodeHash: null,
+        emailCodeExpiresAt: null,
+        emailVerifiedAt: null,
+        expiresAt: new Date(now.getTime() + REGISTRATION_DRAFT_TTL_MS),
+      },
+    })
+
+    return NextResponse.json({
+      registrationToken: draftToken,
+      expiresAt: draft.expiresAt.toISOString(),
+      email: '',
+      phone: '',
+      emailVerified: false,
+      hospitalOnly: true,
+      message: '请先完成 E院体检，体检通过后填写注册资料',
+    }, { headers: noStoreHeaders })
+  }
+
   const rawNickname = body?.nickname || body?.username
+  const suppliedRegistrationToken = normalizeText(body?.registrationToken)
   const nickname = getLoginAccountDisplay(rawNickname)
   const accountValidation = validateLoginAccountValue(rawNickname)
   const usernameNormalized = accountValidation.usernameNormalized
@@ -53,15 +92,12 @@ export async function POST(request: Request) {
   const securityQuestions = parseSecurityQuestions(body?.securityQuestions)
   const errors: Record<string, string> = {}
 
-  if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error) {
-    errors.nickname = '用户名 / 昵称需要 2-16 个字符'
-  }
-  if (!rawPhone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
-  if (!normalizedPhone) errors.phone = getPhoneValidationMessage(requestedPhoneCountry)
-  if (!email) errors.email = '请填写邮箱'
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = '请输入有效邮箱'
-  if (!password || password.length < 8) errors.password = '密码至少需要 8 位'
-  if (confirmPassword !== password) errors.confirmPassword = '两次输入的密码不一致'
+  if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) errors.nickname = '用户名格式不正确'
+  else if (accountValidation.error) errors.nickname = accountValidation.error
+  if (!rawPhone) errors.phone = '手机号格式错误'
+  else if (!normalizedPhone) errors.phone = '手机号格式错误'
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = '邮箱格式错误'
+  Object.assign(errors, validateRegistrationPasswordFields(password, confirmPassword))
   if (!acceptedAgreement) errors.acceptedAgreement = '请先勾选用户协议'
   if (policy.requireSecurityQuestionsForNewUsers) {
     const securityError = validateSecurityQuestions(securityQuestions)
@@ -71,6 +107,19 @@ export async function POST(request: Request) {
 
   const turnstile = await verifyTurnstileToken(body?.turnstileToken, request)
   if (!turnstile.success) return errorResponse(turnstile.message || '人机验证失败', 400, 'TURNSTILE_FAILED', { turnstileToken: turnstile.message || '人机验证失败' })
+
+  const existingHospitalDraft = suppliedRegistrationToken
+    ? await prisma.registrationDraft.findUnique({
+      where: { tokenHash: hashToken(suppliedRegistrationToken) },
+      select: { id: true, nickname: true, completedAt: true, expiresAt: true },
+    })
+    : null
+  if (suppliedRegistrationToken && (!existingHospitalDraft || existingHospitalDraft.completedAt || existingHospitalDraft.expiresAt <= new Date())) {
+    return errorResponse('注册验证已过期，请重新开始 E院体检', 410, 'REGISTRATION_DRAFT_EXPIRED')
+  }
+  if (suppliedRegistrationToken && existingHospitalDraft && !isHospitalOnlyDraft(existingHospitalDraft.nickname)) {
+    return errorResponse('注册验证状态不允许重新保存资料，请重新开始注册', 409, 'REGISTRATION_DRAFT_INVALID')
+  }
 
   const phoneVariants = getPhoneLookupVariants(phone, normalizedPhone?.country || requestedPhoneCountry)
   const draftIdentityFilter = [{ email }, ...phoneVariants.map((phoneValue) => ({ phone: phoneValue }))]
@@ -112,7 +161,7 @@ export async function POST(request: Request) {
   if (duplicate?.phone && phoneVariants.includes(duplicate.phone)) return errorResponse('手机号已被注册', 409, 'PHONE_ALREADY_EXISTS', { phone: '手机号已被注册' })
   if (duplicate?.email === email) return errorResponse('邮箱已被注册', 409, 'EMAIL_ALREADY_EXISTS', { email: '邮箱已被注册' })
   if (accountDuplicate) return errorResponse('该登录账号已被使用，账号不区分大小写', 409, 'USERNAME_ALREADY_EXISTS', { nickname: '该登录账号已被使用，账号不区分大小写' })
-  if (recoverableDraft && (await verifyPassword(password, recoverableDraft.passwordHash)).valid) {
+  if (!existingHospitalDraft && recoverableDraft && (await verifyPassword(password, recoverableDraft.passwordHash)).valid) {
     const recoveredToken = createPlainToken(32)
     const rotated = await prisma.registrationDraft.updateMany({
       where: { id: recoverableDraft.id, tokenHash: recoverableDraft.tokenHash, completedAt: null, expiresAt: { gt: new Date() } },
@@ -143,6 +192,48 @@ export async function POST(request: Request) {
       }, { headers: noStoreHeaders })
     }
   }
+  const passwordHash = await hashPassword(password)
+  const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
+    ? await hashSecurityQuestions(securityQuestions)
+    : []
+
+  if (existingHospitalDraft) {
+    const now = new Date()
+    const updated = await prisma.registrationDraft.update({
+      where: { id: existingHospitalDraft.id },
+      data: {
+        username: nickname,
+        usernameNormalized,
+        nickname,
+        email,
+        phone,
+        passwordHash,
+        securityQuestions: hashedSecurityQuestions.length ? hashedSecurityQuestions : Prisma.JsonNull,
+        acceptedAgreement,
+        identityHash: getRegistrationIdentityHash(email, phone),
+        emailCodeHash: null,
+        emailCodeExpiresAt: null,
+        emailVerifiedAt: null,
+        expiresAt: new Date(now.getTime() + REGISTRATION_DRAFT_TTL_MS),
+      },
+    })
+    const hospital = await prisma.eHospitalCheckSession.findFirst({
+      where: { registrationDraftId: updated.id, status: 'PASSED', expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true, score: true, expiresAt: true },
+    })
+    return NextResponse.json({
+      registrationToken: suppliedRegistrationToken,
+      expiresAt: updated.expiresAt.toISOString(),
+      email: updated.email,
+      phone: updated.phone,
+      emailVerified: false,
+      draft: { nickname: updated.nickname, email: updated.email, phone: updated.phone, acceptedAgreement: updated.acceptedAgreement },
+      hospital: hospital ? { sessionId: hospital.id, status: hospital.status, score: hospital.score, expiresAt: hospital.expiresAt.toISOString() } : null,
+      message: '注册资料已保存，请发送邮箱验证码',
+    }, { headers: noStoreHeaders })
+  }
+
   const oldDraftIds = existingDrafts.map(({ id }) => id)
   if (oldDraftIds.length) {
     const invalidatedAt = new Date()
@@ -156,10 +247,6 @@ export async function POST(request: Request) {
     })
   }
   const draftToken = createPlainToken(32)
-  const passwordHash = await hashPassword(password)
-  const hashedSecurityQuestions = policy.requireSecurityQuestionsForNewUsers
-    ? await hashSecurityQuestions(securityQuestions)
-    : []
   const now = new Date()
   const draft = await prisma.registrationDraft.create({
     data: {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { formatBeijingDate } from '@/lib/checkin'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
@@ -35,7 +36,7 @@ function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<
       fallbackName: getPublicUserDisplayName(row.User),
       remarkMap,
     }),
-    avatarUrl: row.User.Profile?.avatarUrl || row.User.avatarUrl || null,
+    avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
   }
 }
 

@@ -29,7 +29,7 @@ export async function POST(request: Request) {
         releaseYear: parseMusicYear(body?.releaseYear) || album.releaseYear,
         duration: parseOptionalDuration(body?.duration),
         language: optionalMusicText(body?.language, 40) || album.language,
-        coverUrl: optionalMusicText(body?.coverUrl, 1000) || album.coverUrl,
+        coverUrl: toPublicMediaUrl(optionalMusicText(body?.coverUrl, 1000) || album.coverUrl),
         composer: optionalMusicText(body?.composer, 200),
         lyricist: optionalMusicText(body?.lyricist, 200),
         arranger: optionalMusicText(body?.arranger, 200),

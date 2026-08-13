@@ -3,7 +3,7 @@ import { awardFeaturedPostRewards } from '@/lib/community-rewards'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { checkForbiddenWords } from '@/lib/content-filter'
-import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
+import { MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -101,10 +101,12 @@ export async function GET(_request: Request, { params }: Params) {
   return NextResponse.json({
     post: {
       ...postData,
+      content: publicContentImageMarkers(postData.content),
       author,
       board: Board,
       replies: Reply.map(({ User: replyAuthor, ...reply }) => ({
         ...reply,
+        content: publicContentImageMarkers(reply.content),
         author: replyAuthor.Profile ? {
           ...replyAuthor,
           avatarUrl: publicImageUrl(replyAuthor.avatarUrl),
@@ -353,7 +355,7 @@ async function handleEditPost(
   })
 
   return NextResponse.json({
-    post: { id: updated.id, title: updated.title, content: updated.content, updatedAt: updated.updatedAt },
+    post: { id: updated.id, title: updated.title, content: publicContentImageMarkers(updated.content), updatedAt: updated.updatedAt },
     message: '帖子已保存',
   })
 }

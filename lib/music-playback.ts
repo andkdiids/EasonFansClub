@@ -1,4 +1,5 @@
 import type { SessionUser } from '@/lib/auth'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export type MusicPlaybackSource = {
   id: string
@@ -65,7 +66,7 @@ export function getMusicPlaybackUrl(songId: string) {
 
 export function resolveMusicPlayback(source: MusicPlaybackSource, user?: Pick<SessionUser, 'role' | 'canPlayFullMusic'> | null) {
   const fullPlayback = canPlayFullMusic(user) && Boolean(source.sourceAudioPath)
-  const playbackAvailable = fullPlayback || Boolean(source.previewUrl)
+  const playbackAvailable = fullPlayback || Boolean(toPublicMediaUrl(source.previewUrl))
   const previewDuration = Math.max(1, Math.min(60, source.previewDuration || 60))
   const fullDuration = source.sourceAudioDurationMs && source.sourceAudioDurationMs > 0
     ? Math.max(1, Math.ceil(source.sourceAudioDurationMs / 1000))

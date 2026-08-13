@@ -24,6 +24,8 @@ export {
   parseBeijingDateTime,
   parseRegistrationDailyScheduleInput,
   parseRegistrationControlInput,
+  REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE,
+  REGISTRATION_ONE_TIME_VALIDATION_MESSAGE,
   registrationAvailabilityStatuses,
   registrationControlModes,
   registrationControlOverrides,

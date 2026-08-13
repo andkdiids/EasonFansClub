@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { optionalMusicText, parseMusicFeatured, parseMusicFeaturedOrder, parseMusicYear } from '@/lib/music'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -47,7 +48,11 @@ export async function POST(request: Request) {
       include: { MusicSong: true },
     })
     const { MusicSong, ...albumData } = album
-    return NextResponse.json({ album: { ...albumData, songs: MusicSong }, message: '专辑草稿已创建' }, { status: 201 })
+    return NextResponse.json({ album: {
+      ...albumData,
+      coverUrl: toPublicMediaUrl(albumData.coverUrl),
+      songs: MusicSong.map((song) => ({ ...song, coverUrl: toPublicMediaUrl(song.coverUrl), previewUrl: toPublicMediaUrl(song.previewUrl) })),
+    }, message: '专辑草稿已创建' }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return NextResponse.json({ message: '同名、同艺人和同年份的专辑已存在' }, { status: 409 })

@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { PostEditForm, type ExistingMedia } from '@/components/PostEditForm'
 import { getCurrentUser } from '@/lib/auth'
+import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/security'
@@ -62,7 +63,7 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
         <PostEditForm
           postId={post.id}
           initialTitle={post.title}
-          initialContent={post.content}
+          initialContent={publicContentImageMarkers(post.content)}
           initialMedia={initialMedia}
         />
       </div>

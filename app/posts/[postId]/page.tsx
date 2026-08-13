@@ -10,6 +10,7 @@ import { PostViewCounter } from '@/components/PostViewCounter'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
+import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getPostModerationAccess } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
@@ -448,8 +449,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canManagePost = Boolean(user && isAdminRole(user.role))
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
   const canEditPost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
+  const publicPostContent = publicContentImageMarkers(post.content)
   const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
     ...reply,
+    content: publicContentImageMarkers(reply.content),
     stickerId: reply.stickerId ?? null,
     stickerUrl: publicImageUrl(reply.sticker?.url),
     author: User.status === 'ACTIVE' && !User.isDeleted
@@ -540,7 +543,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <PostViewCounter postId={post.id} initialCount={post.viewCount} />
             <span>回复 {post.replyCount}</span>
           </div>
-          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{post.content}</div>
+          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{publicPostContent}</div>
           {post.sticker?.url ? (
             <div className="mt-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}

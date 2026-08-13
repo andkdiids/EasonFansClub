@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
 
@@ -257,7 +258,10 @@ export function buildPersonalSongAtlas(rows: PersonalLiveRow[]) {
       const current = songs.get(item.songId) || {
         songId: item.songId,
         title: item.MusicSong.title,
-        album: item.MusicSong.MusicAlbum,
+        album: {
+          ...item.MusicSong.MusicAlbum,
+          coverUrl: toPublicMediaUrl(item.MusicSong.MusicAlbum.coverUrl),
+        },
         occurrenceCount: 0,
         concerts: new Map(),
       }
@@ -318,7 +322,7 @@ export function buildTourStats(rows: PersonalLiveRow[], fallbacks: PersonalPoste
     return {
       id: tour.id,
       name: tour.name,
-      posterUrl: tour.posterUrl,
+      posterUrl: toPublicMediaUrl(tour.posterUrl),
       resolvedPosterUrl: resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: fallbacks.tour.get(tour.id) }).resolvedPosterUrl,
       concertCount: dates.length,
       firstDate: dates[0],
@@ -434,14 +438,14 @@ export function serializePersonalRecord(row: PersonalLiveRow, fallbacks: Persona
       venue: concert.venue,
       sessionNumber: concert.sessionNumber,
       stageType: concert.stageType,
-      posterUrl: concert.posterUrl,
+      posterUrl: toPublicMediaUrl(concert.posterUrl),
       resolvedPosterUrl: posterResolution.resolvedPosterUrl,
       posterSource: posterResolution.posterSource,
       setlistCount: concert.MusicConcertSetlistItem.filter(isCountableSetlistItem).length,
       tour: {
         id: concert.MusicTour.id,
         name: concert.MusicTour.name,
-        posterUrl: concert.MusicTour.posterUrl,
+        posterUrl: toPublicMediaUrl(concert.MusicTour.posterUrl),
         resolvedPosterUrl: resolveConcertPoster({ posterUrl: concert.MusicTour.posterUrl, cityPosterUrl: fallbacks.tour.get(concert.MusicTour.id) }).resolvedPosterUrl,
       },
     },

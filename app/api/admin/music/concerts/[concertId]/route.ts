@@ -98,7 +98,7 @@ export async function PATCH(request: Request, { params }: Context) {
           venue: sanitizeText(body?.venue, 200) || null,
           startTime: combineDateAndTime(concertDate, body?.startTime),
           endTime: combineDateAndTime(concertDate, body?.endTime),
-          ...(hasPosterUrl ? { posterUrl: sanitizeText(body?.posterUrl, 1000) || null } : {}),
+          ...(hasPosterUrl ? { posterUrl: toPublicMediaUrl(sanitizeText(body?.posterUrl, 1000)) || null } : {}),
           description: sanitizeText(body?.description, 20_000) || null,
           status: parsePublicationStatus(body?.status),
         },

@@ -11,7 +11,7 @@ function source(path: string) {
 
 test('登录账号沿用注册时的 2-16 字符规则并要求二次确认', () => {
   assert.deepEqual(validateAdminLoginAccount('Eason仔', 'EASON仔', 'old'), { account: 'Eason仔', usernameNormalized: 'eason仔', error: null })
-  assert.match(validateAdminLoginAccount(' Eason仔 ', 'EASON仔', 'old').error || '', /用户名不能包含空格或特殊符号/)
+  assert.match(validateAdminLoginAccount(' Eason仔 ', 'EASON仔', 'old').error || '', /用户名只能包含中文、英文、数字和下划线，不能包含空格或特殊字符/)
   assert.match(validateAdminLoginAccount('', '', 'old').error || '', /请输入/)
   assert.match(validateAdminLoginAccount('a', 'a', 'old').error || '', /2-16/)
   assert.match(validateAdminLoginAccount('new', 'other', 'old').error || '', /不一致/)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationAvailabilityError, getRegistrationPolicy, serializeRegistrationAvailability, serializeRegistrationControlSettings } from '@/lib/registration'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
+import { isHospitalOnlyDraft } from '@/lib/registration-draft'
 import { hashToken } from '@/lib/tokens'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -47,8 +48,9 @@ export async function POST(request: Request) {
   if (!draft) return NextResponse.json({ message: '注册验证已失效，请重新填写注册资料', code: 'REGISTRATION_DRAFT_NOT_FOUND' }, { status: 410, headers: noStoreHeaders })
 
   const session = draft.EHospitalCheckSession[0] || null
+  const hospitalOnly = isHospitalOnlyDraft(draft.nickname)
   return NextResponse.json({
-    draft: { nickname: draft.nickname, email: draft.email, phone: draft.phone, acceptedAgreement: draft.acceptedAgreement },
+    draft: { nickname: hospitalOnly ? '' : draft.nickname, email: hospitalOnly ? '' : draft.email, phone: hospitalOnly ? '' : draft.phone, acceptedAgreement: hospitalOnly ? false : draft.acceptedAgreement, hospitalOnly },
     emailVerified: Boolean(draft.emailVerifiedAt),
     completed: Boolean(draft.completedAt),
     expired: draft.expiresAt <= new Date(),

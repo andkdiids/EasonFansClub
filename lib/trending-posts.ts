@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { unstable_cache } from 'next/cache'
+import { publicContentImageMarkers } from '@/lib/content-images'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export const TRENDING_PAGE_SIZE = 15
@@ -94,7 +96,10 @@ export const getTrendingPosts = unstable_cache(
       hasMore: rows.length > TRENDING_PAGE_SIZE,
       posts: rows.slice(0, TRENDING_PAGE_SIZE).map((row) => ({
         ...row,
+        summary: publicContentImageMarkers(row.summary),
         hotScore: Number(row.hotScore),
+        authorAvatarUrl: publicImageUrl(row.authorAvatarUrl),
+        imageUrl: publicImageUrl(row.imageUrl),
       })),
     }
   },

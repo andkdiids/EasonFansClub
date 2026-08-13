@@ -4,10 +4,12 @@ import test from 'node:test'
 import {
   formatBeijingDateTimeDisplay,
   parseBeijingDateTime,
+  parseRegistrationControlInput,
   resolveRegistrationAvailability,
   serializeRegistrationAvailability,
   serializeRegistrationControlSettings,
   type RegistrationControlSettings,
+  validateRegistrationControlSettings,
   validateRegistrationDailySchedule,
 } from '../lib/registration-availability'
 
@@ -30,6 +32,50 @@ test('北京时间输入按 Asia/Shanghai 解析并保存为 UTC 对应时刻', 
 test('手动模式只根据服务端手动状态开放', () => {
   const availability = resolveRegistrationAvailability({ settings: settings({ mode: 'MANUAL', opensAt: null, closesAt: null }), baseRegistrationOpen: true })
   assert.deepEqual({ status: availability.status, isOpen: availability.isOpen }, { status: 'OPEN', isOpen: true })
+})
+
+test('手动模式忽略无关时间字段并且无需时间校验', () => {
+  const parsed = parseRegistrationControlInput({
+    mode: 'MANUAL',
+    opensAt: 'not-a-datetime',
+    closesAt: 'also-not-a-datetime',
+    dailySchedule: [{ start: 'invalid', end: 'invalid' }],
+  })
+  assert.ok(parsed)
+  assert.equal(parsed.opensAt, null)
+  assert.equal(parsed.closesAt, null)
+  assert.deepEqual(parsed.dailySchedule, [])
+  assert.equal(validateRegistrationControlSettings(parsed), null)
+})
+
+test('单次限时模式只校验日期时间且要求结束时间晚于开始时间', () => {
+  const missing = parseRegistrationControlInput({ mode: 'ONE_TIME', opensAt: '', closesAt: '', dailySchedule: [{ start: 'invalid', end: 'invalid' }] })
+  assert.ok(missing)
+  assert.equal(validateRegistrationControlSettings(missing), '请输入正确的开放开始和结束时间，格式 YYYY-MM-DD HH:mm')
+
+  const valid = parseRegistrationControlInput({ mode: 'ONE_TIME', opensAt: '2026-08-13 15:00', closesAt: '2026-08-13 16:00', dailySchedule: [] })
+  assert.ok(valid)
+  assert.equal(validateRegistrationControlSettings(valid), null)
+
+  const reversed = parseRegistrationControlInput({ mode: 'ONE_TIME', opensAt: '2026-08-13 16:00', closesAt: '2026-08-13 15:00', dailySchedule: [] })
+  assert.ok(reversed)
+  assert.equal(validateRegistrationControlSettings(reversed), '结束时间必须晚于开始时间')
+})
+
+test('每日定时模式只校验每日 HH:mm 时段并忽略日期字段', () => {
+  const parsed = parseRegistrationControlInput({
+    mode: 'DAILY_SCHEDULE',
+    opensAt: 'not-a-datetime',
+    closesAt: 'also-not-a-datetime',
+    dailySchedule: [{ start: '09:00', end: '23:30' }],
+  })
+  assert.ok(parsed)
+  assert.equal(parsed.opensAt, null)
+  assert.equal(parsed.closesAt, null)
+  assert.equal(validateRegistrationControlSettings(parsed), null)
+
+  const invalid = parseRegistrationControlInput({ mode: 'DAILY_SCHEDULE', dailySchedule: [{ start: '9:00', end: '23:30' }] })
+  assert.equal(invalid, null)
 })
 
 test('限时模式在开始前、窗口内、结束后返回对应状态', () => {

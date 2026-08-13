@@ -10,12 +10,14 @@ import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-a
 import { MySqlAdvisoryLockBusyError, createMySqlAdvisoryLockName, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
+import { isHospitalOnlyDraft } from '@/lib/registration-draft'
 import { getRegistrationAvailabilityError, getRegistrationPolicy } from '@/lib/registration'
+import { validateRegistrationPasswordFields } from '@/lib/registration-password'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { MAX_UID } from '@/lib/uid'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
-import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, getPhoneValidationMessage, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
+import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -95,12 +97,13 @@ export async function POST(request: Request) {
     const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash: hashToken(registrationToken) } })
     if (!draft || draft.completedAt) return jsonError('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND', { form: '注册验证已失效，请重新填写注册资料' })
     if (draft.expiresAt <= new Date()) return jsonError('注册验证已过期，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_EXPIRED', { form: '注册验证已过期，请重新填写注册资料' })
+    if (isHospitalOnlyDraft(draft.nickname)) return jsonError('请先填写注册资料', 409, 'REGISTRATION_DETAILS_REQUIRED', { form: '请先填写注册资料' })
     const requestedPhoneCountry = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
     const rawSubmittedPhone = normalizeText(body?.phone)
     const submittedPhone = normalizePhoneNumber(rawSubmittedPhone, requestedPhoneCountry)
     const draftPhone = normalizePhoneNumber(draft.phone, requestedPhoneCountry)
-    if (!rawSubmittedPhone || !draft.phone) return jsonError('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
-    if (!submittedPhone || !draftPhone) return jsonError(getPhoneValidationMessage(requestedPhoneCountry), 400, 'INVALID_PHONE', { phone: getPhoneValidationMessage(requestedPhoneCountry) })
+    if (!rawSubmittedPhone || !draft.phone) return jsonError('手机号格式错误', 400, 'INVALID_PHONE', { phone: '手机号格式错误' })
+    if (!submittedPhone || !draftPhone) return jsonError('手机号格式错误', 400, 'INVALID_PHONE', { phone: '手机号格式错误' })
     if (submittedPhone.e164 !== draftPhone.e164) return jsonError('注册手机号已变化，请重新开始验证', 400, 'PHONE_CHANGED', { phone: '注册手机号已变化，请重新开始验证' })
     if (!draft.emailVerifiedAt) return jsonError('请先完成邮箱验证码验证', 409, 'EMAIL_VERIFICATION_REQUIRED', { emailCode: '请先完成邮箱验证码验证' })
 
@@ -118,17 +121,19 @@ export async function POST(request: Request) {
     const accountValidation = validateLoginAccountValue(username)
     const usernameNormalized = accountValidation.usernameNormalized
     const nickname = getLoginAccountDisplay(body?.nickname || username)
+    const submittedAccountValidation = validateLoginAccountValue(nickname)
     const email = draft.email
     const phone = draftPhone.e164
     const phoneVariants = getPhoneLookupVariants(phone, draftPhone.country)
     const password = normalizeText(body?.password)
     const confirmPassword = normalizeText(body?.confirmPassword)
     const errors: Record<string, string> = {}
-    if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16 || accountValidation.error || nickname !== draft.nickname) errors.nickname = '注册资料已变化，请重新开始验证'
+    if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) errors.nickname = '用户名格式不正确'
+    else if (submittedAccountValidation.error) errors.nickname = submittedAccountValidation.error
+    else if (accountValidation.error || nickname !== draft.nickname) errors.nickname = '注册资料已变化，请重新开始验证'
     if (body?.email && normalizeText(body.email).toLowerCase() !== email) errors.email = '注册邮箱已变化，请重新发送验证码'
-    if (password && password.length < 8) errors.password = '密码至少需要 8 位'
-    if (password && !(await verifyPassword(password, draft.passwordHash)).valid) errors.password = '注册资料已变化，请重新开始验证'
-    if (password && confirmPassword !== password) errors.confirmPassword = '两次输入的密码不一致'
+    Object.assign(errors, validateRegistrationPasswordFields(password, confirmPassword))
+    if (!errors.password && password && !(await verifyPassword(password, draft.passwordHash)).valid) errors.password = '注册资料已变化，请重新开始验证'
     if (Object.keys(errors).length) return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
 
     const [duplicate, accountDuplicate] = await Promise.all([

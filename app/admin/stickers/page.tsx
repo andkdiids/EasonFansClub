@@ -2,6 +2,7 @@ import { requireAdminPage } from '@/components/AdminAccess'
 
 import { prisma } from '@/lib/prisma'
 import { AdminStickersTabs } from '@/components/AdminStickersTabs'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,14 +55,17 @@ export default async function AdminStickersPage() {
     id: p.id,
     name: p.name,
     description: p.description,
-    coverUrl: p.coverUrl,
+    coverUrl: toPublicMediaUrl(p.coverUrl),
     type: p.type,
     status: p.status,
     rejectionReason: p.rejectionReason,
     reviewedAt: p.reviewedAt ? p.reviewedAt.toISOString() : null,
     createdAt: p.createdAt.toISOString(),
     creator: p.creator,
-    stickers: p.stickers,
+    stickers: p.stickers.map((sticker) => ({
+      ...sticker,
+      url: toPublicMediaUrl(sticker.url) || sticker.url,
+    })),
   }))
 
   return (

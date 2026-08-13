@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
@@ -122,7 +123,7 @@ function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remark
       fallbackName: getPublicUserDisplayName(like.User),
       remarkMap,
     }),
-    avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+    avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
   }))
 }
 
@@ -156,8 +157,8 @@ function serializeWallNode(
     sender: {
       uid: sender.uid,
       nickname: sender.nickname,
-      avatarUrl: sender.avatarUrl,
-      profile: sender.Profile ? { ...sender.Profile, displayName } : null,
+      avatarUrl: publicImageUrl(sender.avatarUrl),
+      profile: sender.Profile ? { ...sender.Profile, avatarUrl: publicImageUrl(sender.Profile.avatarUrl), displayName } : null,
     },
     children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, remarkMap)),
   }

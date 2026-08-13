@@ -28,13 +28,16 @@ function makeAnimatedGif(): Buffer {
 
 test('image variants resolve only deterministic source families', () => {
   const source = '/cos/content/user-1/post-1/source.webp?v=7'
-  assert.equal(toImageVariantUrl(source, 'card'), '/cos/content/user-1/post-1/card.webp?v=7')
-  assert.equal(publicImageVariantUrl(source, 'thumb-md'), '/cos/content/user-1/post-1/thumb-md.webp?v=7')
-  assert.equal(publicImageOriginalUrl(source), '/cos/content/user-1/post-1/original?v=7')
+  const mediaSource = 'https://media.ecfc.fans/media/content/user-1/post-1/source.webp?v=7'
+  assert.equal(toImageVariantUrl(source, 'card'), 'https://media.ecfc.fans/media/content/user-1/post-1/card.webp?v=7')
+  assert.equal(publicImageVariantUrl(source, 'thumb-md'), 'https://media.ecfc.fans/media/content/user-1/post-1/thumb-md.webp?v=7')
+  assert.equal(publicImageOriginalUrl(source), 'https://media.ecfc.fans/media/content/user-1/post-1/original?v=7')
   assert.equal(toImageVariantUrl('/cos/content/legacy.webp', 'card'), null)
-  assert.equal(publicImageVariantUrl('/cos/content/legacy.webp', 'card'), '/cos/content/legacy.webp')
-  assert.equal(publicHeroVariantUrl('/cos/page-visuals/home/optimized/family/hero.webp?v=7', 'card'), '/cos/page-visuals/home/optimized/family/card.webp?v=7')
-  assert.equal(publicHeroVariantUrl('/cos/page-visuals/legacy.webp', 'card'), '/cos/page-visuals/legacy.webp')
+  assert.equal(publicImageVariantUrl('/cos/content/legacy.webp', 'card'), 'https://media.ecfc.fans/media/content/legacy.webp')
+  assert.equal(publicHeroVariantUrl('/cos/page-visuals/home/optimized/family/hero.webp?v=7', 'card'), 'https://media.ecfc.fans/media/page-visuals/home/optimized/family/card.webp?v=7')
+  assert.equal(publicHeroVariantUrl('/cos/page-visuals/legacy.webp', 'card'), 'https://media.ecfc.fans/media/page-visuals/legacy.webp')
+  assert.equal(toImageVariantUrl(mediaSource, 'card'), 'https://media.ecfc.fans/media/content/user-1/post-1/card.webp?v=7')
+  assert.equal(publicImageOriginalUrl(mediaSource), 'https://media.ecfc.fans/media/content/user-1/post-1/original?v=7')
   assert.equal(publicHeroVariantUrl('https://example.com/hero.webp', 'card'), 'https://example.com/hero.webp')
 })
 

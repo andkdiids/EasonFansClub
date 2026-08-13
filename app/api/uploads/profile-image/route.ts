@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import sharp from 'sharp'
-import { publicImageUrl, storedImageUrl } from '@/lib/images'
+import { publicImageUrl } from '@/lib/images'
+import { toStoredMediaUrl } from '@/lib/media-url'
 import { uploadToCos, deleteFromCos } from '@/lib/tencent-cos'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/security'
@@ -34,10 +35,11 @@ function cosPathFromUrl(url?: string | null) {
   if (!bucket || !region) return null
 
   const prefix = `https://${bucket}.cos.${region}.myqcloud.com/`
+  const storageUrl = toStoredMediaUrl(url) || url
 
-  if (!url.startsWith(prefix)) return null
+  if (!storageUrl.startsWith(prefix)) return null
 
-  return decodeURIComponent(url.replace(prefix, ''))
+  return decodeURIComponent(storageUrl.replace(prefix, ''))
 }
 
 
@@ -152,8 +154,11 @@ export async function POST(request: Request) {
 
 
 
-  const safeUrl = storedImageUrl(url)
-  const browserUrl = publicImageUrl(url)
+  // New profile media is stored as the public gateway URL. Existing COS URLs
+  // remain valid and are converted on read; deletion still canonicalizes them
+  // back to a COS object path through cosPathFromUrl().
+  const safeUrl = publicImageUrl(url)
+  const browserUrl = safeUrl
 
   if (!safeUrl || !browserUrl) {
 

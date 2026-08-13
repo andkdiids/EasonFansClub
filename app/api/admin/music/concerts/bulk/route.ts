@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { buildConcertSequenceUpdates, cloneSetlistItems } from '@/lib/music-concert-admin'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     if (!posterUrl || !/^https?:\/\//i.test(posterUrl)) {
       return NextResponse.json({ message: '请提供有效的海报地址' }, { status: 400 })
     }
-    data = { posterUrl }
+    data = { posterUrl: toPublicMediaUrl(posterUrl) }
   }
 
   const existing = await prisma.musicConcert.findMany({ where: { id: { in: ids } }, select: { id: true, tourId: true, _count: { select: { UserMusicConcert: true } } } })

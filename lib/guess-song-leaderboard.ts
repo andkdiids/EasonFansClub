@@ -4,6 +4,7 @@ import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_M
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export async function getGuessSongDeletedYearSessionIds(periodKey?: string) {
@@ -128,7 +129,7 @@ function serializeModeHighScore(
     fallbackName: getPublicUserDisplayName(row.User),
     remarkMap,
   })
-  const avatarUrl = row.User.Profile?.avatarUrl || row.User.avatarUrl
+  const avatarUrl = publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl)
   return {
     mode: publicMode,
     score: row.score,
@@ -309,7 +310,7 @@ function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remar
       fallbackName: getPublicUserDisplayName(row.User),
       remarkMap,
     }),
-    avatarUrl: row.User.Profile?.avatarUrl || row.User.avatarUrl,
+    avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
     mode: row.mode ? toPublicGuessSongMode(row.mode) : undefined,
     score: row.score,
     correctCount: row.correctCount,

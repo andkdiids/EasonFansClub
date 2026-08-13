@@ -7,6 +7,7 @@ import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +33,8 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
     getSiteAppearance(),
   ])
   if (!tour) notFound()
+  tour.posterUrl = toPublicMediaUrl(tour.posterUrl)
+  tour.MusicConcert.forEach((concert) => { concert.posterUrl = toPublicMediaUrl(concert.posterUrl) })
   const locations = [...new Set(tour.MusicConcert.map((concert) => `${concert.countryOrRegion || '中国'} · ${concert.city}`))]
   const resolvedPosterUrl = resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(tour.MusicConcert.map((concert) => concert.posterUrl)) }).resolvedPosterUrl
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>

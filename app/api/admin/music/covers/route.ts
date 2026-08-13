@@ -108,7 +108,7 @@ async function uploadCover(request: Request) {
       generated,
       upload: ({ key, body, contentType }) => uploadMusicMedia({ kind: 'cover', key, body, contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp' }),
     })
-    const objectUrl = uploadResult.sourceUrl
+    const objectUrl = toPublicMediaUrl(uploadResult.sourceUrl) || uploadResult.sourceUrl
     console.info('[music-cover.cos-complete]', {
       entityType,
       entityId,

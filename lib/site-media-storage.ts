@@ -1,4 +1,5 @@
 import COS from 'cos-nodejs-sdk-v5'
+import { buildPublicMediaUrl } from '@/lib/media-url'
 import { putCosObjectWithAclFallback, readCosEnv } from '@/lib/tencent-cos'
 
 const COS_UPLOAD_TIMEOUT_MS = 120_000
@@ -22,13 +23,6 @@ function getConfig() {
     throw new SiteMediaStorageError('腾讯云 COS 图片存储尚未配置完整')
   }
   return { secretId, secretKey, bucket, region }
-}
-
-function publicUrl(bucket: string, region: string, key: string) {
-  const base = process.env.TENCENT_COS_SITE_PUBLIC_BASE_URL?.trim().replace(/\/+$/, '')
-    || process.env.TENCENT_COS_PUBLIC_BASE_URL?.trim().replace(/\/+$/, '')
-    || `https://${bucket}.cos.${region}.myqcloud.com`
-  return `${base}/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
 export async function uploadSiteImage(params: { key: string; body: Buffer; contentType?: string }) {
@@ -68,5 +62,5 @@ export async function uploadSiteImage(params: { key: string; body: Buffer; conte
     if (timeout) clearTimeout(timeout)
   }
 
-  return publicUrl(config.bucket, config.region, key)
+  return buildPublicMediaUrl(key)
 }

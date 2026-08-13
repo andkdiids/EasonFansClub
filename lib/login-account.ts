@@ -1,25 +1,13 @@
 export const loginAccountMinLength = 2
 export const loginAccountMaxLength = 16
-export const loginAccountCharacterError = '用户名不能包含空格或特殊符号，可使用中文、英文字母、数字和 Emoji。'
+export const loginAccountCharacterError = '用户名只能包含中文、英文、数字和下划线，不能包含空格或特殊字符'
 
-// Match one username token at a time. Letters and numbers are accepted
-// directly; emoji may include variation selectors, skin-tone modifiers and
-// ZWJ-linked emoji. Punctuation, separators and ordinary symbols do not
-// match this expression.
-const emojiBase = '(?:\\p{Extended_Pictographic}|[\\u{1F1E6}-\\u{1F1FF}])'
-const emojiTail = '(?:[\\uFE0E\\uFE0F\\u{1F3FB}-\\u{1F3FF}])*'
-const usernameTokenPattern = new RegExp(
-  `(?:\\p{N}\\uFE0F\\u20E3|[\\p{L}\\p{N}\\p{M}]|${emojiBase}${emojiTail}(?:\\u200D${emojiBase}${emojiTail})*)`,
-  'gu',
-)
+// NFKC is applied before this check so the existing full-width Latin/numeric
+// input remains compatible with the normalized login-account contract.
+const usernameCharacterPattern = /^[\p{Script=Han}A-Za-z0-9_]+$/u
 
 function hasValidUsernameCharacters(value: string) {
-  if (!value) return false
-  usernameTokenPattern.lastIndex = 0
-  let consumed = ''
-  let match: RegExpExecArray | null
-  while ((match = usernameTokenPattern.exec(value))) consumed += match[0]
-  return consumed === value
+  return Boolean(value) && usernameCharacterPattern.test(value.normalize('NFKC'))
 }
 
 export function getLoginAccountDisplay(value: unknown) {

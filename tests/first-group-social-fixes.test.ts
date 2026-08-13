@@ -6,15 +6,15 @@ import { validateLoginAccountValue } from '../lib/login-account'
 const root = process.cwd()
 const readSource = (path: string) => readFileSync(`${root}/${path}`, 'utf8')
 
-test('username validation accepts Unicode letters, numbers and emoji', () => {
-  for (const value of ['陈奕迅', 'Eason', 'Eason2026', '陈奕迅🐶', '❤️Eason', '👩‍💻Eason', '1️⃣Eason']) {
+test('username validation accepts Chinese, English letters, numbers and underscores', () => {
+  for (const value of ['陈奕迅', 'Eason', 'Eason2026', '陈奕迅123', 'Eason_123']) {
     assert.equal(validateLoginAccountValue(value).error, null, value)
   }
 })
 
 test('username validation rejects whitespace, punctuation and ordinary symbols', () => {
-  for (const value of ['陈 奕迅', 'Eason Chan', 'Eason_', 'Eason-', 'Eason.', 'Eason@', 'Eason!', 'Eason#1', 'Eason\u3000Chan', 'Eason\tChan', 'Eason\nChan']) {
-    assert.match(validateLoginAccountValue(value).error || '', /用户名不能包含空格或特殊符号/)
+  for (const value of ['陈 奕迅', 'Eason Chan', ' Eason', 'Eason ', 'Eason-', 'Eason.', 'Eason@', 'Eason!', 'Eason#1', 'Eason\u3000Chan', 'Eason\tChan', 'Eason\nChan', '😀Eason']) {
+    assert.equal(validateLoginAccountValue(value).error, '用户名只能包含中文、英文、数字和下划线，不能包含空格或特殊字符')
   }
 })
 

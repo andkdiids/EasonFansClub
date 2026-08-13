@@ -55,12 +55,12 @@ export async function GET(request: Request, context: RouteContext) {
   if (!location) return NextResponse.json({ ok: false, code: 'AUDIO_NOT_CONFIGURED', message: '暂无可播放音频' }, { status: 404 })
 
   // Probe public previews on the server so the client can distinguish a missing
-  // file from an unavailable storage backend. Relative /cos/ values are probed
-  // through this site as well, so normalized database values keep working.
+  // file from an unavailable storage backend. The probe uses the normalized
+  // media URL as well, so legacy COS values never bypass the media gateway.
   const publicLocation = !isFullPlayback ? (toPublicMediaUrl(location) || location) : location
   if (location === song.previewUrl) {
-    const probeTarget = /^https?:\/\//i.test(location)
-      ? location
+    const probeTarget = /^https?:\/\//i.test(publicLocation)
+      ? publicLocation
       : new URL(publicLocation, request.url).toString()
     const probe = await probeAudioUrl(probeTarget)
     if (!probe.reachable || (probe.status !== null && probe.status >= 500)) {
@@ -74,9 +74,9 @@ export async function GET(request: Request, context: RouteContext) {
     }
   }
 
-  // Public previews use the existing /cos/ proxy when their origin is COS.
-  // Private full playback uses the protected stream route above and never
-  // exposes a COS URL to the browser.
+  // Public previews use the media gateway, including when the database still
+  // contains a legacy COS URL. Private full playback uses the protected stream
+  // route above and never exposes a COS URL to the browser.
   if (!isFullPlayback) location = publicLocation
 
   const response: MusicPlaybackResponse = {

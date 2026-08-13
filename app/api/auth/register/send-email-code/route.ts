@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { sendRegistrationVerificationCode } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
-import { getRegistrationIdentityHash, createRegistrationCode, hashRegistrationCode, REGISTRATION_CODE_TTL_MS } from '@/lib/registration-draft'
+import { getRegistrationIdentityHash, createRegistrationCode, hashRegistrationCode, isHospitalOnlyDraft, REGISTRATION_CODE_TTL_MS } from '@/lib/registration-draft'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
 import { getRegistrationAvailabilityError, getRegistrationLimitEnabled, getRegistrationPolicy } from '@/lib/registration'
 import { checkDailyRegistrationEmailCodeLimit, recordSuccessfulRegistrationEmailCodeSend } from '@/lib/registration-rate-limit'
 import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { findActiveConflict } from '@/lib/users'
 import { hashToken } from '@/lib/tokens'
-import { getPhoneValidationMessage, normalizePhoneNumber } from '@/lib/phone-number'
+import { normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -30,17 +30,17 @@ export async function POST(request: Request) {
   const requestedEmail = normalizeText(body?.email).toLowerCase()
   if (!registrationToken) return errorResponse('注册验证凭证缺失', 400, 'REGISTRATION_TOKEN_REQUIRED')
   if (requestedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail)) {
-    return errorResponse('请输入有效邮箱', 400, 'INVALID_EMAIL', { email: '请输入有效邮箱' })
+    return errorResponse('邮箱格式错误', 400, 'INVALID_EMAIL', { email: '邮箱格式错误' })
   }
 
   const draft = await prisma.registrationDraft.findUnique({ where: { tokenHash: hashToken(registrationToken) } })
   if (!draft || draft.completedAt) return errorResponse('注册验证已失效，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_NOT_FOUND')
   if (draft.expiresAt <= new Date()) return errorResponse('注册验证已过期，请重新填写注册资料', 410, 'REGISTRATION_DRAFT_EXPIRED')
+  if (isHospitalOnlyDraft(draft.nickname)) return errorResponse('请先填写注册资料', 409, 'REGISTRATION_DETAILS_REQUIRED', { form: '请先填写注册资料' })
   const draftPhone = normalizePhoneNumber(draft.phone)
-  if (!draft.phone) return errorResponse('手机号不能为空', 400, 'PHONE_REQUIRED', { phone: '手机号不能为空' })
+  if (!draft.phone) return errorResponse('手机号格式错误', 400, 'INVALID_PHONE', { phone: '手机号格式错误' })
   if (!draftPhone) {
-    const message = getPhoneValidationMessage()
-    return errorResponse(message, 400, 'INVALID_PHONE', { phone: message })
+    return errorResponse('手机号格式错误', 400, 'INVALID_PHONE', { phone: '手机号格式错误' })
   }
 
   const config = await getEHospitalCheckConfig()

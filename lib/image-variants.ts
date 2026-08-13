@@ -1,4 +1,5 @@
 import { publicImageUrl } from '@/lib/images'
+import { getMediaPublicBaseUrl } from '@/lib/media-url'
 
 /**
  * Fixed image sizes used by the public UI.  New uploads may generate this
@@ -18,15 +19,49 @@ export type ImageVariant = keyof typeof IMAGE_VARIANT_WIDTHS
 
 const SOURCE_FILE_PATTERN = /^(.*)\/source\.[a-z0-9]+$/i
 
-function splitSourcePath(value?: string | null) {
+type PublicMediaPath = {
+  parsed: URL
+  pathWithoutProxy: string
+  prefix: string
+}
+
+function splitPublicMediaPath(value?: string | null): PublicMediaPath | null {
   const publicUrl = publicImageUrl(value)
-  if (!publicUrl || !publicUrl.startsWith('/cos/')) return null
+  if (!publicUrl) return null
 
   const parsed = new URL(publicUrl, 'https://ecfc.fans')
-  const pathWithoutProxy = parsed.pathname.replace(/^\/cos(?=\/|$)/i, '') || '/'
+  if (parsed.pathname === '/cos' || parsed.pathname.startsWith('/cos/')) {
+    return {
+      parsed,
+      pathWithoutProxy: parsed.pathname.replace(/^\/cos(?=\/|$)/i, '') || '/',
+      prefix: '/cos',
+    }
+  }
+
+  let mediaBase: URL
+  try {
+    mediaBase = new URL(getMediaPublicBaseUrl())
+  } catch {
+    return null
+  }
+  const basePath = mediaBase.pathname === '/' ? '' : mediaBase.pathname
+  if (parsed.origin !== mediaBase.origin) return null
+  if (parsed.pathname !== basePath && !parsed.pathname.startsWith(`${basePath}/`)) return null
+  return {
+    parsed,
+    pathWithoutProxy: parsed.pathname.slice(basePath.length) || '/',
+    prefix: getMediaPublicBaseUrl(),
+  }
+}
+
+function splitSourcePath(value?: string | null) {
+  const publicMediaPath = splitPublicMediaPath(value)
+  if (!publicMediaPath) return null
+
+  const { pathWithoutProxy } = publicMediaPath
   const match = pathWithoutProxy.match(SOURCE_FILE_PATTERN)
   if (!match) return null
-  return { parsed, directory: match[1] }
+  return { ...publicMediaPath, directory: match[1] }
 }
 
 /**
@@ -37,7 +72,7 @@ function splitSourcePath(value?: string | null) {
 export function toImageVariantUrl(value: string | null | undefined, variant: ImageVariant) {
   const source = splitSourcePath(value)
   if (!source) return null
-  return `/cos${source.directory}/${variant}.webp${source.parsed.search}${source.parsed.hash}`
+  return `${source.prefix}${source.directory}/${variant}.webp${source.parsed.search}${source.parsed.hash}`
 }
 
 export function publicImageVariantUrl(value: string | null | undefined, variant: ImageVariant) {
@@ -52,18 +87,18 @@ export function publicImageVariantUrl(value: string | null | undefined, variant:
 export function publicHeroVariantUrl(value: string | null | undefined, variant: ImageVariant) {
   const publicUrl = publicImageUrl(value)
   if (!publicUrl) return null
-  if (!publicUrl.startsWith('/cos/')) return publicUrl
-  const parsed = new URL(publicUrl, 'https://ecfc.fans')
-  const pathWithoutProxy = parsed.pathname.replace(/^\/cos(?=\/|$)/i, '') || '/'
+  const publicMediaPath = splitPublicMediaPath(publicUrl)
+  if (!publicMediaPath) return publicUrl
+  const { parsed, pathWithoutProxy, prefix } = publicMediaPath
   if (!pathWithoutProxy.endsWith('/hero.webp')) return toImageVariantUrl(publicUrl, variant) || publicUrl
-  return `/cos${pathWithoutProxy.slice(0, -'/hero.webp'.length)}/${variant}.webp${parsed.search}${parsed.hash}`
+  return `${prefix}${pathWithoutProxy.slice(0, -'/hero.webp'.length)}/${variant}.webp${parsed.search}${parsed.hash}`
 }
 
 /** Resolve the preserved original object for a new source URL. */
 export function toImageOriginalUrl(value: string | null | undefined) {
   const source = splitSourcePath(value)
   if (!source) return null
-  return `/cos${source.directory}/original${source.parsed.search}${source.parsed.hash}`
+  return `${source.prefix}${source.directory}/original${source.parsed.search}${source.parsed.hash}`
 }
 
 export function publicImageOriginalUrl(value: string | null | undefined) {

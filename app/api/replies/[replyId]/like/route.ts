@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
@@ -39,7 +40,7 @@ export async function GET(_request: Request, context: RouteContext) {
         fallbackName: getPublicUserDisplayName(like.User),
         remarkMap,
       }),
-      avatarUrl: like.User.Profile?.avatarUrl || like.User.avatarUrl || null,
+      avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
     })),
   })
 }

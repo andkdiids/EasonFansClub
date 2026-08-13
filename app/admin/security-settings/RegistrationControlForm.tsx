@@ -8,7 +8,13 @@ import type {
   RegistrationControlPayload,
   RegistrationDailyScheduleWindow,
 } from '@/lib/registration'
-import { formatBeijingDateTimeDisplay, validateRegistrationDailySchedule } from '@/lib/registration-availability'
+import {
+  formatBeijingDateTimeDisplay,
+  parseBeijingDateTime,
+  REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE,
+  REGISTRATION_ONE_TIME_VALIDATION_MESSAGE,
+  validateRegistrationDailySchedule,
+} from '@/lib/registration-availability'
 
 type RegistrationControlFormProps = {
   initialControl: RegistrationControlPayload
@@ -36,11 +42,6 @@ const statusLabels: Record<RegistrationAvailabilityPayload['status'], string> = 
 
 const emptyDailyWindow = (): RegistrationDailyScheduleWindow => ({ start: '', end: '' })
 const isOneTimeMode = (mode: string) => mode === 'ONE_TIME' || mode === 'SCHEDULED'
-
-function parseBeijingInputTimestamp(value: string) {
-  if (!value) return NaN
-  return Date.parse(`${value}:00+08:00`)
-}
 
 function formatWindow(window: RegistrationDailyScheduleWindow) {
   return `${window.start}–${window.end}`
@@ -94,23 +95,25 @@ export function RegistrationControlForm({ initialControl, initialAvailability }:
 
   async function save() {
     const oneTime = isOneTimeMode(control.mode)
-    if (oneTime && (!control.opensAt || !control.closesAt)) {
-      setError('单次限时开放必须填写开始时间和结束时间')
+    const opensAt = oneTime ? parseBeijingDateTime(control.opensAt) : null
+    const closesAt = oneTime ? parseBeijingDateTime(control.closesAt) : null
+    if (oneTime && (!opensAt || !closesAt)) {
+      setError(REGISTRATION_ONE_TIME_VALIDATION_MESSAGE)
       return
     }
-    if (oneTime && control.opensAt && control.closesAt && control.closesAt <= control.opensAt) {
+    if (oneTime && opensAt && closesAt && closesAt <= opensAt) {
       setError('结束时间必须晚于开始时间')
       return
     }
     if (control.mode === 'DAILY_SCHEDULE') {
       const dailyError = validateRegistrationDailySchedule(control.dailySchedule)
       if (dailyError) {
-        setError(dailyError)
+        setError(REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE)
         return
       }
     }
 
-    const ended = oneTime && parseBeijingInputTimestamp(control.closesAt) <= Date.now()
+    const ended = Boolean(oneTime && closesAt && closesAt.getTime() <= Date.now())
     const confirmEnded = ended && window.confirm('该注册时间段已经结束，请确认是否仍要保存。')
     if (ended && !confirmEnded) return
 

@@ -4,6 +4,7 @@ import { activeUserWhere } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -260,13 +261,13 @@ function serializePublicUser(
     id: friend.id,
     uid: friend.uid,
     nickname: friend.nickname,
-    avatarUrl: friend.avatarUrl,
+    avatarUrl: publicImageUrl(friend.avatarUrl),
     bio: friend.bio,
     isOnline: friend.isOnline,
     lastActiveAt: friend.lastActiveAt,
     createdAt: friend.createdAt,
     level,
     levelName,
-    profile: friend.Profile ? { ...friend.Profile, displayName } : friend.Profile,
+    profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl), displayName } : friend.Profile,
   }
 }

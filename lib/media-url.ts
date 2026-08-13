@@ -1,59 +1,127 @@
 /**
- * The public Tencent COS host that is currently stored in the database.
- * Browser requests for this host are served by the existing Nginx /cos/
- * reverse proxy, while server-side SDK and signing code continues to use COS
- * directly.
+ * The public Tencent COS host that older records may contain. Server-side
+ * storage and signing code continues to use COS directly; browser-facing
+ * responses are normalized through the media gateway below.
  */
 export const PUBLIC_COS_HOST = 'ecfc-1306412725.cos.ap-guangzhou.myqcloud.com'
 export const COS_PROXY_PREFIX = '/cos'
+export const DEFAULT_MEDIA_PUBLIC_BASE_URL = 'https://media.ecfc.fans/media'
 
 function trimValue(value?: string | null) {
   const trimmed = value?.trim()
   return trimmed || null
 }
 
+export function getMediaPublicBaseUrl() {
+  const configured = process.env.MEDIA_PUBLIC_BASE_URL?.trim().replace(/\/+$/, '')
+  if (!configured) return DEFAULT_MEDIA_PUBLIC_BASE_URL
+
+  try {
+    const parsed = new URL(configured)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return DEFAULT_MEDIA_PUBLIC_BASE_URL
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}` || DEFAULT_MEDIA_PUBLIC_BASE_URL
+  } catch {
+    return DEFAULT_MEDIA_PUBLIC_BASE_URL
+  }
+}
+
+/** Build a browser-facing URL for an object that is stored in Tencent COS. */
+export function buildPublicMediaUrl(key: string) {
+  const normalizedKey = key.trim().replace(/^\/+/, '')
+  return `${getMediaPublicBaseUrl()}/${normalizedKey.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function parseMediaPublicBaseUrl() {
+  try {
+    const parsed = new URL(getMediaPublicBaseUrl())
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
 function isCosProxyPath(value: string) {
   return value === COS_PROXY_PREFIX || value.startsWith(`${COS_PROXY_PREFIX}/`)
+}
+
+function cosProxyPathFromUrl(value: string) {
+  try {
+    const parsed = new URL(value, 'https://local.invalid')
+    if (parsed.origin !== 'https://local.invalid' || !isCosProxyPath(parsed.pathname)) return null
+    return {
+      path: parsed.pathname.slice(COS_PROXY_PREFIX.length) || '/',
+      search: parsed.search,
+      hash: parsed.hash,
+    }
+  } catch {
+    return null
+  }
 }
 
 function isCosHost(value: URL) {
   const hostname = value.hostname.toLowerCase()
   return hostname === PUBLIC_COS_HOST
+    || /^[^.]+\.cos\.[^.]+\.myqcloud\.com$/i.test(hostname)
 }
 
-/** True when the browser should request the existing same-origin /cos proxy directly. */
+function isMediaPublicUrl(value: URL) {
+  const base = parseMediaPublicBaseUrl()
+  if (!base || value.origin !== base.origin) return false
+  const basePath = base.pathname === '/' ? '' : base.pathname
+  return value.pathname === basePath || value.pathname.startsWith(`${basePath}/`)
+}
+
+function mediaPathFromUrl(value: URL) {
+  const base = parseMediaPublicBaseUrl()
+  if (!base || !isMediaPublicUrl(value)) return null
+  const basePath = base.pathname === '/' ? '' : base.pathname
+  return value.pathname.slice(basePath.length).replace(/^\/+/, '')
+}
+
+/** True when the browser should request an existing media proxy URL directly. */
 export function isPublicMediaProxyUrl(value?: string | null) {
   const url = trimValue(value)
-  return Boolean(url && isCosProxyPath(url))
+  if (!url) return false
+  if (cosProxyPathFromUrl(url)) return true
+  try {
+    return isMediaPublicUrl(new URL(url))
+  } catch {
+    return false
+  }
 }
 
 /**
- * Convert only the known public COS host to the existing lightweight-server
- * proxy. Other URLs, local paths, data/blob URLs, and empty values are kept
- * unchanged (apart from the existing trim/null behavior).
+ * Convert COS public URLs and legacy relative /cos proxy paths to the media
+ * gateway. Local paths, data/blob URLs, unknown external URLs, and empty
+ * values are kept unchanged.
  */
 export function toPublicMediaUrl(value?: string | null) {
   const url = trimValue(value)
-  if (!url || isPublicMediaProxyUrl(url)) return url
+  if (!url) return null
+
+  const cosProxyPath = cosProxyPathFromUrl(url)
+  if (cosProxyPath) {
+    return `${getMediaPublicBaseUrl()}${cosProxyPath.path}${cosProxyPath.search}${cosProxyPath.hash}`
+  }
+  if (isPublicMediaProxyUrl(url)) return url
 
   try {
     const parsed = new URL(url)
     if (!isCosHost(parsed) || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) return url
 
+    const base = getMediaPublicBaseUrl()
     const path = parsed.pathname || '/'
-    const normalizedPath = path === COS_PROXY_PREFIX || path.startsWith(`${COS_PROXY_PREFIX}/`)
-      ? path.slice(COS_PROXY_PREFIX.length) || '/'
-      : path
-    return `${COS_PROXY_PREFIX}${normalizedPath}${parsed.search}${parsed.hash}`
+    return `${base}${path.startsWith('/') ? path : `/${path}`}${parsed.search}${parsed.hash}`
   } catch {
     return url
   }
 }
 
 /**
- * Convert a proxy URL back to the original COS URL before persisting input
- * received from a browser. This is intentionally limited to /cos/ paths so
- * arbitrary local and external URLs are never rewritten.
+ * Convert a public proxy URL back to the original COS URL before persisting
+ * input received from a browser. Arbitrary local and external URLs are never
+ * rewritten.
  */
 export function toStoredMediaUrl(value?: string | null) {
   const url = trimValue(value)
@@ -61,6 +129,10 @@ export function toStoredMediaUrl(value?: string | null) {
 
   try {
     const parsed = new URL(url, 'https://local.invalid')
+    const mediaPath = mediaPathFromUrl(parsed)
+    if (mediaPath !== null) {
+      return `https://${PUBLIC_COS_HOST}/${mediaPath}${parsed.search}${parsed.hash}`
+    }
     const path = parsed.pathname.slice(COS_PROXY_PREFIX.length) || '/'
     return `https://${PUBLIC_COS_HOST}${path}${parsed.search}${parsed.hash}`
   } catch {

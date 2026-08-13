@@ -10,6 +10,7 @@ import { resolveTourByArchiveSlug } from '@/lib/music-archive'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getCurrentUser } from '@/lib/auth'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 type CityGroupInfo = {
   groupSlug: string
@@ -73,6 +74,8 @@ export default async function MusicTourPage({ params, searchParams }: { params: 
     getSiteAppearance(),
   ])
   if (!tour) return <ConcertNotFound />
+  tour.posterUrl = toPublicMediaUrl(tour.posterUrl)
+  tour.MusicConcert.forEach((concert) => { concert.posterUrl = toPublicMediaUrl(concert.posterUrl) })
   const groups = new Map<string, CityGroupInfo>()
   for (const concert of tour.MusicConcert) {
     const { base, type } = effectiveCityGroup(concert.city, concert.stageType)

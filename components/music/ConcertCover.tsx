@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import { publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl, type ImageVariant } from '@/lib/image-variants'
+import { isPublicMediaProxyUrl } from '@/lib/media-url'
 
 type ConcertCoverProps = {
   src?: string | null
@@ -61,7 +62,7 @@ export function ConcertCover({ src, resolvedPosterUrl, alt, sizes, className = '
 function getRenderableImageSource(value?: string | null) {
   const url = publicImageUrl(value)
   if (!url) return null
-  // Public COS media is normalized to the same-origin /cos proxy before it
-  // reaches this component. Do not reintroduce direct COS URLs as a fallback.
-  return url.startsWith('/') ? url : null
+  // Keep same-origin proxy paths and the media gateway, but never fall back
+  // to a direct COS or arbitrary external URL.
+  return url.startsWith('/') || isPublicMediaProxyUrl(url) ? url : null
 }

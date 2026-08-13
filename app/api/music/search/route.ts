@@ -69,14 +69,17 @@ export async function GET(request: Request) {
   return NextResponse.json({
     query,
      albums: albums.map((album) => ({ ...album, coverUrl: toPublicMediaUrl(album.coverUrl), type: 'album' as const })),
-    songs: songs.map(({ MusicAlbum, lyrics, previewUrl, ...song }) => ({
-      ...song,
-      type: 'song' as const,
-       coverUrl: toPublicMediaUrl(song.coverUrl || MusicAlbum.coverUrl),
-       album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
-      hasPreview: Boolean(previewUrl),
-      lyricSnippet: buildMusicLyricSnippet(lyrics, query),
-    })),
+    songs: songs.map(({ MusicAlbum, lyrics, previewUrl, ...song }) => {
+      const publicPreviewUrl = toPublicMediaUrl(previewUrl)
+      return {
+        ...song,
+        type: 'song' as const,
+        coverUrl: toPublicMediaUrl(song.coverUrl || MusicAlbum.coverUrl),
+        album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
+        hasPreview: Boolean(publicPreviewUrl),
+        lyricSnippet: buildMusicLyricSnippet(lyrics, query),
+      }
+    }),
     tours: tours.map(({ _count, ...tour }) => ({ ...tour, type: 'tour' as const, concertCount: _count.MusicConcert })),
     concerts: concerts.map(({ MusicTour, ...concert }) => ({ ...concert, type: 'concert' as const, tour: MusicTour })),
   })

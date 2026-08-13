@@ -70,7 +70,7 @@ export async function GET(request: Request) {
         ],
       },
       include: {
-        User: { select: { id: true, nickname: true, level: true, Profile: { select: { displayName: true } } } },
+        User: { select: { id: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         Board: { select: { name: true, slug: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -143,8 +143,10 @@ export async function GET(request: Request) {
   return NextResponse.json({
     users: users.map(({ Profile, Post, _count, ...item }) => ({
       ...item,
+      avatarUrl: toPublicMediaUrl(item.avatarUrl),
       profile: Profile ? {
         ...Profile,
+        avatarUrl: toPublicMediaUrl(Profile.avatarUrl),
         displayName: resolveFriendDisplayName({
           viewerId: user?.id,
           targetUserId: item.id,
@@ -159,8 +161,10 @@ export async function GET(request: Request) {
       ...post,
       author: {
         ...User,
+        avatarUrl: toPublicMediaUrl(User.avatarUrl),
         Profile: User.Profile ? {
           ...User.Profile,
+          avatarUrl: toPublicMediaUrl(User.Profile.avatarUrl),
           displayName: resolveFriendDisplayName({
             viewerId: user?.id,
             targetUserId: User.id,
@@ -174,12 +178,15 @@ export async function GET(request: Request) {
     boards,
     tags,
     albums: albums.map((album) => ({ ...album, coverUrl: toPublicMediaUrl(album.coverUrl) })),
-    songs: songs.map(({ MusicAlbum, ...song }) => ({
-      ...song,
-      coverUrl: toPublicMediaUrl(song.coverUrl || MusicAlbum.coverUrl),
-      album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
-      hasPreview: Boolean(song.previewUrl),
-      previewUrl: undefined,
-    })),
+    songs: songs.map(({ MusicAlbum, ...song }) => {
+      const publicPreviewUrl = toPublicMediaUrl(song.previewUrl)
+      return {
+        ...song,
+        coverUrl: toPublicMediaUrl(song.coverUrl || MusicAlbum.coverUrl),
+        album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
+        hasPreview: Boolean(publicPreviewUrl),
+        previewUrl: undefined,
+      }
+    }),
   }, { headers: user ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }

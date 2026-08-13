@@ -8,6 +8,7 @@ import { generateArchiveSlug } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { getSiteAppearance } from '@/lib/site-config'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import {
   getEnabledConcertCategories,
   isReservedCategorySlug,
@@ -87,6 +88,7 @@ export default async function ConcertCategoryDetailPage({ params }: { params: Pr
   })
   const resolvedTours = tours.map(({ MusicConcert, _count, ...tour }) => ({
     ...tour,
+    posterUrl: toPublicMediaUrl(tour.posterUrl),
     ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
     concertCount: _count.MusicConcert,
     cityCount: new Set(MusicConcert.map((concert) => concert.city)).size,

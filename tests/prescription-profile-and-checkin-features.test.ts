@@ -52,7 +52,7 @@ test('默认头像图库复用 SiteSetting 头像池并只保存当前用户的 
   assert.match(form, /使用此头像/)
   assert.match(form, /profile-avatar-updated/)
   assert.match(api, /const guard = await requireUser\(\)/)
-  assert.match(api, /data\.avatarUrl = storedImageUrl\(avatarUrl\)/)
+  assert.match(api, /data\.avatarUrl = publicImageUrl\(avatarUrl\)/)
 })
 
 test('每日处方历史读取用户自己的快照和真实 PointLog，分页且不会触发抽奖', () => {

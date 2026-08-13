@@ -57,7 +57,11 @@ export async function POST(request: Request) {
     try {
       if (kind === 'cover') {
         const url = await uploadStickerPackCover({ ownerId: guard.user.id, buffer })
-        return NextResponse.json({ success: true, url, format: 'webp' })
+        return NextResponse.json({
+          success: true,
+          url: toPublicMediaUrl(url) || url,
+          format: 'webp',
+        })
       }
       const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
       return NextResponse.json({

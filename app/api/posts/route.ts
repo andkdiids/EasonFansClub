@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
-import { parseContentImageUrls } from '@/lib/content-images'
+import { parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -89,7 +89,7 @@ export async function GET(request: Request) {
         } : User.Profile,
       },
       board: Board,
-      content: summary || createSummary(content),
+      content: publicContentImageMarkers(summary || createSummary(content)),
       stickerUrl: publicImageUrl(sticker?.url),
     }))
 

@@ -11,6 +11,7 @@ import {
 import { compareGuessSongScores, getGuessSongPeriod } from '@/lib/guess-song-period'
 import { getGuessSongDeletedYearSessionIds, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export type GuessSongAdminPeriodType = GuessSongPeriodType | 'YEAR'
@@ -185,7 +186,7 @@ function serializeEntry(entry: AdminEntry, entryIds: string[]) {
     nickname: entry.User.nickname,
     username: entry.User.username,
     displayName: entry.User.Profile?.displayName || entry.User.nickname,
-    avatarUrl: entry.User.Profile?.avatarUrl || entry.User.avatarUrl,
+    avatarUrl: publicImageUrl(entry.User.Profile?.avatarUrl || entry.User.avatarUrl),
     mode: toPublicGuessSongMode(entry.mode),
     databaseMode: entry.mode,
     periodType: entry.periodType,
@@ -209,7 +210,7 @@ function serializeYearSession(session: YearSession, periodKey: string) {
     nickname: session.User.nickname,
     username: session.User.username,
     displayName: session.User.Profile?.displayName || session.User.nickname,
-    avatarUrl: session.User.Profile?.avatarUrl || session.User.avatarUrl,
+    avatarUrl: publicImageUrl(session.User.Profile?.avatarUrl || session.User.avatarUrl),
     mode: toPublicGuessSongMode(session.mode),
     databaseMode: session.mode,
     periodType: 'YEAR' as const,

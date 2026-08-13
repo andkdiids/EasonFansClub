@@ -18,6 +18,8 @@ export const registrationAvailabilityStatuses = ['CLOSED', 'WAITING', 'OPEN', 'E
 export type RegistrationAvailabilityStatus = (typeof registrationAvailabilityStatuses)[number]
 
 export const REGISTRATION_DAILY_SCHEDULE_MAX_WINDOWS = 10
+export const REGISTRATION_ONE_TIME_VALIDATION_MESSAGE = '请输入正确的开放开始和结束时间，格式 YYYY-MM-DD HH:mm'
+export const REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE = '请输入每日开放时间，格式 HH:mm'
 export const DEFAULT_REGISTRATION_CLOSED_TITLE = '当前暂停注册'
 export const DEFAULT_REGISTRATION_CLOSED_MESSAGE = '注册入口目前暂时关闭，请稍后再来。'
 
@@ -222,9 +224,13 @@ export function formatBeijingDateTimeDisplay(value: Date | string | null) {
 export function validateRegistrationControlSettings(value: Pick<RegistrationControlSettings, 'mode' | 'dailySchedule' | 'opensAt' | 'closesAt'>) {
   const mode = normalizeRegistrationControlMode(value.mode)
   if (!mode) return '注册开放模式不正确'
-  if (mode === 'DAILY_SCHEDULE') return validateRegistrationDailySchedule(value.dailySchedule)
+  if (mode === 'DAILY_SCHEDULE') {
+    return validateRegistrationDailySchedule(value.dailySchedule)
+      ? REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE
+      : null
+  }
   if (mode === 'ONE_TIME') {
-    if (!value.opensAt || !value.closesAt) return '一次性限时开放必须填写开始时间和结束时间'
+    if (!value.opensAt || !value.closesAt) return REGISTRATION_ONE_TIME_VALIDATION_MESSAGE
     if (value.closesAt <= value.opensAt) return '结束时间必须晚于开始时间'
   }
   return null
@@ -271,12 +277,14 @@ export function parseRegistrationControlInput(value: unknown): Pick<Registration
     if (candidate === undefined || candidate === null || candidate === '') return null
     return parseBeijingDateTime(candidate)
   }
-  const opensAt = parseOptional(input.opensAt)
-  const closesAt = parseOptional(input.closesAt)
-  const dailySchedule = parseRegistrationDailyScheduleInput(input.dailySchedule)
-  const hasInvalidOpen = input.opensAt !== undefined && input.opensAt !== null && input.opensAt !== '' && !opensAt
-  const hasInvalidClose = input.closesAt !== undefined && input.closesAt !== null && input.closesAt !== '' && !closesAt
-  if (hasInvalidOpen || hasInvalidClose || !dailySchedule) return null
+  const opensAt = mode === 'ONE_TIME' ? parseOptional(input.opensAt) : null
+  const closesAt = mode === 'ONE_TIME' ? parseOptional(input.closesAt) : null
+  const dailySchedule = mode === 'DAILY_SCHEDULE'
+    ? parseRegistrationDailyScheduleInput(input.dailySchedule)
+    : []
+  const hasInvalidOpen = mode === 'ONE_TIME' && input.opensAt !== undefined && input.opensAt !== null && input.opensAt !== '' && !opensAt
+  const hasInvalidClose = mode === 'ONE_TIME' && input.closesAt !== undefined && input.closesAt !== null && input.closesAt !== '' && !closesAt
+  if (hasInvalidOpen || hasInvalidClose || dailySchedule === null) return null
   return {
     mode,
     dailySchedule,

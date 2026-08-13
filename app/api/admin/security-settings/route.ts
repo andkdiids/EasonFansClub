@@ -5,6 +5,8 @@ import {
   getRegistrationControlSettings,
   getRegistrationPolicy,
   parseRegistrationControlInput,
+  REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE,
+  REGISTRATION_ONE_TIME_VALIDATION_MESSAGE,
   serializeRegistrationAvailability,
   serializeRegistrationControlSettings,
   setRegistrationControlSettings,
@@ -67,7 +69,15 @@ export async function PUT(request: Request) {
 
   if (body && typeof body === 'object' && body.registrationControl) {
     const parsed = parseRegistrationControlInput(body.registrationControl)
-    if (!parsed) return NextResponse.json({ message: '注册开放时间格式不正确，请使用北京时间 YYYY-MM-DD HH:mm；每日时段请使用 HH:mm' }, { status: 400 })
+    if (!parsed) {
+      const mode = typeof body.registrationControl.mode === 'string' ? body.registrationControl.mode : ''
+      const message = mode === 'DAILY_SCHEDULE'
+        ? REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE
+        : mode === 'ONE_TIME' || mode === 'SCHEDULED'
+          ? REGISTRATION_ONE_TIME_VALIDATION_MESSAGE
+          : '注册开放模式不正确'
+      return NextResponse.json({ message }, { status: 400 })
+    }
     const validationError = validateRegistrationControlSettings(parsed)
     if (validationError) return NextResponse.json({ message: validationError }, { status: 400 })
     if (parsed.mode === 'ONE_TIME' && parsed.closesAt && parsed.closesAt <= new Date() && body.confirmEnded !== true) {

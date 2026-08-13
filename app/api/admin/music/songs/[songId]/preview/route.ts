@@ -110,7 +110,8 @@ async function uploadPreview(request: Request, { params }: { params: Promise<{ s
       objectPath,
       elapsedMs: Date.now() - uploadStartedAt,
     })
-    const previewUrl = `${objectUrl}?v=${encodeURIComponent(revision)}`
+    const publicObjectUrl = toPublicMediaUrl(objectUrl) || objectUrl
+    const previewUrl = `${publicObjectUrl}?v=${encodeURIComponent(revision)}`
     await prisma.musicSong.update({
       where: { id: song.id },
       data: {

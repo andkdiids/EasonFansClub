@@ -173,7 +173,7 @@ export async function getPickerData(userId: string): Promise<PickerData> {
       id: pack.id,
       name: pack.name,
       coverUrl: toPublicMediaUrl(pack.coverUrl),
-      iconUrl: pack.stickers[0]?.url ?? pack.coverUrl,
+      iconUrl: toPublicMediaUrl(pack.stickers[0]?.url) || toPublicMediaUrl(pack.coverUrl),
       type: pack.type,
     })
     stickersByPack[pack.id] = pack.stickers.map(toPicker)

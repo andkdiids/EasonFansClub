@@ -1,6 +1,7 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { adminModulePermissions } from '@/lib/admin-permissions'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { AdminManager } from './AdminManager'
 
@@ -105,7 +106,7 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
             phone: user.phone,
             role: user.role,
             status: user.status,
-            profile: user.Profile ? { displayName: user.Profile.displayName, avatarUrl: user.Profile.avatarUrl } : null,
+            profile: user.Profile ? { displayName: user.Profile.displayName, avatarUrl: publicImageUrl(user.Profile.avatarUrl) } : null,
             canPlayFullMusic: false,
           }))}
           logs={logs.map((log) => ({

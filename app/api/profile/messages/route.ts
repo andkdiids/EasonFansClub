@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
@@ -73,7 +74,7 @@ export async function GET() {
             remarkMap,
           })
         : '匿名用户',
-      authorAvatarUrl: comment.User?.Profile?.avatarUrl || comment.User?.avatarUrl || null,
+      authorAvatarUrl: publicImageUrl(comment.User?.Profile?.avatarUrl || comment.User?.avatarUrl),
     })),
   }))
 

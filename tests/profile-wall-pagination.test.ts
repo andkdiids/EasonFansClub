@@ -25,6 +25,7 @@ test('profile wall uses wallPage URL state and local pagination controls', () =>
   assert.match(client, /new URLSearchParams\(searchParams\.toString\(\)\)/)
   assert.match(client, /<Pagination/)
   assert.match(client, /onPageChange=\{\(nextPage\) => replaceWallPage\(nextPage, true\)\}/)
-  assert.match(client, /if \(parentId \|\| wallPage === 1\) await load\(\)/)
+  assert.match(client, /body: JSON\.stringify\(\{ receiverUid, content, parentId: null \}\)/)
+  assert.match(client, /if \(wallPage === 1\) await load\(\)/)
   assert.match(client, /else replaceWallPage\(1\)/)
 })

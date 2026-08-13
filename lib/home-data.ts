@@ -1,4 +1,5 @@
 import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { publicContentImageMarkers } from '@/lib/content-images'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -122,7 +123,7 @@ async function getHomePostsUncached() {
     ...post,
     board: Board,
     author: { ...User, profile: User.Profile },
-    content: excerpt(summary || content),
+    content: publicContentImageMarkers(excerpt(summary || content)),
   }))
 }
 

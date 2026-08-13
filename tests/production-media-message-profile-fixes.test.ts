@@ -9,6 +9,13 @@ const previewRoute = read('app/api/admin/music/songs/[songId]/preview/route.ts')
 const previewProcessor = read('lib/music-preview.ts')
 const uploadConstraints = read('lib/music-upload-constraints.ts')
 const mediaStorage = read('lib/music-media-storage.ts')
+const mediaUrl = read('lib/media-url.ts')
+const siteMediaStorage = read('lib/site-media-storage.ts')
+const stickerUploadRoute = read('app/api/stickers/upload/route.ts')
+const stickerAdminRoute = read('app/api/admin/stickers/route.ts')
+const stickerCenter = read('lib/sticker-center.ts')
+const profileUploadRoute = read('app/api/uploads/profile-image/route.ts')
+const usersMeRoute = read('app/api/users/me/route.ts')
 const player = read('components/music/MusicPlayer.tsx')
 const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260730110000_add_music_song_preview/migration.sql')
@@ -43,11 +50,36 @@ test('音乐封面限制10MB并在服务器转为 WebP 后上传 COS', () => {
   assert.doesNotMatch(coverRoute, /SUPABASE|supabase/i)
 })
 
-test('COS 音乐对象使用公开读取地址且不暴露密钥', () => {
+test('COS 音乐对象使用媒体网关地址且不暴露密钥', () => {
   assert.match(mediaStorage, /ACL: 'public-read'/)
   assert.match(mediaStorage, /TENCENT_COS_MUSIC_BUCKET/)
-  assert.match(mediaStorage, /TENCENT_COS_MUSIC_PUBLIC_BASE_URL/)
+  assert.match(mediaStorage, /buildPublicMediaUrl/)
+  assert.match(mediaUrl, /MEDIA_PUBLIC_BASE_URL/)
+  assert.match(mediaUrl, /https:\/\/media\.ecfc\.fans\/media/)
+  assert.doesNotMatch(mediaStorage, /TENCENT_COS_MUSIC_PUBLIC_BASE_URL/)
+  assert.doesNotMatch(mediaStorage, /\.cos\.\$\{region\}\.myqcloud\.com/)
   assert.match(mediaStorage, /console\.error\('\[music-media\.cos\]', \{[\s\S]*kind,[\s\S]*code:[\s\S]*statusCode:/)
+  assert.match(previewRoute, /const publicObjectUrl = toPublicMediaUrl\(objectUrl\) \|\| objectUrl/)
+  assert.match(coverRoute, /const objectUrl = toPublicMediaUrl\(uploadResult\.sourceUrl\) \|\| uploadResult\.sourceUrl/)
+})
+
+test('站点图片和表情上传输出媒体网关地址', () => {
+  assert.match(siteMediaStorage, /CacheControl: 'public, max-age=31536000, immutable'/)
+  assert.match(siteMediaStorage, /return buildPublicMediaUrl\(key\)/)
+  assert.doesNotMatch(siteMediaStorage, /myqcloud\.com/)
+  assert.match(stickerUploadRoute, /url: toPublicMediaUrl\(url\) \|\| url/)
+  assert.match(stickerUploadRoute, /url: toPublicMediaUrl\(result\.url\) \|\| result\.url/)
+  assert.match(stickerAdminRoute, /coverUrl: toPublicMediaUrl\(pack\.coverUrl\)/)
+  assert.match(stickerAdminRoute, /url: toPublicMediaUrl\(sticker\.url\) \|\| sticker\.url/)
+  assert.match(stickerCenter, /iconUrl: toPublicMediaUrl\(pack\.stickers\[0\]\?\.url\)/)
+})
+
+test('新头像和个人背景不再向数据库写入 COS 公网地址', () => {
+  assert.match(profileUploadRoute, /const safeUrl = publicImageUrl\(url\)/)
+  assert.doesNotMatch(profileUploadRoute, /const safeUrl = storedImageUrl\(url\)/)
+  assert.match(profileUploadRoute, /const storageUrl = toStoredMediaUrl\(url\) \|\| url/)
+  assert.match(usersMeRoute, /data\.avatarUrl = publicImageUrl\(avatarUrl\)/)
+  assert.match(usersMeRoute, /data\.backgroundUrl = publicImageUrl\(backgroundUrl\)/)
 })
 
 test('音频上传严格限制100MB和支持格式', () => {

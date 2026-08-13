@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
+import { publicImageUrl } from '@/lib/images'
 
 const DEFAULT_PAGE_SIZE = 100
 const MAX_PAGE_SIZE = 100
@@ -102,7 +103,7 @@ export async function GET(request: Request) {
       return {
         ...user,
         nickname: Profile?.displayName || user.nickname,
-        avatarUrl: Profile?.avatarUrl || user.avatarUrl,
+        avatarUrl: publicImageUrl(Profile?.avatarUrl || user.avatarUrl),
         securityQuestionsSet: Boolean(UserSecurityQuestion),
         lastPasswordResetAt: AccountSecurityLog[0]?.createdAt || null,
         securityQuestionFailureCount: failures?.count || 0,

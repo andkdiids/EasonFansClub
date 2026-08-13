@@ -13,6 +13,7 @@ import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { resolveConcertBySlug } from '@/lib/music-archive'
 import { decodeRouteParam } from '@/lib/music-slug'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,6 +65,8 @@ export default async function MusicConcertBySlugPage({
     }) : Promise.resolve(null),
   ])
   if (!concert) return <ConcertNotFound />
+  concert.posterUrl = toPublicMediaUrl(concert.posterUrl)
+  concert.MusicTour.posterUrl = toPublicMediaUrl(concert.MusicTour.posterUrl)
   const cityPoster = await prisma.musicConcert.findFirst({
     where: { tourId: concert.MusicTour.id, city: concert.city, ...(isPreview ? {} : { status: 'PUBLISHED' }), posterUrl: { not: null } },
     orderBy: [{ concertDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],

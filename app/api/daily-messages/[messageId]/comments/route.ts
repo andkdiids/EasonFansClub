@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
@@ -27,8 +28,10 @@ export async function GET(_request: Request, context: RouteContext) {
     ...comment,
     User: comment.User.Profile ? {
       ...comment.User,
+      avatarUrl: publicImageUrl(comment.User.avatarUrl),
       Profile: {
         ...comment.User.Profile,
+        avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl),
         displayName: resolveFriendDisplayName({
           viewerId: viewer?.id,
           targetUserId: comment.User.id,
@@ -111,5 +114,14 @@ export async function POST(request: Request, context: RouteContext) {
   })
 
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
-  return NextResponse.json({ comment }, { status: 201 })
+  return NextResponse.json({
+    comment: {
+      ...comment,
+      User: comment.User.Profile ? {
+        ...comment.User,
+        avatarUrl: publicImageUrl(comment.User.avatarUrl),
+        Profile: { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) },
+      } : { ...comment.User, avatarUrl: publicImageUrl(comment.User.avatarUrl) },
+    },
+  }, { status: 201 })
 }

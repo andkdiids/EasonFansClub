@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma'
 import { formatMusicReleaseDate } from '@/lib/music-display'
 import { getSiteAppearance } from '@/lib/site-config'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,6 +70,7 @@ export default async function MusicPage() {
   const archiveAlbums = albums.map((album) => ({ id: album.id, name: album.name, artist: album.artist, releaseYear: album.releaseYear, language: album.language, coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-md'), songCount: album._count.MusicSong }))
   const timelineTours = tours.map(({ MusicConcert, _count, ...tour }) => ({
     ...tour,
+    posterUrl: toPublicMediaUrl(tour.posterUrl),
     ...resolveConcertPoster({ posterUrl: tour.posterUrl, cityPosterUrl: firstPosterUrl(MusicConcert.map((concert) => concert.posterUrl)) }),
     concertCount: _count.MusicConcert,
     cities: [...new Set(MusicConcert.map((concert) => concert.city))],

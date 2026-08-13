@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
-import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
+import { appendContentImages, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 
@@ -274,6 +274,7 @@ export async function POST(request: Request, { params }: Params) {
     success: true,
     reply: {
       ...serializedReply,
+      content: publicContentImageMarkers(serializedReply.content),
       stickerId: createdReply.stickerId || null,
       stickerUrl: publicImageUrl(replySticker?.url),
       createdAt: serializedReply.createdAt.toISOString(),

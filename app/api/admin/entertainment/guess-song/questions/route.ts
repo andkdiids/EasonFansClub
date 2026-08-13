@@ -84,6 +84,8 @@ export async function GET(request: Request) {
       })),
       musicSongs: musicSongs.map(({ MusicAlbum, sourceAudioPath, _count, ...song }) => ({
         ...song,
+        coverUrl: toPublicMediaUrl(song.coverUrl),
+        previewUrl: toPublicMediaUrl(song.previewUrl),
         hasAudioSource: Boolean(sourceAudioPath),
         hasGuessClip: _count.GuessSongQuestion > 0,
         album: { ...MusicAlbum, coverUrl: toPublicMediaUrl(MusicAlbum.coverUrl) },
