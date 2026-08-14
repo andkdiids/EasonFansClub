@@ -322,13 +322,27 @@ async function reconcileStalePersonalNotifications(userId: string) {
 }
 
 export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
-  await reconcileStalePersonalNotifications(userId)
   const now = new Date()
-  const [personal, systemCount, directMessageRows] = await Promise.all([
-    prisma.notification.findMany({
-      where: getUnreadNotificationWhere(userId),
-      select: { type: true, link: true },
-    }),
+  const [personalRows, systemCount, directMessageRows] = await Promise.all([
+    prisma.$queryRaw<Array<{
+      replies: bigint | number
+      likes: bigint | number
+      friendRequests: bigint | number
+      messages: bigint | number
+      feedback: bigint | number
+      system: bigint | number
+    }>>`
+      SELECT
+        COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS replies,
+        COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS likes,
+        COUNT(CASE WHEN n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
+        COUNT(CASE WHEN n.type = 'MESSAGE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS messages,
+        COUNT(CASE WHEN n.link LIKE '/feedback/%' THEN 1 END) AS feedback,
+        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS system
+      FROM Notification n
+      WHERE n.recipientId = ${userId}
+        AND n.isRead = 0
+    `,
     prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
     prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
       SELECT COUNT(*) AS unreadCount
@@ -343,16 +357,15 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
     `,
   ])
 
-  const personalCounts = personal.reduce((counts, item) => {
-    const category = getNotificationCategory(item.type, item.link)
-    if (category === 'reply') counts.replies += 1
-    else if (category === 'like') counts.likes += 1
-    else if (category === 'friend') counts.friendRequests += 1
-    else if (category === 'messages') counts.messages += 1
-    else if (category === 'feedback') counts.feedback += 1
-    else counts.system += 1
-    return counts
-  }, { replies: 0, likes: 0, friendRequests: 0, messages: 0, feedback: 0, system: 0 })
+  const personalRow = personalRows[0]
+  const personalCounts = {
+    replies: Number(personalRow?.replies || 0),
+    likes: Number(personalRow?.likes || 0),
+    friendRequests: Number(personalRow?.friendRequests || 0),
+    messages: Number(personalRow?.messages || 0),
+    feedback: Number(personalRow?.feedback || 0),
+    system: Number(personalRow?.system || 0),
+  }
 
   const directMessages = Number(directMessageRows[0]?.unreadCount || 0)
   const notifications = personalCounts.system + systemCount + personalCounts.replies + personalCounts.likes

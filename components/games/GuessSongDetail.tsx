@@ -166,12 +166,13 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
           {starting ? '正在进入…' : '立即开始'}
         </button>
         <button type="button" onClick={() => setRuleOpen(true)}>游戏规则</button>
-        <Link href="/games/guess-song/duel">听听·对决</Link>
+        <Link href="/games/guess-song/duel">1v1 对决</Link>
         <Link href="/entertainment/guess-song/leaderboard">排行榜</Link>
         <a href="#history">历史记录</a>
       </div>
       {/* 移动端专用：Hero 右上角入口（规则 / 排行），点击展开对应内容 */}
       <div className="game-detail-mobile-top">
+        <Link href="/games/guess-song/duel">1v1 对决</Link>
         <button type="button" onClick={() => setRuleOpen(true)}>规则</button>
         <Link href="/entertainment/guess-song/leaderboard">排行</Link>
       </div>
@@ -284,6 +285,12 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
                 </button>
               )
             })}
+            <Link href="/games/guess-song/duel" className="guess-detail-duel-link">
+              <span>ONLINE MODE</span>
+              <strong>1v1 对决</strong>
+              <small>与好友实时抢答 30 题</small>
+              <b>进入对决 →</b>
+            </Link>
           </div>
         </div>
         <aside id="history">

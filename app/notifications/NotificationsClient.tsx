@@ -10,6 +10,7 @@ import { getNotificationTarget } from '@/lib/notification-target'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
+import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
@@ -113,7 +114,7 @@ type NotificationReadResponse = {
   }
 }
 
-// 本地即时递减未读数（分类角标同步），随后由 unread-summary:refresh 触发的服务端拉取校正为权威值。
+// 本地即时递减未读数（分类角标同步），随后由 Provider 触发的服务端汇总校正为权威值。
 const NOTIFICATION_LIST_PAGE_SIZE = 20
 const OPTIMISTIC_READ_STORAGE_KEY = 'notifications:optimistic-read'
 
@@ -201,6 +202,9 @@ export function NotificationsClient({
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
+  const searchParamsStringRef = useRef(searchParamsString)
+  searchParamsStringRef.current = searchParamsString
   const { summary: sharedSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
   const [notifications, setNotifications] = useState(initialNotifications)
   const [pagination, setPagination] = useState(initialPagination)
@@ -214,7 +218,7 @@ export function NotificationsClient({
   const [replyStatus, setReplyStatus] = useState<Record<string, string>>({})
   const [sendingReply, setSendingReply] = useState<string | null>(null)
   const optimisticReadRef = useRef<Map<string, Date>>(new Map())
-  const notificationListRequestRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const notificationListRequestRef = useRef<{ key: string; promise: Promise<void>; controller: AbortController } | null>(null)
   const notificationListRequestSequenceRef = useRef(0)
   // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
   const markingReadRef = useRef<Set<string>>(new Set())
@@ -239,27 +243,30 @@ export function NotificationsClient({
     if (nextPagination) setPagination(nextPagination)
   }, [])
 
-  const currentPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const currentPage = Math.max(1, Number.parseInt(new URLSearchParams(searchParamsString).get('page') || '1', 10) || 1)
   const buildNotificationHref = useCallback((page: number, category = activeCategory) => {
-    const next = new URLSearchParams(searchParams.toString())
+    const next = new URLSearchParams(searchParamsStringRef.current)
     if (page <= 1) next.delete('page')
     else next.set('page', String(page))
     if (category === 'all') next.delete('category')
     else next.set('category', category)
     const query = next.toString()
     return `/notifications${query ? `?${query}` : ''}`
-  }, [activeCategory, searchParams])
+  }, [activeCategory])
 
-  const refreshNotifications = useCallback((force = false) => {
+  const refreshNotifications = useCallback(() => {
     const requestKey = `${currentPage}:${activeCategory}`
-    if (!force && notificationListRequestRef.current?.key === requestKey) return notificationListRequestRef.current.promise
+    if (notificationListRequestRef.current?.key === requestKey) return notificationListRequestRef.current.promise
+    notificationListRequestRef.current?.controller.abort()
     const requestSequence = ++notificationListRequestSequenceRef.current
+    const controller = new AbortController()
     const request = (async () => {
       try {
         const params = new URLSearchParams({ page: String(currentPage), pageSize: String(NOTIFICATION_LIST_PAGE_SIZE) })
         if (activeCategory !== 'all') params.set('category', activeCategory)
         const response = await fetch(`/api/notifications?${params.toString()}`, {
           cache: 'no-store',
+          signal: controller.signal,
         })
         if (!response.ok) return
         const data = await response.json().catch(() => null) as {
@@ -279,17 +286,17 @@ export function NotificationsClient({
             router.replace(buildNotificationHref(nextPagination.page), { scroll: false })
           }
         }
-        await refreshUnreadSummary()
       } catch {
+        if (controller.signal.aborted) return
         // The server-rendered list remains usable when a background refresh fails.
       }
     })()
-    notificationListRequestRef.current = { key: requestKey, promise: request }
+    notificationListRequestRef.current = { key: requestKey, promise: request, controller }
     void request.finally(() => {
       if (notificationListRequestRef.current?.promise === request) notificationListRequestRef.current = null
     })
     return request
-  }, [activeCategory, buildNotificationHref, currentPage, mergeServerNotifications, refreshUnreadSummary, router])
+  }, [activeCategory, buildNotificationHref, currentPage, mergeServerNotifications, router])
 
   useEffect(() => {
     try {
@@ -310,22 +317,23 @@ export function NotificationsClient({
       if (document.visibilityState === 'visible') void refreshNotifications()
     }
     const onRealtimeEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{ initial?: boolean; source?: string }>).detail
-      if (detail?.initial) return
-      sync()
+      const detail = (event as CustomEvent<Parameters<typeof shouldRefreshNotificationList>[0]>).detail
+      if (detail && shouldRefreshNotificationList(detail)) sync()
     }
     void refreshNotifications()
     window.addEventListener('pageshow', sync)
-    window.addEventListener('unread-summary:refresh', sync)
     window.addEventListener('realtime:event', onRealtimeEvent)
     document.addEventListener('visibilitychange', sync)
     return () => {
       window.removeEventListener('pageshow', sync)
-      window.removeEventListener('unread-summary:refresh', sync)
       window.removeEventListener('realtime:event', onRealtimeEvent)
       document.removeEventListener('visibilitychange', sync)
     }
   }, [refreshNotifications])
+
+  useEffect(() => () => {
+    notificationListRequestRef.current?.controller.abort()
+  }, [])
 
   useEffect(() => {
     setSummaryOverride(null)
@@ -385,8 +393,9 @@ export function NotificationsClient({
   }, [activeCategory, notifications])
 
   useEffect(() => {
-    setActiveCategory(parseNotificationCategory(searchParams.get('category')))
-  }, [searchParams])
+    const nextCategory = parseNotificationCategory(new URLSearchParams(searchParamsString).get('category'))
+    setActiveCategory((current) => current === nextCategory ? current : nextCategory)
+  }, [searchParamsString])
 
   function goToPage(nextPage: number) {
     const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), Math.max(1, pagination.totalPages))
@@ -445,9 +454,9 @@ export function NotificationsClient({
       setNotifications((current) => current.map((row) => matchesItem(row)
         ? { ...row, isRead: true, read: true, readAt: safeReadAt }
         : row))
-      // 未读数立即减 1（本地），随后由 Provider 重新拉取的服务端汇总校正。
-      window.dispatchEvent(new Event('unread-summary:refresh'))
-      await refreshNotifications(true)
+      // The list and badge are already updated locally. Refresh only the
+      // shared summary; do not reload the list or trigger a router refresh.
+      await refreshUnreadSummary()
       return true
     } catch (reason) {
       optimisticReadRef.current.delete(itemKey)
@@ -563,10 +572,8 @@ export function NotificationsClient({
         setSummaryOverride(previousSummary)
         return
       }
-      window.dispatchEvent(new Event('unread-summary:refresh'))
       await refreshUnreadSummary()
       setSummaryOverride(null)
-      await refreshNotifications(true)
     } catch {
       optimisticItems.forEach((item) => {
         const key = notificationKey(item)
@@ -608,7 +615,7 @@ export function NotificationsClient({
     setNotifications((current) => current.filter((item) => !keys.has(`${item.source}:${item.id}`)))
     // 删除未读通知时未读数同步减少（删除已读通知不影响），随后由服务端汇总校正。
     setSummaryOverride((current) => decrementUnreadSummary(current || sharedSummary, items))
-    window.dispatchEvent(new Event('unread-summary:refresh'))
+    await refreshUnreadSummary()
     return true
   }
 

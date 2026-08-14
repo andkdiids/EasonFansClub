@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { gameCatalog, gameCategories, type GameCategoryFilter } from '@/lib/game-catalog'
 import { GameBanner } from './GameBanner'
 import { GameGrid } from './GameGrid'
@@ -50,6 +51,14 @@ return (
         <p>发现更多有趣的互动游戏</p>
       </header>
       <GameBanner games={gameCatalog.filter((game) => game.featured)} />
+      <section className="game-duel-entry" aria-labelledby="game-duel-entry-title">
+        <div>
+          <span>听听 · ONLINE</span>
+          <h2 id="game-duel-entry-title">1v1 对决</h2>
+          <p>与好友实时抢答 30 题</p>
+        </div>
+        <Link href="/games/guess-song/duel">进入对决</Link>
+      </section>
       <section className="game-library" aria-labelledby="game-library-title">
         <div className="game-library-heading">
           <div>
