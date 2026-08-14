@@ -21,7 +21,10 @@ type DiscoverySession = {
   seenPostIds: string[]
   seenAuthorIds: string[]
   scrollY: number
+  savedAt?: number
 }
+
+const DISCOVERY_SESSION_MAX_AGE_MS = 30_000
 
 type DiscoveryRequest = {
   key: string
@@ -185,6 +188,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           seenPostIds: [...nextSeenPostIds],
           seenAuthorIds: [...nextSeenAuthorIds],
           scrollY: window.scrollY,
+          savedAt: Date.now(),
         })
       } catch (reason) {
         if (controller.signal.aborted) return
@@ -221,8 +225,11 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       if (requestRef.current === request) requestRef.current = null
     }
     const stored = readSession(sessionKey)
+    const storedAge = stored && typeof stored.savedAt === 'number' ? Date.now() - stored.savedAt : Number.POSITIVE_INFINITY
     const canRestoreStoredFeed = stored
       && stored.posts.length > 0
+      && storedAge >= 0
+      && storedAge <= DISCOVERY_SESSION_MAX_AGE_MS
       && (mode !== 'recommend' || typeof stored.feedSeed === 'string')
     if (canRestoreStoredFeed) {
       setPosts(stored.posts)
@@ -363,6 +370,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       seenPostIds: [...seenPostIdsRef.current],
       seenAuthorIds: [...seenAuthorIdsRef.current],
       scrollY: window.scrollY,
+      savedAt: Date.now(),
     })
     router.push(`/posts/${postId}`, { scroll: false })
   }

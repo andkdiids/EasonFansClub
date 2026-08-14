@@ -1,3 +1,5 @@
+import type { DuelMode } from '@/lib/guess-song-duel-config'
+
 export type DuelOption = { key: string; label: string }
 
 export type DuelPublicUser = {
@@ -11,6 +13,7 @@ export type DuelPublicUser = {
 export type DuelRoomState = {
   id: string
   roomCode: string
+  mode: DuelMode
   hasPassword: boolean
   isPublic: boolean
   status: 'WAITING' | 'READY' | 'PLAYING' | 'FINISHED' | 'CLOSED'
@@ -33,8 +36,12 @@ export type DuelPlayerState = DuelPublicUser & {
 
 export type DuelQuestionState = {
   id: string
+  roundId: string
   publicToken: string
+  questionId: string
   questionIndex: number
+  isOvertime: boolean
+  overtimeIndex: number | null
   options: DuelOption[]
   audioDurationSeconds: number
   serverStartedAt: string
@@ -46,6 +53,8 @@ export type DuelQuestionState = {
 
 export type DuelQuestionResult = {
   questionIndex: number
+  isOvertime: boolean
+  overtimeIndex: number | null
   correctOptionKey: string
   correctLabel: string
   answers: Array<{
@@ -58,6 +67,8 @@ export type DuelQuestionResult = {
 
 export type DuelMatchResult = {
   matchId: string
+  mode: DuelMode
+  baseTotalQuestions: number
   status: 'FINISHED' | 'INVALID' | 'CLOSED'
   finishReason: string | null
   winnerId: string | null
@@ -69,9 +80,10 @@ export type DuelMatchResult = {
     userId: string
     slot: 1 | 2
     name: string
-    avatarUrl: string | null
-    correctCount: number
-    accuracy: number
+      avatarUrl: string | null
+      correctCount: number
+      baseCorrectCount: number
+      accuracy: number
     totalEffectiveAnswerMs: number
     averageAnswerMs: number | null
   }>
@@ -80,6 +92,7 @@ export type DuelMatchResult = {
 export type DuelMatchState = {
   matchId: string
   roomId: string
+  mode: DuelMode
   status: 'PLAYING' | 'FINISHED' | 'INVALID' | 'CLOSED'
   phase: 'STARTING' | 'PLAYING' | 'FINISHED' | 'INVALID' | 'CLOSED'
   currentQuestionIndex: number
@@ -113,4 +126,16 @@ export type DuelClientCommand =
   | { type: 'TIME_SYNC_REQUEST'; requestId: string; clientSentAt: number }
   | { type: 'TIME_SYNC_ACK'; requestId: string }
   | { type: 'PING' }
-  | { type: 'ANSWER'; matchId: string; questionToken: string; selectedOptionKey: string; clientElapsedMs: number }
+  | {
+      type: 'ANSWER'
+      matchId: string
+      roomId: string
+      roundId: string
+      questionId: string
+      // The legacy aliases are retained for a clean protocol transition; the
+      // server still requires and validates the new round identifiers.
+      questionToken: string
+      answer: string
+      selectedOptionKey: string
+      clientElapsedMs: number
+    }

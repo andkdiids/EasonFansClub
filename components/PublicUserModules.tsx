@@ -15,6 +15,8 @@ type PostItem = {
   id: string
   title: string
   content: string
+  moderationStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'VIOLATION'
+  rejectionReason: string | null
   ipRegion: string | null
   replyCount: number
   likeCount: number
@@ -206,8 +208,13 @@ function ModuleContent({
   href={`/posts/${post.id}`}
   className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
 >            <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
-            <h3 className="mt-2 text-lg font-black text-brand-950">{post.title}</h3>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
+              {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
+              {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
+            </div>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+            {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
             <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
               <IpRegionLabel ipRegion={post.ipRegion} />
               <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>

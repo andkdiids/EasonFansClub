@@ -1,4 +1,4 @@
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { publicContentImageMarkers } from '@/lib/content-images'
@@ -97,7 +97,7 @@ export async function PATCH(request: Request) {
           where: {
             type: 'ADMIN',
             isRead: false,
-            key: `post-review:${current.id}`,
+            key: { startsWith: `post-review:${current.id}` },
           },
           data: { isRead: true, readAt: reviewedAt },
         })
@@ -135,7 +135,9 @@ export async function PATCH(request: Request) {
     revalidatePath('/community')
     revalidatePath('/forum')
     revalidatePath('/admin/posts/review')
+    revalidatePath('/user/[uid]', 'page')
     revalidatePath(`/posts/${postId}`)
+    revalidateTag('trending-posts')
     return NextResponse.json({ post, previousStatus: result.previousStatus })
   } catch (error) {
     console.error('[admin/posts/review]', { postId, status, error })

@@ -8,6 +8,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
+import { belongsToFriendGroup, buildFriendGroupIndex, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
   const q = sanitizeText(params.get('q'), 50)
   const page = Math.max(1, Number(params.get('page')) || 1)
   const pageSize = Math.min(50, Math.max(10, Number(params.get('pageSize')) || 30))
+  const requestedGroupId = params.get('groupId')?.trim() || null
 
   if (q) return searchUsers(user.id, q)
 
@@ -57,18 +59,29 @@ export async function GET(request: Request) {
         })
       : Promise.resolve([]),
   ])
-  const groupByFriend = new Map(groupMembers.map((member) => [member.friendId, member.groupId]))
-  const groupMemberCounts = new Map<string, number>()
-  groupMembers.forEach((member) => groupMemberCounts.set(member.groupId, (groupMemberCounts.get(member.groupId) || 0) + 1))
-  const groups = groupRows.map((group) => ({ ...group, count: groupMemberCounts.get(group.id) || 0 }))
-  const ungroupedCount = Math.max(0, friendIds.length - groupMembers.length)
-  const conversations = friendIds.length ? await prisma.conversation.findMany({
+  if (requestedGroupId && requestedGroupId !== UNGROUPED_FRIEND_GROUP_ID && !groupRows.some((group) => group.id === requestedGroupId)) {
+    return NextResponse.json({ message: '分组不存在' }, { status: 404, headers: privateHeaders })
+  }
+  const validGroupIds = new Set(groupRows.map((group) => group.id))
+  const { groupByFriend, groupCounts, ungroupedCount } = buildFriendGroupIndex(
+    friendIds,
+    groupMembers.filter((member) => validGroupIds.has(member.groupId)),
+  )
+  const groups = groupRows.map((group) => ({ ...group, count: groupCounts.get(group.id) || 0 }))
+  const scopedFriendRows = requestedGroupId
+    ? friendRows.filter((row) => {
+        const friendId = row.userAId === user.id ? row.userBId : row.userAId
+        return belongsToFriendGroup(friendId, requestedGroupId, groupByFriend)
+      })
+    : friendRows
+  const scopedFriendIds = scopedFriendRows.map((row) => row.userAId === user.id ? row.userBId : row.userAId)
+  const conversations = scopedFriendIds.length ? await prisma.conversation.findMany({
       where: {
         ConversationParticipant: {
           some: { userId: user.id, isDeleted: false },
         },
         AND: [{
-          ConversationParticipant: { some: { userId: { in: friendIds }, isDeleted: false } },
+          ConversationParticipant: { some: { userId: { in: scopedFriendIds }, isDeleted: false } },
         }],
       },
       select: {
@@ -95,7 +108,7 @@ export async function GET(request: Request) {
     return [otherId, conversation] as const
   }))
 
-  const orderedFriendRows = friendRows
+  const orderedFriendRows = scopedFriendRows
     .map((row) => {
       const friend = row.userAId === user.id ? row.User_Friendship_userBIdToUser : row.User_Friendship_userAIdToUser
       const conversation = conversationByFriend.get(friend.id)
@@ -144,7 +157,16 @@ export async function GET(request: Request) {
     }
   })
 
-  return NextResponse.json({ friends, groups, ungroupedCount, page, total, hasMore: pageStart + pageSize < total }, { headers: privateHeaders })
+  const scopedTotal = scopedFriendRows.length
+  return NextResponse.json({
+    friends,
+    groups,
+    ungroupedCount,
+    page,
+    total: scopedTotal,
+    friendTotal: total,
+    hasMore: pageStart + pageSize < scopedTotal,
+  }, { headers: privateHeaders })
 }
 
 async function searchUsers(currentUserId: string, q: string) {
@@ -205,7 +227,7 @@ async function searchUsers(currentUserId: string, q: string) {
         })
       : Promise.resolve([]),
   ])
-  const groupByFriend = new Map(groupMembers.map((member) => [member.friendId, member.groupId]))
+  const { groupByFriend } = buildFriendGroupIndex(friendIds, groupMembers)
 
   return NextResponse.json({
     results: users.map((item) => {

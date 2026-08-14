@@ -33,8 +33,12 @@ export function buildPostReviewUpdate({
   } as const
 }
 
-export function getPostModerationAccess(status: PostModerationStatus, viewerIsAdmin: boolean): PostModerationAccess {
-  if (viewerIsAdmin || status === 'APPROVED' || status === 'VIOLATION') return 'VISIBLE'
+export function getPostModerationAccess(
+  status: PostModerationStatus,
+  viewerIsAdmin: boolean,
+  viewerIsAuthor = false,
+): PostModerationAccess {
+  if (viewerIsAdmin || viewerIsAuthor || status === 'APPROVED' || status === 'VIOLATION') return 'VISIBLE'
   return status
 }
 

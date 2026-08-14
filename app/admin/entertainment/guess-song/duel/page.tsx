@@ -45,10 +45,10 @@ export default async function AdminGuessSongDuelPage() {
                   <tr key={match.id} className="align-top">
                     <td className="px-4 py-4 font-mono text-xs text-slate-600">
                       <div>{match.id}</div>
-                      <div className="mt-1 font-sans font-bold">房间 {match.roomCode}</div>
+                      <div className="mt-1 font-sans font-bold">房间 {match.roomCode} · {match.mode === 'BUZZER' ? '抢答模式' : '比分模式'}</div>
                     </td>
                     <td className="px-4 py-4 font-bold text-slate-800">
-                      {match.players.map((player) => <div key={player.userId}>{player.name} · {player.correctCount}</div>)}
+                      {match.players.map((player) => <div key={player.userId}>{player.name} · {match.mode === 'SCORE' ? `基础 ${player.baseCorrectCount} / 30` : `比分 ${player.correctCount}`}</div>)}
                     </td>
                     <td className="px-4 py-4 font-bold text-slate-800">{winner}</td>
                     <td className="px-4 py-4">

@@ -100,6 +100,9 @@ test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误
   assert.match(discovery, /\[hasMore, loadingMore, loadPage\]/)
   assert.match(discovery, /feedSeed: requestFeedSeed/)
   assert.match(discovery, /payload\.nextCursor === requestCursor/)
+  assert.match(discovery, /DISCOVERY_SESSION_MAX_AGE_MS = 30_000/)
+  assert.match(discovery, /storedAge <= DISCOVERY_SESSION_MAX_AGE_MS/)
+  assert.match(discovery, /savedAt: Date\.now\(\)/)
   assert.doesNotMatch(discovery, /setInterval|SWR|mutate\(/i)
 })
 

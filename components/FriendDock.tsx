@@ -19,6 +19,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { mergeUniqueFriendPage, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 
@@ -41,6 +42,12 @@ type FriendGroup = {
   name: string
   sortOrder: number
   count: number
+}
+
+type FriendGroupPagination = {
+  page: number
+  total: number
+  hasMore: boolean
 }
 
 const emptySummary: UnreadSummary = {
@@ -91,12 +98,14 @@ export function FriendDock({
   const [friends, setFriends] = useState<FriendDockUser[]>([])
   const [searchResults, setSearchResults] = useState<FriendDockUser[]>([])
   const [friendGroups, setFriendGroups] = useState<FriendGroup[]>([])
+  const [groupFriends, setGroupFriends] = useState<Record<string, FriendDockUser[]>>({})
+  const [groupPagination, setGroupPagination] = useState<Record<string, FriendGroupPagination>>({})
+  const [loadingGroupIds, setLoadingGroupIds] = useState<Set<string>>(new Set())
+  const [friendListReady, setFriendListReady] = useState(false)
   const [ungroupedCount, setUngroupedCount] = useState(0)
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(false)
   const [friendTotal, setFriendTotal] = useState(0)
   const [loadingList, setLoadingList] = useState(false)
   const [profileFriend, setProfileFriend] = useState<FriendDockUser | null>(null)
@@ -128,6 +137,7 @@ export function FriendDock({
   const friendListRequestRef = useRef(0)
   const friendsRef = useRef<FriendDockUser[]>([])
   const friendListPageRef = useRef(1)
+  const groupRequestRef = useRef(new Map<string, number>())
 
   // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
   const insertEmoji = useCallback((emoji: string) => {
@@ -176,18 +186,80 @@ export function FriendDock({
     resetChat()
     setProfileFriend(null)
     setCollapsed(false)
+    setFriendListReady(false)
+    groupRequestRef.current.forEach((requestId, groupId) => groupRequestRef.current.set(groupId, requestId + 1))
+    setLoadingGroupIds(new Set())
+    setGroupFriends({})
+    setGroupPagination({})
     setOpen(true)
   }, [resetChat])
 
   const notifyClients = useCallback((type: 'friends' | 'messages' | 'unread') => {
     window.dispatchEvent(new Event('unread-summary:refresh'))
-    window.dispatchEvent(new Event('friend-dock:refresh'))
+    if (type !== 'unread') {
+      window.dispatchEvent(new CustomEvent('friend-dock:refresh', { detail: { type } }))
+    }
     if ('BroadcastChannel' in window) {
       const channel = new BroadcastChannel(`eason-private-sync:${currentUserId}`)
       channel.postMessage({ type, userId: currentUserId })
       channel.close()
     }
   }, [currentUserId])
+
+  const loadGroupFriends = useCallback(async (groupId: string, nextPage = 1, append = false) => {
+    const requestId = (groupRequestRef.current.get(groupId) || 0) + 1
+    groupRequestRef.current.set(groupId, requestId)
+    setLoadingGroupIds((current) => new Set(current).add(groupId))
+    try {
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        pageSize: '20',
+        groupId,
+      })
+      const response = await fetch(`/api/friends/list?${params}`, { cache: 'no-store' })
+      const data = await response.json().catch(() => ({}))
+      if (groupRequestRef.current.get(groupId) !== requestId) return
+      if (!response.ok) {
+        setError(data.message || '好友分组加载失败')
+        return
+      }
+      const incoming = Array.isArray(data.friends) ? data.friends as FriendDockUser[] : []
+      if (Array.isArray(data.groups)) setFriendGroups(data.groups as FriendGroup[])
+      if (Number.isSafeInteger(data.ungroupedCount) && data.ungroupedCount >= 0) setUngroupedCount(data.ungroupedCount)
+      setGroupFriends((current) => ({
+        ...current,
+        [groupId]: mergeUniqueFriendPage(current[groupId] || [], incoming, append),
+      }))
+      setGroupPagination((current) => ({
+        ...current,
+        [groupId]: {
+          page: Number.isSafeInteger(data.page) ? data.page : nextPage,
+          total: Number.isSafeInteger(data.total) ? data.total : incoming.length,
+          hasMore: Boolean(data.hasMore),
+        },
+      }))
+    } catch (loadError) {
+      if (loadError instanceof DOMException && loadError.name === 'AbortError') return
+      if (groupRequestRef.current.get(groupId) === requestId) {
+        setError(loadError instanceof Error ? loadError.message : '好友分组加载失败')
+      }
+    } finally {
+      if (groupRequestRef.current.get(groupId) === requestId) {
+        setLoadingGroupIds((current) => {
+          const next = new Set(current)
+          next.delete(groupId)
+          return next
+        })
+      }
+    }
+  }, [])
+
+  const invalidateAllGroupCaches = useCallback(() => {
+    groupRequestRef.current.forEach((requestId, groupId) => groupRequestRef.current.set(groupId, requestId + 1))
+    setLoadingGroupIds(new Set())
+    setGroupFriends({})
+    setGroupPagination({})
+  }, [])
 
   const loadFriends = useCallback(async (nextPage = 1, append = false, signal?: AbortSignal, silent = false) => {
     const requestId = ++friendListRequestRef.current
@@ -205,6 +277,7 @@ export function FriendDock({
       if (Array.isArray(data.groups)) setFriendGroups(data.groups as FriendGroup[])
       if (Number.isSafeInteger(data.ungroupedCount) && data.ungroupedCount >= 0) setUngroupedCount(data.ungroupedCount)
       if (Number.isSafeInteger(data.total) && data.total >= 0) setFriendTotal(data.total)
+      setFriendListReady(true)
       const preserveLoadedPages = silent && friendListPageRef.current > 1 && !append
       if (preserveLoadedPages) {
         const current = friendsRef.current
@@ -227,8 +300,6 @@ export function FriendDock({
       friendsRef.current = nextFriends
       setFriends(nextFriends)
       friendListPageRef.current = nextPage
-      setPage(nextPage)
-      setHasMore(Boolean(data.hasMore))
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
       if (requestId === friendListRequestRef.current) {
@@ -339,12 +410,14 @@ export function FriendDock({
   }
 
   function toggleFriendGroup(groupId: string) {
+    const opening = collapsedGroupIds.has(groupId)
     setCollapsedGroupIds((current) => {
       const next = new Set(current)
       if (next.has(groupId)) next.delete(groupId)
       else next.add(groupId)
       return next
     })
+    if (opening && groupFriends[groupId] === undefined) void loadGroupFriends(groupId)
   }
 
   useEffect(() => {
@@ -400,6 +473,23 @@ export function FriendDock({
   }, [open, chatFriend, debouncedQuery, loadFriends])
 
   useEffect(() => {
+    if (!open || chatFriend || debouncedQuery || !friendListReady) return
+    const scopes = [
+      { id: UNGROUPED_FRIEND_GROUP_ID, count: ungroupedCount },
+      ...friendGroups.map((group) => ({ id: group.id, count: group.count })),
+    ]
+    scopes.forEach((scope) => {
+      if (collapsedGroupIds.has(scope.id) || groupFriends[scope.id] !== undefined || loadingGroupIds.has(scope.id)) return
+      if (scope.count === 0) {
+        setGroupFriends((current) => ({ ...current, [scope.id]: [] }))
+        setGroupPagination((current) => ({ ...current, [scope.id]: { page: 1, total: 0, hasMore: false } }))
+        return
+      }
+      void loadGroupFriends(scope.id)
+    })
+  }, [chatFriend, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, groupFriends, loadingGroupIds, loadGroupFriends, open, ungroupedCount])
+
+  useEffect(() => {
     setOpen(false)
     setProfileFriend(null)
     resetChat()
@@ -419,8 +509,15 @@ export function FriendDock({
       setChatFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
       setProfileFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
     }
-    const refresh = () => {
-      if (open && !chatFriend && !debouncedQuery) void loadFriends(1)
+    const refresh = (event?: Event) => {
+      if (open && !chatFriend && !debouncedQuery) {
+        const type = (event as CustomEvent<{ type?: string }> | undefined)?.detail?.type
+        if (type !== 'unread') {
+          invalidateAllGroupCaches()
+          setFriendListReady(false)
+        }
+        void loadFriends(1)
+      }
     }
     const refreshFromRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{ type?: string; changed?: string[]; source?: string }>).detail
@@ -438,6 +535,10 @@ export function FriendDock({
     if (channel) {
       channel.onmessage = (event) => {
         if (event.data?.userId !== currentUserId) return
+        if (event.data?.type === 'unread') {
+          if (open && !chatFriend && !debouncedQuery) void loadFriends(1)
+          return
+        }
         refresh()
       }
     }
@@ -449,7 +550,7 @@ export function FriendDock({
       window.removeEventListener('friend-dock:refresh', refresh)
       window.removeEventListener('realtime:event', refreshFromRealtime)
     }
-  }, [currentUserId, open, chatFriend, debouncedQuery, loadFriends, openFriendList, closeDock])
+  }, [currentUserId, open, chatFriend, debouncedQuery, invalidateAllGroupCaches, loadFriends, openFriendList, closeDock])
 
   useEffect(() => {
     if (!open || !isMobileDrawer) return
@@ -552,6 +653,12 @@ export function FriendDock({
     })
     if (!response.ok) return
     setFriends((current) => current.map((friend) => friend.conversationId === id ? { ...friend, unreadCount: 0 } : friend))
+    setGroupFriends((current) => Object.fromEntries(
+      Object.entries(current).map(([groupId, items]) => [
+        groupId,
+        items.map((friend) => friend.conversationId === id ? { ...friend, unreadCount: 0 } : friend),
+      ]),
+    ))
     notifyClients('unread')
   }, [notifyClients])
 
@@ -869,17 +976,17 @@ export function FriendDock({
   const visibleUsers = debouncedQuery ? searchResults : friends
   const groupedFriendSections = useMemo<Array<FriendGroup & { friends: FriendDockUser[] }>>(() => [
     {
-      id: '__ungrouped__',
+      id: UNGROUPED_FRIEND_GROUP_ID,
       name: '未分组',
       sortOrder: -1,
       count: ungroupedCount,
-      friends: friends.filter((friend) => !friend.groupId),
+      friends: groupFriends[UNGROUPED_FRIEND_GROUP_ID] || [],
     },
     ...friendGroups.map((group) => ({
       ...group,
-      friends: friends.filter((friend) => friend.groupId === group.id),
+      friends: groupFriends[group.id] || [],
     })),
-  ], [friendGroups, friends, ungroupedCount])
+  ], [friendGroups, groupFriends, ungroupedCount])
   const groupedMessages = useMemo(() => groupMessages(messages), [messages])
   const overlay = open && typeof document !== 'undefined' ? createPortal(
     <>
@@ -1151,12 +1258,27 @@ export function FriendDock({
                         onDecide={(action) => void decideRequest(friend, action)}
                       />
                     )) : null}
+                    {!collapsed && groupFriends[group.id] === undefined && loadingGroupIds.has(group.id) ? <p className="friend-dock-empty">加载分组成员中…</p> : null}
+                    {!collapsed && groupFriends[group.id] === undefined && !loadingGroupIds.has(group.id) && group.count > 0 ? (
+                      <button type="button" className="friend-dock-load-more" onClick={() => void loadGroupFriends(group.id)}>
+                        加载分组成员
+                      </button>
+                    ) : null}
+                    {!collapsed && groupPagination[group.id]?.hasMore ? (
+                      <button
+                        type="button"
+                        className="friend-dock-load-more"
+                        onClick={() => void loadGroupFriends(group.id, groupPagination[group.id].page + 1, true)}
+                        disabled={loadingGroupIds.has(group.id)}
+                      >
+                        {loadingGroupIds.has(group.id) ? '加载中…' : `加载更多${group.name}好友`}
+                      </button>
+                    ) : null}
                   </section>
                 )
               })}
               {loadingList ? <p className="friend-dock-empty">加载中…</p> : null}
               {!loadingList && !visibleUsers.length ? <p className="friend-dock-empty">{debouncedQuery ? '没有找到匹配用户' : '暂无好友'}</p> : null}
-              {!debouncedQuery && hasMore ? <button type="button" className="friend-dock-load-more" onClick={() => void loadFriends(page + 1, true)}>加载更多好友</button> : null}
               <div className="friend-dock-list-end" aria-hidden="true" />
             </div>
             </div>

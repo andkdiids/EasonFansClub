@@ -8,6 +8,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
+import { isAdminRole } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -31,7 +32,10 @@ export async function GET(request: Request, context: RouteContext) {
   if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   if (moduleKey === 'posts') {
-    const postWhere = { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: { in: ['APPROVED', 'VIOLATION'] as Array<'APPROVED' | 'VIOLATION'> } }
+    const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || isAdminRole(viewer.role)))
+    const postWhere = canViewPendingPosts
+      ? { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const }
+      : { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: { in: ['APPROVED', 'VIOLATION'] as Array<'APPROVED' | 'VIOLATION'> } }
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
     const pagination = getProfileRecordPagination(total, page)
     const posts = await safeDb(
@@ -46,6 +50,7 @@ export async function GET(request: Request, context: RouteContext) {
           title: true,
           content: true,
           moderationStatus: true,
+          rejectionReason: true,
           ipRegion: true,
           replyCount: true,
           likeCount: true,

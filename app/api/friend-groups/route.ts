@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { activeUserWhere } from '@/lib/friends'
+import { buildFriendGroupIndex } from '@/lib/friend-grouping'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
@@ -20,19 +22,36 @@ export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
 
-  const groups = await prisma.friendGroup.findMany({
-    where: { ownerId: user.id },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: {
-      id: true,
-      name: true,
-      sortOrder: true,
-      createdAt: true,
-      _count: { select: { FriendGroupMember: true } },
-    },
-  })
+  const [groups, friendships] = await Promise.all([
+    prisma.friendGroup.findMany({
+      where: { ownerId: user.id },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true, sortOrder: true, createdAt: true },
+    }),
+    prisma.friendship.findMany({
+      where: {
+        OR: [
+          { userAId: user.id, User_Friendship_userBIdToUser: activeUserWhere },
+          { userBId: user.id, User_Friendship_userAIdToUser: activeUserWhere },
+        ],
+      },
+      select: { userAId: true, userBId: true },
+    }),
+  ])
+  const friendIds = friendships.map((friendship) => friendship.userAId === user.id ? friendship.userBId : friendship.userAId)
+  const members = friendIds.length
+    ? await prisma.friendGroupMember.findMany({
+        where: { ownerId: user.id, friendId: { in: friendIds } },
+        select: { friendId: true, groupId: true },
+      })
+    : []
+  const validGroupIds = new Set(groups.map((group) => group.id))
+  const { groupCounts } = buildFriendGroupIndex(
+    friendIds,
+    members.filter((member) => validGroupIds.has(member.groupId)),
+  )
   return NextResponse.json({
-    groups: groups.map(({ _count, ...group }) => ({ ...group, count: _count.FriendGroupMember })),
+    groups: groups.map((group) => ({ ...group, count: groupCounts.get(group.id) || 0 })),
   }, { headers: privateHeaders })
 }
 

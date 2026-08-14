@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: Context) {
       getDuelMatchState(guard.user.id, result.matchId),
     ])
     await duelRealtimeHub.broadcastRoom(roomId, room)
-    duelRealtimeHub.broadcastMatchStarting(result.matchId, result.serverStartAt)
+    duelRealtimeHub.broadcastMatchStarting(result.matchId, result.serverStartAt, 1, result.questionCount)
     duelRealtimeHub.scheduleMatch(result.matchId, result.serverStartAt)
     return duelOk({ room, matchId: result.matchId, serverStartAt: result.serverStartAt, match })
   } catch (error) {

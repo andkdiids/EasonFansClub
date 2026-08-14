@@ -250,7 +250,11 @@ export class GuessSongDuelRealtimeHub {
     const outcome = await submitDuelAnswer({
       userId,
       matchId: command.matchId,
+      roomId: command.roomId,
+      roundId: command.roundId,
+      questionId: command.questionId,
       questionToken: command.questionToken,
+      answer: command.answer,
       selectedOptionKey: command.selectedOptionKey,
       clientElapsedMs: command.clientElapsedMs,
       latencyEstimateMs: Math.round((socket.duelRttMs || 0) / 2),

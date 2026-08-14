@@ -9,7 +9,7 @@ const reviewRoute = read('app/api/admin/posts/review/route.ts')
 test('审核通过 / 拒绝都在同一事务内给作者创建通知', () => {
   const transactionStart = reviewRoute.indexOf('prisma.$transaction')
   const notificationCreate = reviewRoute.indexOf('tx.notification.create')
-  const transactionReturn = reviewRoute.indexOf('return { post: updated')
+  const transactionReturn = reviewRoute.indexOf('post: updated')
   assert.ok(transactionStart > 0 && notificationCreate > transactionStart && transactionReturn > notificationCreate)
   assert.match(reviewRoute, /recipientId: current\.authorId/)
   assert.match(reviewRoute, /type: 'ADMIN'/)

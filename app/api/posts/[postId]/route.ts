@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { awardFeaturedPostRewards } from '@/lib/community-rewards'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
@@ -5,7 +7,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
@@ -39,10 +41,18 @@ function isAcceptableImageUrl(value: unknown): value is string {
 export async function GET(_request: Request, { params }: Params) {
   const viewer = await getCurrentUser()
   const { postId } = await params
+  const viewerIsAdmin = shouldBypassForbiddenWords(viewer)
   const post = await prisma.post.findFirst({
     where: {
-      ...publicPostWhere,
       id: postId,
+      isDeleted: false,
+      status: 'PUBLISHED',
+      ...(viewerIsAdmin ? {} : {
+        OR: [
+          { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
+          ...(viewer ? [{ authorId: viewer.id }] : []),
+        ],
+      }),
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     include: {
@@ -324,16 +334,32 @@ async function handleEditPost(
     return NextResponse.json({ message: '请检查帖子内容', errors }, { status: 400 })
   }
 
+  const reviewNotificationKey = isAdmin ? null : `post-review:${postId}:${randomUUID()}`
   const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    const lockedExisting = await tx.post.findUnique({
+      where: { id: postId },
+      select: { id: true, boardId: true, moderationStatus: true },
+    })
+    if (!lockedExisting) throw new Error('POST_NOT_FOUND')
+
     const updatedPost = await tx.post.update({
       where: { id: postId },
       data: {
         title: rawTitle,
         content: rawContent,
         summary: createSummary(rawContent),
-        // 审核状态、点赞、评论、浏览、收藏、置顶/精选等字段一律保持不变（update 时未提供即不修改）。
+        // 管理员编辑沿用现有直接发布豁免；普通用户编辑始终开启新的审核周期。
+        ...(!isAdmin ? {
+          moderationStatus: 'PENDING' as const,
+          moderationReason: null,
+          matchedBannedWords: null,
+          reviewedAt: null,
+          reviewedById: null,
+          rejectionReason: null,
+        } : {}),
       },
-      select: { id: true, title: true, content: true, updatedAt: true },
+      select: { id: true, title: true, content: true, moderationStatus: true, updatedAt: true },
     })
 
     // 删除被移除的图片（keepMediaIds 显式排除的）。
@@ -362,11 +388,56 @@ async function handleEditPost(
       })
     }
 
+    if (!isAdmin) {
+      // The old approval activity must not keep linking ordinary users to a
+      // post that is now waiting for its edited content to be reviewed.
+      await tx.friendActivity.deleteMany({
+        where: { type: 'POST', targetUrl: `/posts/${postId}` },
+      })
+
+      if (lockedExisting.moderationStatus === 'APPROVED') {
+        const postCount = await tx.post.count({
+          where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+        })
+        await tx.board.update({ where: { id: lockedExisting.boardId }, data: { postCount } })
+      }
+
+      const admins = await tx.user.findMany({
+        where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+        select: { id: true },
+      })
+      if (admins.length && reviewNotificationKey) {
+        await tx.notification.createMany({
+          data: admins.map((admin) => ({
+            recipientId: admin.id,
+            type: 'ADMIN' as const,
+            title: '帖子编辑后待审核',
+            content: rawTitle,
+            link: '/admin/posts/review',
+            key: reviewNotificationKey,
+          })),
+          skipDuplicates: true,
+        })
+      }
+    }
+
     return updatedPost
   })
 
+  revalidatePath('/community')
+  revalidatePath('/forum')
+  revalidatePath('/trending')
+  revalidatePath('/rankings')
+  revalidatePath('/search')
+  revalidatePath('/admin/posts/review')
+  revalidatePath('/user/[uid]', 'page')
+  revalidatePath(`/posts/${postId}`)
+  revalidateTag('trending-posts')
+  if (!isAdmin) void emitRealtimeToAdmins('notification')
+
   return NextResponse.json({
-    post: { id: updated.id, title: updated.title, content: publicContentImageMarkers(updated.content), updatedAt: updated.updatedAt },
-    message: '帖子已保存',
+    post: { id: updated.id, title: updated.title, content: publicContentImageMarkers(updated.content), moderationStatus: updated.moderationStatus, updatedAt: updated.updatedAt },
+    moderationStatus: updated.moderationStatus,
+    message: isAdmin ? '帖子已保存' : '修改已保存，正在等待审核，审核通过后会重新展示。',
   })
 }

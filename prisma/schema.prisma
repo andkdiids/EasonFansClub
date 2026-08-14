@@ -1226,6 +1226,7 @@ model GuessSongRiskLog {
 model GuessSongDuelRoom {
   id                   String                  @id @default(cuid())
   roomCode             String                  @unique
+  mode                 GuessSongDuelMode       @default(SCORE)
   passwordHash         String?
   isPublic             Boolean                 @default(true)
   status               GuessSongDuelRoomStatus @default(WAITING)
@@ -1250,6 +1251,7 @@ model GuessSongDuelRoom {
 
 model GuessSongDuelMatch {
   id                     String                     @id @default(cuid())
+  mode                   GuessSongDuelMode          @default(SCORE)
   status                 GuessSongDuelMatchStatus   @default(PLAYING)
   finishReason           GuessSongDuelFinishReason?
   winnerId               String?
@@ -1303,6 +1305,8 @@ model GuessSongDuelQuestion {
   id                   String                @id @default(cuid())
   publicToken          String                @unique
   questionIndex        Int
+  isOvertime           Boolean               @default(false)
+  overtimeIndex        Int?
   optionsSnapshot      Json
   correctOptionKey     String
   songTitle            String
@@ -3020,6 +3024,11 @@ enum GuessSongDuelRoomStatus {
   CLOSED
 }
 
+enum GuessSongDuelMode {
+  SCORE
+  BUZZER
+}
+
 enum GuessSongDuelMatchStatus {
   PLAYING
   FINISHED
@@ -3030,6 +3039,7 @@ enum GuessSongDuelMatchStatus {
 enum GuessSongDuelFinishReason {
   SCORE_THRESHOLD
   ALL_QUESTIONS
+  TIEBREAKER
   DISCONNECT
   FORFEIT
   DISCONNECT_INVALID

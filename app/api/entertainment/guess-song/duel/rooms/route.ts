@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       roomCode: body?.roomCode,
       password: body?.password,
       isPublic: body?.isPublic,
+      mode: body?.mode,
     }) })
   } catch (error) {
     return duelError(error, 'Unable to create duel room')

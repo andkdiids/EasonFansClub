@@ -410,7 +410,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非 404。
   // 管理员可查看全部（保持现有权限）；普通用户只能查看 APPROVED。
   const viewerIsAdmin = Boolean(user && isAdminRole(user.role))
-  const moderationAccess = getPostModerationAccess(post.moderationStatus, viewerIsAdmin)
+  const viewerIsAuthor = Boolean(user && user.id === post.authorId)
+  const moderationAccess = getPostModerationAccess(post.moderationStatus, viewerIsAdmin, viewerIsAuthor)
   if (moderationAccess === 'PENDING') {
     return <ModerationPendingFallback />
   }
@@ -613,6 +614,16 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       <>
       <main className="forum-discovery-detail-shell site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         {user ? <MarkModerationReadOnMount /> : null}
+        {viewerIsAuthor && post.moderationStatus === 'PENDING' ? (
+          <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black leading-6 text-amber-800">
+            修改已保存，正在等待审核，审核通过后会重新展示。当前内容仅你可见。
+          </div>
+        ) : null}
+        {viewerIsAuthor && post.moderationStatus === 'REJECTED' ? (
+          <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm font-black leading-6 text-red-800">
+            审核未通过{post.rejectionReason ? `：${post.rejectionReason}` : '，请修改后重新提交。'}
+          </div>
+        ) : null}
         <ForumDiscoveryDetailTopbar authorName={authorName} authorAvatar={authorAvatar} authorUid={post.User.uid} />
         <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" /></div>
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">

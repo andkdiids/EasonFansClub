@@ -18,11 +18,12 @@ import {
   DUEL_RECONNECT_GRACE_MS,
   DUEL_RESULT_PAUSE_MS,
   DUEL_TARGET_CORRECT,
-  DUEL_TOTAL_QUESTIONS,
   DUEL_WAITING_ROOM_TTL_MS,
   DUEL_WIN_REWARD,
+  getDuelBaseQuestionCount,
   isDuelWaitingRoomExpired,
   isDuelPresenceOnline,
+  normalizeDuelMode,
   normalizeDuelPassword,
   normalizeDuelRoomCode,
 } from '@/lib/guess-song-duel-config'
@@ -35,6 +36,7 @@ import type {
   DuelQuestionState,
   DuelRoomState,
 } from '@/lib/guess-song-duel-protocol'
+import type { DuelMode } from '@/lib/guess-song-duel-config'
 import { normalizeGuessSongAnswer } from '@/lib/guess-song-config'
 import { getGuessSongQuizConfigOrDefault, GUESS_SONG_QUESTION_TYPE_AUTO, GUESS_SONG_QUESTION_TYPE_MANUAL } from '@/lib/guess-song-quiz-config'
 import { createUUID } from '@/lib/utils/uuid'
@@ -138,6 +140,7 @@ function roomState(room: RoomWithMembers): DuelRoomState {
   return {
     id: room.id,
     roomCode: room.roomCode,
+    mode: room.mode as DuelMode,
     hasPassword: Boolean(room.passwordHash),
     isPublic: room.isPublic,
     status: room.status,
@@ -177,6 +180,13 @@ function validatePassword(value: unknown) {
   const password = normalizeDuelPassword(value)
   if (password === null) throw new GuessSongDuelServiceError('房间密码只能使用 4～12 位英文或数字', 400, 'PASSWORD_INVALID')
   return password
+}
+
+function validateDuelMode(value: unknown): DuelMode {
+  if (value === undefined || value === null || value === '') return 'SCORE'
+  const mode = normalizeDuelMode(value)
+  if (!mode) throw new GuessSongDuelServiceError('对决模式无效', 400, 'DUEL_MODE_INVALID')
+  return mode
 }
 
 function shuffle<T>(items: readonly T[]) {
@@ -248,18 +258,51 @@ export function compareDuelPlayers(players: Array<{ userId: string; correctCount
   if (left.correctCount !== right.correctCount) {
     return { winnerId: left.correctCount > right.correctCount ? left.userId : right.userId, isDraw: false }
   }
-  if (left.totalEffectiveAnswerMs !== right.totalEffectiveAnswerMs) {
-    return { winnerId: left.totalEffectiveAnswerMs < right.totalEffectiveAnswerMs ? left.userId : right.userId, isDraw: false }
-  }
   return { winnerId: null, isDraw: true }
 }
 
-function serializeDuelResult(
-  match: { id: string; status: string; finishReason: string | null; winnerId: string | null; isDraw: boolean; rewardAmount: number; startedAt: Date; finishedAt: Date | null },
+export function resolveBuzzerRound(answers: Array<{ userId: string; isCorrect: boolean }>) {
+  const correct = answers.find((answer) => answer.isCorrect)
+  if (correct) return { outcome: 'SCORED' as const, winnerId: correct.userId }
+  if (answers.length >= 2) return { outcome: 'NO_SCORE' as const, winnerId: null }
+  return { outcome: 'WAITING' as const, winnerId: null }
+}
+
+export function countDuelBaseCorrectAnswers(answers: Array<{ userId: string; isCorrect: boolean; isOvertime: boolean }>) {
+  const counts = new Map<string, number>()
+  for (const answer of answers) {
+    if (!answer.isCorrect || answer.isOvertime) continue
+    counts.set(answer.userId, (counts.get(answer.userId) || 0) + 1)
+  }
+  return counts
+}
+
+type DuelAnswerReader = Pick<Prisma.TransactionClient, 'guessSongDuelAnswer'>
+
+async function loadDuelBaseCorrectCounts(db: DuelAnswerReader, matchId: string) {
+  const answers = await db.guessSongDuelAnswer.findMany({
+    where: { matchId },
+    select: { userId: true, isCorrect: true, Question: { select: { isOvertime: true } } },
+  })
+  return countDuelBaseCorrectAnswers(answers.map((answer) => ({
+    userId: answer.userId,
+    isCorrect: answer.isCorrect,
+    isOvertime: answer.Question.isOvertime,
+  })))
+}
+
+async function serializeDuelResult(
+  db: DuelAnswerReader,
+  match: { id: string; mode: string; totalQuestions: number; status: string; finishReason: string | null; winnerId: string | null; isDraw: boolean; rewardAmount: number; startedAt: Date; finishedAt: Date | null },
   players: Array<{ slot: number; userId: string; correctCount: number; totalEffectiveAnswerMs: number; User: PublicUserRow }>,
-): DuelMatchResult {
+): Promise<DuelMatchResult> {
+  const mode = match.mode as DuelMode
+  const baseTotalQuestions = getDuelBaseQuestionCount(mode)
+  const baseCorrectCounts = await loadDuelBaseCorrectCounts(db, match.id)
   return {
     matchId: match.id,
+    mode,
+    baseTotalQuestions,
     status: match.status as DuelMatchResult['status'],
     finishReason: match.finishReason,
     winnerId: match.winnerId,
@@ -273,7 +316,10 @@ function serializeDuelResult(
       name: getPublicUserDisplayName(player.User),
       avatarUrl: publicImageUrl(player.User.Profile?.avatarUrl || player.User.avatarUrl),
       correctCount: player.correctCount,
-      accuracy: Math.round(player.correctCount / DUEL_TOTAL_QUESTIONS * 1000) / 10,
+      baseCorrectCount: baseCorrectCounts.get(player.userId) || 0,
+      accuracy: mode === 'SCORE'
+        ? Math.round((baseCorrectCounts.get(player.userId) || 0) / baseTotalQuestions * 1000) / 10
+        : Math.round(player.correctCount / baseTotalQuestions * 1000) / 10,
       totalEffectiveAnswerMs: player.totalEffectiveAnswerMs,
       averageAnswerMs: player.correctCount ? Math.round(player.totalEffectiveAnswerMs / player.correctCount) : null,
     })),
@@ -295,14 +341,12 @@ async function loadMatchForState(matchId: string) {
 async function loadQuestionState(matchId: string, questionIndex: number) {
   const [question, next] = await Promise.all([
     prisma.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex } } }),
-    questionIndex < DUEL_TOTAL_QUESTIONS
-      ? prisma.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex: questionIndex + 1 } }, select: { publicToken: true } })
-      : Promise.resolve(null),
+    prisma.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex: questionIndex + 1 } }, select: { publicToken: true } }),
   ])
   return { question, next }
 }
 
-async function loadQuestionResult(matchId: string, question: { questionIndex: number; optionsSnapshot: Prisma.JsonValue; correctOptionKey: string }) {
+async function loadQuestionResult(matchId: string, question: { questionIndex: number; isOvertime: boolean; overtimeIndex: number | null; optionsSnapshot: Prisma.JsonValue; correctOptionKey: string }) {
   const answers = await prisma.guessSongDuelAnswer.findMany({
     where: { matchId, Question: { questionIndex: question.questionIndex } },
     orderBy: { createdAt: 'asc' },
@@ -310,6 +354,8 @@ async function loadQuestionResult(matchId: string, question: { questionIndex: nu
   })
   return {
     questionIndex: question.questionIndex,
+    isOvertime: question.isOvertime,
+    overtimeIndex: question.overtimeIndex,
     correctOptionKey: question.correctOptionKey,
     correctLabel: getOptionLabel(question.optionsSnapshot, question.correctOptionKey),
     answers: answers.map((answer) => ({
@@ -352,9 +398,10 @@ export async function searchDuelRoom(roomCode: string) {
   return roomState(room)
 }
 
-export async function createDuelRoom(userId: string, input: { roomCode?: unknown; password?: unknown; isPublic?: unknown }, now = new Date()) {
+export async function createDuelRoom(userId: string, input: { roomCode?: unknown; password?: unknown; isPublic?: unknown; mode?: unknown }, now = new Date()) {
   const requestedCode = validateRoomCode(input.roomCode)
   const password = validatePassword(input.password)
+  const mode = validateDuelMode(input.mode)
   const passwordHash = password ? await bcrypt.hash(password, 10) : null
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const roomCode = requestedCode || String(randomInt(100_000, 1_000_000))
@@ -373,6 +420,7 @@ export async function createDuelRoom(userId: string, input: { roomCode?: unknown
         return tx.guessSongDuelRoom.create({
           data: {
             roomCode,
+            mode,
             passwordHash,
             isPublic: input.isPublic !== false,
             hostId: userId,
@@ -382,7 +430,7 @@ export async function createDuelRoom(userId: string, input: { roomCode?: unknown
         })
       })
       const state = roomState(room)
-      console.info('[duel.create]', { roomId: state.id, roomCode: state.roomCode, hostId: userId, status: state.status })
+      console.info('[duel.create]', { roomId: state.id, roomCode: state.roomCode, mode: state.mode, hostId: userId, status: state.status })
       return state
     } catch (error) {
       if (isKnownPrismaError(error, 'P2002') && !requestedCode) continue
@@ -515,16 +563,18 @@ export async function leaveDuelRoom(userId: string, roomId: string, now = new Da
 export async function createDuelInvite(userId: string, roomId: string, inviteeId: string, now = new Date()) {
   const token = randomBytes(32).toString('base64url')
   await markExpiredDuelRoom(roomId, now)
-  const room = await prisma.guessSongDuelRoom.findUnique({ where: { id: roomId }, select: { hostId: true, challengerId: true, status: true, roomCode: true } })
+  const room = await prisma.guessSongDuelRoom.findUnique({ where: { id: roomId }, select: { hostId: true, challengerId: true, status: true, roomCode: true, mode: true } })
   if (!room || !['WAITING', 'READY'].includes(room.status)) throw new GuessSongDuelServiceError('房间已经开始或已关闭', 409, 'ROOM_NOT_INVITABLE')
   if (room.hostId !== userId && room.challengerId !== userId) throw new GuessSongDuelServiceError('你不在这个对决房间内', 403, 'ROOM_NOT_MEMBER')
   if (inviteeId === userId) throw new GuessSongDuelServiceError('不能邀请自己', 400, 'INVITEE_INVALID')
 
-  const [friendship, invitee] = await Promise.all([
+  const [friendship, invitee, inviter] = await Promise.all([
     prisma.friendship.findFirst({ where: { OR: [{ userAId: userId, userBId: inviteeId }, { userAId: inviteeId, userBId: userId }] }, select: { id: true } }),
     prisma.user.findFirst({ where: { id: inviteeId, status: 'ACTIVE', isDeleted: false }, select: { id: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: publicUserSelect }),
   ])
   if (!friendship || !invitee) throw new GuessSongDuelServiceError('只能邀请当前好友列表中的用户', 403, 'INVITEE_NOT_FRIEND')
+  const inviterName = inviter ? getPublicUserDisplayName(inviter) : '好友'
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.guessSongDuelInvite.updateMany({
@@ -546,8 +596,8 @@ export async function createDuelInvite(userId: string, roomId: string, inviteeId
         recipientId: inviteeId,
         actorId: userId,
         type: 'GUESS_SONG_DUEL_INVITE',
-        title: '听听·对决邀请',
-        content: `你的好友邀请你参加听听·对决，房间：${room.roomCode}`,
+        title: `听听 · ${room.mode === 'BUZZER' ? '抢答模式' : '比分模式'}邀请`,
+        content: `${inviterName} 邀请你进行「听听 · ${room.mode === 'BUZZER' ? '抢答模式' : '比分模式'}」，房间：${room.roomCode}`,
         link: `/games/guess-song/duel?invite=${encodeURIComponent(`${invite.id}.${token}`)}`,
         key: `guess-song-duel-invite:${invite.id}`,
       },
@@ -592,6 +642,29 @@ async function getEligibleDuelCandidates(tx: Prisma.TransactionClient, autoEnabl
   return [...unique.values()]
 }
 
+function buildStoredDuelQuestion(
+  candidate: DuelCandidate,
+  questionIndex: number,
+  options: { times?: ReturnType<typeof questionTimes>; isOvertime?: boolean; overtimeIndex?: number | null } = {},
+) {
+  const built = buildOptions(candidate)
+  if (!built) throw new GuessSongDuelServiceError('题库存在无效四选一数据，请联系管理员', 409, 'QUESTION_OPTIONS_INVALID')
+  return {
+    publicToken: createUUID(),
+    questionIndex,
+    isOvertime: options.isOvertime === true,
+    overtimeIndex: options.isOvertime === true ? options.overtimeIndex || null : null,
+    optionsSnapshot: built.options,
+    correctOptionKey: built.correctOptionKey,
+    songTitle: candidate.songTitle,
+    albumTitle: candidate.albumTitle,
+    audioStoragePath: candidate.GuessSongAudioVariant[0].storagePath,
+    audioDurationSeconds: candidate.GuessSongAudioVariant[0].durationSeconds,
+    ...(options.times || {}),
+    sourceQuestionId: candidate.id,
+  }
+}
+
 export async function startDuelMatch(userId: string, roomId: string, now = new Date()) {
   await markExpiredDuelRoom(roomId, now)
   const result = await prisma.$transaction(async (tx) => {
@@ -606,7 +679,7 @@ export async function startDuelMatch(userId: string, roomId: string, now = new D
           statusBefore: room.status,
           hostId: room.hostId,
           guestId: room.challengerId,
-          questionCount: DUEL_TOTAL_QUESTIONS,
+          questionCount: getDuelBaseQuestionCount(room.mode as DuelMode),
         }
       }
       throw new GuessSongDuelServiceError('Duel room is already in progress', 409, 'ROOM_NOT_STARTABLE')
@@ -651,36 +724,23 @@ export async function startDuelMatch(userId: string, roomId: string, now = new D
     if (active) throw new GuessSongDuelServiceError('有玩家已经在另一场对决中', 409, 'PLAYER_MATCH_ACTIVE')
 
     const quizConfig = await getGuessSongQuizConfigOrDefault()
+    const mode = room.mode as DuelMode
+    const totalQuestions = getDuelBaseQuestionCount(mode)
     const candidates = await getEligibleDuelCandidates(tx, quizConfig.enabled)
-    if (candidates.length < DUEL_TOTAL_QUESTIONS) {
-      throw new GuessSongDuelServiceError('当前可用曲库不足 30 首，暂时无法开始对决', 409, 'QUESTION_POOL_TOO_SMALL')
+    if (candidates.length < totalQuestions) {
+      throw new GuessSongDuelServiceError(`当前可用曲库不足 ${totalQuestions} 首，暂时无法开始对决`, 409, 'QUESTION_POOL_TOO_SMALL')
     }
-    const selected = shuffle(candidates).slice(0, DUEL_TOTAL_QUESTIONS)
+    const selected = shuffle(candidates).slice(0, totalQuestions)
     const firstStartAt = new Date(now.getTime() + DUEL_COUNTDOWN_MS)
     const firstTimes = questionTimes(firstStartAt)
-    const questions = selected.map((candidate, index) => {
-      const built = buildOptions(candidate)
-      if (!built) throw new GuessSongDuelServiceError('题库存在无效四选一数据，请联系管理员', 409, 'QUESTION_OPTIONS_INVALID')
-      const first = index === 0
-      return {
-        publicToken: createUUID(),
-        questionIndex: index + 1,
-        optionsSnapshot: built.options,
-        correctOptionKey: built.correctOptionKey,
-        songTitle: candidate.songTitle,
-        albumTitle: candidate.albumTitle,
-        audioStoragePath: candidate.GuessSongAudioVariant[0].storagePath,
-        audioDurationSeconds: candidate.GuessSongAudioVariant[0].durationSeconds,
-        ...(first ? firstTimes : {}),
-        sourceQuestionId: candidate.id,
-      }
-    })
+    const questions = selected.map((candidate, index) => buildStoredDuelQuestion(candidate, index + 1, { times: index === 0 ? firstTimes : undefined }))
     const match = await tx.guessSongDuelMatch.create({
       data: {
         roomId,
+        mode,
         startedAt: now,
         currentQuestionIndex: 1,
-        totalQuestions: DUEL_TOTAL_QUESTIONS,
+        totalQuestions,
         GuessSongDuelPlayer: {
           create: [
             { slot: 1, userId: room.hostId, isOnline: true, lastSeenAt: now },
@@ -746,8 +806,12 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
   const activeQuestion = question && question.serverStartedAt && question.audioStartAt && question.answerDeadlineAt
     ? {
         id: question.id,
+        roundId: question.id,
         publicToken: question.publicToken,
+        questionId: question.publicToken,
         questionIndex: question.questionIndex,
+        isOvertime: question.isOvertime,
+        overtimeIndex: question.overtimeIndex,
         options: parseOptions(question.optionsSnapshot),
         audioDurationSeconds: question.audioDurationSeconds,
         serverStartedAt: question.serverStartedAt.toISOString(),
@@ -761,7 +825,7 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
     ? await loadQuestionResult(matchId, question)
     : null
   const result = match.status !== 'PLAYING'
-    ? serializeDuelResult(match, match.GuessSongDuelPlayer)
+    ? await serializeDuelResult(prisma, match, match.GuessSongDuelPlayer)
     : null
   const phase = match.status === 'PLAYING'
     ? (question?.serverStartedAt && question.serverStartedAt > now ? 'STARTING' : 'PLAYING')
@@ -769,6 +833,7 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
   return {
     matchId: match.id,
     roomId: match.Room.id,
+    mode: match.mode as DuelMode,
     status: match.status,
     phase,
     currentQuestionIndex: match.currentQuestionIndex,
@@ -850,36 +915,134 @@ async function resultForTransaction(tx: Prisma.TransactionClient, matchId: strin
     tx.guessSongDuelMatch.findUniqueOrThrow({ where: { id: matchId } }),
     tx.guessSongDuelPlayer.findMany({ where: { matchId }, orderBy: { slot: 'asc' }, include: { User: { select: publicUserSelect } } }),
   ])
-  return serializeDuelResult(match, players)
+  return serializeDuelResult(tx, match, players)
+}
+
+function buildQuestionResult(
+  question: { questionIndex: number; isOvertime: boolean; overtimeIndex: number | null; optionsSnapshot: Prisma.JsonValue; correctOptionKey: string },
+  answers: Array<{ userId: string; selectedOptionKey: string | null; isCorrect: boolean; effectiveElapsedMs: number | null }>,
+): DuelQuestionResult {
+  return {
+    questionIndex: question.questionIndex,
+    isOvertime: question.isOvertime,
+    overtimeIndex: question.overtimeIndex,
+    correctOptionKey: question.correctOptionKey,
+    correctLabel: getOptionLabel(question.optionsSnapshot, question.correctOptionKey),
+    answers: answers.map((answer) => ({
+      userId: answer.userId,
+      selectedOptionKey: answer.selectedOptionKey,
+      correct: answer.isCorrect,
+      effectiveElapsedMs: answer.effectiveElapsedMs,
+    })),
+  }
+}
+
+async function createDuelOvertimeQuestionTx(
+  tx: Prisma.TransactionClient,
+  match: { id: string; totalQuestions: number },
+  questionIndex: number,
+  now: Date,
+) {
+  const quizConfig = await getGuessSongQuizConfigOrDefault()
+  const candidates = await getEligibleDuelCandidates(tx, quizConfig.enabled)
+  const usedRows = await tx.guessSongDuelQuestion.findMany({ where: { matchId: match.id }, select: { sourceQuestionId: true } })
+  const usedIds = new Set(usedRows.map((row) => row.sourceQuestionId).filter((id): id is string => Boolean(id)))
+  const candidate = shuffle(candidates.filter((item) => !usedIds.has(item.id)))[0] || shuffle(candidates)[0]
+  if (!candidate) throw new GuessSongDuelServiceError('当前没有可用的加赛题目', 409, 'OVERTIME_QUESTION_POOL_EMPTY')
+  const overtimeCount = await tx.guessSongDuelQuestion.count({ where: { matchId: match.id, isOvertime: true } })
+  const nextStartAt = new Date(now.getTime() + DUEL_RESULT_PAUSE_MS)
+  const question = await tx.guessSongDuelQuestion.create({
+    data: {
+      ...buildStoredDuelQuestion(candidate, questionIndex, {
+        times: questionTimes(nextStartAt),
+        isOvertime: true,
+        overtimeIndex: overtimeCount + 1,
+      }),
+      matchId: match.id,
+    },
+  })
+  await tx.guessSongDuelMatch.update({ where: { id: match.id }, data: { currentQuestionIndex: questionIndex } })
+  return { question, nextServerStartAt: nextStartAt.toISOString() }
+}
+
+async function advanceDuelQuestionTx(
+  tx: Prisma.TransactionClient,
+  match: { id: string; totalQuestions: number; mode: string },
+  question: { questionIndex: number; isOvertime: boolean },
+  now: Date,
+) {
+  const nextQuestionIndex = question.questionIndex + 1
+  if (!question.isOvertime && nextQuestionIndex <= match.totalQuestions) {
+    const nextStartAt = new Date(now.getTime() + DUEL_RESULT_PAUSE_MS)
+    await tx.guessSongDuelQuestion.update({
+      where: { matchId_questionIndex: { matchId: match.id, questionIndex: nextQuestionIndex } },
+      data: questionTimes(nextStartAt),
+    })
+    await tx.guessSongDuelMatch.update({ where: { id: match.id }, data: { currentQuestionIndex: nextQuestionIndex } })
+    return { nextServerStartAt: nextStartAt.toISOString() }
+  }
+  return createDuelOvertimeQuestionTx(tx, match, nextQuestionIndex, now)
+}
+
+async function completeResolvedQuestionTx(
+  tx: Prisma.TransactionClient,
+  match: { id: string; mode: string; totalQuestions: number; currentQuestionIndex: number },
+  question: { id: string; questionIndex: number; isOvertime: boolean; overtimeIndex: number | null; optionsSnapshot: Prisma.JsonValue; correctOptionKey: string },
+  answers: Array<{ userId: string; selectedOptionKey: string | null; isCorrect: boolean; effectiveElapsedMs: number | null }>,
+  now: Date,
+): Promise<CompletionOutcome | null> {
+  const updatedQuestion = await tx.guessSongDuelQuestion.updateMany({ where: { id: question.id, revealedAt: null }, data: { revealedAt: now } })
+  if (updatedQuestion.count !== 1) return null
+  const questionResult = buildQuestionResult(question, answers)
+  await tx.guessSongDuelMatch.update({ where: { id: match.id }, data: { completedQuestionCount: { increment: 1 } } })
+  const mode = match.mode as DuelMode
+
+  if (mode === 'BUZZER') {
+    const players = await tx.guessSongDuelPlayer.findMany({ where: { matchId: match.id }, select: { userId: true, correctCount: true } })
+    const winner = players.find((player) => player.correctCount >= DUEL_TARGET_CORRECT)
+    if (winner) {
+      const settled = await settleMatchTx(tx, match.id, { finishReason: 'SCORE_THRESHOLD', winnerId: winner.userId, isDraw: false, valid: true, now })
+      return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
+    }
+    const next = await advanceDuelQuestionTx(tx, match, question, now)
+    return { questionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
+  }
+
+  if (question.isOvertime) {
+    const correctAnswers = answers.filter((answer) => answer.isCorrect)
+    if (correctAnswers.length === 1) {
+      const settled = await settleMatchTx(tx, match.id, { finishReason: 'TIEBREAKER', winnerId: correctAnswers[0].userId, isDraw: false, valid: true, now })
+      return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
+    }
+    const next = await advanceDuelQuestionTx(tx, match, question, now)
+    return { questionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
+  }
+
+  if (question.questionIndex >= match.totalQuestions) {
+    const players = await tx.guessSongDuelPlayer.findMany({ where: { matchId: match.id }, select: { userId: true, correctCount: true, totalEffectiveAnswerMs: true } })
+    const winner = compareDuelPlayers(players)
+    if (winner.winnerId) {
+      const settled = await settleMatchTx(tx, match.id, { finishReason: 'ALL_QUESTIONS', winnerId: winner.winnerId, isDraw: false, valid: true, now })
+      return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
+    }
+  }
+
+  const next = await advanceDuelQuestionTx(tx, match, question, now)
+  return { questionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
 }
 
 async function completeQuestionTx(tx: Prisma.TransactionClient, matchId: string, questionIndex: number, now: Date): Promise<CompletionOutcome | null> {
+  await tx.$queryRaw`SELECT id FROM GuessSongDuelMatch WHERE id = ${matchId} FOR UPDATE`
   const match = await tx.guessSongDuelMatch.findUnique({ where: { id: matchId } })
   if (!match || match.status !== 'PLAYING' || match.currentQuestionIndex !== questionIndex) return null
   const question = await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex } } })
   if (!question || question.revealedAt) return null
   const answers = await tx.guessSongDuelAnswer.findMany({ where: { matchId, questionId: question.id } })
+  if (match.mode === 'BUZZER' && resolveBuzzerRound(answers).outcome === 'SCORED') {
+    return completeResolvedQuestionTx(tx, match, question, answers, now)
+  }
   if (answers.length < 2 && (!question.answerDeadlineAt || now < question.answerDeadlineAt)) return null
-  const updatedQuestion = await tx.guessSongDuelQuestion.updateMany({ where: { id: question.id, revealedAt: null }, data: { revealedAt: now } })
-  if (updatedQuestion.count !== 1) return null
-  const questionResult: DuelQuestionResult = {
-    questionIndex,
-    correctOptionKey: question.correctOptionKey,
-    correctLabel: getOptionLabel(question.optionsSnapshot, question.correctOptionKey),
-    answers: answers.map((answer) => ({ userId: answer.userId, selectedOptionKey: answer.selectedOptionKey, correct: answer.isCorrect, effectiveElapsedMs: answer.effectiveElapsedMs })),
-  }
-  await tx.guessSongDuelMatch.update({ where: { id: matchId }, data: { completedQuestionCount: { increment: 1 } } })
-  if (questionIndex >= match.totalQuestions) {
-    const players = await tx.guessSongDuelPlayer.findMany({ where: { matchId }, select: { userId: true, correctCount: true, totalEffectiveAnswerMs: true } })
-    const winner = compareDuelPlayers(players)
-    const settled = await settleMatchTx(tx, matchId, { finishReason: 'ALL_QUESTIONS', winnerId: winner.winnerId, isDraw: winner.isDraw, valid: true, now })
-    return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, matchId), syncUserIds: settled.userIds }
-  }
-  const nextStartAt = new Date(now.getTime() + DUEL_RESULT_PAUSE_MS)
-  const times = questionTimes(nextStartAt)
-  await tx.guessSongDuelQuestion.update({ where: { matchId_questionIndex: { matchId, questionIndex: questionIndex + 1 } }, data: times })
-  await tx.guessSongDuelMatch.update({ where: { id: matchId }, data: { currentQuestionIndex: questionIndex + 1 } })
-  return { questionResult, nextServerStartAt: nextStartAt.toISOString(), matchResult: null, syncUserIds: [] }
+  return completeResolvedQuestionTx(tx, match, question, answers, now)
 }
 
 async function syncDuelUsers(userIds: readonly string[]) {
@@ -891,7 +1054,11 @@ async function syncDuelUsers(userIds: readonly string[]) {
 export async function submitDuelAnswer(input: {
   userId: string
   matchId: string
+  roomId: string
+  roundId: string
+  questionId: string
   questionToken: string
+  answer: string
   selectedOptionKey: string
   clientElapsedMs?: unknown
   latencyEstimateMs?: number
@@ -903,15 +1070,19 @@ export async function submitDuelAnswer(input: {
     const match = await tx.guessSongDuelMatch.findUnique({ where: { id: input.matchId } })
     if (!match) throw new GuessSongDuelServiceError('对决比赛不存在', 404, 'MATCH_NOT_FOUND')
     if (match.status !== 'PLAYING') throw new GuessSongDuelServiceError('比赛已经结束', 409, 'MATCH_FINISHED')
+    if (input.roomId !== match.roomId) throw new GuessSongDuelServiceError('答题请求不属于当前房间', 409, 'STALE_ROUND')
     const player = await tx.guessSongDuelPlayer.findUnique({ where: { matchId_userId: { matchId: input.matchId, userId: input.userId } } })
     if (!player) throw new GuessSongDuelServiceError('你不在这场对决中', 403, 'MATCH_NOT_MEMBER')
-    const question = await tx.guessSongDuelQuestion.findUnique({ where: { publicToken: input.questionToken } })
-    if (!question || question.matchId !== input.matchId || question.questionIndex !== match.currentQuestionIndex) throw new GuessSongDuelServiceError('当前题目已经切换', 409, 'QUESTION_CHANGED')
+    const question = await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId: input.matchId, questionIndex: match.currentQuestionIndex } } })
+    if (!question || question.matchId !== input.matchId || input.roundId !== question.id || input.questionId !== question.publicToken || input.questionToken !== question.publicToken) {
+      throw new GuessSongDuelServiceError('当前题目已经切换', 409, 'STALE_ROUND')
+    }
+    if (question.revealedAt) throw new GuessSongDuelServiceError('当前题目已经结算', 409, 'STALE_ROUND')
+    const existing = await tx.guessSongDuelAnswer.findUnique({ where: { matchId_questionId_userId: { matchId: input.matchId, questionId: question.id, userId: input.userId } } })
+    if (existing) throw new GuessSongDuelServiceError('本题已经作答，不能重复提交', 409, 'ANSWER_ALREADY_SUBMITTED')
     if (!question.audioStartAt || !question.answerDeadlineAt || receivedAt < question.audioStartAt) throw new GuessSongDuelServiceError('题目尚未开始播放', 409, 'QUESTION_TOO_EARLY')
     if (receivedAt > question.answerDeadlineAt) throw new GuessSongDuelServiceError('本题已超时', 409, 'QUESTION_TIMEOUT')
-    const existing = await tx.guessSongDuelAnswer.findUnique({ where: { matchId_questionId_userId: { matchId: input.matchId, questionId: question.id, userId: input.userId } } })
-    if (existing) return { duplicate: true, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, questionCompletion: null as CompletionOutcome | null }
-    const optionKey = typeof input.selectedOptionKey === 'string' ? input.selectedOptionKey.trim().toUpperCase() : ''
+    const optionKey = typeof input.answer === 'string' ? input.answer.trim().toUpperCase() : ''
     const options = parseOptions(question.optionsSnapshot)
     if (!options.some((option) => option.key === optionKey)) throw new GuessSongDuelServiceError('答案选项无效', 400, 'OPTION_INVALID')
     const correct = optionKey === question.correctOptionKey
@@ -944,19 +1115,9 @@ export async function submitDuelAnswer(input: {
     if (suspicious) await tx.guessSongDuelMatch.update({ where: { id: input.matchId }, data: { isSuspicious: true } })
 
     let questionCompletion: CompletionOutcome | null = null
-    const updatedPlayerCorrect = player.correctCount + (correct ? 1 : 0)
-    if (correct && updatedPlayerCorrect >= DUEL_TARGET_CORRECT) {
-      await tx.guessSongDuelQuestion.update({ where: { id: question.id }, data: { revealedAt: receivedAt } })
-      await tx.guessSongDuelMatch.update({ where: { id: input.matchId }, data: { completedQuestionCount: { increment: 1 } } })
+    if (match.mode === 'BUZZER' && correct) {
       const answerRows = await tx.guessSongDuelAnswer.findMany({ where: { matchId: input.matchId, questionId: question.id } })
-      const questionResult: DuelQuestionResult = {
-        questionIndex: question.questionIndex,
-        correctOptionKey: question.correctOptionKey,
-        correctLabel: getOptionLabel(question.optionsSnapshot, question.correctOptionKey),
-        answers: answerRows.map((answer) => ({ userId: answer.userId, selectedOptionKey: answer.selectedOptionKey, correct: answer.isCorrect, effectiveElapsedMs: answer.effectiveElapsedMs })),
-      }
-      const settled = await settleMatchTx(tx, input.matchId, { finishReason: 'SCORE_THRESHOLD', winnerId: input.userId, isDraw: false, valid: true, now: receivedAt })
-      questionCompletion = { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, input.matchId), syncUserIds: settled.userIds }
+      questionCompletion = await completeResolvedQuestionTx(tx, match, question, answerRows, receivedAt)
     } else {
       const answerCount = await tx.guessSongDuelAnswer.count({ where: { matchId: input.matchId, questionId: question.id } })
       if (answerCount >= 2) questionCompletion = await completeQuestionTx(tx, input.matchId, question.questionIndex, receivedAt)
@@ -1066,10 +1227,10 @@ export async function listDuelHistory(userId: string) {
       },
     },
   })
-  return rows.map((row) => ({
-    result: serializeDuelResult(row.Match, row.Match.GuessSongDuelPlayer),
+  return Promise.all(rows.map(async (row) => ({
+    result: await serializeDuelResult(prisma, row.Match, row.Match.GuessSongDuelPlayer),
     roomCode: row.Match.Room.roomCode,
-  }))
+  })))
 }
 
 export async function getDuelAdminMatches(limit = 100) {
@@ -1079,23 +1240,38 @@ export async function getDuelAdminMatches(limit = 100) {
     include: {
       Room: { select: { roomCode: true } },
       GuessSongDuelPlayer: { orderBy: { slot: 'asc' }, include: { User: { select: publicUserSelect } } },
-      GuessSongDuelQuestion: { orderBy: { questionIndex: 'asc' }, select: { id: true, questionIndex: true, songTitle: true, correctOptionKey: true, revealedAt: true } },
+      GuessSongDuelQuestion: { orderBy: { questionIndex: 'asc' }, select: { id: true, questionIndex: true, isOvertime: true, songTitle: true, correctOptionKey: true, revealedAt: true } },
       GuessSongDuelAnswer: { select: { questionId: true, userId: true, selectedOptionKey: true, isCorrect: true, receivedAt: true, effectiveElapsedMs: true, latencyEstimateMs: true, suspicious: true } },
     },
   })
-  return matches.map((match) => ({
-    id: match.id,
-    roomCode: match.Room.roomCode,
-    status: match.status,
-    finishReason: match.finishReason,
-    winnerId: match.winnerId,
-    isDraw: match.isDraw,
-    isSuspicious: match.isSuspicious,
-    rewardAmount: match.rewardAmount,
-    startedAt: match.startedAt.toISOString(),
-    finishedAt: match.finishedAt?.toISOString() || null,
-    players: match.GuessSongDuelPlayer.map((player) => ({ userId: player.userId, name: getPublicUserDisplayName(player.User), correctCount: player.correctCount, slot: player.slot })),
-    questions: match.GuessSongDuelQuestion,
-    answers: match.GuessSongDuelAnswer.map((answer) => ({ ...answer, receivedAt: answer.receivedAt.toISOString() })),
-  }))
+  return matches.map((match) => {
+    const questionIsOvertime = new Map(match.GuessSongDuelQuestion.map((question) => [question.id, question.isOvertime]))
+    const baseCorrectCounts = countDuelBaseCorrectAnswers(match.GuessSongDuelAnswer.map((answer) => ({
+      userId: answer.userId,
+      isCorrect: answer.isCorrect,
+      isOvertime: questionIsOvertime.get(answer.questionId) || false,
+    })))
+    return {
+      id: match.id,
+      roomCode: match.Room.roomCode,
+      mode: match.mode,
+      status: match.status,
+      finishReason: match.finishReason,
+      winnerId: match.winnerId,
+      isDraw: match.isDraw,
+      isSuspicious: match.isSuspicious,
+      rewardAmount: match.rewardAmount,
+      startedAt: match.startedAt.toISOString(),
+      finishedAt: match.finishedAt?.toISOString() || null,
+      players: match.GuessSongDuelPlayer.map((player) => ({
+        userId: player.userId,
+        name: getPublicUserDisplayName(player.User),
+        correctCount: player.correctCount,
+        baseCorrectCount: baseCorrectCounts.get(player.userId) || 0,
+        slot: player.slot,
+      })),
+      questions: match.GuessSongDuelQuestion,
+      answers: match.GuessSongDuelAnswer.map((answer) => ({ ...answer, receivedAt: answer.receivedAt.toISOString() })),
+    }
+  })
 }

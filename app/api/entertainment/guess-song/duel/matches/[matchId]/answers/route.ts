@@ -19,8 +19,12 @@ export async function POST(request: Request, { params }: Context) {
     const outcome = await submitDuelAnswer({
       userId: guard.user.id,
       matchId,
-      questionToken: body?.questionToken as string,
-      selectedOptionKey: body?.selectedOptionKey as string,
+      roomId: body?.roomId as string,
+      roundId: body?.roundId as string,
+      questionId: body?.questionId as string,
+      questionToken: body?.questionToken as string || body?.questionId as string,
+      answer: body?.answer as string || body?.selectedOptionKey as string,
+      selectedOptionKey: body?.selectedOptionKey as string || body?.answer as string,
       clientElapsedMs: body?.clientElapsedMs,
       // HTTP fallback has no server-measured RTT handshake; never trust a client-supplied compensation.
       latencyEstimateMs: 0,

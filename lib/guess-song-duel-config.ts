@@ -1,4 +1,9 @@
-export const DUEL_TOTAL_QUESTIONS = 30
+export type DuelMode = 'SCORE' | 'BUZZER'
+
+export const DUEL_SCORE_TOTAL_QUESTIONS = 30
+export const DUEL_BUZZER_TOTAL_QUESTIONS = 31
+// Kept as the legacy default for callers that predate the two-mode split.
+export const DUEL_TOTAL_QUESTIONS = DUEL_SCORE_TOTAL_QUESTIONS
 export const DUEL_TARGET_CORRECT = 16
 export const DUEL_AUDIO_DURATION_SECONDS = 7
 export const DUEL_ANSWER_SECONDS = 10
@@ -16,6 +21,33 @@ export const DUEL_WAITING_ROOM_TTL_MS = 30 * 60_000
 // Backwards-compatible name for callers that used the old retention constant.
 export const DUEL_ROOM_RETENTION_MS = DUEL_WAITING_ROOM_TTL_MS
 export const DUEL_INVITE_RETENTION_MS = 15 * 60_000
+
+export const DUEL_MODE_LABELS: Record<DuelMode, string> = {
+  SCORE: '比分模式',
+  BUZZER: '抢答模式',
+}
+
+export const DUEL_MODE_RULES: Record<DuelMode, string> = {
+  SCORE: '双方同时挑战相同的 30 道题，每题只能作答一次。30 题结束后，答对更多的一方获胜。',
+  BUZZER: '双方抢答相同题目，抢答正确即可拿下本题；抢答错误后本题不能再次作答，对方仍可继续回答。率先拿下 16 题者获胜。',
+}
+
+export function normalizeDuelMode(value: unknown): DuelMode | null {
+  if (value === 'SCORE' || value === 'BUZZER') return value
+  return null
+}
+
+export function getDuelBaseQuestionCount(mode: DuelMode) {
+  return mode === 'BUZZER' ? DUEL_BUZZER_TOTAL_QUESTIONS : DUEL_SCORE_TOTAL_QUESTIONS
+}
+
+export function getDuelModeLabel(mode: DuelMode) {
+  return DUEL_MODE_LABELS[mode]
+}
+
+export function getDuelModeRule(mode: DuelMode) {
+  return DUEL_MODE_RULES[mode]
+}
 
 export function isDuelWaitingRoomExpired(
   status: 'WAITING' | 'READY' | 'PLAYING' | 'FINISHED' | 'CLOSED',
