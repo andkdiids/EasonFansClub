@@ -402,7 +402,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
       friendRequests: bigint | number
       messages: bigint | number
       feedback: bigint | number
-      system: bigint | number
+      systemCount: bigint | number
     }>>`
       SELECT
         COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS replies,
@@ -410,7 +410,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
         COUNT(CASE WHEN n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
         COUNT(CASE WHEN n.type = 'MESSAGE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS messages,
         COUNT(CASE WHEN n.link LIKE '/feedback/%' THEN 1 END) AS feedback,
-        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS system
+        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount
       FROM Notification n
       WHERE n.recipientId = ${userId}
         AND n.isRead = 0
@@ -426,7 +426,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
     friendRequests: Number(personalRow?.friendRequests || 0),
     messages: Number(personalRow?.messages || 0),
     feedback: Number(personalRow?.feedback || 0),
-    system: Number(personalRow?.system || 0),
+    system: Number(personalRow?.systemCount || 0),
   }
 
   // Direct messages have their own conversation read cursor and are rendered
