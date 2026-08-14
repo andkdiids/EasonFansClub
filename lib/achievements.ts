@@ -1,6 +1,7 @@
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee, HUNDRED_DAY_RECORD_REWARD } from '@/lib/registration-fee'
+import { DUEL_ACHIEVEMENT_CONFIG } from '@/lib/guess-song-duel-config'
 
 export type AchievementSyncCategory =
   | 'REGISTER'
@@ -10,6 +11,7 @@ export type AchievementSyncCategory =
   | 'MUSIC'
   | 'FRIEND'
   | 'ACTIVE'
+  | 'DUEL'
   | 'SPECIAL'
 
 export const rarityText: Record<string, string> = {
@@ -28,6 +30,7 @@ export const categoryText: Record<string, string> = {
   MUSIC: 'EasMusic 成就',
   FRIEND: '好友成就',
   ACTIVE: '活跃成就',
+  DUEL: '听听·对决',
   SPECIAL: '特殊成就',
 }
 
@@ -36,6 +39,7 @@ export async function getUserAchievementStats(userId: string) {
     where: { id: userId },
     include: {
       Profile: true,
+      GuessSongDuelStats: { select: { wins: true, participations: true } },
       CheckIn: { select: { checkinDateKey: true } },
       _count: {
         select: {
@@ -68,6 +72,8 @@ export async function getUserAchievementStats(userId: string) {
     listenHours: Math.floor((listen._sum.durationSeconds || 0) / 3600),
     playTotal: user._count.MusicPlayRecord,
     friendTotal: user._count.Friendship_Friendship_userAIdToUser + user._count.Friendship_Friendship_userBIdToUser,
+    duelWins: user.GuessSongDuelStats?.wins || 0,
+    duelParticipations: user.GuessSongDuelStats?.participations || 0,
     activeDays,
   }
 }
@@ -113,6 +119,39 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
         sortOrder: 13,
       },
     })
+  }
+
+  if (!categories?.length || categories.includes('DUEL')) {
+    for (const config of DUEL_ACHIEVEMENT_CONFIG) {
+      await prisma.achievement.upsert({
+        where: { slug: config.slug },
+        update: {
+          title: config.title,
+          description: config.description,
+          icon: config.icon,
+          category: 'DUEL',
+          rarity: 'EPIC',
+          conditionKey: config.conditionKey,
+          conditionValue: config.conditionValue,
+          isAutoGrant: true,
+          isVisible: true,
+          sortOrder: config.sortOrder,
+        },
+        create: {
+          slug: config.slug,
+          title: config.title,
+          description: config.description,
+          icon: config.icon,
+          category: 'DUEL',
+          rarity: 'EPIC',
+          conditionKey: config.conditionKey,
+          conditionValue: config.conditionValue,
+          isAutoGrant: true,
+          isVisible: true,
+          sortOrder: config.sortOrder,
+        },
+      })
+    }
   }
 
   const achievements = await prisma.achievement.findMany({

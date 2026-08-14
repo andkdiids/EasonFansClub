@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import type { Prisma } from '@prisma/client'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
@@ -7,6 +8,9 @@ import { ImageViewer } from '@/components/ImageViewer'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
+import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
+import { ForumDiscoveryDetailController } from '@/components/ForumDiscoveryDetailController'
+import { ForumDiscoveryDetailTopbar } from '@/components/ForumDiscoveryDetailTopbar'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
@@ -20,10 +24,17 @@ import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMoun
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { emitRealtime } from '@/lib/realtime'
+import {
+  clampPostReplyPage,
+  getPostReplyOffset,
+  getPostReplyOrderBy,
+  getPostReplyTotalPages,
+  parsePostReplySort,
+  POST_REPLY_PAGE_SIZE,
+  type PostReplySort,
+} from '@/lib/post-replies'
 
 export const dynamic = 'force-dynamic'
-
-const POST_DETAIL_REPLY_LIMIT = 50
 
 function PostLoadFallback() {
   return (
@@ -141,60 +152,108 @@ function loadPost(postId: string, userId?: string) {
   })
 }
 
-function loadPostReplies(postId: string, userId?: string) {
-  return prisma.reply.findMany({
-    where: { postId, isDeleted: false },
-    orderBy: { createdAt: 'asc' },
-    take: POST_DETAIL_REPLY_LIMIT,
+
+const replyDetailSelect = {
+  id: true,
+  content: true,
+  parentId: true,
+  likeCount: true,
+  isPinned: true,
+  ipRegion: true,
+  stickerId: true,
+  sticker: { select: { url: true } },
+  ReplyLike: {
+    orderBy: { createdAt: 'desc' },
+    take: 10,
     select: {
-      id: true,
-      content: true,
-      parentId: true,
-      likeCount: true,
-      stickerId: true,
-      sticker: { select: { url: true } },
-      // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由批量查询单独判断。
-      ReplyLike: {
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        select: {
-          userId: true,
-          User: {
-            select: {
-              id: true,
-              uid: true,
-              nickname: true,
-              avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
-            },
-          },
-        },
-      },
-      ReplyMention: {
-        orderBy: { startIndex: 'asc' },
-        select: {
-          id: true,
-          startIndex: true,
-          endIndex: true,
-          User_ReplyMention_mentionedUserIdToUser: {
-            select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
-          },
-        },
-      },
-      createdAt: true,
+      userId: true,
       User: {
         select: {
           id: true,
           uid: true,
           nickname: true,
-          level: true,
           avatarUrl: true,
-          status: true,
-          isDeleted: true,
           Profile: { select: { displayName: true, avatarUrl: true } },
         },
       },
     },
+  },
+  ReplyMention: {
+    orderBy: { startIndex: 'asc' },
+    select: {
+      id: true,
+      startIndex: true,
+      endIndex: true,
+      User_ReplyMention_mentionedUserIdToUser: {
+        select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
+      },
+    },
+  },
+  createdAt: true,
+  User: {
+    select: {
+      id: true,
+      uid: true,
+      nickname: true,
+      level: true,
+      avatarUrl: true,
+      status: true,
+      isDeleted: true,
+      Profile: { select: { displayName: true, avatarUrl: true } },
+    },
+  },
+} satisfies Prisma.ReplySelect
+
+async function loadPostReplies(postId: string, sort: PostReplySort, requestedPage: number) {
+  return prisma.$transaction(async (tx) => {
+    const [pinnedReply, normalTotal] = await Promise.all([
+      tx.reply.findFirst({
+        where: { postId, isDeleted: false, parentId: null, isPinned: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: replyDetailSelect,
+      }),
+      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false } }),
+    ])
+    const totalPages = getPostReplyTotalPages(normalTotal)
+    const page = clampPostReplyPage(requestedPage, totalPages)
+    const normalRoots = await tx.reply.findMany({
+      where: { postId, isDeleted: false, parentId: null, isPinned: false },
+      orderBy: getPostReplyOrderBy(sort),
+      skip: getPostReplyOffset(page),
+      take: POST_REPLY_PAGE_SIZE,
+      select: replyDetailSelect,
+    })
+
+    const rootIds = [pinnedReply?.id, ...normalRoots.map((reply) => reply.id)].filter((id): id is string => Boolean(id))
+    const childRows = rootIds.length
+      ? await tx.reply.findMany({
+          where: { postId, isDeleted: false, parentId: { not: null } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: replyDetailSelect,
+        })
+      : []
+    const includedRootIds = new Set(rootIds)
+    let added = true
+    while (added) {
+      added = false
+      for (const child of childRows) {
+        if (child.parentId && includedRootIds.has(child.parentId) && !includedRootIds.has(child.id)) {
+          includedRootIds.add(child.id)
+          added = true
+        }
+      }
+    }
+
+    return {
+      rows: [
+        ...(pinnedReply ? [pinnedReply] : []),
+        ...normalRoots,
+        ...childRows.filter((reply) => includedRootIds.has(reply.id)),
+      ],
+      total: normalTotal,
+      totalPages,
+      page,
+    }
   })
 }
 
@@ -203,6 +262,8 @@ type FocusedReply = {
   content: string
   parentId: string | null
   likeCount: number
+  isPinned: boolean
+  ipRegion: string | null
   createdAt: Date
   stickerId: string | null
   sticker: { url: string } | null
@@ -227,6 +288,8 @@ type FocusedReplyQueryRow = {
   content: string
   parentId: string | null
   likeCount: number
+  isPinned: boolean
+  ipRegion: string | null
   createdAt: Date
   stickerId: string | null
   sticker: { url: string } | null
@@ -257,7 +320,9 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
         content: true,
         parentId: true,
         likeCount: true,
-        createdAt: true,
+         isPinned: true,
+         ipRegion: true,
+         createdAt: true,
         stickerId: true,
         sticker: { select: { url: true } },
         User: {
@@ -303,10 +368,12 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentSort?: string; commentPage?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
   const focusId = query.focus?.slice(0, 80)
+  const commentSort = parsePostReplySort(query.commentSort)
+  const requestedCommentPage = Math.max(1, Number.parseInt(query.commentPage || '1', 10) || 1)
   const user = await getCurrentUser()
 
   let post: Awaited<ReturnType<typeof loadPost>>
@@ -353,9 +420,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   }
 
   let commentsLoadError = false
-  let postReplies: Awaited<ReturnType<typeof loadPostReplies>> = []
+  let postReplies: Awaited<ReturnType<typeof loadPostReplies>>['rows'] = []
+  let commentPage = 1
+  let commentTotalPages = 1
   try {
-    postReplies = await loadPostReplies(postId, user?.id)
+    const loadedReplies = await loadPostReplies(postId, commentSort, requestedCommentPage)
+    postReplies = loadedReplies.rows
+    commentPage = loadedReplies.page
+    commentTotalPages = loadedReplies.totalPages
   } catch (error) {
     commentsLoadError = true
     console.error('[post:comments:load-failed]', { postId, userId: user?.id, error })
@@ -370,6 +442,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         content: reply.content,
         parentId: reply.parentId,
         likeCount: reply.likeCount,
+        isPinned: reply.isPinned,
+        ipRegion: reply.ipRegion,
         createdAt: reply.createdAt,
         stickerId: reply.stickerId,
         sticker: reply.sticker,
@@ -512,10 +586,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     .map((reply) => reply.id)
 
   return (
-    <>
-      <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
+    <ForumDiscoveryDetailController>
+      <>
+      <main className="forum-discovery-detail-shell site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         {user ? <MarkModerationReadOnMount /> : null}
-        <BackButton fallbackHref="/forum" />
+        <ForumDiscoveryDetailTopbar authorName={authorName} authorAvatar={authorAvatar} authorUid={post.User.uid} />
+        <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" /></div>
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
@@ -563,7 +639,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               )}
             </div>
           ) : null}
-          <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
+          <div className="post-detail-legacy-actions mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
               <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
@@ -599,17 +675,32 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
         <CommentSectionBoundary>
           <PostRepliesSection
+            key={`${commentSort}:${commentPage}`}
             postId={post.id}
             initialReplies={replyRows}
             initialReplyCount={post.replyCount}
             currentUserId={user?.id}
             currentUserRole={user?.role}
+            postAuthorId={post.User.id}
             focusId={focusId}
+            sort={commentSort}
+            page={commentPage}
+            totalPages={commentTotalPages}
             hotReplyIds={hotReplyIds}
             commentsLoadError={commentsLoadError}
           />
         </CommentSectionBoundary>
       </main>
-    </>
+      <ForumDiscoveryActionBar
+        postId={post.id}
+        currentUserId={user?.id}
+        initialLiked={liked}
+        initialLikeCount={post.likeCount}
+        initialFavorited={favorited}
+        initialFavoriteCount={post.favoriteCount}
+        initialReplyCount={post.replyCount}
+      />
+      </>
+    </ForumDiscoveryDetailController>
   )
 }

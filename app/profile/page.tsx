@@ -8,6 +8,7 @@ import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
+import { locationFromProfile } from '@/lib/user-location'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +35,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
+      ipRegion: true,
       email: true,
       phone: true,
       emailVerifiedAt: true,
@@ -76,6 +78,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     defaultAvatarOptions,
     backgroundUrl: background || '',
     bio,
+    location: locationFromProfile(profile.Profile),
     email: profile.email || '',
     phone: profile.phone || '',
     emailVerifiedAt: profile.emailVerifiedAt ? profile.emailVerifiedAt.toISOString() : null,
@@ -96,6 +99,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           displayName,
           baseDisplayName: displayName,
           bio,
+          location: locationFromProfile(profile.Profile),
+          ipRegion: profile.ipRegion,
           avatarUrl: avatar,
           backgroundUrl: background,
           createdAt: profile.createdAt,
@@ -107,6 +112,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           isSelf: true,
           isFriend: false,
           isBlocked: false,
+          isFollowed: false,
           hasViewer: true,
           friendStatus: 'NONE',
           initialRemark: null,

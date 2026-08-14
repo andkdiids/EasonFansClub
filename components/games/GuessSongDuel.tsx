@@ -1,0 +1,586 @@
+'use client'
+
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DuelClientCommand, DuelMatchResult, DuelMatchState, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
+
+type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null }
+type DuelStats = { wins: number; participations: number; winRate: number }
+type DuelHistoryItem = { result: DuelMatchResult; roomCode: string }
+type ApiPayload = { ok?: boolean; message?: string; code?: string; [key: string]: unknown }
+
+async function api<T extends ApiPayload>(url: string, init?: RequestInit) {
+  const response = await fetch(url, { cache: 'no-store', ...init })
+  const payload = await response.json().catch(() => ({})) as T
+  if (!response.ok || payload.ok === false) throw new Error(payload.message || '请求失败')
+  return payload
+}
+
+function avatar(user: { name: string; avatarUrl: string | null }) {
+  return user.avatarUrl
+    ? <span className="duel-avatar-image" style={{ backgroundImage: `url(${user.avatarUrl})` }} role="img" aria-label="" />
+    : <span className="duel-avatar-fallback">{user.name.slice(0, 1)}</span>
+}
+
+function friendName(friend: Friend) {
+  return friend.profile?.displayName || friend.name || friend.nickname || '好友'
+}
+
+function formatSeconds(value: number | null) {
+  return value === null ? '—' : `${(value / 1000).toFixed(2)}s`
+}
+
+function formatDuration(startedAt: string, finishedAt: string | null) {
+  if (!finishedAt) return '—'
+  const seconds = Math.max(0, Math.round((new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000))
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
+}
+
+function unlockAudio() {
+  if (typeof window === 'undefined') return
+  const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioContextClass) return
+  try {
+    const context = new AudioContextClass()
+    void context.resume().then(() => context.close()).catch(() => undefined)
+  } catch {
+    // The actual game audio will show a retry affordance if the browser blocks it.
+  }
+}
+
+export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId: string; initialInviteToken: string | null }>) {
+  const router = useRouter()
+  const [rooms, setRooms] = useState<DuelRoomState[]>([])
+  const [stats, setStats] = useState<DuelStats>({ wins: 0, participations: 0, winRate: 0 })
+  const [history, setHistory] = useState<DuelHistoryItem[]>([])
+  const [room, setRoom] = useState<DuelRoomState | null>(null)
+  const [roomId, setRoomId] = useState<string | null>(null)
+  const [matchId, setMatchId] = useState<string | null>(null)
+  const [match, setMatch] = useState<DuelMatchState | null>(null)
+  const [questionResult, setQuestionResult] = useState<DuelMatchState['questionResult']>(null)
+  const [view, setView] = useState<'lobby' | 'room' | 'match' | 'result'>('lobby')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [roomCode, setRoomCode] = useState('')
+  const [roomPassword, setRoomPassword] = useState('')
+  const [isPublic, setIsPublic] = useState(true)
+  const [searchCode, setSearchCode] = useState('')
+  const [joinPassword, setJoinPassword] = useState('')
+  const [pendingJoinRoom, setPendingJoinRoom] = useState<DuelRoomState | null>(null)
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [selectedFriendId, setSelectedFriendId] = useState('')
+  const [audioBlocked, setAudioBlocked] = useState(false)
+  const [clockTick, setClockTick] = useState(Date.now())
+
+  const socketRef = useRef<WebSocket | null>(null)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptRef = useRef(0)
+  const stoppedRef = useRef(false)
+  const offsetRef = useRef(0)
+  const roomIdRef = useRef<string | null>(null)
+  const matchIdRef = useRef<string | null>(null)
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Keep the Audio element stable while score/presence updates replace the match object.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const audioQuestion = useMemo(() => match?.question || null, [match?.question?.publicToken, match?.question?.audioStartAt, match?.question?.audioUrl, match?.question?.preloadAudioUrl])
+
+  const setDuelError = useCallback((reason: unknown) => {
+    setError(reason instanceof Error ? reason.message : '对决请求失败')
+  }, [])
+
+  const loadLobby = useCallback(async () => {
+    try {
+      const [roomData, statData] = await Promise.all([
+        api<{ rooms: DuelRoomState[] }>('/api/entertainment/guess-song/duel/rooms'),
+        api<{ stats: DuelStats; history: DuelHistoryItem[] }>('/api/entertainment/guess-song/duel/stats'),
+      ])
+      setRooms(roomData.rooms || [])
+      setStats(statData.stats || { wins: 0, participations: 0, winRate: 0 })
+      setHistory(statData.history || [])
+    } catch (reason) {
+      setDuelError(reason)
+    }
+  }, [setDuelError])
+
+  const openRoom = useCallback((nextRoom: DuelRoomState) => {
+    setError('')
+    setRoom(nextRoom)
+    setRoomId(nextRoom.id)
+    setMatchId(nextRoom.matchId)
+    setView(nextRoom.matchId ? 'match' : 'room')
+    if (nextRoom.matchId) setMatch((current) => current)
+    router.replace(`/games/guess-song/duel?room=${encodeURIComponent(nextRoom.id)}`)
+  }, [router])
+
+  useEffect(() => {
+    roomIdRef.current = roomId
+    matchIdRef.current = matchId
+  }, [roomId, matchId])
+
+  useEffect(() => {
+    void loadLobby()
+    const queryRoomId = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('room') || ''
+    const boot = async () => {
+      try {
+        if (initialInviteToken) {
+          const data = await api<{ room: DuelRoomState }>('/api/entertainment/guess-song/duel/invites/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ inviteToken: initialInviteToken }),
+          })
+          openRoom(data.room)
+          return
+        }
+        if (queryRoomId) {
+          const data = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(queryRoomId)}`)
+          if (data.room.host.id === userId || data.room.challenger?.id === userId) openRoom(data.room)
+        }
+      } catch (reason) {
+        setDuelError(reason)
+        router.replace('/games/guess-song/duel')
+      }
+    }
+    void boot()
+  }, [initialInviteToken, loadLobby, openRoom, router, setDuelError, userId])
+
+  const handleRealtimeEvent = useCallback((event: DuelRealtimeEvent) => {
+    if (event.type === 'TIME_SYNC') {
+      const receivedAt = Date.now()
+      offsetRef.current = ((event.serverReceivedAt + event.serverSentAt) / 2) - ((event.clientSentAt + receivedAt) / 2)
+      socketRef.current?.send(JSON.stringify({ type: 'TIME_SYNC_ACK', requestId: event.requestId } satisfies DuelClientCommand))
+      return
+    }
+    if (event.type === 'ROOM_STATE') {
+      setRoom(event.state)
+      if (event.state.status === 'CLOSED' && !event.state.matchId) {
+        setError('房主已离开，房间已关闭')
+        setRoom(null)
+        setRoomId(null)
+        setView('lobby')
+        router.replace('/games/guess-song/duel')
+        return
+      }
+      if (event.state.matchId) {
+        setMatchId(event.state.matchId)
+        setView('match')
+      } else if (event.state.status !== 'CLOSED') {
+        setView('room')
+      }
+      return
+    }
+    if (event.type === 'MATCH_STARTING') {
+      setMatchId(event.matchId)
+      setView('match')
+      return
+    }
+    if (event.type === 'MATCH_STATE') {
+      setMatch(event.state)
+      if (event.state.result) {
+        setView('result')
+        setQuestionResult(null)
+      } else {
+        setView('match')
+      }
+      return
+    }
+    if (event.type === 'QUESTION_START') {
+      setMatch((current) => current ? { ...current, phase: 'PLAYING', question: event.state, currentQuestionIndex: event.state.questionIndex, completedQuestionCount: event.completedQuestionCount, players: event.players, questionResult: null } : current)
+      setQuestionResult(null)
+      setAudioBlocked(false)
+      return
+    }
+    if (event.type === 'PLAYER_ANSWERED') {
+      setMatch((current) => current ? { ...current, players: current.players.map((player) => player.userId === event.userId ? { ...player, submitted: true } : player) } : current)
+      return
+    }
+    if (event.type === 'PLAYER_PRESENCE') {
+      setMatch((current) => current ? { ...current, players: current.players.map((player) => player.userId === event.userId ? { ...player, isOnline: event.isOnline } : player) } : current)
+      return
+    }
+    if (event.type === 'QUESTION_RESULT') {
+      setQuestionResult(event.result)
+      setMatch((current) => current ? {
+        ...current,
+        questionResult: event.result,
+        players: current.players.map((player) => {
+          const answer = event.result.answers.find((item) => item.userId === player.userId)
+          return answer?.correct
+            ? { ...player, submitted: true, correctCount: player.correctCount + 1, totalEffectiveAnswerMs: player.totalEffectiveAnswerMs + (answer.effectiveElapsedMs || 0) }
+            : answer ? { ...player, submitted: true } : player
+        }),
+      } : current)
+      return
+    }
+    if (event.type === 'MATCH_FINISHED') {
+      setMatch((current) => current ? { ...current, status: event.result.status, phase: event.result.status, result: event.result } : current)
+      setView('result')
+      setQuestionResult(null)
+      void loadLobby()
+      return
+    }
+    if (event.type === 'ERROR') setError(event.message)
+  }, [loadLobby, router])
+
+  useEffect(() => {
+    if (!roomId && !matchId) return
+    stoppedRef.current = false
+    const connect = () => {
+      if (stoppedRef.current || socketRef.current || typeof window === 'undefined') return
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const socket = new WebSocket(`${protocol}//${window.location.host}/ws/duel`)
+      socketRef.current = socket
+      socket.onopen = () => {
+        reconnectAttemptRef.current = 0
+        const sync = () => {
+          const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+          socket.send(JSON.stringify({ type: 'TIME_SYNC_REQUEST', requestId, clientSentAt: Date.now() } satisfies DuelClientCommand))
+        }
+        for (let index = 0; index < 5; index += 1) window.setTimeout(sync, index * 80)
+        if (roomIdRef.current) socket.send(JSON.stringify({ type: 'JOIN_ROOM', roomId: roomIdRef.current } satisfies DuelClientCommand))
+        if (matchIdRef.current) socket.send(JSON.stringify({ type: 'JOIN_MATCH', matchId: matchIdRef.current } satisfies DuelClientCommand))
+      }
+      socket.onmessage = (message) => {
+        try {
+          handleRealtimeEvent(JSON.parse(String(message.data)) as DuelRealtimeEvent)
+        } catch {
+          // Ignore malformed frames; the HTTP state endpoint remains available for recovery.
+        }
+      }
+      socket.onclose = () => {
+        if (socketRef.current !== socket) return
+        socketRef.current = null
+        if (stoppedRef.current) return
+        const delay = [500, 1000, 2000, 4000, 8000, 15_000][Math.min(reconnectAttemptRef.current, 5)]
+        reconnectAttemptRef.current += 1
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null
+          connect()
+        }, delay)
+      }
+      socket.onerror = () => socket.close()
+    }
+    connect()
+    return () => {
+      stoppedRef.current = true
+      if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+      const socket = socketRef.current
+      socketRef.current = null
+      socket?.close()
+    }
+  }, [roomId, matchId, handleRealtimeEvent])
+
+  useEffect(() => {
+    if (!audioQuestion || view !== 'match') return
+    const question = audioQuestion
+    const audio = new Audio(question.audioUrl)
+    audio.preload = 'auto'
+    audio.controls = false
+    currentAudioRef.current?.pause()
+    currentAudioRef.current = audio
+    if (question.preloadAudioUrl) {
+      const nextAudio = new Audio(question.preloadAudioUrl)
+      nextAudio.preload = 'auto'
+      nextAudio.controls = false
+    }
+    const delay = Math.max(0, new Date(question.audioStartAt).getTime() - (Date.now() + offsetRef.current))
+    const timer = window.setTimeout(() => {
+      void audio.play().catch(() => setAudioBlocked(true))
+    }, delay)
+    return () => {
+      window.clearTimeout(timer)
+      audio.pause()
+      audio.src = ''
+    }
+  }, [audioQuestion, view])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTick(Date.now()), 200)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const countdown = useMemo(() => {
+    if (!match?.question || match.phase !== 'STARTING') return 0
+    return Math.max(0, Math.ceil((new Date(match.question.serverStartedAt).getTime() - (clockTick + offsetRef.current)) / 1000))
+  }, [clockTick, match])
+
+  const currentQuestion = match?.question
+  const audioStarted = Boolean(currentQuestion && clockTick + offsetRef.current >= new Date(currentQuestion.audioStartAt).getTime())
+  const deadlinePassed = Boolean(currentQuestion && clockTick + offsetRef.current > new Date(currentQuestion.answerDeadlineAt).getTime())
+  const me = match?.players.find((player) => player.userId === userId) || null
+  const opponent = match?.players.find((player) => player.userId !== userId) || null
+
+  async function createRoom() {
+    setBusy(true)
+    setError('')
+    unlockAudio()
+    try {
+      const data = await api<{ room: DuelRoomState }>('/api/entertainment/guess-song/duel/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomCode: roomCode || undefined, password: roomPassword || undefined, isPublic }),
+      })
+      setRoomCode('')
+      setRoomPassword('')
+      openRoom(data.room)
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function searchRoom() {
+    if (!searchCode.trim()) return
+    setBusy(true)
+    try {
+      const data = await api<{ rooms: DuelRoomState[] }>(`/api/entertainment/guess-song/duel/rooms?q=${encodeURIComponent(searchCode.trim())}`)
+      const found = data.rooms[0]
+      if (!found) throw new Error('没有找到可加入的对决房间')
+      setPendingJoinRoom(found)
+      setJoinPassword('')
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function joinRoom(target: DuelRoomState, password?: string) {
+    setBusy(true)
+    setError('')
+    unlockAudio()
+    try {
+      const data = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(target.id)}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: password || undefined }),
+      })
+      setPendingJoinRoom(null)
+      openRoom(data.room)
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function updateReady(ready: boolean) {
+    if (!room) return
+    setBusy(true)
+    unlockAudio()
+    try {
+      const data = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(room.id)}/ready`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ready }),
+      })
+      setRoom(data.room)
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function startMatch() {
+    if (!room) return
+    setBusy(true)
+    unlockAudio()
+    try {
+      const data = await api<{ matchId: string; serverStartAt: string }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(room.id)}/start`, { method: 'POST' })
+      setMatchId(data.matchId)
+      setView('match')
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function leaveRoomOrMatch() {
+    if (!room) return
+    if (view === 'match' && matchId) {
+      if (!window.confirm('比赛正在进行中。现在退出将可能被判负，确定退出吗？')) return
+      setBusy(true)
+      try {
+        await api(`/api/entertainment/guess-song/duel/matches/${encodeURIComponent(matchId)}/forfeit`, { method: 'POST' })
+      } catch (reason) {
+        setDuelError(reason)
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    setBusy(true)
+    try {
+      await api(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(room.id)}/leave`, { method: 'POST' })
+      setRoom(null)
+      setRoomId(null)
+      setMatchId(null)
+      setMatch(null)
+      setView('lobby')
+      router.replace('/games/guess-song/duel')
+      void loadLobby()
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitAnswer(optionKey: string) {
+    if (!matchId || !currentQuestion || !audioStarted || deadlinePassed || me?.submitted || questionResult) return
+    unlockAudio()
+    const clientElapsedMs = Math.max(0, Math.round(Date.now() + offsetRef.current - new Date(currentQuestion.audioStartAt).getTime()))
+    const command: DuelClientCommand = { type: 'ANSWER', matchId, questionToken: currentQuestion.publicToken, selectedOptionKey: optionKey, clientElapsedMs }
+    setMatch((current) => current ? { ...current, players: current.players.map((player) => player.userId === userId ? { ...player, submitted: true } : player) } : current)
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(command))
+      return
+    }
+    try {
+      await api(`/api/entertainment/guess-song/duel/matches/${encodeURIComponent(matchId)}/answers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command),
+      })
+    } catch (reason) {
+      setDuelError(reason)
+    }
+  }
+
+  async function openInvites() {
+    setBusy(true)
+    try {
+      const data = await api<{ friends: Friend[] }>('/api/friends/list?page=1&pageSize=50')
+      setFriends(data.friends || [])
+      setSelectedFriendId(data.friends?.[0]?.id || '')
+      setInviteOpen(true)
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function sendInvite() {
+    if (!room || !selectedFriendId) return
+    setBusy(true)
+    try {
+      await api('/api/entertainment/guess-song/duel/invites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId: room.id, inviteeId: selectedFriendId }),
+      })
+      setInviteOpen(false)
+    } catch (reason) {
+      setDuelError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function resetAfterResult() {
+    setRoom(null)
+    setRoomId(null)
+    setMatchId(null)
+    setMatch(null)
+    setQuestionResult(null)
+    setView('lobby')
+    router.replace('/games/guess-song/duel')
+    void loadLobby()
+  }
+
+  const myReady = room ? room.host.id === userId ? room.hostReady : room.challengerReady : false
+  const canStart = Boolean(room && room.host.id === userId && room.challenger && room.hostReady && room.challengerReady)
+  const result = match?.result
+  const resultWinnerName = result?.winnerId ? result.players.find((player) => player.userId === result.winnerId)?.name : null
+
+  return (
+    <main className="duel-page">
+      <header className="duel-topbar">
+        <Link href="/games/guess-song" className="duel-back" aria-label="返回听听">←</Link>
+        <div><span>听听 · 对决</span>{room ? <small>房间 {room.roomCode}</small> : null}</div>
+        {view === 'match' ? <span className="duel-live-pill">LIVE</span> : <span className="duel-top-spacer" />}
+      </header>
+
+      {error ? <div className="duel-alert" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div> : null}
+
+      {view === 'lobby' ? (
+        <section className="duel-lobby">
+          <div className="duel-hero-card">
+            <div>
+              <p className="duel-eyebrow">REAL-TIME 1V1 · 30 QUESTIONS</p>
+              <h1>听听 · 对决</h1>
+              <p>两名用户同步听歌，四选一抢答。正确 16 题立即获胜。</p>
+            </div>
+            <div className="duel-stat-strip">
+              <div><strong>{stats.wins}</strong><span>胜场</span></div>
+              <div><strong>{stats.participations}</strong><span>参与</span></div>
+              <div><strong>{stats.winRate}%</strong><span>胜率</span></div>
+            </div>
+          </div>
+          <div className="duel-lobby-grid">
+            <section className="duel-panel">
+              <h2>创建房间</h2>
+              <p className="duel-muted">房间号留空时自动生成 6 位数字。密码只保存为 hash。</p>
+              <div className="duel-form-grid">
+                <label>房间号<input value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="自动生成" maxLength={12} /></label>
+                <label>房间密码<input value={roomPassword} onChange={(event) => setRoomPassword(event.target.value)} placeholder="可选，4～12 位字母数字" maxLength={12} /></label>
+              </div>
+              <label className="duel-checkbox"><input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />公开房间，可出现在列表中</label>
+              <button type="button" className="duel-primary-button" onClick={() => void createRoom()} disabled={busy}>创建房间</button>
+            </section>
+            <section className="duel-panel">
+              <h2>加入房间</h2>
+              <p className="duel-muted">输入房间号搜索；密码房间不会返回密码本身。</p>
+              <div className="duel-search-row"><input value={searchCode} onChange={(event) => setSearchCode(event.target.value)} placeholder="输入房间号" maxLength={12} /><button type="button" onClick={() => void searchRoom()} disabled={busy}>搜索</button></div>
+              {pendingJoinRoom ? <div className="duel-join-card"><div><b>房间 {pendingJoinRoom.roomCode}</b><span>{pendingJoinRoom.host.name} · {pendingJoinRoom.currentCount}/2 {pendingJoinRoom.hasPassword ? '· 🔒 需要密码' : ''}</span></div>{pendingJoinRoom.hasPassword ? <input value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="请输入房间密码" maxLength={12} /> : null}<button type="button" className="duel-primary-button" onClick={() => void joinRoom(pendingJoinRoom, joinPassword)} disabled={busy}>加入</button></div> : null}
+            </section>
+          </div>
+          <section className="duel-panel duel-room-list-panel">
+            <div className="duel-panel-heading"><div><h2>公开房间</h2><p className="duel-muted">密码房间仍可见，加入时需要密码。</p></div><button type="button" onClick={() => void loadLobby()}>刷新</button></div>
+            {rooms.length ? <div className="duel-room-list">{rooms.map((item) => <div key={item.id} className="duel-room-row"><div className="duel-room-code">{item.roomCode}</div><div className="duel-room-owner"><span className="duel-mini-avatar">{avatar(item.host)}</span><span>{item.host.name}</span></div><span className="duel-room-count">{item.currentCount}/2 {item.hasPassword ? '🔒' : ''}</span><button type="button" onClick={() => item.hasPassword ? setPendingJoinRoom(item) : void joinRoom(item)} disabled={busy}>加入</button></div>)}</div> : <p className="duel-empty">暂时没有等待中的公开房间，创建一个开始挑战吧。</p>}
+          </section>
+          {history.length ? <section className="duel-panel"><div className="duel-panel-heading"><h2>我的对决记录</h2><span className="duel-muted">最近 {history.length} 场</span></div><div className="duel-history-list">{history.slice(0, 6).map((item) => <div key={item.result.matchId}><span>{formatDate(item.result.finishedAt || item.result.startedAt)}</span><b>{item.result.players.map((player) => player.correctCount).join(' : ')}</b><em>{item.result.isDraw ? '平局' : item.result.winnerId === userId ? '胜利' : '失败'}</em></div>)}</div></section> : null}
+        </section>
+      ) : null}
+
+      {view === 'room' && room ? (
+        <section className="duel-room-hall">
+          <div className="duel-hall-title"><div><p className="duel-eyebrow">听听 · 对决</p><h1>房间 {room.roomCode}</h1><p className="duel-muted">两位玩家都准备后，房主才能开始。</p></div><button type="button" className="duel-ghost-button" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出房间</button></div>
+          <div className="duel-players-card">
+            <div className="duel-room-player"><div className="duel-large-avatar">{avatar(room.host)}</div><span className="duel-player-role">房主</span><h2>{room.host.name}</h2><p className={room.hostReady ? 'is-ready' : ''}>{room.hostReady ? '✓ 已准备' : '○ 未准备'}</p></div>
+            <div className="duel-versus">VS</div>
+            <div className="duel-room-player">{room.challenger ? <><div className="duel-large-avatar">{avatar(room.challenger)}</div><span className="duel-player-role">挑战者</span><h2>{room.challenger.name}</h2><p className={room.challengerReady ? 'is-ready' : ''}>{room.challengerReady ? '✓ 已准备' : '○ 未准备'}</p></> : <><div className="duel-large-avatar duel-empty-avatar">+</div><span className="duel-player-role">等待加入</span><h2>等待挑战者</h2><p>分享房间号或邀请好友</p></>}</div>
+          </div>
+          <div className="duel-hall-actions"><button type="button" className="duel-primary-button" onClick={() => void updateReady(!myReady)} disabled={busy || !room.challenger}>{myReady ? '取消准备' : '准备'}</button>{room.host.id === userId ? <button type="button" className="duel-start-button" onClick={() => void startMatch()} disabled={!canStart || busy}>{canStart ? '开始游戏' : '等待双方准备'}</button> : null}<button type="button" className="duel-ghost-button" onClick={() => void openInvites()} disabled={busy || Boolean(room.challenger)}>邀请好友</button></div>
+          <p className="duel-rule-note">正式开始后服务端统一生成 30 首不重复歌曲；每题倒计时后 2 秒同步播放，双方每题只能提交一次。</p>
+        </section>
+      ) : null}
+
+      {view === 'match' && match ? (
+        <section className="duel-match-screen">
+          <div className="duel-scoreboard"><div className="duel-score-player"><span className="duel-score-avatar">{me ? avatar(me) : null}</span><span>{me?.name || '我'}</span><strong>{me?.correctCount || 0}</strong><small>{me?.isOnline ? '在线' : '重连中'}</small></div><div className="duel-score-center"><b>{me?.correctCount || 0} <i>:</i> {opponent?.correctCount || 0}</b><span>第 {match.currentQuestionIndex} / {match.totalQuestions} 题</span></div><div className="duel-score-player is-opponent"><span className="duel-score-avatar">{opponent ? avatar(opponent) : null}</span><span>{opponent?.name || '对手'}</span><strong>{opponent?.correctCount || 0}</strong><small>{opponent?.isOnline ? '在线' : '等待重连'}</small></div></div>
+          <div className="duel-question-card">
+            {match.phase === 'STARTING' && countdown > 0 ? <div className="duel-countdown"><span>准备</span><strong>{countdown}</strong></div> : null}
+            <div className="duel-question-heading"><span>QUESTION {String(match.currentQuestionIndex).padStart(2, '0')} / {match.totalQuestions}</span><span>{audioStarted && !deadlinePassed ? '抢答进行中' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
+            <p className="duel-audio-hint">试听将在题目开始后 2 秒同步播放 · 每题仅播放一次</p>
+            {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
+            <div className="duel-options">{currentQuestion?.options.map((option) => <button key={option.key} type="button" className={me?.submitted || Boolean(questionResult) ? 'is-submitted' : ''} onClick={() => void submitAnswer(option.key)} disabled={!audioStarted || deadlinePassed || Boolean(me?.submitted) || Boolean(questionResult)}><b>{option.key}</b><span>{option.label}</span></button>)}</div>
+            <div className="duel-answer-status">{me?.submitted ? '✓ 已作答，等待对手' : audioStarted && !deadlinePassed ? '选择一个答案，提交后不可修改' : '请等待题目开始'}{opponent?.submitted ? <span> · 对手已作答</span> : null}</div>
+            {questionResult ? <div className="duel-question-result"><b>本题答案：{questionResult.correctLabel}</b><span>{questionResult.answers.filter((answer) => answer.correct).length} 人答对</span></div> : null}
+          </div>
+          <button type="button" className="duel-exit-link" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出比赛</button>
+        </section>
+      ) : null}
+
+      {view === 'result' && result ? (
+        <section className="duel-result-screen"><p className="duel-eyebrow">MATCH COMPLETE</p><h1>{result.status === 'INVALID' ? '比赛无效' : result.isDraw ? '平局' : result.winnerId === userId ? '🏆 你赢了' : `${resultWinnerName || '对手'}获胜`}</h1><div className="duel-result-score">{result.players.map((player) => <div key={player.userId} className={player.userId === result.winnerId ? 'is-winner' : ''}><span>{player.name}</span><strong>{player.correctCount}</strong><small>正确率 {player.accuracy}% · 平均 {formatSeconds(player.averageAnswerMs)}</small></div>)}</div><p className="duel-result-reason">{result.status === 'INVALID' ? '有效比赛题目不足，双方不计胜场、参与次数和奖励' : result.isDraw ? '正确数和累计有效答题耗时完全相同' : result.finishReason === 'DISCONNECT' ? '对手在重连保护期内未回来' : result.finishReason === 'FORFEIT' ? '对手主动退出比赛' : result.finishReason === 'SCORE_THRESHOLD' ? '率先达到 16 题正确' : '30 题完成，按正确数和耗时结算'} · 本场用时 {formatDuration(result.startedAt, result.finishedAt)}</p><div className="duel-reward-card">{result.rewardAmount ? <><b>+{result.rewardAmount} 挂号费</b><span>今日对决胜利奖励已发放</span></> : result.winnerId === userId ? <><b>今日奖励已领取</b><span>本场胜场正常增加，今日最多领取一次 +7</span></> : <><b>本场未获得挂号费</b><span>参与次数仅在正常结算后增加</span></>}</div><button type="button" className="duel-primary-button" onClick={resetAfterResult}>返回对决大厅</button></section>
+      ) : null}
+
+      {inviteOpen ? <div className="duel-modal-backdrop"><section className="duel-modal" role="dialog" aria-modal="true"><h2>邀请好友</h2><p className="duel-muted">好友将收到通知，邀请链接不包含房间密码。</p><select value={selectedFriendId} onChange={(event) => setSelectedFriendId(event.target.value)}><option value="">选择好友</option>{friends.map((friend) => <option key={friend.id} value={friend.id}>{friendName(friend)}</option>)}</select><div className="duel-modal-actions"><button type="button" onClick={() => setInviteOpen(false)}>取消</button><button type="button" className="duel-primary-button" onClick={() => void sendInvite()} disabled={!selectedFriendId || busy}>发送邀请</button></div></section></div> : null}
+    </main>
+  )
+}

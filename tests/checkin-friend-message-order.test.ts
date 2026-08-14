@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { normalizeFriendCheckInMessages } from '../lib/checkin-message-order'
+import { normalizeFriendCheckInMessages, planFriendCheckInMessagePage } from '../lib/checkin-message-order'
 
 type Message = {
   id: string
@@ -62,19 +62,30 @@ test('历史异常存在多条本人留言时只保留最新一条置顶', () =>
   assert.deepEqual(result.map((item) => item.id), ['self-new', 'friend-a'])
 })
 
-test('服务端把本人留言作为独立 sticky 查询，好友分页不使用本人 offset', () => {
+test('服务端按本人、关注好友、普通好友三组计算固定大小分页', () => {
   const service = readFileSync('lib/checkin-messages.ts', 'utf8')
   const api = readFileSync('app/api/checkin/messages/route.ts', 'utf8')
   const page = readFileSync('app/checkin/page.tsx', 'utf8')
 
-  assert.match(service, /stickyUserId\?: string/)
-  assert.match(service, /const friendUserIds = \[\.\.\.new Set\(userIds\)\]\.filter\(\(userId\) => userId !== stickyUserId\)/)
-  assert.match(service, /userIds: \[stickyUserId\]/)
-  assert.match(service, /orderByCreatedAtDesc: true/)
-  assert.match(service, /const totalPages = Math\.max\(1, Math\.ceil\(friendTotal \/ safePageSize\)\)/)
-  assert.match(service, /stickyMessage && safePage === 1/)
-  assert.match(api, /stickyUserId: scope === 'friends' \? user\.id : undefined/)
-  assert.match(page, /stickyUserId: sessionUser\.id/)
+  assert.match(service, /followedUserIds\?: string\[\]/)
+  assert.match(service, /planFriendCheckInMessagePage/)
+  assert.match(service, /appendGroup\(followedFriendUserIds, plan\.followed\.offset, plan\.followed\.take\)/)
+  assert.match(service, /appendGroup\(ordinaryFriendUserIds, plan\.ordinary\.offset, plan\.ordinary\.take\)/)
+  assert.match(api, /getFriendFollowedIds\(user\.id, friendIds\)/)
+  assert.match(api, /followedUserIds/)
+  assert.match(page, /getFriendFollowedIds\(sessionUser\.id, friendIds\)/)
+  assert.match(page, /followedUserIds: followedFriendIds/)
+})
+
+test('本人、关注、普通三组分页不会把关注好友留在后页', () => {
+  const firstPage = planFriendCheckInMessagePage({ ownCount: 1, followedCount: 1, ordinaryCount: 20, page: 1, pageSize: 7 })
+  assert.deepEqual(firstPage.own, { offset: 0, take: 1 })
+  assert.deepEqual(firstPage.followed, { offset: 0, take: 1 })
+  assert.deepEqual(firstPage.ordinary, { offset: 0, take: 5 })
+
+  const sixthPage = planFriendCheckInMessagePage({ ownCount: 1, followedCount: 1, ordinaryCount: 40, page: 6, pageSize: 7 })
+  assert.deepEqual(sixthPage.followed, { offset: 1, take: 0 })
+  assert.deepEqual(sixthPage.ordinary, { offset: 33, take: 7 })
 })
 
 test('挂号成功事件只把本人的留言送入好友面板第一页并触发同步', () => {
@@ -85,5 +96,7 @@ test('挂号成功事件只把本人的留言送入好友面板第一页并触�
   assert.match(panel, /setPage\(1\)/)
   assert.match(panel, /setMessages\(\[displayMessage\]\)/)
   assert.match(panel, /void loadMessages\(nextDate, sort, true, true, 1\)/)
-  assert.match(panel, /normalizeFriendCheckInMessages\(merged, nextPage, sessionUserIdRef\.current\)/)
+  assert.match(panel, /FriendFollowButton/)
+  assert.match(panel, /void loadMessages\(date, sort, false, false, page\)/)
+  assert.doesNotMatch(panel, /normalizeFriendCheckInMessages\(merged, nextPage, sessionUserIdRef\.current\)/)
 })

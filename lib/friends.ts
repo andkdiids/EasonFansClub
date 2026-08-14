@@ -26,6 +26,22 @@ export async function getFriendIds(userId: string) {
   return friendships.map((item) => (item.userAId === userId ? item.userBId : item.userAId))
 }
 
+/**
+ * Returns only private friend-follow marks that still point at a current friend.
+ * Keeping the friendship ids as the input makes the friendship permission check
+ * explicit at every caller and prevents stale follow rows from affecting reads.
+ */
+export async function getFriendFollowedIds(userId: string, friendIds: string[]) {
+  const ids = [...new Set(friendIds)].filter((id) => id && id !== userId)
+  if (!ids.length) return []
+
+  const follows = await prisma.friendFollow.findMany({
+    where: { followerId: userId, followedId: { in: ids } },
+    select: { followedId: true },
+  })
+  return follows.map((item) => item.followedId)
+}
+
 export const friendUserSelect = {
   id: true,
   uid: true,

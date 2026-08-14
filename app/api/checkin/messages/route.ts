@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { withDbTimeout } from '@/lib/db-timeout'
-import { getFriendIds } from '@/lib/friends'
+import { getFriendFollowedIds, getFriendIds } from '@/lib/friends'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +39,9 @@ export async function GET(request: Request) {
     const friendIds = scope === 'friends'
       ? await withDbTimeout('Friendship.findMany checkin.messages.api', getFriendIds(user.id))
       : undefined
+    const followedUserIds = scope === 'friends' && friendIds
+      ? await withDbTimeout('FriendFollow.findMany checkin.messages.api', getFriendFollowedIds(user.id, friendIds))
+      : undefined
     const messagePage = await withDbTimeout(
       'DailyMessage.page checkin.messages.api',
       getCheckInMessagesPage({
@@ -49,6 +52,7 @@ export async function GET(request: Request) {
         viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
         userIds: friendIds,
         stickyUserId: scope === 'friends' ? user.id : undefined,
+        followedUserIds,
         page,
         pageSize,
       }),
@@ -60,6 +64,7 @@ export async function GET(request: Request) {
         sort,
         scope,
         messages: messagePage.messages,
+        followedUserIds,
         pagination: messagePage.pagination,
         ...messagePage.pagination,
       },

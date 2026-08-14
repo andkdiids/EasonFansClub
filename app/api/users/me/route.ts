@@ -8,6 +8,8 @@ import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/secur
 import { validateLoginAccountValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
+import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
+import { updateUserIpRegion } from '@/lib/ip-region'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -51,7 +53,7 @@ function usernameChangeErrorResponse(error: UsernameChangeError) {
   }, { status })
 }
 
-async function updateUsername(userId: string, rawUsername: unknown) {
+async function updateUsername(userId: string, rawUsername: unknown, request: Request) {
   const validation = validateLoginAccountValue(rawUsername)
   if (validation.error) {
     return NextResponse.json({ message: validation.error, code: 'USERNAME_INVALID' }, { status: 400 })
@@ -98,6 +100,7 @@ async function updateUsername(userId: string, rawUsername: unknown) {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     invalidateCurrentUserCache(userId)
+    void updateUserIpRegion(userId, request)
     return NextResponse.json(result)
   } catch (error) {
     if (error instanceof UsernameChangeError) return usernameChangeErrorResponse(error)
@@ -152,6 +155,7 @@ export async function GET() {
       birthDay: true,
       birthdaySetAt: true,
       usernameChangedAt: true,
+      ipRegion: true,
       Profile: true,
       UserBadge: {
         where: { isHidden: false },
@@ -178,6 +182,7 @@ export async function GET() {
       backgroundUrl: publicImageUrl(user.backgroundUrl),
       profile: Profile ? {
         ...Profile,
+        location: locationFromProfile(Profile),
         avatarUrl: publicImageUrl(Profile.avatarUrl),
         backgroundUrl: publicImageUrl(Profile.backgroundUrl),
       } : Profile,
@@ -199,7 +204,7 @@ export async function PATCH(request: Request) {
 
   const body = await request.json().catch(() => null)
   if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'newUsername')) {
-    return updateUsername(guard.user.id, body.newUsername)
+    return updateUsername(guard.user.id, body.newUsername, request)
   }
 
   const rawNickname = typeof body?.nickname === 'string' ? body.nickname : ''
@@ -214,6 +219,11 @@ export async function PATCH(request: Request) {
   const normalizedPhone = phone ? normalizePhoneNumber(phone, phoneCountry) : null
   const requestedWallVisibility = body?.wallVisibility === undefined ? undefined : sanitizeText(body.wallVisibility, 20)
   const wallVisibility = requestedWallVisibility as ProfileWallVisibility | undefined
+  const hasLocation = Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'location'))
+  const location = hasLocation ? normalizeUserLocationInput(body.location) : undefined
+  if (hasLocation && location === undefined) {
+    return NextResponse.json({ message: '地区选择无效，请重新选择' }, { status: 400 })
+  }
 
   const birthMonthRaw = body?.birthMonth === undefined || body?.birthMonth === null ? undefined : Number(body.birthMonth)
   const birthDayRaw = body?.birthDay === undefined || body?.birthDay === null ? undefined : Number(body.birthDay)
@@ -339,6 +349,7 @@ export async function PATCH(request: Request) {
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
+        ipRegion: true,
       },
     })
 
@@ -350,6 +361,12 @@ export async function PATCH(request: Request) {
         ...(data.backgroundUrl !== undefined ? { backgroundUrl: data.backgroundUrl } : {}),
         ...(data.bio !== undefined ? { bio: data.bio } : {}),
         ...(wallVisibility !== undefined ? { wallVisibility } : {}),
+        ...(location !== undefined ? {
+          locationCountryCode: location?.countryCode || null,
+          locationCountry: location?.countryName || null,
+          locationRegionCode: location?.regionCode || null,
+          locationRegion: location?.regionName || null,
+        } : {}),
       },
       create: {
         userId: guard.user.id,
@@ -358,14 +375,36 @@ export async function PATCH(request: Request) {
         backgroundUrl: updated.backgroundUrl,
         bio: updated.bio,
         wallVisibility: wallVisibility || 'PUBLIC',
+        ...(location ? {
+          locationCountryCode: location.countryCode,
+          locationCountry: location.countryName,
+          locationRegionCode: location.regionCode,
+          locationRegion: location.regionName,
+        } : {}),
       },
-      select: { wallVisibility: true },
+      select: {
+        wallVisibility: true,
+        locationCountryCode: true,
+        locationCountry: true,
+        locationRegionCode: true,
+        locationRegion: true,
+      },
     })
 
-    return { ...updated, wallVisibility: profileRecord.wallVisibility }
+    return {
+      ...updated,
+      wallVisibility: profileRecord.wallVisibility,
+      location: profileRecord.locationCountryCode ? {
+        countryCode: profileRecord.locationCountryCode,
+        countryName: profileRecord.locationCountry || profileRecord.locationCountryCode,
+        regionCode: profileRecord.locationRegionCode,
+        regionName: profileRecord.locationRegion,
+      } : null,
+    }
   })
 
   invalidateCurrentUserCache(guard.user.id)
+  void updateUserIpRegion(guard.user.id, request)
 
   profile.avatarUrl = publicImageUrl(profile.avatarUrl)
   profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)

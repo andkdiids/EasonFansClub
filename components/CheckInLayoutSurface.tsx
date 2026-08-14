@@ -4,6 +4,7 @@ import { BeijingClock } from '@/components/BeijingClock'
 import { useCallback, useEffect, useState } from 'react'
 import { CheckInButton, type CheckInStateChange, type CheckInStats, type TodayCheckIn } from '@/components/CheckInButton'
 import { CheckInMessagesPanel } from '@/components/CheckInMessagesPanel'
+import { CheckInHistoryDialog } from '@/components/CheckInHistoryDialog'
 import { CheckInLikeProvider } from '@/components/checkin-like-context'
 import { TodayRegistrationFeePanel } from '@/components/TodayRegistrationFeePanel'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
@@ -29,6 +30,7 @@ export type CheckInLayoutModuleProps = {
   selectedMessagesPagination?: CheckInMessagePagination
   friendMessages: CheckInMessageItem[]
   friendMessagesPagination?: CheckInMessagePagination
+  friendFollowedUserIds?: string[]
   selectedDateValue: string
   todayValue: string
   sort: CheckInMessageSort
@@ -96,6 +98,7 @@ function CheckInStatusContent({
   initialTotalCheckIns,
   initialCheckIn,
   initialStats,
+  todayValue,
   previewMode,
   checkinMoodEnabled = true,
 }: Readonly<{
@@ -106,6 +109,7 @@ function CheckInStatusContent({
   initialTotalCheckIns: number
   initialCheckIn: TodayCheckInPayload
   initialStats: CheckInStats
+  todayValue: string
   previewMode: boolean
   checkinMoodEnabled: boolean
 }>) {
@@ -166,6 +170,7 @@ function CheckInStatusContent({
           onStateChange={handleStateChange}
         />
       </div>
+      <CheckInHistoryDialog initialDate={todayValue} previewMode={previewMode} />
       <TodayRegistrationFeePanel initialBalance={stats.points} previewMode={previewMode} />
     </section>
   )
@@ -180,6 +185,7 @@ export function createCheckInLayoutModules({
   selectedMessagesPagination,
   friendMessages,
   friendMessagesPagination,
+  friendFollowedUserIds = [],
   selectedDateValue,
   todayValue,
   sort,
@@ -204,6 +210,7 @@ export function createCheckInLayoutModules({
             initialTotalCheckIns={totalCheckIns}
             initialCheckIn={todayCheckIn}
             initialStats={stats}
+            todayValue={todayValue}
             previewMode={previewMode}
             checkinMoodEnabled={checkinMoodEnabled}
           />
@@ -233,6 +240,7 @@ export function createCheckInLayoutModules({
             scope="friends"
             initialMessages={friendMessages}
             initialPagination={friendMessagesPagination}
+            initialFollowedUserIds={friendFollowedUserIds}
             initialDate={selectedDateValue}
             maxDate={todayValue}
             initialSort={sort}

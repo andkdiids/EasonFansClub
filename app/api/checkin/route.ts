@@ -12,6 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
 import { checkForbiddenWords } from '@/lib/content-filter'
+import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 
 export async function GET() {
   const user = await getCurrentUser()
@@ -89,6 +90,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
   }
   const message = rawMessage
+  const ipRegion = await resolveIpRegion(request)
+  void updateUserIpRegion(user.id, ipRegion)
 
   if (preference.checkinMoodEnabled && !mood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
@@ -202,6 +205,7 @@ export async function POST(request: Request) {
           date: today,
           mood: mood?.key ?? null,
           content: message,
+          ipRegion,
         },
         select: { id: true },
       })

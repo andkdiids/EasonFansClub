@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { prisma } from '@/lib/prisma'
 import { requireUser, sanitizeText } from '@/lib/security'
 
@@ -37,6 +38,15 @@ export async function POST(request: Request, context: RouteContext) {
       ],
     },
   })
+  await prisma.friendFollow.deleteMany({
+    where: {
+      OR: [
+        { followerId: guard.user.id, followedId: userId },
+        { followerId: userId, followedId: guard.user.id },
+      ],
+    },
+  })
+  invalidateCheckInMessagesCache()
 
   return NextResponse.json({ blocked: true })
 }

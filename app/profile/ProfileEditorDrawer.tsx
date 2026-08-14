@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
+import type { UserLocation } from '@/lib/user-location'
 
 type InitialProfile = {
   username: string
@@ -17,6 +18,7 @@ type InitialProfile = {
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
+  location: UserLocation | null
   email: string
   phone: string
   emailVerifiedAt: string | null

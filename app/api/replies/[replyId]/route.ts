@@ -35,9 +35,11 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const deleteIds = [reply.id, ...collectDescendantIds(reply.id)]
 
   const replyCount = await prisma.$transaction(async (tx) => {
+    // Keep deletion and pinning in the same per-post lock order.
+    await tx.$queryRaw`SELECT id FROM Post WHERE id = ${reply.postId} FOR UPDATE`
     await tx.reply.updateMany({
       where: { id: { in: deleteIds } },
-      data: { isDeleted: true, deletedAt: new Date() },
+      data: { isDeleted: true, isPinned: false, deletedAt: new Date() },
     })
     const count = await tx.reply.count({
       where: { postId: reply.postId, isDeleted: false },

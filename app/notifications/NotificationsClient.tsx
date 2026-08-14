@@ -47,6 +47,8 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
     case 'FRIEND_REQUEST':
     case 'FOLLOW':
       return { label: '去好友', href: '/friends#received-requests' }
+    case 'GUESS_SONG_DUEL_INVITE':
+      return { label: '接受对决邀请', href: item.link || '/games/guess-song/duel' }
     case 'MESSAGE':
       return { label: '打开私信', action: 'dock' }
     case 'ADMIN':

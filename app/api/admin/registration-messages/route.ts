@@ -3,6 +3,7 @@ import { startOfLocalDay } from '@/lib/checkin'
 import { checkForbiddenWords } from '@/lib/content-filter'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 
 export async function GET() {
   const guard = await requireAdmin('daily_message_manage')
@@ -45,6 +46,8 @@ export async function POST(request: Request) {
   const moderationStatus = body?.moderationStatus === 'REJECTED' ? 'REJECTED' : 'APPROVED'
   const sort = Number(body?.sort) || 0
   const today = startOfLocalDay()
+  const ipRegion = await resolveIpRegion(request)
+  void updateUserIpRegion(guard.user.id, ipRegion)
 
   try {
     const created = await prisma.dailyMessage.create({
@@ -52,6 +55,7 @@ export async function POST(request: Request) {
         userId: guard.user.id,
         date: today,
         content,
+        ipRegion,
         isAdminMessage: true,
         moderationStatus,
         sort,

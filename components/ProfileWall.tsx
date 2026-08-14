@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import { profileImageUrl } from '@/lib/images'
@@ -21,6 +22,7 @@ type WallMessage = {
   content: string
   createdAt: string
   updatedAt?: string
+  ipRegion?: string | null
   canDelete: boolean
   liked: boolean
   likeCount: number
@@ -393,6 +395,7 @@ function WallMessageHeader({ message, name }: { message: WallMessage; name: stri
       <a href={`/user/${formatUid(message.sender.uid)}`} className="font-black text-brand-950">{name}</a>
       <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(message.sender.uid)}</span>
       <span className="text-xs font-bold text-slate-400">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
+      <IpRegionLabel ipRegion={message.ipRegion} />
     </div>
   )
 }

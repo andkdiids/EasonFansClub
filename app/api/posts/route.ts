@@ -11,6 +11,7 @@ import { parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { updateUserIpRegion } from '@/lib/ip-region'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -222,6 +223,7 @@ export async function POST(request: Request) {
     }
 
     const detailUrl = `/posts/${result.post.id}`
+    void updateUserIpRegion(user.id, request)
     if (moderationStatus === 'PENDING') void emitRealtimeToAdmins('notification')
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)

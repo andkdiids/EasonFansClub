@@ -5,7 +5,7 @@ import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBe
 import { CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
-import { getFriendIds } from '@/lib/friends'
+import { getFriendFollowedIds, getFriendIds } from '@/lib/friends'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -115,6 +115,12 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
     ),
     safeDb('CheckIn.findMany checkin.history', prisma.checkIn.findMany({ where: { userId: sessionUser.id }, select: { checkinDateKey: true } }), []),
   ])
+  const followedFriendIds = await safeDb(
+    'FriendFollow.findMany checkin.followedFriendIds',
+    getFriendFollowedIds(sessionUser.id, friendIds),
+    [],
+    3000,
+  )
   const friendMessages = await safeDb(
     'DailyMessage.page checkin.friendMessages',
     getCheckInMessagesPage({
@@ -125,6 +131,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
       userIds: friendIds,
       stickyUserId: sessionUser.id,
+      followedUserIds: followedFriendIds,
       page: 1,
     }),
     { messages: [], pagination: emptyMessagePagination },
@@ -189,6 +196,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           selectedMessagesPagination={selectedMessagePage.pagination}
           friendMessages={friendMessages.messages}
           friendMessagesPagination={friendMessages.pagination}
+          friendFollowedUserIds={followedFriendIds}
           selectedDateValue={selectedDateValue}
           todayValue={todayValue}
           sort={sort}

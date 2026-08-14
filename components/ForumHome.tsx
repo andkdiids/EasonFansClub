@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ForumDiscoveryHome } from '@/components/ForumDiscoveryHome'
 import { PostList } from '@/components/PostList'
 import { Pagination } from '@/components/ui/Pagination'
+import type { ForumTheme } from '@/lib/forum-discovery'
 import type { ForumFeedResponse, ForumSort } from '@/lib/forum'
 import { buildForumHref, parseForumSort } from '@/lib/forum'
 
@@ -32,6 +34,42 @@ const previewData: ForumFeedResponse = {
 }
 
 export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
+  const [isMobile, setIsMobile] = useState(false)
+  const [theme, setTheme] = useState<ForumTheme>('xiaochenshu')
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)')
+    const syncViewport = () => setIsMobile(media.matches)
+    const syncTheme = () => setTheme(window.localStorage.getItem('ecfc-forum-theme') === 'plaza' ? 'plaza' : 'xiaochenshu')
+    syncViewport()
+    syncTheme()
+    media.addEventListener('change', syncViewport)
+    window.addEventListener('ecfc:forum-theme-change', syncTheme)
+    return () => {
+      media.removeEventListener('change', syncViewport)
+      window.removeEventListener('ecfc:forum-theme-change', syncTheme)
+    }
+  }, [])
+
+  function switchTheme(nextTheme: ForumTheme) {
+    window.localStorage.setItem('ecfc-forum-theme', nextTheme)
+    setTheme(nextTheme)
+    window.dispatchEvent(new CustomEvent('ecfc:forum-theme-change', { detail: { theme: nextTheme } }))
+  }
+
+  if (!previewMode && isMobile && theme === 'xiaochenshu') {
+    return <ForumDiscoveryHome onSwitchToPlaza={() => switchTheme('plaza')} />
+  }
+
+  return (
+    <>
+      <ForumPlazaHome previewMode={previewMode} />
+      {!previewMode && isMobile ? <button type="button" className="forum-theme-switch-floating" onClick={() => switchTheme('xiaochenshu')} aria-label="切换到发现模式">小臣书</button> : null}
+    </>
+  )
+}
+
+function ForumPlazaHome({ previewMode = false }: { previewMode?: boolean }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -47,6 +85,16 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   const requestSequence = useRef(0)
   const contentRef = useRef<HTMLDivElement>(null)
   const scrollRestoreAttemptedRef = useRef(false)
+  const searchComposingRef = useRef(false)
+
+  const applySearch = useCallback((value: string) => {
+    if (previewMode) return
+    const normalized = value.trim()
+    const nextUrl = buildForumHref(pathname, queryString, { query: normalized || null, page: null })
+    const currentUrl = `${pathname}${queryString ? `?${queryString}` : ''}`
+    if (nextUrl === currentUrl) return
+    router.push(nextUrl, { scroll: true })
+  }, [pathname, previewMode, queryString, router])
 
   function updateQuery(values: Record<string, string | number | null>) {
     if (previewMode) return
@@ -75,15 +123,10 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
     if (previewMode) return
     if (searchValue === query) return
     const timer = window.setTimeout(() => {
-      const next = new URLSearchParams(queryString)
-      const value = searchValue.trim()
-      if (value) next.set('query', value)
-      else next.delete('query')
-      next.delete('page')
-      router.push(`${pathname}${next.size ? `?${next.toString()}` : ''}`, { scroll: true })
+      if (!searchComposingRef.current) applySearch(searchValue)
     }, 350)
     return () => window.clearTimeout(timer)
-  }, [pathname, previewMode, query, queryString, router, searchValue])
+  }, [applySearch, previewMode, query, searchValue])
 
   useEffect(() => {
     if (previewMode) return
@@ -172,10 +215,24 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
           </div>
           {data?.permissions.canCreatePost ? <Link href={createHref} className="flat-button-primary">发布帖子</Link> : null}
         </div>
-        <label className="forum-search">
+        <form
+          className="forum-search"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (searchComposingRef.current) return
+            applySearch(searchValue)
+          }}
+          onCompositionStart={() => { searchComposingRef.current = true }}
+          onCompositionEnd={() => { searchComposingRef.current = false }}
+        >
           <span className="sr-only">搜索帖子</span>
-          <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="搜索标题和摘要" />
-        </label>
+          <input
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            placeholder="搜索标题和摘要"
+            enterKeyHint="search"
+          />
+        </form>
         </div>
       </header>
 

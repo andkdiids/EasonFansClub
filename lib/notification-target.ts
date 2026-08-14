@@ -36,6 +36,7 @@ export function getNotificationTarget(notification: NotificationTargetInput) {
   const explicit = notification.targetUrl || notification.link
   if (explicit?.startsWith('/')) return explicit
   if (notification.type === 'FRIEND_REQUEST' || notification.type === 'FOLLOW') return '/friends#received-requests'
+  if (notification.type === 'GUESS_SONG_DUEL_INVITE') return '/games/guess-song/duel'
   if (notification.type === 'ACTIVITY') return '/activities'
   // Legacy personal moderation notifications may have been created without a
   // link. Keep them actionable with the existing user-owned sticker list.

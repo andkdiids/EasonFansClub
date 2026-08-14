@@ -24,6 +24,7 @@ const personalTypeLabels: Record<string, string> = {
   FOLLOW: '关注',
   BADGE: '勋章',
   BIRTHDAY_GREETING: '生日',
+  GUESS_SONG_DUEL_INVITE: '听听·对决',
 }
 
 const systemTypeLabels: Record<string, string> = {
@@ -39,7 +40,7 @@ export function getNotificationCategory(type: string, link?: string | null) {
   if (link?.startsWith('/feedback/')) return 'feedback'
   if (type === 'REPLY') return 'reply'
   if (type === 'LIKE') return 'like'
-  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'friend'
+  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW' || type === 'GUESS_SONG_DUEL_INVITE') return 'friend'
   if (type === 'MESSAGE') return 'messages'
   return 'system'
 }
@@ -61,11 +62,11 @@ export function getNotificationCategoryFilter(category: string): Prisma.Notifica
   if (category === 'all') return {}
   if (category === 'reply') return { type: 'REPLY' }
   if (category === 'like') return { type: 'LIKE' }
-  if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW'] } }
+  if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE'] } }
   if (category === 'messages') return { type: 'MESSAGE' }
   if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
   return {
-    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE'] },
+    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE'] },
     OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }],
   }
 }
@@ -91,10 +92,10 @@ function getPersonalNotificationCategorySql(category: NotificationCategory) {
   switch (category) {
     case 'reply': return Prisma.raw("AND n.type = 'REPLY'")
     case 'like': return Prisma.raw("AND n.type = 'LIKE'")
-    case 'friend': return Prisma.raw("AND n.type IN ('FRIEND_REQUEST', 'FOLLOW')")
+    case 'friend': return Prisma.raw("AND n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE')")
     case 'messages': return Prisma.raw("AND n.type = 'MESSAGE'")
     case 'feedback': return Prisma.raw("AND n.link LIKE '/feedback/%'")
-    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
     default: return Prisma.empty
   }
 }

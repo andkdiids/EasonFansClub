@@ -19,6 +19,7 @@ export type ProfileRecentMessage = {
   mood: string | null
   content: string
   createdAt: string
+  ipRegion: string | null
   likeCount: number
   commentCount: number
   comments: Array<{
@@ -26,6 +27,7 @@ export type ProfileRecentMessage = {
     parentId: string | null
     content: string
     createdAt: string
+    ipRegion: string | null
     authorName: string
     authorAvatarUrl: string | null
   }>
@@ -36,6 +38,7 @@ type ProfileRecentMessageRow = {
   mood: string | null
   content: string
   createdAt: Date
+  ipRegion: string | null
   likeCount: number
   commentCount: number
   DailyMessageComment: Array<{
@@ -43,6 +46,7 @@ type ProfileRecentMessageRow = {
     parentId: string | null
     content: string
     createdAt: Date
+    ipRegion: string | null
     User: {
       id: string
       nickname: string
@@ -74,6 +78,7 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerI
     mood: message.mood,
     content: message.content,
     createdAt: message.createdAt.toISOString(),
+    ipRegion: message.ipRegion,
     likeCount: message.likeCount,
     commentCount: message.commentCount,
     comments: message.DailyMessageComment.map((comment) => ({
@@ -81,6 +86,7 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerI
       parentId: comment.parentId,
       content: comment.content,
       createdAt: comment.createdAt.toISOString(),
+      ipRegion: comment.ipRegion,
       authorName: resolveFriendDisplayName({
         viewerId,
         targetUserId: comment.User.id,
@@ -111,6 +117,7 @@ export async function loadProfileRecentMessagesPage(
         mood: true,
         content: true,
         createdAt: true,
+        ipRegion: true,
         likeCount: true,
         commentCount: true,
         DailyMessageComment: {
@@ -121,6 +128,7 @@ export async function loadProfileRecentMessagesPage(
             parentId: true,
             content: true,
             createdAt: true,
+            ipRegion: true,
             User: {
               select: {
                 id: true,

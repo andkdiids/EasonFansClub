@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ImageViewer } from '@/components/ImageViewer'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { MentionText, type ReplyMentionView } from '@/components/MentionText'
@@ -14,15 +16,19 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { splitContentImages } from '@/lib/content-images'
+import { canPinPostReply, type PostReplySort } from '@/lib/post-replies'
+import { Pagination } from '@/components/ui/Pagination'
 
 type ReplyItem = {
   id: string
   content: string
   parentId: string | null
   likeCount: number
+  isPinned: boolean
   liked: boolean
   likers?: LikeAvatarUser[]
   createdAt: Date | string
+  ipRegion?: string | null
   stickerId?: string | null
   stickerUrl?: string | null
   mentions: ReplyMentionView[]
@@ -55,9 +61,11 @@ function normalizeReply(value: unknown): ReplyItem | null {
     content: reply.content,
     parentId: typeof reply.parentId === 'string' ? reply.parentId : null,
     likeCount: Number(reply.likeCount) || 0,
+    isPinned: Boolean(reply.isPinned),
     liked: Boolean(reply.liked),
     likers: Array.isArray(reply.likers) ? reply.likers : [],
     createdAt: typeof reply.createdAt === 'string' || reply.createdAt instanceof Date ? reply.createdAt : new Date().toISOString(),
+    ipRegion: typeof reply.ipRegion === 'string' ? reply.ipRegion : null,
     stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
     stickerUrl: typeof reply.stickerUrl === 'string' ? toPublicMediaUrl(reply.stickerUrl) : null,
     mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
@@ -95,7 +103,11 @@ export function PostRepliesSection({
   initialReplyCount,
   currentUserId,
   currentUserRole,
+  postAuthorId,
   focusId,
+  sort,
+  page,
+  totalPages,
   hotReplyIds,
   commentsLoadError,
 }: Readonly<{
@@ -104,17 +116,46 @@ export function PostRepliesSection({
   initialReplyCount: number
   currentUserId?: string
   currentUserRole?: string
+  postAuthorId: string
   focusId?: string
+  sort: PostReplySort
+  page: number
+  totalPages: number
   hotReplyIds?: string[]
   commentsLoadError?: boolean
 }>) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [replies, setReplies] = useState(() => initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
+  const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
   const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    setReplies(initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
+  }, [initialReplies])
   const tree = useMemo(() => buildReplyTree(replies), [replies])
   const replyMap = useMemo(() => buildReplyMap(replies), [replies])
   const rootReplies = tree.get(null) || []
+
+  function buildCommentHref(nextSort: PostReplySort, nextPage: number) {
+    const params = new URLSearchParams(searchParams.toString())
+    if (nextSort === 'latest') params.delete('commentSort')
+    else params.set('commentSort', nextSort)
+    if (nextPage <= 1) params.delete('commentPage')
+    else params.set('commentPage', String(nextPage))
+    const query = params.toString()
+    return `${pathname}${query ? `?${query}` : ''}`
+  }
+
+  function changeCommentSort(nextSort: PostReplySort) {
+    router.push(buildCommentHref(nextSort, 1), { scroll: false })
+  }
+
+  function changeCommentPage(nextPage: number) {
+    router.push(buildCommentHref(sort, nextPage), { scroll: false })
+  }
 
   async function toggleLike(replyId: string) {
     const response = await fetch(`/api/replies/${replyId}/like`, { method: 'POST' })
@@ -127,6 +168,35 @@ export function PostRepliesSection({
     setReplies((current) => current.map((reply) => reply.id === replyId
       ? { ...reply, liked: Boolean(data.isLiked), likeCount: Number(data.likeCount) || 0 }
       : reply))
+    if (sort === 'hot') router.refresh()
+  }
+
+  async function togglePin(reply: ReplyItem) {
+    if (!canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId }) || pinningReplyId) return
+    const pinned = !reply.isPinned
+    setPinningReplyId(reply.id)
+    const response = await fetch(`/api/replies/${reply.id}/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned }),
+    })
+    if (response.status === 401) {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
+      setPinningReplyId(null)
+      return
+    }
+    if (response.ok) {
+      setReplies((current) => {
+        const updated = current.map((item) => item.id === reply.id
+          ? { ...item, isPinned: pinned }
+          : pinned && item.parentId === null ? { ...item, isPinned: false } : item)
+        if (!pinned) return updated
+        const pinnedReply = updated.find((item) => item.id === reply.id)
+        return pinnedReply ? [pinnedReply, ...updated.filter((item) => item.id !== reply.id)] : updated
+      })
+      router.refresh()
+    }
+    setPinningReplyId(null)
   }
 
   function replyLikeButton(reply: ReplyItem) {
@@ -167,6 +237,21 @@ export function PostRepliesSection({
     return () => window.cancelAnimationFrame(frame)
   }, [activeReplyId])
 
+  useEffect(() => {
+    const onFocusComposer = (event: Event) => {
+      const detail = (event as CustomEvent<{ postId?: string }>).detail
+      if (detail?.postId !== postId || !currentUserId) return
+      setReplyTo(null)
+      window.requestAnimationFrame(() => {
+        const composer = document.getElementById(`post-primary-composer-${postId}`)
+        composer?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        composer?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+      })
+    }
+    window.addEventListener('ecfc:focus-post-composer', onFocusComposer)
+    return () => window.removeEventListener('ecfc:focus-post-composer', onFocusComposer)
+  }, [currentUserId, postId])
+
   function findRootReplyId(replyId: string) {
     let current = replyMap.get(replyId)
     const visited = new Set<string>()
@@ -183,6 +268,8 @@ export function PostRepliesSection({
     setReplies((current) => current.some((item) => item.id === created.id) ? current : [...current, created])
     const rootId = created.parentId ? findRootReplyId(created.parentId) : null
     if (rootId) setExpandedReplies((current) => ({ ...current, [rootId]: true }))
+    window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: Math.max(initialReplyCount, replies.length + 1) } }))
+    if (document.documentElement.dataset.forumDetailDiscover !== 'true') router.refresh()
   }
 
   function removeReply(replyId: string) {
@@ -192,6 +279,7 @@ export function PostRepliesSection({
       const removeIds = new Set([replyId, ...collectIds(replyId)])
       return current.filter((reply) => !removeIds.has(reply.id))
     })
+    router.refresh()
   }
 
   function collectThreadReplies(rootId: string) {
@@ -230,6 +318,7 @@ export function PostRepliesSection({
               <span className="font-bold text-slate-400">UID {formatUid(reply.author.uid)}</span>
               <span className="font-bold text-slate-400">Lv.{reply.author.level}</span>
               <span className="font-bold text-slate-400">{formatDate(new Date(reply.createdAt))}</span>
+              <IpRegionLabel ipRegion={reply.ipRegion} />
             </div>
             <p className="mt-1 break-words whitespace-pre-wrap text-sm leading-6 text-slate-700">
               {replyToName ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}
@@ -292,13 +381,15 @@ export function PostRepliesSection({
       <article key={reply.id} id={`reply-${reply.id}`} className="scroll-mt-20">
         <div className="post-reply-card rounded-xl border p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3 text-sm font-bold text-slate-500">
-            <Link href={`/user/${formatUid(reply.author.uid)}`} className="flex items-center gap-2 text-brand-950">
-              <span className="grid h-8 w-8 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
+            <Link href={`/user/${formatUid(reply.author.uid)}`} className="flex min-w-0 items-center gap-2 text-brand-950">
+              <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                 <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
               </span>
               <span>{name} · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
             </Link>
+            {reply.isPinned ? <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
             <span>#{index + 1} · {formatDate(new Date(reply.createdAt))}</span>
+            <IpRegionLabel ipRegion={reply.ipRegion} />
           </div>
           <p className="whitespace-pre-wrap leading-7 text-slate-700">
             <MentionText text={replyBody.text} mentions={reply.mentions} />
@@ -319,6 +410,16 @@ export function PostRepliesSection({
                 className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700"
               >
                 回复
+              </button>
+            ) : null}
+            {canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId }) ? (
+              <button
+                type="button"
+                disabled={pinningReplyId === reply.id}
+                onClick={() => void togglePin(reply)}
+                className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700 disabled:opacity-50"
+              >
+                {reply.isPinned ? '取消置顶' : '置顶'}
               </button>
             ) : null}
             {canDelete ? (
@@ -363,17 +464,35 @@ export function PostRepliesSection({
   return (
     <section className="post-replies-section space-y-3">
       {currentUserId && !replyTo ? (
-        <ReplyForm
-          postId={postId}
-          onReplyCancel={() => setReplyTo(null)}
-          onReplyCreated={addReply}
-        />
+        <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
+          <ReplyForm
+            postId={postId}
+            onReplyCancel={() => setReplyTo(null)}
+            onReplyCreated={addReply}
+          />
+        </div>
       ) : !currentUserId ? (
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
       ) : null}
 
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
       {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
+      <div className="flex items-center justify-end">
+        <div role="tablist" aria-label="评论排序" className="inline-flex rounded-full bg-slate-100 p-1">
+          {([['latest', '最新'], ['hot', '最热']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={sort === value}
+              onClick={() => changeCommentSort(value)}
+              className={`rounded-full px-3 py-1 text-xs font-black transition ${sort === value ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       {hotReplyIds?.length ? (
         <div className="post-replies-hot-list p-4">
           <h3 className="font-black text-brand-950">热门评论</h3>
@@ -395,6 +514,15 @@ export function PostRepliesSection({
           {rootReplies.map((reply, index) => renderReply(reply, index))}
         </div>
       )}
+      {totalPages > 1 ? (
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          onPageChange={changeCommentPage}
+          ariaLabel="评论分页"
+          className="post-replies-pagination"
+        />
+      ) : null}
 
     </section>
   )

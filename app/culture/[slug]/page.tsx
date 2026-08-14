@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
@@ -84,12 +85,16 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
           <div className="mt-4 space-y-3">
             {item.CultureComment.map((comment) => (
               <div key={comment.id} className="rounded-2xl bg-sky-50/80 p-4">
-                <p className="text-sm font-black text-brand-950">{resolveFriendDisplayName({
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <p className="text-sm font-black text-brand-950">{resolveFriendDisplayName({
                   viewerId: user.id,
                   targetUserId: comment.User.id,
                   fallbackName: getPublicUserDisplayName(comment.User),
                   remarkMap,
-                })}</p>
+                  })}</p>
+                  <time className="text-xs font-bold text-slate-400" dateTime={comment.createdAt.toISOString()}>{comment.createdAt.toLocaleString('zh-CN')}</time>
+                  <IpRegionLabel ipRegion={comment.ipRegion} />
+                </div>
                 <p className="mt-2 text-sm font-bold leading-7 text-slate-600">{comment.content}</p>
               </div>
             ))}

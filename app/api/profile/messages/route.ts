@@ -33,6 +33,7 @@ export async function GET(request: Request) {
         mood: true,
         content: true,
         createdAt: true,
+        ipRegion: true,
         likeCount: true,
         commentCount: true,
         DailyMessageComment: {
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
             parentId: true,
             content: true,
             createdAt: true,
+            ipRegion: true,
             User: {
               select: {
                 id: true,
@@ -70,6 +72,7 @@ export async function GET(request: Request) {
     mood: message.mood,
     content: message.content,
     createdAt: message.createdAt,
+    ipRegion: message.ipRegion,
     likeCount: message.likeCount,
     commentCount: message.commentCount,
     comments: message.DailyMessageComment.map((comment) => ({
@@ -77,6 +80,7 @@ export async function GET(request: Request) {
       parentId: comment.parentId,
       content: comment.content,
       createdAt: comment.createdAt,
+      ipRegion: comment.ipRegion,
       authorName: comment.User
         ? resolveFriendDisplayName({
             viewerId: user.id,

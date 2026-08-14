@@ -8,6 +8,7 @@ import { formatUid } from '@/lib/uid'
 import { PROFILE_RECORD_PAGE_SIZE, type ProfileRecentMessage, type ProfileRecordPagination } from '@/lib/profile-page'
 import { scrollToSectionTop } from '@/lib/pagination'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 
 type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
 type PostItem = {
@@ -240,6 +241,7 @@ function ModuleContent({
             <div className="flex flex-wrap items-center gap-2 text-xs font-black text-brand-950">
               {message.mood ? <span className="rounded-full bg-sky-50 px-2 py-1 text-brand-700">{message.mood}</span> : null}
               <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('zh-CN')}</time>
+              <IpRegionLabel ipRegion={message.ipRegion} />
             </div>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.content}</p>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
@@ -262,6 +264,7 @@ function ModuleContent({
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-black text-brand-950">{comment.authorName}</span>
                         <time className="text-[11px] font-bold text-slate-400">{new Date(comment.createdAt).toLocaleString('zh-CN')}</time>
+                        <IpRegionLabel ipRegion={comment.ipRegion} />
                       </div>
                       <p className="mt-0.5 break-words text-sm font-bold leading-5 text-slate-600">{comment.content}</p>
                     </div>

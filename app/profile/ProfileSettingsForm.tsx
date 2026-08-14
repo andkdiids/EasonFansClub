@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Poi
 import { useRouter } from 'next/navigation'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { UserLocationPicker } from '@/components/UserLocationPicker'
 import { profileImageUrl } from '@/lib/images'
 import { validateLoginAccountValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
+import type { UserLocation } from '@/lib/user-location'
 
 type InitialProfile = {
   username: string
@@ -20,6 +22,7 @@ type InitialProfile = {
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
+  location: UserLocation | null
   email: string
   phone: string
   emailVerifiedAt: string | null
@@ -690,6 +693,7 @@ export function ProfileSettingsForm({
       body: JSON.stringify({
         nickname: form.nickname,
         bio: form.bio,
+        location: form.location,
         avatarUrl: form.avatarUrl,
         backgroundUrl: form.backgroundUrl,
         email: form.email,
@@ -718,6 +722,7 @@ export function ProfileSettingsForm({
         emailVerifiedAt: data.profile.emailVerifiedAt || null,
         phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
         wallVisibility: data.profile.wallVisibility || current.wallVisibility,
+        location: data.profile.location || null,
       }))
       const nextPhone = data.profile.phone || ''
       const nextPhoneParts = getPhoneInputParts(nextPhone, phoneCountry)
@@ -940,6 +945,12 @@ export function ProfileSettingsForm({
               className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
               placeholder="写一点关于你的 Eason 故事"
             />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-black text-slate-700">地区</span>
+            <UserLocationPicker value={form.location} onChange={(value) => update('location', value)} />
+            <span className="mt-2 block text-xs font-bold leading-5 text-slate-500">地区由你自行设置，与系统显示的 IP 属地无关。</span>
           </label>
         </section>
 

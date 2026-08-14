@@ -68,7 +68,8 @@ test('缺失父评论和循环父子关系不会破坏评论树', () => {
 
 test('评论查询与帖子正文查询隔离', () => {
   assert.match(postPage, /function loadPostReplies/)
-  assert.match(postPage, /try \{[\s\S]*postReplies = await loadPostReplies/)
+  assert.match(postPage, /const loadedReplies = await loadPostReplies/)
+  assert.match(postPage, /postReplies = loadedReplies\.rows/)
   assert.match(postPage, /\[post:comments:load-failed\]/)
 })
 

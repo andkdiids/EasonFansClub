@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { AddFriendButton } from '@/components/FriendRequestActions'
+import { FriendProfileActions } from '@/components/FriendProfileActions'
 import { ProfileHeader } from '@/components/ProfileSummary'
 import { ProfileWall } from '@/components/ProfileWall'
 import { PublicUserModules } from '@/components/PublicUserModules'
 import type { GrowthSummary } from '@/lib/growth'
 import { formatUid } from '@/lib/uid'
 import type { ProfileRecentMessage, ProfileRecordPagination, ProfileWallVisibility } from '@/lib/profile-page'
+import { formatUserLocation, type UserLocation } from '@/lib/user-location'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -16,6 +17,8 @@ export type ProfilePageSurfaceProfile = {
   displayName: string
   baseDisplayName: string
   bio: string
+  location: UserLocation | null
+  ipRegion: string | null
   avatarUrl: string | null
   backgroundUrl: string | null
   createdAt: Date
@@ -27,6 +30,7 @@ export type ProfilePageSurfaceRelationship = {
   isSelf: boolean
   isFriend: boolean
   isBlocked: boolean
+  isFollowed: boolean
   hasViewer: boolean
   friendStatus: FriendStatus
   initialRemark: string | null
@@ -90,6 +94,16 @@ export function ProfilePageSurface({
           <h2 className="profile-archive-title whitespace-nowrap text-base font-black text-brand-950 sm:text-lg md:text-xl">个人档案</h2>
           {!isSelf && hasViewer && isFriend && !isBlocked && remarkEditor ? <div className="shrink-0">{remarkEditor}</div> : null}
         </div>
+        <dl className="mt-4 grid gap-2 border-t border-sky-100 pt-4 text-sm sm:grid-cols-2">
+          <div className="flex min-w-0 items-baseline gap-3">
+            <dt className="shrink-0 font-black text-slate-500">地区</dt>
+            <dd className="min-w-0 truncate font-bold text-brand-950">{formatUserLocation(profile.location) || '未设置'}</dd>
+          </div>
+          <div className="flex min-w-0 items-baseline gap-3">
+            <dt className="shrink-0 font-black text-slate-500">IP属地</dt>
+            <dd className="min-w-0 truncate font-bold text-brand-950">{profile.ipRegion || '暂未记录'}</dd>
+          </div>
+        </dl>
         <p className="mt-3 min-w-0 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600 sm:text-base">
           {profile.bio || '这个成员还没有填写个人简介。'}
         </p>
@@ -106,12 +120,16 @@ export function ProfilePageSurface({
               <Link href="/profile/stickers" className={actionLinkClass()}>我的表情包</Link>
             </>
           ) : (
-            <>
-              {hasViewer && isFriend && !isBlocked ? <span className={actionLinkClass()}>已好友</span> : null}
-              {hasViewer && !isFriend && !isBlocked ? <AddFriendButton uid={profile.uid} initialStatus={friendStatus} /> : null}
-              {!hasViewer ? <Link href="/login" className={actionLinkClass()}>登录后添加好友</Link> : null}
-              {profile.publicLiveCount > 0 ? <Link href={`/user/${formatUid(profile.uid)}/live`} className={actionLinkClass()}>TA的现场</Link> : null}
-            </>
+            <FriendProfileActions
+              targetUserId={profile.id}
+              targetUid={profile.uid}
+              publicLiveCount={profile.publicLiveCount}
+              hasViewer={hasViewer}
+              initialIsFriend={isFriend}
+              initialIsBlocked={isBlocked}
+              initialIsFollowed={relationship.isFollowed}
+              friendStatus={friendStatus}
+            />
           )}
         </div>
       </div>

@@ -5,8 +5,10 @@ import { WebSocket as WsWebSocket, WebSocketServer, type WebSocket } from 'next/
 import { authCookieName, getCurrentUserFromSessionToken } from './lib/auth'
 import { hasValidRequestOrigin } from './lib/security'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
+import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
 
 const websocketPath = '/ws'
+const duelWebsocketPath = '/ws/duel'
 const maxPayload = 4096
 const maxConnectionsPerUser = 8
 const maxConnectionsPerIp = 20
@@ -98,7 +100,7 @@ function parsePort() {
 
 async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
   const url = requestUrl(request)
-  if (url.pathname !== websocketPath) {
+  if (url.pathname !== websocketPath && url.pathname !== duelWebsocketPath) {
     rejectUpgrade(socket, 404, 'Not Found')
     return null
   }
@@ -135,7 +137,7 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
       rejectUpgrade(socket, 429, 'Too Many Requests')
       return null
     }
-    return { user, ip }
+    return { user, ip, channel: url.pathname === duelWebsocketPath ? 'duel' as const : 'summary' as const }
   } catch (error) {
     console.error('[realtime.authorize]', error)
     rejectUpgrade(socket, 503, 'Service Unavailable')
@@ -161,7 +163,7 @@ async function start() {
     perMessageDeflate: false,
   })
 
-  websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string }) => {
+  websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string; channel: 'summary' | 'duel' }) => {
     const { user, ip } = auth
     socket.isAlive = true
     socket.realtimeUserId = user.id
@@ -169,8 +171,10 @@ async function start() {
     realtimeSockets.add(socket)
     increment(activeConnectionsByUser, user.id)
     increment(activeConnectionsByIp, ip)
-    const removeFromHub = realtimeHub.add(user.id, socket)
     let closed = false
+
+    const removeFromHub = auth.channel === 'summary' ? realtimeHub.add(user.id, socket) : () => duelRealtimeHub.detach(socket)
+    if (auth.channel === 'duel') duelRealtimeHub.attach(user.id, socket)
 
     const cleanup = () => {
       if (closed) return
@@ -188,11 +192,16 @@ async function start() {
         if (socket.readyState === WsWebSocket.OPEN) socket.send('pong')
         return
       }
+      if (auth.channel === 'duel') {
+        void duelRealtimeHub.handleMessage(socket, data)
+        return
+      }
       socket.close(1008, 'read-only realtime channel')
     })
     socket.on('close', cleanup)
     socket.on('error', cleanup)
 
+    if (auth.channel !== 'summary') return
     void realtimePublisher.sendInitial(user.id, socket).catch((error) => {
       console.error('[realtime.initial-summary]', error)
       socket.close(1011, 'summary unavailable')

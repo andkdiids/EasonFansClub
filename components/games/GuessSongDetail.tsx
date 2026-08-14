@@ -166,6 +166,7 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
           {starting ? '正在进入…' : '立即开始'}
         </button>
         <button type="button" onClick={() => setRuleOpen(true)}>游戏规则</button>
+        <Link href="/games/guess-song/duel">听听·对决</Link>
         <Link href="/entertainment/guess-song/leaderboard">排行榜</Link>
         <a href="#history">历史记录</a>
       </div>

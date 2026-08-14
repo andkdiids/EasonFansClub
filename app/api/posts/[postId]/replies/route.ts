@@ -10,6 +10,7 @@ import { checkForbiddenWords } from '@/lib/content-filter'
 import { appendContentImages, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
+import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -46,6 +47,8 @@ export async function POST(request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再回复' }, { status: 401 })
 
+  const ipRegion = await resolveIpRegion(request)
+  void updateUserIpRegion(user.id, ipRegion)
   const { postId } = await params
   const body = await request.json().catch(() => null)
   const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''
@@ -171,6 +174,7 @@ export async function POST(request: Request, { params }: Params) {
         postId,
         authorId: user.id,
         content,
+        ipRegion,
         stickerId: stickerId || null,
         parentId: parentId || null,
       },

@@ -10,6 +10,7 @@ import { DEFAULT_PHONE_COUNTRY, getPhoneValidationMessage, isSupportedPhoneCount
 import { normalizeText } from '@/lib/validators'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
+import { updateUserIpRegion } from '@/lib/ip-region'
 
 const loginUserQueryTimeoutMs = 4500
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -91,6 +92,8 @@ export async function POST(request: Request) {
         { status: 401, headers: noStoreHeaders },
       )
     }
+
+    void updateUserIpRegion(user.id, request)
 
     const sessionUser = {
       id: user.id,

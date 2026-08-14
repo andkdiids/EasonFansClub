@@ -1,18 +1,59 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+
+type PostInteractionDetail = {
+  postId?: string
+  isLiked?: boolean
+  likeCount?: number
+  isFavorited?: boolean
+  favoriteCount?: number
+}
+
+function emitPostInteraction(detail: PostInteractionDetail) {
+  window.dispatchEvent(new CustomEvent('ecfc:post-interaction', { detail }))
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index)
+      if (!key?.startsWith('forum-discovery-session:')) continue
+      const raw = window.sessionStorage.getItem(key)
+      if (!raw) continue
+      const session = JSON.parse(raw) as { posts?: Array<Record<string, unknown>> }
+      if (!Array.isArray(session.posts)) continue
+      const posts = session.posts.map((post) => post.id === detail.postId
+        ? { ...post, ...(typeof detail.isLiked === 'boolean' ? { likedByMe: detail.isLiked } : {}), ...(typeof detail.likeCount === 'number' ? { likeCount: detail.likeCount } : {}), ...(typeof detail.isFavorited === 'boolean' ? { favoritedByMe: detail.isFavorited } : {}), ...(typeof detail.favoriteCount === 'number' ? { favoriteCount: detail.favoriteCount } : {}) }
+        : post)
+      window.sessionStorage.setItem(key, JSON.stringify({ ...session, posts }))
+    }
+  } catch {
+    // Interaction state still updates in mounted components if storage is unavailable.
+  }
+}
 
 export function LikeButton({
   postId,
   initialLiked,
   initialCount,
-}: Readonly<{ postId: string; initialLiked: boolean; initialCount: number }>) {
+  className,
+  refreshOnSuccess = true,
+}: Readonly<{ postId: string; initialLiked: boolean; initialCount: number; className?: string; refreshOnSuccess?: boolean }>) {
   const router = useRouter()
   const [liked, setLiked] = useState(initialLiked)
   const [count, setCount] = useState(Math.max(initialCount, 0))
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    const syncInteraction = (event: Event) => {
+      const detail = (event as CustomEvent<PostInteractionDetail>).detail
+      if (detail?.postId !== postId || typeof detail.isLiked !== 'boolean') return
+      setLiked(detail.isLiked)
+      if (typeof detail.likeCount === 'number') setCount(Math.max(detail.likeCount, 0))
+    }
+    window.addEventListener('ecfc:post-interaction', syncInteraction)
+    return () => window.removeEventListener('ecfc:post-interaction', syncInteraction)
+  }, [postId])
 
   async function toggleLike() {
     if (isSubmitting) return
@@ -32,7 +73,8 @@ export function LikeButton({
       if (!response.ok) throw new Error(data.message || '操作失败，请先登录')
       setLiked(Boolean(data.isLiked))
       setCount(Math.max(Number(data.likeCount || 0), 0))
-      router.refresh()
+      emitPostInteraction({ postId, isLiked: Boolean(data.isLiked), likeCount: Number(data.likeCount || 0) })
+      if (refreshOnSuccess) router.refresh()
     } catch (reason) {
       setLiked(previousLiked)
       setCount(previousCount)
@@ -48,7 +90,9 @@ export function LikeButton({
         type="button"
         onClick={(event) => { event.preventDefault(); event.stopPropagation(); void toggleLike() }}
         disabled={isSubmitting}
-        className={`interaction-button rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
+        aria-pressed={liked}
+        data-liked={liked}
+        className={className || `interaction-button rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
           liked ? 'bg-red-50 text-red-600' : 'bg-sky-50 text-brand-700'
         }`}
       >
@@ -63,12 +107,25 @@ export function FavoriteButton({
   postId,
   initialFavorited,
   initialCount,
-}: Readonly<{ postId: string; initialFavorited: boolean; initialCount: number }>) {
+  className,
+  refreshOnSuccess = true,
+}: Readonly<{ postId: string; initialFavorited: boolean; initialCount: number; className?: string; refreshOnSuccess?: boolean }>) {
   const router = useRouter()
   const [favorited, setFavorited] = useState(initialFavorited)
   const [count, setCount] = useState(Math.max(initialCount, 0))
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    const syncInteraction = (event: Event) => {
+      const detail = (event as CustomEvent<PostInteractionDetail>).detail
+      if (detail?.postId !== postId || typeof detail.isFavorited !== 'boolean') return
+      setFavorited(detail.isFavorited)
+      if (typeof detail.favoriteCount === 'number') setCount(Math.max(detail.favoriteCount, 0))
+    }
+    window.addEventListener('ecfc:post-interaction', syncInteraction)
+    return () => window.removeEventListener('ecfc:post-interaction', syncInteraction)
+  }, [postId])
 
   async function toggleFavorite() {
     if (isSubmitting) return
@@ -85,7 +142,8 @@ export function FavoriteButton({
 
     setFavorited(Boolean(data.isFavorited))
     setCount(Math.max(Number(data.favoriteCount || 0), 0))
-    router.refresh()
+    emitPostInteraction({ postId, isFavorited: Boolean(data.isFavorited), favoriteCount: Number(data.favoriteCount || 0) })
+    if (refreshOnSuccess) router.refresh()
   }
 
   return (
@@ -93,7 +151,9 @@ export function FavoriteButton({
       <button
         onClick={toggleFavorite}
         disabled={isSubmitting}
-        className={`interaction-button rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
+        aria-pressed={favorited}
+        data-favorited={favorited}
+        className={className || `interaction-button rounded-full px-4 py-2 font-black transition disabled:opacity-60 ${
           favorited ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-brand-700'
         }`}
       >

@@ -18,6 +18,7 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   ADMIN_ADJUST: '管理员发放',
   FEATURED_POST: '精选奖励',
   ACTIVITY_REWARD: '成就奖励',
+  GUESS_SONG_DUEL_WIN: '听听·对决获胜',
   BADGE_EXCHANGE: '兑换奖励',
   ENTERTAINMENT_DAILY_DRAW: '每日处方',
   POST_DAILY_FIRST: '发帖奖励',

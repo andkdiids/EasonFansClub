@@ -6,6 +6,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
 import { formatBeijingDate } from '@/lib/checkin'
+import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -47,6 +48,8 @@ export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
+  const ipRegion = await resolveIpRegion(request)
+  void updateUserIpRegion(guard.user.id, ipRegion)
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)
   const content = sanitizeText(body?.content, 300)
@@ -83,6 +86,7 @@ export async function POST(request: Request, context: RouteContext) {
         messageId,
         authorId: guard.user.id,
         content,
+        ipRegion,
         parentId: parentId || null,
       },
       include: { User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } } },

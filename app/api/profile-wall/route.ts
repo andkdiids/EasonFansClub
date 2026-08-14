@@ -7,6 +7,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -49,6 +50,7 @@ type SerializedWallMessage = {
   parentId: string | null
   createdAt: string
   updatedAt: string
+  ipRegion: string | null
   canDelete: boolean
   liked: boolean
   likeCount: number
@@ -149,6 +151,7 @@ function serializeWallNode(
     parentId: node.row.parentId,
     createdAt: node.row.createdAt.toISOString(),
     updatedAt: node.row.updatedAt.toISOString(),
+    ipRegion: node.row.ipRegion,
     canDelete: canManageWallMessage(viewer, node.row.senderId, receiverId),
     liked: viewerLikedIds.has(node.row.id),
     likeCount: node.row.likeCount,
@@ -282,6 +285,8 @@ export async function POST(request: Request) {
   const viewer = await getCurrentUser()
   if (!viewer) return NextResponse.json({ message: '请先登录' }, { status: 401 })
 
+  const ipRegion = await resolveIpRegion(request)
+  void updateUserIpRegion(viewer.id, ipRegion)
   const body = await request.json().catch(() => null)
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null
@@ -311,7 +316,7 @@ export async function POST(request: Request) {
   let notifiedUserId: string | null = null
   const message = await prisma.$transaction(async (tx) => {
     const created = await tx.profileWallMessage.create({
-      data: { senderId: viewer.id, receiverId: receiver.id, parentId: parentMessage?.id || null, content: rawContent },
+      data: { senderId: viewer.id, receiverId: receiver.id, parentId: parentMessage?.id || null, content: rawContent, ipRegion },
       select: { id: true },
     })
     await tx.friendActivity.create({

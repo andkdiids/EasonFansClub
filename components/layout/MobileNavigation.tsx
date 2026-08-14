@@ -31,7 +31,6 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
   const router = useRouter()
   const [centerOpen, setCenterOpen] = useState(false)
   const pendingHref = useRef('')
-  const backdropCloseTimer = useRef(0)
   const items = primaryNavigation.filter((item) => item.mobile)
   const first = items.slice(0, 2)
   const last = items.slice(2)
@@ -82,8 +81,6 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
 
   useEffect(() => setCenterOpen(false), [pathname])
 
-  useEffect(() => () => window.clearTimeout(backdropCloseTimer.current), [])
-
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return
 
@@ -125,24 +122,19 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
   }
 
   function closeCenter() {
-    window.clearTimeout(backdropCloseTimer.current)
     pendingHref.current = ''
     if (window.history.state?.easonCenterSheet) window.history.back()
     else setCenterOpen(false)
   }
 
-  function consumeBackdropEvent(event: ReactPointerEvent<HTMLButtonElement> | ReactMouseEvent<HTMLButtonElement>) {
-    event.preventDefault()
+  function consumeBackdropEvent(event: ReactPointerEvent<HTMLButtonElement>) {
     event.stopPropagation()
   }
 
-  function closeCenterAfterPointer(event: ReactPointerEvent<HTMLButtonElement>) {
-    consumeBackdropEvent(event)
-    backdropCloseTimer.current = window.setTimeout(closeCenter, 0)
-  }
-
   function closeCenterFromBackdrop(event: ReactMouseEvent<HTMLButtonElement>) {
-    consumeBackdropEvent(event)
+    if (event.target !== event.currentTarget) return
+    event.preventDefault()
+    event.stopPropagation()
     closeCenter()
   }
 
@@ -176,7 +168,6 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
         className="mobile-center-backdrop"
         aria-label="关闭 E院中心"
         onPointerDown={consumeBackdropEvent}
-        onPointerUp={closeCenterAfterPointer}
         onClick={closeCenterFromBackdrop}
       />
       <section className="mobile-center-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-center-title">

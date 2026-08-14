@@ -34,7 +34,7 @@ export default async function PrescriptionHistoryPage({ searchParams }: Readonly
       </header>
 
       {result.records.length ? (
-        <div className="mt-5 space-y-4">
+        <div className="mt-4 space-y-3">
           {result.records.map((record) => (
             <article key={record.id} id={`prescription-${record.id}`} className="prescription-card">
               <header>

@@ -9,6 +9,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { withDbTimeout } from '@/lib/db-timeout'
+import { locationFromProfile } from '@/lib/user-location'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,7 @@ export default async function PublicUserPage({ params }: PageProps) {
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
+      ipRegion: true,
       createdAt: true,
       Profile: true,
       _count: {
@@ -54,6 +56,7 @@ export default async function PublicUserPage({ params }: PageProps) {
 
   const isSelf = viewer?.id === user.id
   let isFriend = false
+  let isFollowed = false
   let isBlocked = false
   let pendingRequest: { senderId: string; receiverId: string } | null = null
   let initialRemark: string | null = null
@@ -61,7 +64,7 @@ export default async function PublicUserPage({ params }: PageProps) {
   if (viewer && !isSelf) {
     try {
       const [userAId, userBId] = normalizeFriendPair(viewer.id, user.id)
-      const [friendshipResult, pendingResult, blockResult] = await Promise.all([
+      const [friendshipResult, pendingResult, blockResult, followResult] = await Promise.all([
         withDbTimeout('Friendship.findUnique publicUser.friendship', prisma.friendship.findUnique({
           where: { userAId_userBId: { userAId, userBId } },
           select: { id: true },
@@ -85,9 +88,14 @@ export default async function PublicUserPage({ params }: PageProps) {
           },
           select: { id: true },
         }), 2500),
+        withDbTimeout('FriendFollow.findUnique publicUser.follow', prisma.friendFollow.findUnique({
+          where: { followerId_followedId: { followerId: viewer.id, followedId: user.id } },
+          select: { id: true },
+        }), 2500),
       ])
 
       isFriend = Boolean(friendshipResult)
+      isFollowed = Boolean(followResult) && isFriend
       pendingRequest = pendingResult
       isBlocked = Boolean(blockResult)
 
@@ -101,6 +109,7 @@ export default async function PublicUserPage({ params }: PageProps) {
     } catch (error) {
       console.error('[public-user:ssr] relationship-query:failed', error)
       isFriend = false
+      isFollowed = false
       pendingRequest = null
       isBlocked = false
       initialRemark = null
@@ -136,6 +145,8 @@ export default async function PublicUserPage({ params }: PageProps) {
         displayName,
         baseDisplayName,
         bio,
+        location: locationFromProfile(user.Profile),
+        ipRegion: user.ipRegion,
         avatarUrl: avatar,
         backgroundUrl: background,
         createdAt: user.createdAt,
@@ -147,6 +158,7 @@ export default async function PublicUserPage({ params }: PageProps) {
         isSelf,
         isFriend,
         isBlocked,
+        isFollowed,
         hasViewer: Boolean(viewer),
         friendStatus,
         initialRemark,

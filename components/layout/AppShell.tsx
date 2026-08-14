@@ -25,7 +25,7 @@ function isImmersiveRoute(pathname: string) {
 export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
   const isMusicRoute = pathname === '/music' || pathname.startsWith('/music/')
-  const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname)
+  const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname) || pathname === '/games/guess-song/duel' || pathname.startsWith('/games/guess-song/duel/')
   const isEntertainmentRoute = isImmersiveRoute(pathname)
   const [sidebarState, setSidebarState] = useState(() => ({ pathname, collapsed: isEntertainmentRoute }))
   const sidebarCollapsed = sidebarState.pathname === pathname ? sidebarState.collapsed : isEntertainmentRoute

@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
+import { FriendFollowButton } from '@/components/FriendFollowButton'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { useCheckInLike } from '@/components/checkin-like-context'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
 import { anonymizeCheckInMessages, getCheckInMessagePageSize, CHECK_IN_MESSAGE_PAGE_SIZE, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
-import { checkInMessageAuthorId, normalizeFriendCheckInMessages } from '@/lib/checkin-message-order'
+import { checkInMessageAuthorId } from '@/lib/checkin-message-order'
 import { getCheckInReplyToggleLabel, getVisibleCheckInReplyCount } from '@/lib/checkin-reply-display'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
@@ -25,6 +27,7 @@ type FlattenedDailyComment = {
   isRoot: boolean
 }
 const messagesPerPage = CHECK_IN_MESSAGE_PAGE_SIZE
+const EMPTY_FOLLOWED_USER_IDS: string[] = []
 
 function beijingDateTime(value: string) {
   return formatBeijingDateTime(value)
@@ -129,6 +132,7 @@ export function CheckInMessagesPanel({
   emptyText,
   initialMessages,
   initialPagination,
+  initialFollowedUserIds = EMPTY_FOLLOWED_USER_IDS,
   initialDate,
   maxDate,
   initialSort,
@@ -146,6 +150,7 @@ export function CheckInMessagesPanel({
   emptyText?: string
   initialMessages: CheckInDisplayMessageItem[]
   initialPagination?: CheckInMessagePagination
+  initialFollowedUserIds?: string[]
   initialDate: string
   maxDate: string
   initialSort: CheckInMessageSort
@@ -160,6 +165,7 @@ export function CheckInMessagesPanel({
   const [date, setDate] = useState(initialDate)
   const [sort, setSort] = useState<CheckInMessageSort>(initialSort)
   const [messages, setMessages] = useState<CheckInDisplayMessageItem[]>(initialMessages)
+  const [followedUserIds, setFollowedUserIds] = useState<Set<string>>(() => new Set(initialFollowedUserIds))
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [pagination, setPagination] = useState<CheckInMessagePagination | null>(initialPagination || null)
@@ -198,19 +204,14 @@ export function CheckInMessagesPanel({
     const safePage = Math.min(Math.max(page, 1), totalPages)
     const start = (safePage - 1) * activePageSize
     const pagedMessages = serverPaginated ? messages : messages.slice(start, start + activePageSize)
-    const normalizedMessages = scope === 'friends'
-      ? normalizeFriendCheckInMessages(pagedMessages, safePage, sessionUserId)
-      : pagedMessages
     const recentMessage = recentlyCreatedMessageId
       ? messages.find((item) => item.id === recentlyCreatedMessageId)
       : null
-    if (recentMessage && (scope !== 'friends' || safePage === 1) && !normalizedMessages.some((item) => item.id === recentMessage.id)) {
-      return scope === 'friends'
-        ? normalizeFriendCheckInMessages([recentMessage, ...normalizedMessages], safePage, sessionUserId)
-        : [recentMessage, ...normalizedMessages]
+    if (recentMessage && !serverPaginated && !pagedMessages.some((item) => item.id === recentMessage.id)) {
+      return [recentMessage, ...pagedMessages]
     }
-    return normalizedMessages
-  }, [activePageSize, messages, page, recentlyCreatedMessageId, scope, serverPaginated, sessionUserId, totalPages])
+    return pagedMessages
+  }, [activePageSize, messages, page, recentlyCreatedMessageId, serverPaginated, totalPages])
 
   const loadMessages = useCallback(async (
     nextDate = date,
@@ -255,12 +256,13 @@ export function CheckInMessagesPanel({
       setSort(data.sort === 'hot' ? 'hot' : 'latest')
       const incoming = Array.isArray(data.messages) ? data.messages : []
       const localMessage = recentlyCreatedMessageRef.current
-      const merged = localMessage && !incoming.some((item: CheckInDisplayMessageItem) => item.id === localMessage.id)
+      const merged = !serverPaginated && localMessage && !incoming.some((item: CheckInDisplayMessageItem) => item.id === localMessage.id)
         ? [...incoming, localMessage].sort((left, right) => compareCheckInMessages(left, right, nextSort))
         : incoming
-      setMessages(scope === 'friends'
-        ? normalizeFriendCheckInMessages(merged, nextPage, sessionUserIdRef.current)
-        : merged)
+      setMessages(merged)
+      if (scope === 'friends' && Array.isArray(data.followedUserIds)) {
+        setFollowedUserIds(new Set(data.followedUserIds.filter((id: unknown): id is string => typeof id === 'string')))
+      }
       const nextPagination = data.pagination as CheckInMessagePagination | undefined
       if (serverPaginated && nextPagination) {
         pageSizeRef.current = nextPagination.pageSize
@@ -307,6 +309,7 @@ export function CheckInMessagesPanel({
     setSort(initialSort)
     setMessages(initialMessages)
     setPagination(initialPagination || null)
+    setFollowedUserIds(new Set(initialFollowedUserIds))
     pageSizeRef.current = initialPagination?.pageSize || messagesPerPage
     if (recentlyCreatedMessageRef.current && initialMessages.some((item) => item.id === recentlyCreatedMessageRef.current?.id)) {
       recentlyCreatedMessageRef.current = null
@@ -323,7 +326,7 @@ export function CheckInMessagesPanel({
     if (initialPagination) setPage(initialPagination.page)
     else if (queryChanged) setPage(1)
     initialQueryRef.current = { date: initialDate, sort: initialSort }
-  }, [initialDate, initialMessages, initialPagination, initialSort])
+  }, [initialDate, initialFollowedUserIds, initialMessages, initialPagination, initialSort])
 
   useEffect(() => {
     if (previewMode || !serverPaginated) return
@@ -569,11 +572,29 @@ export function CheckInMessagesPanel({
                     {anonymous ? (
                       <span className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>E院病友</span>
                     ) : (
-                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>{name}</a> : null
+                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'min-w-0 max-w-[9rem] truncate text-xs font-black text-brand-950' : 'min-w-0 max-w-[12rem] truncate font-black text-brand-950 sm:max-w-[16rem]'}>{name}</a> : null
                     )}
+                    {scope === 'friends' && !previewMode && !anonymous && fullIdentity && fullIdentity.id !== sessionUserId && !followedUserIds.has(fullIdentity.id) ? (
+                      <FriendFollowButton
+                        userId={fullIdentity.id}
+                        initialFollowed={false}
+                        compact
+                        hideWhenFollowed
+                        onChanged={(nextFollowed) => {
+                          setFollowedUserIds((current) => {
+                            const next = new Set(current)
+                            if (nextFollowed) next.add(fullIdentity.id)
+                            else next.delete(fullIdentity.id)
+                            return next
+                          })
+                          if (nextFollowed) void loadMessages(date, sort, false, false, page)
+                        }}
+                      />
+                    ) : null}
                     {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood ? `${mood.icon} ${mood.label}` : '未填写心情'}</span> : mood ? <span className="text-xs">{mood.icon}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
+                    <IpRegionLabel ipRegion={item.ipRegion} />
                     {canManageMessages && !previewMode && !isMinimal ? (
                       <button
                         type="button"
@@ -605,6 +626,7 @@ export function CheckInMessagesPanel({
                                   {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950">{commentName}</a>}
                                   {!isRoot && !anonymous && commentIdentity ? <span className="font-bold text-slate-400">Lv.{commentIdentity.level}</span> : null}
                                   <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
+                                  <IpRegionLabel ipRegion={comment.ipRegion} />
                                 </div>
                                 <p className={`${isRoot ? 'text-sm' : 'text-sm'} mt-1 break-words whitespace-pre-wrap leading-6`}>
                                   {!isRoot ? <span className="font-black text-brand-700">回复 @{replyToName}：</span> : null}

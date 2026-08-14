@@ -445,6 +445,7 @@ model ConversationParticipant {
 model CultureComment {
   id          String      @id @default(cuid())
   content     String
+  ipRegion    String?
   isDeleted   Boolean     @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -523,6 +524,7 @@ model DailyMessage {
   date                 DateTime
   mood                 String?
   content              String
+  ipRegion             String?
   likeCount            Int                    @default(0)
   commentCount         Int                    @default(0)
   favoriteCount        Int                    @default(0)
@@ -559,6 +561,7 @@ model DailyMessage {
 model DailyMessageComment {
   id                        String                @id @default(cuid())
   content                   String
+  ipRegion                  String?
   isDeleted                 Boolean               @default(false)
   deletedAt                 DateTime?
   createdAt                 DateTime              @default(now())
@@ -919,6 +922,19 @@ model Friendship {
   @@index([userBId, createdAt])
 }
 
+model FriendFollow {
+  id                            String   @id @default(cuid())
+  createdAt                     DateTime @default(now())
+  followerId                    String
+  followedId                    String
+  User_FriendFollow_followerIdToUser User   @relation("FriendFollowFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  User_FriendFollow_followedIdToUser User   @relation("FriendFollowFollowed", fields: [followedId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followedId])
+  @@index([followerId, createdAt])
+  @@index([followedId])
+}
+
 model FriendRemark {
   id        String   @id @default(cuid())
   remark    String   @db.VarChar(20)
@@ -1023,6 +1039,7 @@ model GuessSongQuestion {
   GuessSongAudioVariant    GuessSongAudioVariant[]
   MusicSong                MusicSong?                 @relation(fields: [musicSongId], references: [id])
   GuessSongSessionQuestion GuessSongSessionQuestion[]
+  GuessSongDuelQuestion    GuessSongDuelQuestion[]
 
   @@index([allowEndless, enabled])
   @@index([createdAt])
@@ -1133,6 +1150,157 @@ model GuessSongRiskLog {
   @@index([userId, createdAt])
   @@index([riskScore, createdAt])
   @@index([sessionId])
+}
+
+model GuessSongDuelRoom {
+  id                   String                  @id @default(cuid())
+  roomCode             String                  @unique
+  passwordHash         String?
+  isPublic              Boolean                 @default(true)
+  status                GuessSongDuelRoomStatus @default(WAITING)
+  hostReady             Boolean                 @default(false)
+  challengerReady       Boolean                 @default(false)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  closedAt              DateTime?
+  hostId                String
+  challengerId          String?
+  Host                  User                    @relation("GuessSongDuelRoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  Challenger            User?                   @relation("GuessSongDuelRoomChallenger", fields: [challengerId], references: [id], onDelete: SetNull)
+  Match                 GuessSongDuelMatch?
+  GuessSongDuelInvite   GuessSongDuelInvite[]
+
+  @@index([status, isPublic, createdAt])
+  @@index([hostId, status])
+  @@index([challengerId, status])
+}
+
+model GuessSongDuelMatch {
+  id                   String                  @id @default(cuid())
+  status               GuessSongDuelMatchStatus @default(PLAYING)
+  finishReason         GuessSongDuelFinishReason?
+  winnerId             String?
+  isDraw               Boolean                 @default(false)
+  isSuspicious         Boolean                 @default(false)
+  currentQuestionIndex Int                     @default(1)
+  totalQuestions       Int                     @default(30)
+  completedQuestionCount Int                   @default(0)
+  startedAt            DateTime                @default(now())
+  finishedAt           DateTime?
+  rewardAmount         Int                     @default(0)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  roomId               String                  @unique
+  Room                 GuessSongDuelRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  Winner               User?                   @relation("GuessSongDuelMatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  GuessSongDuelPlayer  GuessSongDuelPlayer[]
+  GuessSongDuelQuestion GuessSongDuelQuestion[]
+  GuessSongDuelAnswer  GuessSongDuelAnswer[]
+
+  @@index([status, createdAt])
+  @@index([winnerId, finishedAt])
+  @@index([startedAt])
+}
+
+model GuessSongDuelPlayer {
+  id                   String             @id @default(cuid())
+  slot                 Int
+  correctCount         Int                @default(0)
+  totalEffectiveAnswerMs Int              @default(0)
+  isOnline             Boolean            @default(false)
+  disconnectedAt       DateTime?
+  reconnectDeadlineAt  DateTime?
+  suspicious            Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  matchId              String
+  userId               String
+  Match                GuessSongDuelMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  User                 User               @relation("GuessSongDuelPlayerUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@unique([matchId, slot])
+  @@index([userId, createdAt])
+  @@index([matchId, isOnline])
+}
+
+model GuessSongDuelQuestion {
+  id                   String             @id @default(cuid())
+  publicToken          String             @unique
+  questionIndex        Int
+  optionsSnapshot      Json
+  correctOptionKey     String
+  songTitle            String
+  albumTitle           String?
+  audioStoragePath     String
+  audioDurationSeconds Int
+  serverStartedAt      DateTime?
+  audioStartAt         DateTime?
+  answerDeadlineAt     DateTime?
+  revealedAt           DateTime?
+  createdAt            DateTime           @default(now())
+  matchId              String
+  sourceQuestionId     String?
+  Match                GuessSongDuelMatch  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  SourceQuestion       GuessSongQuestion?  @relation(fields: [sourceQuestionId], references: [id], onDelete: SetNull)
+  GuessSongDuelAnswer  GuessSongDuelAnswer[]
+
+  @@unique([matchId, questionIndex])
+  @@index([matchId, revealedAt])
+  @@index([sourceQuestionId])
+}
+
+model GuessSongDuelAnswer {
+  id                    String                @id @default(cuid())
+  selectedOptionKey     String?
+  isCorrect             Boolean               @default(false)
+  clientElapsedMs       Int?
+  receivedAt            DateTime
+  latencyEstimateMs     Int                   @default(0)
+  effectiveElapsedMs    Int?
+  suspicious             Boolean               @default(false)
+  createdAt             DateTime              @default(now())
+  matchId               String
+  questionId            String
+  userId                String
+  Match                 GuessSongDuelMatch   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  Question              GuessSongDuelQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  User                  User                  @relation("GuessSongDuelAnswerUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, questionId, userId])
+  @@index([questionId, receivedAt])
+  @@index([userId, createdAt])
+  @@index([suspicious, createdAt])
+}
+
+model GuessSongDuelStats {
+  id             String   @id @default(cuid())
+  wins           Int      @default(0)
+  participations Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  userId         String   @unique
+  User           User     @relation("GuessSongDuelStatsUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([wins, userId])
+  @@index([participations, userId])
+}
+
+model GuessSongDuelInvite {
+  id             String             @id @default(cuid())
+  tokenHash      String             @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  roomId         String
+  inviterId      String
+  inviteeId      String
+  Room           GuessSongDuelRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  Inviter        User               @relation("GuessSongDuelInviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  Invitee        User               @relation("GuessSongDuelInviteInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, inviteeId, expiresAt])
+  @@index([inviteeId, acceptedAt, expiresAt])
 }
 
 model Like {
@@ -1806,6 +1974,10 @@ model Profile {
   avatarUrl      String?
   backgroundUrl  String?
   bio            String?
+  locationCountryCode String?
+  locationCountry     String?
+  locationRegionCode  String?
+  locationRegion      String?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
   userId         String                @unique
@@ -1831,6 +2003,7 @@ model ProfileWallLike {
 model ProfileWallMessage {
   id                                       String               @id @default(cuid())
   content                                  String
+  ipRegion                                 String?
   createdAt                                DateTime             @default(now())
   updatedAt                                DateTime             @updatedAt
   deletedAt                                DateTime?
@@ -1865,9 +2038,11 @@ model RateLimitLog {
 model Reply {
   id           String         @id @default(cuid())
   content      String
+  ipRegion     String?
   stickerId    String?
   sticker      Sticker?        @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
   isDeleted    Boolean        @default(false)
+  isPinned     Boolean        @default(false)
   deletedAt    DateTime?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
@@ -1886,6 +2061,7 @@ model Reply {
 
   @@index([authorId, createdAt])
   @@index([isDeleted])
+  @@index([postId, isDeleted, isPinned])
   @@index([parentId])
   @@index([postId, createdAt])
   @@index([stickerId])
@@ -2239,6 +2415,8 @@ model User {
   usernameNormalized                                     String                      @unique
   usernameChangedAt                                      DateTime?
   checkinMoodEnabled                                     Boolean                     @default(true)
+  ipRegion                                               String?
+  ipRegionUpdatedAt                                      DateTime?
   AccountSecurityLog                                     AccountSecurityLog[]
   ActivityFavorite                                       ActivityFavorite[]
   ActivityRegistration                                   ActivityRegistration[]
@@ -2272,6 +2450,8 @@ model User {
   FeedbackReply                                          FeedbackReply[]
   Follow_Follow_followerIdToUser                         Follow[]                    @relation("Follow_followerIdToUser")
   Follow_Follow_followingIdToUser                        Follow[]                    @relation("Follow_followingIdToUser")
+  FriendFollow_FriendFollow_followerIdToUser             FriendFollow[]               @relation("FriendFollowFollower")
+  FriendFollow_FriendFollow_followedIdToUser             FriendFollow[]               @relation("FriendFollowFollowed")
   FriendActivity                                         FriendActivity[]
   FriendRemark_FriendRemark_ownerIdToUser                FriendRemark[]               @relation("FriendRemarkOwner")
   FriendRemark_FriendRemark_friendIdToUser               FriendRemark[]               @relation("FriendRemarkFriend")
@@ -2282,6 +2462,14 @@ model User {
   GuessSongLeaderboardEntry                              GuessSongLeaderboardEntry[]
   GuessSongRiskLog                                       GuessSongRiskLog[]
   GuessSongSession                                       GuessSongSession[]
+  GuessSongDuelRoom_GuessSongDuelRoomHost               GuessSongDuelRoom[]          @relation("GuessSongDuelRoomHost")
+  GuessSongDuelRoom_GuessSongDuelRoomChallenger          GuessSongDuelRoom[]          @relation("GuessSongDuelRoomChallenger")
+  GuessSongDuelMatch_GuessSongDuelMatchWinner            GuessSongDuelMatch[]         @relation("GuessSongDuelMatchWinner")
+  GuessSongDuelPlayer                                    GuessSongDuelPlayer[]        @relation("GuessSongDuelPlayerUser")
+  GuessSongDuelAnswer                                    GuessSongDuelAnswer[]        @relation("GuessSongDuelAnswerUser")
+  GuessSongDuelStats                                     GuessSongDuelStats?          @relation("GuessSongDuelStatsUser")
+  GuessSongDuelInvite_GuessSongDuelInviteInviter         GuessSongDuelInvite[]        @relation("GuessSongDuelInviteInviter")
+  GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]        @relation("GuessSongDuelInviteInvitee")
   Like                                                   Like[]
   LoginDevice                                            LoginDevice[]
   LotteryEntry                                           LotteryEntry[]
@@ -2415,6 +2603,7 @@ enum AchievementCategory {
   CHECKIN_TOTAL
   POST
   MUSIC
+  DUEL
   FRIEND
   ACTIVE
   SPECIAL
@@ -2642,6 +2831,7 @@ enum NotificationType {
   BADGE
   FRIEND_REQUEST
   BIRTHDAY_GREETING
+  GUESS_SONG_DUEL_INVITE
 }
 
 enum PageLayoutRevisionSource {
@@ -2680,6 +2870,31 @@ enum PointActionType {
   POST_COMMENT_RECEIVED
   COMMENT_POST
   COMMENT_REVOKE
+  GUESS_SONG_DUEL_WIN
+}
+
+enum GuessSongDuelRoomStatus {
+  WAITING
+  READY
+  PLAYING
+  FINISHED
+  CLOSED
+}
+
+enum GuessSongDuelMatchStatus {
+  PLAYING
+  FINISHED
+  INVALID
+  CLOSED
+}
+
+enum GuessSongDuelFinishReason {
+  SCORE_THRESHOLD
+  ALL_QUESTIONS
+  DISCONNECT
+  FORFEIT
+  DISCONNECT_INVALID
+  FORFEIT_INVALID
 }
 
 enum PostContentType {

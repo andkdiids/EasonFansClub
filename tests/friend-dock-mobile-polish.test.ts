@@ -130,19 +130,23 @@ test('E center sheet independently clears nav center button and visual gap', () 
   assert.match(css, /--mobile-center-action-overhang: 28px/)
 })
 
-test('E center layering keeps backdrop above content nav visible and sheet on top', () => {
+test('E center layering keeps the backdrop above the bottom nav while open', () => {
   assert.match(css, /--layer-floating-action: 65/)
   assert.match(css, /--layer-center-backdrop: 68/)
   assert.match(css, /--layer-mobile-nav: 99999/)
   assert.match(css, /--layer-center-sheet: 110/)
+  assert.match(css, /\.app-mobile-nav\[data-center-open='true'\] \{[^}]*z-index:calc\(var\(--layer-center-backdrop\) - 1\);[^}]*pointer-events:none/)
+  assert.match(css, /:root\[data-eason-center-open='true'\] \.app-main-area \{[^}]*pointer-events:none/)
   assert.match(css, /\.mobile-center-backdrop \{[^}]*z-index:var\(--layer-center-backdrop\)/)
-  assert.match(css, /\.mobile-center-sheet \{[^}]*z-index:var\(--layer-center-sheet\)/)
+  assert.match(css, /\.mobile-center-sheet \{[^}]*z-index:var\(--layer-center-sheet\)[^}]*pointer-events:auto/)
 })
 
-test('E center outside gesture is consumed before closing without click-through', () => {
+test('E center keeps the backdrop mounted until the compatibility click closes it', () => {
   assert.match(mobileNavigation, /onPointerDown=\{consumeBackdropEvent\}/)
-  assert.match(mobileNavigation, /onPointerUp=\{closeCenterAfterPointer\}/)
   assert.match(mobileNavigation, /onClick=\{closeCenterFromBackdrop\}/)
+  assert.doesNotMatch(mobileNavigation, /onPointerUp=\{closeCenterAfterPointer\}/)
+  assert.doesNotMatch(mobileNavigation, /backdropCloseTimer/)
+  assert.match(mobileNavigation, /event\.target !== event\.currentTarget/)
   assert.match(mobileNavigation, /event\.preventDefault\(\)/)
   assert.match(mobileNavigation, /event\.stopPropagation\(\)/)
 })

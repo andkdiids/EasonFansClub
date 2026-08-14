@@ -33,6 +33,7 @@ export async function GET(request: Request) {
         date: true,
         mood: true,
         content: true,
+        ipRegion: true,
         likeCount: true,
         favoriteCount: true,
         commentCount: true,
@@ -57,6 +58,7 @@ export async function GET(request: Request) {
             id: true,
             content: true,
             createdAt: true,
+            ipRegion: true,
             User: {
               select: {
                 id: true,

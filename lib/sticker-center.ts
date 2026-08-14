@@ -3,7 +3,7 @@ import { emitRealtime, emitRealtimeToAdmins } from '@/lib/realtime'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
-import type { StickerReportReason } from '@prisma/client'
+import type { Prisma, StickerReportReason } from '@prisma/client'
 
 /** 选择器可见表情：未隐藏、未下架、所属合集已通过审核。 */
 const VISIBLE_STICKER_WHERE = {
@@ -559,12 +559,27 @@ export type StorePackItem = {
   createdAt: string
 }
 
+export type StickerStoreSort = 'hot' | 'new' | 'official'
+
+export function getStorePackOrderBy(sort: StickerStoreSort): Prisma.StickerPackOrderByWithRelationInput | Prisma.StickerPackOrderByWithRelationInput[] {
+  if (sort === 'hot') {
+    return [
+      { UserStickerPack: { _count: 'desc' } },
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]
+  }
+
+  return { createdAt: 'desc' }
+}
+
 /**
- * 获取表情包汇总计数：以 `usageCount` 字段汇总（含官方/用户表情包）。
- * 由于 `usageCount` 是单个 Sticker 的全局发送次数总和，把它当作「下载/使用次数」展示。
+ * 获取表情包汇总计数。
+ * `UserStickerPack` 的记录代表一个用户将合集添加到表情库，按合集计数即为商店下载量。
+ * `Sticker.usageCount` 只代表发送/使用次数，不能用于热门合集排序。
  */
-async function aggregatePackUsage(packIds: string[]): Promise<Map<string, { stickerCount: number; downloadCount: number; addedByCount: number }>> {
-  const result = new Map<string, { stickerCount: number; downloadCount: number; addedByCount: number }>()
+async function aggregatePackUsage(packIds: string[]): Promise<Map<string, { stickerCount: number; downloadCount: number; addedByCount: number; usageCount: number }>> {
+  const result = new Map<string, { stickerCount: number; downloadCount: number; addedByCount: number; usageCount: number }>()
   if (packIds.length === 0) return result
   const groups = await prisma.sticker.groupBy({
     by: ['packId'],
@@ -575,19 +590,20 @@ async function aggregatePackUsage(packIds: string[]): Promise<Map<string, { stic
   for (const g of groups) {
     result.set(g.packId, {
       stickerCount: g._count._all,
-      downloadCount: g._sum.usageCount ?? 0,
+      downloadCount: 0,
       addedByCount: 0,
+      usageCount: g._sum.usageCount ?? 0,
     })
   }
-  // 添加人数：UserStickerPack
+  // 每个 UserStickerPack 记录代表一次用户添加/下载，按合集统计全局下载量。
   const addedGroups = await prisma.userStickerPack.groupBy({
     by: ['packId'],
     where: { packId: { in: packIds } },
     _count: { _all: true },
   })
   for (const g of addedGroups) {
-    const prev = result.get(g.packId) ?? { stickerCount: 0, downloadCount: 0, addedByCount: 0 }
-    result.set(g.packId, { ...prev, addedByCount: g._count._all })
+    const prev = result.get(g.packId) ?? { stickerCount: 0, downloadCount: 0, addedByCount: 0, usageCount: 0 }
+    result.set(g.packId, { ...prev, downloadCount: g._count._all, addedByCount: g._count._all })
   }
   return result
 }
@@ -599,7 +615,7 @@ export async function getStorePacks(opts: {
   userId: string
   page?: number
   pageSize?: number
-  sort?: 'hot' | 'new' | 'official'
+  sort?: StickerStoreSort
   category?: string | null
 }): Promise<{ packs: StorePackItem[]; total: number; page: number; pageSize: number }> {
   const page = Math.max(1, opts.page ?? 1)
@@ -613,7 +629,7 @@ export async function getStorePacks(opts: {
   const [packs, total] = await Promise.all([
     prisma.stickerPack.findMany({
       where,
-      orderBy: sort === 'new' ? { createdAt: 'desc' } : { createdAt: 'desc' },
+      orderBy: getStorePackOrderBy(sort),
       skip: (page - 1) * pageSize,
       take: pageSize,
       select: {
@@ -635,10 +651,11 @@ export async function getStorePacks(opts: {
   const addedSet = await getUserAddedPackIds(opts.userId, packs.map((p) => p.id))
   const remarkMap = await loadFriendRemarkMap(opts.userId, packs.flatMap((pack) => pack.creator ? [pack.creator.id] : []))
 
-  // 排序：hot / official 都按下载量降序；new 走时间倒序
+  // 热门顺序已经由数据库在 skip/take 之前完成；其他分类继续使用创建时间顺序。
   let ordered = packs
-  if (sort !== 'new') {
-    ordered = [...packs].sort((a, b) => (agg.get(b.id)?.downloadCount ?? 0) - (agg.get(a.id)?.downloadCount ?? 0))
+  if (sort === 'official') {
+    // 保留官方分类原有的当前页使用次数排序，不影响热门的全局下载排序。
+    ordered = [...packs].sort((a, b) => (agg.get(b.id)?.usageCount ?? 0) - (agg.get(a.id)?.usageCount ?? 0))
   }
 
   const items = ordered.map<StorePackItem>((pack) => ({

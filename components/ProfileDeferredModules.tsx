@@ -2,16 +2,18 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { getMood } from '@/lib/daily'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 type CheckIn = { id: string; checkDate: string; mood: string | null; streakDay: number }
-type ReplyItem = { id: string; content: string; createdAt: string; authorName: string; authorAvatarUrl: string | null }
+type ReplyItem = { id: string; content: string; createdAt: string; ipRegion?: string | null; authorName: string; authorAvatarUrl: string | null }
 type Message = {
   id: string
   mood: string
   content: string
   createdAt: string
+  ipRegion?: string | null
   likeCount: number
   commentCount: number
   comments: ReplyItem[]
@@ -140,6 +142,7 @@ export function ProfileRecentMessages() {
               <div className="flex items-center gap-2 text-sm font-black text-brand-950">
                 <span className="text-base">{mood?.icon || '🎵'}</span>
                 <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString('zh-CN')}</time>
+                <IpRegionLabel ipRegion={item.ipRegion} />
               </div>
               <p className="mt-2 line-clamp-3 break-words text-sm leading-6 text-slate-600">{item.content}</p>
 
@@ -183,6 +186,7 @@ export function ProfileRecentMessages() {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-black text-brand-950">{reply.authorName}</span>
                           <time className="text-[11px] font-bold text-slate-400">{new Date(reply.createdAt).toLocaleString('zh-CN')}</time>
+                          <IpRegionLabel ipRegion={reply.ipRegion} />
                         </div>
                         <p className="mt-0.5 break-words text-sm font-bold leading-5 text-slate-600">{reply.content}</p>
                       </div>
