@@ -6,7 +6,8 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
 import { formatBeijingMonthDayTime } from '@/lib/beijing-time'
-import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
     select: feedbackListSelect,
   }), [], 8000)
 
-  return NextResponse.json({ feedbacks: feedbacks.map(serializeFeedbackListItem) })
+  return NextResponse.json({ feedbacks: feedbacks.map((feedback) => serializeFeedbackListItem(feedback)) })
 }
 
 export async function POST(request: Request) {
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
   const contact = sanitizeText(body?.contact, 120)
   const type = parseFeedbackType(body?.type ?? body?.category)
   const attachments = parseFeedbackAttachments(body?.attachments)
-  if (await containsSensitiveContent(`${title}\n${content}`)) return NextResponse.json({ message: '内容包含违禁词，无法提交' }, { status: 400 })
+  if ((await checkBannedWords(`${title}\n${content}`)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
 
   if (!title) return NextResponse.json({ message: '请填写反馈标题', errors: { title: '请填写反馈标题' } }, { status: 400 })
   if (!type) return NextResponse.json({ message: '请选择反馈分类', errors: { type: '请选择反馈分类' } }, { status: 400 })

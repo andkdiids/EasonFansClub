@@ -40,7 +40,10 @@ test('推荐流排除 ID 会去重并限制输入规模', () => {
   const route = readFileSync('app/api/forum/discover/route.ts', 'utf8')
   assert.match(route, /publicPostWhere/)
   assert.match(route, /seenAuthorIds/)
-  assert.match(route, /randomInt/)
+  assert.match(route, /feedSeed/)
+  assert.match(route, /recommendationScore/)
+  assert.match(route, /createdAt: \{ lte: feedSeed/)
+  assert.doesNotMatch(route, /randomInt/)
   assert.doesNotMatch(route, /ORDER\s+BY\s+RAND\s*\(/i)
 })
 
@@ -93,6 +96,10 @@ test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误
   assert.match(discovery, /postsRef\.current/)
   assert.match(discovery, /autoLoadBlockedRef/)
   assert.match(discovery, /loadPage\(false, true\)/)
+  assert.match(discovery, /rootMargin: '420px 0px'/)
+  assert.match(discovery, /\[hasMore, loadingMore, loadPage\]/)
+  assert.match(discovery, /feedSeed: requestFeedSeed/)
+  assert.match(discovery, /payload\.nextCursor === requestCursor/)
   assert.doesNotMatch(discovery, /setInterval|SWR|mutate\(/i)
 })
 

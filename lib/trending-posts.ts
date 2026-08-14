@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const TRENDING_PAGE_SIZE = 15
 export type TrendingRange = 7 | 30
@@ -25,6 +26,10 @@ export type TrendingPost = {
   boardName: string
   boardSlug: string
   imageUrl: string | null
+  moderationStatus: string
+  usernameModerationStatus: string
+  nicknameModerationStatus: string
+  displayNameModerationStatus: string | null
 }
 
 type TrendingPostRow = Omit<TrendingPost, 'hotScore'> & {
@@ -49,6 +54,7 @@ export const getTrendingPosts = unstable_cache(
       SELECT
         p.id,
         p.title,
+        p.moderationStatus,
         COALESCE(NULLIF(p.summary, ''), LEFT(p.content, 180)) AS summary,
         p.viewCount,
         p.likeCount,
@@ -59,6 +65,9 @@ export const getTrendingPosts = unstable_cache(
         (p.viewCount * 0.08 + p.likeCount * 3 + p.replyCount * 5 + p.favoriteCount * 4) AS hotScore,
         u.id AS authorId,
         u.uid AS authorUid,
+        u.usernameModerationStatus,
+        u.nicknameModerationStatus,
+        pr.displayNameModerationStatus,
         COALESCE(NULLIF(pr.displayName, ''), u.nickname) AS authorName,
         COALESCE(NULLIF(pr.avatarUrl, ''), u.avatarUrl) AS authorAvatarUrl,
         b.name AS boardName,
@@ -77,7 +86,7 @@ export const getTrendingPosts = unstable_cache(
       WHERE
         p.createdAt >= ${cutoff}
         AND p.status = 'PUBLISHED'
-        AND p.moderationStatus = 'APPROVED'
+        AND p.moderationStatus IN ('APPROVED', 'VIOLATION')
         AND p.isDeleted = false
         AND u.status = 'ACTIVE'
         AND u.isDeleted = false
@@ -96,7 +105,9 @@ export const getTrendingPosts = unstable_cache(
       hasMore: rows.length > TRENDING_PAGE_SIZE,
       posts: rows.slice(0, TRENDING_PAGE_SIZE).map((row) => ({
         ...row,
-        summary: publicContentImageMarkers(row.summary),
+        title: publicModerationText(row.title, row.moderationStatus),
+        summary: publicModerationText(publicContentImageMarkers(row.summary), row.moderationStatus),
+        authorName: row.usernameModerationStatus === 'VIOLATION' || row.nicknameModerationStatus === 'VIOLATION' || row.displayNameModerationStatus === 'VIOLATION' ? '违规用户' : row.authorName,
         hotScore: Number(row.hotScore),
         authorAvatarUrl: publicImageUrl(row.authorAvatarUrl),
         imageUrl: publicImageUrl(row.imageUrl),

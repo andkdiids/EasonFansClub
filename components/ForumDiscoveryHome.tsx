@@ -17,6 +17,7 @@ type DiscoverySession = {
   permissions: ForumDiscoveryResponse['permissions']
   hasMore: boolean
   nextCursor: string | null
+  feedSeed?: string | null
   seenPostIds: string[]
   seenAuthorIds: string[]
   scrollY: number
@@ -68,6 +69,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
   const hasMoreRef = useRef(true)
   const postsRef = useRef<ForumDiscoveryPost[]>([])
   const nextCursorRef = useRef<string | null>(null)
+  const feedSeedRef = useRef<string | null>(null)
   const requestSequence = useRef(0)
   const requestRef = useRef<DiscoveryRequest | null>(null)
   const autoLoadBlockedRef = useRef(false)
@@ -91,7 +93,9 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     if (!reset && autoLoadBlockedRef.current && !manual) return
     if (!reset && requestRef.current) return requestRef.current.promise
 
-    const requestKey = `${sessionKey}:${reset ? 'reset' : `more:${nextCursorRef.current || 'start'}`}`
+    const requestCursor = reset ? null : nextCursorRef.current
+    const requestFeedSeed = reset ? null : feedSeedRef.current
+    const requestKey = `${sessionKey}:${reset ? 'reset' : `more:${requestCursor || 'start'}`}`
     if (requestRef.current?.key === requestKey) return requestRef.current.promise
     requestRef.current?.controller.abort()
     if (reset || manual) autoLoadBlockedRef.current = false
@@ -103,6 +107,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       seenAuthorIdsRef.current = new Set()
       postsRef.current = []
       nextCursorRef.current = null
+      feedSeedRef.current = null
       setPosts([])
       setNextCursor(null)
       setHasMore(true)
@@ -130,7 +135,8 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           board: boardValue || null,
           query,
           limit: FORUM_DISCOVERY_PAGE_SIZE,
-          cursor: reset ? null : nextCursorRef.current,
+          cursor: requestCursor,
+          feedSeed: requestFeedSeed,
           seenPostIds: reset ? [] : [...seenPostIdsRef.current],
           seenAuthorIds: reset ? [] : [...seenAuthorIdsRef.current],
         }),
@@ -141,9 +147,17 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
 
         const incoming = payload.posts
         const currentPosts = postsRef.current
+        const uniqueIncoming = reset
+          ? incoming
+          : incoming.filter((post) => !currentPosts.some((current) => current.id === post.id))
+        if (!reset && payload.hasMore && (uniqueIncoming.length === 0 || payload.nextCursor === requestCursor)) {
+          autoLoadBlockedRef.current = true
+          setError('加载更多没有返回新内容，请重试')
+          return
+        }
         const merged = reset
           ? incoming
-          : [...currentPosts, ...incoming.filter((post) => !currentPosts.some((current) => current.id === post.id))]
+          : [...currentPosts, ...uniqueIncoming]
         const nextSeenPostIds = reset ? new Set<string>() : new Set(seenPostIdsRef.current)
         const nextSeenAuthorIds = reset ? new Set<string>() : new Set(seenAuthorIdsRef.current)
         incoming.forEach((post) => {
@@ -152,6 +166,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
         })
         postsRef.current = merged
         nextCursorRef.current = payload.nextCursor
+        feedSeedRef.current = payload.feedSeed
         seenPostIdsRef.current = nextSeenPostIds
         seenAuthorIdsRef.current = nextSeenAuthorIds
         hasMoreRef.current = payload.hasMore
@@ -166,6 +181,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           permissions: payload.permissions,
           hasMore: payload.hasMore,
           nextCursor: payload.nextCursor,
+          feedSeed: payload.feedSeed,
           seenPostIds: [...nextSeenPostIds],
           seenAuthorIds: [...nextSeenAuthorIds],
           scrollY: window.scrollY,
@@ -185,7 +201,9 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       }
     })()
     requestRef.current = { key: requestKey, controller, promise: request }
-    void request.finally(() => {
+    void request.then(() => {
+      if (requestRef.current?.promise === request) requestRef.current = null
+    }, () => {
       if (requestRef.current?.promise === request) requestRef.current = null
     })
     return request
@@ -203,7 +221,10 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       if (requestRef.current === request) requestRef.current = null
     }
     const stored = readSession(sessionKey)
-    if (stored && stored.posts.length > 0) {
+    const canRestoreStoredFeed = stored
+      && stored.posts.length > 0
+      && (mode !== 'recommend' || typeof stored.feedSeed === 'string')
+    if (canRestoreStoredFeed) {
       setPosts(stored.posts)
       setBoards(stored.boards)
       setPermissions(stored.permissions)
@@ -211,6 +232,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       setHasMore(stored.hasMore)
       postsRef.current = stored.posts
       nextCursorRef.current = stored.nextCursor
+      feedSeedRef.current = stored.feedSeed || null
       hasMoreRef.current = stored.hasMore
       seenPostIdsRef.current = new Set(stored.seenPostIds || stored.posts.map((post) => post.id))
       seenAuthorIdsRef.current = new Set(stored.seenAuthorIds || stored.posts.map((post) => post.author.id))
@@ -220,7 +242,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     }
     void loadPage(true)
     return cleanupRequest
-  }, [loadPage, sessionKey])
+  }, [loadPage, mode, sessionKey])
 
   useEffect(() => {
     if (restoreScrollY === null || !posts.length || loading) return
@@ -242,11 +264,21 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     const sentinel = sentinelRef.current
     if (!sentinel) return
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) void loadPage(false)
-    }, { rootMargin: '900px 0px' })
+      const entered = entries.some((entry) => entry.isIntersecting)
+      if (!entered) autoLoadBlockedRef.current = false
+      if (entered) void loadPage(false)
+    }, { rootMargin: '420px 0px' })
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [hasMore, loadPage])
+  }, [hasMore, loadingMore, loadPage])
+
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore || error || autoLoadBlockedRef.current) return
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    const distanceToViewport = sentinel.getBoundingClientRect().top - window.innerHeight
+    if (distanceToViewport <= 420) void loadPage(false)
+  }, [error, hasMore, loading, loadingMore, loadPage, posts.length])
 
   useEffect(() => {
     let frame = 0
@@ -327,6 +359,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       permissions,
       hasMore,
       nextCursor,
+      feedSeed: feedSeedRef.current,
       seenPostIds: [...seenPostIdsRef.current],
       seenAuthorIds: [...seenAuthorIdsRef.current],
       scrollY: window.scrollY,

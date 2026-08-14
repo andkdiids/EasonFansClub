@@ -5,6 +5,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { publicModerationText } from '@/lib/content-moderation'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -14,14 +15,21 @@ export async function GET() {
   const conversationRows = await prisma.conversation.findMany({
     where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
     include: {
-      ConversationParticipant: { select: { userId: true, lastReadAt: true, User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } } } },
-      DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, createdAt: true, senderId: true } },
+      ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } } },
+      DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true } },
     },
   })
   // Sort by the latest visible message, then page.  Conversation.updatedAt is
   // intentionally not used: read markers and other metadata updates must not
   // move an old conversation above a newer one.
   const conversations = conversationRows
+    .map((row) => {
+      const participant = row.ConversationParticipant.find((item) => item.userId === user.id)
+      const latest = row.DirectMessage[0]
+      return participant?.clearedAt && latest && latest.createdAt <= participant.clearedAt
+        ? { ...row, DirectMessage: [] }
+        : row
+    })
     .sort((left, right) => compareFriendConversationOrder(
       {
         latestMessageAt: left.DirectMessage[0]?.createdAt || null,
@@ -38,24 +46,33 @@ export async function GET() {
   const participants = conversations.map((row) => ({
     conversationId: row.id,
     lastReadAt: row.ConversationParticipant.find((participant) => participant.userId === user.id)?.lastReadAt || null,
+    clearedAt: row.ConversationParticipant.find((participant) => participant.userId === user.id)?.clearedAt || null,
   }))
   const oldestReadAt = participants.some((item) => !item.lastReadAt)
     ? null
     : participants.reduce<Date | null>((oldest, item) => !oldest || (item.lastReadAt && item.lastReadAt < oldest) ? item.lastReadAt : oldest, null)
+  const oldestClearedAt = participants.some((item) => !item.clearedAt)
+    ? null
+    : participants.reduce<Date | null>((oldest, item) => !oldest || (item.clearedAt && item.clearedAt < oldest) ? item.clearedAt : oldest, null)
+  const oldestBoundary = oldestReadAt && oldestClearedAt
+    ? (oldestReadAt < oldestClearedAt ? oldestReadAt : oldestClearedAt)
+    : oldestReadAt || oldestClearedAt
   const incoming = conversations.length ? await prisma.directMessage.findMany({
     where: {
       conversationId: { in: conversations.map((row) => row.id) },
       senderId: { not: user.id },
       isDeleted: false,
-      ...(oldestReadAt ? { createdAt: { gt: oldestReadAt } } : {}),
+      ...(oldestBoundary ? { createdAt: { gt: oldestBoundary } } : {}),
     },
     select: { conversationId: true, createdAt: true },
   }) : []
   const readByConversation = new Map(participants.map((item) => [item.conversationId, item.lastReadAt]))
+  const clearedByConversation = new Map(participants.map((item) => [item.conversationId, item.clearedAt]))
   const unreadByConversation = new Map<string, number>()
   incoming.forEach((message) => {
     const lastReadAt = readByConversation.get(message.conversationId)
-    if (!lastReadAt || message.createdAt > lastReadAt) unreadByConversation.set(message.conversationId, (unreadByConversation.get(message.conversationId) || 0) + 1)
+    const clearedAt = clearedByConversation.get(message.conversationId)
+    if ((!clearedAt || message.createdAt > clearedAt) && (!lastReadAt || message.createdAt > lastReadAt)) unreadByConversation.set(message.conversationId, (unreadByConversation.get(message.conversationId) || 0) + 1)
   })
   const otherUserIds = conversations.flatMap((row) => row.ConversationParticipant
     .filter((participant) => participant.userId !== user.id)
@@ -66,6 +83,7 @@ export async function GET() {
     const otherUser = other?.User
       ? {
           ...other.User,
+          nickname: getPublicUserDisplayName(other.User),
           avatarUrl: publicImageUrl(other.User.avatarUrl),
           Profile: other.User.Profile ? {
             ...other.User.Profile,
@@ -79,11 +97,14 @@ export async function GET() {
           } : other.User.Profile,
         }
       : null
+    const latestMessage = row.DirectMessage[0]
+      ? { ...row.DirectMessage[0], content: publicModerationText(row.DirectMessage[0].content, row.DirectMessage[0].moderationStatus) }
+      : null
     return {
       id: row.id,
-      lastMessageAt: row.DirectMessage[0]?.createdAt || null,
+      lastMessageAt: latestMessage?.createdAt || null,
       otherUser,
-      latestMessage: row.DirectMessage[0] || null,
+      latestMessage,
       unreadCount: unreadByConversation.get(row.id) || 0,
     }
   }) }, { headers: privateHeaders })

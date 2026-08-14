@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { awardFeaturedPostRewards } from '@/lib/community-rewards'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { checkForbiddenWords } from '@/lib/content-filter'
 import { MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
-import { containsSensitiveContent, isAdminRole, requireUser, sanitizeText } from '@/lib/security'
+import { requireUser, sanitizeText } from '@/lib/security'
+import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -50,9 +50,11 @@ export async function GET(_request: Request, { params }: Params) {
         select: {
           id: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           level: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
       Board: { select: { name: true, slug: true } },
@@ -68,9 +70,11 @@ export async function GET(_request: Request, { params }: Params) {
             select: {
               id: true,
               nickname: true,
+              usernameModerationStatus: true,
+              nicknameModerationStatus: true,
               level: true,
               avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
             },
           },
         },
@@ -86,6 +90,7 @@ export async function GET(_request: Request, { params }: Params) {
   const remarkMap = await loadFriendRemarkMap(viewer?.id, [User.id, ...Reply.map((reply) => reply.User.id)])
   const author = User.Profile ? {
     ...User,
+    nickname: getPublicUserDisplayName(User),
     avatarUrl: publicImageUrl(User.avatarUrl),
     Profile: {
       ...User.Profile,
@@ -97,18 +102,20 @@ export async function GET(_request: Request, { params }: Params) {
         remarkMap,
       }),
     },
-  } : User
+  } : { ...User, nickname: getPublicUserDisplayName(User), avatarUrl: publicImageUrl(User.avatarUrl) }
   return NextResponse.json({
     post: {
       ...postData,
-      content: publicContentImageMarkers(postData.content),
+      title: publicModerationText(postData.title, postData.moderationStatus),
+      content: publicModerationText(publicContentImageMarkers(postData.content), postData.moderationStatus),
       author,
       board: Board,
       replies: Reply.map(({ User: replyAuthor, ...reply }) => ({
         ...reply,
-        content: publicContentImageMarkers(reply.content),
+        content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus),
         author: replyAuthor.Profile ? {
           ...replyAuthor,
+          nickname: getPublicUserDisplayName(replyAuthor),
           avatarUrl: publicImageUrl(replyAuthor.avatarUrl),
           Profile: {
             ...replyAuthor.Profile,
@@ -120,7 +127,7 @@ export async function GET(_request: Request, { params }: Params) {
               remarkMap,
             }),
           },
-        } : replyAuthor,
+        } : { ...replyAuthor, nickname: getPublicUserDisplayName(replyAuthor), avatarUrl: publicImageUrl(replyAuthor.avatarUrl) },
       })),
     },
   }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
@@ -152,7 +159,7 @@ export async function PATCH(request: Request, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
 
-  const isAdmin = isAdminRole(guard.user.role)
+  const isAdmin = shouldBypassForbiddenWords(guard.user)
   const isOwner = existing.authorId === guard.user.id
 
   // 编辑意图：请求体带有标题 / 正文 / 媒体（保留或新增）字段。
@@ -255,7 +262,7 @@ type EditContext = {
     stickerId: string | null
     moderationStatus: string
   }
-  user: { id: string; role: string }
+  user: Pick<SessionUser, 'role'>
   isAdmin: boolean
   isOwner: boolean
   body: Record<string, unknown>
@@ -265,7 +272,7 @@ async function handleEditPost(
   request: Request,
   ctx: EditContext,
 ) {
-  const { postId, existing, isAdmin, isOwner, body } = ctx
+  const { postId, existing, user, isAdmin, isOwner, body } = ctx
 
   if (!isOwner && !isAdmin) {
     return NextResponse.json({ message: '只能编辑自己发布的帖子' }, { status: 403 })
@@ -275,11 +282,15 @@ async function handleEditPost(
   const rawContent = stripUnsafeHtml(sanitizeText(typeof body.content === 'string' ? body.content : existing.content, 20000))
   const hasSticker = Boolean(existing.stickerId)
 
-  if (checkForbiddenWords(`${rawTitle}\n${rawContent}`).blocked) {
-    return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
-  }
-  if (await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
-    return NextResponse.json({ message: '帖子包含违禁词，无法保存', errors: { content: '请修改后重新保存' } }, { status: 400 })
+  const forbiddenWords = await checkPostForbiddenWords({ title: rawTitle, content: rawContent }, user)
+  if (forbiddenWords.blocked) {
+    return NextResponse.json({
+      error: CONTENT_CONTAINS_BANNED_WORD,
+      message: formatPostForbiddenWordMessage(forbiddenWords.matches, forbiddenWords.hasMore),
+      matches: forbiddenWords.matches,
+      hasMore: forbiddenWords.hasMore,
+      errors: formatPostForbiddenWordFieldErrors(forbiddenWords.matches),
+    }, { status: 400 })
   }
 
   const errors: Record<string, string> = {}

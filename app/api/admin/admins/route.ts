@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser, invalidateCurrentUserCache } from '@/lib/auth'
 import { allAdminPermissionKeys, invalidateAdminPermissionCache, type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
+import { USER_REWARD_PERMISSION } from '@/lib/user-reward-constants'
 
 export async function POST(request: Request) {
   const currentUser = await getCurrentUser()
@@ -19,10 +20,27 @@ export async function POST(request: Request) {
 
   const target = await prisma.user.findFirst({
     where: { id: userId, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    select: { id: true, role: true, uid: true, nickname: true, canPlayFullMusic: true },
+    select: {
+      id: true,
+      role: true,
+      uid: true,
+      nickname: true,
+      canPlayFullMusic: true,
+      AdminPermission: {
+        where: { permissionKey: USER_REWARD_PERMISSION },
+        select: { enabled: true },
+      },
+    },
   })
   if (!target) return NextResponse.json({ message: '用户不存在或状态不可用' }, { status: 404 })
   if (target.role === 'SUPER_ADMIN') return NextResponse.json({ message: '不能修改超级管理员权限' }, { status: 400 })
+  if (currentUser.role !== 'SUPER_ADMIN') {
+    const currentlyEnabled = target.AdminPermission.some((permission) => permission.enabled)
+    const requestedEnabled = permissions.includes(USER_REWARD_PERMISSION)
+    if (currentlyEnabled !== requestedEnabled) {
+      return NextResponse.json({ message: '只有超级管理员可以调整用户奖励权限' }, { status: 403 })
+    }
+  }
   const canPlayFullMusic = requestedFullMusic ?? target.canPlayFullMusic
 
   await prisma.$transaction(async (tx) => {

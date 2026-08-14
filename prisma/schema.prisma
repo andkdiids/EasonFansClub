@@ -147,6 +147,24 @@ model AdminPermission {
   @@index([userId, enabled])
 }
 
+model UserReward {
+  id                    String   @id @default(cuid())
+  transactionId         String   @unique
+  userId                String
+  operatorId            String
+  usernameSnapshot      String
+  experienceAmount      Int      @default(0)
+  registrationFeeAmount Int      @default(0)
+  reason                String   @db.VarChar(500)
+  createdAt             DateTime @default(now())
+  recipient             User     @relation("UserRewardRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  operator              User     @relation("UserRewardOperator", fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([operatorId, createdAt])
+  @@index([createdAt])
+}
+
 model Announcement {
   id          String   @id @default(cuid())
   title       String
@@ -166,19 +184,19 @@ enum BadgeCategory {
 }
 
 model Badge {
-  id          String         @id @default(cuid())
-  name        String         @unique
-  slug        String         @unique
+  id          String        @id @default(cuid())
+  name        String        @unique
+  slug        String        @unique
   description String?
   iconUrl     String?
   pointsCost  Int?
-  category    BadgeCategory  @default(SYSTEM)
+  category    BadgeCategory @default(SYSTEM)
   musicTourId String?
-  musicTour   MusicTour?     @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
-  isAutoGrant Boolean        @default(false)
-  isActive    Boolean        @default(true)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  musicTour   MusicTour?    @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
+  isAutoGrant Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
   UserBadge   UserBadge[]
 
   @@index([isActive])
@@ -211,25 +229,28 @@ model BirthdayMessage {
 }
 
 model TodayEvent {
-  id             String          @id @default(cuid())
-  date           DateTime        @db.Date
-  month          Int
-  day            Int
-  type           TodayEventType
-  title          String
-  content        String          @db.Text
-  imageUrl       String?
-  source         TodayEventSource @default(ADMIN)
-  reference      String?
-  status         TodayEventStatus @default(PENDING)
-  rejectionReason String?        @db.Text
-  reviewedAt     DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  submittedById  String?
-  reviewedById   String?
-  SubmittedBy    User?           @relation("TodayEventSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
-  ReviewedBy     User?           @relation("TodayEventReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  id                 String                  @id @default(cuid())
+  date               DateTime                @db.Date
+  month              Int
+  day                Int
+  type               TodayEventType
+  title              String
+  content            String                  @db.Text
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  imageUrl           String?
+  source             TodayEventSource        @default(ADMIN)
+  reference          String?
+  status             TodayEventStatus        @default(PENDING)
+  rejectionReason    String?                 @db.Text
+  reviewedAt         DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  submittedById      String?
+  reviewedById       String?
+  SubmittedBy        User?                   @relation("TodayEventSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  ReviewedBy         User?                   @relation("TodayEventReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([month, day, status])
   @@index([status, createdAt])
@@ -237,14 +258,14 @@ model TodayEvent {
 }
 
 model UserDailyMusicRecommendation {
-  id            String     @id @default(cuid())
+  id            String    @id @default(cuid())
   recommendDate String
   anonymousId   String?
-  createdAt     DateTime   @default(now())
+  createdAt     DateTime  @default(now())
   userId        String?
   songId        String
-  User          User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  MusicSong     MusicSong  @relation(fields: [songId], references: [id], onDelete: Cascade)
+  User          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicSong     MusicSong @relation(fields: [songId], references: [id], onDelete: Cascade)
 
   @@unique([userId, recommendDate])
   @@unique([anonymousId, recommendDate])
@@ -430,6 +451,7 @@ model Conversation {
 model ConversationParticipant {
   id             String       @id @default(cuid())
   lastReadAt     DateTime?
+  clearedAt      DateTime?
   isDeleted      Boolean      @default(false)
   isMuted        Boolean      @default(false)
   joinedAt       DateTime     @default(now())
@@ -443,16 +465,19 @@ model ConversationParticipant {
 }
 
 model CultureComment {
-  id          String      @id @default(cuid())
-  content     String
-  ipRegion    String?
-  isDeleted   Boolean     @default(false)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  itemId      String
-  userId      String
-  CultureItem CultureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  User        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String                  @id @default(cuid())
+  content            String
+  ipRegion           String?
+  isDeleted          Boolean                 @default(false)
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  itemId             String
+  userId             String
+  CultureItem        CultureItem             @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  User               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([itemId, createdAt])
   @@index([userId, createdAt])
@@ -534,6 +559,8 @@ model DailyMessage {
   isDeleted            Boolean                @default(false)
   deletedAt            DateTime?
   moderationStatus     PostModerationStatus   @default(APPROVED)
+  moderationReason     String?
+  matchedBannedWords   String?                @db.Text
   sort                 Int                    @default(0)
   isAdminMessage       Boolean                @default(false)
   createdAt            DateTime               @default(now())
@@ -559,20 +586,23 @@ model DailyMessage {
 }
 
 model DailyMessageComment {
-  id                        String                @id @default(cuid())
+  id                        String                  @id @default(cuid())
   content                   String
   ipRegion                  String?
-  isDeleted                 Boolean               @default(false)
+  isDeleted                 Boolean                 @default(false)
+  moderationStatus          ContentModerationStatus @default(NORMAL)
+  moderationReason          String?
+  matchedBannedWords        String?                 @db.Text
   deletedAt                 DateTime?
-  createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime              @updatedAt
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
   messageId                 String
   authorId                  String
   parentId                  String?
-  User                      User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  DailyMessage              DailyMessage          @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  DailyMessageComment       DailyMessageComment?  @relation("DailyMessageCommentToDailyMessageComment", fields: [parentId], references: [id], onDelete: NoAction)
-  other_DailyMessageComment DailyMessageComment[] @relation("DailyMessageCommentToDailyMessageComment")
+  User                      User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  DailyMessage              DailyMessage            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  DailyMessageComment       DailyMessageComment?    @relation("DailyMessageCommentToDailyMessageComment", fields: [parentId], references: [id], onDelete: NoAction)
+  other_DailyMessageComment DailyMessageComment[]   @relation("DailyMessageCommentToDailyMessageComment")
 
   @@index([authorId, createdAt])
   @@index([messageId, createdAt])
@@ -653,19 +683,22 @@ model DailyTaskTemplate {
 }
 
 model DirectMessage {
-  id              String       @id @default(cuid())
-  type            MessageType  @default(TEXT)
-  content         String
-  imageUrl        String?
-  stickerId       String?
-  sticker         Sticker?      @relation("DirectMessageSticker", fields: [stickerId], references: [id], onDelete: SetNull)
-  isDeleted       Boolean      @default(false)
-  createdAt       DateTime     @default(now())
-  conversationId  String
-  senderId        String
-  clientMessageId String?
-  Conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  User            User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  id                 String                  @id @default(cuid())
+  type               MessageType             @default(TEXT)
+  content            String
+  imageUrl           String?
+  stickerId          String?
+  sticker            Sticker?                @relation("DirectMessageSticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  isDeleted          Boolean                 @default(false)
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  createdAt          DateTime                @default(now())
+  conversationId     String
+  senderId           String
+  clientMessageId    String?
+  Conversation       Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  User               User                    @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
@@ -699,35 +732,35 @@ model EHospitalCheckConfig {
 }
 
 model EHospitalCheckSession {
-  id                     String                    @id @default(cuid())
-  questions              Json
-  answers                Json?
-  score                  Int?
-  status                 String
-  createdAt              DateTime                  @default(now())
-  updatedAt              DateTime                  @updatedAt
-  expiresAt              DateTime
-  registrationDraftId    String
-  RegistrationDraft      RegistrationDraft         @relation(fields: [registrationDraftId], references: [id], onDelete: Cascade)
-  EHospitalCheckAttempt  EHospitalCheckAttempt?
+  id                    String                 @id @default(cuid())
+  questions             Json
+  answers               Json?
+  score                 Int?
+  status                String
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  expiresAt             DateTime
+  registrationDraftId   String
+  RegistrationDraft     RegistrationDraft      @relation(fields: [registrationDraftId], references: [id], onDelete: Cascade)
+  EHospitalCheckAttempt EHospitalCheckAttempt?
 
   @@index([registrationDraftId, status, createdAt])
   @@index([status, expiresAt])
 }
 
 model EHospitalCheckAttempt {
-  id                  String                    @id @default(cuid())
-  sessionId           String                    @unique
-  score               Int
-  passed              Boolean
-  ip                  String?
-  identityHash        String?
-  userId              String?
-  registrationDraftId String
-  createdAt           DateTime                  @default(now())
-  EHospitalCheckSession EHospitalCheckSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  RegistrationDraft   RegistrationDraft         @relation(fields: [registrationDraftId], references: [id], onDelete: Cascade)
-  User                User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id                    String                @id @default(cuid())
+  sessionId             String                @unique
+  score                 Int
+  passed                Boolean
+  ip                    String?
+  identityHash          String?
+  userId                String?
+  registrationDraftId   String
+  createdAt             DateTime              @default(now())
+  EHospitalCheckSession EHospitalCheckSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  RegistrationDraft     RegistrationDraft     @relation(fields: [registrationDraftId], references: [id], onDelete: Cascade)
+  User                  User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([identityHash, createdAt])
   @@index([registrationDraftId, createdAt])
@@ -735,30 +768,30 @@ model EHospitalCheckAttempt {
 }
 
 model RegistrationDraft {
-  id                       String                    @id @default(cuid())
-  tokenHash                String                    @unique
-  registrationType         String
-  username                 String
-  usernameNormalized       String
-  nickname                 String
-  email                    String
-  phone                    String
-  passwordHash             String
-  securityQuestions        Json?
-  acceptedAgreement        Boolean                   @default(false)
-  identityHash             String
-  phoneCodeHash            String?
-  phoneCodeExpiresAt       DateTime?
-  phoneVerifiedAt          DateTime?
-  emailCodeHash            String?
-  emailCodeExpiresAt       DateTime?
-  emailVerifiedAt          DateTime?
-  completedAt              DateTime?
-  expiresAt                DateTime
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
-  EHospitalCheckSession    EHospitalCheckSession[]
-  EHospitalCheckAttempt   EHospitalCheckAttempt[]
+  id                    String                  @id @default(cuid())
+  tokenHash             String                  @unique
+  registrationType      String
+  username              String
+  usernameNormalized    String
+  nickname              String
+  email                 String
+  phone                 String
+  passwordHash          String
+  securityQuestions     Json?
+  acceptedAgreement     Boolean                 @default(false)
+  identityHash          String
+  phoneCodeHash         String?
+  phoneCodeExpiresAt    DateTime?
+  phoneVerifiedAt       DateTime?
+  emailCodeHash         String?
+  emailCodeExpiresAt    DateTime?
+  emailVerifiedAt       DateTime?
+  completedAt           DateTime?
+  expiresAt             DateTime
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  EHospitalCheckSession EHospitalCheckSession[]
+  EHospitalCheckAttempt EHospitalCheckAttempt[]
 
   @@index([email])
   @@index([phone])
@@ -805,24 +838,27 @@ model ExperienceLog {
 }
 
 model Feedback {
-  id                 String               @id @default(cuid())
+  id                 String                  @id @default(cuid())
   type               FeedbackType
   title              String
   content            String
   imageUrl           String?
-  status             FeedbackStatus       @default(OPEN)
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  status             FeedbackStatus          @default(OPEN)
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
   userId             String
   contact            String?
-  adminUnread        Boolean              @default(true)
-  userUnread         Boolean              @default(false)
+  adminUnread        Boolean                 @default(true)
+  userUnread         Boolean                 @default(false)
   lastReplyAt        DateTime?
   lastUserReplyAt    DateTime?
   lastAdminReplyAt   DateTime?
   closedAt           DateTime?
-  idempotencyKeyHash String?              @unique
-  User               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idempotencyKeyHash String?                 @unique
+  User               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   FeedbackAttachment FeedbackAttachment[]
   FeedbackReply      FeedbackReply[]
 
@@ -847,17 +883,20 @@ model FeedbackAttachment {
 }
 
 model FeedbackReply {
-  id                 String               @id @default(cuid())
+  id                 String                  @id @default(cuid())
   content            String
-  createdAt          DateTime             @default(now())
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  createdAt          DateTime                @default(now())
   feedbackId         String
   adminId            String
-  authorRole         String               @default("ADMIN")
-  isReadByUser       Boolean              @default(false)
-  isReadByAdmin      Boolean              @default(true)
+  authorRole         String                  @default("ADMIN")
+  isReadByUser       Boolean                 @default(false)
+  isReadByAdmin      Boolean                 @default(true)
   FeedbackAttachment FeedbackAttachment[]
-  User               User                 @relation(fields: [adminId], references: [id], onDelete: Cascade)
-  Feedback           Feedback             @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  User               User                    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  Feedback           Feedback                @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
 
   @@index([adminId, createdAt])
   @@index([feedbackId, createdAt])
@@ -876,18 +915,21 @@ model Follow {
 }
 
 model FriendActivity {
-  id             String        @id @default(cuid())
-  mood           String?
-  content        String?
-  createdAt      DateTime      @default(now())
-  actorId        String
-  checkInId      String?
-  dailyMessageId String?
-  type           String        @default("CHECKIN")
-  targetUrl      String?
-  User           User          @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  CheckIn        CheckIn?      @relation(fields: [checkInId], references: [id])
-  DailyMessage   DailyMessage? @relation(fields: [dailyMessageId], references: [id])
+  id                 String                  @id @default(cuid())
+  mood               String?
+  content            String?
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  createdAt          DateTime                @default(now())
+  actorId            String
+  checkInId          String?
+  dailyMessageId     String?
+  type               String                  @default("CHECKIN")
+  targetUrl          String?
+  User               User                    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  CheckIn            CheckIn?                @relation(fields: [checkInId], references: [id])
+  DailyMessage       DailyMessage?           @relation(fields: [dailyMessageId], references: [id])
 
   @@index([actorId, createdAt])
   @@index([checkInId])
@@ -923,12 +965,12 @@ model Friendship {
 }
 
 model FriendFollow {
-  id                            String   @id @default(cuid())
-  createdAt                     DateTime @default(now())
-  followerId                    String
-  followedId                    String
-  User_FriendFollow_followerIdToUser User   @relation("FriendFollowFollower", fields: [followerId], references: [id], onDelete: Cascade)
-  User_FriendFollow_followedIdToUser User   @relation("FriendFollowFollowed", fields: [followedId], references: [id], onDelete: Cascade)
+  id                                 String   @id @default(cuid())
+  createdAt                          DateTime @default(now())
+  followerId                         String
+  followedId                         String
+  User_FriendFollow_followerIdToUser User     @relation("FriendFollowFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  User_FriendFollow_followedIdToUser User     @relation("FriendFollowFollowed", fields: [followedId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followedId])
   @@index([followerId, createdAt])
@@ -946,6 +988,35 @@ model FriendRemark {
   Friend    User     @relation("FriendRemarkFriend", fields: [friendId], references: [id], onDelete: Cascade)
 
   @@unique([ownerId, friendId])
+  @@index([friendId])
+}
+
+model FriendGroup {
+  id                String              @id @default(cuid())
+  name              String              @db.VarChar(30)
+  sortOrder         Int                 @default(0)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  ownerId           String
+  Owner             User                @relation("FriendGroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  FriendGroupMember FriendGroupMember[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId, sortOrder, createdAt])
+}
+
+model FriendGroupMember {
+  id        String      @id @default(cuid())
+  createdAt DateTime    @default(now())
+  ownerId   String
+  friendId  String
+  groupId   String
+  Owner     User        @relation("FriendGroupMemberOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  Friend    User        @relation("FriendGroupMemberFriend", fields: [friendId], references: [id], onDelete: Cascade)
+  Group     FriendGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, friendId])
+  @@index([groupId])
   @@index([friendId])
 }
 
@@ -1051,35 +1122,35 @@ model GuessSongQuestion {
 }
 
 model GuessSongSession {
-  id                        String                      @id @default(cuid())
-  activeKey                 String?                     @unique
-  mode                      GuessSongMode
-  status                    GuessSongSessionStatus      @default(IN_PROGRESS)
-  riskScore                 Int                         @default(0)
-  riskReasons               Json?
-  isValid                   Boolean                     @default(true)
-  clientSessionNonce        String?
+  id                         String                      @id @default(cuid())
+  activeKey                  String?                     @unique
+  mode                       GuessSongMode
+  status                     GuessSongSessionStatus      @default(IN_PROGRESS)
+  riskScore                  Int                         @default(0)
+  riskReasons                Json?
+  isValid                    Boolean                     @default(true)
+  clientSessionNonce         String?
   clientSessionTokenIssuedAt DateTime?
-  invalidatedAt             DateTime?
-  score                     Int                         @default(0)
-  correctCount              Int                         @default(0)
-  wrongCount                Int                         @default(0)
-  currentStreak             Int                         @default(0)
-  maxStreak                 Int                         @default(0)
-  livesRemaining            Int                         @default(0)
-  totalPlayCount            Int                         @default(0)
-  currentPosition           Int                         @default(1)
-  questionCount             Int?
-  startedAt                 DateTime                    @default(now())
-  completedAt               DateTime?
-  expiresAt                 DateTime
-  createdAt                 DateTime                    @default(now())
-  updatedAt                 DateTime                    @updatedAt
-  userId                    String
-  GuessSongLeaderboardEntry GuessSongLeaderboardEntry[]
-  GuessSongRiskLog          GuessSongRiskLog[]
-  User                      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  GuessSongSessionQuestion  GuessSongSessionQuestion[]
+  invalidatedAt              DateTime?
+  score                      Int                         @default(0)
+  correctCount               Int                         @default(0)
+  wrongCount                 Int                         @default(0)
+  currentStreak              Int                         @default(0)
+  maxStreak                  Int                         @default(0)
+  livesRemaining             Int                         @default(0)
+  totalPlayCount             Int                         @default(0)
+  currentPosition            Int                         @default(1)
+  questionCount              Int?
+  startedAt                  DateTime                    @default(now())
+  completedAt                DateTime?
+  expiresAt                  DateTime
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+  userId                     String
+  GuessSongLeaderboardEntry  GuessSongLeaderboardEntry[]
+  GuessSongRiskLog           GuessSongRiskLog[]
+  User                       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  GuessSongSessionQuestion   GuessSongSessionQuestion[]
 
   @@index([createdAt])
   @@index([status, expiresAt])
@@ -1091,28 +1162,28 @@ model GuessSongSession {
 }
 
 model GuessSongSessionQuestion {
-  id                      String                 @id @default(cuid())
-  publicId                String                 @unique
-  position                Int
-  playbackDurationSeconds Int
-  maxPlayCount            Int
-  playCount               Int                    @default(0)
+  id                       String                 @id @default(cuid())
+  publicId                 String                 @unique
+  position                 Int
+  playbackDurationSeconds  Int
+  maxPlayCount             Int
+  playCount                Int                    @default(0)
   questionAttemptTokenHash String?
   firstPlayedAt            DateTime?
   answerLatencyMs          Int?
-  optionsSnapshot         Json
-  correctOptionKey        String
-  selectedOptionKey       String?
-  isCorrect               Boolean?
-  awardedScore            Int                    @default(0)
-  answerDeadlineAt        DateTime?
-  answeredAt              DateTime?
-  createdAt               DateTime               @default(now())
-  sessionId               String
-  questionId              String
-  GuessSongPlayRequest    GuessSongPlayRequest[]
-  GuessSongQuestion       GuessSongQuestion      @relation(fields: [questionId], references: [id])
-  GuessSongSession        GuessSongSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  optionsSnapshot          Json
+  correctOptionKey         String
+  selectedOptionKey        String?
+  isCorrect                Boolean?
+  awardedScore             Int                    @default(0)
+  answerDeadlineAt         DateTime?
+  answeredAt               DateTime?
+  createdAt                DateTime               @default(now())
+  sessionId                String
+  questionId               String
+  GuessSongPlayRequest     GuessSongPlayRequest[]
+  GuessSongQuestion        GuessSongQuestion      @relation(fields: [questionId], references: [id])
+  GuessSongSession         GuessSongSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, position])
   @@index([publicId])
@@ -1156,21 +1227,21 @@ model GuessSongDuelRoom {
   id                   String                  @id @default(cuid())
   roomCode             String                  @unique
   passwordHash         String?
-  isPublic              Boolean                 @default(true)
-  status                GuessSongDuelRoomStatus @default(WAITING)
-  hostReady             Boolean                 @default(false)
-  challengerReady       Boolean                 @default(false)
-  hostLastSeenAt        DateTime?
-  challengerLastSeenAt  DateTime?
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  closedAt              DateTime?
-  hostId                String
-  challengerId          String?
-  Host                  User                    @relation("GuessSongDuelRoomHost", fields: [hostId], references: [id], onDelete: Cascade)
-  Challenger            User?                   @relation("GuessSongDuelRoomChallenger", fields: [challengerId], references: [id], onDelete: SetNull)
-  Match                 GuessSongDuelMatch?
-  GuessSongDuelInvite   GuessSongDuelInvite[]
+  isPublic             Boolean                 @default(true)
+  status               GuessSongDuelRoomStatus @default(WAITING)
+  hostReady            Boolean                 @default(false)
+  challengerReady      Boolean                 @default(false)
+  hostLastSeenAt       DateTime?
+  challengerLastSeenAt DateTime?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  closedAt             DateTime?
+  hostId               String
+  challengerId         String?
+  Host                 User                    @relation("GuessSongDuelRoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  Challenger           User?                   @relation("GuessSongDuelRoomChallenger", fields: [challengerId], references: [id], onDelete: SetNull)
+  Match                GuessSongDuelMatch?
+  GuessSongDuelInvite  GuessSongDuelInvite[]
 
   @@index([status, isPublic, createdAt])
   @@index([hostId, status])
@@ -1178,26 +1249,26 @@ model GuessSongDuelRoom {
 }
 
 model GuessSongDuelMatch {
-  id                   String                  @id @default(cuid())
-  status               GuessSongDuelMatchStatus @default(PLAYING)
-  finishReason         GuessSongDuelFinishReason?
-  winnerId             String?
-  isDraw               Boolean                 @default(false)
-  isSuspicious         Boolean                 @default(false)
-  currentQuestionIndex Int                     @default(1)
-  totalQuestions       Int                     @default(30)
-  completedQuestionCount Int                   @default(0)
-  startedAt            DateTime                @default(now())
-  finishedAt           DateTime?
-  rewardAmount         Int                     @default(0)
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
-  roomId               String                  @unique
-  Room                 GuessSongDuelRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  Winner               User?                   @relation("GuessSongDuelMatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
-  GuessSongDuelPlayer  GuessSongDuelPlayer[]
-  GuessSongDuelQuestion GuessSongDuelQuestion[]
-  GuessSongDuelAnswer  GuessSongDuelAnswer[]
+  id                     String                     @id @default(cuid())
+  status                 GuessSongDuelMatchStatus   @default(PLAYING)
+  finishReason           GuessSongDuelFinishReason?
+  winnerId               String?
+  isDraw                 Boolean                    @default(false)
+  isSuspicious           Boolean                    @default(false)
+  currentQuestionIndex   Int                        @default(1)
+  totalQuestions         Int                        @default(30)
+  completedQuestionCount Int                        @default(0)
+  startedAt              DateTime                   @default(now())
+  finishedAt             DateTime?
+  rewardAmount           Int                        @default(0)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  roomId                 String                     @unique
+  Room                   GuessSongDuelRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  Winner                 User?                      @relation("GuessSongDuelMatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  GuessSongDuelPlayer    GuessSongDuelPlayer[]
+  GuessSongDuelQuestion  GuessSongDuelQuestion[]
+  GuessSongDuelAnswer    GuessSongDuelAnswer[]
 
   @@index([status, createdAt])
   @@index([winnerId, finishedAt])
@@ -1205,21 +1276,21 @@ model GuessSongDuelMatch {
 }
 
 model GuessSongDuelPlayer {
-  id                   String             @id @default(cuid())
-  slot                 Int
-  correctCount         Int                @default(0)
-  totalEffectiveAnswerMs Int              @default(0)
-  isOnline             Boolean            @default(false)
-  lastSeenAt            DateTime?
-  disconnectedAt       DateTime?
-  reconnectDeadlineAt  DateTime?
-  suspicious            Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  matchId              String
-  userId               String
-  Match                GuessSongDuelMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  User                 User               @relation("GuessSongDuelPlayerUser", fields: [userId], references: [id], onDelete: Cascade)
+  id                     String             @id @default(cuid())
+  slot                   Int
+  correctCount           Int                @default(0)
+  totalEffectiveAnswerMs Int                @default(0)
+  isOnline               Boolean            @default(false)
+  lastSeenAt             DateTime?
+  disconnectedAt         DateTime?
+  reconnectDeadlineAt    DateTime?
+  suspicious             Boolean            @default(false)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  matchId                String
+  userId                 String
+  Match                  GuessSongDuelMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  User                   User               @relation("GuessSongDuelPlayerUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([matchId, userId])
   @@unique([matchId, slot])
@@ -1229,8 +1300,8 @@ model GuessSongDuelPlayer {
 }
 
 model GuessSongDuelQuestion {
-  id                   String             @id @default(cuid())
-  publicToken          String             @unique
+  id                   String                @id @default(cuid())
+  publicToken          String                @unique
   questionIndex        Int
   optionsSnapshot      Json
   correctOptionKey     String
@@ -1242,11 +1313,11 @@ model GuessSongDuelQuestion {
   audioStartAt         DateTime?
   answerDeadlineAt     DateTime?
   revealedAt           DateTime?
-  createdAt            DateTime           @default(now())
+  createdAt            DateTime              @default(now())
   matchId              String
   sourceQuestionId     String?
-  Match                GuessSongDuelMatch  @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  SourceQuestion       GuessSongQuestion?  @relation(fields: [sourceQuestionId], references: [id], onDelete: SetNull)
+  Match                GuessSongDuelMatch    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  SourceQuestion       GuessSongQuestion?    @relation(fields: [sourceQuestionId], references: [id], onDelete: SetNull)
   GuessSongDuelAnswer  GuessSongDuelAnswer[]
 
   @@unique([matchId, questionIndex])
@@ -1255,21 +1326,21 @@ model GuessSongDuelQuestion {
 }
 
 model GuessSongDuelAnswer {
-  id                    String                @id @default(cuid())
-  selectedOptionKey     String?
-  isCorrect             Boolean               @default(false)
-  clientElapsedMs       Int?
-  receivedAt            DateTime
-  latencyEstimateMs     Int                   @default(0)
-  effectiveElapsedMs    Int?
-  suspicious             Boolean               @default(false)
-  createdAt             DateTime              @default(now())
-  matchId               String
-  questionId            String
-  userId                String
-  Match                 GuessSongDuelMatch   @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  Question              GuessSongDuelQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  User                  User                  @relation("GuessSongDuelAnswerUser", fields: [userId], references: [id], onDelete: Cascade)
+  id                 String                @id @default(cuid())
+  selectedOptionKey  String?
+  isCorrect          Boolean               @default(false)
+  clientElapsedMs    Int?
+  receivedAt         DateTime
+  latencyEstimateMs  Int                   @default(0)
+  effectiveElapsedMs Int?
+  suspicious         Boolean               @default(false)
+  createdAt          DateTime              @default(now())
+  matchId            String
+  questionId         String
+  userId             String
+  Match              GuessSongDuelMatch    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  Question           GuessSongDuelQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  User               User                  @relation("GuessSongDuelAnswerUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([matchId, questionId, userId])
   @@index([questionId, receivedAt])
@@ -1291,17 +1362,17 @@ model GuessSongDuelStats {
 }
 
 model GuessSongDuelInvite {
-  id             String             @id @default(cuid())
-  tokenHash      String             @unique
-  expiresAt      DateTime
-  acceptedAt     DateTime?
-  createdAt      DateTime           @default(now())
-  roomId         String
-  inviterId      String
-  inviteeId      String
-  Room           GuessSongDuelRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  Inviter        User               @relation("GuessSongDuelInviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
-  Invitee        User               @relation("GuessSongDuelInviteInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+  id         String            @id @default(cuid())
+  tokenHash  String            @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime          @default(now())
+  roomId     String
+  inviterId  String
+  inviteeId  String
+  Room       GuessSongDuelRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  Inviter    User              @relation("GuessSongDuelInviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  Invitee    User              @relation("GuessSongDuelInviteInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
 
   @@index([roomId, inviteeId, expiresAt])
   @@index([inviteeId, acceptedAt, expiresAt])
@@ -1524,42 +1595,42 @@ model MusicPlayRecord {
 }
 
 model MusicSong {
-  id                      String                    @id @default(cuid())
-  title                   String
-  artist                  String                    @default("陈奕迅")
-  albumId                 String
-  trackNumber             Int
-  releaseYear             Int
-  duration                Int?
-  coverUrl                String?
-  composer                String?
-  lyricist                String?
-  arranger                String?
-  producer                String?
-  story                   String?
-  lyrics                  String?
-  sourceType              String?
-  sourceUrl               String?
-  sourceAudioPath         String?
-  sourceAudioDurationMs   Int?
-  sourceAudioRevision     String?
-  previewUrl              String?                   @db.Text
-  previewDuration         Int                       @default(7)
-  createdAt               DateTime                  @default(now())
-  language                String?
-  tags                    String?
-  era                     String?
-  trackType               String?
-  concertVersion          String?
-  mood                    String?
-  scene                   String?
-  recommendLevel          String?
-  description             String?
-  expertEnabled           Boolean                   @default(true)
-  GuessSongQuestion       GuessSongQuestion[]
-  MusicConcertSetlistItem MusicConcertSetlistItem[]
+  id                           String                         @id @default(cuid())
+  title                        String
+  artist                       String                         @default("陈奕迅")
+  albumId                      String
+  trackNumber                  Int
+  releaseYear                  Int
+  duration                     Int?
+  coverUrl                     String?
+  composer                     String?
+  lyricist                     String?
+  arranger                     String?
+  producer                     String?
+  story                        String?
+  lyrics                       String?
+  sourceType                   String?
+  sourceUrl                    String?
+  sourceAudioPath              String?
+  sourceAudioDurationMs        Int?
+  sourceAudioRevision          String?
+  previewUrl                   String?                        @db.Text
+  previewDuration              Int                            @default(7)
+  createdAt                    DateTime                       @default(now())
+  language                     String?
+  tags                         String?
+  era                          String?
+  trackType                    String?
+  concertVersion               String?
+  mood                         String?
+  scene                        String?
+  recommendLevel               String?
+  description                  String?
+  expertEnabled                Boolean                        @default(true)
+  GuessSongQuestion            GuessSongQuestion[]
+  MusicConcertSetlistItem      MusicConcertSetlistItem[]
   UserDailyMusicRecommendation UserDailyMusicRecommendation[]
-  MusicAlbum              MusicAlbum                @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  MusicAlbum                   MusicAlbum                     @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, title])
   @@unique([albumId, trackNumber])
@@ -1687,13 +1758,13 @@ model MusicConcertHighlight {
 // 与 MusicTour.category 枚举（MAIN / SMALL / GUEST）一一对应；其余为管理员扩展分类。
 // 旧数据无需迁移：MusicTour 仍使用 category 枚举，天然落在三大核心分类中。
 model MusicConcertCategory {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  sortOrder Int      @default(0)
-  enabled   Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String      @id @default(cuid())
+  name       String
+  slug       String      @unique
+  sortOrder  Int         @default(0)
+  enabled    Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
   musicTours MusicTour[]
 
   @@index([sortOrder])
@@ -1877,46 +1948,48 @@ model PollVote {
 }
 
 model Post {
-  id            String          @id @default(cuid())
-  title         String
-  content       String
-  ipRegion      String?
-  viewCount     Int             @default(0)
-  likeCount     Int             @default(0)
-  replyCount    Int             @default(0)
-  isPinned      Boolean         @default(false)
-  isFeatured    Boolean         @default(false)
-  isDeleted     Boolean         @default(false)
-  deletedAt     DateTime?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  authorId      String
-  boardId       String
-  contentType   PostContentType @default(NORMAL)
-  favoriteCount Int             @default(0)
-  isLocked      Boolean         @default(false)
-  isRecommended Boolean         @default(false)
-  publishedAt   DateTime        @default(now())
-  readUserCount Int             @default(0)
-  shareCount    Int             @default(0)
-  status        PostStatus      @default(PUBLISHED)
-  moderationStatus PostModerationStatus @default(APPROVED)
-  reviewedAt    DateTime?
-  reviewedById  String?
-  rejectionReason String?       @db.Text
-  summary       String?
-  AdminAction   AdminAction[]
-  Like          Like[]
-  Poll          Poll?
-  User          User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  Board         Board           @relation(fields: [boardId], references: [id])
-  PostFavorite  PostFavorite[]
-  PostMedia     PostMedia[]
-  PostTag       PostTag[]
-  Reply         Reply[]
-  Report        Report[]
-  stickerId     String?
-  sticker       Sticker?      @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  id                 String               @id @default(cuid())
+  title              String
+  content            String
+  ipRegion           String?
+  viewCount          Int                  @default(0)
+  likeCount          Int                  @default(0)
+  replyCount         Int                  @default(0)
+  isPinned           Boolean              @default(false)
+  isFeatured         Boolean              @default(false)
+  isDeleted          Boolean              @default(false)
+  deletedAt          DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  authorId           String
+  boardId            String
+  contentType        PostContentType      @default(NORMAL)
+  favoriteCount      Int                  @default(0)
+  isLocked           Boolean              @default(false)
+  isRecommended      Boolean              @default(false)
+  publishedAt        DateTime             @default(now())
+  readUserCount      Int                  @default(0)
+  shareCount         Int                  @default(0)
+  status             PostStatus           @default(PUBLISHED)
+  moderationStatus   PostModerationStatus @default(APPROVED)
+  moderationReason   String?
+  matchedBannedWords String?              @db.Text
+  reviewedAt         DateTime?
+  reviewedById       String?
+  rejectionReason    String?              @db.Text
+  summary            String?
+  AdminAction        AdminAction[]
+  Like               Like[]
+  Poll               Poll?
+  User               User                 @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Board              Board                @relation(fields: [boardId], references: [id])
+  PostFavorite       PostFavorite[]
+  PostMedia          PostMedia[]
+  PostTag            PostTag[]
+  Reply              Reply[]
+  Report             Report[]
+  stickerId          String?
+  sticker            Sticker?             @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
 
   @@index([authorId, createdAt])
   @@index([boardId, createdAt])
@@ -1974,20 +2047,24 @@ model PostTag {
 }
 
 model Profile {
-  id             String                @id @default(cuid())
-  displayName    String
-  avatarUrl      String?
-  backgroundUrl  String?
-  bio            String?
-  locationCountryCode String?
-  locationCountry     String?
-  locationRegionCode  String?
-  locationRegion      String?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  userId         String                @unique
-  wallVisibility ProfileWallVisibility @default(PUBLIC)
-  User           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                          String                  @id @default(cuid())
+  displayName                 String
+  avatarUrl                   String?
+  backgroundUrl               String?
+  bio                         String?
+  displayNameModerationStatus ContentModerationStatus @default(NORMAL)
+  bioModerationStatus         ContentModerationStatus @default(NORMAL)
+  moderationReason            String?
+  matchedBannedWords          String?                 @db.Text
+  locationCountryCode         String?
+  locationCountry             String?
+  locationRegionCode          String?
+  locationRegion              String?
+  createdAt                   DateTime                @default(now())
+  updatedAt                   DateTime                @updatedAt
+  userId                      String                  @unique
+  wallVisibility              ProfileWallVisibility   @default(PUBLIC)
+  User                        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([displayName])
   @@index([wallVisibility])
@@ -2006,21 +2083,24 @@ model ProfileWallLike {
 }
 
 model ProfileWallMessage {
-  id                                       String               @id @default(cuid())
+  id                                       String                  @id @default(cuid())
   content                                  String
   ipRegion                                 String?
-  createdAt                                DateTime             @default(now())
-  updatedAt                                DateTime             @updatedAt
+  createdAt                                DateTime                @default(now())
+  updatedAt                                DateTime                @updatedAt
   deletedAt                                DateTime?
   senderId                                 String
   receiverId                               String
   parentId                                 String?
-  likeCount                                Int                  @default(0)
+  likeCount                                Int                     @default(0)
+  moderationStatus                         ContentModerationStatus @default(NORMAL)
+  moderationReason                         String?
+  matchedBannedWords                       String?                 @db.Text
   ProfileWallLike                          ProfileWallLike[]
-  ProfileWallMessage                       ProfileWallMessage?  @relation("ProfileWallMessageToProfileWallMessage", fields: [parentId], references: [id], onDelete: NoAction)
-  other_ProfileWallMessage                 ProfileWallMessage[] @relation("ProfileWallMessageToProfileWallMessage")
-  User_ProfileWallMessage_receiverIdToUser User                 @relation("ProfileWallMessage_receiverIdToUser", fields: [receiverId], references: [id], onDelete: Cascade)
-  User_ProfileWallMessage_senderIdToUser   User                 @relation("ProfileWallMessage_senderIdToUser", fields: [senderId], references: [id], onDelete: Cascade)
+  ProfileWallMessage                       ProfileWallMessage?     @relation("ProfileWallMessageToProfileWallMessage", fields: [parentId], references: [id], onDelete: NoAction)
+  other_ProfileWallMessage                 ProfileWallMessage[]    @relation("ProfileWallMessageToProfileWallMessage")
+  User_ProfileWallMessage_receiverIdToUser User                    @relation("ProfileWallMessage_receiverIdToUser", fields: [receiverId], references: [id], onDelete: Cascade)
+  User_ProfileWallMessage_senderIdToUser   User                    @relation("ProfileWallMessage_senderIdToUser", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([deletedAt])
   @@index([parentId])
@@ -2041,28 +2121,31 @@ model RateLimitLog {
 }
 
 model Reply {
-  id           String         @id @default(cuid())
-  content      String
-  ipRegion     String?
-  stickerId    String?
-  sticker      Sticker?        @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
-  isDeleted    Boolean        @default(false)
-  isPinned     Boolean        @default(false)
-  deletedAt    DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  postId       String
-  authorId     String
-  parentId     String?
-  likeCount    Int            @default(0)
-  AdminAction  AdminAction[]
-  User         User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  Reply        Reply?         @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
-  other_Reply  Reply[]        @relation("ReplyToReply")
-  Post         Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
-  ReplyLike    ReplyLike[]
-  ReplyMention ReplyMention[]
-  Report       Report[]
+  id                 String                  @id @default(cuid())
+  content            String
+  ipRegion           String?
+  stickerId          String?
+  sticker            Sticker?                @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  isDeleted          Boolean                 @default(false)
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  isPinned           Boolean                 @default(false)
+  deletedAt          DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  postId             String
+  authorId           String
+  parentId           String?
+  likeCount          Int                     @default(0)
+  AdminAction        AdminAction[]
+  User               User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Reply              Reply?                  @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
+  other_Reply        Reply[]                 @relation("ReplyToReply")
+  Post               Post                    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  ReplyLike          ReplyLike[]
+  ReplyMention       ReplyMention[]
+  Report             Report[]
 
   @@index([authorId, createdAt])
   @@index([isDeleted])
@@ -2155,6 +2238,38 @@ model SensitiveWord {
   @@index([isActive])
 }
 
+enum BannedWordPriority {
+  NORMAL
+  HIGH
+}
+
+model BannedWord {
+  id             String             @id @default(cuid())
+  word           String
+  normalizedWord String             @unique
+  enabled        Boolean            @default(true)
+  priority       BannedWordPriority @default(NORMAL)
+  note           String?
+  createdById    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  createdBy      User?              @relation("BannedWordCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([enabled, priority])
+  @@index([word])
+}
+
+model ContentModerationScanJob {
+  id          String                         @id @default(cuid())
+  status      ContentModerationScanJobStatus @default(SCANNING)
+  summary     Json?
+  error       String?
+  createdAt   DateTime                       @default(now())
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+}
+
 model SiteSetting {
   id        String               @id @default(cuid())
   key       String               @unique
@@ -2193,22 +2308,25 @@ enum StickerPackStatus {
 }
 
 model StickerPack {
-  id              String            @id @default(cuid())
-  name            String
-  description     String?
-  coverUrl        String?
-  creatorId       String
-  type            StickerType       @default(STATIC)
-  status          StickerPackStatus @default(PENDING)
-  rejectionReason String?           @db.Text
-  reviewedAt      DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  isOfficial      Boolean            @default(false)
-  category        String?
-  creator         User              @relation("StickerPackCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  stickers        Sticker[]
-  UserStickerPack UserStickerPack[]
+  id                 String                  @id @default(cuid())
+  name               String
+  description        String?
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  coverUrl           String?
+  creatorId          String
+  type               StickerType             @default(STATIC)
+  status             StickerPackStatus       @default(PENDING)
+  rejectionReason    String?                 @db.Text
+  reviewedAt         DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  isOfficial         Boolean                 @default(false)
+  category           String?
+  creator            User                    @relation("StickerPackCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  stickers           Sticker[]
+  UserStickerPack    UserStickerPack[]
 
   @@index([creatorId, createdAt])
   @@index([status, createdAt])
@@ -2216,25 +2334,28 @@ model StickerPack {
 }
 
 model Sticker {
-  id           String      @id @default(cuid())
-  packId       String
-  name         String?     @db.VarChar(32)
-  url          String
-  type         StickerType @default(STATIC)
-  sort         Int         @default(0)
-  usageCount   Int         @default(0)
-  isHidden     Boolean     @default(false)
-  hiddenAt     DateTime?
-  hiddenReason String?
-  enabled      Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  pack         StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
-  favorites    StickerFavorite[]
-  usages       StickerUsage[]
-  reports      StickerReport[]
-  directMessages DirectMessage[] @relation("DirectMessageSticker")
-  replies      Reply[] @relation("ReplySticker")
-  posts        Post[] @relation("PostSticker")
+  id                 String                  @id @default(cuid())
+  packId             String
+  name               String?                 @db.VarChar(32)
+  moderationStatus   ContentModerationStatus @default(NORMAL)
+  moderationReason   String?
+  matchedBannedWords String?                 @db.Text
+  url                String
+  type               StickerType             @default(STATIC)
+  sort               Int                     @default(0)
+  usageCount         Int                     @default(0)
+  isHidden           Boolean                 @default(false)
+  hiddenAt           DateTime?
+  hiddenReason       String?
+  enabled            Boolean                 @default(true)
+  createdAt          DateTime                @default(now())
+  pack               StickerPack             @relation(fields: [packId], references: [id], onDelete: Cascade)
+  favorites          StickerFavorite[]
+  usages             StickerUsage[]
+  reports            StickerReport[]
+  directMessages     DirectMessage[]         @relation("DirectMessageSticker")
+  replies            Reply[]                 @relation("ReplySticker")
+  posts              Post[]                  @relation("PostSticker")
 
   @@index([packId, sort])
   @@index([isHidden])
@@ -2293,16 +2414,16 @@ model StickerUsage {
 }
 
 model StickerReport {
-  id         String             @id @default(cuid())
-  userId     String
-  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stickerId  String
-  reason     StickerReportReason
-  status     StickerReportStatus @default(PENDING)
-  detail     String?
-  createdAt  DateTime           @default(now())
-  handledAt  DateTime?
-  sticker    Sticker            @relation(fields: [stickerId], references: [id], onDelete: Cascade)
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stickerId String
+  reason    StickerReportReason
+  status    StickerReportStatus @default(PENDING)
+  detail    String?
+  createdAt DateTime            @default(now())
+  handledAt DateTime?
+  sticker   Sticker             @relation(fields: [stickerId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([stickerId])
@@ -2381,7 +2502,7 @@ model Task {
 }
 
 model User {
-  id                                                     String                      @id @default(cuid())
+  id                                                     String                         @id @default(cuid())
   username                                               String
   email                                                  String?
   phone                                                  String?
@@ -2389,37 +2510,42 @@ model User {
   nickname                                               String
   avatarUrl                                              String?
   bio                                                    String?
-  role                                                   UserRole                    @default(USER)
-  canPlayFullMusic                                       Boolean                     @default(false)
-  level                                                  Int                         @default(1)
-  points                                                 Int                         @default(0)
-  consecutiveDays                                        Int                         @default(0)
+  usernameModerationStatus                               ContentModerationStatus        @default(NORMAL)
+  nicknameModerationStatus                               ContentModerationStatus        @default(NORMAL)
+  bioModerationStatus                                    ContentModerationStatus        @default(NORMAL)
+  moderationReason                                       String?
+  matchedBannedWords                                     String?                        @db.Text
+  role                                                   UserRole                       @default(USER)
+  canPlayFullMusic                                       Boolean                        @default(false)
+  level                                                  Int                            @default(1)
+  points                                                 Int                            @default(0)
+  consecutiveDays                                        Int                            @default(0)
   lastCheckInDate                                        DateTime?
-  isDeleted                                              Boolean                     @default(false)
+  isDeleted                                              Boolean                        @default(false)
   deletedAt                                              DateTime?
-  createdAt                                              DateTime                    @default(now())
-  updatedAt                                              DateTime                    @updatedAt
+  createdAt                                              DateTime                       @default(now())
+  updatedAt                                              DateTime                       @updatedAt
   backgroundUrl                                          String?
   emailVerifiedAt                                        DateTime?
-  exp                                                    Int                         @default(0)
-  isOnline                                               Boolean                     @default(false)
+  exp                                                    Int                            @default(0)
+  isOnline                                               Boolean                        @default(false)
   lastActiveAt                                           DateTime?
   lastLoginAt                                            DateTime?
   phoneVerifiedAt                                        DateTime?
-  status                                                 UserStatus                  @default(ACTIVE)
-  verificationStatus                                     VerificationStatus          @default(NONE)
+  status                                                 UserStatus                     @default(ACTIVE)
+  verificationStatus                                     VerificationStatus             @default(NONE)
   nicknameChangedAt                                      DateTime?
   birthMonth                                             Int?
   birthDay                                               Int?
   birthdaySetAt                                          DateTime?
-  uid                                                    Int                         @unique @default(autoincrement())
-  experience                                             Int                         @default(0)
-  securityQuestionRecoveryEnabled                        Boolean                     @default(false)
-  registrationIdempotencyKeyHash                         String?                     @unique
-  mustSetupSecurity                                      Boolean                     @default(false)
-  usernameNormalized                                     String                      @unique
+  uid                                                    Int                            @unique @default(autoincrement())
+  experience                                             Int                            @default(0)
+  securityQuestionRecoveryEnabled                        Boolean                        @default(false)
+  registrationIdempotencyKeyHash                         String?                        @unique
+  mustSetupSecurity                                      Boolean                        @default(false)
+  usernameNormalized                                     String                         @unique
   usernameChangedAt                                      DateTime?
-  checkinMoodEnabled                                     Boolean                     @default(true)
+  checkinMoodEnabled                                     Boolean                        @default(true)
   ipRegion                                               String?
   ipRegionUpdatedAt                                      DateTime?
   AccountSecurityLog                                     AccountSecurityLog[]
@@ -2428,13 +2554,16 @@ model User {
   AlbumReview                                            AlbumReview[]
   AlbumReviewFavorite                                    AlbumReviewFavorite[]
   AlbumReviewLike                                        AlbumReviewLike[]
-  AdminAction_AdminAction_adminIdToUser                  AdminAction[]               @relation("AdminAction_adminIdToUser")
-  AdminAction_AdminAction_targetUserIdToUser             AdminAction[]               @relation("AdminAction_targetUserIdToUser")
-  AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]            @relation("AdminActionLog_adminIdToUser")
-  AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]            @relation("AdminActionLog_targetUserIdToUser")
+  AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
+  AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
+  AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]               @relation("AdminActionLog_adminIdToUser")
+  AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]               @relation("AdminActionLog_targetUserIdToUser")
   AdminPermission                                        AdminPermission[]
-  Block_Block_blockedIdToUser                            Block[]                     @relation("Block_blockedIdToUser")
-  Block_Block_blockerIdToUser                            Block[]                     @relation("Block_blockerIdToUser")
+  UserReward_UserReward_operatorIdToUser                 UserReward[]                   @relation("UserRewardOperator")
+  UserReward_UserReward_userIdToUser                     UserReward[]                   @relation("UserRewardRecipient")
+  BannedWordCreated                                      BannedWord[]                   @relation("BannedWordCreatedBy")
+  Block_Block_blockedIdToUser                            Block[]                        @relation("Block_blockedIdToUser")
+  Block_Block_blockerIdToUser                            Block[]                        @relation("Block_blockerIdToUser")
   BoardFavorite                                          BoardFavorite[]
   Changelog                                              Changelog[]
   CheckIn                                                CheckIn[]
@@ -2453,39 +2582,42 @@ model User {
   ExperienceLog                                          ExperienceLog[]
   Feedback                                               Feedback[]
   FeedbackReply                                          FeedbackReply[]
-  Follow_Follow_followerIdToUser                         Follow[]                    @relation("Follow_followerIdToUser")
-  Follow_Follow_followingIdToUser                        Follow[]                    @relation("Follow_followingIdToUser")
-  FriendFollow_FriendFollow_followerIdToUser             FriendFollow[]               @relation("FriendFollowFollower")
-  FriendFollow_FriendFollow_followedIdToUser             FriendFollow[]               @relation("FriendFollowFollowed")
+  Follow_Follow_followerIdToUser                         Follow[]                       @relation("Follow_followerIdToUser")
+  Follow_Follow_followingIdToUser                        Follow[]                       @relation("Follow_followingIdToUser")
+  FriendFollow_FriendFollow_followerIdToUser             FriendFollow[]                 @relation("FriendFollowFollower")
+  FriendFollow_FriendFollow_followedIdToUser             FriendFollow[]                 @relation("FriendFollowFollowed")
   FriendActivity                                         FriendActivity[]
-  FriendRemark_FriendRemark_ownerIdToUser                FriendRemark[]               @relation("FriendRemarkOwner")
-  FriendRemark_FriendRemark_friendIdToUser               FriendRemark[]               @relation("FriendRemarkFriend")
-  FriendRequest_FriendRequest_receiverIdToUser           FriendRequest[]             @relation("FriendRequest_receiverIdToUser")
-  FriendRequest_FriendRequest_senderIdToUser             FriendRequest[]             @relation("FriendRequest_senderIdToUser")
-  Friendship_Friendship_userAIdToUser                    Friendship[]                @relation("Friendship_userAIdToUser")
-  Friendship_Friendship_userBIdToUser                    Friendship[]                @relation("Friendship_userBIdToUser")
+  FriendGroup_FriendGroup_ownerIdToUser                  FriendGroup[]                  @relation("FriendGroupOwner")
+  FriendGroupMember_FriendGroupMember_ownerIdToUser      FriendGroupMember[]            @relation("FriendGroupMemberOwner")
+  FriendGroupMember_FriendGroupMember_friendIdToUser     FriendGroupMember[]            @relation("FriendGroupMemberFriend")
+  FriendRemark_FriendRemark_ownerIdToUser                FriendRemark[]                 @relation("FriendRemarkOwner")
+  FriendRemark_FriendRemark_friendIdToUser               FriendRemark[]                 @relation("FriendRemarkFriend")
+  FriendRequest_FriendRequest_receiverIdToUser           FriendRequest[]                @relation("FriendRequest_receiverIdToUser")
+  FriendRequest_FriendRequest_senderIdToUser             FriendRequest[]                @relation("FriendRequest_senderIdToUser")
+  Friendship_Friendship_userAIdToUser                    Friendship[]                   @relation("Friendship_userAIdToUser")
+  Friendship_Friendship_userBIdToUser                    Friendship[]                   @relation("Friendship_userBIdToUser")
   GuessSongLeaderboardEntry                              GuessSongLeaderboardEntry[]
   GuessSongRiskLog                                       GuessSongRiskLog[]
   GuessSongSession                                       GuessSongSession[]
-  GuessSongDuelRoom_GuessSongDuelRoomHost               GuessSongDuelRoom[]          @relation("GuessSongDuelRoomHost")
-  GuessSongDuelRoom_GuessSongDuelRoomChallenger          GuessSongDuelRoom[]          @relation("GuessSongDuelRoomChallenger")
-  GuessSongDuelMatch_GuessSongDuelMatchWinner            GuessSongDuelMatch[]         @relation("GuessSongDuelMatchWinner")
-  GuessSongDuelPlayer                                    GuessSongDuelPlayer[]        @relation("GuessSongDuelPlayerUser")
-  GuessSongDuelAnswer                                    GuessSongDuelAnswer[]        @relation("GuessSongDuelAnswerUser")
-  GuessSongDuelStats                                     GuessSongDuelStats?          @relation("GuessSongDuelStatsUser")
-  GuessSongDuelInvite_GuessSongDuelInviteInviter         GuessSongDuelInvite[]        @relation("GuessSongDuelInviteInviter")
-  GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]        @relation("GuessSongDuelInviteInvitee")
+  GuessSongDuelRoom_GuessSongDuelRoomHost                GuessSongDuelRoom[]            @relation("GuessSongDuelRoomHost")
+  GuessSongDuelRoom_GuessSongDuelRoomChallenger          GuessSongDuelRoom[]            @relation("GuessSongDuelRoomChallenger")
+  GuessSongDuelMatch_GuessSongDuelMatchWinner            GuessSongDuelMatch[]           @relation("GuessSongDuelMatchWinner")
+  GuessSongDuelPlayer                                    GuessSongDuelPlayer[]          @relation("GuessSongDuelPlayerUser")
+  GuessSongDuelAnswer                                    GuessSongDuelAnswer[]          @relation("GuessSongDuelAnswerUser")
+  GuessSongDuelStats                                     GuessSongDuelStats?            @relation("GuessSongDuelStatsUser")
+  GuessSongDuelInvite_GuessSongDuelInviteInviter         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInviter")
+  GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInvitee")
   Like                                                   Like[]
   LoginDevice                                            LoginDevice[]
   LotteryEntry                                           LotteryEntry[]
   LyricCard                                              LyricCard[]
   MusicFavorite                                          MusicFavorite[]
   MusicPlayRecord                                        MusicPlayRecord[]
-  Notification_Notification_actorIdToUser                Notification[]              @relation("Notification_actorIdToUser")
-  Notification_Notification_recipientIdToUser            Notification[]              @relation("Notification_recipientIdToUser")
+  Notification_Notification_actorIdToUser                Notification[]                 @relation("Notification_actorIdToUser")
+  Notification_Notification_recipientIdToUser            Notification[]                 @relation("Notification_recipientIdToUser")
   OnlineSession                                          OnlineSession[]
-  PageLayout_PageLayout_publishedByIdToUser              PageLayout[]                @relation("PageLayout_publishedByIdToUser")
-  PageLayout_PageLayout_updatedByIdToUser                PageLayout[]                @relation("PageLayout_updatedByIdToUser")
+  PageLayout_PageLayout_publishedByIdToUser              PageLayout[]                   @relation("PageLayout_publishedByIdToUser")
+  PageLayout_PageLayout_updatedByIdToUser                PageLayout[]                   @relation("PageLayout_updatedByIdToUser")
   PageLayoutRevision                                     PageLayoutRevision[]
   PasswordResetToken                                     PasswordResetToken[]
   PointLog                                               PointLog[]
@@ -2493,19 +2625,19 @@ model User {
   PostFavorite                                           PostFavorite[]
   Profile                                                Profile?
   ProfileWallLike                                        ProfileWallLike[]
-  ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]        @relation("ProfileWallMessage_receiverIdToUser")
-  ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]        @relation("ProfileWallMessage_senderIdToUser")
+  ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]           @relation("ProfileWallMessage_receiverIdToUser")
+  ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]           @relation("ProfileWallMessage_senderIdToUser")
   Reply                                                  Reply[]
   ReplyLike                                              ReplyLike[]
-  ReplyMention_ReplyMention_mentionerIdToUser            ReplyMention[]              @relation("ReplyMentionMentioner")
-  ReplyMention_ReplyMention_mentionedUserIdToUser        ReplyMention[]              @relation("ReplyMentionMentionedUser")
-  Report_Report_reporterIdToUser                         Report[]                    @relation("Report_reporterIdToUser")
-  Report_Report_targetUserIdToUser                       Report[]                    @relation("Report_targetUserIdToUser")
+  ReplyMention_ReplyMention_mentionerIdToUser            ReplyMention[]                 @relation("ReplyMentionMentioner")
+  ReplyMention_ReplyMention_mentionedUserIdToUser        ReplyMention[]                 @relation("ReplyMentionMentionedUser")
+  Report_Report_reporterIdToUser                         Report[]                       @relation("Report_reporterIdToUser")
+  Report_Report_targetUserIdToUser                       Report[]                       @relation("Report_targetUserIdToUser")
   SearchHistory                                          SearchHistory[]
   SystemNotification                                     SystemNotification[]
   SystemNotificationRead                                 SystemNotificationRead[]
-  TodayEventSubmitted                                    TodayEvent[]              @relation("TodayEventSubmittedBy")
-  TodayEventReviewed                                     TodayEvent[]              @relation("TodayEventReviewedBy")
+  TodayEventSubmitted                                    TodayEvent[]                   @relation("TodayEventSubmittedBy")
+  TodayEventReviewed                                     TodayEvent[]                   @relation("TodayEventReviewedBy")
   UserDailyMusicRecommendation                           UserDailyMusicRecommendation[]
   UserAchievement                                        UserAchievement[]
   UserAlbumCollection                                    UserAlbumCollection[]
@@ -2513,8 +2645,8 @@ model User {
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
   EHospitalCheckAttempt                                  EHospitalCheckAttempt[]
-  StickerPack_StickerPackCreator                         StickerPack[]             @relation("StickerPackCreator")
-  UserStickerPack_UserStickerPackUser                    UserStickerPack[]        @relation("UserStickerPackUser")
+  StickerPack_StickerPackCreator                         StickerPack[]                  @relation("StickerPackCreator")
+  UserStickerPack_UserStickerPackUser                    UserStickerPack[]              @relation("UserStickerPackUser")
   stickerReports                                         StickerReport[]
 
   @@index([createdAt])
@@ -2837,6 +2969,7 @@ enum NotificationType {
   FRIEND_REQUEST
   BIRTHDAY_GREETING
   GUESS_SONG_DUEL_INVITE
+  USER_REWARD
 }
 
 enum PageLayoutRevisionSource {
@@ -2876,6 +3009,7 @@ enum PointActionType {
   COMMENT_POST
   COMMENT_REVOKE
   GUESS_SONG_DUEL_WIN
+  USER_REWARD
 }
 
 enum GuessSongDuelRoomStatus {
@@ -2914,6 +3048,18 @@ enum PostModerationStatus {
   PENDING
   APPROVED
   REJECTED
+  VIOLATION
+}
+
+enum ContentModerationStatus {
+  NORMAL
+  VIOLATION
+}
+
+enum ContentModerationScanJobStatus {
+  SCANNING
+  COMPLETED
+  FAILED
 }
 
 enum PostStatus {

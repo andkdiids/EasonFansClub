@@ -21,7 +21,9 @@ export async function GET(_request: Request, { params }: Context) {
       id: true,
       uid: true,
       nickname: true,
-      Profile: { select: { displayName: true, avatarUrl: true } },
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
+      Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
       UserMusicConcert: {
         where: {
           isPublic: true,

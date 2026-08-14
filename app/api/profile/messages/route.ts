@@ -5,6 +5,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { getProfileRecordPagination } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export async function GET(request: Request) {
   const user = await getCurrentUser()
@@ -32,6 +33,7 @@ export async function GET(request: Request) {
         id: true,
         mood: true,
         content: true,
+        moderationStatus: true,
         createdAt: true,
         ipRegion: true,
         likeCount: true,
@@ -43,14 +45,17 @@ export async function GET(request: Request) {
             id: true,
             parentId: true,
             content: true,
+            moderationStatus: true,
             createdAt: true,
             ipRegion: true,
             User: {
               select: {
                 id: true,
                 nickname: true,
+                usernameModerationStatus: true,
+                nicknameModerationStatus: true,
                 avatarUrl: true,
-                Profile: { select: { displayName: true, avatarUrl: true } },
+                Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
               },
             },
           },
@@ -70,7 +75,7 @@ export async function GET(request: Request) {
   const mapped = messages.map((message) => ({
     id: message.id,
     mood: message.mood,
-    content: message.content,
+    content: publicModerationText(message.content, message.moderationStatus),
     createdAt: message.createdAt,
     ipRegion: message.ipRegion,
     likeCount: message.likeCount,
@@ -78,7 +83,7 @@ export async function GET(request: Request) {
     comments: message.DailyMessageComment.map((comment) => ({
       id: comment.id,
       parentId: comment.parentId,
-      content: comment.content,
+      content: publicModerationText(comment.content, comment.moderationStatus),
       createdAt: comment.createdAt,
       ipRegion: comment.ipRegion,
       authorName: comment.User

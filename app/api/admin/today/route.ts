@@ -5,6 +5,7 @@ import { getTodayEventDateKey, isTodayEventType, parseTodayDate } from '@/lib/to
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,6 +65,9 @@ export async function POST(request: Request) {
   const imageUrl = storedImageUrl(sanitizeText(body?.imageUrl, 1000))
   const reference = sanitizeText(body?.reference ?? body?.source, 500)
   const status = body?.status === 'PENDING' || body?.status === 'REJECTED' ? body.status : 'APPROVED'
+  if ((await checkBannedWords(`${title}\n${content}`)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+  }
   if (!date || !isTodayEventType(type) || title.length < 2 || content.length < 5) {
     return NextResponse.json({ message: '请填写有效日期、类型、标题和内容' }, { status: 400 })
   }

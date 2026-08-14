@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const postLikeRoute = read('app/api/posts/[postId]/like/route.ts')
+const likeNotifications = read('lib/like-notifications.ts')
 const postLikePost = postLikeRoute.slice(
   postLikeRoute.indexOf('export async function POST'),
   postLikeRoute.indexOf('export async function DELETE'),
@@ -16,12 +17,14 @@ const duplicateBranch = postLikeRoute.slice(
 
 const forbiddenRewardEffects = /awardRegistrationFee|awardExperience|POST_LIKE_RECEIVED|postLikeReceived|tx\.pointLog\.(?:create|update)|tx\.user\.update/
 
-test('A liking B post only creates Like, updates count, and sends the existing notification', () => {
+test('A liking B post only creates Like, updates count, and upserts its aggregate notification', () => {
   assert.match(postLikePost, /await tx\.like\.create\(/)
   assert.match(postLikePost, /await tx\.like\.count\(/)
   assert.match(postLikePost, /await tx\.post\.update\(/)
-  assert.match(postLikePost, /await tx\.notification\.create\(/)
-  assert.match(postLikePost, /type: 'LIKE'/)
+  assert.match(postLikePost, /syncLikeNotification\(/)
+  assert.match(likeNotifications, /getLikeNotificationKey\(/)
+  assert.match(likeNotifications, /notification\.upsert\(/)
+  assert.match(likeNotifications, /type: 'LIKE'/)
   assert.doesNotMatch(postLikePost, forbiddenRewardEffects)
 })
 
@@ -29,6 +32,7 @@ test('取消帖子点赞只删除 Like 并刷新数量，双方积分和经验�
   assert.match(postLikeDelete, /await tx\.like\.deleteMany\(/)
   assert.match(postLikeDelete, /await tx\.like\.count\(/)
   assert.match(postLikeDelete, /await tx\.post\.update\(/)
+  assert.match(postLikeDelete, /syncLikeNotification\([\s\S]*'unlike'/)
   assert.doesNotMatch(postLikeDelete, forbiddenRewardEffects)
 })
 

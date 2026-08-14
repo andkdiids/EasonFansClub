@@ -124,6 +124,7 @@ targetName:
       log.User_AdminAction_targetUserIdToUser.nickname
     : null,
           }))}
+          canManageUserRewardPermission={currentUser.role === 'SUPER_ADMIN'}
         />
       </main>
     </>

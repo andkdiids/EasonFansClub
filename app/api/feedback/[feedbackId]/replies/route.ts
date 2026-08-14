@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { feedbackInclude, parseFeedbackAttachments, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
-import { containsSensitiveContent, getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
   const guard = await requireUser()
@@ -15,7 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   const rawContent = typeof body?.content === 'string' ? body.content : ''
   if (rawContent.length > 2000) return NextResponse.json({ message: '回复内容最多 2000 个字' }, { status: 400 })
   const content = sanitizeText(body?.content, 2000)
-  if (await containsSensitiveContent(content)) return NextResponse.json({ message: '内容包含违禁词，无法发布' }, { status: 400 })
+  if ((await checkBannedWords(content)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   const attachments = parseFeedbackAttachments(body?.attachments)
 
   if (!content && attachments.length === 0) {

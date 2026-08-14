@@ -5,6 +5,7 @@ import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
 import { getTodayEventDateParts, getTodayMonthDay, type TodayEventSourceValue, type TodayEventTypeValue } from '@/lib/today'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export type TodayEventRecord = {
   id: string
@@ -50,6 +51,7 @@ async function loadManualTodayEvents(month: number, day: number) {
         type: true,
         title: true,
         content: true,
+        moderationStatus: true,
         imageUrl: true,
         source: true,
         reference: true,
@@ -69,8 +71,8 @@ async function loadManualTodayEvents(month: number, day: number) {
       month: parts.month,
       day: parts.day,
       type: event.type,
-      title: event.title,
-      content: event.content,
+      title: publicModerationText(event.title, event.moderationStatus),
+      content: publicModerationText(event.content, event.moderationStatus),
       imageUrl: publicImageVariantUrl(event.imageUrl, 'large'),
       source: event.source,
       reference: event.reference,

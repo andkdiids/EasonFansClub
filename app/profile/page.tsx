@@ -10,7 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
-import { updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -26,10 +26,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   if (!user) redirect('/login')
   const query = await searchParams
   const requestHeaders = await headers()
-  const resolvedIpRegion = await updateUserIpRegion(
-    user.id,
-    new Request('http://profile.internal/current', { headers: new Headers(requestHeaders) }),
-  )
+  const request = new Request('http://profile.internal/current', { headers: new Headers(requestHeaders) })
+  const ipLocation = await resolveIpLocation(request)
+  const resolvedIpRegion = await updateUserIpRegion(user.id, ipLocation)
 
   const profile = await prisma.user.findFirst({
     where: { id: user.id, isDeleted: false, status: 'ACTIVE', Profile: { isNot: null } },
@@ -39,6 +38,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       username: true,
       usernameChangedAt: true,
       nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
+      bioModerationStatus: true,
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
@@ -81,10 +83,12 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       canChange: usernameChange.canChange,
     },
     nickname: displayName,
+    nicknameViolation: profile.nicknameModerationStatus === 'VIOLATION' || profile.Profile.displayNameModerationStatus === 'VIOLATION',
     avatarUrl: avatar || '',
     defaultAvatarOptions,
     backgroundUrl: background || '',
     bio,
+    bioViolation: profile.bioModerationStatus === 'VIOLATION' || profile.Profile.bioModerationStatus === 'VIOLATION',
     location: locationFromProfile(profile.Profile),
     email: profile.email || '',
     phone: profile.phone || '',

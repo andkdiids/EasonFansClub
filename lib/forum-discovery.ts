@@ -59,6 +59,7 @@ export type ForumDiscoveryResponse = {
   }>
   selectedBoard: { id: string; name: string; slug: string; isAnnouncement: boolean } | null
   nextCursor: string | null
+  feedSeed: string | null
   hasMore: boolean
   permissions: { canCreatePost: boolean; canCreateAnnouncement: boolean }
   mode: ForumDiscoveryMode

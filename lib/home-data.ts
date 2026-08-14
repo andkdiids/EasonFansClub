@@ -11,6 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { getTodayMonthDay } from '@/lib/today'
 import { countTodayBirthdays, grantTodayBirthdayRewards } from '@/lib/birthday'
 import { getTodayEventRecords } from '@/lib/today-events'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -36,6 +37,8 @@ function excerpt(value: string | null | undefined, length = 180) {
   if (!value) return ''
   return value.length > length ? `${value.slice(0, length)}...` : value
 }
+
+const publicPostModerationStatuses: Array<'APPROVED' | 'VIOLATION'> = ['APPROVED', 'VIOLATION']
 
 export async function getHomePosts(userId?: string) {
   const posts = await getHomePostsUncached()
@@ -68,7 +71,7 @@ async function getHomePostsUncached() {
   const baseWhere = {
     isDeleted: false,
     status: 'PUBLISHED' as const,
-    moderationStatus: 'APPROVED' as const,
+    moderationStatus: { in: publicPostModerationStatuses },
     OR: [{ isFeatured: true }, { isPinned: true }],
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }
@@ -77,6 +80,7 @@ async function getHomePostsUncached() {
     title: true,
     summary: true,
     content: true,
+    moderationStatus: true,
     likeCount: true,
     replyCount: true,
     viewCount: true,
@@ -89,8 +93,10 @@ async function getHomePostsUncached() {
         id: true,
         uid: true,
         nickname: true,
+        usernameModerationStatus: true,
+        nicknameModerationStatus: true,
         level: true,
-        Profile: { select: { displayName: true } },
+        Profile: { select: { displayName: true, displayNameModerationStatus: true } },
       },
     },
   }
@@ -119,11 +125,12 @@ async function getHomePostsUncached() {
     8000,
   )
 
-  return rows.map(({ summary, content, Board, User, ...post }) => ({
+  return rows.map(({ summary, content, moderationStatus, Board, User, ...post }) => ({
     ...post,
+    title: publicModerationText(post.title, moderationStatus),
     board: Board,
-    author: { ...User, profile: User.Profile },
-    content: publicContentImageMarkers(excerpt(summary || content)),
+    author: { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile },
+    content: publicModerationText(publicContentImageMarkers(excerpt(summary || content)), moderationStatus),
   }))
 }
 
@@ -156,6 +163,7 @@ async function getHomeDailyMessagesUncached() {
       where: {
         date: today,
         isDeleted: false,
+        moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       },
       orderBy: [{ isFeatured: 'desc' }, { likeCount: 'desc' }, { createdAt: 'desc' }],
@@ -164,13 +172,16 @@ async function getHomeDailyMessagesUncached() {
         id: true,
         mood: true,
         content: true,
+        moderationStatus: true,
         User: {
           select: {
             id: true,
             uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             level: true,
-            Profile: { select: { displayName: true } },
+            Profile: { select: { displayName: true, displayNameModerationStatus: true } },
           },
         },
       },
@@ -181,8 +192,8 @@ async function getHomeDailyMessagesUncached() {
 
   return rows.map(({ User, ...message }) => ({
     ...message,
-    user: { ...User, profile: User.Profile },
-    content: excerpt(message.content, 120),
+    user: { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile },
+    content: publicModerationText(excerpt(message.content, 120), message.moderationStatus),
   }))
 }
 

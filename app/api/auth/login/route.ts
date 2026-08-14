@@ -11,6 +11,8 @@ import { normalizeText } from '@/lib/validators'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
 import { updateUserIpRegion } from '@/lib/ip-region'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { publicModerationUserName } from '@/lib/content-moderation'
 
 const loginUserQueryTimeoutMs = 4500
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
@@ -98,8 +100,8 @@ export async function POST(request: Request) {
     const sessionUser = {
       id: user.id,
       uid: user.uid,
-      username: user.username,
-      nickname: user.nickname,
+      username: publicModerationUserName(user.username, [user.usernameModerationStatus]),
+      nickname: getPublicUserDisplayName(user),
       role: user.role,
     }
 

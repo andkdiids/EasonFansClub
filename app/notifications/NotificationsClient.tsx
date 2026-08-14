@@ -13,7 +13,7 @@ import { parseNotificationCategory, type NotificationCategory, type UnifiedNotif
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
-const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
+const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING', 'USER_REWARD'])
 
 function isSystemLikeNotification(item: UnifiedNotification) {
   // 系统通知来源、无操作人，或显式的系统类型（含生日纪念）均视为系统类
@@ -60,6 +60,8 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
       return { label: '查看徽章', href: '/profile/badges' }
     case 'BIRTHDAY_GREETING':
       return { label: '编辑资料', href: '/profile/edit' }
+    case 'USER_REWARD':
+      return { label: '查看成长', href: item.link || '/profile' }
     case 'ANNOUNCEMENT':
     case 'MAINTENANCE':
     case 'SECURITY':
@@ -117,6 +119,7 @@ type NotificationReadResponse = {
 // 本地即时递减未读数（分类角标同步），随后由 Provider 触发的服务端汇总校正为权威值。
 const NOTIFICATION_LIST_PAGE_SIZE = 20
 const OPTIMISTIC_READ_STORAGE_KEY = 'notifications:optimistic-read'
+const DISMISSED_SYSTEM_STORAGE_KEY = 'notifications:dismissed-system'
 
 type NotificationPagination = {
   page: number
@@ -148,6 +151,31 @@ function removePersistedOptimisticRead(key: string) {
   } catch {
     // Ignore malformed or unavailable session storage.
   }
+}
+
+function readDismissedSystemIds() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(DISMISSED_SYSTEM_STORAGE_KEY) || '[]')
+    return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function rememberDismissedSystemIds(ids: string[]) {
+  if (!ids.length) return
+  const dismissed = readDismissedSystemIds()
+  ids.forEach((id) => dismissed.add(id))
+  try {
+    window.localStorage.setItem(DISMISSED_SYSTEM_STORAGE_KEY, JSON.stringify(Array.from(dismissed).slice(-1000)))
+  } catch {
+    // Local dismissal only prevents a global system row from reappearing in this browser.
+  }
+}
+
+function filterDismissedSystemNotifications(items: UnifiedNotification[]) {
+  const dismissed = readDismissedSystemIds()
+  return items.filter((item) => item.source !== 'system' || !dismissed.has(item.id))
 }
 
 function isNotificationRead(item: UnifiedNotification) {
@@ -223,12 +251,12 @@ export function NotificationsClient({
   // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
   const markingReadRef = useRef<Set<string>>(new Set())
   // 清除二次确认：第一次点击只打开确认框，确认后才真正调用删除接口。
-  const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[] } | null>(null)
+  const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[]; all?: boolean } | null>(null)
   const [isClearing, setIsClearing] = useState(false)
   const [actionError, setActionError] = useState('')
 
   const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[], nextPagination?: NotificationPagination) => {
-    const merged = serverNotifications.map((item) => {
+    const merged = filterDismissedSystemNotifications(serverNotifications).map((item) => {
       const key = notificationKey(item)
       if (isNotificationRead(item)) {
         optimisticReadRef.current.delete(key)
@@ -353,7 +381,7 @@ export function NotificationsClient({
   }, [])
 
   useEffect(() => {
-    const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
+    const dismissed = readDismissedSystemIds()
     if (!dismissed.size) return
     const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !isNotificationRead(item))
     setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
@@ -474,10 +502,9 @@ export function NotificationsClient({
   }
 
   // 进入通知目标页：标记已读 + 记录返回状态 + 跳转。返回 false 表示该通知无跳转目标（仅标记已读）。
-  function navigateToNotification(item: UnifiedNotification): boolean {
+  async function navigateToNotification(item: UnifiedNotification): Promise<boolean> {
     const target = getNotificationTarget(item)
-    // 乐观更新同步发生，不等待刷新或接口往返，卡片立即呈现已读态。
-    void markRead(item)
+    await markRead(item)
     if (!target) return false
     window.sessionStorage.setItem('notifications:return-state', JSON.stringify({
       category: activeCategory,
@@ -489,7 +516,7 @@ export function NotificationsClient({
 
   async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
     event.preventDefault()
-    navigateToNotification(item)
+    await navigateToNotification(item)
   }
 
   async function sendDirectReply(item: UnifiedNotification) {
@@ -589,7 +616,44 @@ export function NotificationsClient({
 
   // 只负责真正的删除请求与本地状态更新；调用前必须经过 clearConfirm 二次确认。
   // 返回是否成功——失败时保留原列表与原未读数，并显示错误。
-  async function clearNotifications(items: UnifiedNotification[]): Promise<boolean> {
+  async function clearNotifications(items: UnifiedNotification[], clearAll = false): Promise<boolean> {
+    // A list request started before the delete must not be allowed to put its
+    // stale response back into the client after the delete succeeds.
+    notificationListRequestRef.current?.controller.abort()
+    notificationListRequestRef.current = null
+    notificationListRequestSequenceRef.current += 1
+
+    if (clearAll) {
+      const response = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
+      if (!response.ok) return false
+      const data = await response.json().catch(() => null) as { systemIds?: unknown } | null
+      const systemIds = Array.isArray(data?.systemIds)
+        ? data.systemIds.filter((id): id is string => typeof id === 'string')
+        : []
+      rememberDismissedSystemIds(systemIds)
+      setNotifications([])
+      setPagination((current) => ({ ...current, page: 1, total: 0, totalPages: 1 }))
+      const currentSummary = summaryOverride || sharedSummary
+      setSummaryOverride({
+        ...currentSummary,
+        notifications: 0,
+        system: 0,
+        replies: 0,
+        likes: 0,
+        feedbackReplies: 0,
+        feedback: 0,
+        friendRequests: 0,
+        total: currentSummary.directMessages,
+      })
+      if (currentPage !== 1) router.replace(buildNotificationHref(1), { scroll: false })
+      await refreshUnreadSummary()
+      return true
+    }
+
     const personalIds = items.filter((item) => item.source === 'personal').map((item) => item.id)
     if (personalIds.length) {
       const response = await fetch('/api/notifications', {
@@ -607,9 +671,7 @@ export function NotificationsClient({
         body: JSON.stringify({ ids: systemIds.map((id) => ({ id, source: 'system' })) }),
       })
       if (!response.ok) return false
-      const dismissed = new Set(JSON.parse(window.localStorage.getItem('notifications:dismissed-system') || '[]') as string[])
-      systemIds.forEach((id) => dismissed.add(id))
-      window.localStorage.setItem('notifications:dismissed-system', JSON.stringify(Array.from(dismissed).slice(-500)))
+      rememberDismissedSystemIds(systemIds)
     }
     const keys = new Set(items.map((item) => `${item.source}:${item.id}`))
     setNotifications((current) => current.filter((item) => !keys.has(`${item.source}:${item.id}`)))
@@ -624,7 +686,7 @@ export function NotificationsClient({
     setIsClearing(true)
     setActionError('')
     try {
-      const ok = await clearNotifications(clearConfirm.items)
+      const ok = await clearNotifications(clearConfirm.items, clearConfirm.all === true)
       if (ok) {
         setClearConfirm(null)
       } else {
@@ -643,6 +705,7 @@ export function NotificationsClient({
     const target = getNotificationTarget(item)
     const systemLike = isSystemLikeNotification(item)
     const isBirthday = isBirthdayNotification(item)
+    const isUserReward = item.type === 'USER_REWARD'
     const smartEntry = getSmartEntry(item)
     // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框（保持扁平简洁 Windows 风格）
     const emphasisClass = isBirthday && !isNotificationRead(item) ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
@@ -652,7 +715,7 @@ export function NotificationsClient({
 
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
-      if (target) navigateToNotification(item)
+      if (target) void navigateToNotification(item)
       else void markRead(item)
     }
 
@@ -692,6 +755,7 @@ export function NotificationsClient({
                 {typeIcon[category] || 'i'}
               </span>
             ) : null}
+            {isUserReward ? <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-emerald-100 text-[10px] font-black text-emerald-700">＋</span> : null}
           </div>
 
           {/* 内容区：标题 + 正文 + 智能入口 */}
@@ -701,7 +765,7 @@ export function NotificationsClient({
               {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">未读</span> : null}
             </div>
             <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
-            {item.content ? <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600">{item.content}</p> : null}
+            {item.content ? <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward ? '' : 'line-clamp-2'}`}>{item.content}</p> : null}
 
             {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
             {smartEntry?.action === 'dock' ? (
@@ -836,9 +900,10 @@ export function NotificationsClient({
                 title: '确认清除全部通知？',
                 description: '全部通知将从通知中心移除，此操作无法撤销。',
                 items: notifications,
+                all: true,
               })
             }}
-            disabled={isUpdating || notifications.length === 0}
+            disabled={isUpdating || pagination.total === 0}
             className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-slate-600 disabled:opacity-50"
           >
             清除通知
@@ -902,7 +967,7 @@ export function NotificationsClient({
         open={Boolean(clearConfirm)}
         title={clearConfirm?.title || ''}
         description={clearConfirm?.description}
-        confirmLabel={clearConfirm && clearConfirm.items.length > 1 ? '确认全部清除' : '确认清除'}
+        confirmLabel={clearConfirm?.all || (clearConfirm && clearConfirm.items.length > 1) ? '确认全部清除' : '确认清除'}
         loading={isClearing}
         onConfirm={() => void confirmClearNotifications()}
         onCancel={() => {

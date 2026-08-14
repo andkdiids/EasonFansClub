@@ -33,7 +33,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     emitRealtime(guard.user.id, 'feedback', { feedbackId })
   }
 
-  return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true }) })
+  return NextResponse.json({ feedback: serializeFeedback(feedback, { includeContact: true, forAdmin: true }) })
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
@@ -59,5 +59,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ fe
   })
 
   emitRealtime(feedback.userId, 'feedback', { feedbackId })
-  return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '反馈状态已更新' })
+  return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true, forAdmin: true }), message: '反馈状态已更新' })
 }

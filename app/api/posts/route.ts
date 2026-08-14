@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
-import { hasAdminPermission, isAdminUser } from '@/lib/admin-permissions'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
-import { containsSensitiveContent, sanitizeText } from '@/lib/security'
-import { checkForbiddenWords } from '@/lib/content-filter'
+import { sanitizeText } from '@/lib/security'
 import { parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
-import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -49,6 +49,7 @@ export async function GET(request: Request) {
         title: true,
         summary: true,
         content: true,
+        moderationStatus: true,
         ipRegion: true,
         likeCount: true,
         favoriteCount: true,
@@ -62,9 +63,11 @@ export async function GET(request: Request) {
               id: true,
               uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             avatarUrl: true,
             level: true,
-            Profile: { select: { avatarUrl: true, displayName: true } },
+            Profile: { select: { avatarUrl: true, displayName: true, displayNameModerationStatus: true } },
           },
         },
         Board: { select: { name: true, slug: true } },
@@ -74,10 +77,12 @@ export async function GET(request: Request) {
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
     const remarkMap = await loadFriendRemarkMap(viewer?.id, pageRows.map((row) => row.User.id))
-    const posts = pageRows.map(({ summary, content, User, Board, sticker, ...post }) => ({
+    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, ...post }) => ({
       ...post,
+      title: publicModerationText(post.title, moderationStatus),
       author: {
         ...User,
+        nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
         profile: User.Profile ? {
           ...User.Profile,
@@ -91,7 +96,7 @@ export async function GET(request: Request) {
         } : User.Profile,
       },
       board: Board,
-      content: publicContentImageMarkers(summary || createSummary(content)),
+      content: publicModerationText(publicContentImageMarkers(summary || createSummary(content)), moderationStatus),
       stickerUrl: publicImageUrl(sticker?.url),
     }))
 
@@ -117,12 +122,16 @@ export async function POST(request: Request) {
   const rawTitle = sanitizeText(body?.title, 120)
   const rawContent = stripUnsafeHtml(sanitizeText(body?.content, 20000))
   const rawStickerId = typeof body?.stickerId === 'string' && body.stickerId ? String(body.stickerId).trim().slice(0, 191) : null
-  const isAdmin = isAdminUser(user)
-  if (!isAdmin && checkForbiddenWords(`${rawTitle}\n${rawContent}`).blocked) {
-    return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
-  }
-  if (!isAdmin && await containsSensitiveContent(`${rawTitle}\n${rawContent}`)) {
-    return NextResponse.json({ message: '帖子包含违禁词，无法发布', errors: { content: '请修改后重新发布' } }, { status: 400 })
+  const isAdmin = shouldBypassForbiddenWords(user)
+  const forbiddenWords = await checkPostForbiddenWords({ title: rawTitle, content: rawContent }, user)
+  if (forbiddenWords.blocked) {
+    return NextResponse.json({
+      error: CONTENT_CONTAINS_BANNED_WORD,
+      message: formatPostForbiddenWordMessage(forbiddenWords.matches, forbiddenWords.hasMore),
+      matches: forbiddenWords.matches,
+      hasMore: forbiddenWords.hasMore,
+      errors: formatPostForbiddenWordFieldErrors(forbiddenWords.matches),
+    }, { status: 400 })
   }
   if (rawStickerId && !(await isStickerVisible(rawStickerId))) {
     return NextResponse.json({ message: '该表情不可用或已被隐藏', errors: { stickerId: '表情无效' } }, { status: 400 })
@@ -161,7 +170,8 @@ export async function POST(request: Request) {
 
     const canPublishImmediately = isAdmin
     const moderationStatus = canPublishImmediately ? 'APPROVED' as const : 'PENDING' as const
-    const ipRegion = await resolveIpRegion(request)
+    const ipLocation = await resolveIpLocation(request)
+    const ipRegion = ipLocation?.label || null
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
       await tx.user.findFirstOrThrow({
@@ -226,7 +236,7 @@ export async function POST(request: Request) {
     }
 
     const detailUrl = `/posts/${result.post.id}`
-    void updateUserIpRegion(user.id, ipRegion)
+    void updateUserIpRegion(user.id, ipLocation)
     if (moderationStatus === 'PENDING') void emitRealtimeToAdmins('notification')
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)

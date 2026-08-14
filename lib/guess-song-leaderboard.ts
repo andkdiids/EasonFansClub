@@ -3,6 +3,7 @@ import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { publicModerationText, publicModerationUserName } from '@/lib/content-moderation'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -114,8 +115,10 @@ function serializeModeHighScore(
       uid: number
       nickname: string
       username: string
+      usernameModerationStatus?: string | null
+      nicknameModerationStatus?: string | null
       avatarUrl: string | null
-      Profile: { displayName: string | null; avatarUrl: string | null } | null
+      Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null } | null
     }
   },
   publicMode: GuessSongPublicMode,
@@ -123,6 +126,7 @@ function serializeModeHighScore(
   remarkMap: ReadonlyMap<string, string>,
 ): GuessSongModeHighScore | null {
   if (!row.completedAt) return null
+  const safeName = getPublicUserDisplayName(row.User)
   const name = resolveFriendDisplayName({
     viewerId,
     targetUserId: row.User.id,
@@ -139,17 +143,17 @@ function serializeModeHighScore(
     achievedAt: row.completedAt.toISOString(),
     userId: row.User.id,
     uid: row.User.uid,
-    username: row.User.username,
-    displayName: row.User.Profile?.displayName || null,
+    username: publicModerationUserName(row.User.username, [row.User.usernameModerationStatus]),
+    displayName: publicModerationText(row.User.Profile?.displayName, row.User.Profile?.displayNameModerationStatus),
     nickname: name,
     avatarUrl,
     user: {
       id: row.User.id,
       uid: row.User.uid,
-      username: row.User.username,
-      displayName: row.User.Profile?.displayName || null,
-      nickname: row.User.nickname,
-      name,
+      username: publicModerationUserName(row.User.username, [row.User.usernameModerationStatus]),
+      displayName: publicModerationText(row.User.Profile?.displayName, row.User.Profile?.displayNameModerationStatus),
+      nickname: safeName,
+      name: safeName,
       avatarUrl,
     },
   }
@@ -200,8 +204,10 @@ export async function getGuessSongModeHighScores(viewerId?: string): Promise<Gue
               uid: true,
               nickname: true,
               username: true,
+              usernameModerationStatus: true,
+              nicknameModerationStatus: true,
               avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
             },
           },
         },
@@ -294,8 +300,10 @@ type LeaderboardRow = ScoreRecord & {
     uid: number
     nickname: string
     username: string
+    usernameModerationStatus?: string | null
+    nicknameModerationStatus?: string | null
     avatarUrl: string | null
-    Profile: { displayName: string | null; avatarUrl: string | null } | null
+    Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null } | null
   }
 }
 
@@ -356,8 +364,10 @@ export async function getGuessSongPersonalBest(input: {
           uid: true,
           nickname: true,
           username: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },
@@ -390,8 +400,11 @@ type YearLeaderboardQueryRow = {
   uid: number
   nickname: string
   username: string
+  usernameModerationStatus: string | null
+  nicknameModerationStatus: string | null
   avatar_url: string | null
   profile_display_name: string | null
+  profile_display_name_moderation_status: string | null
   profile_avatar_url: string | null
 }
 
@@ -409,10 +422,12 @@ function toYearLeaderboardRow(row: YearLeaderboardQueryRow) {
       uid: row.uid,
       nickname: row.nickname,
       username: row.username,
+      usernameModerationStatus: row.usernameModerationStatus,
+      nicknameModerationStatus: row.nicknameModerationStatus,
       avatarUrl: row.avatar_url,
       Profile: row.profile_display_name === null && row.profile_avatar_url === null
         ? null
-        : { displayName: row.profile_display_name, avatarUrl: row.profile_avatar_url },
+        : { displayName: row.profile_display_name, displayNameModerationStatus: row.profile_display_name_moderation_status, avatarUrl: row.profile_avatar_url },
     },
   }
 
@@ -515,8 +530,11 @@ async function getYearGuessSongLeaderboard(input: {
       u.uid,
       u.nickname,
       u.username,
+      u.usernameModerationStatus,
+      u.nicknameModerationStatus,
       u.avatarUrl AS avatar_url,
       p.displayName AS profile_display_name,
+      p.displayNameModerationStatus AS profile_display_name_moderation_status,
       p.avatarUrl AS profile_avatar_url
     FROM ranked_sessions AS ranked
     INNER JOIN \`User\` AS u ON u.id = ranked.user_id
@@ -583,8 +601,10 @@ export async function getGuessSongLeaderboard(input: {
           uid: true,
           nickname: true,
           username: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },

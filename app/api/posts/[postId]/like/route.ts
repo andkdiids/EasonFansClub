@@ -5,6 +5,7 @@ import { publicImageUrl } from '@/lib/images'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
+import { syncLikeNotification } from '@/lib/like-notifications'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -24,8 +25,10 @@ export async function GET(_request: Request, { params }: Params) {
           id: true,
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },
@@ -34,7 +37,7 @@ export async function GET(_request: Request, { params }: Params) {
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
-      nickname: like.User.nickname,
+      nickname: getPublicUserDisplayName(like.User),
       displayName: resolveFriendDisplayName({
         viewerId: user.id,
         targetUserId: like.User.id,
@@ -74,21 +77,12 @@ export async function POST(_request: Request, { params }: Params) {
     })
 
     if (post.authorId !== user.id) {
-      const author = await tx.user.findUnique({ where: { id: post.authorId }, select: { id: true } })
-      if (author) {
-        // 点赞通知：仅在「新建点赞」时生成一次（上面的 findUnique 已保证同一用户不会重复点赞），
-        // 格式与回复点赞 / 每日留言点赞一致；link 指向帖子详情。
-        await tx.notification.create({
-          data: {
-            recipientId: post.authorId,
-            actorId: user.id,
-            type: 'LIKE',
-            title: '你的帖子收到点赞',
-            content: `${user.nickname} 点赞了你的帖子`,
-            link: `/posts/${postId}`,
-          },
-        })
-      }
+      await syncLikeNotification(tx, {
+        recipientId: post.authorId,
+        actorId: user.id,
+        actorName: user.nickname,
+        target: { kind: 'post', id: postId, link: `/posts/${postId}` },
+      }, 'like')
     }
 
     return { isLiked: true, likeCount: updatedPost.likeCount, notifiedUserId: post.authorId !== user.id ? post.authorId : null }
@@ -105,7 +99,7 @@ export async function DELETE(_request: Request, { params }: Params) {
 
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {
-    const post = await tx.post.findFirst({ where: { ...publicPostWhere, id: postId }, select: { likeCount: true } })
+    const post = await tx.post.findFirst({ where: { ...publicPostWhere, id: postId }, select: { likeCount: true, authorId: true } })
     if (!post) return null
 
     await tx.like.deleteMany({ where: { postId, userId: user.id } })
@@ -116,9 +110,22 @@ export async function DELETE(_request: Request, { params }: Params) {
       select: { likeCount: true },
     })
 
-    return { isLiked: false, likeCount: Math.max(updatedPost.likeCount, 0) }
+    if (post.authorId !== user.id) {
+      await syncLikeNotification(tx, {
+        recipientId: post.authorId,
+        actorId: user.id,
+        target: { kind: 'post', id: postId, link: `/posts/${postId}` },
+      }, 'unlike')
+    }
+
+    return {
+      isLiked: false,
+      likeCount: Math.max(updatedPost.likeCount, 0),
+      notifiedUserId: post.authorId !== user.id ? post.authorId : null,
+    }
   })
 
   if (!result) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
+  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

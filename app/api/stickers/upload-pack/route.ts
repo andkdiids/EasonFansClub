@@ -12,6 +12,7 @@ import {
   getStickerUploadErrorResponse,
 } from '@/lib/sticker-upload'
 import { submitStickerPack } from '@/lib/sticker-center'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import {
   parseStickerPackMultipart,
   removeStickerMultipartTempDirectory,
@@ -93,10 +94,17 @@ export async function POST(request: Request) {
     const category = firstField('category').slice(0, 40).trim()
     const typeRaw = (firstField('type') || 'STATIC').toUpperCase()
     const type = typeRaw === 'GIF' ? 'GIF' : 'STATIC'
+    if ((await checkBannedWords(`${name}\n${description}`)).blocked) {
+      return NextResponse.json({ success: false, error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+    }
 
     const stickerFiles = parsed.files
       .filter((file) => file.fieldName === 'stickerFiles')
       .sort((left, right) => left.ordinal - right.ordinal)
+    const stickerNamesRaw = parsed.fields.get('stickerNames') || []
+    if ((await checkBannedWords(stickerNamesRaw.join('\n'))).blocked) {
+      return NextResponse.json({ success: false, error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+    }
     const coverFile = parsed.files.find((file) => file.fieldName === 'cover') || null
     if (!coverFile || coverFile.size === 0) {
       return NextResponse.json({ success: false, code: 'COVER_REQUIRED', message: '请选择表情包封面' }, { status: 400 })
@@ -148,7 +156,6 @@ export async function POST(request: Request) {
     }
 
     const uploadedStickers: Array<{ name: string | null; url: string; type: 'STATIC' | 'GIF' }> = []
-    const stickerNamesRaw = parsed.fields.get('stickerNames') || []
     stage = 'sticker_upload'
     for (let i = 0; i < stickerFiles.length; i += 1) {
       stickerIndex = i

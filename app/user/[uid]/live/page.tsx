@@ -22,7 +22,7 @@ export default async function PublicUserLivePage({ params }: { params: Promise<{
     prisma.user.findFirst({
       where: { uid: numericUid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       select: {
-        id: true, uid: true, nickname: true, Profile: { select: { displayName: true } },
+        id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } },
         UserMusicConcert: {
           where: { isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } },
           orderBy: [{ MusicConcert: { concertDate: 'desc' } }, { createdAt: 'desc' }],

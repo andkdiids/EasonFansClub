@@ -9,6 +9,7 @@ import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,14 +24,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           where: {
             isDeleted: false,
             status: 'PUBLISHED',
-            moderationStatus: 'APPROVED',
+            moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
             OR: [
               { title: { contains: q } },
               { content: { contains: q } },
             ],
           },
           include: {
-            User: { select: { id: true, nickname: true, level: true, Profile: { select: { displayName: true } } } },
+            User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             Board: { select: { name: true, slug: true } },
           },
           take: 20,
@@ -53,10 +54,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             ],
           },
           select: {
-            id: true, uid: true, nickname: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
-            Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
-            _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' } } } },
-            Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true } },
+            id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
+            _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } } } },
+            Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, moderationStatus: true } },
           },
           take: 10,
         }),
@@ -150,7 +151,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             <div className="space-y-3">
               {posts.map((post) => (
                 <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
-                  <p className="font-black text-slate-950">{post.title}</p>
+                  <p className="font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
                   <p className="mt-2 text-sm text-slate-500">
                     {post.Board.name} · {resolveFriendDisplayName({
                       viewerId: viewer?.id,
@@ -212,13 +213,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                             <small>UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.Post} 帖</small>
                           </span>
                         </Link>
-                        <p className="mt-2 text-xs font-bold text-slate-500">{item.Profile?.bio || `入院于 ${item.createdAt.toLocaleDateString('zh-CN')}`}</p>
+                        <p className="mt-2 text-xs font-bold text-slate-500">{publicModerationText(item.Profile?.bio || `入院于 ${item.createdAt.toLocaleDateString('zh-CN')}`, item.Profile?.bioModerationStatus)}</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <Link href={`/user/${formatUid(item.uid)}`} className="border border-sky-100 px-3 py-2 text-xs font-black text-brand-700">查看主页</Link>
                           {viewer && viewer.id !== item.id && status !== 'RECEIVED' ? <AddFriendButton uid={item.uid} initialStatus={status} /> : null}
                           {status === 'RECEIVED' && receivedRequestBySender.get(item.id) ? <FriendRequestDecision requestId={receivedRequestBySender.get(item.id)!} /> : null}
                         </div>
-                        {item.Post.length ? <div className="mt-2 space-y-1">{item.Post.map((post) => <Link key={post.id} href={`/posts/${post.id}`} className="block truncate text-xs font-bold text-slate-600">帖子 · {post.title}</Link>)}</div> : null}
+                        {item.Post.length ? <div className="mt-2 space-y-1">{item.Post.map((post) => <Link key={post.id} href={`/posts/${post.id}`} className="block truncate text-xs font-bold text-slate-600">帖子 · {publicModerationText(post.title, post.moderationStatus)}</Link>)}</div> : null}
                       </article>
                     )
                   })}

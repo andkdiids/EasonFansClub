@@ -32,8 +32,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
         select: {
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },
@@ -42,7 +44,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
-      nickname: like.User.nickname,
+      nickname: getPublicUserDisplayName(like.User),
       displayName: resolveFriendDisplayName({
         viewerId: user.id,
         targetUserId: like.userId,

@@ -1,5 +1,5 @@
-import { duelError, duelInputError, duelOk } from '@/lib/guess-song-duel-api'
-import { getDuelRoomState, startDuelMatch } from '@/lib/guess-song-duel-service'
+import { duelError, duelOk } from '@/lib/guess-song-duel-api'
+import { getDuelMatchState, getDuelRoomState, startDuelMatch } from '@/lib/guess-song-duel-service'
 import { duelRealtimeHub } from '@/lib/guess-song-duel-realtime'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 
@@ -15,16 +15,15 @@ export async function POST(request: Request, { params }: Context) {
   if (!guard.user) return guard.response
   const { roomId } = await params
   try {
-    const room = await getDuelRoomState(roomId)
-    if (room.host.id !== guard.user.id) return duelInputError('只有房主可以开始游戏', 'HOST_ONLY', 403)
-    if (!room.challenger) {
-      return duelInputError('对方当前不在线，请等待对方重新进入房间。', 'PLAYERS_NOT_ONLINE', 409)
-    }
     const result = await startDuelMatch(guard.user.id, roomId)
-    duelRealtimeHub.broadcastRoom(roomId)
+    const [room, match] = await Promise.all([
+      getDuelRoomState(roomId),
+      getDuelMatchState(guard.user.id, result.matchId),
+    ])
+    await duelRealtimeHub.broadcastRoom(roomId, room)
     duelRealtimeHub.broadcastMatchStarting(result.matchId, result.serverStartAt)
     duelRealtimeHub.scheduleMatch(result.matchId, result.serverStartAt)
-    return duelOk({ matchId: result.matchId, serverStartAt: result.serverStartAt })
+    return duelOk({ room, matchId: result.matchId, serverStartAt: result.serverStartAt, match })
   } catch (error) {
     return duelError(error, 'Unable to start duel')
   }

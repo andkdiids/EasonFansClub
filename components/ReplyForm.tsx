@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
@@ -12,11 +12,15 @@ export function ReplyForm({
   replyTo,
   onReplyCancel,
   onReplyCreated,
+  autoFocus = false,
+  className = '',
 }: Readonly<{
   postId: string
   replyTo?: { id: string; name: string } | null
   onReplyCancel?: () => void
   onReplyCreated?: (reply: unknown) => void
+  autoFocus?: boolean
+  className?: string
 }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -29,6 +33,12 @@ export function ReplyForm({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!autoFocus) return
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [autoFocus])
 
   // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
   function insertEmoji(emoji: string) {
@@ -101,7 +111,7 @@ export function ReplyForm({
   }
 
   return (
-    <form onSubmit={submitReply} className="post-reply-form rounded-xl border p-5 shadow-sm">
+    <form onSubmit={submitReply} className={`post-reply-form rounded-xl border p-5 shadow-sm ${className}`}>
       {replyTo ? (
         <div className="post-reply-form-target mb-3 flex items-center justify-between rounded-xl px-4 py-2 text-sm font-black text-brand-700">
           <span>正在回复 {replyTo.name}</span>
@@ -143,7 +153,7 @@ export function ReplyForm({
             😊 表情
           </button>
         </div>
-        <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+        <button type="submit" disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布回复'}
         </button>
         <StickerPicker

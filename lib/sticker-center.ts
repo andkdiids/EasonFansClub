@@ -9,7 +9,8 @@ import type { Prisma, StickerReportReason } from '@prisma/client'
 const VISIBLE_STICKER_WHERE = {
   isHidden: false,
   enabled: true,
-  pack: { status: 'APPROVED' as const },
+  moderationStatus: 'NORMAL' as const,
+  pack: { status: 'APPROVED' as const, moderationStatus: 'NORMAL' as const },
 }
 
 export type StickerView = {
@@ -83,7 +84,8 @@ export async function getMyStickers(userId: string): Promise<StickerView[]> {
   const stickers = await prisma.sticker.findMany({
     where: {
       isHidden: false,
-      pack: { creatorId: userId, status: 'APPROVED' },
+      moderationStatus: 'NORMAL',
+      pack: { creatorId: userId, status: 'APPROVED', moderationStatus: 'NORMAL' },
     },
     orderBy: { createdAt: 'desc' },
     select: {
@@ -156,7 +158,7 @@ export async function getPickerData(userId: string): Promise<PickerData> {
           coverUrl: true,
           type: true,
           stickers: {
-            where: { isHidden: false, enabled: true },
+            where: { isHidden: false, enabled: true, moderationStatus: 'NORMAL' },
             orderBy: { sort: 'asc' },
             select: { id: true, name: true, url: true, type: true, packId: true, sort: true },
           },
@@ -217,7 +219,7 @@ export async function getPickerData(userId: string): Promise<PickerData> {
 /** 我的上传（选择器用，不含 usageCount）。 */
 export async function getMyUploadStickers(userId: string): Promise<PickerSticker[]> {
   const stickers = await prisma.sticker.findMany({
-    where: { isHidden: false, pack: { creatorId: userId, status: 'APPROVED' } },
+    where: { isHidden: false, moderationStatus: 'NORMAL', pack: { creatorId: userId, status: 'APPROVED', moderationStatus: 'NORMAL' } },
     orderBy: { createdAt: 'desc' },
     select: { id: true, name: true, url: true, type: true },
   })
@@ -516,7 +518,7 @@ export async function createOfficialSticker(input: {
           name: true,
           isOfficial: true,
           category: true,
-          creator: { select: { id: true, nickname: true, uid: true } },
+          creator: { select: { id: true, nickname: true, uid: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
         },
       },
     },
@@ -583,7 +585,7 @@ async function aggregatePackUsage(packIds: string[]): Promise<Map<string, { stic
   if (packIds.length === 0) return result
   const groups = await prisma.sticker.groupBy({
     by: ['packId'],
-    where: { packId: { in: packIds }, isHidden: false, enabled: true, pack: { status: 'APPROVED' } },
+    where: { packId: { in: packIds }, isHidden: false, enabled: true, moderationStatus: 'NORMAL', pack: { status: 'APPROVED', moderationStatus: 'NORMAL' } },
     _count: { _all: true },
     _sum: { usageCount: true },
   })
@@ -622,7 +624,7 @@ export async function getStorePacks(opts: {
   const pageSize = Math.min(60, Math.max(8, opts.pageSize ?? 24))
   const sort = opts.sort ?? 'hot'
 
-  const where: { status: 'APPROVED'; category?: string; isOfficial?: boolean } = { status: 'APPROVED' }
+  const where: { status: 'APPROVED'; moderationStatus: 'NORMAL'; category?: string; isOfficial?: boolean } = { status: 'APPROVED', moderationStatus: 'NORMAL' }
   if (opts.category) where.category = opts.category
   if (sort === 'official') where.isOfficial = true
 
@@ -641,7 +643,7 @@ export async function getStorePacks(opts: {
         category: true,
         isOfficial: true,
         createdAt: true,
-        creator: { select: { id: true, nickname: true, uid: true, Profile: { select: { displayName: true } } } },
+        creator: { select: { id: true, nickname: true, uid: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
       },
     }),
     prisma.stickerPack.count({ where }),
@@ -707,7 +709,7 @@ export type StorePackDetail = StorePackItem & {
  */
 export async function getStorePackDetail(packId: string, userId: string | null): Promise<StorePackDetail | null> {
   const pack = await prisma.stickerPack.findFirst({
-    where: { id: packId, status: 'APPROVED' },
+    where: { id: packId, status: 'APPROVED', moderationStatus: 'NORMAL' },
     select: {
       id: true,
       name: true,
@@ -717,9 +719,9 @@ export async function getStorePackDetail(packId: string, userId: string | null):
       category: true,
       isOfficial: true,
       createdAt: true,
-      creator: { select: { id: true, nickname: true, uid: true, Profile: { select: { displayName: true } } } },
+      creator: { select: { id: true, nickname: true, uid: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
       stickers: {
-        where: { isHidden: false, enabled: true },
+        where: { isHidden: false, enabled: true, moderationStatus: 'NORMAL' },
         orderBy: { sort: 'asc' },
         select: { id: true, name: true, url: true, type: true, packId: true },
       },
@@ -763,7 +765,7 @@ export async function getStorePackDetail(packId: string, userId: string | null):
  */
 export async function getStoreCategories(): Promise<string[]> {
   const rows = await prisma.stickerPack.findMany({
-    where: { status: 'APPROVED' },
+    where: { status: 'APPROVED', moderationStatus: 'NORMAL' },
     select: { category: true },
     distinct: ['category'],
   })
@@ -781,7 +783,7 @@ export async function addPackToLibrary(userId: string, packId: string): Promise<
   if (exists) return { added: true }
   // 校验合集存在且通过审核
   const pack = await prisma.stickerPack.findFirst({
-    where: { id: packId, status: 'APPROVED' },
+    where: { id: packId, status: 'APPROVED', moderationStatus: 'NORMAL' },
     select: { id: true },
   })
   if (!pack) throw new Error('表情包不存在或未上架')
@@ -807,7 +809,7 @@ export async function removePackFromLibrary(userId: string, packId: string): Pro
  */
 export async function getMyLibraryPacks(userId: string): Promise<StorePackItem[]> {
   const rows = await prisma.userStickerPack.findMany({
-    where: { userId, pack: { status: 'APPROVED' } },
+    where: { userId, pack: { status: 'APPROVED', moderationStatus: 'NORMAL' } },
     orderBy: { createdAt: 'desc' },
     select: {
       pack: {
@@ -820,7 +822,7 @@ export async function getMyLibraryPacks(userId: string): Promise<StorePackItem[]
           category: true,
           isOfficial: true,
           createdAt: true,
-          creator: { select: { id: true, nickname: true, uid: true } },
+          creator: { select: { id: true, nickname: true, uid: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
         },
       },
     },
@@ -836,7 +838,7 @@ export async function getMyLibraryPacks(userId: string): Promise<StorePackItem[]
     type: pack.type,
     category: pack.category,
     isOfficial: pack.isOfficial,
-    creator: pack.creator,
+    creator: pack.creator ? { ...pack.creator, nickname: getPublicUserDisplayName(pack.creator) } : null,
     stickerCount: agg.get(pack.id)?.stickerCount ?? 0,
     downloadCount: agg.get(pack.id)?.downloadCount ?? 0,
     addedByCount: agg.get(pack.id)?.addedByCount ?? 0,

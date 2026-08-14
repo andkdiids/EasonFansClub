@@ -72,7 +72,7 @@ export function ConfirmDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <h2 className="text-lg font-black text-brand-950">{title}</h2>
-        {description ? <p className="mt-2 text-sm font-bold leading-6 text-slate-500">{description}</p> : null}
+        {description ? <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-500">{description}</p> : null}
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <button
             ref={cancelRef}

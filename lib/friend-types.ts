@@ -17,6 +17,7 @@ export type FriendDockUser = {
   createdAt: string
   level: number
   levelName: string
+  groupId?: string | null
   profile: {
     displayName: string | null
     avatarUrl: string | null

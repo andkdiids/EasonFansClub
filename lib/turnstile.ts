@@ -1,3 +1,5 @@
+import { getClientIp } from '@/lib/client-ip'
+
 export async function verifyTurnstileToken(token: unknown, request: Request) {
   const enabled = process.env.ENABLE_TURNSTILE === 'true' || process.env.NEXT_PUBLIC_ENABLE_TURNSTILE === 'true'
   if (!enabled) {
@@ -18,11 +20,8 @@ export async function verifyTurnstileToken(token: unknown, request: Request) {
   const formData = new FormData()
   formData.append('secret', secret)
   formData.append('response', responseToken)
-  const ip =
-    request.headers.get('cf-connecting-ip') ||
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip')
-  if (ip) formData.append('remoteip', ip)
+  const ip = getClientIp(request)
+  if (ip !== 'unknown') formData.append('remoteip', ip)
 
   const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
     method: 'POST',

@@ -2,6 +2,9 @@ import type { PointActionType, Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { getShanghaiDayRange } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
+import { REGISTRATION_FEE_HISTORY_PAGE_SIZE } from '@/lib/registration-fee-constants'
+
+export { REGISTRATION_FEE_HISTORY_PAGE_SIZE }
 
 export const LONG_TERM_PATIENT_STREAK_DAYS = 7
 export const LONG_TERM_PATIENT_DAILY_BONUS = 7
@@ -16,6 +19,7 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   CONTINUOUS_CHECK_IN_BONUS: '连续挂号奖励',
   POST_LIKE_RECEIVED: '点赞奖励',
   ADMIN_ADJUST: '管理员发放',
+  USER_REWARD: '获得奖励',
   FEATURED_POST: '精选奖励',
   ACTIVITY_REWARD: '成就奖励',
   GUESS_SONG_DUEL_WIN: '听听·对决获胜',
@@ -276,5 +280,37 @@ export async function getTodayRegistrationFeeSummary(userId: string, now = new D
     todayEarned: sumPositiveRegistrationFees(records),
     dateKey,
     records: records.map(serializeRegistrationFeeRecord),
+  }
+}
+
+export async function getRegistrationFeeHistory(userId: string, options: { page?: number; pageSize?: number } = {}) {
+  const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || REGISTRATION_FEE_HISTORY_PAGE_SIZE) || REGISTRATION_FEE_HISTORY_PAGE_SIZE, 1), 50)
+  const requestedPage = Math.max(1, Math.trunc(options.page || 1) || 1)
+  // Keep the full non-zero ledger here so reversals and manual balance
+  // corrections retain their correct negative sign in the history page.
+  const where = { userId, points: { not: 0 } }
+  const [user, total] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { points: true } }),
+    prisma.pointLog.count({ where }),
+  ])
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const page = Math.min(requestedPage, totalPages)
+  const records = await prisma.pointLog.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: (page - 1) * pageSize,
+    take: pageSize,
+    select: registrationFeeRecordSelect,
+  })
+
+  return {
+    currentBalance: user.points,
+    records: records.map(serializeRegistrationFeeRecord),
+    page,
+    pageSize,
+    total,
+    totalPages,
   }
 }

@@ -19,6 +19,7 @@ import { MAX_UID } from '@/lib/uid'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
+import { USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
@@ -131,10 +132,16 @@ export async function POST(request: Request) {
     if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) errors.nickname = '用户名格式不正确'
     else if (submittedAccountValidation.error) errors.nickname = submittedAccountValidation.error
     else if (accountValidation.error || nickname !== draft.nickname) errors.nickname = '注册资料已变化，请重新开始验证'
+    else if ((await checkBannedWords(nickname)).blocked) errors.nickname = USERNAME_BANNED_WORD_MESSAGE
     if (body?.email && normalizeText(body.email).toLowerCase() !== email) errors.email = '注册邮箱已变化，请重新发送验证码'
     Object.assign(errors, validateRegistrationPasswordFields(password, confirmPassword))
     if (!errors.password && password && !(await verifyPassword(password, draft.passwordHash)).valid) errors.password = '注册资料已变化，请重新开始验证'
-    if (Object.keys(errors).length) return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
+    if (Object.keys(errors).length) {
+      if (errors.nickname === USERNAME_BANNED_WORD_MESSAGE) {
+        return jsonError(USERNAME_BANNED_WORD_MESSAGE, 400, USERNAME_CONTAINS_BANNED_WORD, errors)
+      }
+      return jsonError('请检查注册信息', 400, 'INVALID_REGISTER_FIELDS', errors)
+    }
 
     const [duplicate, accountDuplicate] = await Promise.all([
       findActiveConflict({ phone: phone || null, email }),

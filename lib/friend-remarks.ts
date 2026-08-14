@@ -6,17 +6,26 @@ export type FriendRemarkMap = ReadonlyMap<string, string>
 type PublicNameUser = {
   nickname?: string | null
   username?: string | null
-  Profile?: { displayName?: string | null } | null
+  usernameModerationStatus?: string | null
+  nicknameModerationStatus?: string | null
+  Profile?: { displayName?: string | null; displayNameModerationStatus?: string | null } | null
 }
 
 type SerializedNameUser = {
   nickname?: string | null
   username?: string | null
-  profile?: { displayName?: string | null } | null
+  usernameModerationStatus?: string | null
+  nicknameModerationStatus?: string | null
+  profile?: { displayName?: string | null; displayNameModerationStatus?: string | null } | null
 }
 
 export function getPublicUserDisplayName(user: PublicNameUser | SerializedNameUser) {
   const profile = 'Profile' in user ? user.Profile : 'profile' in user ? user.profile : null
+  if (
+    user.usernameModerationStatus === 'VIOLATION' ||
+    user.nicknameModerationStatus === 'VIOLATION' ||
+    profile?.displayNameModerationStatus === 'VIOLATION'
+  ) return '违规用户'
   return profile?.displayName?.trim() || user.nickname?.trim() || '已注销用户'
 }
 
@@ -33,6 +42,7 @@ export function resolveFriendDisplayName({
   remarkMap?: FriendRemarkMap
   context?: 'default' | 'profile'
 }) {
+  if (fallbackName === '违规用户') return fallbackName
   if (context === 'profile' || !viewerId || !targetUserId) return fallbackName
   return remarkMap?.get(targetUserId) || fallbackName
 }

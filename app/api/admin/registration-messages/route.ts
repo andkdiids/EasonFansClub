@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { startOfLocalDay } from '@/lib/checkin'
-import { checkForbiddenWords } from '@/lib/content-filter'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export async function GET() {
   const guard = await requireAdmin('daily_message_manage')
@@ -39,15 +39,16 @@ export async function POST(request: Request) {
   if (!content) {
     return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
   }
-  if (checkForbiddenWords(content).blocked) {
-    return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
+  if ((await checkBannedWords(content)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
 
   const moderationStatus = body?.moderationStatus === 'REJECTED' ? 'REJECTED' : 'APPROVED'
   const sort = Number(body?.sort) || 0
   const today = startOfLocalDay()
-  const ipRegion = await resolveIpRegion(request)
-  void updateUserIpRegion(guard.user.id, ipRegion)
+  const ipLocation = await resolveIpLocation(request)
+  const ipRegion = ipLocation?.label || null
+  void updateUserIpRegion(guard.user.id, ipLocation)
 
   try {
     const created = await prisma.dailyMessage.create({

@@ -4,6 +4,7 @@ import { startOfLocalDay, startOfYesterday } from '@/lib/checkin'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export async function GET(request: Request) {
   const viewer = await getCurrentUser()
@@ -21,6 +22,7 @@ export async function GET(request: Request) {
       where: {
         date: { gte: date, lt: nextDate },
         isDeleted: false,
+        moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       },
       orderBy: sort === 'hot'
@@ -33,6 +35,7 @@ export async function GET(request: Request) {
         date: true,
         mood: true,
         content: true,
+        moderationStatus: true,
         ipRegion: true,
         likeCount: true,
         favoriteCount: true,
@@ -45,9 +48,11 @@ export async function GET(request: Request) {
             id: true,
             uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             avatarUrl: true,
             level: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
           },
         },
         DailyMessageComment: {
@@ -57,6 +62,7 @@ export async function GET(request: Request) {
           select: {
             id: true,
             content: true,
+            moderationStatus: true,
             createdAt: true,
             ipRegion: true,
             User: {
@@ -64,8 +70,10 @@ export async function GET(request: Request) {
                 id: true,
                 uid: true,
                 nickname: true,
+                usernameModerationStatus: true,
+                nicknameModerationStatus: true,
                 level: true,
-                Profile: { select: { displayName: true, avatarUrl: true } },
+                Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
               },
             },
           },
@@ -82,8 +90,10 @@ export async function GET(request: Request) {
     const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
     const messages = visibleRows.map(({ User, DailyMessageComment, ...message }) => ({
       ...message,
+      content: publicModerationText(message.content, message.moderationStatus),
       user: {
         ...User,
+        nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
         Profile: User.Profile ? {
           ...User.Profile,
@@ -102,8 +112,10 @@ export async function GET(request: Request) {
       },
       comments: DailyMessageComment.map(({ User: commentUser, ...comment }) => ({
         ...comment,
+        content: publicModerationText(comment.content, comment.moderationStatus),
         user: {
           ...commentUser,
+          nickname: getPublicUserDisplayName(commentUser),
           Profile: commentUser.Profile ? {
             ...commentUser.Profile,
             avatarUrl: publicImageUrl(commentUser.Profile.avatarUrl),

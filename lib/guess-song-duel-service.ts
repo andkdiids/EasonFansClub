@@ -17,10 +17,11 @@ import {
   DUEL_ONLINE_TIMEOUT_MS,
   DUEL_RECONNECT_GRACE_MS,
   DUEL_RESULT_PAUSE_MS,
-  DUEL_ROOM_RETENTION_MS,
   DUEL_TARGET_CORRECT,
   DUEL_TOTAL_QUESTIONS,
+  DUEL_WAITING_ROOM_TTL_MS,
   DUEL_WIN_REWARD,
+  isDuelWaitingRoomExpired,
   isDuelPresenceOnline,
   normalizeDuelPassword,
   normalizeDuelRoomCode,
@@ -42,9 +43,11 @@ const publicUserSelect = {
   id: true,
   uid: true,
   nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
   avatarUrl: true,
   isOnline: true,
-  Profile: { select: { displayName: true, avatarUrl: true } },
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
 } as const
 
 const roomMemberInclude = {
@@ -54,7 +57,7 @@ const roomMemberInclude = {
 
 const roomInclude = {
   ...roomMemberInclude,
-  Match: { select: { id: true, status: true } },
+  Match: { select: { id: true, status: true, startedAt: true } },
 } as const
 
 type RoomWithMembers = Prisma.GuessSongDuelRoomGetPayload<{ include: typeof roomInclude }>
@@ -90,6 +93,26 @@ export class GuessSongDuelServiceError extends Error {
     super(message)
     this.name = 'GuessSongDuelServiceError'
   }
+}
+
+function waitingRoomCutoff(now: Date) {
+  return new Date(now.getTime() - DUEL_WAITING_ROOM_TTL_MS)
+}
+
+async function markExpiredDuelRoom(roomId: string, now: Date) {
+  const result = await prisma.guessSongDuelRoom.updateMany({
+    where: { id: roomId, status: { in: ['WAITING', 'READY'] }, createdAt: { lt: waitingRoomCutoff(now) } },
+    data: { status: 'CLOSED', closedAt: now },
+  })
+  if (result.count) console.info('[duel.expire]', { roomId, count: result.count, at: now.toISOString() })
+}
+
+async function markExpiredWaitingDuelRooms(now: Date) {
+  const result = await prisma.guessSongDuelRoom.updateMany({
+    where: { status: { in: ['WAITING', 'READY'] }, createdAt: { lt: waitingRoomCutoff(now) } },
+    data: { status: 'CLOSED', closedAt: now },
+  })
+  if (result.count) console.info('[duel.expire]', { count: result.count, at: now.toISOString() })
 }
 
 function isKnownPrismaError(error: unknown, code: string) {
@@ -128,6 +151,7 @@ function roomState(room: RoomWithMembers): DuelRoomState {
 }
 
 async function findRoom(roomId: string) {
+  await markExpiredDuelRoom(roomId, new Date())
   const room = await prisma.guessSongDuelRoom.findUnique({ where: { id: roomId }, include: roomInclude })
   if (!room) throw new GuessSongDuelServiceError('对决房间不存在', 404, 'ROOM_NOT_FOUND')
   return room
@@ -136,6 +160,9 @@ async function findRoom(roomId: string) {
 async function findRoomForTransaction(tx: Prisma.TransactionClient, roomId: string) {
   const room = await tx.guessSongDuelRoom.findUnique({ where: { id: roomId }, include: roomInclude })
   if (!room) throw new GuessSongDuelServiceError('对决房间不存在', 404, 'ROOM_NOT_FOUND')
+  if (isDuelWaitingRoomExpired(room.status, room.createdAt)) {
+    throw new GuessSongDuelServiceError('Duel room expired', 410, 'ROOM_EXPIRED')
+  }
   return room
 }
 
@@ -299,13 +326,11 @@ export async function getDuelRoomState(roomId: string) {
 }
 
 export async function listDuelRooms() {
-  const cutoff = new Date(Date.now() - DUEL_ROOM_RETENTION_MS)
-  await prisma.guessSongDuelRoom.updateMany({
-    where: { status: { in: ['WAITING', 'READY'] }, createdAt: { lt: cutoff } },
-    data: { status: 'CLOSED', closedAt: new Date() },
-  })
+  const now = new Date()
+  const cutoff = waitingRoomCutoff(now)
+  await markExpiredWaitingDuelRooms(now)
   const rooms = await prisma.guessSongDuelRoom.findMany({
-    where: { isPublic: true, status: { in: ['WAITING', 'READY'] } },
+    where: { isPublic: true, status: { in: ['WAITING', 'READY'] }, createdAt: { gte: cutoff } },
     include: roomMemberInclude,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 30,
@@ -317,6 +342,10 @@ export async function searchDuelRoom(roomCode: string) {
   const code = normalizeDuelRoomCode(roomCode)
   if (!code) throw new GuessSongDuelServiceError('请输入有效房间号', 400, 'ROOM_CODE_INVALID')
   const room = await prisma.guessSongDuelRoom.findUnique({ where: { roomCode: code }, include: roomInclude })
+  if (room && isDuelWaitingRoomExpired(room.status, room.createdAt)) {
+    await markExpiredDuelRoom(room.id, new Date())
+    throw new GuessSongDuelServiceError('Duel room expired', 410, 'ROOM_EXPIRED')
+  }
   if (!room || !['WAITING', 'READY'].includes(room.status)) {
     throw new GuessSongDuelServiceError('没有找到可加入的对决房间', 404, 'ROOM_NOT_JOINABLE')
   }
@@ -330,17 +359,31 @@ export async function createDuelRoom(userId: string, input: { roomCode?: unknown
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const roomCode = requestedCode || String(randomInt(100_000, 1_000_000))
     try {
-      const room = await prisma.guessSongDuelRoom.create({
-        data: {
-          roomCode,
-          passwordHash,
-          isPublic: input.isPublic !== false,
-          hostId: userId,
-          hostLastSeenAt: now,
-        },
-        include: roomInclude,
+      const room = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM GuessSongDuelRoom WHERE roomCode = ${roomCode} FOR UPDATE`
+        const existing = await tx.guessSongDuelRoom.findUnique({
+          where: { roomCode },
+          select: { id: true, status: true, createdAt: true, Match: { select: { id: true } } },
+        })
+        if (existing) {
+          const reusable = !existing.Match && (existing.status === 'CLOSED' || isDuelWaitingRoomExpired(existing.status, existing.createdAt, now.getTime()))
+          if (!reusable) throw new GuessSongDuelServiceError('Duel room code already used', 409, 'ROOM_CODE_TAKEN')
+          await tx.guessSongDuelRoom.delete({ where: { id: existing.id } })
+        }
+        return tx.guessSongDuelRoom.create({
+          data: {
+            roomCode,
+            passwordHash,
+            isPublic: input.isPublic !== false,
+            hostId: userId,
+            hostLastSeenAt: now,
+          },
+          include: roomInclude,
+        })
       })
-      return roomState(room)
+      const state = roomState(room)
+      console.info('[duel.create]', { roomId: state.id, roomCode: state.roomCode, hostId: userId, status: state.status })
+      return state
     } catch (error) {
       if (isKnownPrismaError(error, 'P2002') && !requestedCode) continue
       if (isKnownPrismaError(error, 'P2002')) throw new GuessSongDuelServiceError('该房间号已被使用', 409, 'ROOM_CODE_TAKEN')
@@ -371,9 +414,11 @@ async function acceptInviteInTransaction(tx: Prisma.TransactionClient, userId: s
 
 export async function joinDuelRoom(userId: string, roomId: string, input: { password?: unknown; inviteToken?: unknown }, now = new Date()) {
   const password = validatePassword(input.password)
+  await markExpiredDuelRoom(roomId, now)
   const room = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM GuessSongDuelRoom WHERE id = ${roomId} FOR UPDATE`
     const current = await findRoomForTransaction(tx, roomId)
+    if (!['WAITING', 'READY'].includes(current.status)) throw new GuessSongDuelServiceError('该对决房间已经开始或已关闭', 409, 'ROOM_NOT_JOINABLE')
     if (current.hostId === userId || current.challengerId === userId) {
       return tx.guessSongDuelRoom.update({
         where: { id: roomId },
@@ -381,7 +426,6 @@ export async function joinDuelRoom(userId: string, roomId: string, input: { pass
         include: roomInclude,
       })
     }
-    if (!['WAITING', 'READY'].includes(current.status)) throw new GuessSongDuelServiceError('该对决房间已经开始或已关闭', 409, 'ROOM_NOT_JOINABLE')
     if (current.challengerId) throw new GuessSongDuelServiceError('房间已满', 409, 'ROOM_FULL')
 
     const invited = await acceptInviteInTransaction(tx, userId, roomId, input.inviteToken, now)
@@ -396,7 +440,9 @@ export async function joinDuelRoom(userId: string, roomId: string, input: { pass
       include: roomInclude,
     })
   })
-  return roomState(room)
+  const state = roomState(room)
+  console.info('[duel.join]', { roomId: state.id, roomCode: state.roomCode, hostId: state.host.id, guestId: state.challenger?.id || null, status: state.status })
+  return state
 }
 
 export async function acceptDuelInvite(userId: string, inviteToken: unknown, now = new Date()) {
@@ -411,6 +457,7 @@ export async function acceptDuelInvite(userId: string, inviteToken: unknown, now
 }
 
 export async function setDuelRoomReady(userId: string, roomId: string, ready: boolean, now = new Date()) {
+  await markExpiredDuelRoom(roomId, now)
   const room = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM GuessSongDuelRoom WHERE id = ${roomId} FOR UPDATE`
     const current = await findRoomForTransaction(tx, roomId)
@@ -421,10 +468,13 @@ export async function setDuelRoomReady(userId: string, roomId: string, ready: bo
       : { challengerReady: ready, challengerLastSeenAt: now }
     return tx.guessSongDuelRoom.update({ where: { id: roomId }, data, include: roomInclude })
   })
-  return roomState(room)
+  const state = roomState(room)
+  console.info('[duel.ready]', { roomId: state.id, roomCode: state.roomCode, userId, ready, hostReady: state.hostReady, guestReady: state.challengerReady, status: state.status })
+  return state
 }
 
 export async function touchDuelRoomPresence(userId: string, roomId: string, now = new Date()) {
+  await markExpiredDuelRoom(roomId, now)
   const room = await prisma.guessSongDuelRoom.findUnique({
     where: { id: roomId },
     select: { hostId: true, challengerId: true, status: true },
@@ -443,13 +493,14 @@ export async function touchDuelRoomPresence(userId: string, roomId: string, now 
   return updated.count === 1
 }
 
-export async function leaveDuelRoom(userId: string, roomId: string) {
+export async function leaveDuelRoom(userId: string, roomId: string, now = new Date()) {
+  await markExpiredDuelRoom(roomId, now)
   const room = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM GuessSongDuelRoom WHERE id = ${roomId} FOR UPDATE`
     const current = await findRoomForTransaction(tx, roomId)
     if (current.Match?.status === 'PLAYING') throw new GuessSongDuelServiceError('比赛进行中，请使用退出比赛', 409, 'MATCH_ACTIVE')
     if (current.hostId === userId) {
-      return tx.guessSongDuelRoom.update({ where: { id: roomId }, data: { status: 'CLOSED', closedAt: new Date() }, include: roomInclude })
+      return tx.guessSongDuelRoom.update({ where: { id: roomId }, data: { status: 'CLOSED', closedAt: now }, include: roomInclude })
     }
     if (current.challengerId !== userId) throw new GuessSongDuelServiceError('你不在这个对决房间内', 403, 'ROOM_NOT_MEMBER')
     return tx.guessSongDuelRoom.update({
@@ -463,6 +514,7 @@ export async function leaveDuelRoom(userId: string, roomId: string) {
 
 export async function createDuelInvite(userId: string, roomId: string, inviteeId: string, now = new Date()) {
   const token = randomBytes(32).toString('base64url')
+  await markExpiredDuelRoom(roomId, now)
   const room = await prisma.guessSongDuelRoom.findUnique({ where: { id: roomId }, select: { hostId: true, challengerId: true, status: true, roomCode: true } })
   if (!room || !['WAITING', 'READY'].includes(room.status)) throw new GuessSongDuelServiceError('房间已经开始或已关闭', 409, 'ROOM_NOT_INVITABLE')
   if (room.hostId !== userId && room.challengerId !== userId) throw new GuessSongDuelServiceError('你不在这个对决房间内', 403, 'ROOM_NOT_MEMBER')
@@ -541,10 +593,24 @@ async function getEligibleDuelCandidates(tx: Prisma.TransactionClient, autoEnabl
 }
 
 export async function startDuelMatch(userId: string, roomId: string, now = new Date()) {
-  const quizConfig = await getGuessSongQuizConfigOrDefault()
+  await markExpiredDuelRoom(roomId, now)
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM GuessSongDuelRoom WHERE id = ${roomId} FOR UPDATE`
     const room = await findRoomForTransaction(tx, roomId)
+    if (room.status === 'PLAYING' && room.hostId === userId) {
+      if (room.Match?.id && room.Match.status === 'PLAYING') {
+        return {
+          matchId: room.Match.id,
+          serverStartAt: new Date(room.Match.startedAt.getTime() + DUEL_COUNTDOWN_MS).toISOString(),
+          reused: true,
+          statusBefore: room.status,
+          hostId: room.hostId,
+          guestId: room.challengerId,
+          questionCount: DUEL_TOTAL_QUESTIONS,
+        }
+      }
+      throw new GuessSongDuelServiceError('Duel room is already in progress', 409, 'ROOM_NOT_STARTABLE')
+    }
     if (room.hostId !== userId) throw new GuessSongDuelServiceError('只有房主可以开始游戏', 403, 'HOST_ONLY')
     if (!room.challengerId) throw new GuessSongDuelServiceError('需要两名玩家才能开始', 409, 'TWO_PLAYERS_REQUIRED')
     if (!room.hostReady || !room.challengerReady) throw new GuessSongDuelServiceError('双方都准备后才能开始', 409, 'PLAYERS_NOT_READY')
@@ -584,6 +650,7 @@ export async function startDuelMatch(userId: string, roomId: string, now = new D
     })
     if (active) throw new GuessSongDuelServiceError('有玩家已经在另一场对决中', 409, 'PLAYER_MATCH_ACTIVE')
 
+    const quizConfig = await getGuessSongQuizConfigOrDefault()
     const candidates = await getEligibleDuelCandidates(tx, quizConfig.enabled)
     if (candidates.length < DUEL_TOTAL_QUESTIONS) {
       throw new GuessSongDuelServiceError('当前可用曲库不足 30 首，暂时无法开始对决', 409, 'QUESTION_POOL_TOO_SMALL')
@@ -625,9 +692,37 @@ export async function startDuelMatch(userId: string, roomId: string, now = new D
       select: { id: true },
     })
     await tx.guessSongDuelRoom.update({ where: { id: roomId }, data: { status: 'PLAYING' } })
-    return { matchId: match.id, serverStartAt: firstStartAt.toISOString() }
+    return {
+      matchId: match.id,
+      serverStartAt: firstStartAt.toISOString(),
+      reused: false,
+      statusBefore: room.status,
+      hostId: room.hostId,
+      guestId: room.challengerId,
+      questionCount: questions.length,
+    }
+  })
+  console.info('[duel.start]', {
+    roomId,
+    hostId: result.hostId,
+    guestId: result.guestId,
+    statusBefore: result.statusBefore,
+    statusAfter: 'PLAYING',
+    gameId: result.matchId,
+    questionCount: result.questionCount,
+    startedAt: now.toISOString(),
+    reused: result.reused,
   })
   return result
+}
+
+export async function getDuelMatchParticipantId(matchId: string) {
+  const player = await prisma.guessSongDuelPlayer.findFirst({
+    where: { matchId },
+    orderBy: { slot: 'asc' },
+    select: { userId: true },
+  })
+  return player?.userId || null
 }
 
 export async function getDuelMatchState(userId: string, matchId: string, now = new Date()): Promise<DuelMatchState> {

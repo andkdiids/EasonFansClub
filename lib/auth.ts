@@ -2,11 +2,13 @@ import { cookies } from 'next/headers'
 import { SignJWT, jwtVerify } from 'jose'
 import type { UserRole } from '@prisma/client'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
 import { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
+import { publicModerationUserName } from '@/lib/content-moderation'
 
 export { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 
@@ -103,7 +105,9 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
             canPlayFullMusic: true,
             status: true,
             isDeleted: true,
-            Profile: { select: { id: true, avatarUrl: true } },
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
+            Profile: { select: { id: true, avatarUrl: true, displayName: true, displayNameModerationStatus: true } },
           },
         }),
         8000,
@@ -114,8 +118,8 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
       return {
         id: user.id,
         uid: user.uid,
-        username: user.username,
-        nickname: user.nickname,
+        username: publicModerationUserName(user.username, [user.usernameModerationStatus]),
+        nickname: getPublicUserDisplayName(user),
         avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
         level: user.level,
         experience: user.experience,

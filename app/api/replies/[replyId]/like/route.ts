@@ -4,6 +4,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
+import { syncLikeNotification } from '@/lib/like-notifications'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
 
@@ -23,8 +24,10 @@ export async function GET(_request: Request, context: RouteContext) {
           id: true,
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },
@@ -33,7 +36,7 @@ export async function GET(_request: Request, context: RouteContext) {
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
-      nickname: like.User.nickname,
+      nickname: getPublicUserDisplayName(like.User),
       displayName: resolveFriendDisplayName({
         viewerId: guard.user.id,
         targetUserId: like.User.id,
@@ -65,23 +68,23 @@ export async function POST(_request: Request, context: RouteContext) {
       await tx.replyLike.delete({ where: { id: existing.id } })
     } else {
       await tx.replyLike.create({ data: { replyId, userId: guard.user.id } })
-      if (reply.authorId !== guard.user.id) {
-        await tx.notification.create({
-          data: {
-            recipientId: reply.authorId,
-            actorId: guard.user.id,
-            type: 'LIKE',
-            title: '你的回复收到点赞',
-            content: `${guard.user.nickname} 点赞了你的回复`,
-            link: `/posts/${reply.postId}?focus=${reply.id}`,
-          },
-        })
-      }
     }
 
     const likeCount = await tx.replyLike.count({ where: { replyId } })
     await tx.reply.update({ where: { id: replyId }, data: { likeCount } })
-    return { isLiked: !existing, likeCount, notifiedUserId: !existing && reply.authorId !== guard.user.id ? reply.authorId : null }
+    if (reply.authorId !== guard.user.id) {
+      await syncLikeNotification(tx, {
+        recipientId: reply.authorId,
+        actorId: guard.user.id,
+        actorName: guard.user.nickname,
+        target: { kind: 'reply', id: reply.id, link: `/posts/${reply.postId}?focus=${reply.id}` },
+      }, existing ? 'unlike' : 'like')
+    }
+    return {
+      isLiked: !existing,
+      likeCount,
+      notifiedUserId: reply.authorId !== guard.user.id ? reply.authorId : null,
+    }
   })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
@@ -97,16 +100,28 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const result = await prisma.$transaction(async (tx) => {
     const reply = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
-      select: { id: true },
+      select: { id: true, authorId: true, postId: true },
     })
     if (!reply) return null
 
     await tx.replyLike.deleteMany({ where: { replyId, userId: guard.user.id } })
     const likeCount = await tx.replyLike.count({ where: { replyId } })
     await tx.reply.update({ where: { id: replyId }, data: { likeCount } })
-    return { isLiked: false, likeCount }
+    if (reply.authorId !== guard.user.id) {
+      await syncLikeNotification(tx, {
+        recipientId: reply.authorId,
+        actorId: guard.user.id,
+        target: { kind: 'reply', id: reply.id, link: `/posts/${reply.postId}?focus=${reply.id}` },
+      }, 'unlike')
+    }
+    return {
+      isLiked: false,
+      likeCount,
+      notifiedUserId: reply.authorId !== guard.user.id ? reply.authorId : null,
+    }
   })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
+  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

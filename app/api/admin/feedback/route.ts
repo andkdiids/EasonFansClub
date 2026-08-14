@@ -50,7 +50,7 @@ export async function GET(request: Request) {
   })
 
   return NextResponse.json({
-    feedbacks: feedbacks.map(serializeFeedbackListItem),
+    feedbacks: feedbacks.map((feedback) => serializeFeedbackListItem(feedback, { forAdmin: true })),
     statusOptions: feedbackVisibleStatuses,
     typeOptions: feedbackTypes,
     page,

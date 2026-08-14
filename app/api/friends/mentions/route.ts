@@ -127,6 +127,8 @@ const mentionFriendSelect = {
   uid: true,
   username: true,
   nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
   avatarUrl: true,
-  Profile: { select: { displayName: true, avatarUrl: true } },
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
 } as const

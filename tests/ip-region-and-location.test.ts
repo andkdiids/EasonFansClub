@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { normalizeIpRegionFromGeo } from '../lib/ip-region'
+import {
+  clearIpLocationCacheForTests,
+  normalizeIpLocationProviderResponse,
+  normalizeIpRegionFromGeo,
+  resolveIpLocation,
+} from '../lib/ip-region'
+import { getClientIp, getClientIpDiagnostics } from '../lib/client-ip'
 import {
   LOCATION_COUNTRIES,
   formatUserLocation,
@@ -38,10 +44,89 @@ test('IP 属地只输出粗粒度标准化名称，不包含城市或完整 IP',
   assert.equal(normalizeIpRegionFromGeo({ country: 'US', region: 'California' }), '美国')
   assert.equal(normalizeIpRegionFromGeo({ country: 'ZZ', region: 'Somewhere' }), null)
   assert.equal(normalizeIpRegionFromGeo({}), null)
-  assert.doesNotMatch(ipResolver, /getClientIp\(/)
-  assert.doesNotMatch(ipResolver, /rawIp|clientIp|forwardedFor/)
+  assert.match(ipResolver, /resolveIpLocation\(request: Request\)/)
+  assert.match(ipResolver, /getClientIp\(request\)/)
+  assert.match(ipResolver, /IP_LOCATION_API_URL/)
+  assert.doesNotMatch(ipResolver, /\|\| '广东'/)
   assert.match(ipResolver, /getCloudflareContext\(\{ async: true \}\)/)
   assert.match(ipResolver, /TRUSTED_EDGE_GEO_HEADERS/)
+  assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region_code: '44', org: 'test' })?.label, '广东')
+  assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: '广西壮族自治区' })?.label, '广西')
+  assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: 'Zhejiang' })?.label, '浙江')
+  assert.equal(normalizeIpLocationProviderResponse({ country_code: 'JP' })?.label, '日本')
+  assert.equal(normalizeIpLocationProviderResponse({ success: false }), null)
+})
+
+test('只信任 Nginx 重写的客户端 IP，并按 IP 分别缓存 IPv4/IPv6 解析结果', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
+  let providerCalls = 0
+
+  process.env.IP_LOCATION_API_URL = 'https://unit.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  process.env.IP_DIAGNOSTICS_LOG = 'false'
+  clearIpLocationCacheForTests()
+  globalThis.fetch = async () => {
+    providerCalls += 1
+    const regionCode = providerCalls === 1 ? '44' : '33'
+    return new Response(JSON.stringify({ country_code: 'CN', region_code: regionCode }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  try {
+    const guangdongRequest = new Request('https://ecfc.fans/api/posts', {
+      headers: {
+        'x-ecfc-client-ip': '203.0.113.10',
+        'x-real-ip': '1.1.1.1',
+        'x-forwarded-for': '9.9.9.9',
+      },
+    })
+    const zhejiangRequest = new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-ecfc-client-ip': '2409:8a00:1234::10' },
+    })
+    const forgedRequest = new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-forwarded-for': '203.0.113.99', 'x-real-ip': '203.0.113.98' },
+    })
+
+    assert.equal(getClientIp(guangdongRequest), '203.0.113.10')
+    assert.equal(getClientIp(forgedRequest), 'unknown')
+    assert.equal((await resolveIpLocation(guangdongRequest))?.label, '广东')
+    assert.equal((await resolveIpLocation(zhejiangRequest))?.label, '浙江')
+    assert.equal((await resolveIpLocation(guangdongRequest))?.label, '广东')
+    assert.equal(providerCalls, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+    if (previousDiagnostics === undefined) delete process.env.IP_DIAGNOSTICS_LOG
+    else process.env.IP_DIAGNOSTICS_LOG = previousDiagnostics
+  }
+})
+
+test('诊断日志只包含约定的五个 IP 字段并限制 Header 长度', () => {
+  const forwardedFor = `203.0.113.22${'x'.repeat(600)}`
+  const request = new Request('https://ecfc.fans/api/posts', {
+    headers: {
+      'cf-connecting-ip': '203.0.113.20',
+      'x-real-ip': '203.0.113.21',
+      'x-forwarded-for': forwardedFor,
+      'x-ecfc-remote-address': '203.0.113.23',
+    },
+  })
+  assert.deepEqual(getClientIpDiagnostics(request, '203.0.113.24'), {
+    cfConnectingIp: '203.0.113.20',
+    xRealIp: '203.0.113.21',
+    xForwardedFor: forwardedFor.slice(0, 512),
+    remoteAddress: '203.0.113.23',
+    resolvedClientIp: '203.0.113.24',
+  })
 })
 
 test('数据库只保存 nullable 的处理后属地，旧记录无需回填', () => {
@@ -89,9 +174,9 @@ test('个人档案与所有主要公开评论链路区分显示两个地区概�
 })
 
 test('帖子保存发表时的独立省级 IP 属地并在广场、发现页和详情展示', () => {
-  assert.match(postCreateApi, /resolveIpRegion\(request\)/)
+  assert.match(postCreateApi, /resolveIpLocation\(request\)/)
   assert.match(postCreateApi, /content: input\.content,\s*ipRegion,\s*summary:/)
-  assert.match(replyCreateApi, /resolveIpRegion\(request\)/)
+  assert.match(replyCreateApi, /resolveIpLocation\(request\)/)
   assert.match(replyCreateApi, /content,\s*ipRegion,[\s\S]*parentId:/)
   assert.match(postDetailPage, /IpRegionLabel ipRegion=\{post\.ipRegion\}/)
   assert.match(forumFeed, /ipRegion: true/)

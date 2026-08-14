@@ -1,6 +1,7 @@
 import { profileImageUrl } from '@/lib/images'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -18,6 +19,7 @@ export type ProfileRecentMessage = {
   id: string
   mood: string | null
   content: string
+  moderationStatus: string
   createdAt: string
   ipRegion: string | null
   likeCount: number
@@ -26,6 +28,7 @@ export type ProfileRecentMessage = {
     id: string
     parentId: string | null
     content: string
+    moderationStatus: string
     createdAt: string
     ipRegion: string | null
     authorName: string
@@ -37,6 +40,7 @@ type ProfileRecentMessageRow = {
   id: string
   mood: string | null
   content: string
+  moderationStatus: string
   createdAt: Date
   ipRegion: string | null
   likeCount: number
@@ -45,13 +49,16 @@ type ProfileRecentMessageRow = {
     id: string
     parentId: string | null
     content: string
+    moderationStatus: string
     createdAt: Date
     ipRegion: string | null
     User: {
       id: string
       nickname: string
+      usernameModerationStatus: string
+      nicknameModerationStatus: string
       avatarUrl: string | null
-      Profile: { displayName: string | null; avatarUrl: string | null } | null
+      Profile: { displayName: string | null; displayNameModerationStatus: string; avatarUrl: string | null } | null
     }
   }>
 }
@@ -76,7 +83,8 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerI
   return rows.map((message) => ({
     id: message.id,
     mood: message.mood,
-    content: message.content,
+    content: publicModerationText(message.content, message.moderationStatus),
+    moderationStatus: message.moderationStatus,
     createdAt: message.createdAt.toISOString(),
     ipRegion: message.ipRegion,
     likeCount: message.likeCount,
@@ -84,7 +92,8 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerI
     comments: message.DailyMessageComment.map((comment) => ({
       id: comment.id,
       parentId: comment.parentId,
-      content: comment.content,
+      content: publicModerationText(comment.content, comment.moderationStatus),
+      moderationStatus: comment.moderationStatus,
       createdAt: comment.createdAt.toISOString(),
       ipRegion: comment.ipRegion,
       authorName: resolveFriendDisplayName({
@@ -116,6 +125,7 @@ export async function loadProfileRecentMessagesPage(
         id: true,
         mood: true,
         content: true,
+        moderationStatus: true,
         createdAt: true,
         ipRegion: true,
         likeCount: true,
@@ -127,14 +137,17 @@ export async function loadProfileRecentMessagesPage(
             id: true,
             parentId: true,
             content: true,
+            moderationStatus: true,
             createdAt: true,
             ipRegion: true,
             User: {
               select: {
                 id: true,
                 nickname: true,
+                usernameModerationStatus: true,
+                nicknameModerationStatus: true,
                 avatarUrl: true,
-                Profile: { select: { displayName: true, avatarUrl: true } },
+                Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
               },
             },
           },

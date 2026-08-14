@@ -88,7 +88,9 @@ export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' 
       email: true,
       phone: true,
       emailVerifiedAt: true,
-      Profile: { select: { id: true } },
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
+      Profile: { select: { id: true, displayName: true, displayNameModerationStatus: true } },
     },
   })
 

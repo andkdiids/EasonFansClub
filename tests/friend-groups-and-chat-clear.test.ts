@@ -1,0 +1,76 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+const read = (path: string) => readFileSync(path, 'utf8')
+const schema = read('prisma/schema.prisma')
+const migration = read('prisma/migrations/20260814200000_add_friend_groups_and_conversation_clear/migration.sql')
+const listRoute = read('app/api/friends/list/route.ts')
+const groupRoute = read('app/api/friend-groups/route.ts')
+const groupDetailRoute = read('app/api/friend-groups/[groupId]/route.ts')
+const moveRoute = read('app/api/friends/[userId]/group/route.ts')
+const deleteFriendRoute = read('app/api/friends/[userId]/route.ts')
+const messagesRoute = read('app/api/direct-conversations/[conversationId]/messages/route.ts')
+const conversationsRoute = read('app/api/direct-conversations/route.ts')
+const clearRoute = read('app/api/direct-conversations/[conversationId]/clear/route.ts')
+const readRoute = read('app/api/direct-conversations/[conversationId]/read/route.ts')
+const notifications = read('lib/notifications.ts')
+const dock = read('components/FriendDock.tsx')
+
+test('好友分组是单向私有模型，不向 Friendship 添加共享 groupId', () => {
+  assert.match(schema, /model FriendGroup\s*\{[\s\S]*?ownerId\s+String[\s\S]*?@@unique\(\[ownerId, name\]\)/)
+  assert.match(schema, /model FriendGroupMember\s*\{[\s\S]*?ownerId\s+String[\s\S]*?friendId\s+String[\s\S]*?groupId\s+String[\s\S]*?@@unique\(\[ownerId, friendId\]\)/)
+  const friendship = schema.slice(schema.indexOf('model Friendship'), schema.indexOf('model FriendFollow'))
+  assert.doesNotMatch(friendship, /groupId/)
+  assert.match(migration, /CREATE TABLE `FriendGroup`/)
+  assert.match(migration, /CREATE TABLE `FriendGroupMember`/)
+  assert.match(migration, /ALTER TABLE `ConversationParticipant`[\s\S]*ADD COLUMN `clearedAt` DATETIME\(3\) NULL/)
+})
+
+test('分组支持新建、重命名、删除与单好友移动，并限制在当前用户好友范围', () => {
+  assert.match(groupRoute, /分组名不能为空/)
+  assert.match(groupRoute, /FRIEND_GROUP_NAME_MAX_LENGTH = 30/)
+  assert.match(groupRoute, /rawName\.length > FRIEND_GROUP_NAME_MAX_LENGTH/)
+  assert.match(groupRoute, /ownerId: user\.id, name: parsed\.name/)
+})
+
+test('分组路由实际包含重命名/删除处理，移动接口校验 ownerId 与 Friendship', () => {
+  assert.match(groupDetailRoute, /export async function PATCH/)
+  assert.match(groupDetailRoute, /export async function DELETE/)
+  assert.match(groupDetailRoute, /ownerId: user\.id/)
+  assert.match(moveRoute, /tx\.friendship\.findUnique/)
+  assert.match(moveRoute, /tx\.friendGroup\.findFirst\([\s\S]*ownerId: viewer\.id/)
+  assert.match(moveRoute, /tx\.friendGroupMember\.upsert/)
+  assert.match(moveRoute, /tx\.friendGroupMember\.deleteMany/)
+  assert.match(deleteFriendRoute, /tx\.friendGroupMember\.deleteMany/)
+})
+
+test('好友列表返回真实总数、分组计数，搜索仍走独立跨分组结果', () => {
+  assert.match(listRoute, /prisma\.friendGroup\.findMany/)
+  assert.match(listRoute, /groupId: groupByFriend\.get\(friend\.id\) \|\| null/)
+  assert.match(listRoute, /ungroupedCount/)
+  assert.match(listRoute, /const pageStart = \(page - 1\) \* pageSize/)
+  assert.match(listRoute, /if \(q\) return searchUsers\(user\.id, q\)/)
+  assert.match(listRoute, /groupId: groupByFriend\.get\(item\.id\) \|\| null/)
+  assert.match(dock, /好友分组/)
+  assert.match(dock, /新建分组/)
+  assert.match(dock, /移动到分组/)
+  assert.match(dock, /name: '未分组'/)
+  assert.match(dock, /aria-expanded=\{!collapsed\}/)
+})
+
+test('私信清除只写当前参与者 clearedAt，读取与未读统计均按边界过滤', () => {
+  assert.match(clearRoute, /conversationParticipant\.update\([\s\S]*clearedAt,[\s\S]*lastReadAt: clearedAt/)
+  assert.match(clearRoute, /emitRealtime\(user\.id, 'message'/)
+  assert.doesNotMatch(clearRoute, /directMessage\.(delete|deleteMany)/)
+  assert.match(messagesRoute, /createdAt: \{ gt: viewerParticipant\.clearedAt \}/)
+  assert.match(conversationsRoute, /const conversations = conversationRows/)
+  assert.match(conversationsRoute, /participant\?\.clearedAt/)
+  assert.match(conversationsRoute, /clearedByConversation/)
+  assert.match(readRoute, /participant\.clearedAt/)
+  assert.match(notifications, /cp\.clearedAt IS NULL OR dm\.createdAt > cp\.clearedAt/)
+  assert.match(dock, /确定删除与该好友的全部聊天记录吗？删除后不可恢复。/)
+  assert.match(dock, /删除聊天记录/)
+  assert.match(dock, /setMessages\(\[\]\)/)
+  assert.match(dock, /仍然保留输入框|friend-chat-composer/)
+})

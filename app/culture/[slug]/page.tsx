@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
         take: 20,
-        include: { User: { select: { id: true, nickname: true, Profile: { select: { displayName: true } } } } },
+        include: { User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } } },
       },
     },
   })
@@ -95,7 +96,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
                   <time className="text-xs font-bold text-slate-400" dateTime={comment.createdAt.toISOString()}>{comment.createdAt.toLocaleString('zh-CN')}</time>
                   <IpRegionLabel ipRegion={comment.ipRegion} />
                 </div>
-                <p className="mt-2 text-sm font-bold leading-7 text-slate-600">{comment.content}</p>
+                <p className="mt-2 text-sm font-bold leading-7 text-slate-600">{publicModerationText(comment.content, comment.moderationStatus)}</p>
               </div>
             ))}
             {!item.CultureComment.length ? <p className="rounded-2xl bg-sky-50/80 p-4 text-sm font-bold text-slate-500">暂无评论。</p> : null}

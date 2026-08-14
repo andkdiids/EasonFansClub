@@ -4,6 +4,7 @@ import { getTodayEventDateKey, isTodayEventSource, isTodayEventType, parseTodayD
 import { prisma } from '@/lib/prisma'
 import { storedImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 type RouteContext = { params: Promise<{ eventId: string }> }
 
@@ -12,6 +13,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!guard.user) return guard.response
   const { eventId } = await context.params
   const body = await request.json().catch(() => null)
+  const existing = await prisma.todayEvent.findUnique({ where: { id: eventId }, select: { title: true, content: true } })
+  if (!existing) return NextResponse.json({ message: '今日内容不存在' }, { status: 404 })
+  const nextTitle = body?.title === undefined ? existing.title : sanitizeText(body.title, 160)
+  const nextContent = body?.content === undefined ? existing.content : sanitizeText(body.content, 10_000)
+  if ((await checkBannedWords(`${nextTitle}\n${nextContent}`)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+  }
   const date = body?.date === undefined ? null : parseTodayDate(body.date)
   if (body?.date !== undefined && !date) return NextResponse.json({ message: '日期格式无效' }, { status: 400 })
   if (body?.type !== undefined && !isTodayEventType(body.type)) return NextResponse.json({ message: '内容类型无效' }, { status: 400 })
@@ -34,8 +42,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     data: {
       ...(date ? { date: date.date, month: date.month, day: date.day } : {}),
       ...(body?.type !== undefined ? { type: body.type } : {}),
-      ...(body?.title !== undefined ? { title: sanitizeText(body.title, 160) } : {}),
-      ...(body?.content !== undefined ? { content: sanitizeText(body.content, 10_000) } : {}),
+      ...(body?.title !== undefined ? { title: nextTitle } : {}),
+      ...(body?.content !== undefined ? { content: nextContent } : {}),
       ...(body?.imageUrl !== undefined ? { imageUrl: storedImageUrl(sanitizeText(body.imageUrl, 1000)) } : {}),
       ...(sourceReference !== undefined ? { reference: sanitizeText(sourceReference, 500) || null } : {}),
       ...(isTodayEventSource(body?.source) ? { source: body.source } : {}),

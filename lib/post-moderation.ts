@@ -1,7 +1,9 @@
-export const postModerationStatuses = ['PENDING', 'APPROVED', 'REJECTED'] as const
+export const postModerationStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'VIOLATION'] as const
 
 export type PostModerationStatus = typeof postModerationStatuses[number]
 export type PostModerationAccess = 'VISIBLE' | 'PENDING' | 'REJECTED'
+
+const publicPostModerationStatuses: PostModerationStatus[] = ['APPROVED', 'VIOLATION']
 
 /**
  * The moderation state is deliberately separate from Post.status.
@@ -32,7 +34,7 @@ export function buildPostReviewUpdate({
 }
 
 export function getPostModerationAccess(status: PostModerationStatus, viewerIsAdmin: boolean): PostModerationAccess {
-  if (viewerIsAdmin || status === 'APPROVED') return 'VISIBLE'
+  if (viewerIsAdmin || status === 'APPROVED' || status === 'VIOLATION') return 'VISIBLE'
   return status
 }
 
@@ -40,5 +42,5 @@ export function getPostModerationAccess(status: PostModerationStatus, viewerIsAd
 export const publicPostWhere = {
   isDeleted: false,
   status: 'PUBLISHED' as const,
-  moderationStatus: 'APPROVED' as const,
+  moderationStatus: { in: publicPostModerationStatuses },
 }

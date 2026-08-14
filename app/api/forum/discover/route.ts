@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
@@ -16,18 +16,82 @@ import {
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
-const DISCOVERY_CANDIDATE_POOL = 60
+const DISCOVERY_CANDIDATE_POOL = 240
+const DISCOVERY_MAX_RECOMMEND_WINDOWS = 4
 const DISCOVERY_MAX_SEEN_IDS = 500
+const DISCOVERY_FRESH_WINDOW_HOURS = 24
+const DISCOVERY_RECENT_WINDOW_HOURS = 72
 
-function shuffle<T>(rows: T[]) {
-  for (let index = rows.length - 1; index > 0; index -= 1) {
-    const swapIndex = randomInt(index + 1)
-    ;[rows[index], rows[swapIndex]] = [rows[swapIndex], rows[index]]
+type DiscoveryFeedSeed = {
+  value: string
+  startedAt: Date
+}
+
+type RecommendationCursor = {
+  page: number
+}
+
+function createFeedSeed() {
+  return `${Date.now().toString(36)}.${randomUUID()}`
+}
+
+function parseFeedSeed(value: unknown): DiscoveryFeedSeed | null {
+  if (typeof value !== 'string' || !value || value.length > 160) return null
+  const [timestampPart, randomPart] = value.split('.', 2)
+  if (!timestampPart || !randomPart || randomPart.length > 100) return null
+  const timestamp = Number.parseInt(timestampPart, 36)
+  if (!Number.isSafeInteger(timestamp) || timestamp <= 0) return null
+  const now = Date.now()
+  if (timestamp > now + 5 * 60 * 1000) return null
+  return { value, startedAt: new Date(Math.min(timestamp, now)) }
+}
+
+function buildRecommendationCursor(seed: string, page: number) {
+  return `r|${seed}|${page}`
+}
+
+function parseRecommendationCursor(value: unknown, seed: DiscoveryFeedSeed): RecommendationCursor | null {
+  if (value === undefined || value === null || value === '') return { page: 0 }
+  if (typeof value !== 'string') return null
+  const [prefix, cursorSeed, pageValue] = value.split('|')
+  if (prefix !== 'r' || cursorSeed !== seed.value || !pageValue) return null
+  const page = Number.parseInt(pageValue, 10)
+  if (!Number.isSafeInteger(page) || page < 0 || page > 10000) return null
+  return { page }
+}
+
+function hashRecommendationValue(value: string) {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
   }
-  return rows
+  return hash >>> 0
+}
+
+function recommendationScore(row: DiscoveryRow, seed: DiscoveryFeedSeed) {
+  const ageHours = Math.max(0, (seed.startedAt.getTime() - row.createdAt.getTime()) / (60 * 60 * 1000))
+  const freshnessScore = ageHours <= 6
+    ? 82
+    : ageHours <= DISCOVERY_FRESH_WINDOW_HOURS
+      ? 62
+      : ageHours <= DISCOVERY_RECENT_WINDOW_HOURS
+        ? 40
+        : ageHours <= 168
+          ? 20
+          : 8
+  const qualityScore = Math.log1p(row.likeCount) * 4
+    + Math.log1p(row.replyCount) * 5
+    + Math.log1p(row.viewCount) * 0.5
+    + (row.isFeatured ? 18 : 0)
+    + (row.isPinned ? 12 : 0)
+    + (row.isRecommended ? 10 : 0)
+  const explorationScore = (hashRecommendationValue(`${seed.value}:${row.id}`) % 1000) / 1000 * 18
+  return freshnessScore + qualityScore + explorationScore
 }
 
 function parseCursor(value: unknown) {
@@ -60,7 +124,7 @@ function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap:
   } : null
   return {
     id: row.id,
-    title: row.title,
+    title: publicModerationText(row.title, row.moderationStatus),
     ipRegion: row.ipRegion,
     likeCount: row.likeCount,
     favoriteCount: row.favoriteCount,
@@ -75,7 +139,7 @@ function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap:
     author: {
       id: row.User.id,
       uid: row.User.uid,
-      nickname: row.User.nickname,
+      nickname: getPublicUserDisplayName(row.User),
       displayName: resolveFriendDisplayName({
         viewerId: userId,
         targetUserId: row.User.id,
@@ -92,13 +156,16 @@ function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap:
 const discoverySelect = {
   id: true,
   title: true,
+  moderationStatus: true,
   content: true,
   ipRegion: true,
+  viewCount: true,
   likeCount: true,
   favoriteCount: true,
   replyCount: true,
   isPinned: true,
   isFeatured: true,
+  isRecommended: true,
   createdAt: true,
   updatedAt: true,
   Board: { select: { name: true, slug: true } },
@@ -107,9 +174,11 @@ const discoverySelect = {
       id: true,
       uid: true,
       nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
       avatarUrl: true,
       level: true,
-      Profile: { select: { displayName: true, avatarUrl: true } },
+      Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
     },
   },
   Like: { select: { id: true } },
@@ -160,6 +229,7 @@ export async function POST(request: Request) {
   const rawBoard = body.board
   const rawQuery = body.query
   const rawCursor = body.cursor
+  const rawFeedSeed = body.feedSeed
   const rawSeenPostIds = body.seenPostIds
   const rawSeenAuthorIds = body.seenAuthorIds
   if (!requestedMode) return NextResponse.json({ message: 'mode 参数无效' }, { status: 400 })
@@ -172,12 +242,12 @@ export async function POST(request: Request) {
   if (typeof rawCursor === 'string' && (!rawCursor || rawCursor.length > 300)) return NextResponse.json({ message: 'cursor 参数无效' }, { status: 400 })
   if (hasInvalidDiscoveryIds(rawSeenPostIds)) return NextResponse.json({ message: 'seenPostIds 参数无效' }, { status: 400 })
   if (hasInvalidDiscoveryIds(rawSeenAuthorIds)) return NextResponse.json({ message: 'seenAuthorIds 参数无效' }, { status: 400 })
+  if (typeof rawFeedSeed === 'string' && (!rawFeedSeed || rawFeedSeed.length > 160)) return NextResponse.json({ message: 'feedSeed invalid' }, { status: 400 })
+  if (rawFeedSeed !== undefined && rawFeedSeed !== null && typeof rawFeedSeed !== 'string') return NextResponse.json({ message: 'feedSeed invalid' }, { status: 400 })
   const boardValue = sanitizeText(typeof rawBoard === 'string' ? rawBoard : '', 80)
   const query = sanitizeText(typeof rawQuery === 'string' ? rawQuery : '', 100)
   const seenPostIds = normalizeDiscoveryIds(body.seenPostIds)
   const seenAuthorIds = normalizeDiscoveryIds(body.seenAuthorIds)
-  const cursor = parseCursor(rawCursor)
-  if (rawCursor && !cursor) return NextResponse.json({ message: 'cursor 参数无效' }, { status: 400 })
 
   const boards = await prisma.board.findMany({
     where: { isActive: true },
@@ -190,55 +260,95 @@ export async function POST(request: Request) {
     : null
   if (boardValue && boardValue !== 'all' && !selectedBoard) return NextResponse.json({ message: '分区不存在' }, { status: 404 })
   const mode: ForumDiscoveryMode = requestedMode === 'recommend' && !boardValue && !query ? 'recommend' : 'latest'
+  const feedSeed = mode === 'recommend'
+    ? (rawFeedSeed ? parseFeedSeed(rawFeedSeed) : { value: createFeedSeed(), startedAt: new Date() })
+    : null
+  if (mode === 'recommend' && !feedSeed) return NextResponse.json({ message: 'feedSeed invalid' }, { status: 400 })
+  const cursor = mode === 'latest' ? parseCursor(rawCursor) : null
+  const recommendationCursor = mode === 'recommend' && feedSeed
+    ? parseRecommendationCursor(rawCursor, feedSeed)
+    : null
+  if (mode === 'latest' && rawCursor && !cursor) return NextResponse.json({ message: 'cursor invalid' }, { status: 400 })
+  if (mode === 'recommend' && rawCursor && !recommendationCursor) return NextResponse.json({ message: 'cursor invalid' }, { status: 400 })
   const currentUserId = user?.id
   const interactionUserId = currentUserId || '__anonymous__'
-  const where = buildWhere({
-    boardId: selectedBoard?.id,
-    query,
-    excludedPostIds: mode === 'recommend' ? seenPostIds : undefined,
-    excludedAuthorIds: mode === 'recommend' ? seenAuthorIds : undefined,
-  })
+  const where = buildWhere({ boardId: selectedBoard?.id, query })
 
   let rows: DiscoveryRow[] = []
   let hasMore = false
   let nextCursor: string | null = null
 
   if (mode === 'recommend') {
-    const totalRemaining = await prisma.post.count({ where })
-    if (totalRemaining > 0) {
-      const poolSize = Math.min(DISCOVERY_CANDIDATE_POOL, Math.max(limit * 4, limit))
-      const maxOffset = Math.max(0, totalRemaining - poolSize)
-      const offset = maxOffset > 0 ? randomInt(maxOffset + 1) : 0
+    const recommendWhere: Prisma.PostWhereInput = {
+      AND: [where, { createdAt: { lte: feedSeed!.startedAt } }],
+    }
+    const remainingPostIds = new Set(seenPostIds)
+    const remainingAuthorIds = new Set(seenAuthorIds)
+    const selectedRows: DiscoveryRow[] = []
+    const candidateRows: DiscoveryRow[] = []
+    const candidateSize = Math.min(DISCOVERY_CANDIDATE_POOL, Math.max(limit * 12, 96))
+    const selectForPage = (candidates: DiscoveryRow[], allowPreviouslySeenAuthors = false) => {
+      const ranked = candidates
+        .filter((row, index, all) => all.findIndex((candidate) => candidate.id === row.id) === index)
+        .sort((left, right) => {
+          const scoreDelta = recommendationScore(right, feedSeed!) - recommendationScore(left, feedSeed!)
+          if (scoreDelta !== 0) return scoreDelta
+          const dateDelta = right.createdAt.getTime() - left.createdAt.getTime()
+          return dateDelta !== 0 ? dateDelta : right.id.localeCompare(left.id)
+        })
+      const selected = selectRecommendationRows(
+        ranked.map((row) => ({ row, id: row.id, author: { id: row.User.id } })),
+        remainingPostIds,
+        allowPreviouslySeenAuthors ? new Set(selectedRows.map((row) => row.User.id)) : remainingAuthorIds,
+        limit - selectedRows.length,
+      )
+      selected.rows.forEach((item) => {
+        selectedRows.push(item.row)
+        remainingPostIds.add(item.row.id)
+        remainingAuthorIds.add(item.row.User.id)
+      })
+    }
+
+    for (let window = 0; window < DISCOVERY_MAX_RECOMMEND_WINDOWS && selectedRows.length < limit; window += 1) {
       const candidates = await prisma.post.findMany({
-        where,
+        where: recommendWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: offset,
-        take: poolSize,
+        skip: window * candidateSize,
+        take: candidateSize,
         select: {
           ...discoverySelect,
           Like: { where: { userId: interactionUserId }, select: { id: true }, take: 1 },
           PostFavorite: currentUserId ? { where: { userId: currentUserId }, select: { id: true }, take: 1 } : false,
         },
       })
-      const selected = selectRecommendationRows(
-        shuffle(candidates.map((row) => ({ row: { ...row, PostFavorite: row.PostFavorite || [] }, id: row.id, author: { id: row.User.id } }))),
-        new Set(seenPostIds),
-        new Set(seenAuthorIds),
-        limit,
-      )
-      rows = selected.rows.map((item) => item.row)
-      if (rows.length) {
-        const nextRemaining = await prisma.post.count({
-          where: buildWhere({
-            boardId: selectedBoard?.id,
-            query,
-            excludedPostIds: [...seenPostIds, ...rows.map((row) => row.id)],
-            excludedAuthorIds: [...seenAuthorIds, ...rows.map((row) => row.User.id)],
-          }),
-        })
-        hasMore = nextRemaining > 0
-      }
+      const normalizedCandidates = candidates.map((row) => ({ ...row, PostFavorite: row.PostFavorite || [] }))
+      candidateRows.push(...normalizedCandidates)
+      selectForPage(normalizedCandidates)
+      if (candidates.length < candidateSize) break
     }
+
+    if (selectedRows.length < limit) selectForPage(candidateRows, true)
+
+    if (selectedRows.length === 0) {
+      const fallbackCandidates = await prisma.post.findMany({
+        where: { AND: [recommendWhere, { id: { notIn: [...remainingPostIds] } }] },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit,
+        select: {
+          ...discoverySelect,
+          Like: { where: { userId: interactionUserId }, select: { id: true }, take: 1 },
+          PostFavorite: currentUserId ? { where: { userId: currentUserId }, select: { id: true }, take: 1 } : false,
+        },
+      })
+      selectForPage(fallbackCandidates.map((row) => ({ ...row, PostFavorite: row.PostFavorite || [] })), true)
+    }
+
+    rows = selectedRows
+    const nextRemaining = await prisma.post.count({
+      where: { AND: [recommendWhere, { id: { notIn: [...remainingPostIds] } }] },
+    })
+    hasMore = rows.length > 0 && nextRemaining > 0
+    if (hasMore) nextCursor = buildRecommendationCursor(feedSeed!.value, (recommendationCursor?.page || 0) + 1)
   } else {
     const pinAwareOrder = !query
     const cursorConditions: Prisma.PostWhereInput[] = cursor && pinAwareOrder && typeof cursor.isPinned === 'boolean' && typeof cursor.isFeatured === 'boolean'
@@ -283,6 +393,7 @@ export async function POST(request: Request) {
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
     nextCursor,
+    feedSeed: feedSeed?.value || null,
     hasMore,
     mode,
     permissions: {

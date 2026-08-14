@@ -5,13 +5,16 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { containsSensitiveContent, sanitizeText } from '@/lib/security'
+import { sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
+import { publicModerationText } from '@/lib/content-moderation'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const messageSelect = {
   id: true,
   content: true,
+  moderationStatus: true,
   senderId: true,
   createdAt: true,
   clientMessageId: true,
@@ -24,7 +27,7 @@ async function getConversation(userId: string, conversationId: string) {
     where: { id: conversationId, ConversationParticipant: { some: { userId, isDeleted: false } } },
     select: {
       id: true,
-      ConversationParticipant: { select: { userId: true, lastReadAt: true } },
+      ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true } },
     },
   })
 }
@@ -40,10 +43,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
   const cursor = parseCursor(url.searchParams.get('after'))
   const before = cursor ? null : parseCursor(url.searchParams.get('before'))
   const take = cursor ? 101 : 51
+  const viewerParticipant = conversation.ConversationParticipant.find((participant) => participant.userId === user.id)
   const rows = await prisma.directMessage.findMany({
     where: {
       conversationId,
       isDeleted: false,
+      ...(viewerParticipant?.clearedAt ? { createdAt: { gt: viewerParticipant.clearedAt } } : {}),
       ...(cursor ? {
         OR: [
           { createdAt: { gt: cursor.createdAt } },
@@ -162,7 +167,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const content = sanitizeText(rawContent, 1000)
     normalizedContent = content
     if (!content) return messageFailure(400, 'INVALID_CONTENT', '消息不能为空')
-    if (await containsSensitiveContent(content)) return messageFailure(400, 'INVALID_CONTENT', '消息包含违禁内容')
+    if ((await checkBannedWords(content)).blocked) return messageFailure(400, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE)
     const clientMessageId = String(body?.clientMessageId || '').trim()
     idempotencyKey = clientMessageId
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientMessageId)) {
@@ -271,6 +276,7 @@ function serializeMessage(
   message: {
     id: string
     content: string
+    moderationStatus: string
     senderId: string
     createdAt: Date
     clientMessageId: string | null
@@ -282,7 +288,7 @@ function serializeMessage(
 ) {
   return {
     id: message.id,
-    content: message.content,
+    content: publicModerationText(message.content, message.moderationStatus),
     senderId: message.senderId,
     clientMessageId: message.clientMessageId,
     stickerId: message.stickerId,

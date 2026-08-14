@@ -2,14 +2,15 @@ import { NextResponse } from 'next/server'
 import { Prisma, ProfileWallVisibility } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
-import { profileImageUrl, publicImageUrl } from '@/lib/images'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
+import { requireUser, sanitizeText } from '@/lib/security'
 import { validateLoginAccountValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
-import { updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -58,6 +59,9 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
   if (validation.error) {
     return NextResponse.json({ message: validation.error, code: 'USERNAME_INVALID' }, { status: 400 })
   }
+  if ((await checkBannedWords(validation.account)).blocked) {
+    return NextResponse.json({ error: USERNAME_CONTAINS_BANNED_WORD, message: USERNAME_BANNED_WORD_MESSAGE }, { status: 400 })
+  }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -89,6 +93,7 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
           username: validation.account,
           usernameNormalized: validation.usernameNormalized,
           usernameChangedAt: now,
+          usernameModerationStatus: 'NORMAL',
         },
         select: { id: true, uid: true, username: true, usernameChangedAt: true },
       })
@@ -129,7 +134,8 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
 export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
-  const resolvedIpRegion = await updateUserIpRegion(guard.user.id, request)
+  const ipLocation = await resolveIpLocation(request)
+  const resolvedIpRegion = await updateUserIpRegion(guard.user.id, ipLocation)
 
   const profile = await prisma.user.findUnique({
     where: { id: guard.user.id },
@@ -212,7 +218,12 @@ export async function PATCH(request: Request) {
   const rawNickname = typeof body?.nickname === 'string' ? body.nickname : ''
   const nickname = sanitizeText(body?.nickname, 32)
   const bio = sanitizeText(body?.bio, 300)
-  if (await containsSensitiveContent(bio)) return NextResponse.json({ message: '个人简介包含违禁词，无法保存' }, { status: 400 })
+  if (nickname && (await checkBannedWords(nickname)).blocked) {
+    return NextResponse.json({ error: USERNAME_CONTAINS_BANNED_WORD, message: USERNAME_BANNED_WORD_MESSAGE }, { status: 400 })
+  }
+  if (body?.bio !== undefined && (await checkBannedWords(bio)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+  }
   const avatarUrl = sanitizeText(body?.avatarUrl, 500)
   const backgroundUrl = sanitizeText(body?.backgroundUrl, 500)
   const email = body?.email === undefined ? undefined : normalizeEmail(body.email)
@@ -233,6 +244,8 @@ export async function PATCH(request: Request) {
   const data: {
     nickname?: string
     bio?: string
+    nicknameModerationStatus?: 'NORMAL'
+    bioModerationStatus?: 'NORMAL'
     avatarUrl?: string | null
     backgroundUrl?: string | null
     email?: string | null
@@ -244,8 +257,14 @@ export async function PATCH(request: Request) {
     birthdaySetAt?: Date
   } = {}
 
-  if (nickname) data.nickname = nickname
-  if (body?.bio !== undefined) data.bio = bio
+  if (nickname) {
+    data.nickname = nickname
+    data.nicknameModerationStatus = 'NORMAL'
+  }
+  if (body?.bio !== undefined) {
+    data.bio = bio
+    data.bioModerationStatus = 'NORMAL'
+  }
   // 头像/背景图只允许保存有效 COS 等地址；失效的 Supabase 地址一律清空
   if (body?.avatarUrl !== undefined) data.avatarUrl = publicImageUrl(avatarUrl)
   if (body?.backgroundUrl !== undefined) data.backgroundUrl = publicImageUrl(backgroundUrl)
@@ -331,6 +350,7 @@ export async function PATCH(request: Request) {
 
   if (nicknameChanged && !canChangeNickname) {
     delete data.nickname
+    delete data.nicknameModerationStatus
   }
 
   const profile = await prisma.$transaction(async (tx) => {
@@ -358,10 +378,10 @@ export async function PATCH(request: Request) {
     const profileRecord = await tx.profile.upsert({
       where: { userId: guard.user.id },
       update: {
-        ...(data.nickname ? { displayName: data.nickname } : {}),
+        ...(data.nickname ? { displayName: data.nickname, displayNameModerationStatus: 'NORMAL' as const } : {}),
         ...(data.avatarUrl !== undefined ? { avatarUrl: data.avatarUrl } : {}),
         ...(data.backgroundUrl !== undefined ? { backgroundUrl: data.backgroundUrl } : {}),
-        ...(data.bio !== undefined ? { bio: data.bio } : {}),
+        ...(data.bio !== undefined ? { bio: data.bio, bioModerationStatus: 'NORMAL' as const } : {}),
         ...(wallVisibility !== undefined ? { wallVisibility } : {}),
         ...(location !== undefined ? {
           locationCountryCode: location?.countryCode || null,

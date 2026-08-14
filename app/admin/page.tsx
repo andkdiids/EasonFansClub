@@ -21,6 +21,13 @@ type AdminNavigationGroup = {
 
 const adminNavigationGroups: readonly AdminNavigationGroup[] = [
   {
+    title: '内容安全',
+    desc: '统一维护违禁词并处理历史违规内容。',
+    items: [
+      { href: '/admin/banned-words', title: '违禁词管理', desc: '新增、删除、启停违禁词，并重新扫描全站历史内容。' },
+    ],
+  },
+  {
     title: '数据面板',
     desc: '查看后台运营数据与趋势。',
     items: [
@@ -33,6 +40,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     items: [
       { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
       { href: '/admin/default-avatars', title: '默认头像管理', desc: '维护系统默认头像池。' },
+      { href: '/admin/user-rewards', title: '用户奖励', desc: '用户投稿、建议或内容被采纳后，记录并发放贡献奖励。' },
     ],
   },
   {

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 export type RegistrationMessageRow = {
   id: string
   content: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'VIOLATION'
   isAdminMessage: boolean
   sort: number
   isDeleted: boolean

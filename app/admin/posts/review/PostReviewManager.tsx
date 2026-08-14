@@ -25,7 +25,7 @@ type ReviewTarget = {
   nextStatus: Exclude<ReviewStatus, 'PENDING'>
 }
 
-const statusLabels: Record<ReviewStatus, string> = { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已拒绝' }
+const statusLabels: Record<ReviewStatus, string> = { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已拒绝', VIOLATION: '违规内容' }
 
 export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[] }) {
   const [posts, setPosts] = useState(initialPosts)

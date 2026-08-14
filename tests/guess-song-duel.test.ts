@@ -8,10 +8,13 @@ import {
   DUEL_MIN_VALID_QUESTIONS,
   DUEL_ONLINE_TIMEOUT_MS,
   DUEL_RECONNECT_GRACE_MS,
+  DUEL_ROOM_POLL_INTERVAL_MS,
+  DUEL_WAITING_ROOM_TTL_MS,
   DUEL_TARGET_CORRECT,
   DUEL_TOTAL_QUESTIONS,
   DUEL_WIN_REWARD,
   isDuelPresenceOnline,
+  isDuelWaitingRoomExpired,
   normalizeDuelPassword,
   normalizeDuelRoomCode,
 } from '../lib/guess-song-duel-config'
@@ -110,4 +113,43 @@ test('Duel presence uses a five-second client heartbeat and a twenty-second serv
   assert.match(client, /setInterval\(sendHeartbeat, DUEL_HEARTBEAT_INTERVAL_MS\)/)
   assert.match(client, /visibilitychange/)
   assert.doesNotMatch(startRoute, /isUserConnectedInRoom/)
+})
+
+test('等待房间在三十分钟后过期，但进行中的对局不受等待 TTL 影响', () => {
+  const now = Date.parse('2026-08-14T00:00:00.000Z')
+  assert.equal(DUEL_ROOM_POLL_INTERVAL_MS, 2_500)
+  assert.equal(DUEL_WAITING_ROOM_TTL_MS, 30 * 60_000)
+  assert.equal(isDuelWaitingRoomExpired('WAITING', now - DUEL_WAITING_ROOM_TTL_MS, now), true)
+  assert.equal(isDuelWaitingRoomExpired('READY', now - DUEL_WAITING_ROOM_TTL_MS - 1, now), true)
+  assert.equal(isDuelWaitingRoomExpired('WAITING', now - DUEL_WAITING_ROOM_TTL_MS + 1, now), false)
+  assert.equal(isDuelWaitingRoomExpired('PLAYING', now - 24 * 60 * 60_000, now), false)
+  assert.equal(isDuelWaitingRoomExpired('FINISHED', now - 24 * 60 * 60_000, now), false)
+})
+
+test('开始接口返回完整房间和对局，客户端轮询并在对局数据未到时显示同步状态', () => {
+  const service = source('lib/guess-song-duel-service.ts')
+  const startRoute = source('app/api/entertainment/guess-song/duel/rooms/[roomId]/start/route.ts')
+  const client = source('components/games/GuessSongDuel.tsx')
+  const realtime = source('lib/guess-song-duel-realtime.ts')
+  assert.match(service, /room.status === 'PLAYING'/)
+  assert.match(service, /reused: true/)
+  assert.match(service, /GuessSongDuelQuestion: \{ create: questions \}/)
+  assert.match(startRoute, /return duelOk\(\{ room, matchId: result\.matchId, serverStartAt: result\.serverStartAt, match \}\)/)
+  assert.match(client, /DUEL_ROOM_POLL_INTERVAL_MS/)
+  assert.match(client, /syncDuelState/)
+  assert.match(client, /正在同步对局，请稍候/)
+  assert.match(client, /new AbortController\(\)/)
+  assert.match(realtime, /getDuelMatchParticipantId/)
+  assert.doesNotMatch(realtime, /const socket = this\.firstMatchSocket\(matchId\)\n      if \(!socket\?\.duelUserId\) return/)
+})
+
+test('过期等待房间会在列表、查询和创建同号房间时被处理，PLAYING 房间不会被清理', () => {
+  const service = source('lib/guess-song-duel-service.ts')
+  assert.match(service, /markExpiredWaitingDuelRooms\(now\)/)
+  assert.match(service, /createdAt: \{ gte: cutoff \}/)
+  assert.match(service, /isDuelWaitingRoomExpired\(room\.status, room\.createdAt\)/)
+  assert.match(service, /const reusable = !existing\.Match && \(existing\.status === 'CLOSED' \|\| isDuelWaitingRoomExpired\(existing\.status, existing\.createdAt, now\.getTime\(\)\)\)/)
+  assert.match(service, /tx\.guessSongDuelRoom\.delete\(\{ where: \{ id: existing\.id \} \}\)/)
+  assert.match(service, /status: \{ in: \['WAITING', 'READY'\]\s*\}/)
+  assert.doesNotMatch(service, /status: \{ in: \['WAITING', 'READY', 'PLAYING'\]\}/)
 })

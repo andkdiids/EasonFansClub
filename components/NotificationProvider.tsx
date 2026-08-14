@@ -18,6 +18,28 @@ const emptySummary: UnreadSummary = {
   total: 0,
 }
 
+const unreadSummaryKeys: Array<keyof UnreadSummary> = [
+  'notifications',
+  'system',
+  'replies',
+  'likes',
+  'feedbackReplies',
+  'feedback',
+  'friendRequests',
+  'directMessages',
+  'messages',
+  'total',
+]
+
+function isUnreadSummary(value: unknown): value is UnreadSummary {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return unreadSummaryKeys.every((key) => {
+    const count = candidate[key]
+    return typeof count === 'number' && Number.isFinite(count) && count >= 0
+  })
+}
+
 const tabPresenceIntervalMs = 5000
 const tabPresenceTimeoutMs = 15_000
 
@@ -209,8 +231,21 @@ export function NotificationProvider({
   }, [userId])
 
   const refresh = useCallback(async () => {
-    window.dispatchEvent(new Event('unread-summary:refresh'))
-  }, [])
+    if (!userId) return
+
+    try {
+      const response = await fetch('/api/notifications/unread-summary', {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) return
+
+      const nextSummary: unknown = await response.json()
+      if (isUnreadSummary(nextSummary)) setSummary(nextSummary)
+    } catch {
+      // 保留最近一次成功统计，不能把请求失败误显示成 0 条未读。
+    }
+  }, [userId])
 
   const value = useMemo(() => ({ summary, refresh, realtimeStatus }), [realtimeStatus, refresh, summary])
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>

@@ -3,6 +3,7 @@ import type { LikeAvatarUser } from '@/components/LikeAvatars'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { planFriendCheckInMessagePage } from '@/lib/checkin-message-order'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
@@ -10,6 +11,7 @@ type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncache
 export type CheckInMessageItem = CheckInMessagesResult[number]
 export const CHECK_IN_MESSAGE_PAGE_SIZE = 5
 export const CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE = 7
+const publicDailyMessageStatuses: Array<'APPROVED' | 'VIOLATION'> = ['APPROVED', 'VIOLATION']
 
 export function getCheckInMessagePageSize(isDesktop: boolean) {
   return isDesktop ? CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE : CHECK_IN_MESSAGE_PAGE_SIZE
@@ -95,9 +97,11 @@ const checkInCommentUserSelect = {
   id: true,
   uid: true,
   nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
   avatarUrl: true,
   level: true,
-  Profile: { select: { displayName: true, avatarUrl: true } },
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
 } as const
 
 export function invalidateCheckInMessagesCache() {
@@ -119,7 +123,7 @@ function buildCheckInMessagesWhere({
     ...(messageId ? { id: messageId } : {}),
     date: { gte: selectedDate, lt: nextDate },
     isDeleted: false,
-    moderationStatus: 'APPROVED' as const,
+    moderationStatus: { in: publicDailyMessageStatuses },
     ...(userIds ? { userId: { in: userIds } } : {}),
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }
@@ -409,9 +413,11 @@ async function getCheckInMessagesUncached({
           id: true,
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
           level: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
       DailyMessageLike: {
@@ -424,8 +430,10 @@ async function getCheckInMessagesUncached({
               id: true,
               uid: true,
               nickname: true,
+              usernameModerationStatus: true,
+              nicknameModerationStatus: true,
               avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
             },
           },
         },
@@ -502,6 +510,7 @@ async function getCheckInMessagesUncached({
   return rowsWithFocus.map((item) => {
     const publicUser = {
       ...item.User,
+      nickname: getPublicUserDisplayName(item.User),
       avatarUrl: publicImageUrl(item.User.avatarUrl),
       Profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl) } : item.User.Profile,
     }
@@ -509,14 +518,17 @@ async function getCheckInMessagesUncached({
       ...like,
       User: {
         ...like.User,
+        nickname: getPublicUserDisplayName(like.User),
         avatarUrl: publicImageUrl(like.User.avatarUrl),
         Profile: like.User.Profile ? { ...like.User.Profile, avatarUrl: publicImageUrl(like.User.Profile.avatarUrl) } : like.User.Profile,
       },
     }))
     const publicComments = item.DailyMessageComment.map((comment) => ({
       ...comment,
+      content: publicModerationText(comment.content, comment.moderationStatus),
       User: {
         ...comment.User,
+        nickname: getPublicUserDisplayName(comment.User),
         avatarUrl: publicImageUrl(comment.User.avatarUrl),
         Profile: comment.User.Profile ? { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) } : comment.User.Profile,
       },
@@ -529,6 +541,7 @@ async function getCheckInMessagesUncached({
     })
     return {
       ...item,
+      content: publicModerationText(item.content, item.moderationStatus),
       User: publicUser,
       DailyMessageLike: publicLikes,
       DailyMessageComment: publicComments,
@@ -539,7 +552,7 @@ async function getCheckInMessagesUncached({
       likes: viewerLikeIdByMessage.has(item.id) ? [{ id: viewerLikeIdByMessage.get(item.id)! }] : [],
       likers: item.DailyMessageLike.map((like) => ({
         uid: like.User.uid,
-        nickname: like.User.nickname,
+        nickname: getPublicUserDisplayName(like.User),
         displayName: resolveFriendDisplayName({
           viewerId,
           targetUserId: like.userId,
@@ -556,6 +569,7 @@ async function getCheckInMessagesUncached({
       deletedAt: item.deletedAt?.toISOString() || null,
       comments: item.DailyMessageComment.map((comment) => ({
         ...comment,
+        content: publicModerationText(comment.content, comment.moderationStatus),
         author: {
           ...publicComments.find((candidate) => candidate.id === comment.id)!.User,
           profile: comment.User.Profile ? {
@@ -590,7 +604,7 @@ export async function getCheckInReplyStatus({ messageId, commentId }: { messageI
     },
   })
 
-  if (!comment || comment.messageId !== messageId || comment.DailyMessage.isDeleted || comment.DailyMessage.moderationStatus !== 'APPROVED') {
+  if (!comment || comment.messageId !== messageId || comment.DailyMessage.isDeleted || !['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus)) {
     return 'unavailable'
   }
   return comment.isDeleted ? 'deleted' : 'visible'

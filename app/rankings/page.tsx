@@ -6,6 +6,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicPostWhere } from '@/lib/post-moderation'
 import { isAdminRole } from '@/lib/security'
 import { redirect } from 'next/navigation'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,7 @@ export default async function RankingsPage() {
   const [points, checkInKeys, posts, growthLevels] = await Promise.all([
     prisma.user.findMany({ where: { isDeleted: false }, orderBy: { points: 'desc' }, take: 10, select: { id: true, nickname: true, points: true, experience: true, Profile: { select: { displayName: true } } } }),
     prisma.checkIn.findMany({ where: { User: { isDeleted: false } }, select: { userId: true, checkinDateKey: true } }),
-    prisma.post.findMany({ where: publicPostWhere, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, replyCount: true, likeCount: true } }),
+    prisma.post.findMany({ where: publicPostWhere, orderBy: [{ replyCount: 'desc' }, { likeCount: 'desc' }], take: 10, select: { id: true, title: true, moderationStatus: true, replyCount: true, likeCount: true } }),
     listGrowthLevels(),
   ])
 
@@ -59,7 +60,7 @@ export default async function RankingsPage() {
           {[
             ['挂号费榜', points.map((u) => { const growth = calculateGrowthSummary(u.experience, growthLevels); return `${displayName(u)} · ${growth.levelName} · Lv.${growth.level} · ${u.points}挂号费` })],
             ['签到榜', streakTop.map((item) => { const u = userById.get(item.userId); return u ? `${displayName(u)} · 连续${item.currentStreak}天` : null }).filter((row): row is string => Boolean(row))],
-            ['热帖榜', posts.map((p) => `${p.title} · ${p.replyCount}回复 · ${p.likeCount}赞`)],
+            ['热帖榜', posts.map((p) => `${publicModerationText(p.title, p.moderationStatus)} · ${p.replyCount}回复 · ${p.likeCount}赞`)],
           ].map(([title, rows]) => (
             <div key={title as string} className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
               <h2 className="text-2xl font-black text-brand-950">{title}</h2>

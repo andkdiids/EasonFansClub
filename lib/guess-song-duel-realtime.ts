@@ -1,6 +1,7 @@
 import type { WebSocket } from 'next/dist/compiled/ws'
 import {
   finalizeDuelQuestion,
+  getDuelMatchParticipantId,
   getDuelMatchState,
   getDuelRoomState,
   markDuelPlayerConnected,
@@ -156,15 +157,13 @@ export class GuessSongDuelRealtimeHub {
     return false
   }
 
-  broadcastRoom(roomId: string, state?: DuelRoomState) {
-    void (async () => {
-      try {
-        const nextState = state || await getDuelRoomState(roomId)
-        this.broadcastRoomEvent(roomId, { type: 'ROOM_STATE', state: nextState })
-      } catch (error) {
-        this.broadcastRoomEvent(roomId, { type: 'ERROR', code: errorCode(error), message: errorMessage(error) })
-      }
-    })()
+  async broadcastRoom(roomId: string, state?: DuelRoomState) {
+    try {
+      const nextState = state || await getDuelRoomState(roomId)
+      this.broadcastRoomEvent(roomId, { type: 'ROOM_STATE', state: nextState })
+    } catch (error) {
+      this.broadcastRoomEvent(roomId, { type: 'ERROR', code: errorCode(error), message: errorMessage(error) })
+    }
   }
 
   broadcastMatchState(matchId: string) {
@@ -262,8 +261,9 @@ export class GuessSongDuelRealtimeHub {
   private async tickMatch(matchId: string) {
     try {
       const socket = this.firstMatchSocket(matchId)
-      if (!socket?.duelUserId) return
-      const state = await getDuelMatchState(socket.duelUserId, matchId)
+      const userId = socket?.duelUserId || await getDuelMatchParticipantId(matchId)
+      if (!userId) return
+      const state = await getDuelMatchState(userId, matchId)
       if (state.status !== 'PLAYING' || !state.question) {
         if (state.result) this.broadcastMatchEvent(matchId, { type: 'MATCH_FINISHED', result: state.result })
         return

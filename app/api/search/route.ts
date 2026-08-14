@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -52,10 +53,10 @@ export async function GET(request: Request) {
         ],
       },
       select: {
-        id: true, uid: true, nickname: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
-        Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
-        _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' } } } },
-        Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, createdAt: true } },
+        id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+        Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
+        _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } } } },
+        Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, moderationStatus: true, createdAt: true } },
       },
       take: 10,
     }),
@@ -63,14 +64,14 @@ export async function GET(request: Request) {
       where: {
         isDeleted: false,
         status: 'PUBLISHED',
-        moderationStatus: 'APPROVED',
+        moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
         OR: [
           { title: { contains: keyword } },
           { content: { contains: keyword } },
         ],
       },
       include: {
-        User: { select: { id: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+        User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
         Board: { select: { name: true, slug: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -143,6 +144,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     users: users.map(({ Profile, Post, _count, ...item }) => ({
       ...item,
+      nickname: getPublicUserDisplayName({ ...item, Profile }),
       avatarUrl: toPublicMediaUrl(item.avatarUrl),
       profile: Profile ? {
         ...Profile,
@@ -154,13 +156,15 @@ export async function GET(request: Request) {
           remarkMap,
         }),
       } : Profile,
-      posts: Post,
+      posts: Post.map((post) => ({ ...post, title: publicModerationText(post.title, post.moderationStatus) })),
       _count: { posts: _count.Post },
     })),
     posts: posts.map(({ User, Board, ...post }) => ({
       ...post,
+      title: publicModerationText(post.title, post.moderationStatus),
       author: {
         ...User,
+        nickname: getPublicUserDisplayName(User),
         avatarUrl: toPublicMediaUrl(User.avatarUrl),
         Profile: User.Profile ? {
           ...User.Profile,

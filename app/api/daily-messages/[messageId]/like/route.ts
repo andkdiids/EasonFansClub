@@ -12,8 +12,10 @@ const likerUserSelect = {
   id: true,
   uid: true,
   nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
   avatarUrl: true,
-  Profile: { select: { displayName: true, avatarUrl: true } },
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
 } as const
 
 type LikerRow = {
@@ -29,7 +31,7 @@ type LikerRow = {
 function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<string, string>) {
   return {
     uid: row.User.uid,
-    nickname: row.User.nickname,
+    nickname: getPublicUserDisplayName(row.User),
     displayName: resolveFriendDisplayName({
       viewerId,
       targetUserId: row.User.id,

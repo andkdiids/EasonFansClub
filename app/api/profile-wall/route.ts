@@ -6,8 +6,9 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { containsSensitiveContent, sanitizeText } from '@/lib/security'
-import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
+import { sanitizeText } from '@/lib/security'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -19,9 +20,11 @@ const wallRowInclude = {
       id: true,
       uid: true,
       nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
       avatarUrl: true,
       role: true,
-      Profile: { select: { displayName: true, avatarUrl: true } },
+      Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
     },
   },
   ProfileWallLike: {
@@ -33,8 +36,10 @@ const wallRowInclude = {
         select: {
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },
@@ -118,7 +123,7 @@ function buildWallTree(rows: WallRow[]) {
 function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remarkMap: ReadonlyMap<string, string>) {
   return likes.map((like) => ({
     uid: like.User.uid,
-    nickname: like.User.nickname,
+    nickname: getPublicUserDisplayName(like.User),
     displayName: resolveFriendDisplayName({
       viewerId: viewerId || undefined,
       targetUserId: like.userId,
@@ -147,7 +152,7 @@ function serializeWallNode(
 
   return {
     id: node.row.id,
-    content: node.row.content,
+    content: publicModerationText(node.row.content, node.row.moderationStatus),
     parentId: node.row.parentId,
     createdAt: node.row.createdAt.toISOString(),
     updatedAt: node.row.updatedAt.toISOString(),
@@ -159,7 +164,7 @@ function serializeWallNode(
     commentCount: node.commentCount,
     sender: {
       uid: sender.uid,
-      nickname: sender.nickname,
+      nickname: getPublicUserDisplayName(sender),
       avatarUrl: publicImageUrl(sender.avatarUrl),
       profile: sender.Profile ? { ...sender.Profile, avatarUrl: publicImageUrl(sender.Profile.avatarUrl), displayName } : null,
     },
@@ -285,13 +290,14 @@ export async function POST(request: Request) {
   const viewer = await getCurrentUser()
   if (!viewer) return NextResponse.json({ message: '请先登录' }, { status: 401 })
 
-  const ipRegion = await resolveIpRegion(request)
-  void updateUserIpRegion(viewer.id, ipRegion)
+  const ipLocation = await resolveIpLocation(request)
+  const ipRegion = ipLocation?.label || null
+  void updateUserIpRegion(viewer.id, ipLocation)
   const body = await request.json().catch(() => null)
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null
   const rawContent = sanitizeText(body?.content, 500)
-  if (await containsSensitiveContent(rawContent)) return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
+  if ((await checkBannedWords(rawContent)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   if (!rawContent) return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
   if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 

@@ -30,6 +30,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
         ],
       },
     })
+    await tx.friendGroupMember.deleteMany({
+      where: {
+        OR: [
+          { ownerId: viewer.id, friendId: userId },
+          { ownerId: userId, friendId: viewer.id },
+        ],
+      },
+    })
     return friendship.count
   })
 

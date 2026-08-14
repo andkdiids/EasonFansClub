@@ -11,6 +11,7 @@ import {
 } from '@/lib/sticker-upload'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { isUserEditableStickerPackStatus } from '@/lib/sticker-pack-editing'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -126,6 +127,9 @@ export async function PATCH(
   const name = sanitizeText(formData.get('name'), STICKER_MAX_PACK_NAME_LENGTH)
   if (!name) return NextResponse.json({ message: '请填写表情包名称' }, { status: 400 })
   const description = sanitizeText(formData.get('description'), STICKER_MAX_DESCRIPTION_LENGTH) || null
+  if ((await checkBannedWords(`${name}\n${description || ''}`)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+  }
   const category = sanitizeText(formData.get('category'), 40) || null
   const coverFile = formData.get('cover')
 

@@ -8,6 +8,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,12 +62,12 @@ export async function GET(request: Request) {
       skip: getForumOffset(page, pageSize),
       take: pageSize,
       select: {
-        id: true, title: true,
+        id: true, title: true, moderationStatus: true,
         ipRegion: true,
         likeCount: true, replyCount: true, viewCount: true,
         isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
         Board: { select: { name: true, slug: true } },
-        User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+        User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
         Like: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
       },
     })
@@ -81,8 +82,10 @@ export async function GET(request: Request) {
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
     posts: rows.map(({ Like, User, Board, ...post }) => ({
       ...post,
+      title: publicModerationText(post.title, post.moderationStatus),
       author: {
         ...User,
+        nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
         profile: User.Profile ? {
           ...User.Profile,

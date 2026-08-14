@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 
 type TodayRegistrationFeeRecord = {
@@ -69,11 +70,17 @@ export function TodayRegistrationFeePanel({ initialBalance, previewMode = false 
   useEffect(() => {
     if (previewMode) return
     const refresh = () => void loadSummary()
+    const refreshFromRealtime = (event: Event) => {
+      const detail = (event as CustomEvent<{ changed?: string[]; type?: string }>).detail
+      if (detail?.type === 'notification-changed' || detail?.changed?.includes('notification')) refresh()
+    }
     window.addEventListener('checkin:completed', refresh)
     window.addEventListener('user:points-updated', refresh)
+    window.addEventListener('realtime:event', refreshFromRealtime)
     return () => {
       window.removeEventListener('checkin:completed', refresh)
       window.removeEventListener('user:points-updated', refresh)
+      window.removeEventListener('realtime:event', refreshFromRealtime)
     }
   }, [loadSummary, previewMode])
 
@@ -106,6 +113,7 @@ export function TodayRegistrationFeePanel({ initialBalance, previewMode = false 
             重试
           </button>
         ) : null}
+        {!previewMode ? <Link href="/registration-fee" className="flex-none border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-black text-[var(--primary)]">全部记录</Link> : null}
       </div>
 
       {loading ? (

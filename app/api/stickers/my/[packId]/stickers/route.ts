@@ -11,6 +11,7 @@ import {
   STICKER_MAX_FILE_SIZE,
 } from '@/lib/sticker-upload'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -54,6 +55,10 @@ export async function POST(
     name = sanitizeStickerName(formData.get('name'))
   } catch (error) {
     return NextResponse.json({ message: error instanceof Error ? error.message : '表情名称无效' }, { status: 400 })
+  }
+
+  if ((await checkBannedWords(name || '')).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
 
   const typeRaw = String(formData.get('type') || 'STATIC').toUpperCase()

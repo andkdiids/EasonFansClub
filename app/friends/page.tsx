@@ -8,6 +8,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
 import { profileImageUrl } from '@/lib/images'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 
@@ -112,7 +113,9 @@ type FriendUser = {
   bio: string | null
   status: string
   isDeleted: boolean
-  Profile: { displayName: string; avatarUrl: string | null; bio: string | null } | null
+  usernameModerationStatus?: string | null
+  nicknameModerationStatus?: string | null
+  Profile: { displayName: string; avatarUrl: string | null; bio: string | null; displayNameModerationStatus?: string | null } | null
 }
 
 function RequestCard({
@@ -128,7 +131,7 @@ function RequestCard({
   direction: 'received' | 'sent'
   action?: ReactNode
 }) {
-  const name = user.Profile?.displayName || user.nickname
+  const name = getPublicUserDisplayName(user)
   const avatar = profileImageUrl(user.Profile?.avatarUrl || user.avatarUrl)
   return (
     <article className="rounded-sm border border-sky-100 bg-sky-50/60 p-4">

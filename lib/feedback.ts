@@ -1,5 +1,7 @@
 import type { FeedbackStatus, FeedbackType, Prisma } from '@prisma/client'
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const FEEDBACK_DESCRIPTION_MIN_LENGTH = 10
 export const FEEDBACK_MAX_ATTACHMENTS = 5
@@ -33,8 +35,10 @@ export const feedbackInclude = {
       id: true,
       uid: true,
       nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
       avatarUrl: true,
-      Profile: { select: { displayName: true, avatarUrl: true } },
+      Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
     },
   },
   FeedbackAttachment: {
@@ -49,9 +53,11 @@ export const feedbackInclude = {
           id: true,
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
           role: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
       FeedbackAttachment: { orderBy: { createdAt: 'asc' } },
@@ -69,12 +75,15 @@ export const feedbackListSelect = {
   lastReplyAt: true,
   createdAt: true,
   updatedAt: true,
+  moderationStatus: true,
   User: {
     select: {
       id: true,
       uid: true,
       nickname: true,
-      Profile: { select: { displayName: true } },
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
+      Profile: { select: { displayName: true, displayNameModerationStatus: true } },
     },
   },
   _count: { select: { FeedbackReply: true, FeedbackAttachment: true } },
@@ -89,12 +98,15 @@ function displayUser(user: {
   nickname: string
   avatarUrl?: string | null
   role?: string
-  Profile?: { displayName: string | null; avatarUrl?: string | null } | null
+  usernameModerationStatus?: string | null
+  nicknameModerationStatus?: string | null
+  Profile?: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl?: string | null } | null
+  forAdmin?: boolean
 }) {
   return {
     id: user.id,
     uid: user.uid,
-    nickname: user.Profile?.displayName || user.nickname,
+    nickname: user.forAdmin ? (user.Profile?.displayName || user.nickname) : getPublicUserDisplayName(user),
     avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl || null),
     role: user.role,
   }
@@ -109,10 +121,11 @@ function serializeAttachment(item: { id: string; url: string; mimeType: string |
   }
 }
 
-export function serializeFeedbackListItem(item: FeedbackListItem) {
+export function serializeFeedbackListItem(item: FeedbackListItem, options: { forAdmin?: boolean } = {}) {
+  const forAdmin = options.forAdmin === true
   return {
     id: item.id,
-    title: item.title,
+    title: forAdmin ? item.title : publicModerationText(item.title, item.moderationStatus),
     type: item.type,
     typeLabel: feedbackTypeLabels[item.type],
     status: item.status,
@@ -124,30 +137,31 @@ export function serializeFeedbackListItem(item: FeedbackListItem) {
     updatedAt: item.updatedAt,
     replyCount: item._count.FeedbackReply,
     attachmentCount: item._count.FeedbackAttachment,
-    user: displayUser(item.User),
+    user: displayUser({ ...item.User, forAdmin }),
   }
 }
 
-export function serializeFeedback(item: FeedbackWithThread, options: { includeContact: boolean }) {
-  const user = displayUser(item.User)
+export function serializeFeedback(item: FeedbackWithThread, options: { includeContact: boolean; forAdmin?: boolean }) {
+  const forAdmin = options.forAdmin === true
+  const user = displayUser({ ...item.User, forAdmin })
   const serializedReplies = item.FeedbackReply.map((reply) => ({
     id: reply.id,
-    content: reply.content,
+    content: forAdmin ? reply.content : publicModerationText(reply.content, reply.moderationStatus),
     authorRole: reply.authorRole,
     isReadByUser: reply.isReadByUser,
     isReadByAdmin: reply.isReadByAdmin,
     createdAt: reply.createdAt,
-    author: displayUser(reply.User),
+    author: displayUser({ ...reply.User, forAdmin }),
     attachments: reply.FeedbackAttachment.map(serializeAttachment).filter((attachment) => attachment.url),
   }))
-  const hasStoredInitialMessage = serializedReplies.some((reply) => (
+  const hasStoredInitialMessage = item.FeedbackReply.some((reply) => (
     reply.authorRole === 'USER' &&
     reply.content === item.content &&
     Math.abs(new Date(reply.createdAt).getTime() - item.createdAt.getTime()) < 10_000
   ))
   const initialMessage = {
     id: `initial-${item.id}`,
-    content: item.content,
+    content: forAdmin ? item.content : publicModerationText(item.content, item.moderationStatus),
     authorRole: 'USER',
     isReadByUser: true,
     isReadByAdmin: !item.adminUnread,
@@ -158,10 +172,10 @@ export function serializeFeedback(item: FeedbackWithThread, options: { includeCo
 
   return {
     id: item.id,
-    title: item.title,
+    title: forAdmin ? item.title : publicModerationText(item.title, item.moderationStatus),
     type: item.type,
     typeLabel: feedbackTypeLabels[item.type],
-    content: item.content,
+    content: forAdmin ? item.content : publicModerationText(item.content, item.moderationStatus),
     contact: options.includeContact ? item.contact : null,
     status: item.status,
     statusLabel: feedbackStatusLabels[item.status],

@@ -41,7 +41,8 @@ export function AdminManager({
   searchUsers,
   query,
   logs,
-}: Readonly<{ admins: AdminUser[]; searchUsers: SearchUser[]; query: string; logs: AdminLog[] }>) {
+  canManageUserRewardPermission,
+}: Readonly<{ admins: AdminUser[]; searchUsers: SearchUser[]; query: string; logs: AdminLog[]; canManageUserRewardPermission: boolean }>) {
   const router = useRouter()
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -125,6 +126,7 @@ export function AdminManager({
                 onSave={saveAdmin}
                 isSubmitting={submittingId === user.id}
                 actionLabel={user.role === 'ADMIN' ? '更新权限' : '设置为管理员'}
+                canManageUserRewardPermission={canManageUserRewardPermission}
               />
             )) : <p className="rounded-xl bg-sky-50 p-4 text-sm font-bold text-slate-500">没有找到可设置的 active 用户。</p>}
           </div>
@@ -142,6 +144,7 @@ export function AdminManager({
               onRemove={admin.role === 'SUPER_ADMIN' ? undefined : removeAdmin}
               isSubmitting={submittingId === admin.id}
               actionLabel="保存权限"
+              canManageUserRewardPermission={canManageUserRewardPermission}
             />
           ))}
           {!admins.length ? <p className="rounded-xl bg-sky-50 p-4 text-sm font-bold text-slate-500">暂无管理员。</p> : null}
@@ -171,12 +174,14 @@ function PermissionCard({
   onRemove,
   isSubmitting,
   actionLabel,
+  canManageUserRewardPermission,
 }: Readonly<{
   user: AdminUser
   onSave: (userId: string, permissions: string[], canPlayFullMusic: boolean) => void
   onRemove?: (userId: string) => void
   isSubmitting: boolean
   actionLabel: string
+  canManageUserRewardPermission: boolean
 }>) {
   const [selected, setSelected] = useState(() => new Set(user.permissions))
   const isSuperAdmin = user.role === 'SUPER_ADMIN'
@@ -248,13 +253,13 @@ function PermissionCard({
               <input
                 type="checkbox"
                 checked={isSuperAdmin || selected.has(permission.key)}
-                disabled={isSuperAdmin}
+                disabled={isSuperAdmin || (permission.key === 'user_reward_manage' && !canManageUserRewardPermission)}
                 onChange={() => toggle(permission.key)}
                 className="mt-1 h-4 w-4"
               />
               <span>
                 <span className="block text-sm font-black text-brand-950">{permission.label}</span>
-                <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">{permission.description}</span>
+                <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">{permission.description}{permission.key === 'user_reward_manage' && !canManageUserRewardPermission ? ' 仅超级管理员可调整。' : ''}</span>
               </span>
             </span>
           </label>

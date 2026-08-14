@@ -13,6 +13,15 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, i
   initialReplyCount: number
 }>) {
   const [replyCount, setReplyCount] = useState(Math.max(initialReplyCount, 0))
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)')
+    const sync = () => setIsMobile(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
 
   useEffect(() => {
     const onReplyCount = (event: Event) => {
@@ -24,17 +33,25 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, i
     return () => window.removeEventListener('ecfc:post-reply-count', onReplyCount)
   }, [postId])
 
-  function focusComposer() {
+  function openComposer() {
     if (!currentUserId) {
       window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
+      return
+    }
+    if (isMobile) {
+      window.dispatchEvent(new CustomEvent('ecfc:open-post-reply-sheet', { detail: { postId } }))
       return
     }
     window.dispatchEvent(new CustomEvent('ecfc:focus-post-composer', { detail: { postId } }))
   }
 
+  function focusComments() {
+    document.getElementById(`post-comments-${postId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <div className="forum-discovery-action-bar" data-forum-discovery-action-bar>
-      <button type="button" className="forum-discovery-comment-trigger" onClick={focusComposer}>说点什么…</button>
+      <button type="button" className="forum-discovery-comment-trigger" onClick={openComposer}>说点什么…</button>
       <LikeButton
         postId={postId}
         initialLiked={initialLiked}
@@ -49,7 +66,7 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, i
         refreshOnSuccess={false}
         className="forum-discovery-action-button forum-discovery-action-favorite"
       />
-      <button type="button" className="forum-discovery-action-count" onClick={focusComposer} aria-label="查看评论">评论 {replyCount}</button>
+      <button type="button" className="forum-discovery-action-count" onClick={focusComments} aria-label="查看评论">评论 {replyCount}</button>
     </div>
   )
 }

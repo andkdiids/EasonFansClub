@@ -8,11 +8,24 @@ export const DUEL_NEXT_QUESTION_DELAY_MS = 3_000
 export const DUEL_RESULT_PAUSE_MS = DUEL_NEXT_QUESTION_DELAY_MS
 export const DUEL_RECONNECT_GRACE_MS = 15_000
 export const DUEL_HEARTBEAT_INTERVAL_MS = 5_000
+export const DUEL_ROOM_POLL_INTERVAL_MS = 2_500
 export const DUEL_ONLINE_TIMEOUT_MS = 20_000
 export const DUEL_MIN_VALID_QUESTIONS = 5
 export const DUEL_WIN_REWARD = 7
-export const DUEL_ROOM_RETENTION_MS = 30 * 60_000
+export const DUEL_WAITING_ROOM_TTL_MS = 30 * 60_000
+// Backwards-compatible name for callers that used the old retention constant.
+export const DUEL_ROOM_RETENTION_MS = DUEL_WAITING_ROOM_TTL_MS
 export const DUEL_INVITE_RETENTION_MS = 15 * 60_000
+
+export function isDuelWaitingRoomExpired(
+  status: 'WAITING' | 'READY' | 'PLAYING' | 'FINISHED' | 'CLOSED',
+  createdAt: Date | string | number,
+  now = Date.now(),
+) {
+  if (status !== 'WAITING' && status !== 'READY') return false
+  const createdTimestamp = createdAt instanceof Date ? createdAt.getTime() : typeof createdAt === 'number' ? createdAt : new Date(createdAt).getTime()
+  return Number.isFinite(createdTimestamp) && now - createdTimestamp >= DUEL_WAITING_ROOM_TTL_MS
+}
 
 export function isDuelPresenceOnline(lastSeenAt: Date | string | number | null | undefined, now = Date.now()) {
   if (lastSeenAt === null || lastSeenAt === undefined) return false

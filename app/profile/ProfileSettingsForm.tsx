@@ -18,10 +18,12 @@ type InitialProfile = {
     canChange: boolean
   }
   nickname: string
+  nicknameViolation: boolean
   avatarUrl: string
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
+  bioViolation: boolean
   location: UserLocation | null
   email: string
   phone: string
@@ -760,6 +762,12 @@ export function ProfileSettingsForm({
           <h2 className="mt-2 text-2xl font-black text-brand-950">编辑资料</h2>
           <p className="mt-2 text-sm font-bold text-slate-500">编辑内容只会更新你的个人资料；手机号和邮箱仅在这里自己可见。</p>
         </div>
+
+        {(initialProfile.nicknameViolation || initialProfile.bioViolation) ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black leading-6 text-rose-700">
+            你的资料包含违规内容，请修改后保存。
+          </div>
+        ) : null}
 
         <section className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/45 p-4">
           <div>

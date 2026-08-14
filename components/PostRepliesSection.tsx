@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
@@ -9,6 +9,7 @@ import { ImageViewer } from '@/components/ImageViewer'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
 import { MentionText, type ReplyMentionView } from '@/components/MentionText'
 import { ReplyForm } from '@/components/ReplyForm'
+import { PostReplyBottomSheet } from '@/components/PostReplyBottomSheet'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
 import { profileImageUrl } from '@/lib/images'
@@ -129,9 +130,11 @@ export function PostRepliesSection({
   const searchParams = useSearchParams()
   const [replies, setReplies] = useState(() => initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
+  const [mobileReplySheetOpen, setMobileReplySheetOpen] = useState(false)
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
   const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
+  const closeMobileReplySheet = useCallback(() => setMobileReplySheetOpen(false), [])
   useEffect(() => {
     setReplies(initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   }, [initialReplies])
@@ -250,6 +253,17 @@ export function PostRepliesSection({
     }
     window.addEventListener('ecfc:focus-post-composer', onFocusComposer)
     return () => window.removeEventListener('ecfc:focus-post-composer', onFocusComposer)
+  }, [currentUserId, postId])
+
+  useEffect(() => {
+    const onOpenReplySheet = (event: Event) => {
+      const detail = (event as CustomEvent<{ postId?: string }>).detail
+      if (detail?.postId !== postId || !currentUserId) return
+      setReplyTo(null)
+      setMobileReplySheetOpen(true)
+    }
+    window.addEventListener('ecfc:open-post-reply-sheet', onOpenReplySheet)
+    return () => window.removeEventListener('ecfc:open-post-reply-sheet', onOpenReplySheet)
   }, [currentUserId, postId])
 
   function findRootReplyId(replyId: string) {
@@ -462,7 +476,8 @@ export function PostRepliesSection({
   }
 
   return (
-    <section className="post-replies-section space-y-3">
+    <>
+    <section id={`post-comments-${postId}`} className="post-replies-section scroll-mt-16 space-y-3">
       {currentUserId && !replyTo ? (
         <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
           <ReplyForm
@@ -525,5 +540,14 @@ export function PostRepliesSection({
       ) : null}
 
     </section>
+    {currentUserId ? (
+      <PostReplyBottomSheet
+        open={mobileReplySheetOpen}
+        postId={postId}
+        onClose={closeMobileReplySheet}
+        onReplyCreated={addReply}
+      />
+    ) : null}
+    </>
   )
 }

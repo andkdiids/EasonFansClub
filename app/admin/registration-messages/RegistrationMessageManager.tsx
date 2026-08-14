@@ -7,6 +7,7 @@ const STATUS_LABEL: Record<RegistrationMessageRow['status'], string> = {
   PENDING: '待审核',
   APPROVED: '已发布',
   REJECTED: '已隐藏',
+  VIOLATION: '违规内容',
 }
 
 function formatDate(value: string): string {

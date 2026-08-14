@@ -10,9 +10,9 @@ import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience 
 import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
-import { containsSensitiveContent, sanitizeText } from '@/lib/security'
-import { checkForbiddenWords } from '@/lib/content-filter'
-import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
+import { sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 
 export async function GET() {
   const user = await getCurrentUser()
@@ -83,15 +83,13 @@ export async function POST(request: Request) {
   if (!preference) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
   const mood = preference.checkinMoodEnabled ? requestedMood : null
   const rawMessage = sanitizeText(body?.message, 300)
-  if (await containsSensitiveContent(rawMessage)) {
-    return NextResponse.json({ message: '留言包含违禁词，无法发布' }, { status: 400 })
-  }
-  if (checkForbiddenWords(rawMessage).blocked) {
-    return NextResponse.json({ message: '内容包含不允许使用的词语，请修改后重新提交。' }, { status: 400 })
+  if ((await checkBannedWords(rawMessage)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
   const message = rawMessage
-  const ipRegion = await resolveIpRegion(request)
-  void updateUserIpRegion(user.id, ipRegion)
+  const ipLocation = await resolveIpLocation(request)
+  const ipRegion = ipLocation?.label || null
+  void updateUserIpRegion(user.id, ipLocation)
 
   if (preference.checkinMoodEnabled && !mood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })

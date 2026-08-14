@@ -4,6 +4,7 @@ import { getFriendIds } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { publicModerationText } from '@/lib/content-moderation'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -70,8 +71,10 @@ export async function GET(request: Request) {
             id: true,
             uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             avatarUrl: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
           },
         },
       },
@@ -84,12 +87,13 @@ export async function GET(request: Request) {
     activities: activities.map((item) => ({
       id: item.id,
       mood: item.mood,
-      content: item.content,
+      content: publicModerationText(item.content, item.moderationStatus),
       type: item.type,
       targetUrl: item.targetUrl,
       createdAt: item.createdAt.toISOString(),
       actor: {
         ...item.User,
+        nickname: getPublicUserDisplayName(item.User),
         avatarUrl: publicImageUrl(item.User.avatarUrl),
         profile: item.User.Profile ? {
           ...item.User.Profile,

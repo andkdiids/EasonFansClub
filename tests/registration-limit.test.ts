@@ -19,10 +19,14 @@ test('注册限流使用上海自然日边界并规范化 IPv4/IPv6', () => {
   assert.equal(normalizeIp('2001:DB8::1'), '2001:db8::1')
   assert.equal(normalizeIp('::ffff:192.0.2.1'), '192.0.2.1')
   assert.equal(getClientIp(new Request('https://ecfc.fans/api/auth/register/send-email-code', {
-    headers: { 'x-real-ip': '127.0.0.1', 'x-forwarded-for': '2001:0db8:0:0:0:0:0:1, 10.0.0.1' },
+    headers: {
+      'x-ecfc-client-ip': '2001:0db8:0:0:0:0:0:1',
+      'x-real-ip': '127.0.0.1',
+      'x-forwarded-for': '1.2.3.4, 10.0.0.1',
+    },
   })), '2001:db8::1')
   assert.equal(getClientIp(new Request('https://ecfc.fans/api/auth/register/send-email-code', {
-    headers: { 'x-real-ip': '10.0.0.2' },
+    headers: { 'x-real-ip': '8.8.8.8', 'x-forwarded-for': '9.9.9.9' },
   })), 'unknown')
 })
 

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { feedbackInclude, parseFeedbackAttachments, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { filterSensitiveWords, requireAdmin, sanitizeText } from '@/lib/security'
+import { requireAdmin, sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
   const guard = await requireAdmin('feedback_manage')
@@ -12,11 +13,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   const body = await request.json().catch(() => null)
   const rawContent = typeof body?.content === 'string' ? body.content : ''
   if (rawContent.length > 2000) return NextResponse.json({ message: '回复内容最多 2000 个字' }, { status: 400 })
-  const content = await filterSensitiveWords(sanitizeText(body?.content, 2000))
+  const content = sanitizeText(body?.content, 2000)
   const attachments = parseFeedbackAttachments(body?.attachments)
 
   if (!content && attachments.length === 0) {
     return NextResponse.json({ message: '请填写回复内容或上传图片' }, { status: 400 })
+  }
+  if ((await checkBannedWords(content)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
 
   const feedback = await prisma.feedback.findUnique({
@@ -75,5 +79,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   })
 
   emitRealtime(feedback.userId, 'feedback', { feedbackId })
-  return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true }), message: '回复已发送' })
+  return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true, forAdmin: true }), message: '回复已发送' })
 }

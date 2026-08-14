@@ -3,6 +3,7 @@ import type { Duplex } from 'node:stream'
 import next from 'next'
 import { WebSocket as WsWebSocket, WebSocketServer, type WebSocket } from 'next/dist/compiled/ws'
 import { authCookieName, getCurrentUserFromSessionToken } from './lib/auth'
+import { getClientIpFromHeaders } from './lib/client-ip'
 import { hasValidRequestOrigin } from './lib/security'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
@@ -29,10 +30,7 @@ function firstHeader(value: string | string[] | undefined) {
 }
 
 function requestIp(request: IncomingMessage) {
-  const forwarded = firstHeader(request.headers['x-real-ip'])
-    || firstHeader(request.headers['cf-connecting-ip'])
-    || firstHeader(request.headers['x-forwarded-for'])?.split(',')[0]?.trim()
-  return forwarded || request.socket.remoteAddress || 'unknown'
+  return getClientIpFromHeaders(request.headers, request.socket.remoteAddress)
 }
 
 function cookieValue(request: IncomingMessage, name: string) {

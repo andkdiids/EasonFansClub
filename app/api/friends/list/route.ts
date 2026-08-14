@@ -7,6 +7,7 @@ import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
+import { publicModerationText } from '@/lib/content-moderation'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -43,6 +44,24 @@ export async function GET(request: Request) {
   // The actual page is selected only after conversation ordering below.
   const friendRows = rows
   const friendIds = friendRows.map((row) => row.userAId === user.id ? row.userBId : row.userAId)
+  const [groupRows, groupMembers] = await Promise.all([
+    prisma.friendGroup.findMany({
+      where: { ownerId: user.id },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true, sortOrder: true, createdAt: true },
+    }),
+    friendIds.length
+      ? prisma.friendGroupMember.findMany({
+          where: { ownerId: user.id, friendId: { in: friendIds } },
+          select: { friendId: true, groupId: true },
+        })
+      : Promise.resolve([]),
+  ])
+  const groupByFriend = new Map(groupMembers.map((member) => [member.friendId, member.groupId]))
+  const groupMemberCounts = new Map<string, number>()
+  groupMembers.forEach((member) => groupMemberCounts.set(member.groupId, (groupMemberCounts.get(member.groupId) || 0) + 1))
+  const groups = groupRows.map((group) => ({ ...group, count: groupMemberCounts.get(group.id) || 0 }))
+  const ungroupedCount = Math.max(0, friendIds.length - groupMembers.length)
   const conversations = friendIds.length ? await prisma.conversation.findMany({
       where: {
         ConversationParticipant: {
@@ -55,7 +74,7 @@ export async function GET(request: Request) {
       select: {
         id: true,
         lastMessageAt: true,
-        ConversationParticipant: { select: { userId: true, lastReadAt: true } },
+        ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true } },
         DirectMessage: {
           where: { isDeleted: false },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -64,7 +83,14 @@ export async function GET(request: Request) {
         },
       },
     }) : []
-  const conversationByFriend = new Map(conversations.map((conversation) => {
+  const visibleConversations = conversations.map((conversation) => {
+    const participant = conversation.ConversationParticipant.find((item) => item.userId === user.id)
+    const latest = conversation.DirectMessage[0]
+    return participant?.clearedAt && latest && latest.createdAt <= participant.clearedAt
+      ? { ...conversation, DirectMessage: [] }
+      : conversation
+  })
+  const conversationByFriend = new Map(visibleConversations.map((conversation) => {
     const otherId = conversation.ConversationParticipant.find((item) => item.userId !== user.id)?.userId
     return [otherId, conversation] as const
   }))
@@ -107,6 +133,7 @@ export async function GET(request: Request) {
     })
     return {
       ...serializePublicUser(friend, growth.level, growth.levelName, displayName),
+      groupId: groupByFriend.get(friend.id) || null,
       conversationId: conversation?.id || null,
       lastMessage: conversation?.DirectMessage[0] || null,
       // Derive this from the latest visible message instead of the mutable
@@ -117,7 +144,7 @@ export async function GET(request: Request) {
     }
   })
 
-  return NextResponse.json({ friends, page, total, hasMore: pageStart + pageSize < total }, { headers: privateHeaders })
+  return NextResponse.json({ friends, groups, ungroupedCount, page, total, hasMore: pageStart + pageSize < total }, { headers: privateHeaders })
 }
 
 async function searchUsers(currentUserId: string, q: string) {
@@ -169,7 +196,16 @@ async function searchUsers(currentUserId: string, q: string) {
   ]) : [[], [], []]
   const friendIds = new Set(friendships.flatMap((item) => [item.userAId, item.userBId]).filter((id) => id !== currentUserId))
   const blockedIds = new Set(blocks.flatMap((item) => [item.blockerId, item.blockedId]).filter((id) => id !== currentUserId))
-  const remarkMap = await loadFriendRemarkMap(currentUserId, friendIds)
+  const [remarkMap, groupMembers] = await Promise.all([
+    loadFriendRemarkMap(currentUserId, friendIds),
+    friendIds.size
+      ? prisma.friendGroupMember.findMany({
+          where: { ownerId: currentUserId, friendId: { in: [...friendIds] } },
+          select: { friendId: true, groupId: true },
+        })
+      : Promise.resolve([]),
+  ])
+  const groupByFriend = new Map(groupMembers.map((member) => [member.friendId, member.groupId]))
 
   return NextResponse.json({
     results: users.map((item) => {
@@ -190,6 +226,7 @@ async function searchUsers(currentUserId: string, q: string) {
       })
       return {
         ...serializePublicUser(item, growth.level, growth.levelName, displayName),
+        groupId: groupByFriend.get(item.id) || null,
         relationshipStatus,
         requestId: relationshipStatus === 'INCOMING_PENDING' ? request?.id : null,
       }
@@ -201,27 +238,37 @@ async function getUnreadCounts(userId: string, conversationIds: string[]) {
   if (!conversationIds.length) return new Map<string, number>()
   const participantRows = await prisma.conversationParticipant.findMany({
     where: { userId, conversationId: { in: conversationIds }, isDeleted: false },
-    select: { conversationId: true, lastReadAt: true },
+    select: { conversationId: true, lastReadAt: true, clearedAt: true },
   })
   const oldestReadAt = participantRows.some((item) => !item.lastReadAt)
     ? null
     : participantRows.reduce<Date | null>((oldest, item) => (
       !oldest || (item.lastReadAt && item.lastReadAt < oldest) ? item.lastReadAt : oldest
     ), null)
+  const oldestClearedAt = participantRows.some((item) => !item.clearedAt)
+    ? null
+    : participantRows.reduce<Date | null>((oldest, item) => (
+      !oldest || (item.clearedAt && item.clearedAt < oldest) ? item.clearedAt : oldest
+    ), null)
+  const oldestBoundary = oldestReadAt && oldestClearedAt
+    ? (oldestReadAt < oldestClearedAt ? oldestReadAt : oldestClearedAt)
+    : oldestReadAt || oldestClearedAt
   const incoming = await prisma.directMessage.findMany({
     where: {
       conversationId: { in: conversationIds },
       senderId: { not: userId },
       isDeleted: false,
-      ...(oldestReadAt ? { createdAt: { gt: oldestReadAt } } : {}),
+      ...(oldestBoundary ? { createdAt: { gt: oldestBoundary } } : {}),
     },
     select: { conversationId: true, createdAt: true },
   })
   const lastReadByConversation = new Map(participantRows.map((item) => [item.conversationId, item.lastReadAt]))
+  const clearedByConversation = new Map(participantRows.map((item) => [item.conversationId, item.clearedAt]))
   const counts = new Map<string, number>()
   incoming.forEach((message) => {
     const lastReadAt = lastReadByConversation.get(message.conversationId)
-    if (!lastReadAt || message.createdAt > lastReadAt) {
+    const clearedAt = clearedByConversation.get(message.conversationId)
+    if ((!clearedAt || message.createdAt > clearedAt) && (!lastReadAt || message.createdAt > lastReadAt)) {
       counts.set(message.conversationId, (counts.get(message.conversationId) || 0) + 1)
     }
   })
@@ -232,13 +279,16 @@ const publicFriendSelect = {
   id: true,
   uid: true,
   nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
+  bioModerationStatus: true,
   avatarUrl: true,
   bio: true,
   experience: true,
   isOnline: true,
   lastActiveAt: true,
   createdAt: true,
-  Profile: { select: { displayName: true, avatarUrl: true, bio: true } },
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
 } as const
 
 function serializePublicUser(
@@ -246,12 +296,15 @@ function serializePublicUser(
     id: string
     uid: number
     nickname: string
+    usernameModerationStatus?: string | null
+    nicknameModerationStatus?: string | null
+    bioModerationStatus?: string | null
     avatarUrl: string | null
     bio: string | null
     isOnline: boolean
     lastActiveAt: Date | null
     createdAt: Date
-    Profile: { displayName: string | null; avatarUrl: string | null; bio: string | null } | null
+    Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null; bio: string | null; bioModerationStatus?: string | null } | null
   },
   level: number,
   levelName: string,
@@ -260,9 +313,9 @@ function serializePublicUser(
   return {
     id: friend.id,
     uid: friend.uid,
-    nickname: friend.nickname,
+    nickname: getPublicUserDisplayName(friend),
     avatarUrl: publicImageUrl(friend.avatarUrl),
-    bio: friend.bio,
+    bio: publicModerationText(friend.Profile?.bio || friend.bio, friend.Profile?.bioModerationStatus || friend.bioModerationStatus),
     isOnline: friend.isOnline,
     lastActiveAt: friend.lastActiveAt,
     createdAt: friend.createdAt,

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { publicContentImageMarkers } from '@/lib/content-images'
+import { publicModerationText } from '@/lib/content-moderation'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
@@ -30,7 +31,7 @@ export async function GET(request: Request, context: RouteContext) {
   if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   if (moduleKey === 'posts') {
-    const postWhere = { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: 'APPROVED' as const }
+    const postWhere = { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: { in: ['APPROVED', 'VIOLATION'] as Array<'APPROVED' | 'VIOLATION'> } }
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
     const pagination = getProfileRecordPagination(total, page)
     const posts = await safeDb(
@@ -44,6 +45,7 @@ export async function GET(request: Request, context: RouteContext) {
           id: true,
           title: true,
           content: true,
+          moderationStatus: true,
           ipRegion: true,
           replyCount: true,
           likeCount: true,
@@ -55,7 +57,7 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     return NextResponse.json({
-      items: posts.map(({ Board, ...post }) => ({ ...post, content: publicContentImageMarkers(post.content), board: Board })),
+      items: posts.map(({ Board, ...post }) => ({ ...post, title: publicModerationText(post.title, post.moderationStatus), content: publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus), board: Board })),
       pagination,
     })
   }
@@ -73,14 +75,14 @@ export async function GET(request: Request, context: RouteContext) {
     const replies = await safeDb(
       'userModules.replies',
       prisma.reply.findMany({
-        where: { authorId: target.id, isDeleted: false, Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED' } },
+        where: { authorId: target.id, isDeleted: false, Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } },
         orderBy: { createdAt: 'desc' },
         take: 10,
-        select: { id: true, content: true, createdAt: true, Post: { select: { id: true, title: true } } },
+        select: { id: true, content: true, moderationStatus: true, createdAt: true, Post: { select: { id: true, title: true, moderationStatus: true } } },
       }),
       [],
     )
-    return NextResponse.json({ items: replies.map(({ Post, ...reply }) => ({ ...reply, content: publicContentImageMarkers(reply.content), post: Post })) })
+    return NextResponse.json({ items: replies.map(({ Post, ...reply }) => ({ ...reply, content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus), post: { ...Post, title: publicModerationText(Post.title, Post.moderationStatus) } })) })
   }
 
   if (moduleKey === 'achievements') {
@@ -135,7 +137,7 @@ export async function GET(request: Request, context: RouteContext) {
       prisma.postFavorite.findMany({
         where: {
           userId: target.id,
-          Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: 'APPROVED', User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
+          Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] }, User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
@@ -147,7 +149,8 @@ export async function GET(request: Request, context: RouteContext) {
               id: true,
               title: true,
               content: true,
-              User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
+              moderationStatus: true,
+              User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             },
           },
         },
@@ -160,9 +163,11 @@ export async function GET(request: Request, context: RouteContext) {
         ...favorite,
         post: {
           ...Post,
-          content: publicContentImageMarkers(Post.content),
+          title: publicModerationText(Post.title, Post.moderationStatus),
+          content: publicModerationText(publicContentImageMarkers(Post.content), Post.moderationStatus),
           author: {
             ...Post.User,
+            nickname: getPublicUserDisplayName(Post.User),
             profile: Post.User.Profile ? {
               ...Post.User.Profile,
               displayName: resolveFriendDisplayName({

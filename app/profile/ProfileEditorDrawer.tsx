@@ -14,10 +14,12 @@ type InitialProfile = {
     canChange: boolean
   }
   nickname: string
+  nicknameViolation: boolean
   avatarUrl: string
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
+  bioViolation: boolean
   location: UserLocation | null
   email: string
   phone: string

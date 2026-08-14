@@ -44,3 +44,18 @@ test('Duel entry does not replace the existing single-player mode flow', () => {
   assert.match(detail, /modes\.map/)
   assert.match(detail, /leaderboard/)
 })
+
+test('Duel lobby uses the entertainment games visual system instead of a SaaS dashboard', () => {
+  const duel = read('components/games/GuessSongDuel.tsx')
+  const css = read('app/globals.css')
+
+  assert.match(duel, /LISTEN · DUEL/)
+  assert.match(duel, /className="duel-hero-visual"/)
+  assert.match(duel, /PLAY TOGETHER/)
+  assert.match(css, /body:has\(\.duel-page\)/)
+  assert.match(css, /\.duel-page \{[\s\S]*#07101d/)
+  assert.match(css, /\.duel-hero-card \{[\s\S]*border-radius:0/)
+  assert.match(css, /\.duel-primary-button,\.duel-start-button[\s\S]*#54dba4/)
+  assert.match(css, /\.duel-panel \{[\s\S]*background:var\(--duel-panel\)/)
+  assert.match(css, /\.duel-hero-visual::before/)
+})

@@ -2,11 +2,10 @@ import { NextResponse } from 'next/server'
 import type { UserRole } from '@prisma/client'
 import { type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
+import { containsBannedWord, getEnabledBannedWords } from '@/lib/content-moderation'
 import { prisma } from '@/lib/prisma'
 
-const SENSITIVE_WORD_CACHE_TTL_MS = 60_000
-
-let sensitiveWordCache: { expiresAt: number; words: string[] } | null = null
+export { getClientIp, normalizeIp } from '@/lib/client-ip'
 
 export type GuardResult =
   | { user: SessionUser; response: null }
@@ -79,27 +78,13 @@ export function sanitizeText(value: unknown, maxLength = 5000) {
     .slice(0, maxLength)
 }
 
-async function getSensitiveWords() {
-  const now = Date.now()
-  if (sensitiveWordCache && sensitiveWordCache.expiresAt > now) {
-    return sensitiveWordCache.words
-  }
-
-  const rows = await prisma.sensitiveWord.findMany({
-    where: { isActive: true },
-    select: { word: true },
-  })
-  const words = rows.map((item) => item.word).filter(Boolean)
-  sensitiveWordCache = { words, expiresAt: now + SENSITIVE_WORD_CACHE_TTL_MS }
-  return words
-}
-
 export async function filterSensitiveWords(content: string) {
   try {
-    const words = await getSensitiveWords()
+    const words = await getEnabledBannedWords()
 
     return words.reduce((text, word) => {
-      return text.replaceAll(word, '*'.repeat(Math.min(word.length, 6)))
+      if (!word.word) return text
+      return text.replaceAll(word.word, '*'.repeat(Math.min(word.word.length, 6)))
     }, content)
   } catch {
     return content
@@ -179,127 +164,10 @@ export async function rateLimit(key: string, action: string, limit = 30, windowS
   )
 }
 
-function parseIPv4(value: string) {
-  const parts = value.split('.')
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return null
-  const octets = parts.map(Number)
-  if (octets.some((octet) => octet < 0 || octet > 255)) return null
-  return octets.join('.')
-}
-
-function parseIPv6(value: string) {
-  let candidate = value.toLowerCase()
-  const lastColon = candidate.lastIndexOf(':')
-  const embeddedIPv4 = candidate.slice(lastColon + 1)
-  const parsedIPv4 = embeddedIPv4.includes('.') ? parseIPv4(embeddedIPv4) : null
-  if (embeddedIPv4.includes('.') && !parsedIPv4) return null
-  if (parsedIPv4) {
-    const octets = parsedIPv4.split('.').map(Number)
-    const high = ((octets[0] << 8) | octets[1]).toString(16)
-    const low = ((octets[2] << 8) | octets[3]).toString(16)
-    candidate = `${candidate.slice(0, lastColon + 1)}${high}:${low}`
-  }
-
-  const compressionParts = candidate.split('::')
-  if (compressionParts.length > 2) return null
-  const hasCompression = compressionParts.length === 2
-  const left = (hasCompression ? compressionParts[0] : candidate).split(':').filter(Boolean)
-  const right = hasCompression ? compressionParts[1].split(':').filter(Boolean) : []
-  if ([...left, ...right].some((part) => !/^[0-9a-f]{1,4}$/.test(part))) return null
-
-  const missing = 8 - left.length - right.length
-  if (hasCompression ? missing < 1 : missing !== 0) return null
-  const groups = [
-    ...left,
-    ...(hasCompression ? Array.from({ length: missing }, () => '0') : []),
-    ...right,
-  ].map((part) => Number.parseInt(part, 16))
-  if (groups.length !== 8) return null
-
-  // Treat IPv4-mapped IPv6 addresses as their IPv4 form, so both headers
-  // identify the same client consistently.
-  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
-    return [
-      groups[6] >> 8,
-      groups[6] & 0xff,
-      groups[7] >> 8,
-      groups[7] & 0xff,
-    ].join('.')
-  }
-
-  let bestStart = -1
-  let bestLength = 0
-  for (let index = 0; index < groups.length;) {
-    if (groups[index] !== 0) {
-      index += 1
-      continue
-    }
-    const start = index
-    while (index < groups.length && groups[index] === 0) index += 1
-    const length = index - start
-    if (length >= 2 && length > bestLength) {
-      bestStart = start
-      bestLength = length
-    }
-  }
-
-  if (bestStart < 0) return groups.map((group) => group.toString(16)).join(':')
-  const before = groups.slice(0, bestStart).map((group) => group.toString(16)).join(':')
-  const after = groups.slice(bestStart + bestLength).map((group) => group.toString(16)).join(':')
-  return `${before}::${after}`
-}
-
-export function normalizeIp(value: unknown) {
-  if (typeof value !== 'string') return ''
-  let candidate = value.trim().replace(/^"|"$/g, '')
-  if (!candidate) return ''
-
-  if (candidate.startsWith('[')) {
-    const closingBracket = candidate.indexOf(']')
-    if (closingBracket < 0) return ''
-    candidate = candidate.slice(1, closingBracket)
-  } else {
-    const ipv4WithPort = candidate.match(/^((?:\d{1,3}\.){3}\d{1,3}):\d{1,5}$/)
-    if (ipv4WithPort) candidate = ipv4WithPort[1]
-  }
-
-  return parseIPv4(candidate) || (candidate.includes(':') ? parseIPv6(candidate) || '' : '')
-}
-
-function isLocalOrPrivateIp(value: string) {
-  if (value === '0.0.0.0' || value === '127.0.0.1' || value === '::' || value === '::1') return true
-  const ipv4 = value.split('.').map(Number)
-  if (ipv4.length === 4 && ipv4.every((part) => Number.isInteger(part))) {
-    return ipv4[0] === 10
-      || ipv4[0] === 127
-      || (ipv4[0] === 169 && ipv4[1] === 254)
-      || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31)
-      || (ipv4[0] === 192 && ipv4[1] === 168)
-  }
-  const firstGroup = Number.parseInt(value.split(':')[0] || '0', 16)
-  return (firstGroup >= 0xfc00 && firstGroup <= 0xfdff)
-    || (firstGroup >= 0xfe80 && firstGroup <= 0xfebf)
-}
-
-export function getClientIp(request: Request) {
-  const candidates = [
-    request.headers.get('cf-connecting-ip'),
-    request.headers.get('x-real-ip'),
-    ...(request.headers.get('x-forwarded-for')?.split(',') || []),
-  ]
-  for (const candidate of candidates) {
-    const normalized = normalizeIp(candidate)
-    if (normalized && !isLocalOrPrivateIp(normalized)) return normalized
-  }
-  return 'unknown'
-}
-
 export async function containsSensitiveContent(content: string) {
   if (!content.trim()) return false
   try {
-    const normalized = content.toLocaleLowerCase('zh-CN')
-    const words = await getSensitiveWords()
-    return words.some((word) => normalized.includes(word.toLocaleLowerCase('zh-CN')))
+    return await containsBannedWord(content)
   } catch {
     return false
   }

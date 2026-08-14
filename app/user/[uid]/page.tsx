@@ -10,6 +10,8 @@ import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { locationFromProfile } from '@/lib/user-location'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +34,9 @@ export default async function PublicUserPage({ params }: PageProps) {
       id: true,
       uid: true,
       nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
+      bioModerationStatus: true,
       experience: true,
       avatarUrl: true,
       backgroundUrl: true,
@@ -116,12 +121,12 @@ export default async function PublicUserPage({ params }: PageProps) {
     }
   }
 
-  const name = user.Profile.displayName || user.nickname
+  const name = getPublicUserDisplayName(user)
   const baseDisplayName = name
   const displayName = baseDisplayName
   const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
   const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
-  const bio = user.Profile.bio || user.bio || ''
+  const bio = publicModerationText(user.Profile.bio || user.bio || '', user.Profile.bioModerationStatus === 'VIOLATION' || user.bioModerationStatus === 'VIOLATION' ? 'VIOLATION' : 'NORMAL')
   const [growth, recentMessagesPage] = await Promise.all([
     getGrowthSummarySafe(user.experience),
     loadProfileRecentMessagesPage(user.id, viewer?.id),

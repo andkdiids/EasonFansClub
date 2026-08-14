@@ -16,6 +16,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
+import { publicModerationText } from '@/lib/content-moderation'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getPostModerationAccess } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
@@ -121,15 +122,17 @@ function loadPost(postId: string, userId?: string) {
           uid: true,
           id: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           level: true,
           avatarUrl: true,
           status: true,
           isDeleted: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
       Board: { select: { name: true, slug: true } },
-      sticker: { select: { url: true, name: true, type: true } },
+      sticker: { select: { url: true, name: true, moderationStatus: true, type: true } },
       // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由页面里的批量查询单独判断。
       Like: {
         orderBy: { createdAt: 'desc' },
@@ -141,8 +144,10 @@ function loadPost(postId: string, userId?: string) {
               id: true,
               uid: true,
               nickname: true,
+              usernameModerationStatus: true,
+              nicknameModerationStatus: true,
               avatarUrl: true,
-              Profile: { select: { displayName: true, avatarUrl: true } },
+              Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
             },
           },
         },
@@ -157,6 +162,7 @@ function loadPost(postId: string, userId?: string) {
 const replyDetailSelect = {
   id: true,
   content: true,
+  moderationStatus: true,
   parentId: true,
   likeCount: true,
   isPinned: true,
@@ -173,8 +179,10 @@ const replyDetailSelect = {
           id: true,
           uid: true,
           nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
           avatarUrl: true,
-          Profile: { select: { displayName: true, avatarUrl: true } },
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
       },
     },
@@ -186,7 +194,7 @@ const replyDetailSelect = {
       startIndex: true,
       endIndex: true,
       User_ReplyMention_mentionedUserIdToUser: {
-        select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
+        select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } },
       },
     },
   },
@@ -196,11 +204,13 @@ const replyDetailSelect = {
       id: true,
       uid: true,
       nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
       level: true,
       avatarUrl: true,
       status: true,
       isDeleted: true,
-      Profile: { select: { displayName: true, avatarUrl: true } },
+      Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
     },
   },
 } satisfies Prisma.ReplySelect
@@ -261,6 +271,7 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
 type FocusedReply = {
   id: string
   content: string
+  moderationStatus: 'NORMAL' | 'VIOLATION'
   parentId: string | null
   likeCount: number
   isPinned: boolean
@@ -278,15 +289,18 @@ type FocusedReply = {
     id: string
     uid: number
     nickname: string
+    usernameModerationStatus: 'NORMAL' | 'VIOLATION'
+    nicknameModerationStatus: 'NORMAL' | 'VIOLATION'
     level: number
     avatarUrl: string | null
-    profile: { displayName: string; avatarUrl: string | null } | null
+    profile: { displayName: string; displayNameModerationStatus: 'NORMAL' | 'VIOLATION'; avatarUrl: string | null } | null
   }
 }
 
 type FocusedReplyQueryRow = {
   id: string
   content: string
+  moderationStatus: 'NORMAL' | 'VIOLATION'
   parentId: string | null
   likeCount: number
   isPinned: boolean
@@ -319,6 +333,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
       select: {
         id: true,
         content: true,
+        moderationStatus: true,
         parentId: true,
         likeCount: true,
          isPinned: true,
@@ -331,9 +346,11 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
             id: true,
             uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             level: true,
             avatarUrl: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
           },
         },
         ReplyMention: {
@@ -343,7 +360,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
             startIndex: true,
             endIndex: true,
             User_ReplyMention_mentionedUserIdToUser: {
-              select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
+        select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } },
             },
           },
         },
@@ -358,7 +375,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
         user: {
           id: mentionedUser.id,
           uid: mentionedUser.uid,
-          name: mentionedUser.Profile?.displayName || mentionedUser.nickname,
+          name: getPublicUserDisplayName(mentionedUser),
         },
       })),
       author: { ...replyUser, profile: replyUser.Profile },
@@ -441,6 +458,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       postReplies.push(...focusedReplies.filter((reply) => !existingIds.has(reply.id)).map((reply) => ({
         id: reply.id,
         content: reply.content,
+        moderationStatus: reply.moderationStatus,
         parentId: reply.parentId,
         likeCount: reply.likeCount,
         isPinned: reply.isPinned,
@@ -458,7 +476,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             id: mention.user.id,
             uid: mention.user.uid,
             nickname: mention.user.name,
-            Profile: { displayName: mention.user.name },
+            usernameModerationStatus: 'NORMAL' as const,
+            nicknameModerationStatus: 'NORMAL' as const,
+            Profile: { displayName: mention.user.name, displayNameModerationStatus: 'NORMAL' as const },
           },
         })),
       })))
@@ -525,13 +545,15 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
   const canEditPost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
   const publicPostContent = publicContentImageMarkers(post.content)
+  const publicPostTitle = publicModerationText(post.title, post.moderationStatus)
+  const safePublicPostContent = publicModerationText(publicPostContent, post.moderationStatus)
   const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
     ...reply,
-    content: publicContentImageMarkers(reply.content),
+    content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus),
     stickerId: reply.stickerId ?? null,
     stickerUrl: publicImageUrl(reply.sticker?.url),
     author: User.status === 'ACTIVE' && !User.isDeleted
-      ? { ...User, profile: User.Profile ? {
+      ? { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile ? {
           ...User.Profile,
           displayName: resolveFriendDisplayName({
             viewerId: user?.id,
@@ -545,7 +567,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     likers: Array.isArray(ReplyLike)
       ? ReplyLike.map((like) => ({
           uid: like.User.uid,
-          nickname: like.User.nickname,
+          nickname: getPublicUserDisplayName(like.User),
           displayName: resolveFriendDisplayName({
             viewerId: user?.id,
             targetUserId: like.userId,
@@ -601,7 +623,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               {post.Board.name}
             </Link>
           </div>
-          <h1 className="text-4xl font-black leading-tight text-brand-950">{post.title}</h1>
+          <h1 className="text-4xl font-black leading-tight text-brand-950">{publicPostTitle}</h1>
           <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold text-slate-500">
             {isArchivedAuthor ? (
               <span className="flex items-center gap-2 text-brand-950">
@@ -621,11 +643,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <PostViewCounter postId={post.id} initialCount={post.viewCount} />
             <span>回复 {post.replyCount}</span>
           </div>
-          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{publicPostContent}</div>
+          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{safePublicPostContent}</div>
           {post.sticker?.url ? (
             <div className="mt-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={publicImageVariantUrl(post.sticker.url, 'thumb-md') || post.sticker.url} alt={post.sticker.name || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" loading="lazy" />
+        <img src={publicImageVariantUrl(post.sticker.url, 'thumb-md') || post.sticker.url} alt={publicModerationText(post.sticker.name, post.sticker.moderationStatus) || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" loading="lazy" />
             </div>
           ) : null}
           {post.PostMedia.length ? (
@@ -665,8 +687,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           <LikeAvatars
             likers={(post.Like || []).map((like) => ({
               uid: like.User.uid,
-              nickname: like.User.nickname,
-              displayName: like.User.Profile?.displayName || null,
+              nickname: getPublicUserDisplayName(like.User),
+              displayName: getPublicUserDisplayName(like.User),
               avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
             }))}
             totalCount={post.likeCount}

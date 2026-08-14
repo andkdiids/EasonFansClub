@@ -6,6 +6,7 @@ import { Prisma, type NotificationType, type SystemNotificationType } from '@pri
 import { parseNotificationReplyTarget, type NotificationReplyTarget } from '@/lib/notification-target'
 import { compareNotificationOrder } from '@/lib/notification-order'
 import { clampPaginationPage } from '@/lib/pagination'
+import { formatLikeNotificationText, loadLikeNotificationStats, parseLikeNotificationTarget, reconcileLikeNotifications, type LikeNotificationTargetKind } from '@/lib/like-notifications'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
@@ -25,6 +26,7 @@ const personalTypeLabels: Record<string, string> = {
   BADGE: '勋章',
   BIRTHDAY_GREETING: '生日',
   GUESS_SONG_DUEL_INVITE: '听听·对决',
+  USER_REWARD: '获得奖励',
 }
 
 const systemTypeLabels: Record<string, string> = {
@@ -55,6 +57,7 @@ export function getNotificationVisibilityFilter(userId: string, extra: Prisma.No
 }
 
 export function getUnreadNotificationWhere(userId: string, extra: Prisma.NotificationWhereInput = {}): Prisma.NotificationWhereInput {
+  // isRead is the canonical unread flag. readAt is only an audit timestamp.
   return getNotificationVisibilityFilter(userId, { isRead: false, ...extra })
 }
 
@@ -162,6 +165,8 @@ export type UnifiedNotification = {
   actorName: string | null
   actorUid: number | null
   actorAvatarUrl: string | null
+  likeCount?: number | null
+  likeTargetKind?: LikeNotificationTargetKind | null
   popup: boolean
   sticky: boolean
   isRead: boolean
@@ -183,6 +188,15 @@ export type UnreadSummary = {
   directMessages: number
   messages: number
   total: number
+}
+
+export type UnreadPersonalCounts = {
+  replies: number
+  likes: number
+  friendRequests: number
+  messages: number
+  feedback: number
+  system: number
 }
 
 type DailyCommentNotificationRow = {
@@ -321,9 +335,67 @@ async function reconcileStalePersonalNotifications(userId: string) {
   }
 }
 
+async function getDirectMessageUnreadCount(userId: string) {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
+      SELECT COUNT(*) AS unreadCount
+      FROM DirectMessage dm
+      INNER JOIN ConversationParticipant cp
+        ON cp.conversationId = dm.conversationId
+       AND cp.userId = ${userId}
+      WHERE dm.senderId <> ${userId}
+        AND dm.isDeleted = false
+        AND cp.isDeleted = false
+        AND (cp.clearedAt IS NULL OR dm.createdAt > cp.clearedAt)
+        AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
+    `
+    return Number(rows[0]?.unreadCount || 0)
+  } catch (error) {
+    // ConversationParticipant.clearedAt was added after the original private
+    // message schema. Keep notification counts usable while an older database
+    // is being migrated, but do not turn a second database failure into zero.
+    console.warn('[notifications.unread-summary.direct-messages-compat]', {
+      userId,
+      error: error instanceof Error ? error.name : 'unknown',
+    })
+    const rows = await prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
+      SELECT COUNT(*) AS unreadCount
+      FROM DirectMessage dm
+      INNER JOIN ConversationParticipant cp
+        ON cp.conversationId = dm.conversationId
+       AND cp.userId = ${userId}
+      WHERE dm.senderId <> ${userId}
+        AND dm.isDeleted = false
+        AND cp.isDeleted = false
+        AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
+    `
+    return Number(rows[0]?.unreadCount || 0)
+  }
+}
+
+export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: number, directMessages: number): UnreadSummary {
+  const system = personal.system + systemCount
+  const notifications = system + personal.replies + personal.likes
+  const friendRequests = personal.friendRequests
+  const feedbackReplies = personal.feedback
+  return {
+    notifications,
+    system,
+    replies: personal.replies,
+    likes: personal.likes,
+    feedbackReplies,
+    feedback: feedbackReplies,
+    friendRequests,
+    directMessages,
+    messages: directMessages,
+    total: notifications + feedbackReplies + friendRequests + directMessages,
+  }
+}
+
 export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
+  await reconcileLikeNotifications(userId)
   const now = new Date()
-  const [personalRows, systemCount, directMessageRows] = await Promise.all([
+  const [personalRows, systemCount, directMessages] = await Promise.all([
     prisma.$queryRaw<Array<{
       replies: bigint | number
       likes: bigint | number
@@ -344,17 +416,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
         AND n.isRead = 0
     `,
     prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
-    prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
-      SELECT COUNT(*) AS unreadCount
-      FROM DirectMessage dm
-      INNER JOIN ConversationParticipant cp
-        ON cp.conversationId = dm.conversationId
-       AND cp.userId = ${userId}
-      WHERE dm.senderId <> ${userId}
-        AND dm.isDeleted = false
-        AND cp.isDeleted = false
-        AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
-    `,
+    getDirectMessageUnreadCount(userId),
   ])
 
   const personalRow = personalRows[0]
@@ -367,24 +429,20 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
     system: Number(personalRow?.system || 0),
   }
 
-  const directMessages = Number(directMessageRows[0]?.unreadCount || 0)
-  const notifications = personalCounts.system + systemCount + personalCounts.replies + personalCounts.likes
-  const friendRequests = personalCounts.friendRequests
-  const feedbackReplies = personalCounts.feedback
   // Direct messages have their own conversation read cursor and are rendered
   // by the notification center as a dedicated entry, not as Notification rows.
-  return {
-    notifications,
-    system: systemCount + personalCounts.system,
-    replies: personalCounts.replies,
-    likes: personalCounts.likes,
-    feedbackReplies,
-    feedback: feedbackReplies,
-    friendRequests,
-    directMessages,
-    messages: directMessages,
-    total: notifications + feedbackReplies + friendRequests + directMessages,
-  }
+  const summary = buildUnreadSummary(personalCounts, systemCount, directMessages)
+  console.info('[notifications.unread-summary]', {
+    userId,
+    total: summary.total,
+    reply: summary.replies,
+    like: summary.likes,
+    request: summary.friendRequests,
+    message: summary.messages,
+    feedback: summary.feedback,
+    system: summary.system,
+  })
+  return summary
 }
 
 export async function getUnreadNotificationCount(userId: string) {
@@ -413,6 +471,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   pageSize?: number
   category?: NotificationCategory
 } = {}): Promise<UnifiedNotificationPage> {
+  await reconcileLikeNotifications(userId)
   await reconcileStalePersonalNotifications(userId)
   const now = new Date()
   const category = parseNotificationCategory(options.category)
@@ -477,6 +536,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         title: true,
         content: true,
         link: true,
+        key: true,
         isRead: true,
         createdAt: true,
         readAt: true,
@@ -485,8 +545,10 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
             id: true,
             uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             avatarUrl: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
           },
         },
       },
@@ -510,7 +572,15 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   ])
 
   const actorIds = personal.flatMap((item) => item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
-  const remarkMap = await loadFriendRemarkMap(userId, actorIds)
+  const likeTargets = personal.flatMap((item) => {
+    if (item.type !== 'LIKE') return []
+    const target = parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
+    return target ? [target] : []
+  })
+  const [remarkMap, likeCounts] = await Promise.all([
+    loadFriendRemarkMap(userId, actorIds),
+    loadLikeNotificationStats(likeTargets),
+  ])
   const personalById = new Map(personal.map((item) => [item.id, item]))
   const systemById = new Map(system.map((item) => [item.id, item]))
   const merged: UnifiedNotification[] = rows.flatMap((row): UnifiedNotification[] => {
@@ -524,7 +594,14 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
             targetUserId: actor.id,
             fallbackName: getPublicUserDisplayName(actor),
             remarkMap,
-          })
+        })
+        : null
+      const likeTarget = item.type === 'LIKE'
+        ? parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
+        : null
+      const likeCount = likeTarget ? likeCounts.get(`${likeTarget.kind}:${likeTarget.id}`) ?? null : null
+      const likeTitle = likeTarget && likeCount !== null && likeCount > 0
+        ? formatLikeNotificationText(actorName, likeCount, likeTarget.kind)
         : null
       return [{
         id: item.id,
@@ -532,13 +609,15 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         type: item.type,
         typeLabel: getNotificationTypeLabel(item.type, item.link, 'personal'),
         category: getNotificationCategory(item.type, item.link),
-        title: resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, item.link, 'personal'),
-        content: resolveNotificationActorText(item.content, actorName),
+        title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, item.link, 'personal'),
+        content: likeTitle ? null : resolveNotificationActorText(item.content, actorName),
         link: item.link,
         targetUrl: item.link,
         actorName,
         actorUid: actor?.uid || null,
         actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
+        likeCount,
+        likeTargetKind: likeTarget?.kind || null,
         popup: false,
         sticky: false,
         isRead: item.isRead,
@@ -773,6 +852,7 @@ export async function markPersonalNotificationsForTargetRead(input: {
 }
 
 export async function markAllUnifiedNotificationsRead(userId: string) {
+  await reconcileLikeNotifications(userId)
   await reconcileStalePersonalNotifications(userId)
   const now = new Date()
   const unreadSystem = await prisma.systemNotification.findMany({

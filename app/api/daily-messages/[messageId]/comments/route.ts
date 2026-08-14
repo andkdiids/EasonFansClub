@@ -4,9 +4,10 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
-import { containsSensitiveContent, requireUser, sanitizeText } from '@/lib/security'
+import { requireUser, sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 import { formatBeijingDate } from '@/lib/checkin'
-import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -20,15 +21,17 @@ export async function GET(_request: Request, context: RouteContext) {
     orderBy: { createdAt: 'asc' },
     take: COMMENT_PAGE_SIZE,
     include: {
-      User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+      User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
     },
   })
 
   const remarkMap = await loadFriendRemarkMap(viewer?.id, comments.map((comment) => comment.User.id))
   return NextResponse.json({ comments: comments.map((comment) => ({
     ...comment,
+    content: publicModerationText(comment.content, comment.moderationStatus),
     User: comment.User.Profile ? {
       ...comment.User,
+      nickname: getPublicUserDisplayName(comment.User),
       avatarUrl: publicImageUrl(comment.User.avatarUrl),
       Profile: {
         ...comment.User.Profile,
@@ -48,8 +51,9 @@ export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
-  const ipRegion = await resolveIpRegion(request)
-  void updateUserIpRegion(guard.user.id, ipRegion)
+  const ipLocation = await resolveIpLocation(request)
+  const ipRegion = ipLocation?.label || null
+  void updateUserIpRegion(guard.user.id, ipLocation)
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)
   const content = sanitizeText(body?.content, 300)
@@ -58,8 +62,8 @@ export async function POST(request: Request, context: RouteContext) {
   if (!content) {
     return NextResponse.json({ message: '评论内容不能为空' }, { status: 400 })
   }
-  if (await containsSensitiveContent(content)) {
-    return NextResponse.json({ message: '内容包含违禁词，无法发布' }, { status: 400 })
+  if ((await checkBannedWords(content)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
 
   let parentComment: { id: string; authorId: string; messageId: string } | null = null
@@ -89,7 +93,7 @@ export async function POST(request: Request, context: RouteContext) {
         ipRegion,
         parentId: parentId || null,
       },
-      include: { User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, avatarUrl: true } } } } },
+      include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } },
     })
 
     await tx.dailyMessage.update({
@@ -121,11 +125,13 @@ export async function POST(request: Request, context: RouteContext) {
   return NextResponse.json({
     comment: {
       ...comment,
+      content: publicModerationText(comment.content, comment.moderationStatus),
       User: comment.User.Profile ? {
         ...comment.User,
+        nickname: getPublicUserDisplayName(comment.User),
         avatarUrl: publicImageUrl(comment.User.avatarUrl),
         Profile: { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) },
-      } : { ...comment.User, avatarUrl: publicImageUrl(comment.User.avatarUrl) },
+      } : { ...comment.User, nickname: getPublicUserDisplayName(comment.User), avatarUrl: publicImageUrl(comment.User.avatarUrl) },
     },
   }, { status: 201 })
 }

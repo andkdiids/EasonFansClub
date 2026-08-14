@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const emptyUnreadSummary = { notifications: 0, system: 0, replies: 0, likes: 0, feedbackReplies: 0, feedback: 0, friendRequests: 0, directMessages: 0, messages: 0, total: 0 }
   const [appearance, unreadSummary, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([
     getSiteAppearance().catch(() => null),
-    getUnreadSummary(sessionUser.id).catch(() => emptyUnreadSummary),
+    getUnreadSummary(sessionUser.id),
     hasAdminPermission(sessionUser, 'layout.manage').catch(() => false),
     hasAdminPermission(sessionUser).catch(() => false),
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),

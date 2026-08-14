@@ -5,12 +5,12 @@ import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { containsSensitiveContent, sanitizeText } from '@/lib/security'
-import { checkForbiddenWords } from '@/lib/content-filter'
+import { sanitizeText } from '@/lib/security'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { appendContentImages, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
-import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -47,8 +47,9 @@ export async function POST(request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再回复' }, { status: 401 })
 
-  const ipRegion = await resolveIpRegion(request)
-  void updateUserIpRegion(user.id, ipRegion)
+  const ipLocation = await resolveIpLocation(request)
+  const ipRegion = ipLocation?.label || null
+  void updateUserIpRegion(user.id, ipLocation)
   const { postId } = await params
   const body = await request.json().catch(() => null)
   const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''
@@ -63,8 +64,8 @@ export async function POST(request: Request, { params }: Params) {
   const textContent = sanitizeText(body?.content, 5000)
   const imageUrls = parseContentImageUrls(body?.imageUrls)
   const content = appendContentImages(textContent, imageUrls)
-  if (checkForbiddenWords(content).blocked || await containsSensitiveContent(content)) {
-    return NextResponse.json({ message: '回复包含违禁词，无法发布' }, { status: 400 })
+  if ((await checkBannedWords(content)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
   const parentId = sanitizeText(body?.parentId, 80)
   const parsedMentions = parseMentions(body?.mentions, textContent, user.id)
@@ -130,7 +131,7 @@ export async function POST(request: Request, { params }: Params) {
         id: true,
         authorId: true,
         parentId: true,
-        User: { select: { nickname: true, Profile: { select: { displayName: true } } } },
+        User: { select: { nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
       },
     })
     parentReply = parentRow ? {
@@ -138,7 +139,7 @@ export async function POST(request: Request, { params }: Params) {
       authorId: parentRow.authorId,
       parentId: parentRow.parentId,
       author: {
-        nickname: parentRow.User.nickname,
+        nickname: getPublicUserDisplayName(parentRow.User),
         profile: parentRow.User.Profile,
       },
     } : null
@@ -184,9 +185,11 @@ export async function POST(request: Request, { params }: Params) {
             id: true,
             uid: true,
             nickname: true,
+            usernameModerationStatus: true,
+            nicknameModerationStatus: true,
             level: true,
             avatarUrl: true,
-            Profile: { select: { displayName: true, avatarUrl: true } },
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
           },
         },
         sticker: { select: { url: true } },
@@ -285,6 +288,7 @@ export async function POST(request: Request, { params }: Params) {
       updatedAt: serializedReply.updatedAt.toISOString(),
       author: {
         ...replyAuthor,
+        nickname: getPublicUserDisplayName(replyAuthor),
         avatarUrl: publicImageUrl(replyAuthor.avatarUrl),
         profile: replyAuthor.Profile ? {
           ...replyAuthor.Profile,
