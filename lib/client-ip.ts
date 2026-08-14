@@ -123,6 +123,10 @@ function trustedHeaderNames() {
   return [trustedClientIpHeader]
 }
 
+function trustedClientIpSource() {
+  return (process.env.TRUSTED_CLIENT_IP_SOURCE || 'nginx').trim().toLowerCase()
+}
+
 function firstPublicIp(candidates: Array<string | null | undefined>) {
   for (const candidate of candidates) {
     const normalized = normalizeIp(candidate)
@@ -147,7 +151,12 @@ export function getClientIp(request: Request) {
 
 export function getClientIpFromHeaders(source: IpHeaderSource, socketRemoteAddress?: string | null) {
   const candidates = trustedHeaderNames().map((name) => readHeader(source, name))
-  if ((process.env.TRUSTED_CLIENT_IP_SOURCE || '').trim().toLowerCase() === 'socket') {
+  if (trustedClientIpSource() === 'nginx-forwarded') {
+    const forwardedFor = readHeader(source, 'x-forwarded-for')
+    if (forwardedFor) candidates.push(...forwardedFor.split(',').map((value) => value.trim()))
+    candidates.push(readHeader(source, 'x-real-ip'))
+  }
+  if (trustedClientIpSource() === 'socket') {
     candidates.push(socketRemoteAddress || null)
   }
   return firstPublicIp(candidates)

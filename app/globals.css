@@ -9,6 +9,11 @@
   font-style: normal;
 }
 
+.duel-options button small { margin-left:auto; color:#64748b; font-size:10px; font-weight:900; white-space:nowrap; }
+.duel-options button.is-my-choice { border-color:#2563eb; }
+.duel-options button.is-opponent-choice { box-shadow:inset 0 0 0 1px #f59e0b; }
+.duel-options button.is-correct-choice { border-color:#059669; background:#ecfdf5; }
+
 /* Entertainment center */
 .entertainment-page { width:min(80rem,calc(100% - 40px)); color:var(--foreground); }
 .entertainment-heading { border-bottom:1px solid var(--border); padding:30px 0 24px; }

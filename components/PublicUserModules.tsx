@@ -216,7 +216,6 @@ function ModuleContent({
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
             {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
             <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
-              <IpRegionLabel ipRegion={post.ipRegion} />
               <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
             </p>
           </Link>

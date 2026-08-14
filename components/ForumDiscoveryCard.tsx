@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { LikeButton } from '@/components/PostActions'
-import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { getForumDiscoveryCoverFit, type ForumDiscoveryPost } from '@/lib/forum-discovery'
 
 function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
@@ -64,7 +63,6 @@ export function ForumDiscoveryCard({ post, priority = false, onOpen }: Readonly<
             ) : post.author.displayName.slice(0, 1)}
           </span>
           <span title={post.author.displayName}>{post.author.displayName}</span>
-          <IpRegionLabel ipRegion={post.ipRegion} />
         </div>
         <LikeButton
           postId={post.id}

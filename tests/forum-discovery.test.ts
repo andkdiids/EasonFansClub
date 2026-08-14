@@ -61,6 +61,7 @@ test('主题切换和发现详情只在移动端边界启用', () => {
 test('小臣书接口参数有明确边界，非法输入不会静默变成默认请求', () => {
   assert.equal(parseForumDiscoveryMode(undefined), 'recommend')
   assert.equal(parseForumDiscoveryMode('latest'), 'latest')
+  assert.equal(parseForumDiscoveryMode('hot'), 'hot')
   assert.equal(parseForumDiscoveryMode('other'), null)
   assert.equal(parseForumDiscoveryLimit(undefined), 12)
   assert.equal(parseForumDiscoveryLimit(8), 8)
@@ -82,6 +83,30 @@ test('小臣书接口参数有明确边界，非法输入不会静默变成默�
   assert.match(route, /take: 100/)
   assert.match(route, /\.\.\.discoverySelect/)
   assert.doesNotMatch(route, /passwordHash|verificationToken|sessionToken|answer/i)
+})
+
+test('system discovery tabs use server-side sorting and never expose post-card IP regions', () => {
+  const route = readFileSync('app/api/forum/discover/route.ts', 'utf8')
+  const home = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
+  const discoveryCard = readFileSync('components/ForumDiscoveryCard.tsx', 'utf8')
+  const postList = readFileSync('components/PostList.tsx', 'utf8')
+  const detail = readFileSync('app/posts/[postId]/page.tsx', 'utf8')
+  const replies = readFileSync('components/PostRepliesSection.tsx', 'utf8')
+
+  assert.match(route, /mode === 'hot'/)
+  assert.match(route, /likeCount: 'desc'[\s\S]*replyCount: 'desc'[\s\S]*createdAt: 'desc'[\s\S]*id: 'desc'/)
+  assert.match(route, /buildHotCursor/)
+  assert.match(route, /take: limit \+ 1/)
+  assert.match(route, /isPinned: false/)
+  assert.match(route, /isFeatured: false/)
+  assert.match(route, /slug: \{ not: 'announcements' \}/)
+  assert.match(home, /value: 'latest'/)
+  assert.match(home, /value: 'hot'/)
+  assert.match(home, /next\.set\('sort', value\)/)
+  assert.doesNotMatch(discoveryCard, /IpRegionLabel/)
+  assert.doesNotMatch(postList, /IpRegionLabel/)
+  assert.match(detail, /IpRegionLabel ipRegion=\{post\.ipRegion\}/)
+  assert.match(replies, /IpRegionLabel ipRegion=\{reply\.ipRegion\}/)
 })
 
 test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误停止自动重试保护', () => {

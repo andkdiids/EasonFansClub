@@ -27,7 +27,8 @@ proxy_set_header CF-Connecting-IP "";
 - `getClientIp(request)` 是唯一入口；默认可信优先级只有 `X-ECFC-Client-IP`。
 - `TRUSTED_CLIENT_IP_SOURCE=cloudflare` 时优先使用 Nginx 重写的 `X-ECFC-Client-IP`，其次才是可信链路的 `CF-Connecting-IP`。
 - `TRUSTED_CLIENT_IP_SOURCE=nginx-legacy` 仅用于已确认安全的旧 Nginx 配置，会额外读取 `X-Real-IP`。
-- `X-Forwarded-For` 只进入诊断日志，不参与解析；普通客户端不能靠它伪造属地。
+- `TRUSTED_CLIENT_IP_SOURCE=nginx-forwarded` 仅用于已确认会清洗并重写转发链的 Nginx；此模式按 `X-Forwarded-For` 左到右取第一个公开 IP，再回退到 `X-Real-IP`。
+- 默认模式下 `X-Forwarded-For` 只进入诊断日志，不参与解析；普通客户端不能靠它伪造属地。
 - `IP_DIAGNOSTICS_LOG=true` 时仅记录 `cfConnectingIp`、`xRealIp`、`xForwardedFor`、`remoteAddress`、`resolvedClientIp`，不记录 Cookie、Token 或请求体。
 
 IP 位置按规范化后的单个 IP 缓存，解析失败、超时、限流或无可信 IP 都返回未知，不会回退到广东。

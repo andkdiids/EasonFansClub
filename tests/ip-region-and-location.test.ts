@@ -110,6 +110,50 @@ test('只信任 Nginx 重写的客户端 IP，并按 IP 分别缓存 IPv4/IPv6 �
   }
 })
 
+test('trusted proxy modes resolve CF, forwarded, mapped, and invalid addresses safely', () => {
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  try {
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'cloudflare'
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'cf-connecting-ip': '203.0.113.20' } })), '203.0.113.20')
+
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx-forwarded'
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '203.0.113.21' } })), '203.0.113.21')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '10.0.0.1, ::ffff:203.0.113.22, 203.0.113.23' } })), '203.0.113.22')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-real-ip': '203.0.113.24' } })), '203.0.113.24')
+
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-ecfc-client-ip': '::ffff:203.0.113.25' } })), '203.0.113.25')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-ecfc-client-ip': '10.0.0.1', 'x-real-ip': '203.0.113.26' } })), 'unknown')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '203.0.113.27' } })), 'unknown')
+  } finally {
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+  }
+})
+
+test('IP location provider failure returns null instead of a province fallback', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  process.env.IP_LOCATION_API_URL = 'https://unit.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  clearIpLocationCacheForTests()
+  globalThis.fetch = async () => new Response(JSON.stringify({ status: 'fail' }), { status: 200 })
+  try {
+    const location = await resolveIpLocation(new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-ecfc-client-ip': '203.0.113.28' },
+    }))
+    assert.equal(location, null)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+  }
+})
+
 test('诊断日志只包含约定的五个 IP 字段并限制 Header 长度', () => {
   const forwardedFor = `203.0.113.22${'x'.repeat(600)}`
   const request = new Request('https://ecfc.fans/api/posts', {

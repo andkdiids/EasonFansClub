@@ -1,6 +1,7 @@
 import type { WebSocket } from 'next/dist/compiled/ws'
 import {
   finalizeDuelQuestion,
+  enterDuelRoom,
   getDuelMatchParticipantId,
   getDuelMatchState,
   getDuelRoomState,
@@ -218,9 +219,9 @@ export class GuessSongDuelRealtimeHub {
   private async joinRoom(socket: DuelSocket, roomId: string) {
     const userId = this.requireUser(socket)
     socket.duelLastSeenAt = Date.now()
-    await touchDuelRoomPresence(userId, roomId, new Date(socket.duelLastSeenAt))
-    const state = await getDuelRoomState(roomId)
-    if (state.host.id !== userId && state.challenger?.id !== userId) throw new Error('You are not a member of this room')
+    const result = await enterDuelRoom(userId, roomId, new Date(socket.duelLastSeenAt))
+    for (const affectedRoom of result.affectedRooms) this.broadcastRoomEvent(affectedRoom.id, { type: 'ROOM_STATE', state: affectedRoom })
+    const state = result.room
     this.removeFromRoom(socket)
     socket.duelRoomId = roomId
     this.addToMap(this.roomSockets, roomId, socket)

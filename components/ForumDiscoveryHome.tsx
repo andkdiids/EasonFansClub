@@ -52,7 +52,10 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
   const boardValue = searchParams.get('board') || ''
   const query = searchParams.get('query') || ''
   const activeBoard = boardValue && boardValue !== 'all' ? boardValue : ''
-  const mode: ForumDiscoveryMode = !boardValue && !query ? 'recommend' : 'latest'
+  const requestedSort = searchParams.get('sort')
+  const mode: ForumDiscoveryMode = !boardValue && !query
+    ? requestedSort === 'hot' ? 'hot' : requestedSort === 'latest' ? 'latest' : 'recommend'
+    : 'latest'
   const sessionKey = `forum-discovery-session:${pathname}${queryString ? `?${queryString}` : ''}`
   const [searchValue, setSearchValue] = useState(query)
   const [posts, setPosts] = useState<ForumDiscoveryPost[]>([])
@@ -81,7 +84,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
   const touchStartRef = useRef<number | null>(null)
   const pullDistanceRef = useRef(0)
 
-  const activeTab = query ? '' : boardValue || 'recommend'
+  const activeTab = query ? '' : boardValue || mode
   const createHref = activeBoard ? `/posts/new?board=${encodeURIComponent(activeBoard)}` : '/posts/new'
 
   const persistSession = useCallback((session: DiscoverySession) => {
@@ -345,6 +348,10 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     next.delete('page')
     next.delete('query')
     if (value === 'recommend') next.delete('board')
+    else if (value === 'latest' || value === 'hot') {
+      next.delete('board')
+      next.set('sort', value)
+    }
     else next.set('board', value)
     router.push(`${pathname}${next.toString() ? `?${next.toString()}` : ''}`, { scroll: true })
   }
@@ -377,6 +384,8 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
 
   const tabItems = useMemo(() => [
     { value: 'recommend', label: '推荐' },
+    { value: 'latest', label: '\u6700\u65b0' },
+    { value: 'hot', label: '\u70ed\u5ea6\u6700\u9ad8' },
     { value: 'all', label: '全部' },
     ...boards.map((board) => ({ value: board.slug, label: board.name })),
   ], [boards])

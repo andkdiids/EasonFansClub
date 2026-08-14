@@ -2,12 +2,12 @@ export const FORUM_DISCOVERY_PAGE_SIZE = 12
 export const FORUM_DISCOVERY_MIN_PAGE_SIZE = 8
 export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
 
-export type ForumDiscoveryMode = 'recommend' | 'latest'
+export type ForumDiscoveryMode = 'recommend' | 'latest' | 'hot'
 export type ForumTheme = 'plaza' | 'xiaochenshu'
 
 export function parseForumDiscoveryMode(value: unknown): ForumDiscoveryMode | null {
   if (value === undefined) return 'recommend'
-  return value === 'recommend' || value === 'latest' ? value : null
+  return value === 'recommend' || value === 'latest' || value === 'hot' ? value : null
 }
 
 export function parseForumDiscoveryLimit(value: unknown) {

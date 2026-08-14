@@ -35,6 +35,13 @@ type RecommendationCursor = {
   page: number
 }
 
+type HotCursor = {
+  likeCount: number
+  replyCount: number
+  date: Date
+  id: string
+}
+
 function createFeedSeed() {
   return `${Date.now().toString(36)}.${randomUUID()}`
 }
@@ -111,6 +118,21 @@ function parseCursor(value: unknown) {
 
 function buildCursor(row: Pick<DiscoveryRow, 'isPinned' | 'isFeatured' | 'createdAt' | 'id'>) {
   return `${row.isPinned ? '1' : '0'}|${row.isFeatured ? '1' : '0'}|${row.createdAt.toISOString()}|${row.id}`
+}
+
+function parseHotCursor(value: unknown): HotCursor | null {
+  if (typeof value !== 'string' || !value) return null
+  const [prefix, likeValue, replyValue, dateValue, id] = value.split('|')
+  const likeCount = Number.parseInt(likeValue || '', 10)
+  const replyCount = Number.parseInt(replyValue || '', 10)
+  const date = new Date(dateValue || '')
+  if (prefix !== 'h' || !Number.isSafeInteger(likeCount) || likeCount < 0 || !Number.isSafeInteger(replyCount) || replyCount < 0) return null
+  if (Number.isNaN(date.getTime()) || !id || id.length > 80) return null
+  return { likeCount, replyCount, date, id }
+}
+
+function buildHotCursor(row: Pick<DiscoveryRow, 'likeCount' | 'replyCount' | 'createdAt' | 'id'>) {
+  return `h|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
 }
 
 function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap: ReadonlyMap<string, string>) {
@@ -194,16 +216,18 @@ const discoverySelect = {
 
 type DiscoveryRow = Prisma.PostGetPayload<{ select: typeof discoverySelect }>
 
-function buildWhere({ boardId, query, excludedPostIds, excludedAuthorIds }: {
+function buildWhere({ boardId, query, excludedPostIds, excludedAuthorIds, excludeSystemPosts }: {
   boardId?: string
   query?: string
   excludedPostIds?: string[]
   excludedAuthorIds?: string[]
+  excludeSystemPosts?: boolean
 }): Prisma.PostWhereInput {
   return {
     ...publicPostWhere,
     User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    Board: { isActive: true },
+    Board: excludeSystemPosts ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
+    ...(excludeSystemPosts ? { isPinned: false, isFeatured: false } : {}),
     ...(boardId ? { boardId } : {}),
     ...(query ? { OR: [{ title: { contains: query } }, { summary: { contains: query } }] } : {}),
     ...(excludedPostIds?.length ? { id: { notIn: excludedPostIds } } : {}),
@@ -259,20 +283,23 @@ export async function POST(request: Request) {
     ? boards.find((board) => board.slug === boardValue || board.id === boardValue) || null
     : null
   if (boardValue && boardValue !== 'all' && !selectedBoard) return NextResponse.json({ message: '分区不存在' }, { status: 404 })
-  const mode: ForumDiscoveryMode = requestedMode === 'recommend' && !boardValue && !query ? 'recommend' : 'latest'
+  const mode: ForumDiscoveryMode = !boardValue && !query ? requestedMode : 'latest'
   const feedSeed = mode === 'recommend'
     ? (rawFeedSeed ? parseFeedSeed(rawFeedSeed) : { value: createFeedSeed(), startedAt: new Date() })
     : null
   if (mode === 'recommend' && !feedSeed) return NextResponse.json({ message: 'feedSeed invalid' }, { status: 400 })
   const cursor = mode === 'latest' ? parseCursor(rawCursor) : null
+  const hotCursor = mode === 'hot' ? parseHotCursor(rawCursor) : null
   const recommendationCursor = mode === 'recommend' && feedSeed
     ? parseRecommendationCursor(rawCursor, feedSeed)
     : null
   if (mode === 'latest' && rawCursor && !cursor) return NextResponse.json({ message: 'cursor invalid' }, { status: 400 })
+  if (mode === 'hot' && rawCursor && !hotCursor) return NextResponse.json({ message: 'cursor invalid' }, { status: 400 })
   if (mode === 'recommend' && rawCursor && !recommendationCursor) return NextResponse.json({ message: 'cursor invalid' }, { status: 400 })
   const currentUserId = user?.id
   const interactionUserId = currentUserId || '__anonymous__'
-  const where = buildWhere({ boardId: selectedBoard?.id, query })
+  const isSystemSort = !boardValue && !query && (mode === 'latest' || mode === 'hot')
+  const where = buildWhere({ boardId: selectedBoard?.id, query, excludeSystemPosts: isSystemSort })
 
   let rows: DiscoveryRow[] = []
   let hasMore = false
@@ -349,8 +376,34 @@ export async function POST(request: Request) {
     })
     hasMore = rows.length > 0 && nextRemaining > 0
     if (hasMore) nextCursor = buildRecommendationCursor(feedSeed!.value, (recommendationCursor?.page || 0) + 1)
+  } else if (mode === 'hot') {
+    const cursorConditions: Prisma.PostWhereInput[] = hotCursor
+      ? [
+          { likeCount: { lt: hotCursor.likeCount } },
+          { likeCount: hotCursor.likeCount, replyCount: { lt: hotCursor.replyCount } },
+          { likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: { lt: hotCursor.date } },
+          { likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: hotCursor.date, id: { lt: hotCursor.id } },
+        ]
+      : []
+    const hotWhere: Prisma.PostWhereInput = hotCursor
+      ? { AND: [where, { OR: cursorConditions }] }
+      : where
+    const pageRows = await prisma.post.findMany({
+      where: hotWhere,
+      orderBy: [{ likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: {
+        ...discoverySelect,
+        Like: { where: { userId: interactionUserId }, select: { id: true }, take: 1 },
+        PostFavorite: currentUserId ? { where: { userId: currentUserId }, select: { id: true }, take: 1 } : false,
+      },
+    })
+    hasMore = pageRows.length > limit
+    rows = pageRows.slice(0, limit).map((row) => ({ ...row, PostFavorite: row.PostFavorite || [] }))
+    const last = rows.at(-1)
+    nextCursor = last ? buildHotCursor(last) : null
   } else {
-    const pinAwareOrder = !query
+    const pinAwareOrder = !query && !isSystemSort
     const cursorConditions: Prisma.PostWhereInput[] = cursor && pinAwareOrder && typeof cursor.isPinned === 'boolean' && typeof cursor.isFeatured === 'boolean'
       ? [
           ...(cursor.isPinned ? [{ isPinned: false }] : []),

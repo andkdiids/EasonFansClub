@@ -31,10 +31,20 @@ export type DuelPlayerState = DuelPublicUser & {
   correctCount: number
   totalEffectiveAnswerMs: number
   submitted: boolean
+  selectedOptionKey: string | null
+  answerCorrect: boolean | null
   suspicious: boolean
 }
 
+export type DuelRoundAnswerState = {
+  userId: string
+  selectedOptionKey: string | null
+  submitted: boolean
+  isCorrect: boolean | null
+}
+
 export type DuelQuestionState = {
+  matchId: string
   id: string
   roundId: string
   publicToken: string
@@ -93,15 +103,21 @@ export type DuelMatchState = {
   matchId: string
   roomId: string
   mode: DuelMode
+  revision: number
   status: 'PLAYING' | 'FINISHED' | 'INVALID' | 'CLOSED'
   phase: 'STARTING' | 'PLAYING' | 'FINISHED' | 'INVALID' | 'CLOSED'
   currentQuestionIndex: number
   totalQuestions: number
   completedQuestionCount: number
+  roundId: string | null
+  questionId: string | null
+  questionToken: string | null
   serverNow: string
   players: DuelPlayerState[]
+  answers: DuelRoundAnswerState[]
   question: DuelQuestionState | null
   questionResult: DuelQuestionResult | null
+  lastQuestionResult: DuelQuestionResult | null
   result: DuelMatchResult | null
 }
 

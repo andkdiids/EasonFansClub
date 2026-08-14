@@ -16,9 +16,10 @@ export async function POST(request: Request, { params }: Context) {
   const { roomId } = await params
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   try {
-    const room = await joinDuelRoom(guard.user.id, roomId, { password: body?.password, inviteToken: body?.inviteToken })
-    await duelRealtimeHub.broadcastRoom(roomId, room)
-    return duelOk({ room })
+    const result = await joinDuelRoom(guard.user.id, roomId, { password: body?.password, inviteToken: body?.inviteToken })
+    for (const affectedRoom of result.affectedRooms) await duelRealtimeHub.broadcastRoom(affectedRoom.id, affectedRoom)
+    await duelRealtimeHub.broadcastRoom(roomId, result.room)
+    return duelOk({ room: result.room })
   } catch (error) {
     return duelError(error, 'Unable to join duel room')
   }
