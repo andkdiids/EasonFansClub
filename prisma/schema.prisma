@@ -1160,6 +1160,8 @@ model GuessSongDuelRoom {
   status                GuessSongDuelRoomStatus @default(WAITING)
   hostReady             Boolean                 @default(false)
   challengerReady       Boolean                 @default(false)
+  hostLastSeenAt        DateTime?
+  challengerLastSeenAt  DateTime?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   closedAt              DateTime?
@@ -1208,6 +1210,7 @@ model GuessSongDuelPlayer {
   correctCount         Int                @default(0)
   totalEffectiveAnswerMs Int              @default(0)
   isOnline             Boolean            @default(false)
+  lastSeenAt            DateTime?
   disconnectedAt       DateTime?
   reconnectDeadlineAt  DateTime?
   suspicious            Boolean            @default(false)
@@ -1222,6 +1225,7 @@ model GuessSongDuelPlayer {
   @@unique([matchId, slot])
   @@index([userId, createdAt])
   @@index([matchId, isOnline])
+  @@index([matchId, lastSeenAt])
 }
 
 model GuessSongDuelQuestion {
@@ -1876,6 +1880,7 @@ model Post {
   id            String          @id @default(cuid())
   title         String
   content       String
+  ipRegion      String?
   viewCount     Int             @default(0)
   likeCount     Int             @default(0)
   replyCount    Int             @default(0)

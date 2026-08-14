@@ -7,7 +7,8 @@ import { splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import {
-  FORUM_DISCOVERY_PAGE_SIZE,
+  parseForumDiscoveryLimit,
+  parseForumDiscoveryMode,
   normalizeDiscoveryIds,
   selectRecommendationRows,
   type ForumDiscoveryMode,
@@ -19,6 +20,7 @@ import { sanitizeText } from '@/lib/security'
 export const dynamic = 'force-dynamic'
 
 const DISCOVERY_CANDIDATE_POOL = 60
+const DISCOVERY_MAX_SEEN_IDS = 500
 
 function shuffle<T>(rows: T[]) {
   for (let index = rows.length - 1; index > 0; index -= 1) {
@@ -59,6 +61,7 @@ function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap:
   return {
     id: row.id,
     title: row.title,
+    ipRegion: row.ipRegion,
     likeCount: row.likeCount,
     favoriteCount: row.favoriteCount,
     replyCount: row.replyCount,
@@ -90,6 +93,7 @@ const discoverySelect = {
   id: true,
   title: true,
   content: true,
+  ipRegion: true,
   likeCount: true,
   favoriteCount: true,
   replyCount: true,
@@ -138,16 +142,42 @@ function buildWhere({ boardId, query, excludedPostIds, excludedAuthorIds }: {
   }
 }
 
+function hasInvalidDiscoveryIds(value: unknown) {
+  if (value === undefined) return false
+  if (!Array.isArray(value) || value.length > DISCOVERY_MAX_SEEN_IDS) return true
+  return value.some((item) => typeof item !== 'string' || !item.trim() || item.trim().length > 80)
+}
+
 export async function POST(request: Request) {
   const user = await getCurrentUser()
-  const body = await request.json().catch(() => ({})) as Record<string, unknown>
-  const requestedMode: ForumDiscoveryMode = body.mode === 'latest' ? 'latest' : 'recommend'
-  const boardValue = sanitizeText(typeof body.board === 'string' ? body.board : '', 80)
-  const query = sanitizeText(typeof body.query === 'string' ? body.query : '', 100)
-  const limit = Math.min(20, Math.max(8, Number(body.limit) || FORUM_DISCOVERY_PAGE_SIZE))
+  const rawBody = await request.json().catch(() => null)
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return NextResponse.json({ message: '请求参数无效' }, { status: 400 })
+  }
+  const body = rawBody as Record<string, unknown>
+  const requestedMode = parseForumDiscoveryMode(body.mode)
+  const limit = parseForumDiscoveryLimit(body.limit)
+  const rawBoard = body.board
+  const rawQuery = body.query
+  const rawCursor = body.cursor
+  const rawSeenPostIds = body.seenPostIds
+  const rawSeenAuthorIds = body.seenAuthorIds
+  if (!requestedMode) return NextResponse.json({ message: 'mode 参数无效' }, { status: 400 })
+  if (limit === null) return NextResponse.json({ message: 'limit 参数无效' }, { status: 400 })
+  if (rawBoard !== undefined && rawBoard !== null && typeof rawBoard !== 'string') return NextResponse.json({ message: 'board 参数无效' }, { status: 400 })
+  if (typeof rawBoard === 'string' && rawBoard.length > 80) return NextResponse.json({ message: 'board 参数过长' }, { status: 400 })
+  if (rawQuery !== undefined && rawQuery !== null && typeof rawQuery !== 'string') return NextResponse.json({ message: 'query 参数无效' }, { status: 400 })
+  if (typeof rawQuery === 'string' && rawQuery.length > 100) return NextResponse.json({ message: 'query 参数过长' }, { status: 400 })
+  if (rawCursor !== undefined && rawCursor !== null && typeof rawCursor !== 'string') return NextResponse.json({ message: 'cursor 参数无效' }, { status: 400 })
+  if (typeof rawCursor === 'string' && (!rawCursor || rawCursor.length > 300)) return NextResponse.json({ message: 'cursor 参数无效' }, { status: 400 })
+  if (hasInvalidDiscoveryIds(rawSeenPostIds)) return NextResponse.json({ message: 'seenPostIds 参数无效' }, { status: 400 })
+  if (hasInvalidDiscoveryIds(rawSeenAuthorIds)) return NextResponse.json({ message: 'seenAuthorIds 参数无效' }, { status: 400 })
+  const boardValue = sanitizeText(typeof rawBoard === 'string' ? rawBoard : '', 80)
+  const query = sanitizeText(typeof rawQuery === 'string' ? rawQuery : '', 100)
   const seenPostIds = normalizeDiscoveryIds(body.seenPostIds)
   const seenAuthorIds = normalizeDiscoveryIds(body.seenAuthorIds)
-  const cursor = parseCursor(body.cursor)
+  const cursor = parseCursor(rawCursor)
+  if (rawCursor && !cursor) return NextResponse.json({ message: 'cursor 参数无效' }, { status: 400 })
 
   const boards = await prisma.board.findMany({
     where: { isActive: true },
@@ -158,7 +188,8 @@ export async function POST(request: Request) {
   const selectedBoard = boardValue && boardValue !== 'all'
     ? boards.find((board) => board.slug === boardValue || board.id === boardValue) || null
     : null
-  const mode: ForumDiscoveryMode = requestedMode === 'recommend' && !boardValue && !selectedBoard && !query ? 'recommend' : 'latest'
+  if (boardValue && boardValue !== 'all' && !selectedBoard) return NextResponse.json({ message: '分区不存在' }, { status: 404 })
+  const mode: ForumDiscoveryMode = requestedMode === 'recommend' && !boardValue && !query ? 'recommend' : 'latest'
   const currentUserId = user?.id
   const interactionUserId = currentUserId || '__anonymous__'
   const where = buildWhere({
@@ -196,7 +227,17 @@ export async function POST(request: Request) {
         limit,
       )
       rows = selected.rows.map((item) => item.row)
-      hasMore = totalRemaining > rows.length
+      if (rows.length) {
+        const nextRemaining = await prisma.post.count({
+          where: buildWhere({
+            boardId: selectedBoard?.id,
+            query,
+            excludedPostIds: [...seenPostIds, ...rows.map((row) => row.id)],
+            excludedAuthorIds: [...seenAuthorIds, ...rows.map((row) => row.User.id)],
+          }),
+        })
+        hasMore = nextRemaining > 0
+      }
     }
   } else {
     const pinAwareOrder = !query

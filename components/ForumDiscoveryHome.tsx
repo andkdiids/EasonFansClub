@@ -22,6 +22,12 @@ type DiscoverySession = {
   scrollY: number
 }
 
+type DiscoveryRequest = {
+  key: string
+  controller: AbortController
+  promise: Promise<void>
+}
+
 function readSession(key: string) {
   try {
     const value = window.sessionStorage.getItem(key)
@@ -60,7 +66,11 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
   const seenAuthorIdsRef = useRef(new Set<string>())
   const loadingMoreRef = useRef(false)
   const hasMoreRef = useRef(true)
+  const postsRef = useRef<ForumDiscoveryPost[]>([])
+  const nextCursorRef = useRef<string | null>(null)
   const requestSequence = useRef(0)
+  const requestRef = useRef<DiscoveryRequest | null>(null)
+  const autoLoadBlockedRef = useRef(false)
   const initializedSessionKeyRef = useRef('')
   const sentinelRef = useRef<HTMLDivElement>(null)
   const touchStartRef = useRef<number | null>(null)
@@ -77,12 +87,22 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     }
   }, [sessionKey])
 
-  const loadPage = useCallback(async (reset: boolean) => {
+  const loadPage = useCallback(async (reset: boolean, manual = false) => {
+    if (!reset && autoLoadBlockedRef.current && !manual) return
+    if (!reset && requestRef.current) return requestRef.current.promise
+
+    const requestKey = `${sessionKey}:${reset ? 'reset' : `more:${nextCursorRef.current || 'start'}`}`
+    if (requestRef.current?.key === requestKey) return requestRef.current.promise
+    requestRef.current?.controller.abort()
+    if (reset || manual) autoLoadBlockedRef.current = false
+
     if (reset) {
       loadingMoreRef.current = false
       hasMoreRef.current = true
       seenPostIdsRef.current = new Set()
       seenAuthorIdsRef.current = new Set()
+      postsRef.current = []
+      nextCursorRef.current = null
       setPosts([])
       setNextCursor(null)
       setHasMore(true)
@@ -96,70 +116,92 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     }
 
     const sequence = ++requestSequence.current
+    const controller = new AbortController()
     setError('')
-    try {
-      const response = await fetch('/api/forum/discover', {
+    const request = (async () => {
+      try {
+        const response = await fetch('/api/forum/discover', {
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           mode,
           board: boardValue || null,
           query,
           limit: FORUM_DISCOVERY_PAGE_SIZE,
-          cursor: reset ? null : nextCursor,
+          cursor: reset ? null : nextCursorRef.current,
           seenPostIds: reset ? [] : [...seenPostIdsRef.current],
           seenAuthorIds: reset ? [] : [...seenAuthorIdsRef.current],
         }),
-      })
-      const payload = await response.json().catch(() => null) as ForumDiscoveryResponse | { message?: string } | null
-      if (!response.ok || !payload || !('posts' in payload)) throw new Error(payload && 'message' in payload ? payload.message : '内容加载失败')
-      if (sequence !== requestSequence.current) return
+        })
+        const payload = await response.json().catch(() => null) as ForumDiscoveryResponse | { message?: string } | null
+        if (!response.ok || !payload || !('posts' in payload)) throw new Error(payload && 'message' in payload ? payload.message : '内容加载失败')
+        if (sequence !== requestSequence.current) return
 
-      const incoming = payload.posts
-      const merged = reset
-        ? incoming
-        : [...posts, ...incoming.filter((post) => !posts.some((current) => current.id === post.id))]
-      const nextSeenPostIds = reset ? new Set<string>() : new Set(seenPostIdsRef.current)
-      const nextSeenAuthorIds = reset ? new Set<string>() : new Set(seenAuthorIdsRef.current)
-      incoming.forEach((post) => {
-        nextSeenPostIds.add(post.id)
-        if (mode === 'recommend') nextSeenAuthorIds.add(post.author.id)
-      })
-      seenPostIdsRef.current = nextSeenPostIds
-      seenAuthorIdsRef.current = nextSeenAuthorIds
-      hasMoreRef.current = payload.hasMore
-      setPosts(merged)
-      setBoards(payload.boards)
-      setPermissions(payload.permissions)
-      setNextCursor(payload.nextCursor)
-      setHasMore(payload.hasMore)
-      persistSession({
-        posts: merged,
-        boards: payload.boards,
-        permissions: payload.permissions,
-        hasMore: payload.hasMore,
-        nextCursor: payload.nextCursor,
-        seenPostIds: [...nextSeenPostIds],
-        seenAuthorIds: [...nextSeenAuthorIds],
-        scrollY: window.scrollY,
-      })
-    } catch (reason) {
-      if (sequence === requestSequence.current) setError(reason instanceof Error ? reason.message : '内容加载失败')
-    } finally {
-      if (sequence === requestSequence.current) {
-        setLoading(false)
-        setLoadingMore(false)
-        loadingMoreRef.current = false
+        const incoming = payload.posts
+        const currentPosts = postsRef.current
+        const merged = reset
+          ? incoming
+          : [...currentPosts, ...incoming.filter((post) => !currentPosts.some((current) => current.id === post.id))]
+        const nextSeenPostIds = reset ? new Set<string>() : new Set(seenPostIdsRef.current)
+        const nextSeenAuthorIds = reset ? new Set<string>() : new Set(seenAuthorIdsRef.current)
+        incoming.forEach((post) => {
+          nextSeenPostIds.add(post.id)
+          if (mode === 'recommend') nextSeenAuthorIds.add(post.author.id)
+        })
+        postsRef.current = merged
+        nextCursorRef.current = payload.nextCursor
+        seenPostIdsRef.current = nextSeenPostIds
+        seenAuthorIdsRef.current = nextSeenAuthorIds
+        hasMoreRef.current = payload.hasMore
+        setPosts(merged)
+        setBoards(payload.boards)
+        setPermissions(payload.permissions)
+        setNextCursor(payload.nextCursor)
+        setHasMore(payload.hasMore)
+        persistSession({
+          posts: merged,
+          boards: payload.boards,
+          permissions: payload.permissions,
+          hasMore: payload.hasMore,
+          nextCursor: payload.nextCursor,
+          seenPostIds: [...nextSeenPostIds],
+          seenAuthorIds: [...nextSeenAuthorIds],
+          scrollY: window.scrollY,
+        })
+      } catch (reason) {
+        if (controller.signal.aborted) return
+        if (sequence === requestSequence.current) {
+          autoLoadBlockedRef.current = true
+          setError(reason instanceof Error ? reason.message : '内容加载失败')
+        }
+      } finally {
+        if (sequence === requestSequence.current) {
+          setLoading(false)
+          setLoadingMore(false)
+          loadingMoreRef.current = false
+        }
       }
-    }
-  }, [boardValue, mode, nextCursor, persistSession, posts, query, sessionKey])
+    })()
+    requestRef.current = { key: requestKey, controller, promise: request }
+    void request.finally(() => {
+      if (requestRef.current?.promise === request) requestRef.current = null
+    })
+    return request
+  }, [boardValue, mode, persistSession, query, sessionKey])
 
   useEffect(() => setSearchValue(query), [query])
 
   useEffect(() => {
     if (initializedSessionKeyRef.current === sessionKey) return
     initializedSessionKeyRef.current = sessionKey
+    const cleanupRequest = () => {
+      if (initializedSessionKeyRef.current === sessionKey) initializedSessionKeyRef.current = ''
+      const request = requestRef.current
+      request?.controller.abort()
+      if (requestRef.current === request) requestRef.current = null
+    }
     const stored = readSession(sessionKey)
     if (stored && stored.posts.length > 0) {
       setPosts(stored.posts)
@@ -167,14 +209,17 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       setPermissions(stored.permissions)
       setNextCursor(stored.nextCursor)
       setHasMore(stored.hasMore)
+      postsRef.current = stored.posts
+      nextCursorRef.current = stored.nextCursor
       hasMoreRef.current = stored.hasMore
       seenPostIdsRef.current = new Set(stored.seenPostIds || stored.posts.map((post) => post.id))
       seenAuthorIdsRef.current = new Set(stored.seenAuthorIds || stored.posts.map((post) => post.author.id))
       setRestoreScrollY(Number.isFinite(stored.scrollY) ? Math.max(0, stored.scrollY) : null)
       setLoading(false)
-      return
+      return cleanupRequest
     }
     void loadPage(true)
+    return cleanupRequest
   }, [loadPage, sessionKey])
 
   useEffect(() => {
@@ -346,7 +391,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} onOpen={openPost} />)}
         </div>
       ) : null}
-      {error && posts.length ? <div className="forum-discovery-load-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadPage(false)}>重试</button></div> : null}
+      {error && posts.length ? <div className="forum-discovery-load-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadPage(false, true)}>重试</button></div> : null}
       {loadingMore ? <div className="forum-discovery-loading-more" aria-live="polite">正在加载更多</div> : null}
       {!hasMore && posts.length ? <p className="forum-discovery-end">已经看到这里了</p> : null}
       <div ref={sentinelRef} className="forum-discovery-sentinel" aria-hidden="true" />

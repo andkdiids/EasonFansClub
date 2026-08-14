@@ -15,6 +15,7 @@ type PostItem = {
   id: string
   title: string
   content: string
+  ipRegion: string | null
   replyCount: number
   likeCount: number
   viewCount: number
@@ -207,7 +208,10 @@ function ModuleContent({
 >            <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
             <h3 className="mt-2 text-lg font-black text-brand-950">{post.title}</h3>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-            <p className="mt-2 text-xs font-bold text-slate-500">回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</p>
+            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
+              <IpRegionLabel ipRegion={post.ipRegion} />
+              <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
+            </p>
           </Link>
         ))}
         {pageNavigation}

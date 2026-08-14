@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   getForumDiscoveryCoverFit,
   normalizeDiscoveryIds,
+  parseForumDiscoveryLimit,
+  parseForumDiscoveryMode,
   selectRecommendationRows,
 } from '../lib/forum-discovery'
 
@@ -51,4 +53,58 @@ test('主题切换和发现详情只在移动端边界启用', () => {
   assert.match(detail, /max-width: 767px/)
   assert.match(css, /@media \(max-width:767px\)[\s\S]*forum-discovery-grid/)
   assert.match(css, /data-forum-detail-discover='true'[\s\S]*app-mobile-nav/)
+})
+
+test('小臣书接口参数有明确边界，非法输入不会静默变成默认请求', () => {
+  assert.equal(parseForumDiscoveryMode(undefined), 'recommend')
+  assert.equal(parseForumDiscoveryMode('latest'), 'latest')
+  assert.equal(parseForumDiscoveryMode('other'), null)
+  assert.equal(parseForumDiscoveryLimit(undefined), 12)
+  assert.equal(parseForumDiscoveryLimit(8), 8)
+  assert.equal(parseForumDiscoveryLimit(20), 20)
+  assert.equal(parseForumDiscoveryLimit(7), null)
+  assert.equal(parseForumDiscoveryLimit(21), null)
+  assert.equal(parseForumDiscoveryLimit('12'), null)
+  assert.deepEqual(normalizeDiscoveryIds([' p1 ', 'p1', '']), ['p1'])
+  assert.deepEqual(normalizeDiscoveryIds(['x'.repeat(81)]), [])
+  assert.equal(normalizeDiscoveryIds(Array.from({ length: 501 }, (_, index) => `post-${index}`)).length, 500)
+
+  const route = readFileSync('app/api/forum/discover/route.ts', 'utf8')
+  assert.match(route, /getCurrentUser\(\)/)
+  assert.match(route, /parseForumDiscoveryMode/)
+  assert.match(route, /parseForumDiscoveryLimit/)
+  assert.match(route, /status: 400/)
+  assert.match(route, /status: 404/)
+  assert.match(route, /length > DISCOVERY_MAX_SEEN_IDS/)
+  assert.match(route, /take: 100/)
+  assert.match(route, /\.\.\.discoverySelect/)
+  assert.doesNotMatch(route, /passwordHash|verificationToken|sessionToken|answer/i)
+})
+
+test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误停止自动重试保护', () => {
+  const home = readFileSync('components/ForumHome.tsx', 'utf8')
+  const discovery = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
+
+  assert.match(home, /useState<boolean \| null>\(previewMode \? false : null\)/)
+  assert.match(home, /isMobile === null/)
+  assert.match(discovery, /new AbortController\(\)/)
+  assert.match(discovery, /signal: controller\.signal/)
+  assert.match(discovery, /requestRef\.current\?\.controller\.abort\(\)/)
+  assert.match(discovery, /postsRef\.current/)
+  assert.match(discovery, /autoLoadBlockedRef/)
+  assert.match(discovery, /loadPage\(false, true\)/)
+  assert.doesNotMatch(discovery, /setInterval|SWR|mutate\(/i)
+})
+
+test('小臣书详情收藏使用明确目标状态，重复请求不会反向切换', () => {
+  const favoriteRoute = readFileSync('app/api/posts/[postId]/favorite/route.ts', 'utf8')
+  const actions = readFileSync('components/PostActions.tsx', 'utf8')
+
+  assert.match(favoriteRoute, /requireUser\(\)/)
+  assert.match(favoriteRoute, /publicPostWhere/)
+  assert.match(favoriteRoute, /requestedState/)
+  assert.match(favoriteRoute, /postFavorite\.upsert/)
+  assert.match(favoriteRoute, /postFavorite\.deleteMany/)
+  assert.match(actions, /body: JSON\.stringify\(\{ isFavorited: nextFavorited \}\)/)
+  assert.match(actions, /finally \{[\s\S]*setIsSubmitting\(false\)/)
 })

@@ -11,7 +11,7 @@ import { parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
-import { updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -49,6 +49,7 @@ export async function GET(request: Request) {
         title: true,
         summary: true,
         content: true,
+        ipRegion: true,
         likeCount: true,
         favoriteCount: true,
         replyCount: true,
@@ -160,6 +161,7 @@ export async function POST(request: Request) {
 
     const canPublishImmediately = isAdmin
     const moderationStatus = canPublishImmediately ? 'APPROVED' as const : 'PENDING' as const
+    const ipRegion = await resolveIpRegion(request)
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${user.id} FOR UPDATE`
       await tx.user.findFirstOrThrow({
@@ -172,6 +174,7 @@ export async function POST(request: Request) {
           authorId: user.id,
           title: input.title,
           content: input.content,
+          ipRegion,
           summary: createSummary(input.content),
           status: 'PUBLISHED',
           moderationStatus,
@@ -223,7 +226,7 @@ export async function POST(request: Request) {
     }
 
     const detailUrl = `/posts/${result.post.id}`
-    void updateUserIpRegion(user.id, request)
+    void updateUserIpRegion(user.id, ipRegion)
     if (moderationStatus === 'PENDING') void emitRealtimeToAdmins('notification')
     await syncUserAchievements(user.id, ['POST']).catch((achievementError) => {
       console.error('[achievements:post]', achievementError)

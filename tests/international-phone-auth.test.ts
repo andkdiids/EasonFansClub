@@ -81,3 +81,22 @@ test('注册和登录共享紧凑区号触发器，且展开面板保留足够�
   assert.match(selector, /absolute right-2 top-1\/2/)
   assert.match(selector, /w-\[min\(280px,calc\(100vw-2rem\)\)\]/)
 })
+
+test('编辑资料手机号使用对齐的紧凑区号列，并优先向上展开且不撑开布局', () => {
+  const selector = source('components/InternationalPhoneInput.tsx')
+  const profile = source('app/profile/ProfileSettingsForm.tsx')
+  const styles = source('app/globals.css')
+
+  assert.match(selector, /containerClassName\?: string/)
+  assert.match(selector, /countryContainerClassName\?: string/)
+  assert.match(selector, /dropdownPlacement\?: 'auto' \| 'top' \| 'bottom'/)
+  assert.match(selector, /data-placement=\{dropdownSide\}/)
+  assert.match(selector, /className=\{`\$\{containerClassName \|\| 'mt-1'\} flex min-w-0 items-stretch gap-2`\}/)
+  assert.match(profile, /containerClassName="profile-phone-input mt-3"/)
+  assert.match(profile, /countryContainerClassName="profile-phone-country"/)
+  assert.match(profile, /dropdownPlacement="top"/)
+  assert.doesNotMatch(profile, /inputClassName="mt-3"/)
+  assert.match(styles, /\.profile-phone-input \.profile-phone-country \{ width:88px; \}/)
+  assert.match(styles, /\.phone-country-options\[data-placement='top'\][^{]*\{[^}]*top:auto; bottom:calc\(100% \+ 4px\)/)
+  assert.match(styles, /\.phone-country-options \{[^}]*max-height:min\(360px,calc\(100dvh - 9rem\)\)/)
+})

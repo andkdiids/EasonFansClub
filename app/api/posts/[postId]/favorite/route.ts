@@ -5,11 +5,13 @@ import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
   const { postId } = await context.params
+  const body = await request.json().catch(() => null) as { isFavorited?: unknown } | null
+  const requestedState = typeof body?.isFavorited === 'boolean' ? body.isFavorited : null
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
@@ -17,11 +19,19 @@ export async function POST(_request: Request, context: RouteContext) {
     })
     if (!post) return null
 
-    const existing = await tx.postFavorite.findUnique({
-      where: { postId_userId: { postId, userId: guard.user.id } },
-    })
+    const existing = requestedState === null
+      ? await tx.postFavorite.findUnique({ where: { postId_userId: { postId, userId: guard.user.id } } })
+      : null
 
-    if (existing) {
+    if (requestedState === true) {
+      await tx.postFavorite.upsert({
+        where: { postId_userId: { postId, userId: guard.user.id } },
+        update: {},
+        create: { postId, userId: guard.user.id },
+      })
+    } else if (requestedState === false) {
+      await tx.postFavorite.deleteMany({ where: { postId, userId: guard.user.id } })
+    } else if (existing) {
       await tx.postFavorite.delete({ where: { id: existing.id } })
     } else {
       await tx.postFavorite.create({ data: { postId, userId: guard.user.id } })
@@ -29,7 +39,7 @@ export async function POST(_request: Request, context: RouteContext) {
 
     const favoriteCount = await tx.postFavorite.count({ where: { postId } })
     await tx.post.update({ where: { id: postId }, data: { favoriteCount } })
-    return { isFavorited: !existing, favoriteCount }
+    return { isFavorited: requestedState ?? !existing, favoriteCount }
   })
 
   if (!result) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })

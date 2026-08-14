@@ -8,6 +8,7 @@ import { ImageViewer } from '@/components/ImageViewer'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
 import { ForumDiscoveryDetailController } from '@/components/ForumDiscoveryDetailController'
 import { ForumDiscoveryDetailTopbar } from '@/components/ForumDiscoveryDetailTopbar'
@@ -616,6 +617,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               </Link>
             )}
             <span>{formatDate(post.createdAt)}</span>
+            <IpRegionLabel ipRegion={post.ipRegion} />
             <PostViewCounter postId={post.id} initialCount={post.viewCount} />
             <span>回复 {post.replyCount}</span>
           </div>

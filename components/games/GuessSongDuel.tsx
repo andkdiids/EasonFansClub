@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { DUEL_HEARTBEAT_INTERVAL_MS } from '@/lib/guess-song-duel-config'
 import type { DuelClientCommand, DuelMatchResult, DuelMatchState, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
 
 type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null }
@@ -230,6 +231,12 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   useEffect(() => {
     if (!roomId && !matchId) return
     stoppedRef.current = false
+    const sendHeartbeat = () => {
+      const currentSocket = socketRef.current
+      if (currentSocket?.readyState === WebSocket.OPEN) {
+        currentSocket.send(JSON.stringify({ type: 'PING' } satisfies DuelClientCommand))
+      }
+    }
     const connect = () => {
       if (stoppedRef.current || socketRef.current || typeof window === 'undefined') return
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -244,6 +251,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         for (let index = 0; index < 5; index += 1) window.setTimeout(sync, index * 80)
         if (roomIdRef.current) socket.send(JSON.stringify({ type: 'JOIN_ROOM', roomId: roomIdRef.current } satisfies DuelClientCommand))
         if (matchIdRef.current) socket.send(JSON.stringify({ type: 'JOIN_MATCH', matchId: matchIdRef.current } satisfies DuelClientCommand))
+        sendHeartbeat()
       }
       socket.onmessage = (message) => {
         try {
@@ -266,8 +274,27 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       socket.onerror = () => socket.close()
     }
     connect()
+    const heartbeatTimer = window.setInterval(sendHeartbeat, DUEL_HEARTBEAT_INTERVAL_MS)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      sendHeartbeat()
+      const currentRoomId = roomIdRef.current
+      if (!currentRoomId) return
+      void api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(currentRoomId)}`)
+        .then((data) => {
+          setRoom(data.room)
+          if (data.room.matchId) {
+            setMatchId(data.room.matchId)
+            setView('match')
+          }
+        })
+        .catch(() => undefined)
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       stoppedRef.current = true
+      window.clearInterval(heartbeatTimer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = null
       const socket = socketRef.current

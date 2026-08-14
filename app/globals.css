@@ -177,6 +177,29 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .checkin-history-detail { width:100%; max-height:calc(100% - env(safe-area-inset-top)); border-right:0; border-bottom:0; border-left:0; border-radius:20px 20px 0 0; padding-bottom:env(safe-area-inset-bottom); }
 }
 
+/* 挂号记录沿用当前每日挂号页的直角、扁平视觉；禁用日期仍保留弱化对比。 */
+.checkin-history-trigger,
+.checkin-history-dialog,
+.checkin-history-close,
+.checkin-history-toolbar>button,
+.checkin-history-picker,
+.checkin-history-picker select,
+.checkin-history-today-link,
+.checkin-history-day-cell,
+.checkin-history-day-number,
+.checkin-history-detail,
+.checkin-history-detail-facts>div,
+.checkin-history-message { border-radius:0; }
+.checkin-history-weekdays>span,
+.checkin-history-weekdays>span:first-child,
+.checkin-history-weekdays>span:last-child,
+.checkin-history-toolbar>span,
+.checkin-history-picker label>span,
+.checkin-history-day-cell { color:var(--foreground); }
+.checkin-history-day-cell.has-record { border-color:var(--border); }
+.checkin-history-day-cell.is-outside-month,
+.checkin-history-day-cell.is-future { color:var(--foreground-muted); }
+
 /* 听听·对决：独立沉浸式实时对战界面 */
 .duel-page {
   min-height: 100dvh;
@@ -1528,6 +1551,15 @@ padding-top:18vh; }.auth-brand-copy { display:none; }.auth-form-panel { padding:
 .auth-method-tabs button[aria-selected='true'] { border-bottom-color:#6ea9ff; color:#fff; }
 .phone-country-options { max-height:min(360px,calc(100dvh - 9rem)); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; -ms-overflow-style:none; }
 .phone-country-options::-webkit-scrollbar { display:none; }
+.phone-country-options[data-placement='top'] { top:auto; bottom:calc(100% + 4px); }
+.profile-phone-input .profile-phone-country { width:88px; }
+.profile-phone-input .profile-phone-country>input,.profile-phone-input>input { border-color:var(--border); color:var(--foreground); background:var(--surface-elevated); }
+.profile-phone-input .profile-phone-country>input::placeholder,.profile-phone-input>input::placeholder { color:var(--foreground-muted); opacity:1; }
+.profile-phone-input .profile-phone-country>span { color:var(--foreground-muted); }
+.profile-phone-input .phone-country-options { max-height:min(320px,calc(100dvh - 8rem)); border-color:var(--border); background:var(--surface-elevated); }
+.profile-phone-input .phone-country-options button { color:var(--foreground); }
+.profile-phone-input .phone-country-options button:hover,.profile-phone-input .phone-country-options button[aria-selected='true'] { color:var(--primary); background:var(--accent); }
+.profile-phone-input .phone-country-options button .text-slate-400 { color:var(--foreground-muted); }
 .auth-input { min-height:44px; padding:0 13px; outline:none; }
 .auth-input:focus { border-color:#6ea9ff!important; }
 .auth-submit-button { min-height:46px; border:1px solid var(--primary); border-radius:2px; color:#fff; background:var(--primary); font-size:13px; font-weight:850; box-shadow:none; }

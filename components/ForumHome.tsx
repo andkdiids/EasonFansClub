@@ -34,7 +34,7 @@ const previewData: ForumFeedResponse = {
 }
 
 export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobile, setIsMobile] = useState<boolean | null>(previewMode ? false : null)
   const [theme, setTheme] = useState<ForumTheme>('xiaochenshu')
 
   useEffect(() => {
@@ -56,6 +56,11 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
     setTheme(nextTheme)
     window.dispatchEvent(new CustomEvent('ecfc:forum-theme-change', { detail: { theme: nextTheme } }))
   }
+
+  // Wait for the client viewport before mounting either feed. This prevents a
+  // mobile hydration pass from mounting ForumPlazaHome and firing /api/forum/feed
+  // before the Xiaochenshu feed takes over.
+  if (!previewMode && isMobile === null) return null
 
   if (!previewMode && isMobile && theme === 'xiaochenshu') {
     return <ForumDiscoveryHome onSwitchToPlaza={() => switchTheme('plaza')} />

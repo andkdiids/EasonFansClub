@@ -1,0 +1,2 @@
+ALTER TABLE `Post`
+  ADD COLUMN `ipRegion` VARCHAR(191) NULL;

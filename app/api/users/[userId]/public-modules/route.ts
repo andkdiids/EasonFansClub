@@ -44,6 +44,7 @@ export async function GET(request: Request, context: RouteContext) {
           id: true,
           title: true,
           content: true,
+          ipRegion: true,
           replyCount: true,
           likeCount: true,
           viewCount: true,

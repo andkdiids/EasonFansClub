@@ -22,6 +22,9 @@ type InternationalPhoneInputProps = {
   placeholder?: string
   inputClassName?: string
   countryInputClassName?: string
+  containerClassName?: string
+  countryContainerClassName?: string
+  dropdownPlacement?: 'auto' | 'top' | 'bottom'
   'data-register-field'?: string
 }
 
@@ -38,6 +41,9 @@ export function InternationalPhoneInput({
   placeholder = '请输入本地手机号码',
   inputClassName = '',
   countryInputClassName = '',
+  containerClassName = '',
+  countryContainerClassName = '',
+  dropdownPlacement = 'bottom',
   'data-register-field': dataRegisterField,
 }: Readonly<InternationalPhoneInputProps>) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -47,6 +53,7 @@ export function InternationalPhoneInput({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [dropdownSide, setDropdownSide] = useState<'top' | 'bottom'>(dropdownPlacement === 'top' ? 'top' : 'bottom')
   const selectedCountry = getPhoneCountry(country)
   const filteredCountries = useMemo(() => filterPhoneCountries(query), [query])
   const safeActiveIndex = Math.min(activeIndex, Math.max(filteredCountries.length - 1, 0))
@@ -66,6 +73,36 @@ export function InternationalPhoneInput({
     if (!open || !filteredCountries[safeActiveIndex]) return
     optionRefs.current.get(filteredCountries[safeActiveIndex].code)?.scrollIntoView({ block: 'nearest' })
   }, [filteredCountries, open, safeActiveIndex])
+
+  useEffect(() => {
+    if (!open) return
+
+    function updateDropdownSide() {
+      const root = rootRef.current
+      if (!root) return
+      if (dropdownPlacement === 'bottom') {
+        setDropdownSide('bottom')
+        return
+      }
+
+      const rect = root.getBoundingClientRect()
+      const topSpace = rect.top - 8
+      const bottomSpace = window.innerHeight - rect.bottom - 8
+      if (dropdownPlacement === 'top') {
+        setDropdownSide(topSpace >= 180 || topSpace >= bottomSpace ? 'top' : 'bottom')
+      } else {
+        setDropdownSide(bottomSpace >= 180 || bottomSpace >= topSpace ? 'bottom' : 'top')
+      }
+    }
+
+    updateDropdownSide()
+    window.addEventListener('resize', updateDropdownSide)
+    window.addEventListener('scroll', updateDropdownSide, true)
+    return () => {
+      window.removeEventListener('resize', updateDropdownSide)
+      window.removeEventListener('scroll', updateDropdownSide, true)
+    }
+  }, [dropdownPlacement, open])
 
   function openCountryList() {
     if (disabled) return
@@ -129,8 +166,8 @@ export function InternationalPhoneInput({
   }
 
   return (
-    <div className="mt-1 flex min-w-0 items-stretch gap-2">
-      <div ref={rootRef} className="relative w-[72px] shrink-0">
+    <div className={`${containerClassName || 'mt-1'} flex min-w-0 items-stretch gap-2`}>
+      <div ref={rootRef} className={`relative w-[72px] shrink-0 ${countryContainerClassName}`}>
         <input
           type="text"
           value={open ? query : `+${selectedCountry.dialCode}`}
@@ -159,6 +196,7 @@ export function InternationalPhoneInput({
             id={listId}
             role="listbox"
             aria-label="国家或地区列表"
+            data-placement={dropdownSide}
             className="phone-country-options absolute left-0 top-[calc(100%+4px)] z-40 w-[min(280px,calc(100vw-2rem))] rounded-lg border border-sky-100 bg-white p-1 shadow-xl"
           >
             {filteredCountries.length ? filteredCountries.map((item, index) => (

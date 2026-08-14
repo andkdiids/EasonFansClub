@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
+import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
 import { profileImageUrl } from '@/lib/images'
@@ -11,6 +12,7 @@ import { formatUid } from '@/lib/uid'
 type PostItem = {
   id: string
   title: string
+  ipRegion?: string | null
   likeCount: number
   favoriteCount?: number
   replyCount: number
@@ -92,6 +94,7 @@ export function PostList({
                 </span>
               ) : null}
               <span>{formatDate(post.createdAt instanceof Date ? post.createdAt : new Date(post.createdAt))}</span>
+              <IpRegionLabel ipRegion={post.ipRegion} />
               <span>浏览 {post.viewCount}</span>
               <span>回复 {post.replyCount}</span>
               <LikeButton postId={post.id} initialLiked={Boolean(post.likedByMe)} initialCount={post.likeCount} />

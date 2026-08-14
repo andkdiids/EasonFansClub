@@ -14,10 +14,17 @@ import {
 const read = (path: string) => readFileSync(path, 'utf8')
 const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260814130000_add_ip_regions_and_profile_locations/migration.sql')
+const postMigration = read('prisma/migrations/20260814170000_add_post_ip_region/migration.sql')
 const ipResolver = read('lib/ip-region.ts')
 const profileApi = read('app/api/users/me/route.ts')
 const profileSurface = read('components/ProfilePageSurface.tsx')
+const profilePage = read('app/profile/page.tsx')
 const profileForm = read('app/profile/ProfileSettingsForm.tsx')
+const postCreateApi = read('app/api/posts/route.ts')
+const replyCreateApi = read('app/api/posts/[postId]/replies/route.ts')
+const postDetailPage = read('app/posts/[postId]/page.tsx')
+const forumFeed = read('app/api/forum/feed/route.ts')
+const forumDiscovery = read('app/api/forum/discover/route.ts')
 const replies = read('components/PostRepliesSection.tsx')
 const checkinMessages = read('components/CheckInMessagesPanel.tsx')
 const wall = read('components/ProfileWall.tsx')
@@ -38,7 +45,7 @@ test('IP 属地只输出粗粒度标准化名称，不包含城市或完整 IP',
 })
 
 test('数据库只保存 nullable 的处理后属地，旧记录无需回填', () => {
-  for (const model of ['CultureComment', 'DailyMessage', 'DailyMessageComment', 'ProfileWallMessage', 'Reply']) {
+  for (const model of ['CultureComment', 'DailyMessage', 'DailyMessageComment', 'ProfileWallMessage', 'Reply', 'Post']) {
     assert.match(schema, new RegExp(`model ${model} \\{[\\s\\S]*?ipRegion\\s+String\\?`))
   }
   assert.match(schema, /ipRegionUpdatedAt\s+DateTime\?/)
@@ -75,4 +82,19 @@ test('个人档案与所有主要公开评论链路区分显示两个地区概�
   assert.match(checkinMessages, /IpRegionLabel ipRegion=\{item\.ipRegion\}/)
   assert.match(checkinMessages, /IpRegionLabel ipRegion=\{comment\.ipRegion\}/)
   assert.match(wall, /IpRegionLabel ipRegion=\{message\.ipRegion\}/)
+  assert.match(profileSurface, /formatUserLocation\(profile\.location\) \|\|/)
+  assert.match(profileSurface, /profile\.ipRegion \|\|/)
+  assert.doesNotMatch(profileSurface, /profile\.location\s*\?\s*profile\.ipRegion/)
+  assert.match(profilePage, /updateUserIpRegion/)
+})
+
+test('帖子保存发表时的独立省级 IP 属地并在广场、发现页和详情展示', () => {
+  assert.match(postCreateApi, /resolveIpRegion\(request\)/)
+  assert.match(postCreateApi, /content: input\.content,\s*ipRegion,\s*summary:/)
+  assert.match(replyCreateApi, /resolveIpRegion\(request\)/)
+  assert.match(replyCreateApi, /content,\s*ipRegion,[\s\S]*parentId:/)
+  assert.match(postDetailPage, /IpRegionLabel ipRegion=\{post\.ipRegion\}/)
+  assert.match(forumFeed, /ipRegion: true/)
+  assert.match(forumDiscovery, /ipRegion: true/)
+  assert.match(postMigration, /ALTER TABLE `Post`[\s\S]*ADD COLUMN `ipRegion` VARCHAR\(191\) NULL/)
 })

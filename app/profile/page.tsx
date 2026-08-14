@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { ProfilePageSurface } from '@/components/ProfilePageSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
@@ -9,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
+import { updateUserIpRegion } from '@/lib/ip-region'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +25,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
   const query = await searchParams
+  const requestHeaders = await headers()
+  const resolvedIpRegion = await updateUserIpRegion(
+    user.id,
+    new Request('http://profile.internal/current', { headers: new Headers(requestHeaders) }),
+  )
 
   const profile = await prisma.user.findFirst({
     where: { id: user.id, isDeleted: false, status: 'ACTIVE', Profile: { isNot: null } },
@@ -100,7 +107,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           baseDisplayName: displayName,
           bio,
           location: locationFromProfile(profile.Profile),
-          ipRegion: profile.ipRegion,
+          ipRegion: resolvedIpRegion || profile.ipRegion,
           avatarUrl: avatar,
           backgroundUrl: background,
           createdAt: profile.createdAt,

@@ -131,19 +131,29 @@ export function FavoriteButton({
     if (isSubmitting) return
     setError('')
     setIsSubmitting(true)
-    const response = await fetch(`/api/posts/${postId}/favorite`, { method: 'POST' })
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
+    const nextFavorited = !favorited
+    try {
+      const response = await fetch(`/api/posts/${postId}/favorite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isFavorited: nextFavorited }),
+      })
+      const data = await response.json().catch(() => ({}))
 
-    if (!response.ok) {
+      if (!response.ok) {
       setError(data.message || '操作失败，请先登录')
-      return
-    }
+        return
+      }
 
-    setFavorited(Boolean(data.isFavorited))
-    setCount(Math.max(Number(data.favoriteCount || 0), 0))
-    emitPostInteraction({ postId, isFavorited: Boolean(data.isFavorited), favoriteCount: Number(data.favoriteCount || 0) })
-    if (refreshOnSuccess) router.refresh()
+      setFavorited(Boolean(data.isFavorited))
+      setCount(Math.max(Number(data.favoriteCount || 0), 0))
+      emitPostInteraction({ postId, isFavorited: Boolean(data.isFavorited), favoriteCount: Number(data.favoriteCount || 0) })
+      if (refreshOnSuccess) router.refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '操作失败，请稍后重试')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (

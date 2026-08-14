@@ -17,8 +17,8 @@ export async function POST(request: Request, { params }: Context) {
   try {
     const room = await getDuelRoomState(roomId)
     if (room.host.id !== guard.user.id) return duelInputError('只有房主可以开始游戏', 'HOST_ONLY', 403)
-    if (!room.challenger || !duelRealtimeHub.isUserConnectedInRoom(roomId, room.host.id) || !duelRealtimeHub.isUserConnectedInRoom(roomId, room.challenger.id)) {
-      return duelInputError('双方必须在线', 'PLAYERS_NOT_ONLINE', 409)
+    if (!room.challenger) {
+      return duelInputError('对方当前不在线，请等待对方重新进入房间。', 'PLAYERS_NOT_ONLINE', 409)
     }
     const result = await startDuelMatch(guard.user.id, roomId)
     duelRealtimeHub.broadcastRoom(roomId)

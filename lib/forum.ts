@@ -47,6 +47,7 @@ export type ForumFeedResponse = {
   posts: Array<{
     id: string
     title: string
+    ipRegion: string | null
     likeCount: number
     replyCount: number
     viewCount: number

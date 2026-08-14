@@ -87,3 +87,15 @@ test('日历状态覆盖心情、今天、未来日期、移动端和深色模�
   assert.match(css, /\.checkin-history-detail-body[^{]*\{[^}]*overflow:auto/)
   assert.match(css, /\.checkin-history-dialog[^{]*\{[^}]*var\(--surface-elevated\)/)
 })
+
+test('挂号记录统一使用直角和正文色，禁用日期继续弱化', () => {
+  assert.match(css, /\.checkin-history-dialog[^{]*\{[^}]*border-radius:0/)
+  assert.match(css, /\.checkin-history-close[^{]*\{[^}]*border-radius:0/)
+  assert.match(css, /\.checkin-history-toolbar>button[^{]*\{[^}]*border-radius:0/)
+  assert.match(css, /\.checkin-history-day-cell[^{]*\{[^}]*border-radius:0/)
+  assert.match(css, /\.checkin-history-day-number[^{]*\{[^}]*border-radius:0/)
+  assert.match(css, /\.checkin-history-weekdays>span,[\s\S]*?color:var\(--foreground\)/)
+  assert.match(css, /\.checkin-history-toolbar>span[^{]*\{[^}]*color:var\(--foreground\)/)
+  assert.match(css, /\.checkin-history-day-cell\.is-outside-month,[\s\S]*?color:var\(--foreground-muted\)/)
+  assert.match(css, /\.checkin-history-day-cell\.is-future[^{]*\{[^}]*color:var\(--foreground-muted\)/)
+})

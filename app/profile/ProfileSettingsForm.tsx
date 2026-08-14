@@ -1061,7 +1061,10 @@ export function ProfileSettingsForm({
                 onCountryChange={setPhoneCountry}
                 disabled={isSaving || uploading !== null}
                 placeholder={form.phone ? '更换手机号' : '绑定手机号'}
-                inputClassName="mt-3"
+                containerClassName="profile-phone-input mt-3"
+                countryContainerClassName="profile-phone-country"
+                dropdownPlacement="top"
+                inputClassName="text-sm"
               />
             </label>
           </div>

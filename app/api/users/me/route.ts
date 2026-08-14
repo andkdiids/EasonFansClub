@@ -126,9 +126,10 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const resolvedIpRegion = await updateUserIpRegion(guard.user.id, request)
 
   const profile = await prisma.user.findUnique({
     where: { id: guard.user.id },
@@ -178,6 +179,7 @@ export async function GET() {
   return NextResponse.json({
     profile: {
       ...user,
+      ipRegion: resolvedIpRegion || user.ipRegion,
       avatarUrl: publicImageUrl(user.avatarUrl),
       backgroundUrl: publicImageUrl(user.backgroundUrl),
       profile: Profile ? {

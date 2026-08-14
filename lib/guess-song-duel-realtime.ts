@@ -7,7 +7,10 @@ import {
   markDuelPlayerDisconnected,
   settleDuelDisconnect,
   submitDuelAnswer,
+  touchDuelPlayerPresence,
+  touchDuelRoomPresence,
 } from '@/lib/guess-song-duel-service'
+import { isDuelPresenceOnline } from '@/lib/guess-song-duel-config'
 import type {
   DuelClientCommand,
   DuelMatchState,
@@ -22,6 +25,7 @@ type DuelSocket = WebSocket & {
   duelUserId?: string
   duelRoomId?: string
   duelMatchId?: string
+  duelLastSeenAt?: number
   duelRttMs?: number
   duelTimeSyncPending?: Map<string, { serverReceivedAt: number; serverSentAt: number }>
 }
@@ -74,6 +78,7 @@ export class GuessSongDuelRealtimeHub {
 
   attach(userId: string, socket: DuelSocket) {
     socket.duelUserId = userId
+    socket.duelLastSeenAt = Date.now()
     this.sockets.add(socket)
     safeSend(socket, { type: 'SERVER_HELLO', serverNow: new Date().toISOString() })
     return () => this.detach(socket)
@@ -127,6 +132,7 @@ export class GuessSongDuelRealtimeHub {
           return
         }
         case 'PING':
+          await this.touchPresence(socket)
           safeSend(socket, { type: 'PONG', serverNow: new Date().toISOString() })
           return
         case 'ANSWER':
@@ -143,7 +149,10 @@ export class GuessSongDuelRealtimeHub {
   isUserConnectedInRoom(roomId: string, userId: string) {
     const sockets = this.roomSockets.get(roomId)
     if (!sockets) return false
-    for (const socket of sockets) if (socket.duelUserId === userId && socket.readyState === OPEN_STATE) return true
+    const now = Date.now()
+    for (const socket of sockets) {
+      if (socket.duelUserId === userId && socket.readyState === OPEN_STATE && isDuelPresenceOnline(socket.duelLastSeenAt, now)) return true
+    }
     return false
   }
 
@@ -209,6 +218,8 @@ export class GuessSongDuelRealtimeHub {
 
   private async joinRoom(socket: DuelSocket, roomId: string) {
     const userId = this.requireUser(socket)
+    socket.duelLastSeenAt = Date.now()
+    await touchDuelRoomPresence(userId, roomId, new Date(socket.duelLastSeenAt))
     const state = await getDuelRoomState(roomId)
     if (state.host.id !== userId && state.challenger?.id !== userId) throw new Error('You are not a member of this room')
     this.removeFromRoom(socket)
@@ -220,12 +231,14 @@ export class GuessSongDuelRealtimeHub {
 
   private async joinMatch(socket: DuelSocket, matchId: string) {
     const userId = this.requireUser(socket)
-    const state = await getDuelMatchState(userId, matchId)
+    await getDuelMatchState(userId, matchId)
     this.removeFromMatch(socket)
     socket.duelMatchId = matchId
     this.addToMap(this.matchSockets, matchId, socket)
     await markDuelPlayerConnected(matchId, userId)
+    socket.duelLastSeenAt = Date.now()
     this.clearDisconnectTimer(matchId, userId)
+    const state = await getDuelMatchState(userId, matchId)
     safeSend(socket, { type: 'MATCH_STATE', state })
     this.broadcastMatchEvent(matchId, { type: 'PLAYER_PRESENCE', matchId, userId, isOnline: true, reconnectDeadlineAt: null })
     if (state.phase === 'STARTING' && state.question?.serverStartedAt) this.scheduleMatch(matchId, state.question.serverStartedAt)
@@ -322,6 +335,14 @@ export class GuessSongDuelRealtimeHub {
   private requireUser(socket: DuelSocket) {
     if (!socket.duelUserId) throw new Error('Unauthenticated duel socket')
     return socket.duelUserId
+  }
+
+  private async touchPresence(socket: DuelSocket) {
+    const userId = this.requireUser(socket)
+    const now = new Date()
+    socket.duelLastSeenAt = now.getTime()
+    if (socket.duelRoomId) await touchDuelRoomPresence(userId, socket.duelRoomId, now)
+    if (socket.duelMatchId) await touchDuelPlayerPresence(socket.duelMatchId, userId, now)
   }
 
   private firstMatchSocket(matchId: string) {

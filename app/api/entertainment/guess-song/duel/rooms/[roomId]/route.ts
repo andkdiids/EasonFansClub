@@ -1,5 +1,5 @@
 import { duelError, duelOk } from '@/lib/guess-song-duel-api'
-import { getDuelRoomState } from '@/lib/guess-song-duel-service'
+import { getDuelRoomState, touchDuelRoomPresence } from '@/lib/guess-song-duel-service'
 import { requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -12,6 +12,7 @@ export async function GET(_request: Request, { params }: Context) {
   if (!guard.user) return guard.response
   const { roomId } = await params
   try {
+    await touchDuelRoomPresence(guard.user.id, roomId)
     return duelOk({ room: await getDuelRoomState(roomId) })
   } catch (error) {
     return duelError(error, 'Unable to load duel room')

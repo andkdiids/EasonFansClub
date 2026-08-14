@@ -1,7 +1,21 @@
 export const FORUM_DISCOVERY_PAGE_SIZE = 12
+export const FORUM_DISCOVERY_MIN_PAGE_SIZE = 8
+export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
 
 export type ForumDiscoveryMode = 'recommend' | 'latest'
 export type ForumTheme = 'plaza' | 'xiaochenshu'
+
+export function parseForumDiscoveryMode(value: unknown): ForumDiscoveryMode | null {
+  if (value === undefined) return 'recommend'
+  return value === 'recommend' || value === 'latest' ? value : null
+}
+
+export function parseForumDiscoveryLimit(value: unknown) {
+  if (value === undefined) return FORUM_DISCOVERY_PAGE_SIZE
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null
+  if (value < FORUM_DISCOVERY_MIN_PAGE_SIZE || value > FORUM_DISCOVERY_MAX_PAGE_SIZE) return null
+  return value
+}
 
 export type ForumDiscoveryCover = {
   url: string
@@ -11,6 +25,7 @@ export type ForumDiscoveryCover = {
 export type ForumDiscoveryPost = {
   id: string
   title: string
+  ipRegion: string | null
   likeCount: number
   favoriteCount: number
   replyCount: number
@@ -51,7 +66,11 @@ export type ForumDiscoveryResponse = {
 
 export function normalizeDiscoveryIds(values: unknown, max = 500) {
   if (!Array.isArray(values)) return []
-  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0).slice(0, max))]
+  return [...new Set(values
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0 && value.length <= 80)
+    .slice(0, max))]
 }
 
 /**

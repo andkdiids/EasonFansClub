@@ -7,10 +7,18 @@ export const DUEL_AUDIO_DELAY_MS = 2_000
 export const DUEL_NEXT_QUESTION_DELAY_MS = 3_000
 export const DUEL_RESULT_PAUSE_MS = DUEL_NEXT_QUESTION_DELAY_MS
 export const DUEL_RECONNECT_GRACE_MS = 15_000
+export const DUEL_HEARTBEAT_INTERVAL_MS = 5_000
+export const DUEL_ONLINE_TIMEOUT_MS = 20_000
 export const DUEL_MIN_VALID_QUESTIONS = 5
 export const DUEL_WIN_REWARD = 7
 export const DUEL_ROOM_RETENTION_MS = 30 * 60_000
 export const DUEL_INVITE_RETENTION_MS = 15 * 60_000
+
+export function isDuelPresenceOnline(lastSeenAt: Date | string | number | null | undefined, now = Date.now()) {
+  if (lastSeenAt === null || lastSeenAt === undefined) return false
+  const timestamp = lastSeenAt instanceof Date ? lastSeenAt.getTime() : typeof lastSeenAt === 'number' ? lastSeenAt : new Date(lastSeenAt).getTime()
+  return Number.isFinite(timestamp) && timestamp <= now && now - timestamp <= DUEL_ONLINE_TIMEOUT_MS
+}
 
 export const DUEL_ROOM_CODE_MIN_LENGTH = 4
 export const DUEL_ROOM_CODE_MAX_LENGTH = 12

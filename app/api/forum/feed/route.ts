@@ -62,6 +62,7 @@ export async function GET(request: Request) {
       take: pageSize,
       select: {
         id: true, title: true,
+        ipRegion: true,
         likeCount: true, replyCount: true, viewCount: true,
         isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
         Board: { select: { name: true, slug: true } },
