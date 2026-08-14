@@ -17,19 +17,21 @@ proxy_set_header X-ECFC-Client-IP $remote_addr;
 proxy_set_header X-ECFC-Remote-Address $remote_addr;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header CF-Connecting-IP "";
+proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
 ```
 
-如果前面确实是 Cloudflare，不能直接把 `$remote_addr` 当用户地址；应先只对 Cloudflare 官方 IP 段配置 `set_real_ip_from`，再使用 `real_ip_header CF-Connecting-IP` 和 `real_ip_recursive on`，最后仍由 Nginx 重写 `X-ECFC-Client-IP`。应用侧只有显式设置 `TRUSTED_CLIENT_IP_SOURCE=cloudflare` 时才会读取 `CF-Connecting-IP`。
+仓库中的生产入口工作流会在服务器上从 Cloudflare 官方 `ips-v4` / `ips-v6` 地址获取网段，校验为 CIDR 后生成 `/etc/nginx/snippets/ecfc-cloudflare-real-ip.conf`，其中包含 `set_real_ip_from`、`real_ip_header CF-Connecting-IP` 和 `real_ip_recursive on`，再由站点配置 include。获取失败或返回异常内容时，工作流会在写入站点配置前失败，不会生成不完整的信任边界。
+
+如果前面确实是 Cloudflare，不能直接把未恢复的 `$remote_addr` 当用户地址；只有 Nginx 的 realip 模块根据官方 Cloudflare 网段恢复后，才允许把 `$remote_addr` 写入 `X-ECFC-Client-IP`。应用侧只有显式设置 `TRUSTED_CLIENT_IP_SOURCE=cloudflare` 时才进入 Cloudflare 模式。
 
 ## 应用侧约定
 
 - `getClientIp(request)` 是唯一入口；默认可信优先级只有 `X-ECFC-Client-IP`。
-- `TRUSTED_CLIENT_IP_SOURCE=cloudflare` 时优先使用 Nginx 重写的 `X-ECFC-Client-IP`，其次才是可信链路的 `CF-Connecting-IP`。
+- `TRUSTED_CLIENT_IP_SOURCE=cloudflare` 时优先检查 `CF-Connecting-IP`，但要求它与 Nginx 重写的 `X-ECFC-Client-IP` 一致；不一致时只使用后者，缺少后者时返回未知，避免源站直连伪造 Header。
 - `TRUSTED_CLIENT_IP_SOURCE=nginx-legacy` 仅用于已确认安全的旧 Nginx 配置，会额外读取 `X-Real-IP`。
 - `TRUSTED_CLIENT_IP_SOURCE=nginx-forwarded` 仅用于已确认会清洗并重写转发链的 Nginx；此模式按 `X-Forwarded-For` 左到右取第一个公开 IP，再回退到 `X-Real-IP`。
 - 默认模式下 `X-Forwarded-For` 只进入诊断日志，不参与解析；普通客户端不能靠它伪造属地。
-- `IP_DIAGNOSTICS_LOG=true` 时仅记录 `cfConnectingIp`、`xRealIp`、`xForwardedFor`、`remoteAddress`、`resolvedClientIp`，不记录 Cookie、Token 或请求体。
+- `DEBUG_CLIENT_IP=true`（兼容旧变量 `IP_DIAGNOSTICS_LOG=true`）时只记录 Header 是否存在、转发链数量和脱敏后的 `resolvedIp`，不记录完整 IP、Cookie、Token 或请求体。
 
 IP 位置按规范化后的单个 IP 缓存，解析失败、超时、限流或无可信 IP 都返回未知，不会回退到广东。
 

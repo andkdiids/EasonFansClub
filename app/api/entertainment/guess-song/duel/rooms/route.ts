@@ -1,4 +1,4 @@
-import { cleanupStaleDuelMembership, createDuelRoom, listDuelRooms, searchDuelRoom } from '@/lib/guess-song-duel-service'
+import { createDuelRoom, listDuelRooms, resolveActiveDuelForUser, searchDuelRoom } from '@/lib/guess-song-duel-service'
 import { duelError, duelOk } from '@/lib/guess-song-duel-api'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { duelRealtimeHub } from '@/lib/guess-song-duel-realtime'
@@ -11,11 +11,15 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
   const q = new URL(request.url).searchParams.get('q')
   try {
-    if (!q) {
-      const affectedRooms = await cleanupStaleDuelMembership(guard.user.id)
-      for (const affectedRoom of affectedRooms) await duelRealtimeHub.broadcastRoom(affectedRoom.id, affectedRoom)
-    }
-    return duelOk({ rooms: q ? [await searchDuelRoom(q)] : await listDuelRooms() })
+    if (q) return duelOk({ rooms: [await searchDuelRoom(q)] })
+    const activeState = await resolveActiveDuelForUser(guard.user.id)
+    for (const affectedRoom of activeState.affectedRooms) await duelRealtimeHub.broadcastRoom(affectedRoom.id, affectedRoom)
+    return duelOk({
+      rooms: await listDuelRooms(),
+      activeRoom: activeState.activeRoom,
+      activeMatch: activeState.activeMatch,
+      isInActiveDuel: activeState.isInActiveDuel,
+    })
   } catch (error) {
     if (q) return duelError(error)
     return duelError(error, 'Unable to load duel rooms')

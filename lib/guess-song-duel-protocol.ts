@@ -25,6 +25,18 @@ export type DuelRoomState = {
   matchId: string | null
 }
 
+export type DuelActiveMatchState = {
+  id: string
+  roomId: string
+  status: 'PLAYING'
+}
+
+export type DuelActiveState = {
+  activeRoom: DuelRoomState | null
+  activeMatch: DuelActiveMatchState | null
+  isInActiveDuel: boolean
+}
+
 export type DuelPlayerState = DuelPublicUser & {
   userId: string
   slot: 1 | 2

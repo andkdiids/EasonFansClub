@@ -30,6 +30,7 @@ import {
 import type {
   DuelMatchResult,
   DuelMatchState,
+  DuelActiveState,
   DuelOption,
   DuelPublicUser,
   DuelQuestionResult,
@@ -67,6 +68,10 @@ type PublicUserRow = Prisma.UserGetPayload<{ select: typeof publicUserSelect }>
 
 export type DuelRoomOperationResult = {
   room: DuelRoomState
+  affectedRooms: DuelRoomState[]
+}
+
+export type DuelActiveStateResult = DuelActiveState & {
   affectedRooms: DuelRoomState[]
 }
 
@@ -180,7 +185,8 @@ export function getDuelRoomLifecycle(room: {
   status: string
   Match?: { status: string } | null
 }): DuelRoomLifecycle {
-  if (room.Match) return room.Match.status === 'PLAYING' ? 'PLAYING' : 'FINISHED'
+  if (room.Match?.status === 'PLAYING' && room.status === 'PLAYING') return 'PLAYING'
+  if (room.Match) return 'FINISHED'
   if (room.status === 'WAITING' || room.status === 'READY') return 'WAITING'
   if (room.status === 'FINISHED') return 'FINISHED'
   return 'CLOSED'
@@ -217,20 +223,160 @@ function closedRoomState(room: RoomWithMembers, now: Date) {
   })
 }
 
+type DuelActiveMembershipRecord = {
+  userId: string
+  matchId: string
+  matchStatus: string
+  room: {
+    id: string
+    status: string
+    hostId: string
+    challengerId: string | null
+    matchId: string | null
+    matchStatus: string | null
+  } | null
+}
+
+export function isValidActiveDuelMembership(record: DuelActiveMembershipRecord, userId: string) {
+  return record.userId === userId
+    && record.matchStatus === 'PLAYING'
+    && Boolean(record.room)
+    && record.room?.status === 'PLAYING'
+    && record.room.matchId === record.matchId
+    && record.room.matchStatus === 'PLAYING'
+    && (record.room.hostId === userId || record.room.challengerId === userId)
+}
+
+async function findDuelPlayerMatchesTx(tx: Prisma.TransactionClient, userId: string) {
+  return tx.guessSongDuelPlayer.findMany({
+    where: { userId, Match: { status: 'PLAYING' } },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      Match: {
+        include: {
+          Room: {
+            select: {
+              id: true,
+              status: true,
+              hostId: true,
+              challengerId: true,
+              Match: { select: { id: true, status: true } },
+            },
+          },
+        },
+      },
+    },
+  })
+}
+
+async function invalidateStaleDuelMatchTx(tx: Prisma.TransactionClient, matchId: string, roomId: string | null, now: Date) {
+  const updated = await tx.guessSongDuelMatch.updateMany({
+    where: { id: matchId, status: 'PLAYING' },
+    data: {
+      status: 'INVALID',
+      finishReason: 'DISCONNECT_INVALID',
+      finishedAt: now,
+    },
+  })
+  if (roomId) {
+    await tx.guessSongDuelRoom.updateMany({
+      where: { id: roomId, status: { in: ['WAITING', 'READY', 'PLAYING', 'FINISHED'] } },
+      data: { status: 'CLOSED', closedAt: now },
+    })
+  }
+  return updated.count === 1
+}
+
+async function normalizeDuelPlayerMatchesTx(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  now: Date,
+  options: { keepRoomId?: string; rejectPlaying: boolean },
+) {
+  const playerMatches = await findDuelPlayerMatchesTx(tx, userId)
+  const activeMatches: Array<{ id: string; roomId: string; status: 'PLAYING' }> = []
+  const affectedRoomIds = new Set<string>()
+
+  for (const player of playerMatches) {
+    if (player.Match.status !== 'PLAYING') continue
+    const room = player.Match.Room
+    const record: DuelActiveMembershipRecord = {
+      userId: player.userId,
+      matchId: player.matchId,
+      matchStatus: player.Match.status,
+      room: room
+        ? {
+            id: room.id,
+            status: room.status,
+            hostId: room.hostId,
+            challengerId: room.challengerId,
+            matchId: room.Match?.id || null,
+            matchStatus: room.Match?.status || null,
+          }
+        : null,
+    }
+    const valid = isValidActiveDuelMembership(record, userId)
+    if (valid && (options.keepRoomId === room?.id || !options.rejectPlaying)) {
+      if (!activeMatches.some((match) => match.id === player.matchId)) {
+        activeMatches.push({ id: player.matchId, roomId: room!.id, status: 'PLAYING' })
+      }
+      continue
+    }
+    if (valid && options.rejectPlaying) {
+      throw new GuessSongDuelServiceError('你当前正在进行一场对决，请先结束当前比赛', 409, 'MATCH_ACTIVE')
+    }
+
+    await invalidateStaleDuelMatchTx(tx, player.matchId, room?.id || null, now)
+    if (room) affectedRoomIds.add(room.id)
+  }
+
+  const affectedRooms = affectedRoomIds.size
+    ? (await tx.guessSongDuelRoom.findMany({ where: { id: { in: [...affectedRoomIds] } }, include: roomInclude })).map((room) => roomState(room))
+    : []
+  return { activeMatch: activeMatches[0] || null, affectedRooms }
+}
+
+async function removeWaitingDuelMembershipTx(tx: Prisma.TransactionClient, membership: RoomWithMembers, userId: string, now: Date) {
+  if (membership.hostId === userId) {
+    const closed = closedRoomState(membership, now)
+    await tx.guessSongDuelRoom.delete({ where: { id: membership.id } })
+    return closed
+  }
+  if (membership.challengerId !== userId) return null
+  const updated = await tx.guessSongDuelRoom.update({
+    where: { id: membership.id },
+    data: {
+      challengerId: null,
+      challengerReady: false,
+      hostReady: false,
+      status: 'WAITING',
+    },
+    include: roomInclude,
+  })
+  return roomState(updated)
+}
+
 async function cleanupDuelMembershipTx(
   tx: Prisma.TransactionClient,
   userId: string,
   now: Date,
   options: { keepRoomId?: string; rejectPlaying: boolean },
 ) {
+  const normalizedMatches = await normalizeDuelPlayerMatchesTx(tx, userId, now, options)
   const memberships = await findAndLockDuelMembershipsTx(tx, userId)
-  const affectedRooms: DuelRoomState[] = []
+  const affectedRooms: DuelRoomState[] = [...normalizedMatches.affectedRooms]
 
   for (const membership of memberships) {
-    if (membership.id === options.keepRoomId) continue
+    if (membership.id === options.keepRoomId && membership.Match?.status !== 'PLAYING') continue
     if (membership.Match?.status === 'PLAYING') {
-      if (options.rejectPlaying) {
+      const isValidActiveMatch = normalizedMatches.activeMatch?.id === membership.Match.id
+      if (membership.id === options.keepRoomId && isValidActiveMatch) continue
+      if (isValidActiveMatch && options.rejectPlaying) {
         throw new GuessSongDuelServiceError('你当前正在进行一场对决，请先结束当前比赛', 409, 'MATCH_ACTIVE')
+      }
+      if (!isValidActiveMatch) {
+        await invalidateStaleDuelMatchTx(tx, membership.Match.id, membership.id, now)
+        affectedRooms.push(closedRoomState(membership, now))
       }
       continue
     }
@@ -252,34 +398,108 @@ async function cleanupDuelMembershipTx(
       continue
     }
 
-    if (membership.hostId === userId) {
-      const closed = closedRoomState(membership, now)
-      await tx.guessSongDuelRoom.delete({ where: { id: membership.id } })
-      affectedRooms.push(closed)
-      continue
-    }
-
-    const updated = await tx.guessSongDuelRoom.update({
-      where: { id: membership.id },
-      data: {
-        challengerId: null,
-        challengerReady: false,
-        hostReady: false,
-        status: 'WAITING',
-      },
-      include: roomInclude,
-    })
-    affectedRooms.push(roomState(updated))
+    const affected = await removeWaitingDuelMembershipTx(tx, membership, userId, now)
+    if (affected) affectedRooms.push(affected)
   }
 
   return affectedRooms
 }
 
-export async function cleanupStaleDuelMembership(userId: string, now = new Date()) {
+async function resolveDuelActiveStateTx(tx: Prisma.TransactionClient, userId: string, now: Date): Promise<DuelActiveStateResult> {
+  const normalizedMatches = await normalizeDuelPlayerMatchesTx(tx, userId, now, { rejectPlaying: false })
+  const memberships = await findAndLockDuelMembershipsTx(tx, userId)
+  const affectedRooms: DuelRoomState[] = [...normalizedMatches.affectedRooms]
+  const addAffectedRoom = (state: DuelRoomState) => {
+    const index = affectedRooms.findIndex((room) => room.id === state.id)
+    if (index >= 0) affectedRooms[index] = state
+    else affectedRooms.push(state)
+  }
+
+  let activeRoom: DuelRoomState | null = null
+  let activeMatch: DuelActiveState['activeMatch'] = normalizedMatches.activeMatch
+  const waitingRooms: RoomWithMembers[] = []
+
+  for (const membership of memberships) {
+    if (membership.Match?.status === 'PLAYING' && membership.status === 'PLAYING' && membership.Match.id === activeMatch?.id) {
+      activeRoom = roomState(membership)
+      continue
+    }
+    if (membership.Match?.status === 'PLAYING') {
+      // A PLAYING Match without a valid current room membership is stale. The
+      // player-row normalizer normally handles this; this branch also covers a
+      // room row that changed while the membership snapshot was being read.
+      await invalidateStaleDuelMatchTx(tx, membership.Match.id, membership.id, now)
+      addAffectedRoom(roomState({ ...membership, status: 'CLOSED', closedAt: now, hostReady: false, challengerReady: false }))
+      continue
+    }
+    if (membership.Match) {
+      const closed = await tx.guessSongDuelRoom.update({
+        where: { id: membership.id },
+        data: { status: 'CLOSED', closedAt: now },
+        include: roomInclude,
+      })
+      addAffectedRoom(roomState(closed))
+      continue
+    }
+    if (membership.status === 'PLAYING') {
+      const closed = closedRoomState(membership, now)
+      await tx.guessSongDuelRoom.delete({ where: { id: membership.id } })
+      addAffectedRoom(closed)
+      continue
+    }
+    if (!['WAITING', 'READY'].includes(membership.status)) continue
+    if (isDuelWaitingRoomExpired(membership.status, membership.createdAt, now.getTime())) {
+      const affected = await removeWaitingDuelMembershipTx(tx, membership, userId, now)
+      if (affected) addAffectedRoom(affected)
+      continue
+    }
+    waitingRooms.push(membership)
+  }
+
+  if (activeRoom || activeMatch) {
+    // A valid PLAYING match is the only state that may block a new duel. Any
+    // duplicate waiting memberships are stale and can be removed safely.
+    for (const membership of waitingRooms) {
+      const affected = await removeWaitingDuelMembershipTx(tx, membership, userId, now)
+      if (affected) addAffectedRoom(affected)
+    }
+  } else if (waitingRooms.length) {
+    // Keep the newest valid waiting room and normalize duplicate memberships.
+    waitingRooms.sort((left, right) => {
+      const createdDelta = right.createdAt.getTime() - left.createdAt.getTime()
+      return createdDelta || right.id.localeCompare(left.id)
+    })
+    activeRoom = roomState(waitingRooms[0])
+    for (const membership of waitingRooms.slice(1)) {
+      const affected = await removeWaitingDuelMembershipTx(tx, membership, userId, now)
+      if (affected) addAffectedRoom(affected)
+    }
+  }
+
+  if (!activeRoom && activeMatch) {
+    const room = await tx.guessSongDuelRoom.findUnique({ where: { id: activeMatch.roomId }, include: roomInclude })
+    if (room && getDuelRoomLifecycle(room) === 'PLAYING') activeRoom = roomState(room)
+  }
+  if (!activeRoom) activeMatch = null
+
+  return {
+    activeRoom,
+    activeMatch,
+    isInActiveDuel: Boolean(activeRoom || activeMatch),
+    affectedRooms,
+  }
+}
+
+export async function resolveActiveDuelForUser(userId: string, now = new Date()): Promise<DuelActiveStateResult> {
   return prisma.$transaction(async (tx) => {
     await lockDuelUserTx(tx, userId)
-    return cleanupDuelMembershipTx(tx, userId, now, { rejectPlaying: false })
+    return resolveDuelActiveStateTx(tx, userId, now)
   })
+}
+
+export async function cleanupStaleDuelMembership(userId: string, now = new Date()) {
+  const state = await resolveActiveDuelForUser(userId, now)
+  return state.affectedRooms
 }
 
 function validatePassword(value: unknown) {
@@ -712,7 +932,26 @@ export async function leaveDuelRoom(userId: string, roomId: string, now = new Da
     await lockDuelUserTx(tx, userId)
     await tx.$queryRaw`SELECT id FROM GuessSongDuelRoom WHERE id = ${roomId} FOR UPDATE`
     const current = await findRoomForTransaction(tx, roomId)
-    if (current.Match?.status === 'PLAYING') throw new GuessSongDuelServiceError('比赛进行中，请使用退出比赛', 409, 'MATCH_ACTIVE')
+    const isMember = current.hostId === userId || current.challengerId === userId
+    if (!isMember) throw new GuessSongDuelServiceError('你不在这个对决房间内', 403, 'ROOM_NOT_MEMBER')
+    const player = current.Match?.status === 'PLAYING'
+      ? await tx.guessSongDuelPlayer.findUnique({
+          where: { matchId_userId: { matchId: current.Match.id, userId } },
+          select: { id: true },
+        })
+      : null
+    if (current.Match?.status === 'PLAYING' && getDuelRoomLifecycle(current) === 'PLAYING' && player) {
+      throw new GuessSongDuelServiceError('比赛进行中，请使用退出比赛', 409, 'MATCH_ACTIVE')
+    }
+    if (current.Match?.status === 'PLAYING') {
+      await invalidateStaleDuelMatchTx(tx, current.Match.id, current.id, now)
+      const closed = await tx.guessSongDuelRoom.update({
+        where: { id: roomId },
+        data: { status: 'CLOSED', closedAt: now, hostReady: false, challengerReady: false },
+        include: roomInclude,
+      })
+      return roomState(closed)
+    }
     if (current.Match) {
       const updated = await tx.guessSongDuelRoom.update({ where: { id: roomId }, data: { status: 'CLOSED', closedAt: now }, include: roomInclude })
       return roomState(updated)
@@ -895,11 +1134,10 @@ export async function startDuelMatch(userId: string, roomId: string, now = new D
       throw new GuessSongDuelServiceError('对方当前不在线，请等待对方重新进入房间。', 409, 'PLAYERS_NOT_ONLINE')
     }
 
-    const active = await tx.guessSongDuelPlayer.findFirst({
-      where: { userId: { in: [room.hostId, room.challengerId] }, Match: { status: 'PLAYING' } },
-      select: { id: true },
-    })
-    if (active) throw new GuessSongDuelServiceError('有玩家已经在另一场对决中', 409, 'PLAYER_MATCH_ACTIVE')
+    for (const participantId of [room.hostId, room.challengerId]) {
+      const activeState = await normalizeDuelPlayerMatchesTx(tx, participantId, now, { rejectPlaying: false })
+      if (activeState.activeMatch) throw new GuessSongDuelServiceError('有玩家已经在另一场对决中', 409, 'PLAYER_MATCH_ACTIVE')
+    }
 
     const quizConfig = await getGuessSongQuizConfigOrDefault()
     const mode = room.mode as DuelMode

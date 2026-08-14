@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { getDuelRoomLifecycle } from '../lib/guess-song-duel-service'
+import { getDuelRoomLifecycle, isValidActiveDuelMembership } from '../lib/guess-song-duel-service'
 
 function source(path: string) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
@@ -13,6 +13,31 @@ test('active room lifecycle distinguishes WAITING, PLAYING, historical FINISHED 
   assert.equal(getDuelRoomLifecycle({ status: 'PLAYING', Match: { status: 'PLAYING' } }), 'PLAYING')
   assert.equal(getDuelRoomLifecycle({ status: 'WAITING', Match: { status: 'FINISHED' } }), 'FINISHED')
   assert.equal(getDuelRoomLifecycle({ status: 'CLOSED', Match: null }), 'CLOSED')
+  assert.equal(getDuelRoomLifecycle({ status: 'FINISHED', Match: { status: 'PLAYING' } }), 'FINISHED')
+})
+
+test('only a PLAYING match with a matching PLAYING room membership is active', () => {
+  const base = {
+    userId: 'user-a',
+    matchId: 'match-1',
+    matchStatus: 'PLAYING',
+    room: {
+      id: 'room-1',
+      status: 'PLAYING',
+      hostId: 'user-a',
+      challengerId: 'user-b',
+      matchId: 'match-1',
+      matchStatus: 'PLAYING',
+    },
+  } as const
+
+  assert.equal(isValidActiveDuelMembership(base, 'user-a'), true)
+  assert.equal(isValidActiveDuelMembership({ ...base, matchStatus: 'FINISHED' }, 'user-a'), false)
+  assert.equal(isValidActiveDuelMembership({ ...base, room: { ...base.room, status: 'FINISHED' } }, 'user-a'), false)
+  assert.equal(isValidActiveDuelMembership({ ...base, room: { ...base.room, matchId: 'old-match' } }, 'user-a'), false)
+  assert.equal(isValidActiveDuelMembership({ ...base, room: { ...base.room, matchStatus: 'FINISHED' } }, 'user-a'), false)
+  assert.equal(isValidActiveDuelMembership({ ...base, room: null }, 'user-a'), false)
+  assert.equal(isValidActiveDuelMembership(base, 'user-c'), false)
 })
 
 test('创建和加入共享用户锁、旧 WAITING 清理、PLAYING 阻止切房', () => {

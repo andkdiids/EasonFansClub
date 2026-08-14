@@ -22,6 +22,8 @@ const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260814130000_add_ip_regions_and_profile_locations/migration.sql')
 const postMigration = read('prisma/migrations/20260814170000_add_post_ip_region/migration.sql')
 const ipResolver = read('lib/ip-region.ts')
+const productionEntry = read('.github/workflows/configure-production-entry.yml')
+const productionDeploy = read('.github/workflows/deploy.yml')
 const profileApi = read('app/api/users/me/route.ts')
 const profileSurface = read('components/ProfilePageSurface.tsx')
 const profilePage = read('app/profile/page.tsx')
@@ -50,6 +52,17 @@ test('IP 属地只输出粗粒度标准化名称，不包含城市或完整 IP',
   assert.doesNotMatch(ipResolver, /\|\| '广东'/)
   assert.match(ipResolver, /getCloudflareContext\(\{ async: true \}\)/)
   assert.match(ipResolver, /TRUSTED_EDGE_GEO_HEADERS/)
+  assert.ok(productionEntry.includes('https://www.cloudflare.com/ips-v4'))
+  assert.ok(productionEntry.includes('https://www.cloudflare.com/ips-v6'))
+  assert.ok(productionEntry.includes('real_ip_header CF-Connecting-IP;'))
+  assert.ok(productionEntry.includes('real_ip_recursive on;'))
+  assert.ok(productionEntry.includes('set_real_ip_from %s;'))
+  assert.ok(productionEntry.includes('include /etc/nginx/snippets/ecfc-cloudflare-real-ip.conf;'))
+  assert.ok(productionEntry.includes('Application port must be bound to localhost behind Nginx.'))
+  assert.ok(!productionEntry.includes('proxy_set_header CF-Connecting-IP "";'))
+  assert.ok(!productionEntry.includes('proxy_set_header CF-Connecting-IP \\$remote_addr;'))
+  assert.match(productionDeploy, /TRUSTED_CLIENT_IP_SOURCE=\("cloudflare"\|cloudflare\)/)
+  assert.ok(productionDeploy.includes('Application port must be bound to localhost behind Nginx.'))
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region_code: '44', org: 'test' })?.label, '广东')
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: '广西壮族自治区' })?.label, '广西')
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: 'Zhejiang' })?.label, '浙江')
@@ -63,13 +76,15 @@ test('只信任 Nginx 重写的客户端 IP，并按 IP 分别缓存 IPv4/IPv6 �
   const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
   const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
   let providerCalls = 0
+  const providerUrls: string[] = []
 
   process.env.IP_LOCATION_API_URL = 'https://unit.test/{ip}/json/'
   process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
   process.env.IP_DIAGNOSTICS_LOG = 'false'
   clearIpLocationCacheForTests()
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (input) => {
     providerCalls += 1
+    providerUrls.push(String(input))
     const regionCode = providerCalls === 1 ? '44' : '33'
     return new Response(JSON.stringify({ country_code: 'CN', region_code: regionCode }), {
       status: 200,
@@ -98,6 +113,8 @@ test('只信任 Nginx 重写的客户端 IP，并按 IP 分别缓存 IPv4/IPv6 �
     assert.equal((await resolveIpLocation(zhejiangRequest))?.label, '浙江')
     assert.equal((await resolveIpLocation(guangdongRequest))?.label, '广东')
     assert.equal(providerCalls, 2)
+    assert.ok(providerUrls.some((url) => url.includes(encodeURIComponent('203.0.113.10'))))
+    assert.ok(providerUrls.some((url) => url.includes(encodeURIComponent('2409:8a00:1234::10'))))
   } finally {
     globalThis.fetch = originalFetch
     clearIpLocationCacheForTests()
@@ -114,7 +131,15 @@ test('trusted proxy modes resolve CF, forwarded, mapped, and invalid addresses s
   const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
   try {
     process.env.TRUSTED_CLIENT_IP_SOURCE = 'cloudflare'
-    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'cf-connecting-ip': '203.0.113.20' } })), '203.0.113.20')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', {
+      headers: { 'cf-connecting-ip': '::ffff:203.0.113.20', 'x-ecfc-client-ip': '203.0.113.20' },
+    })), '203.0.113.20')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', {
+      headers: { 'cf-connecting-ip': '203.0.113.20' },
+    })), 'unknown')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', {
+      headers: { 'cf-connecting-ip': '203.0.113.20', 'x-ecfc-client-ip': '203.0.113.19' },
+    })), '203.0.113.19')
 
     process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx-forwarded'
     assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '203.0.113.21' } })), '203.0.113.21')
@@ -124,6 +149,8 @@ test('trusted proxy modes resolve CF, forwarded, mapped, and invalid addresses s
     process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
     assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-ecfc-client-ip': '::ffff:203.0.113.25' } })), '203.0.113.25')
     assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-ecfc-client-ip': '10.0.0.1', 'x-real-ip': '203.0.113.26' } })), 'unknown')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'cf-connecting-ip': '203.0.113.26' } })), 'unknown')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-ecfc-client-ip': '127.0.0.1' } })), 'unknown')
     assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '203.0.113.27' } })), 'unknown')
   } finally {
     if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
@@ -164,13 +191,14 @@ test('诊断日志只包含约定的五个 IP 字段并限制 Header 长度', ()
       'x-ecfc-remote-address': '203.0.113.23',
     },
   })
-  assert.deepEqual(getClientIpDiagnostics(request, '203.0.113.24'), {
-    cfConnectingIp: '203.0.113.20',
-    xRealIp: '203.0.113.21',
-    xForwardedFor: forwardedFor.slice(0, 512),
-    remoteAddress: '203.0.113.23',
-    resolvedClientIp: '203.0.113.24',
-  })
+  const diagnostics = getClientIpDiagnostics(request, '203.0.113.24')
+  assert.equal(diagnostics.hasCfConnectingIp, true)
+  assert.equal(diagnostics.hasXRealIp, true)
+  assert.equal(diagnostics.hasTrustedClientIp, false)
+  assert.equal(diagnostics.forwardedForCount, 1)
+  assert.equal(diagnostics.hasRemoteAddress, true)
+  assert.equal(diagnostics.resolvedIp, '203.***.***.24')
+  assert.doesNotMatch(JSON.stringify(diagnostics), /203\.0\.113\./)
 })
 
 test('数据库只保存 nullable 的处理后属地，旧记录无需回填', () => {

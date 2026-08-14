@@ -236,6 +236,11 @@ jobs:
             test -f pnpm-lock.yaml
             test -f server.ts
 
+            if ! grep -Eq '^TRUSTED_CLIENT_IP_SOURCE=("cloudflare"|cloudflare)[[:space:]]*$' .env; then
+              echo 'Production .env must set TRUSTED_CLIENT_IP_SOURCE=cloudflare for the Cloudflare real-IP boundary.' >&2
+              exit 1
+            fi
+
             node -v
             pnpm -v
             pm2 -v
@@ -281,7 +286,10 @@ jobs:
 
             test "$(cat .deployed-sha)" = "${DEPLOY_SHA}"
             pm2 describe easonfansclub
-            ss -ltn | grep -E ":${APP_PORT}[[:space:]]"
+            if ! ss -ltn | grep -Eq "[[:space:]](127\\.0\\.0\\.1|\\[::1\\]):${APP_PORT}[[:space:]]"; then
+              echo 'Application port must be bound to localhost behind Nginx.' >&2
+              exit 1
+            fi
             echo "Deployment health check passed for ${DEPLOY_SHA}."
 
       - name: Verify public website

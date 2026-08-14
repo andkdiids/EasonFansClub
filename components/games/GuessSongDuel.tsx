@@ -86,6 +86,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const offsetRef = useRef(0)
   const roomIdRef = useRef<string | null>(null)
   const matchIdRef = useRef<string | null>(null)
+  const viewRef = useRef<'lobby' | 'room' | 'match' | 'result'>('lobby')
   const currentAudioRef = useRef<HTMLAudioElement | null>(null)
   const syncSequenceRef = useRef(0)
   const requestGenerationRef = useRef(0)
@@ -122,16 +123,17 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const loadLobby = useCallback(async () => {
     try {
       const [roomData, statData] = await Promise.all([
-        api<{ rooms: DuelRoomState[] }>('/api/entertainment/guess-song/duel/rooms'),
+        api<{ rooms: DuelRoomState[]; activeRoom: DuelRoomState | null; activeMatch: { id: string; roomId: string; status: 'PLAYING' } | null; isInActiveDuel: boolean }>('/api/entertainment/guess-song/duel/rooms'),
         api<{ stats: DuelStats; history: DuelHistoryItem[] }>('/api/entertainment/guess-song/duel/stats'),
       ])
       setRooms(roomData.rooms || [])
       setStats(statData.stats || { wins: 0, participations: 0, winRate: 0 })
       setHistory(statData.history || [])
+      if (!roomData.isInActiveDuel && viewRef.current === 'lobby' && (roomIdRef.current || matchIdRef.current)) resetToLobby()
     } catch (reason) {
       setDuelError(reason)
     }
-  }, [setDuelError])
+  }, [resetToLobby, setDuelError])
 
   const applyMatchSnapshot = useCallback((next: DuelMatchState) => {
     if (!canApplyDuelMatchSnapshot(matchIdRef.current, latestMatchRef.current, next)) return false
@@ -184,7 +186,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   useEffect(() => {
     roomIdRef.current = roomId
     matchIdRef.current = matchId
-  }, [roomId, matchId])
+    viewRef.current = view
+  }, [roomId, matchId, view])
 
   useEffect(() => {
     void loadLobby()
@@ -637,7 +640,22 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     }
   }
 
-  function resetAfterResult() {
+  async function resetAfterResult() {
+    setBusy(true)
+    try {
+      const currentRoomId = roomIdRef.current || room?.id
+      if (currentRoomId) {
+        await api(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(currentRoomId)}/leave`, { method: 'POST' })
+      }
+    } catch (reason) {
+      const code = (reason as DuelApiError)?.code
+      if (!['ROOM_NOT_FOUND', 'ROOM_NOT_MEMBER', 'ROOM_EXPIRED'].includes(code || '')) {
+        setDuelError(reason)
+        return
+      }
+    } finally {
+      setBusy(false)
+    }
     resetToLobby()
     void loadLobby()
   }
@@ -771,7 +789,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
           <div className="duel-reward-card">
             {result.rewardAmount ? <><b>+{result.rewardAmount} 挂号费</b><span>今日对决胜利奖励已发放</span></> : result.winnerId === userId ? <><b>今日奖励已领取</b><span>本场胜场正常增加，今日最多领取一次 +7</span></> : <><b>本场未获得挂号费</b><span>参与次数仅在正常结算后增加</span></>}
           </div>
-          <button type="button" className="duel-primary-button" onClick={resetAfterResult}>返回对决大厅</button>
+          <button type="button" className="duel-primary-button" onClick={() => void resetAfterResult()} disabled={busy}>返回对决大厅</button>
         </section>
       ) : null}
 
