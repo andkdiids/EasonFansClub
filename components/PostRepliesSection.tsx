@@ -493,15 +493,16 @@ export function PostRepliesSection({
       <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
       {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
       <div className="flex items-center justify-end">
-        <div role="tablist" aria-label="评论排序" className="inline-flex rounded-full bg-slate-100 p-1">
+        <div role="tablist" aria-label="评论排序" className="post-replies-sort-tabs inline-flex rounded-full bg-slate-100 p-1">
           {([['latest', '最新'], ['hot', '最热']] as const).map(([value, label]) => (
             <button
               key={value}
               type="button"
               role="tab"
               aria-selected={sort === value}
+              data-selected={sort === value ? 'true' : 'false'}
               onClick={() => changeCommentSort(value)}
-              className={`rounded-full px-3 py-1 text-xs font-black transition ${sort === value ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
+              className={`post-replies-sort-tab rounded-full px-3 py-1 text-xs font-black transition ${sort === value ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
             >
               {label}
             </button>
@@ -516,7 +517,7 @@ export function PostRepliesSection({
               const reply = replyMap.get(id)
               if (!reply) return null
               const name = reply.author.profile?.displayName || reply.author.nickname
-              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热度最高 #{index + 1} · {name} · {reply.likeCount} 赞</a>
+              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · {name} · {reply.likeCount} 赞</a>
             })}
           </div>
         </div>

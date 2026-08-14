@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { AuthFormShell } from '@/components/AuthFormShell'
 import { IcpRecord } from '@/components/IcpRecord'
 import { getSiteAppearance } from '@/lib/site-config'
+import { normalizeStoredInternalPath } from '@/lib/url-safety'
 import { LoginForm } from './LoginForm'
 
 export const dynamic = 'force-dynamic'
@@ -10,6 +11,8 @@ export const revalidate = 0
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; redirect?: string; account?: string }> }) {
   const params = await searchParams
   const config = await getSiteAppearance()
+  const requestedRedirect = params.next || params.redirect
+  const redirectTo = requestedRedirect ? normalizeStoredInternalPath(requestedRedirect) || '/' : undefined
 
   return (
     <AuthFormShell
@@ -32,7 +35,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   </div>
 }
     >
-      <LoginForm redirectTo={params.next || params.redirect} initialAccount={params.account} />
+      <LoginForm redirectTo={redirectTo} initialAccount={params.account} />
     </AuthFormShell>
   )
 }

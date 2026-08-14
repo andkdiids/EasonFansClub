@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { FormError } from '@/components/FormError'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { getPhoneInputParts, getPhoneValidationMessage, isLikelyPhoneInput, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
+import { normalizeStoredInternalPath } from '@/lib/url-safety'
 import Link from 'next/link'
 
 type LoginErrors = Partial<{
@@ -21,8 +22,33 @@ function inferIdentifierType(value: string): IdentifierType {
 }
 
 function safeRedirectPath(path?: string) {
-  if (path && path.startsWith('/') && !path.startsWith('//') && !/[\\\r\n]/.test(path)) return path
-  return '/welcome'
+  if (!path?.trim()) return '/welcome'
+  return normalizeStoredInternalPath(path) || '/'
+}
+
+const legacyRedirectStorageKeys = [
+  'ecfc-base-url',
+  'ecfc-redirect-url',
+  'ecfc-callback-url',
+  'ecfc-login-redirect',
+  'redirectUrl',
+  'callbackUrl',
+  'returnTo',
+  'loginRedirect',
+]
+
+function clearLegacyRedirectStorage() {
+  for (const key of legacyRedirectStorageKeys) {
+    try {
+      const value = window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+      if (value && normalizeStoredInternalPath(value) && /^https?:\/\//i.test(value.trim())) {
+        window.localStorage.removeItem(key)
+        window.sessionStorage.removeItem(key)
+      }
+    } catch {
+      // Storage is optional; navigation remains server-authoritative.
+    }
+  }
 }
 
 export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redirectTo?: string; initialAccount?: string }>) {
@@ -35,6 +61,7 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
+    clearLegacyRedirectStorage()
     if (normalizedInitialAccount) {
       const initialType = inferIdentifierType(normalizedInitialAccount)
       setIdentifierType(initialType)

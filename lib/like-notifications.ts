@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { normalizeStoredInternalPath } from '@/lib/url-safety'
 
 export type LikeNotificationTargetKind = 'post' | 'reply'
 
@@ -31,7 +32,9 @@ function targetFromKey(key: string | null | undefined, link: string | null | und
   if (!key?.startsWith(LIKE_NOTIFICATION_KEY_PREFIX) || !link) return null
   const match = key.match(/^like:(post|reply):(.+)$/)
   if (!match) return null
-  return { kind: match[1] as LikeNotificationTargetKind, id: match[2], link }
+  const normalizedLink = normalizeStoredInternalPath(link)
+  if (!normalizedLink) return null
+  return { kind: match[1] as LikeNotificationTargetKind, id: match[2], link: normalizedLink }
 }
 
 export function parseLikeNotificationTarget(input: {
@@ -43,16 +46,17 @@ export function parseLikeNotificationTarget(input: {
 
   const keyedTarget = targetFromKey(input.key, input.link)
   if (keyedTarget) return keyedTarget
-  if (!input.link) return null
+  const normalizedLink = normalizeStoredInternalPath(input.link)
+  if (!normalizedLink) return null
 
   try {
-    const url = new URL(input.link, 'https://local.invalid')
+    const url = new URL(normalizedLink, 'https://local.invalid')
     const post = url.pathname.match(/^\/posts\/([^/]+)$/)
     if (!post) return null
     const focus = url.searchParams.get('focus')
     return focus
-      ? { kind: 'reply', id: focus, link: input.link }
-      : { kind: 'post', id: post[1], link: input.link }
+      ? { kind: 'reply', id: focus, link: normalizedLink }
+      : { kind: 'post', id: post[1], link: normalizedLink }
   } catch {
     return null
   }

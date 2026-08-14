@@ -91,7 +91,7 @@ test('Question payload 必须绑定 Match、round、index、token 和请求 gene
 test('服务端 Match snapshot 在一个 transaction 内读取题目和本题答案，并携带 revision', () => {
   const service = source('lib/guess-song-duel-service.ts')
   assert.match(service, /export async function getDuelMatchState[\s\S]*?return duelTransaction\(async \(tx\) => \{[\s\S]*?loadQuestionState\(tx, matchId, match\.currentQuestionIndex\)[\s\S]*?guessSongDuelAnswer\.findMany/)
-  assert.match(service, /revision = duelStateRevision\(match, question, match\.GuessSongDuelPlayer\)/)
+  assert.match(service, /revisionBase = duelStateRevision\(match, question, match\.GuessSongDuelPlayer/)
   assert.match(service, /roundId: activeQuestion\?\.roundId/)
   assert.match(service, /questionToken: activeQuestion\?\.publicToken/)
   assert.match(service, /lastQuestionResult/)

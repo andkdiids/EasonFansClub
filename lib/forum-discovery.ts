@@ -5,6 +5,21 @@ export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
 export type ForumDiscoveryMode = 'recommend' | 'latest' | 'hot'
 export type ForumTheme = 'plaza' | 'xiaochenshu'
 
+export type ForumDiscoveryTab = { value: string; label: string }
+
+export function buildForumDiscoveryTabs(boards: ReadonlyArray<{ slug: string; name: string; isAnnouncement?: boolean }>): ForumDiscoveryTab[] {
+  const announcement = boards.find((board) => board.isAnnouncement || board.slug === 'announcements')
+  const otherBoards = boards.filter((board) => board !== announcement)
+  return [
+    { value: 'all', label: '全部' },
+    { value: announcement?.slug || 'announcements', label: '公告区' },
+    { value: 'recommend', label: '推荐' },
+    { value: 'latest', label: '最新' },
+    { value: 'hot', label: '热门' },
+    ...otherBoards.map((board) => ({ value: board.slug, label: board.name })),
+  ]
+}
+
 export function parseForumDiscoveryMode(value: unknown): ForumDiscoveryMode | null {
   if (value === undefined) return 'recommend'
   return value === 'recommend' || value === 'latest' || value === 'hot' ? value : null

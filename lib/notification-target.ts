@@ -1,3 +1,5 @@
+import { legacyLocalhostUrlToInternalPath, safeInternalPathOrNull } from '@/lib/url-safety'
+
 export type NotificationTargetInput = {
   id: string
   source: 'personal' | 'system'
@@ -11,6 +13,10 @@ export type NotificationReplyTarget =
   | { kind: 'daily-message'; resourceId: string; parentId: string }
   | { kind: 'feedback'; resourceId: string; parentId: string }
   | { kind: 'profile-wall'; resourceId: string; parentId: string }
+
+function normalizeNotificationTarget(value: unknown) {
+  return safeInternalPathOrNull(value) || legacyLocalhostUrlToInternalPath(value)
+}
 
 export function parseNotificationReplyTarget(input: NotificationTargetInput): NotificationReplyTarget | null {
   const target = getNotificationTarget(input)
@@ -34,7 +40,8 @@ export function parseNotificationReplyTarget(input: NotificationTargetInput): No
 
 export function getNotificationTarget(notification: NotificationTargetInput) {
   const explicit = notification.targetUrl || notification.link
-  if (explicit?.startsWith('/')) return explicit
+  const normalizedExplicit = normalizeNotificationTarget(explicit)
+  if (normalizedExplicit) return normalizedExplicit
   if (notification.type === 'FRIEND_REQUEST' || notification.type === 'FOLLOW') return '/friends#received-requests'
   if (notification.type === 'GUESS_SONG_DUEL_INVITE') return '/games/guess-song/duel'
   if (notification.type === 'ACTIVITY') return '/activities'

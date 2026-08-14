@@ -8,7 +8,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
-import { isAdminRole } from '@/lib/security'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -32,7 +32,7 @@ export async function GET(request: Request, context: RouteContext) {
   if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
   if (moduleKey === 'posts') {
-    const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || isAdminRole(viewer.role)))
+    const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || await hasAdminPermission(viewer, 'post_manage')))
     const postWhere = canViewPendingPosts
       ? { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const }
       : { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: { in: ['APPROVED', 'VIOLATION'] as Array<'APPROVED' | 'VIOLATION'> } }

@@ -36,6 +36,7 @@ test('个性化签到设置只出现在个人资料相关页面', () => {
 test('统一图片查看器支持原图、滚轮、触摸缩放、长图滚动和退出清理', () => {
   const viewer = read('components/ImageViewer.tsx')
   const post = read('app/posts/[postId]/page.tsx')
+  const carousel = read('components/PostMediaCarousel.tsx')
   const replies = read('components/PostRepliesSection.tsx')
   assert.match(viewer, /createPortal/)
   assert.match(viewer, /overflow-auto/)
@@ -43,7 +44,8 @@ test('统一图片查看器支持原图、滚轮、触摸缩放、长图滚动�
   assert.match(viewer, /onTouchMove/)
   assert.match(viewer, /document\.body\.style\.overflow = 'hidden'/)
   assert.match(viewer, /document\.body\.style\.overflow = previousOverflow/)
-  assert.match(post, /<ImageViewer/)
+  assert.match(post, /<PostMediaCarousel/)
+  assert.match(carousel, /<ImageViewer/)
   assert.match(replies, /<ImageViewer/)
   assert.match(replies, /id=\{`reply-\$\{reply\.id\}`\}/)
 })

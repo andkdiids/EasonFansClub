@@ -99,19 +99,33 @@ model AdminAction {
   reason                              String?
   metadata                            Json?
   createdAt                           DateTime        @default(now())
-  adminId                             String
+  adminId                             String?
+  operatorName                        String?
+  operatorUsername                    String?
+  operatorUid                         Int?
+  operationType                       String?
+  targetType                          String?
+  targetId                            String?
+  targetTitle                         String?
   targetUserId                        String?
+  targetUserName                      String?
+  targetUserUid                       Int?
+  result                              String?         @default("SUCCESS")
   postId                              String?
   replyId                             String?
   boardId                             String?
-  User_AdminAction_adminIdToUser      User            @relation("AdminAction_adminIdToUser", fields: [adminId], references: [id], onDelete: Cascade)
+  User_AdminAction_adminIdToUser      User?           @relation("AdminAction_adminIdToUser", fields: [adminId], references: [id], onDelete: SetNull)
   Board                               Board?          @relation(fields: [boardId], references: [id])
-  Post                                Post?           @relation(fields: [postId], references: [id])
+  Post                                Post?           @relation(fields: [postId], references: [id], onDelete: SetNull)
   Reply                               Reply?          @relation(fields: [replyId], references: [id])
   User_AdminAction_targetUserIdToUser User?           @relation("AdminAction_targetUserIdToUser", fields: [targetUserId], references: [id])
 
   @@index([action])
+  @@index([operationType, createdAt])
   @@index([adminId, createdAt])
+  @@index([operatorUid, createdAt])
+  @@index([targetType, createdAt])
+  @@index([targetId, createdAt])
   @@index([boardId])
   @@index([postId])
   @@index([replyId])
@@ -1983,9 +1997,11 @@ model Post {
   rejectionReason    String?              @db.Text
   summary            String?
   AdminAction        AdminAction[]
+  PostModerationHistory PostModerationHistory[]
   Like               Like[]
   Poll               Poll?
   User               User                 @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  ReviewedBy         User?                @relation("PostReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   Board              Board                @relation(fields: [boardId], references: [id])
   PostFavorite       PostFavorite[]
   PostMedia          PostMedia[]
@@ -2011,6 +2027,28 @@ model Post {
   @@index([replyCount])
   @@index([status])
   @@index([moderationStatus, createdAt])
+}
+
+/// Immutable history for every post moderation cycle. Snapshot fields keep
+/// the record useful even when the post or actor account is later removed.
+model PostModerationHistory {
+  id                   String               @id @default(cuid())
+  postId               String?
+  actorId              String?
+  actorName            String?
+  actorUsername        String?
+  actorUid             Int?
+  action               String
+  status               PostModerationStatus
+  titleSnapshot        String?
+  rejectionReason      String?              @db.Text
+  createdAt            DateTime             @default(now())
+  Post                 Post?                @relation(fields: [postId], references: [id], onDelete: SetNull)
+  Actor                User?                @relation("PostModerationHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([postId, createdAt])
+  @@index([status, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model PostFavorite {
@@ -2560,6 +2598,8 @@ model User {
   AlbumReviewLike                                        AlbumReviewLike[]
   AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
+  PostReviewedBy                                          Post[]                         @relation("PostReviewedBy")
+  PostModerationHistoryActor                              PostModerationHistory[]       @relation("PostModerationHistoryActor")
   AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]               @relation("AdminActionLog_adminIdToUser")
   AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]               @relation("AdminActionLog_targetUserIdToUser")
   AdminPermission                                        AdminPermission[]
@@ -2776,6 +2816,7 @@ enum ActivityType {
 
 enum AdminActionType {
   APPROVE_POST
+  EDIT_POST
   DELETE_POST
   REJECT_POST
   RESTORE_POST

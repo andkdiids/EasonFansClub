@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+import { adminAuditOperationLabels, adminAuditOperations } from '../lib/admin-audit'
+
+const read = (path: string) => readFileSync(path, 'utf8')
+const schema = read('prisma/schema.prisma')
+const postRoute = read('app/api/posts/[postId]/route.ts')
+const reviewRoute = read('app/api/admin/posts/review/route.ts')
+const auditRoute = read('app/api/admin/admin-actions/route.ts')
+const auditPage = read('app/admin/admin-actions/page.tsx')
+const auditManager = read('app/admin/admin-actions/AdminActionLogManager.tsx')
+const postDetail = read('app/posts/[postId]/page.tsx')
+const replies = read('components/PostRepliesSection.tsx')
+const styles = read('app/globals.css')
+const layout = read('app/layout.tsx')
+
+test('帖子审核历史与管理员审计模型保存快照且支持账号删除后的追溯', () => {
+  assert.match(schema, /model PostModerationHistory \{[\s\S]*titleSnapshot[\s\S]*rejectionReason/)
+  assert.match(schema, /operatorName\s+String\?/) 
+  assert.match(schema, /operatorUid\s+Int\?/) 
+  assert.match(schema, /targetTitle\s+String\?/) 
+  assert.match(schema, /adminId\s+String\?[\s\S]*onDelete: SetNull/)
+  assert.match(schema, /EDIT_POST/)
+  for (const operation of Object.values(adminAuditOperations)) assert.ok(adminAuditOperationLabels[operation])
+})
+
+test('审核和帖子管理操作使用 authenticated operator、事务及 append-only 记录', () => {
+  assert.match(reviewRoute, /requireAdmin\('post_manage'\)/)
+  assert.match(reviewRoute, /body\.rejectionReason.*trim\(\)/)
+  assert.match(reviewRoute, /拒绝帖子时必须填写拒绝理由/)
+  assert.match(reviewRoute, /moderationStatus: 'PENDING'/)
+  assert.match(reviewRoute, /createAdminActionAudit\(tx/)
+  assert.match(reviewRoute, /createPostModerationHistory\(tx/)
+  assert.doesNotMatch(reviewRoute, /body\.(adminId|operatorId)/)
+  assert.match(reviewRoute, /POST_ALREADY_REVIEWED/)
+  assert.match(postRoute, /existing\.authorId === guard\.user\.id/)
+  assert.match(postRoute, /hasAdminPermission\(guard\.user, 'post_manage'\)/)
+  assert.match(postRoute, /createAdminActionAudit\(tx/)
+  assert.match(postRoute, /createPostModerationHistory\(tx/)
+  assert.match(postRoute, /if \(canManagePosts && changedDeleted\)/)
+  assert.match(postRoute, /if \(canManagePosts && changedPinned\)/)
+  assert.match(postRoute, /if \(canManagePosts && changedFeatured\)/)
+})
+
+test('操作记录后台只读、受权限保护、支持筛选分页并使用快照显示已删除目标', () => {
+  assert.match(auditRoute, /requireAdmin\('post_manage'\)/)
+  assert.match(auditRoute, /orderBy: \{ createdAt: 'desc' \}/)
+  assert.match(auditRoute, /skip: \(page - 1\) \* pageSize/)
+  assert.match(auditRoute, /targetTitle: true/)
+  assert.match(auditRoute, /operatorUid: true/)
+  assert.match(auditRoute, /原管理员账号已不存在/)
+  assert.match(auditPage, /requireAdminPage\('\/admin\/admin-actions', 'post_manage'\)/)
+  assert.match(auditManager, /管理员 \/ UID/)
+  assert.match(auditManager, /操作类型/)
+  assert.match(auditManager, /对象类型/)
+  assert.match(auditManager, /pageSize/)
+  assert.doesNotMatch(auditManager, /删除日志|编辑日志/)
+})
+
+test('帖子详情作者操作、审核后隐藏和回复排序切换器的暗色主题都有源代码覆盖', () => {
+  assert.match(postDetail, /canEditPost/)
+  assert.match(postDetail, /DeletePostButton/)
+  assert.match(postDetail, /redirectTo="\/forum"/)
+  assert.match(postRoute, /moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\]/)
+  assert.match(replies, /post-replies-sort-tabs/)
+  assert.match(replies, /data-selected=/)
+  assert.match(styles, /\.post-replies-sort-tab\[data-selected='true'\]/)
+  assert.match(styles, /data-theme='midnight'[\s\S]*post-replies-sort-tab/)
+  assert.match(layout, /prefers-color-scheme: dark/)
+})

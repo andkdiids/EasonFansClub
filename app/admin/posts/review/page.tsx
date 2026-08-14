@@ -27,6 +27,11 @@ export default async function AdminPostReviewPage() {
       isPinned: true,
       isFeatured: true,
       User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
+      ReviewedBy: { select: { id: true, uid: true, username: true, nickname: true, Profile: { select: { displayName: true } } } },
+      PostModerationHistory: {
+        orderBy: { createdAt: 'desc' as const },
+        select: { id: true, actorName: true, actorUsername: true, actorUid: true, action: true, status: true, titleSnapshot: true, rejectionReason: true, createdAt: true },
+      },
       Board: { select: { name: true } },
       PostMedia: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
     },
@@ -35,6 +40,10 @@ export default async function AdminPostReviewPage() {
     ...post,
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
+    ReviewedBy: post.ReviewedBy
+      ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, username: post.ReviewedBy.username, name: post.ReviewedBy.Profile?.displayName || post.ReviewedBy.nickname }
+      : null,
+    PostModerationHistory: post.PostModerationHistory.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
     User: post.User,
     PostMedia: post.PostMedia.map((media) => ({ ...media, url: publicImageUrl(media.url), thumbnail: publicImageUrl(media.thumbnail) })),
   }))

@@ -10,7 +10,15 @@ type PointerDragState = {
   currentIndex: number
 }
 
-export function ContentImageUploader({ value, onChange }: Readonly<{ value: string[]; onChange: (urls: string[]) => void }>) {
+export function ContentImageUploader({
+  value,
+  onChange,
+  existingCount = 0,
+}: Readonly<{
+  value: string[]
+  onChange: (urls: string[]) => void
+  existingCount?: number
+}>) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [draggingUrl, setDraggingUrl] = useState<string | null>(null)
@@ -29,12 +37,16 @@ export function ContentImageUploader({ value, onChange }: Readonly<{ value: stri
     setError('')
     try {
       const next = [...value]
-      const remaining = MAX_CONTENT_IMAGES - value.length
+      const totalImages = existingCount + value.length
+      const remaining = MAX_CONTENT_IMAGES - totalImages
       if (remaining <= 0) {
         setError(`最多上传 ${MAX_CONTENT_IMAGES} 张图片`)
         return
       }
-      for (const file of Array.from(files).slice(0, remaining)) {
+      const selectedFiles = Array.from(files)
+      const acceptedFiles = selectedFiles.slice(0, remaining)
+      const skippedCount = selectedFiles.length - acceptedFiles.length
+      for (const file of acceptedFiles) {
         // 直接上传原图：格式校验与 WebP 转换统一在服务端用 sharp 完成，
         // 不依赖浏览器 MIME，也不在客户端做 createImageBitmap/canvas 转换（避免部分浏览器/图片误判）。
         const form = new FormData()
@@ -47,6 +59,9 @@ export function ContentImageUploader({ value, onChange }: Readonly<{ value: stri
         next.push(data.url)
       }
       onChange(next)
+      if (skippedCount > 0) {
+        setError(`每篇帖子最多上传 ${MAX_CONTENT_IMAGES} 张图片，已忽略超出的 ${skippedCount} 张`)
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '图片上传失败')
     } finally {
@@ -137,13 +152,16 @@ export function ContentImageUploader({ value, onChange }: Readonly<{ value: stri
   return (
     <div className="space-y-2">
       <label className="inline-flex cursor-pointer items-center rounded-lg border border-sky-100 bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
-        {uploading ? '上传中…' : `添加图片（${value.length}/${MAX_CONTENT_IMAGES}）`}
+        {uploading ? '上传中…' : `添加图片（${existingCount + value.length}/${MAX_CONTENT_IMAGES}）`}
         <input
           type="file"
           accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
           multiple
-          disabled={uploading || value.length >= MAX_CONTENT_IMAGES}
-          onChange={(event) => void upload(event.target.files)}
+          disabled={uploading}
+          onChange={(event) => {
+            void upload(event.target.files)
+            event.currentTarget.value = ''
+          }}
           className="sr-only"
         />
       </label>

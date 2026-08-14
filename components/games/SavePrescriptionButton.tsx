@@ -2,13 +2,15 @@
 
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
+import type { DailyPrescriptionUser } from '@/lib/daily-prescription-types'
+import { publicImageVariantUrl } from '@/lib/image-variants'
+import { formatUid } from '@/lib/uid'
 
 export type PrescriptionImageData = Readonly<{
-  dateKey: string
   points: number
-  totalPoints?: number
   prescriptionCode: string
   issuedAtBeijing?: string
+  user: DailyPrescriptionUser
   lyric: Readonly<{ text: string; songTitle: string }> | null
 }>
 
@@ -103,7 +105,85 @@ function drawWrappedText(
   return visibleLines.length
 }
 
-function drawPrescriptionCanvas(data: PrescriptionImageData, palette: PrescriptionPalette) {
+function truncateCanvasText(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const value = text.trim() || 'E友'
+  if (context.measureText(value).width <= maxWidth) return value
+
+  let result = ''
+  for (const character of Array.from(value)) {
+    const next = `${result}${character}`
+    if (context.measureText(`${next}…`).width > maxWidth) break
+    result = next
+  }
+  return `${result}…`
+}
+
+function avatarFallback(uid: number) {
+  return formatUid(uid).slice(0, 1)
+}
+
+function drawAvatar(
+  context: CanvasRenderingContext2D,
+  avatar: HTMLImageElement | null,
+  x: number,
+  y: number,
+  size: number,
+  fallback: string,
+  palette: PrescriptionPalette,
+) {
+  context.save()
+  context.beginPath()
+  context.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2)
+  context.clip()
+
+  if (avatar && avatar.naturalWidth > 0 && avatar.naturalHeight > 0) {
+    const sourceSize = Math.min(avatar.naturalWidth, avatar.naturalHeight)
+    const sourceX = (avatar.naturalWidth - sourceSize) / 2
+    const sourceY = (avatar.naturalHeight - sourceSize) / 2
+    context.drawImage(avatar, sourceX, sourceY, sourceSize, sourceSize, x, y, size, size)
+  } else {
+    context.fillStyle = palette.accent
+    context.fillRect(x, y, size, size)
+    context.fillStyle = palette.surface
+    context.font = `800 ${Math.round(size * 0.38)}px ${FONT_SANS}`
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.fillText(fallback, x + size / 2, y + size / 2)
+  }
+  context.restore()
+  context.textBaseline = 'alphabetic'
+}
+
+async function loadAvatarImage(url: string | null) {
+  if (!url) return null
+
+  const imageUrl = publicImageVariantUrl(url, 'avatar-md')
+  if (!imageUrl) return null
+
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image()
+    let settled = false
+    const finish = (result: HTMLImageElement | null) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeoutId)
+      resolve(result)
+    }
+    const timeoutId = window.setTimeout(() => finish(null), 5000)
+
+    // Use the existing public media gateway and anonymous CORS mode. If the
+    // gateway rejects CORS, fall back to the deterministic avatar mark instead
+    // of ever tainting the canvas and breaking the whole export.
+    image.crossOrigin = 'anonymous'
+    image.decoding = 'async'
+    image.onload = () => finish(image)
+    image.onerror = () => finish(null)
+    image.src = imageUrl
+  })
+}
+
+async function drawPrescriptionCanvas(data: PrescriptionImageData, palette: PrescriptionPalette) {
+  const avatar = await loadAvatarImage(data.user.avatarUrl)
   const canvas = document.createElement('canvas')
   canvas.width = IMAGE_WIDTH
   canvas.height = IMAGE_HEIGHT
@@ -148,10 +228,17 @@ function drawPrescriptionCanvas(data: PrescriptionImageData, palette: Prescripti
   context.textAlign = 'left'
   context.fillText('BEIJING TIME · DAILY', 80, 94)
 
+  const userAvatarSize = 56
+  const userAvatarX = 818
+  const userAvatarY = 48
+  drawAvatar(context, avatar, userAvatarX, userAvatarY, userAvatarSize, avatarFallback(data.user.uid), palette)
+  context.textAlign = 'left'
+  context.fillStyle = palette.foreground
+  context.font = `700 20px ${FONT_SANS}`
+  context.fillText(truncateCanvasText(context, data.user.username, 230), userAvatarX + userAvatarSize + 16, 76)
   context.fillStyle = palette.foregroundMuted
-  context.font = `500 20px ${FONT_SANS}`
-  context.textAlign = 'right'
-  context.fillText(data.dateKey, 1120, 94)
+  context.font = `500 16px ${FONT_SANS}`
+  context.fillText(`UID: ${formatUid(data.user.uid)}`, userAvatarX + userAvatarSize + 16, 103)
 
   context.fillStyle = palette.foreground
   context.font = `600 54px "ECFC-Title", ${FONT_SANS}`
@@ -172,17 +259,11 @@ function drawPrescriptionCanvas(data: PrescriptionImageData, palette: Prescripti
 
   context.fillStyle = palette.foregroundMuted
   context.font = `800 17px ${FONT_SANS}`
-  context.fillText('获得奖励', 80, 250)
+  context.fillText('获得奖励', 80, 292)
 
   context.fillStyle = palette.accent
   context.font = `800 48px ${FONT_SANS}`
-  context.fillText(`+${data.points} 挂号费`, 80, 316)
-
-  if (typeof data.totalPoints === 'number') {
-    context.fillStyle = palette.foregroundMuted
-    context.font = `500 17px ${FONT_SANS}`
-    context.fillText(`当前挂号费 ${data.totalPoints}`, 80, 356)
-  }
+  context.fillText(`+${data.points} 挂号费`, 80, 360)
 
   context.fillStyle = palette.foregroundMuted
   context.font = `800 17px ${FONT_SANS}`
@@ -262,7 +343,7 @@ function isMobileBrowser() {
 async function generatePrescriptionImage(data: PrescriptionImageData): Promise<GeneratedPrescriptionImage> {
   const mobile = isMobileBrowser()
   const theme = readWebsiteTheme()
-  const canvas = drawPrescriptionCanvas(data, readPalette(theme))
+  const canvas = await drawPrescriptionCanvas(data, readPalette(theme))
   let previewSrc = ''
   let previewSrcIsObjectUrl = false
 

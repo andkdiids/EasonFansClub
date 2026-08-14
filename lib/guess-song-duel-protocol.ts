@@ -42,6 +42,9 @@ export type DuelPlayerState = DuelPublicUser & {
   slot: 1 | 2
   correctCount: number
   totalEffectiveAnswerMs: number
+  /** SCORE progress is calculated per player; BUZZER keeps round semantics. */
+  questionIndex: number
+  answeredCount: number
   submitted: boolean
   selectedOptionKey: string | null
   answerCorrect: boolean | null

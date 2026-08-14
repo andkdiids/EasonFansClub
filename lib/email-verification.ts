@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { verificationMailTemplate, sendMail } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
+import { buildPublicAbsoluteUrl } from '@/lib/url-safety'
 
 const EMAIL_TOKEN_TTL_MS = 1000 * 60 * 60 * 24
 const RESEND_COOLDOWN_MS = 1000 * 60
@@ -22,8 +23,7 @@ export function createEmailVerificationToken() {
 }
 
 export function buildEmailVerificationUrl(token: string) {
-  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '')
-  return `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}`
+  return buildPublicAbsoluteUrl(`/api/auth/verify-email?token=${encodeURIComponent(token)}`)
 }
 
 export async function canSendEmailVerification(email: string) {

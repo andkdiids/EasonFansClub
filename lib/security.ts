@@ -173,12 +173,13 @@ export async function containsSensitiveContent(content: string) {
   }
 }
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:8000',
+const productionAllowedOrigins = [
   'http://43.138.254.68',
   'https://ecfc.fans',
 ]
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? productionAllowedOrigins
+  : [...productionAllowedOrigins, 'http://localhost:3000', 'http://localhost:8000']
 
 export function hasValidRequestOrigin(request: Request) {
   const fetchSite = request.headers.get('sec-fetch-site')

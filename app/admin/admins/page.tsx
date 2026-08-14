@@ -115,8 +115,9 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
             reason: log.reason,
             createdAt: log.createdAt,
             adminName:
-  log.User_AdminAction_adminIdToUser.Profile?.displayName ||
-  log.User_AdminAction_adminIdToUser.nickname,
+  log.User_AdminAction_adminIdToUser?.Profile?.displayName ||
+  log.User_AdminAction_adminIdToUser?.nickname ||
+  '原管理员账号已不存在',
 
 targetName:
   log.User_AdminAction_targetUserIdToUser

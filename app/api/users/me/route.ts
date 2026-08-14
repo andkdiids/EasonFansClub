@@ -185,7 +185,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     profile: {
       ...user,
-      ipRegion: resolvedIpRegion || user.ipRegion,
+      ipRegion: resolvedIpRegion,
       avatarUrl: publicImageUrl(user.avatarUrl),
       backgroundUrl: publicImageUrl(user.backgroundUrl),
       profile: Profile ? {

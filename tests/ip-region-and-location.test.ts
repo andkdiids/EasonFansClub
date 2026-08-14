@@ -7,7 +7,13 @@ import {
   normalizeIpRegionFromGeo,
   resolveIpLocation,
 } from '../lib/ip-region'
-import { getClientIp, getClientIpDiagnostics } from '../lib/client-ip'
+import {
+  getClientIp,
+  getClientIpDiagnostics,
+  getClientIpResolution,
+  isPublicIp,
+  normalizeIp,
+} from '../lib/client-ip'
 import {
   LOCATION_COUNTRIES,
   formatUserLocation,
@@ -36,18 +42,19 @@ const forumDiscovery = read('app/api/forum/discover/route.ts')
 const replies = read('components/PostRepliesSection.tsx')
 const checkinMessages = read('components/CheckInMessagesPanel.tsx')
 const wall = read('components/ProfileWall.tsx')
+const ipRegionLabel = read('components/IpRegionLabel.tsx')
 
 test('IP 属地只输出粗粒度标准化名称，不包含城市或完整 IP', () => {
   assert.equal(normalizeIpRegionFromGeo({ country: 'CN', regionCode: 'CN-44' }), '广东')
   assert.equal(normalizeIpRegionFromGeo({ country: 'CN', region: '广西壮族自治区' }), '广西')
   assert.equal(normalizeIpRegionFromGeo({ country: 'CN', region: '北京市' }), '北京')
-  assert.equal(normalizeIpRegionFromGeo({ country: 'HK', region: '九龙' }), '中国香港')
+  assert.equal(normalizeIpRegionFromGeo({ country: 'HK', region: '九龙' }), '香港')
   assert.equal(normalizeIpRegionFromGeo({ country: 'JP', region: 'Tokyo' }), '日本')
   assert.equal(normalizeIpRegionFromGeo({ country: 'US', region: 'California' }), '美国')
   assert.equal(normalizeIpRegionFromGeo({ country: 'ZZ', region: 'Somewhere' }), null)
   assert.equal(normalizeIpRegionFromGeo({}), null)
   assert.match(ipResolver, /resolveIpLocation\(request: Request\)/)
-  assert.match(ipResolver, /getClientIp\(request\)/)
+  assert.match(ipResolver, /getClientIpResolution\(request\)/)
   assert.match(ipResolver, /IP_LOCATION_API_URL/)
   assert.doesNotMatch(ipResolver, /\|\| '广东'/)
   assert.match(ipResolver, /getCloudflareContext\(\{ async: true \}\)/)
@@ -61,10 +68,15 @@ test('IP 属地只输出粗粒度标准化名称，不包含城市或完整 IP',
   assert.ok(productionEntry.includes('Application port must be bound to localhost behind Nginx.'))
   assert.ok(!productionEntry.includes('proxy_set_header CF-Connecting-IP "";'))
   assert.ok(!productionEntry.includes('proxy_set_header CF-Connecting-IP \\$remote_addr;'))
-  assert.match(productionDeploy, /TRUSTED_CLIENT_IP_SOURCE=\("cloudflare"\|cloudflare\)/)
+  assert.ok(productionEntry.includes('proxy_set_header X-Forwarded-For \\$remote_addr;'))
+  assert.ok(!productionEntry.includes('proxy_set_header X-Forwarded-For \\$proxy_add_x_forwarded_for;'))
+  assert.match(productionDeploy, /TRUSTED_CLIENT_IP_SOURCE=.*nginx.*cloudflare/)
   assert.ok(productionDeploy.includes('Application port must be bound to localhost behind Nginx.'))
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region_code: '44', org: 'test' })?.label, '广东')
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: '广西壮族自治区' })?.label, '广西')
+  assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: 'Guangdong Sheng' })?.label, '广东')
+  assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: 'Guangxi Zhuangzu Zizhiqu' })?.label, '广西')
+  assert.equal(normalizeIpRegionFromGeo({ country: 'CN' }), null)
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'CN', region: 'Zhejiang' })?.label, '浙江')
   assert.equal(normalizeIpLocationProviderResponse({ country_code: 'JP' })?.label, '日本')
   assert.equal(normalizeIpLocationProviderResponse({ success: false }), null)
@@ -142,9 +154,9 @@ test('trusted proxy modes resolve CF, forwarded, mapped, and invalid addresses s
     })), '203.0.113.19')
 
     process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx-forwarded'
-    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '203.0.113.21' } })), '203.0.113.21')
-    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '10.0.0.1, ::ffff:203.0.113.22, 203.0.113.23' } })), '203.0.113.22')
-    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-real-ip': '203.0.113.24' } })), '203.0.113.24')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '203.0.113.21', 'x-ecfc-client-ip': '203.0.113.21' } })), '203.0.113.21')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-forwarded-for': '10.0.0.1, ::ffff:203.0.113.22, 203.0.113.23', 'x-ecfc-client-ip': '203.0.113.22' } })), '203.0.113.22')
+    assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-real-ip': '203.0.113.24', 'x-ecfc-client-ip': '203.0.113.24' } })), '203.0.113.24')
 
     process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
     assert.equal(getClientIp(new Request('https://ecfc.fans', { headers: { 'x-ecfc-client-ip': '::ffff:203.0.113.25' } })), '203.0.113.25')
@@ -254,4 +266,89 @@ test('帖子保存发表时的独立省级 IP 属地并在广场、发现页和�
   assert.match(forumFeed, /ipRegion: true/)
   assert.match(forumDiscovery, /ipRegion: true/)
   assert.match(postMigration, /ALTER TABLE `Post`[\s\S]*ADD COLUMN `ipRegion` VARCHAR\(191\) NULL/)
+})
+
+test('normalizes mapped IPv4 and native IPv6 while rejecting non-public addresses', () => {
+  assert.equal(normalizeIp('::ffff:123.123.123.123'), '123.123.123.123')
+  assert.equal(normalizeIp('240e:8a00:1234::10'), '240e:8a00:1234::10')
+  assert.equal(isPublicIp('240e:8a00:1234::10'), true)
+  assert.equal(isPublicIp('127.0.0.1'), false)
+  assert.equal(isPublicIp('10.0.0.1'), false)
+  assert.equal(isPublicIp('192.168.1.10'), false)
+  assert.equal(isPublicIp('fc00::1'), false)
+  assert.equal(isPublicIp('fe80::1'), false)
+})
+
+test('reports the selected trusted header and refuses forged forwarded headers', () => {
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  try {
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'cloudflare'
+    assert.deepEqual(
+      getClientIpResolution(new Request('https://ecfc.fans', {
+        headers: { 'cf-connecting-ip': '240e:8a00:1234::10', 'x-ecfc-client-ip': '240e:8a00:1234::10' },
+      })),
+      { ip: '240e:8a00:1234::10', source: 'cf-connecting-ip', status: 'success' },
+    )
+
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx-forwarded'
+    assert.deepEqual(
+      getClientIpResolution(new Request('https://ecfc.fans', {
+        headers: { 'x-forwarded-for': '10.0.0.1, ::ffff:123.123.123.123, 127.0.0.1', 'x-ecfc-client-ip': '123.123.123.123' },
+      })),
+      { ip: '123.123.123.123', source: 'x-forwarded-for', status: 'success' },
+    )
+
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+    assert.equal(
+      getClientIpResolution(new Request('https://ecfc.fans', {
+        headers: { 'x-forwarded-for': '1.1.1.1', 'x-real-ip': '1.1.1.1' },
+      })).status,
+      'none',
+    )
+    assert.equal(
+      getClientIpResolution(new Request('https://ecfc.fans', {
+        headers: { 'x-ecfc-client-ip': '127.0.0.1' },
+      })).status,
+      'private-ip',
+    )
+  } finally {
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+  }
+})
+
+test('requires an explicit target IP in the configured GeoIP URL', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  let providerCalled = false
+  process.env.IP_LOCATION_API_URL = 'https://unit.test/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  clearIpLocationCacheForTests()
+  globalThis.fetch = async () => {
+    providerCalled = true
+    return new Response(JSON.stringify({ country_code: 'CN', region_code: '44' }), { status: 200 })
+  }
+  try {
+    const location = await resolveIpLocation(new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-ecfc-client-ip': '123.123.123.123' },
+    }))
+    assert.equal(location, null)
+    assert.equal(providerCalled, false)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+  }
+})
+
+test('unknown IP regions are visible as unknown and do not reuse a stale user region', () => {
+  assert.doesNotMatch(ipRegionLabel, /return null/)
+  assert.match(ipRegionLabel, /IP属地：/)
+  assert.match(ipResolver, /where: \{ id: userId \}/)
+  assert.match(ipResolver, /data: \{ ipRegion: region, ipRegionUpdatedAt: new Date\(\) \}/)
+  assert.doesNotMatch(ipResolver, /if \(!region\) return null/)
 })

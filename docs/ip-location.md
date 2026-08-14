@@ -14,9 +14,9 @@
 
 ```nginx
 proxy_set_header X-ECFC-Client-IP $remote_addr;
-proxy_set_header X-ECFC-Remote-Address $remote_addr;
+proxy_set_header X-ECFC-Remote-Address $realip_remote_addr;
 proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
 ```
 

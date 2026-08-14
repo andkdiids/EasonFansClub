@@ -5,6 +5,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
+import { normalizeStoredInternalPath } from '@/lib/url-safety'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -89,7 +90,7 @@ export async function GET(request: Request) {
       mood: item.mood,
       content: publicModerationText(item.content, item.moderationStatus),
       type: item.type,
-      targetUrl: item.targetUrl,
+      targetUrl: normalizeStoredInternalPath(item.targetUrl),
       createdAt: item.createdAt.toISOString(),
       actor: {
         ...item.User,

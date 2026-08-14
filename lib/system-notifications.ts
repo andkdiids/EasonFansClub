@@ -1,4 +1,5 @@
 import type { Prisma, SystemNotificationType } from '@prisma/client'
+import { normalizeActionUrl } from '@/lib/url-safety'
 
 export const systemNotificationTypeLabels: Record<SystemNotificationType, string> = {
   SYSTEM: '系统通知',
@@ -41,18 +42,7 @@ export function parseSystemNotificationType(value: unknown): SystemNotificationT
 }
 
 export function validateActionUrl(value: string | null | undefined) {
-  const url = String(value || '').trim()
-  if (!url) return null
-  if (url.startsWith('/')) return url
-
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString()
-  } catch {
-    return null
-  }
-
-  return null
+  return normalizeActionUrl(value)
 }
 
 export function effectiveSystemNotificationWhere(now = new Date()): Prisma.SystemNotificationWhereInput {
@@ -76,7 +66,7 @@ export function serializeSystemNotification(item: SystemNotificationItem, totalU
     id: item.id,
     title: item.title,
     content: item.content,
-    link: item.link,
+    link: normalizeActionUrl(item.link),
     type: item.type,
     typeLabel: systemNotificationTypeLabels[item.type],
     cover: item.cover,
@@ -87,7 +77,7 @@ export function serializeSystemNotification(item: SystemNotificationItem, totalU
     expireAt: item.expireAt,
     published: item.published,
     buttonText: item.buttonText,
-    buttonUrl: item.buttonUrl,
+    buttonUrl: normalizeActionUrl(item.buttonUrl),
     version: item.version,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,

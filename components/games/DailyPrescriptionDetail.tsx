@@ -3,11 +3,14 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { SavePrescriptionButton } from './SavePrescriptionButton'
+import { PrescriptionUserBadge } from './PrescriptionUserBadge'
+import type { DailyPrescriptionUser } from '@/lib/daily-prescription-types'
 
 type DrawResult = {
   dateKey: string
   points: number
   totalPoints: number
+  user: DailyPrescriptionUser
   prescriptionCode: string
   issuedAtBeijing: string
   lyric: { text: string; songTitle: string } | null
@@ -80,7 +83,14 @@ export function DailyPrescriptionDetail() {
         </button>
       ) : (
         <article>
-          <span>{status.draw.dateKey}</span>
+          <header className="daily-prescription-card-header">
+            <div>
+              <span>BEIJING TIME · DAILY</span>
+              <h3>今日处方</h3>
+            </div>
+            <PrescriptionUserBadge user={status.draw.user} />
+          </header>
+          <span>获得奖励</span>
           <strong>+{status.draw.points} 挂号费</strong>
           {status.draw.lyric ? <blockquote>“{status.draw.lyric.text}”<cite>《{status.draw.lyric.songTitle}》</cite></blockquote> : null}
           <small>处方编号：{status.draw.prescriptionCode}</small>

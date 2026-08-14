@@ -18,12 +18,18 @@ export function ImageViewer({
   previewSrc,
   imageClassName = 'h-auto max-h-[32rem] w-full object-contain',
   buttonClassName = 'block w-full cursor-zoom-in overflow-hidden bg-slate-100 text-left',
+  loading = 'lazy',
+  fetchPriority = 'auto',
+  onError,
 }: Readonly<{
   src: string
   alt: string
   previewSrc?: string
   imageClassName?: string
   buttonClassName?: string
+  loading?: 'eager' | 'lazy'
+  fetchPriority?: 'high' | 'low' | 'auto'
+  onError?: () => void
 }>) {
   const [open, setOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
@@ -109,6 +115,7 @@ export function ImageViewer({
             src={renderOriginalSrc}
             alt={alt}
             draggable={false}
+            onError={onError}
             onDoubleClick={() => setZoom((value) => value === 1 ? 2 : 1)}
             className="h-auto select-none object-contain"
             style={zoom === 1 ? { maxWidth: '100%' } : { width: `${zoom * 100}%`, maxWidth: 'none' }}
@@ -123,7 +130,15 @@ export function ImageViewer({
     <>
       <button type="button" onClick={() => setOpen(true)} className={buttonClassName} aria-label={`查看大图：${alt}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={renderPreviewSrc} alt={alt} draggable={false} loading="lazy" className={imageClassName} />
+        <img
+          src={renderPreviewSrc}
+          alt={alt}
+          draggable={false}
+          loading={loading}
+          fetchPriority={fetchPriority}
+          onError={onError}
+          className={imageClassName}
+        />
       </button>
       {viewer}
     </>

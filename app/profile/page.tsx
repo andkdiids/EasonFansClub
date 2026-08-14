@@ -111,7 +111,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           baseDisplayName: displayName,
           bio,
           location: locationFromProfile(profile.Profile),
-          ipRegion: resolvedIpRegion || profile.ipRegion,
+          ipRegion: resolvedIpRegion,
           avatarUrl: avatar,
           backgroundUrl: background,
           createdAt: profile.createdAt,

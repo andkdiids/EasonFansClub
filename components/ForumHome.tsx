@@ -67,14 +67,20 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   }
 
   return (
-    <>
-      <ForumPlazaHome previewMode={previewMode} />
-      {!previewMode && isMobile ? <button type="button" className="forum-theme-switch-floating" onClick={() => switchTheme('xiaochenshu')} aria-label="切换到发现模式">小臣书</button> : null}
-    </>
+    <ForumPlazaHome
+      previewMode={previewMode}
+      onSwitchToXiaochenshu={previewMode ? undefined : () => switchTheme('xiaochenshu')}
+    />
   )
 }
 
-function ForumPlazaHome({ previewMode = false }: { previewMode?: boolean }) {
+function ForumPlazaHome({
+  previewMode = false,
+  onSwitchToXiaochenshu,
+}: {
+  previewMode?: boolean
+  onSwitchToXiaochenshu?: () => void
+}) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -218,7 +224,19 @@ function ForumPlazaHome({ previewMode = false }: { previewMode?: boolean }) {
             <h1>E院广场{data?.selectedBoard ? ` / ${data.selectedBoard.name}` : ''}</h1>
             <p>浏览公开分区，筛选、搜索并参与讨论。</p>
           </div>
-          {data?.permissions.canCreatePost ? <Link href={createHref} className="flat-button-primary">发布帖子</Link> : null}
+          <div className="forum-hero-actions">
+            {data?.permissions.canCreatePost ? <Link href={createHref} className="flat-button-primary">发布帖子</Link> : null}
+            {onSwitchToXiaochenshu ? (
+              <button
+                type="button"
+                className="forum-plaza-mode-button"
+                onClick={onSwitchToXiaochenshu}
+                aria-label="切换到小臣书模式"
+              >
+                小臣书模式
+              </button>
+            ) : null}
+          </div>
         </div>
         <form
           className="forum-search"

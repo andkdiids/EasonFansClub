@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { UiIcon } from '@/components/UiIcon'
 import { SavePrescriptionButton } from '@/components/games/SavePrescriptionButton'
+import { PrescriptionUserBadge } from '@/components/games/PrescriptionUserBadge'
+import type { DailyPrescriptionUser } from '@/lib/daily-prescription-types'
 import { MAX_DAILY_PRESCRIPTION_REWARD, MIN_DAILY_PRESCRIPTION_REWARD } from '@/lib/daily-prescription-reward'
 
 type DrawResult = {
@@ -11,6 +13,7 @@ type DrawResult = {
   dateKey: string
   points: number
   totalPoints: number
+  user: DailyPrescriptionUser
   prescriptionCode: string
   issuedAtBeijing: string
   lyric: {
@@ -163,12 +166,11 @@ export function EntertainmentCenter() {
             <article className="prescription-card">
               <header>
                 <p>私家E院 · 今日幸运处方</p>
-                <span>{drawResult.dateKey}</span>
+                <PrescriptionUserBadge user={drawResult.user} />
               </header>
               <div className="prescription-points">
                 <span>获得奖励</span>
                 <strong>+{drawResult.points} 挂号费</strong>
-                <small>当前挂号费 {drawResult.totalPoints}</small>
               </div>
               <div className="prescription-lyric">
                 <span>今日歌词处方</span>

@@ -7,6 +7,7 @@ import { parseNotificationReplyTarget, type NotificationReplyTarget } from '@/li
 import { compareNotificationOrder } from '@/lib/notification-order'
 import { clampPaginationPage } from '@/lib/pagination'
 import { formatLikeNotificationText, loadLikeNotificationStats, parseLikeNotificationTarget, reconcileLikeNotifications, type LikeNotificationTargetKind } from '@/lib/like-notifications'
+import { normalizeActionUrl, normalizeStoredInternalPath } from '@/lib/url-safety'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
@@ -587,6 +588,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     if (row.source === 'personal') {
       const item = personalById.get(row.id)
       if (!item) return []
+      const link = normalizeStoredInternalPath(item.link)
       const actor = item.User_Notification_actorIdToUser
       const actorName = actor
         ? resolveFriendDisplayName({
@@ -607,12 +609,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         id: item.id,
         source: 'personal' as const,
         type: item.type,
-        typeLabel: getNotificationTypeLabel(item.type, item.link, 'personal'),
-        category: getNotificationCategory(item.type, item.link),
-        title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, item.link, 'personal'),
+        typeLabel: getNotificationTypeLabel(item.type, link, 'personal'),
+        category: getNotificationCategory(item.type, link),
+        title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, link, 'personal'),
         content: likeTitle ? null : resolveNotificationActorText(item.content, actorName),
-        link: item.link,
-        targetUrl: item.link,
+        link,
+        targetUrl: link,
         actorName,
         actorUid: actor?.uid || null,
         actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
@@ -628,15 +630,15 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
           id: item.id,
           source: 'personal',
           type: item.type,
-          link: item.link,
-          targetUrl: item.link,
+          link,
+          targetUrl: link,
         }),
         replyDisabledReason: null,
       } satisfies UnifiedNotification]
     }
     const item = systemById.get(row.id)
     if (!item) return []
-    const targetUrl = item.buttonUrl || item.link
+    const targetUrl = normalizeActionUrl(item.buttonUrl) || normalizeActionUrl(item.link)
     const isRead = item.SystemNotificationRead.length > 0
     return [{
       id: item.id,
@@ -747,7 +749,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
   })
 
   return items.map((item) => {
-    const targetUrl = item.buttonUrl || item.link
+    const targetUrl = normalizeActionUrl(item.buttonUrl) || normalizeActionUrl(item.link)
     return {
       id: item.id,
       source: 'system' as const,

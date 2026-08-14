@@ -122,6 +122,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     desc: '维护后台管理员与权限分配。',
     items: [
       { href: '/admin/admins', title: '管理员管理', desc: '添加管理员、移除管理员并编辑后台权限。' },
+      { href: '/admin/admin-actions', title: '管理员操作记录', desc: '按管理员、操作类型、对象和时间追溯内容管理操作。' },
     ],
   },
   {

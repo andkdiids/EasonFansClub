@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
+import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { sanitizeText } from '@/lib/security'
-import { parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
+import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -141,6 +142,12 @@ export async function POST(request: Request) {
     title: rawTitle,
     content: rawContent,
   }
+  if (hasTooManyContentImages(body?.imageUrls)) {
+    return NextResponse.json({
+      message: `每篇帖子最多上传 ${MAX_CONTENT_IMAGES} 张图片`,
+      errors: { imageUrls: `图片数量不能超过 ${MAX_CONTENT_IMAGES} 张` },
+    }, { status: 400 })
+  }
   const imageUrls = parseContentImageUrls(body?.imageUrls)
 
   const errors: Record<string, string> = {}
@@ -195,6 +202,13 @@ export async function POST(request: Request) {
       if (imageUrls.length) {
         await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => ({ postId: post.id, type: 'IMAGE', url, sortOrder })) })
       }
+      await createPostModerationHistory(tx, {
+        postId: post.id,
+        actorId: user.id,
+        action: 'SUBMITTED',
+        status: moderationStatus,
+        titleSnapshot: input.title,
+      })
       if (moderationStatus === 'APPROVED') {
         await tx.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${post.id}` } })
       }

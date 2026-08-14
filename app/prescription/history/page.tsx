@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { SavePrescriptionButton } from '@/components/games/SavePrescriptionButton'
+import { PrescriptionUserBadge } from '@/components/games/PrescriptionUserBadge'
 import { PrescriptionHistoryPagination } from '@/components/games/PrescriptionHistoryPagination'
 import { getEntertainmentDailyDrawHistory } from '@/lib/entertainment'
 import { getCurrentUser } from '@/lib/auth'
@@ -39,10 +40,10 @@ export default async function PrescriptionHistoryPage({ searchParams }: Readonly
             <article key={record.id} id={`prescription-${record.id}`} className="prescription-card">
               <header>
                 <p>私家E院 · 历史处方</p>
-                <span>{record.dateKey}</span>
+                <PrescriptionUserBadge user={record.user} />
               </header>
               <div className="prescription-points">
-                <span>当日奖励</span>
+                <span>获得奖励</span>
                 <strong>{record.rewarded ? `+${record.points} 挂号费` : '未获得奖励'}</strong>
                 <small>{record.rewardFromLedger ? '奖励来自当日挂号费流水' : '奖励来自处方记录快照'}</small>
               </div>

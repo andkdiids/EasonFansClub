@@ -43,6 +43,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/content': 'home_manage',
   '/admin/home': 'home_manage',
   '/admin/posts/review': 'post_manage',
+  '/admin/admin-actions': 'post_manage',
   '/admin/today': 'today_manage',
   '/admin/achievements': 'achievement_manage',
   '/admin/culture': 'culture_manage',

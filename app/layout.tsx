@@ -41,7 +41,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('ecfc-theme');if(t!=='day'&&t!=='midnight')t='day';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='midnight'?'dark':'light';var f=localStorage.getItem('ecfc-forum-theme');if(f!=='plaza'&&f!=='xiaochenshu')f='xiaochenshu';var m=window.matchMedia('(max-width: 767px)').matches;var p=window.location.pathname;if(m&&p==='/forum')document.documentElement.dataset.forumTheme=f;if(m&&p!=='/posts/new'&&/^\\/posts\\/[^/]+$/.test(p)&&f==='xiaochenshu')document.documentElement.dataset.forumDetailDiscover='true'}catch(e){}})()` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('ecfc-theme');if(t!=='day'&&t!=='midnight')t=window.matchMedia('(prefers-color-scheme: dark)').matches?'midnight':'day';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='midnight'?'dark':'light';var f=localStorage.getItem('ecfc-forum-theme');if(f!=='plaza'&&f!=='xiaochenshu')f='xiaochenshu';var m=window.matchMedia('(max-width: 767px)').matches;var p=window.location.pathname;if(m&&p==='/forum')document.documentElement.dataset.forumTheme=f;if(m&&p!=='/posts/new'&&/^\\/posts\\/[^/]+$/.test(p)&&f==='xiaochenshu')document.documentElement.dataset.forumDetailDiscover='true'}catch(e){}})()` }} />
       </head>
       <body>
         <DisableNativeImageDrag />

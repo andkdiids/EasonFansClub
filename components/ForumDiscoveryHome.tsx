@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ForumDiscoveryCard } from '@/components/ForumDiscoveryCard'
 import {
+  buildForumDiscoveryTabs,
   FORUM_DISCOVERY_PAGE_SIZE,
   type ForumDiscoveryMode,
   type ForumDiscoveryPost,
@@ -382,13 +383,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
     router.push(`/posts/${postId}`, { scroll: false })
   }
 
-  const tabItems = useMemo(() => [
-    { value: 'recommend', label: '推荐' },
-    { value: 'latest', label: '\u6700\u65b0' },
-    { value: 'hot', label: '\u70ed\u5ea6\u6700\u9ad8' },
-    { value: 'all', label: '全部' },
-    ...boards.map((board) => ({ value: board.slug, label: board.name })),
-  ], [boards])
+  const tabItems = useMemo(() => buildForumDiscoveryTabs(boards), [boards])
 
   return (
     <section className="forum-discovery-page" data-forum-discovery>
@@ -400,7 +395,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           <h1>小臣书</h1>
           <div className="forum-discovery-header-actions">
             {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
-            <button type="button" className="forum-discovery-mode-button" onClick={onSwitchToPlaza}>广场模式</button>
+            <button type="button" className="forum-discovery-mode-button" onClick={onSwitchToPlaza} aria-label="切换到广场模式">广场模式</button>
           </div>
         </div>
         <form className="forum-discovery-search" onSubmit={submitSearch} role="search">

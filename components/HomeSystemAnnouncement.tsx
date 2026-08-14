@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { normalizeActionUrl } from '@/lib/url-safety'
 
 type Announcement = {
   id: string
@@ -32,6 +33,8 @@ export function HomeSystemAnnouncement({ announcement }: { announcement: Announc
 
   if (!announcement || hidden) return null
 
+  const targetUrl = normalizeActionUrl(announcement.buttonUrl) || normalizeActionUrl(announcement.link) || '/notifications'
+
   function dismiss() {
     if (!announcement) return
     const ids = Array.from(loadDismissedIds())
@@ -48,7 +51,7 @@ export function HomeSystemAnnouncement({ announcement }: { announcement: Announc
           <p className="mt-1 line-clamp-2 text-sm font-bold leading-6 text-slate-600">{announcement.content}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Link href={announcement.buttonUrl || announcement.link || '/notifications'} className="rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white">
+          <Link href={targetUrl} className="rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white">
             查看
           </Link>
           <button onClick={dismiss} className="rounded-full bg-sky-50 px-4 py-2 text-xs font-black text-brand-700">

@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { normalizeActionUrl } from '@/lib/url-safety'
 
 type ToastNotification = {
   id: string
@@ -74,6 +75,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
 
   if (!enabled || !toast) return null
   const createdAt = new Date(toast.createdAt)
+  const targetUrl = normalizeActionUrl(toast.targetUrl) || normalizeActionUrl(toast.link) || '/notifications'
 
   return (
     <div className="notification-toast fixed inset-x-4 md:inset-x-auto md:right-6 md:w-96">
@@ -91,7 +93,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
             ×
           </button>
         </div>
-        <Link href={toast.targetUrl || toast.link || '/notifications'} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white shadow-sm">
+        <Link href={targetUrl} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white shadow-sm">
           查看详情
         </Link>
       </div>

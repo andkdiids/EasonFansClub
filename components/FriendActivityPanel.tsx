@@ -7,6 +7,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { getMood } from '@/lib/daily'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
+import { normalizeStoredInternalPath } from '@/lib/url-safety'
 
 type ActivityType = '' | 'CHECKIN' | 'POST'
 type TimeFilter = 'today' | 'yesterday' | '7days' | 'custom'
@@ -142,6 +143,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
           const name = item.actor.profile?.displayName || item.actor.nickname
           const avatar = profileImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
           const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : '最近发帖'
+          const targetUrl = normalizeStoredInternalPath(item.targetUrl)
           return (
             <article key={item.id} className="border border-sky-100 bg-sky-50/60 p-4">
               <div className="flex gap-3">
@@ -156,7 +158,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
                   </div>
                   {item.content ? <p className="mt-2 line-clamp-3 text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    {item.targetUrl ? <Link href={item.targetUrl} className="text-xs font-black text-brand-700">查看原动态</Link> : <span />}
+                    {targetUrl ? <Link href={targetUrl} className="text-xs font-black text-brand-700">查看原动态</Link> : <span />}
                     <time className="text-xs font-bold text-slate-400">{new Date(item.createdAt).toLocaleString('zh-CN')}</time>
                   </div>
                 </div>

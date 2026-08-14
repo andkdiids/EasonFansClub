@@ -90,7 +90,7 @@ type DuelCandidate = {
 type StoredOption = DuelOption
 
 type CompletionOutcome = {
-  questionResult: DuelQuestionResult
+  questionResult: DuelQuestionResult | null
   nextServerStartAt: string | null
   matchResult: DuelMatchResult | null
   syncUserIds: string[]
@@ -603,10 +603,12 @@ function duelStateRevision(
   match: { updatedAt: Date; status: string },
   question: { createdAt: Date } | null,
   players: Array<{ updatedAt: Date }>,
+  latestAnswerAt: Date | null = null,
 ) {
   const updatedAt = Math.max(
     match.updatedAt.getTime(),
     question?.createdAt.getTime() || 0,
+    latestAnswerAt?.getTime() || 0,
     ...players.map((player) => player.updatedAt.getTime()),
   )
   // Keep status transitions above any in-flight PLAYING snapshot while still
@@ -665,6 +667,73 @@ export function countDuelBaseCorrectAnswers(answers: Array<{ userId: string; isC
     counts.set(answer.userId, (counts.get(answer.userId) || 0) + 1)
   }
   return counts
+}
+
+export type DuelScoreProgress = {
+  questionIndex: number
+  answeredCount: number
+  submitted: boolean
+  lastAnsweredAt: Date | null
+}
+
+/**
+ * SCORE has no shared round cursor.  The next question is derived from the
+ * requesting player's own base-question answers, while the question rows
+ * themselves remain the match-wide immutable set.
+ */
+export function calculateDuelScoreProgress(
+  answers: Array<{ questionIndex: number; isOvertime: boolean; answeredAt?: Date | null }>,
+  totalQuestions: number,
+): DuelScoreProgress {
+  const answeredIndexes = new Set<number>()
+  let lastAnsweredAt: Date | null = null
+  for (const answer of answers) {
+    if (answer.isOvertime || answer.questionIndex < 1 || answer.questionIndex > totalQuestions) continue
+    answeredIndexes.add(answer.questionIndex)
+    if (answer.answeredAt && (!lastAnsweredAt || answer.answeredAt > lastAnsweredAt)) lastAnsweredAt = answer.answeredAt
+  }
+  const answeredCount = answeredIndexes.size
+  return {
+    questionIndex: Math.min(totalQuestions, answeredCount + 1),
+    answeredCount,
+    submitted: answeredCount >= totalQuestions,
+    lastAnsweredAt,
+  }
+}
+
+type DuelScoreAnswerRow = {
+  userId: string
+  selectedOptionKey: string
+  isCorrect: boolean
+  effectiveElapsedMs: number | null
+  receivedAt: Date
+  Question: { questionIndex: number; isOvertime: boolean }
+}
+
+async function loadDuelScoreAnswerRows(db: DuelAnswerReader, matchId: string) {
+  return db.guessSongDuelAnswer.findMany({
+    where: { matchId },
+    select: {
+      userId: true,
+      selectedOptionKey: true,
+      isCorrect: true,
+      effectiveElapsedMs: true,
+      receivedAt: true,
+      Question: { select: { questionIndex: true, isOvertime: true } },
+    },
+    orderBy: { receivedAt: 'asc' },
+  }) as Promise<DuelScoreAnswerRow[]>
+}
+
+function scoreProgressForUser(rows: DuelScoreAnswerRow[], userId: string, totalQuestions: number) {
+  return calculateDuelScoreProgress(
+    rows.filter((row) => row.userId === userId).map((row) => ({
+      questionIndex: row.Question.questionIndex,
+      isOvertime: row.Question.isOvertime,
+      answeredAt: row.receivedAt,
+    })),
+    totalQuestions,
+  )
 }
 
 type DuelAnswerReader = Pick<Prisma.TransactionClient, 'guessSongDuelAnswer'>
@@ -1250,10 +1319,144 @@ export async function getDuelMatchParticipantId(matchId: string) {
   return player?.userId || null
 }
 
+function buildDuelQuestionState(
+  matchId: string,
+  question: {
+    id: string
+    publicToken: string
+    questionIndex: number
+    isOvertime: boolean
+    overtimeIndex: number | null
+    optionsSnapshot: Prisma.JsonValue
+    audioDurationSeconds: number
+  },
+  next: { publicToken: string } | null,
+  times: ReturnType<typeof questionTimes>,
+): DuelQuestionState {
+  return {
+    matchId,
+    id: question.id,
+    roundId: question.id,
+    publicToken: question.publicToken,
+    questionId: question.publicToken,
+    questionIndex: question.questionIndex,
+    isOvertime: question.isOvertime,
+    overtimeIndex: question.overtimeIndex,
+    options: parseOptions(question.optionsSnapshot),
+    audioDurationSeconds: question.audioDurationSeconds,
+    serverStartedAt: times.serverStartedAt.toISOString(),
+    audioStartAt: times.audioStartAt.toISOString(),
+    answerDeadlineAt: times.answerDeadlineAt.toISOString(),
+    audioUrl: questionAudioUrl(matchId, question.publicToken),
+    preloadAudioUrl: next ? questionAudioUrl(matchId, next.publicToken) : null,
+  }
+}
+
+function scoreQuestionTimes(
+  question: { questionIndex: number; serverStartedAt: Date | null; audioStartAt: Date | null; answerDeadlineAt: Date | null },
+  progress: DuelScoreProgress,
+  matchStartedAt: Date,
+  now: Date,
+) {
+  // Question one keeps the match countdown generated at start. Later SCORE
+  // questions derive their start from this player's previous answer, so a
+  // refresh never resets the audio clock and the opponent cannot move it.
+  if (question.questionIndex === 1 && question.serverStartedAt && question.audioStartAt && question.answerDeadlineAt) {
+    return {
+      serverStartedAt: question.serverStartedAt,
+      audioStartAt: question.audioStartAt,
+      answerDeadlineAt: question.answerDeadlineAt,
+    }
+  }
+  const startAt = progress.lastAnsweredAt
+    ? new Date(progress.lastAnsweredAt.getTime() + DUEL_RESULT_PAUSE_MS)
+    : new Date(matchStartedAt.getTime() + DUEL_COUNTDOWN_MS)
+  const times = questionTimes(startAt)
+  // SCORE has no shared round timeout. The client still receives the timing
+  // fields needed to start audio, while the service accepts a late answer.
+  times.answerDeadlineAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  return times
+}
+
 export async function getDuelMatchState(userId: string, matchId: string, now = new Date()): Promise<DuelMatchState> {
   return duelTransaction(async (tx) => {
     const match = await loadMatchForState(tx, matchId)
     if (!match.GuessSongDuelPlayer.some((player) => player.userId === userId)) throw new GuessSongDuelServiceError('你不在这场对决中', 403, 'MATCH_NOT_MEMBER')
+    const scoreRows = match.mode === 'SCORE' ? await loadDuelScoreAnswerRows(tx, matchId) : []
+    const scoreProgress = new Map(match.GuessSongDuelPlayer.map((player) => [
+      player.userId,
+      scoreProgressForUser(scoreRows, player.userId, match.totalQuestions),
+    ]))
+
+    // SCORE base questions share only the immutable question set. The
+    // requesting player's answers determine their next question; the
+    // match-level cursor is reserved for BUZZER and SCORE overtime.
+    if (match.mode === 'SCORE' && match.status === 'PLAYING' && match.currentQuestionIndex <= match.totalQuestions) {
+      const progress = scoreProgress.get(userId) || calculateDuelScoreProgress([], match.totalQuestions)
+      const questionIndex = progress.submitted ? null : progress.questionIndex
+      const question = questionIndex
+        ? await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex } } })
+        : null
+      const next = question
+        ? await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex: question.questionIndex + 1 } }, select: { publicToken: true } })
+        : null
+      const ownAnswer = question
+        ? scoreRows.find((row) => row.userId === userId && row.Question.questionIndex === question.questionIndex && !row.Question.isOvertime)
+        : null
+      const players = match.GuessSongDuelPlayer.map((player) => {
+        const playerProgress = scoreProgress.get(player.userId) || calculateDuelScoreProgress([], match.totalQuestions)
+        const isMe = player.userId === userId
+        return {
+          ...publicUser(player.User),
+          userId: player.userId,
+          isOnline: player.isOnline && isDuelPresenceOnline(player.lastSeenAt, now.getTime()),
+          slot: player.slot === 1 ? 1 as const : 2 as const,
+          correctCount: player.correctCount,
+          totalEffectiveAnswerMs: player.totalEffectiveAnswerMs,
+          questionIndex: playerProgress.questionIndex,
+          answeredCount: playerProgress.answeredCount,
+          submitted: playerProgress.submitted,
+          selectedOptionKey: isMe ? ownAnswer?.selectedOptionKey || null : null,
+          answerCorrect: null,
+          suspicious: player.suspicious,
+        }
+      })
+      const times = question ? scoreQuestionTimes(question, progress, match.startedAt, now) : null
+      const activeQuestion = question && times
+        ? buildDuelQuestionState(matchId, question, next, times)
+        : null
+      const latestAnswerAt = scoreRows.reduce<Date | null>((latest, row) => !latest || row.receivedAt > latest ? row.receivedAt : latest, null)
+      // The row count is a deterministic tie-breaker when two commits share
+      // the same database millisecond, so an old request cannot overwrite a
+      // player's newly advanced question.
+      const revision = duelStateRevision(match, question, match.GuessSongDuelPlayer, latestAnswerAt) * 100 + scoreRows.length
+      return {
+        matchId: match.id,
+        roomId: match.Room.id,
+        mode: 'SCORE',
+        revision,
+        status: match.status,
+        phase: activeQuestion && new Date(activeQuestion.serverStartedAt) > now ? 'STARTING' : 'PLAYING',
+        currentQuestionIndex: progress.questionIndex,
+        totalQuestions: match.totalQuestions,
+        completedQuestionCount: match.completedQuestionCount,
+        roundId: activeQuestion?.roundId || null,
+        questionId: activeQuestion?.questionId || null,
+        questionToken: activeQuestion?.publicToken || null,
+        serverNow: now.toISOString(),
+        players,
+        answers: players.map((player) => ({
+          userId: player.userId,
+          selectedOptionKey: player.userId === userId ? player.selectedOptionKey : null,
+          submitted: player.submitted,
+          isCorrect: null,
+        })),
+        question: activeQuestion,
+        questionResult: null,
+        lastQuestionResult: null,
+        result: null,
+      }
+    }
     const { question, next, lastResolved } = await loadQuestionState(tx, matchId, match.currentQuestionIndex)
     const answers = question
       ? await tx.guessSongDuelAnswer.findMany({
@@ -1263,9 +1466,10 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
         })
       : []
     const answerByUser = new Map(answers.map((answer) => [answer.userId, answer]))
-    const revealCorrectness = match.mode === 'BUZZER' || Boolean(question?.revealedAt) || match.status !== 'PLAYING'
+    const revealCorrectness = match.mode === 'BUZZER' || (match.mode !== 'SCORE' && (Boolean(question?.revealedAt) || match.status !== 'PLAYING'))
     const players = match.GuessSongDuelPlayer.map((player) => {
       const answer = answerByUser.get(player.userId)
+      const playerProgress = scoreProgress.get(player.userId)
       return {
         ...publicUser(player.User),
         userId: player.userId,
@@ -1273,12 +1477,17 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
         slot: player.slot === 1 ? 1 as const : 2 as const,
         correctCount: player.correctCount,
         totalEffectiveAnswerMs: player.totalEffectiveAnswerMs,
+        questionIndex: match.currentQuestionIndex,
+        answeredCount: match.mode === 'SCORE' ? playerProgress?.answeredCount || 0 : Number(Boolean(answer)),
         submitted: Boolean(answer),
         selectedOptionKey: answer?.selectedOptionKey || null,
         answerCorrect: answer && revealCorrectness ? answer.isCorrect : null,
         suspicious: player.suspicious,
       }
     })
+    const safePlayers = match.mode === 'SCORE'
+      ? players.map((player) => player.userId === userId ? player : { ...player, selectedOptionKey: null, answerCorrect: null })
+      : players
     const activeQuestion = match.status === 'PLAYING' && question && question.serverStartedAt && question.audioStartAt && question.answerDeadlineAt
       ? {
           matchId,
@@ -1298,10 +1507,10 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
           preloadAudioUrl: next ? questionAudioUrl(matchId, next.publicToken) : null,
         } satisfies DuelQuestionState
       : null
-    const questionResult = question && (Boolean(question.revealedAt) || match.status !== 'PLAYING')
+    const questionResult = match.mode !== 'SCORE' && question && (Boolean(question.revealedAt) || match.status !== 'PLAYING')
       ? await loadQuestionResult(tx, matchId, question)
       : null
-    const lastQuestionResult = lastResolved && !question?.revealedAt
+    const lastQuestionResult = match.mode !== 'SCORE' && lastResolved && !question?.revealedAt
       ? await loadQuestionResult(tx, matchId, lastResolved)
       : null
     const result = match.status !== 'PLAYING'
@@ -1310,7 +1519,11 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
     const phase = match.status === 'PLAYING'
       ? (question?.serverStartedAt && question.serverStartedAt > now ? 'STARTING' : 'PLAYING')
       : match.status
-    const revision = duelStateRevision(match, question, match.GuessSongDuelPlayer)
+    const latestAnswerAt = match.mode === 'SCORE'
+      ? scoreRows.reduce<Date | null>((latest, row) => !latest || row.receivedAt > latest ? row.receivedAt : latest, null)
+      : null
+    const revisionBase = duelStateRevision(match, question, match.GuessSongDuelPlayer, latestAnswerAt)
+    const revision = match.mode === 'SCORE' ? revisionBase * 100 + scoreRows.length : revisionBase
     return {
       matchId: match.id,
       roomId: match.Room.id,
@@ -1325,12 +1538,12 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
       questionId: activeQuestion?.questionId || question?.publicToken || null,
       questionToken: activeQuestion?.publicToken || question?.publicToken || null,
       serverNow: now.toISOString(),
-      players,
-      answers: players.map((player) => ({
+      players: safePlayers,
+      answers: safePlayers.map((player) => ({
         userId: player.userId,
-        selectedOptionKey: player.selectedOptionKey,
+        selectedOptionKey: match.mode === 'SCORE' && player.userId !== userId ? null : player.selectedOptionKey,
         submitted: player.submitted,
-        isCorrect: player.answerCorrect,
+        isCorrect: match.mode === 'SCORE' && player.userId !== userId ? null : player.answerCorrect,
       })),
       question: activeQuestion,
       questionResult,
@@ -1343,12 +1556,27 @@ export async function getDuelMatchState(userId: string, matchId: string, now = n
 export async function getDuelAudioSource(userId: string, matchId: string, publicToken: string) {
   const match = await prisma.guessSongDuelMatch.findUnique({
     where: { id: matchId },
-    select: { status: true, currentQuestionIndex: true, GuessSongDuelPlayer: { where: { userId }, select: { id: true } } },
+    select: { status: true, mode: true, totalQuestions: true, currentQuestionIndex: true, GuessSongDuelPlayer: { where: { userId }, select: { id: true } } },
   })
   if (!match || !match.GuessSongDuelPlayer.length) throw new GuessSongDuelServiceError('你不在这场对决中', 403, 'MATCH_NOT_MEMBER')
   if (match.status !== 'PLAYING') throw new GuessSongDuelServiceError('比赛已经结束', 410, 'MATCH_FINISHED')
   const question = await prisma.guessSongDuelQuestion.findUnique({ where: { publicToken } })
-  if (!question || question.matchId !== matchId || question.questionIndex < match.currentQuestionIndex || question.questionIndex > match.currentQuestionIndex + 1) {
+  let available = Boolean(question && question.matchId === matchId && question.questionIndex >= match.currentQuestionIndex && question.questionIndex <= match.currentQuestionIndex + 1)
+  if (match.mode === 'SCORE' && match.currentQuestionIndex <= match.totalQuestions) {
+    const rows = await loadDuelScoreAnswerRows(prisma, matchId)
+    const progress = calculateDuelScoreProgress(
+      rows.filter((row) => row.userId === userId).map((row) => ({
+        questionIndex: row.Question.questionIndex,
+        isOvertime: row.Question.isOvertime,
+        answeredAt: row.receivedAt,
+      })),
+      match.totalQuestions,
+    )
+    available = Boolean(question && question.matchId === matchId && !question.isOvertime && (
+      question.questionIndex === progress.questionIndex || question.questionIndex === progress.questionIndex + 1
+    ))
+  }
+  if (!available || !question) {
     throw new GuessSongDuelServiceError('音频资源当前不可用', 404, 'AUDIO_NOT_AVAILABLE')
   }
   return { storagePath: question.audioStoragePath }
@@ -1489,26 +1717,27 @@ async function completeResolvedQuestionTx(
   const questionResult = buildQuestionResult(question, answers)
   await tx.guessSongDuelMatch.update({ where: { id: match.id }, data: { completedQuestionCount: { increment: 1 } } })
   const mode = match.mode as DuelMode
+  const publicQuestionResult = mode === 'SCORE' ? null : questionResult
 
   if (mode === 'BUZZER') {
     const players = await tx.guessSongDuelPlayer.findMany({ where: { matchId: match.id }, select: { userId: true, correctCount: true } })
     const winner = players.find((player) => player.correctCount >= DUEL_TARGET_CORRECT)
     if (winner) {
       const settled = await settleMatchTx(tx, match.id, { finishReason: 'SCORE_THRESHOLD', winnerId: winner.userId, isDraw: false, valid: true, now })
-      return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
+      return { questionResult: publicQuestionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
     }
     const next = await advanceDuelQuestionTx(tx, match, question, now)
-    return { questionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
+    return { questionResult: publicQuestionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
   }
 
   if (question.isOvertime) {
     const correctAnswers = answers.filter((answer) => answer.isCorrect)
     if (correctAnswers.length === 1) {
       const settled = await settleMatchTx(tx, match.id, { finishReason: 'TIEBREAKER', winnerId: correctAnswers[0].userId, isDraw: false, valid: true, now })
-      return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
+      return { questionResult: publicQuestionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
     }
     const next = await advanceDuelQuestionTx(tx, match, question, now)
-    return { questionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
+    return { questionResult: publicQuestionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
   }
 
   if (question.questionIndex >= match.totalQuestions) {
@@ -1516,12 +1745,45 @@ async function completeResolvedQuestionTx(
     const winner = compareDuelPlayers(players)
     if (winner.winnerId) {
       const settled = await settleMatchTx(tx, match.id, { finishReason: 'ALL_QUESTIONS', winnerId: winner.winnerId, isDraw: false, valid: true, now })
-      return { questionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
+      return { questionResult: publicQuestionResult, nextServerStartAt: null, matchResult: await resultForTransaction(tx, match.id), syncUserIds: settled.userIds }
     }
   }
 
   const next = await advanceDuelQuestionTx(tx, match, question, now)
-  return { questionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
+  return { questionResult: publicQuestionResult, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
+}
+
+async function completeScoreSubmissionTx(
+  tx: Prisma.TransactionClient,
+  matchId: string,
+  now: Date,
+): Promise<CompletionOutcome | null> {
+  const match = await tx.guessSongDuelMatch.findUnique({ where: { id: matchId } })
+  if (!match || match.status !== 'PLAYING' || match.mode !== 'SCORE' || match.currentQuestionIndex > match.totalQuestions) return null
+  const players = await tx.guessSongDuelPlayer.findMany({
+    where: { matchId },
+    orderBy: { slot: 'asc' },
+    select: { userId: true, correctCount: true, totalEffectiveAnswerMs: true },
+  })
+  const rows = await loadDuelScoreAnswerRows(tx, matchId)
+  const allSubmitted = players.length === 2 && players.every((player) => scoreProgressForUser(rows, player.userId, match.totalQuestions).submitted)
+  if (!allSubmitted) return null
+
+  await tx.guessSongDuelMatch.update({ where: { id: matchId }, data: { completedQuestionCount: match.totalQuestions } })
+  const winner = compareDuelPlayers(players)
+  if (winner.winnerId) {
+    const settled = await settleMatchTx(tx, matchId, {
+      finishReason: 'ALL_QUESTIONS',
+      winnerId: winner.winnerId,
+      isDraw: false,
+      valid: true,
+      now,
+    })
+    return { questionResult: null, nextServerStartAt: null, matchResult: await resultForTransaction(tx, matchId), syncUserIds: settled.userIds }
+  }
+
+  const next = await createDuelOvertimeQuestionTx(tx, match, match.totalQuestions + 1, now)
+  return { questionResult: null, nextServerStartAt: next.nextServerStartAt, matchResult: null, syncUserIds: [] }
 }
 
 async function completeQuestionTx(tx: Prisma.TransactionClient, matchId: string, questionIndex: number, now: Date): Promise<CompletionOutcome | null> {
@@ -1530,6 +1792,7 @@ async function completeQuestionTx(tx: Prisma.TransactionClient, matchId: string,
   if (!match || match.status !== 'PLAYING' || match.currentQuestionIndex !== questionIndex) return null
   const question = await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId, questionIndex } } })
   if (!question || question.revealedAt) return null
+  if (match.mode === 'SCORE' && !question.isOvertime) return null
   const answers = await tx.guessSongDuelAnswer.findMany({ where: { matchId, questionId: question.id } })
   if (match.mode === 'BUZZER' && resolveBuzzerRound(answers).outcome === 'SCORED') {
     return completeResolvedQuestionTx(tx, match, question, answers, now)
@@ -1560,12 +1823,68 @@ export async function submitDuelAnswer(input: {
   const receivedAt = input.receivedAt || new Date()
   const outcome = await duelTransaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM GuessSongDuelMatch WHERE id = ${input.matchId} FOR UPDATE`
-    const match = await tx.guessSongDuelMatch.findUnique({ where: { id: input.matchId } })
+    const match = await tx.guessSongDuelMatch.findUnique({
+      where: { id: input.matchId },
+      include: { GuessSongDuelPlayer: { select: { userId: true } } },
+    })
     if (!match) throw new GuessSongDuelServiceError('对决比赛不存在', 404, 'MATCH_NOT_FOUND')
     if (match.status !== 'PLAYING') throw new GuessSongDuelServiceError('比赛已经结束', 409, 'MATCH_FINISHED')
     if (input.roomId !== match.roomId) throw new GuessSongDuelServiceError('答题请求不属于当前房间', 409, 'STALE_ROUND')
     const player = await tx.guessSongDuelPlayer.findUnique({ where: { matchId_userId: { matchId: input.matchId, userId: input.userId } } })
     if (!player) throw new GuessSongDuelServiceError('你不在这场对决中', 403, 'MATCH_NOT_MEMBER')
+    if (match.mode === 'SCORE' && match.currentQuestionIndex <= match.totalQuestions) {
+      const scoreRows = await loadDuelScoreAnswerRows(tx, input.matchId)
+      const progress = scoreProgressForUser(scoreRows, input.userId, match.totalQuestions)
+      if (progress.submitted) throw new GuessSongDuelServiceError('你已经交卷，等待对手完成', 409, 'ANSWER_ALREADY_SUBMITTED')
+      const question = await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId: input.matchId, questionIndex: progress.questionIndex } } })
+      if (!question || question.isOvertime || input.roundId !== question.id || input.questionId !== question.publicToken || input.questionToken !== question.publicToken) {
+        throw new GuessSongDuelServiceError('当前题目已经切换', 409, 'STALE_ROUND')
+      }
+      const existing = await tx.guessSongDuelAnswer.findUnique({ where: { matchId_questionId_userId: { matchId: input.matchId, questionId: question.id, userId: input.userId } } })
+      const scoreTimes = scoreQuestionTimes(question, progress, match.startedAt, receivedAt)
+      if (!question.audioStartAt) question.audioStartAt = scoreTimes.audioStartAt
+      if (existing) throw new GuessSongDuelServiceError('本题已经作答，不能重复提交', 409, 'ANSWER_ALREADY_SUBMITTED')
+      if (receivedAt < scoreTimes.audioStartAt) throw new GuessSongDuelServiceError('题目尚未开始播放', 409, 'QUESTION_TOO_EARLY')
+      const optionKey = typeof input.answer === 'string' ? input.answer.trim().toUpperCase() : ''
+      const options = parseOptions(question.optionsSnapshot)
+      if (!options.some((option) => option.key === optionKey)) throw new GuessSongDuelServiceError('答案选项无效', 400, 'OPTION_INVALID')
+      const correct = optionKey === question.correctOptionKey
+      const latencyEstimateMs = Math.max(0, Math.min(1_500, Math.round(input.latencyEstimateMs || 0)))
+      const effectiveMs = effectiveElapsedMs(receivedAt, scoreTimes.audioStartAt, latencyEstimateMs)
+      const clientElapsedMs = clampClientElapsed(input.clientElapsedMs)
+      const suspicious = isSuspiciousAnswer(correct, effectiveMs, clientElapsedMs)
+      await tx.guessSongDuelAnswer.create({
+        data: {
+          matchId: input.matchId,
+          questionId: question.id,
+          userId: input.userId,
+          selectedOptionKey: optionKey,
+          isCorrect: correct,
+          clientElapsedMs,
+          receivedAt,
+          latencyEstimateMs,
+          effectiveElapsedMs: correct ? effectiveMs : null,
+          suspicious,
+        },
+      })
+      await tx.guessSongDuelPlayer.update({
+        where: { id: player.id },
+        data: {
+          correctCount: { increment: correct ? 1 : 0 },
+          totalEffectiveAnswerMs: { increment: correct ? effectiveMs : 0 },
+          suspicious: suspicious ? true : undefined,
+        },
+      })
+      if (suspicious) await tx.guessSongDuelMatch.update({ where: { id: input.matchId }, data: { isSuspicious: true } })
+      const scoreRowsAfter = await loadDuelScoreAnswerRows(tx, input.matchId)
+      const scoreProgressAfter = scoreProgressForUser(scoreRowsAfter, input.userId, match.totalQuestions)
+      const sharedCompletedQuestionCount = Math.min(...match.GuessSongDuelPlayer.map((participant) => scoreProgressForUser(scoreRowsAfter, participant.userId, match.totalQuestions).answeredCount))
+      await tx.guessSongDuelMatch.update({ where: { id: input.matchId }, data: { completedQuestionCount: sharedCompletedQuestionCount } })
+      const questionCompletion = scoreProgressAfter.submitted
+        ? await completeScoreSubmissionTx(tx, input.matchId, receivedAt)
+        : null
+      return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, userId: input.userId, questionCompletion }
+    }
     const question = await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId: input.matchId, questionIndex: match.currentQuestionIndex } } })
     if (!question || question.matchId !== input.matchId || input.roundId !== question.id || input.questionId !== question.publicToken || input.questionToken !== question.publicToken) {
       throw new GuessSongDuelServiceError('当前题目已经切换', 409, 'STALE_ROUND')

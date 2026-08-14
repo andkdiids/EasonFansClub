@@ -216,13 +216,13 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     void boot()
   }, [initialInviteToken, loadLobby, openRoom, router, setDuelError, userId])
 
-  const syncDuelState = useCallback(() => {
+  const syncDuelState = useCallback((force = false) => {
     const currentRoomId = roomIdRef.current
     const currentMatchId = matchIdRef.current
     if (!currentRoomId && !currentMatchId) return Promise.resolve()
     const key = currentMatchId ? `match:${currentMatchId}` : `room:${currentRoomId}`
     const existing = syncRequestRef.current
-    if (existing?.key === key) return existing.promise
+    if (existing?.key === key && !force) return existing.promise
     existing?.controller.abort()
     const controller = new AbortController()
     const sequence = ++syncSequenceRef.current
@@ -323,8 +323,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       applyMatchSnapshot(event.state)
       return
     }
-    if (event.type === 'QUESTION_START' || event.type === 'PLAYER_ANSWERED' || event.type === 'QUESTION_RESULT' || event.type === 'MATCH_FINISHED') {
-      void syncDuelState()
+    if (event.type === 'QUESTION_START' || event.type === 'PLAYER_ANSWERED' || event.type === 'QUESTION_RESULT' || event.type === 'MATCH_FINISHED' || event.type === 'ANSWER_ACCEPTED') {
+      void syncDuelState(true)
       return
     }
     if (event.type === 'PLAYER_PRESENCE') {
@@ -456,11 +456,12 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   }, [clockTick, match])
 
   const currentQuestion = match?.question
+  const activeMode = match?.mode || room?.mode || selectedMode
   const audioStarted = Boolean(currentQuestion && clockTick + offsetRef.current >= new Date(currentQuestion.audioStartAt).getTime())
-  const deadlinePassed = Boolean(currentQuestion && clockTick + offsetRef.current > new Date(currentQuestion.answerDeadlineAt).getTime())
+  const deadlinePassed = Boolean(currentQuestion && (activeMode === 'BUZZER' || currentQuestion.isOvertime) && clockTick + offsetRef.current > new Date(currentQuestion.answerDeadlineAt).getTime())
   const me = match?.players.find((player) => player.userId === userId) || null
   const opponent = match?.players.find((player) => player.userId !== userId) || null
-  const lastRoundVisible = Boolean(match?.lastQuestionResult && currentQuestion && new Date(currentQuestion.serverStartedAt).getTime() > clockTick + offsetRef.current)
+  const lastRoundVisible = activeMode === 'BUZZER' && Boolean(match?.lastQuestionResult && currentQuestion && new Date(currentQuestion.serverStartedAt).getTime() > clockTick + offsetRef.current)
   const lastRoundSummary = lastRoundVisible ? match?.lastQuestionResult?.answers.map((answer) => {
     const player = match.players.find((item) => item.userId === answer.userId)
     return `${player?.name || '玩家'} ${answer.selectedOptionKey || '未作答'}（${answer.correct ? '正确' : '错误'}）`
@@ -668,7 +669,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const canStart = Boolean(room && room.host.id === userId && room.challenger && room.hostReady && room.challengerReady)
   const result = match?.result
   const resultWinnerName = result?.winnerId ? result.players.find((player) => player.userId === result.winnerId)?.name : null
-  const activeMode = match?.mode || room?.mode || selectedMode
   const activeModeLabel = getDuelModeLabel(activeMode)
   const questionProgress = currentQuestion?.isOvertime
     ? `加赛 ${currentQuestion.overtimeIndex || 1}`
@@ -755,14 +755,21 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         <section className="duel-match-screen">
           <div className="duel-scoreboard"><div className="duel-score-player"><span className="duel-score-avatar">{me ? avatar(me) : null}</span><span>{me?.name || '我'}</span><strong>{me?.correctCount || 0}</strong><small>{me?.isOnline ? '在线' : '重连中'}</small></div><div className="duel-score-center"><b>{me?.correctCount || 0} <i>:</i> {opponent?.correctCount || 0}</b><span>{activeModeLabel} · {questionProgress}</span></div><div className="duel-score-player is-opponent"><span className="duel-score-avatar">{opponent ? avatar(opponent) : null}</span><span>{opponent?.name || '对手'}</span><strong>{opponent?.correctCount || 0}</strong><small>{opponent?.isOnline ? '在线' : '等待重连'}</small></div></div>
           <div className="duel-question-card">
+            {activeMode === 'SCORE' && match.status === 'PLAYING' && me?.submitted && !currentQuestion ? (
+              <div className="duel-score-waiting" role="status" aria-live="polite">
+                <strong>已完成 {me.answeredCount} / {match.totalQuestions}</strong>
+                <p>你已完成答题，等待对方交卷</p>
+                <span>对方进度：{opponent?.answeredCount || 0} / {match.totalQuestions}</span>
+              </div>
+            ) : <>
             {match.phase === 'STARTING' && countdown > 0 ? <div className="duel-countdown"><span>准备</span><strong>{countdown}</strong></div> : null}
             <div className="duel-question-heading"><span>{currentQuestion?.isOvertime ? `加赛 ${currentQuestion.overtimeIndex || 1}` : `${activeModeLabel} · QUESTION ${String(match.currentQuestionIndex).padStart(2, '0')} / ${match.totalQuestions}`}</span><span>{audioStarted && !deadlinePassed ? activeMode === 'BUZZER' ? '抢答进行中' : '双方独立作答' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
             <p className="duel-audio-hint">试听将在题目开始后 2 秒同步播放 · {activeMode === 'BUZZER' ? '本题最多 1 个得分者' : '双方各有一次独立答题机会'}</p>
             {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
             <div className="duel-options">{currentQuestion?.options.map((option) => {
               const mine = me?.selectedOptionKey === option.key
-              const theirs = opponent?.selectedOptionKey === option.key
-              const correct = questionResult?.correctOptionKey === option.key
+              const theirs = activeMode === 'BUZZER' && opponent?.selectedOptionKey === option.key
+              const correct = activeMode === 'BUZZER' && questionResult?.correctOptionKey === option.key
               const mineLabel = activeMode === 'BUZZER' && me?.answerCorrect === false ? '我的错误抢答' : questionResult && me?.answerCorrect !== null ? me?.answerCorrect ? '我答对了' : '我答错了' : '我的选择'
               const theirsLabel = activeMode === 'BUZZER' && opponent?.answerCorrect === false ? '对方错误抢答' : questionResult && opponent?.answerCorrect !== null ? opponent?.answerCorrect ? '对方答对了' : '对方答错了' : '对方选择'
               return <button key={option.key} type="button" className={[me?.submitted || Boolean(questionResult) ? 'is-submitted' : '', mine ? 'is-my-choice' : '', theirs ? 'is-opponent-choice' : '', correct ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} onClick={() => void submitAnswer(option.key)} disabled={!audioStarted || deadlinePassed || Boolean(me?.submitted) || Boolean(questionResult)} aria-label={`${option.label}${mine ? `，${mineLabel}` : ''}${theirs ? `，${theirsLabel}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{mine ? <small>{mineLabel}</small> : null}{theirs ? <small>{theirsLabel}</small> : null}</button>
@@ -770,6 +777,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
              <div className="duel-answer-status">{me?.submitted ? activeMode === 'BUZZER' ? '✓ 已作答，本题资格已锁定' : '✓ 已作答，等待对手' : audioStarted && !deadlinePassed ? '选择一个答案，提交后不可修改' : '请等待题目开始'}{opponent?.submitted ? <span> · 对手已作答</span> : null}</div>
              {lastRoundSummary ? <div className="duel-question-result">上一题：{lastRoundSummary}</div> : null}
              {questionResult ? <div className="duel-question-result"><b>本题答案：{questionResult.correctLabel}</b><span>{activeMode === 'BUZZER' ? questionResult.answers.some((answer) => answer.correct) ? '本题已分出胜负' : '本题无人得分' : `${questionResult.answers.filter((answer) => answer.correct).length} 人答对`}</span></div> : null}
+            </>}
           </div>
           <button type="button" className="duel-exit-link" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出比赛</button>
         </section>

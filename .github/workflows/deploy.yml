@@ -236,8 +236,8 @@ jobs:
             test -f pnpm-lock.yaml
             test -f server.ts
 
-            if ! grep -Eq '^TRUSTED_CLIENT_IP_SOURCE=("cloudflare"|cloudflare)[[:space:]]*$' .env; then
-              echo 'Production .env must set TRUSTED_CLIENT_IP_SOURCE=cloudflare for the Cloudflare real-IP boundary.' >&2
+            if ! grep -Eq '^TRUSTED_CLIENT_IP_SOURCE=("nginx"|nginx|"cloudflare"|cloudflare)[[:space:]]*$' .env; then
+              echo 'Production .env must set TRUSTED_CLIENT_IP_SOURCE=nginx or cloudflare to match the active trusted proxy boundary.' >&2
               exit 1
             fi
 

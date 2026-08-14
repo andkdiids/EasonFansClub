@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server'
 import { hashEmailToken } from '@/lib/email-verification'
 import { prisma } from '@/lib/prisma'
+import { buildPublicAbsoluteUrl } from '@/lib/url-safety'
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url)
+  const { searchParams } = new URL(request.url)
   const token = searchParams.get('token') || ''
   const tokenHash = token ? hashEmailToken(token) : ''
 
   if (!tokenHash) {
-    return NextResponse.redirect(new URL('/login?emailVerified=invalid', origin))
+    return NextResponse.redirect(buildPublicAbsoluteUrl('/login?emailVerified=invalid', request))
   }
 
   const verification = await prisma.emailVerification.findUnique({
@@ -24,19 +25,19 @@ export async function GET(request: Request) {
   })
 
   if (!verification) {
-    return NextResponse.redirect(new URL('/login?emailVerified=invalid', origin))
+    return NextResponse.redirect(buildPublicAbsoluteUrl('/login?emailVerified=invalid', request))
   }
 
   if (verification.usedAt || verification.User.emailVerifiedAt) {
-    return NextResponse.redirect(new URL('/login?emailVerified=used', origin))
+    return NextResponse.redirect(buildPublicAbsoluteUrl('/login?emailVerified=used', request))
   }
 
   if (verification.expiresAt.getTime() < Date.now()) {
-    return NextResponse.redirect(new URL('/login?emailVerified=expired', origin))
+    return NextResponse.redirect(buildPublicAbsoluteUrl('/login?emailVerified=expired', request))
   }
 
   if (verification.User.email !== verification.email) {
-    return NextResponse.redirect(new URL('/login?emailVerified=changed', origin))
+    return NextResponse.redirect(buildPublicAbsoluteUrl('/login?emailVerified=changed', request))
   }
 
   await prisma.$transaction([
@@ -50,5 +51,5 @@ export async function GET(request: Request) {
     }),
   ])
 
-  return NextResponse.redirect(new URL('/login?emailVerified=success', origin))
+  return NextResponse.redirect(buildPublicAbsoluteUrl('/login?emailVerified=success', request))
 }

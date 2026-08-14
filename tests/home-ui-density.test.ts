@@ -4,12 +4,16 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('post detail images use a constrained desktop gallery without enlarging small images', () => {
+test('post detail images use one stable horizontal carousel without enlarging small images', () => {
   const postPage = read('app/posts/[postId]/page.tsx')
+  const carousel = read('components/PostMediaCarousel.tsx')
+  const css = read('app/globals.css')
 
-  assert.match(postPage, /post-media-grid mt-6 grid w-full max-w-\[40rem\] items-start gap-3 sm:grid-cols-2/)
-  assert.match(postPage, /buttonClassName="block w-full max-w-full[^\"]*cursor-zoom-in/)
-  assert.match(postPage, /imageClassName="block h-auto max-h-\[70vh\] w-auto max-w-full[^\"]*object-contain sm:max-h-\[28rem\]"/)
+  assert.match(postPage, /<PostMediaCarousel/)
+  assert.match(carousel, /currentIndex/)
+  assert.match(carousel, /scrollTo\(/)
+  assert.match(css, /\.post-media-carousel-viewport \{[^}]*scroll-snap-type:x mandatory/)
+  assert.match(css, /\.post-media-carousel-image \{[^}]*object-fit:contain/)
 })
 
 test('notification cards use compact flow layout while retaining shared rendering', () => {

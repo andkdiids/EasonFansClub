@@ -4,6 +4,7 @@ import { before, test } from 'node:test'
 import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
 import { authCookieName } from '../lib/auth-cookie'
+import { normalizeStoredInternalPath } from '../lib/url-safety'
 
 const TEST_SECRET = 'middleware-test-secret'
 process.env.JWT_SECRET = TEST_SECRET
@@ -143,6 +144,9 @@ test('管理员 JWT 可以通过 middleware 进入 admin 路由，登录 next �
   const loginSource = readFileSync('app/login/LoginForm.tsx', 'utf8')
   assert.match(middlewareSource, /jwtVerify\(token, jwtSecret, \{ algorithms: \['HS256'\] \}\)/)
   assert.match(middlewareSource, /payload\.id/)
-  assert.match(loginSource, /!path\.startsWith\('\/\/'\)/)
-  assert.ok(loginSource.includes('!/[\\\\\\r\\n]/.test(path)'))
+  assert.match(loginSource, /normalizeStoredInternalPath/)
+  assert.equal(normalizeStoredInternalPath('/admin'), '/admin')
+  assert.equal(normalizeStoredInternalPath('//evil.example/admin'), null)
+  assert.equal(normalizeStoredInternalPath('https://evil.example/admin'), null)
+  assert.equal(normalizeStoredInternalPath('https://localhost:3000/admin'), '/admin')
 })

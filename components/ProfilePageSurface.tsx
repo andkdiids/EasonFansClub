@@ -101,7 +101,7 @@ export function ProfilePageSurface({
           </div>
           <div className="flex min-w-0 items-baseline gap-3">
             <dt className="shrink-0 font-black text-slate-500">IP属地</dt>
-            <dd className="min-w-0 truncate font-bold text-brand-950">{profile.ipRegion || '暂未记录'}</dd>
+            <dd className="min-w-0 truncate font-bold text-brand-950">{profile.ipRegion || '未有记录'}</dd>
           </div>
         </dl>
         <p className="mt-3 min-w-0 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600 sm:text-base">

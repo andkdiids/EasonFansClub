@@ -342,7 +342,7 @@ export function DeletePostButton({
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/25 px-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-[24px] border border-sky-100 bg-white p-6 shadow-2xl shadow-sky-900/15">
             <h3 className="text-xl font-black text-brand-950">确认删除帖子</h3>
-            <p className="mt-3 text-sm font-bold leading-7 text-slate-600">删除后普通用户无法再看到这篇帖子，是否继续？</p>
+            <p className="mt-3 text-sm font-bold leading-7 text-slate-600">确定删除这篇帖子吗？删除后不可恢复。</p>
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"

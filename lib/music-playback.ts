@@ -40,7 +40,7 @@ function getAudioAnalysisCorsHosts() {
 export function canAnalyzeMusicPlaybackUrl(value: string, requestOrigin?: string) {
   let url: URL
   try {
-    url = new URL(value, requestOrigin || 'http://localhost')
+    url = new URL(value, requestOrigin || 'https://ecfc.invalid')
   } catch {
     return false
   }

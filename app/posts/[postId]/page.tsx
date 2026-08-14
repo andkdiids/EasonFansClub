@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
-import { ImageViewer } from '@/components/ImageViewer'
+import { PostMediaCarousel } from '@/components/PostMediaCarousel'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { PostViewCounter } from '@/components/PostViewCounter'
@@ -13,6 +13,7 @@ import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
 import { ForumDiscoveryDetailController } from '@/components/ForumDiscoveryDetailController'
 import { ForumDiscoveryDetailTopbar } from '@/components/ForumDiscoveryDetailTopbar'
 import { getCurrentUser } from '@/lib/auth'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
@@ -20,7 +21,6 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getPostModerationAccess } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
-import { isAdminRole } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
 import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
@@ -78,7 +78,19 @@ function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR
 }
 
 // 帖子审核中：用户通过通知/收藏/历史链接进入 PENDING 帖子时显示，而非 404。
-function ModerationPendingFallback() {
+function ModerationFallbackActions({ postId, canEdit }: Readonly<{ postId: string; canEdit: boolean }>) {
+  if (!canEdit) return null
+  return (
+    <div className="mt-6 flex flex-wrap justify-center gap-3">
+      <Link href={`/posts/${postId}/edit`} className="inline-flex min-h-11 items-center rounded-full border border-sky-200 bg-white px-5 text-sm font-black text-brand-700">
+        编辑
+      </Link>
+      <DeletePostButton postId={postId} redirectTo="/forum" />
+    </div>
+  )
+}
+
+function ModerationPendingFallback({ postId, canEdit }: Readonly<{ postId: string; canEdit: boolean }>) {
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
       <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
@@ -87,6 +99,7 @@ function ModerationPendingFallback() {
         <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
           该帖子正在等待审核，审核通过后即可正常查看。
         </p>
+        <ModerationFallbackActions postId={postId} canEdit={canEdit} />
         <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
           返回 E院广场
         </Link>
@@ -96,7 +109,7 @@ function ModerationPendingFallback() {
 }
 
 // 帖子未通过审核：REJECTED 帖子显示提示，而非 404。
-function ModerationRejectedFallback() {
+function ModerationRejectedFallback({ postId, canEdit, rejectionReason }: Readonly<{ postId: string; canEdit: boolean; rejectionReason: string | null }>) {
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
       <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
@@ -105,6 +118,8 @@ function ModerationRejectedFallback() {
         <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
           该帖子未通过审核，暂时无法查看。
         </p>
+        {rejectionReason ? <p className="mt-3 whitespace-pre-wrap text-left text-sm font-bold leading-7 text-red-700">拒绝原因：{rejectionReason}</p> : null}
+        <ModerationFallbackActions postId={postId} canEdit={canEdit} />
         <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
           返回 E院广场
         </Link>
@@ -409,14 +424,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
   // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非 404。
   // 管理员可查看全部（保持现有权限）；普通用户只能查看 APPROVED。
-  const viewerIsAdmin = Boolean(user && isAdminRole(user.role))
+  const viewerIsAdmin = Boolean(user && await hasAdminPermission(user, 'post_manage'))
   const viewerIsAuthor = Boolean(user && user.id === post.authorId)
   const moderationAccess = getPostModerationAccess(post.moderationStatus, viewerIsAdmin, viewerIsAuthor)
   if (moderationAccess === 'PENDING') {
-    return <ModerationPendingFallback />
+    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} />
   }
   if (moderationAccess === 'REJECTED') {
-    return <ModerationRejectedFallback />
+    return <ModerationRejectedFallback postId={postId} canEdit={viewerIsAuthor} rejectionReason={post.rejectionReason} />
   }
 
   if (post.isDeleted || post.status !== 'PUBLISHED') {
@@ -542,9 +557,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     remarkMap,
   })
   const isArchivedAuthor = post.User.uid === 0
-  const canManagePost = Boolean(user && isAdminRole(user.role))
-  const canDeletePost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
-  const canEditPost = Boolean(user && (user.id === post.User.id || isAdminRole(user.role)))
+  const canManagePost = Boolean(user && await hasAdminPermission(user, 'post_manage'))
+  const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
+  const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
   const publicPostContent = publicContentImageMarkers(post.content)
   const publicPostTitle = publicModerationText(post.title, post.moderationStatus)
   const safePublicPostContent = publicModerationText(publicPostContent, post.moderationStatus)
@@ -662,17 +677,13 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             </div>
           ) : null}
           {post.PostMedia.length ? (
-            <div className="post-media-grid mt-6 grid w-full max-w-[40rem] items-start gap-3 sm:grid-cols-2">
-              {post.PostMedia.map((item, index) =>
-                isSupabaseStorageUrl(item.url) ? (
-                  <div key={item.id} className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm font-bold text-slate-500">
-                    图片已失效，请重新编辑帖子上传
-                  </div>
-                ) : (
-                  <ImageViewer key={item.id} src={publicImageUrl(item.url) || item.url} alt={`帖子图片 ${index + 1}`} buttonClassName="block w-full max-w-full cursor-zoom-in overflow-hidden bg-transparent text-left" imageClassName="block h-auto max-h-[70vh] w-auto max-w-full bg-transparent object-contain sm:max-h-[28rem]" />
-                ),
-              )}
-            </div>
+            <PostMediaCarousel
+              items={post.PostMedia.map((item) => ({
+                id: item.id,
+                url: publicImageUrl(item.url) || item.url,
+                broken: isSupabaseStorageUrl(item.url),
+              }))}
+            />
           ) : null}
           <div className="post-detail-legacy-actions mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
@@ -689,9 +700,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
                 </Link>
               ) : null}
               {canManagePost ? (
-                <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo={`/boards/${post.Board.slug}`} />
+                <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo="/forum" />
               ) : canDeletePost ? (
-                <DeletePostButton postId={post.id} redirectTo={`/boards/${post.Board.slug}`} />
+                <DeletePostButton postId={post.id} redirectTo="/forum" />
               ) : null}
             </div>
           </div>

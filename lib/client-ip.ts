@@ -2,6 +2,22 @@ type HeaderValue = string | string[] | undefined
 
 export type IpHeaderSource = Readonly<Record<string, HeaderValue>> | Pick<Headers, 'get'>
 
+export type ClientIpHeaderSource =
+  | 'cf-connecting-ip'
+  | 'x-ecfc-client-ip'
+  | 'x-forwarded-for'
+  | 'x-real-ip'
+  | 'remoteAddress'
+  | 'none'
+
+export type ClientIpResolutionStatus = 'success' | 'private-ip' | 'invalid-ip' | 'none'
+
+export type ClientIpResolution = {
+  ip: string
+  source: ClientIpHeaderSource
+  status: ClientIpResolutionStatus
+}
+
 const trustedClientIpHeader = 'x-ecfc-client-ip'
 
 function readHeader(source: IpHeaderSource, name: string) {
@@ -116,12 +132,22 @@ function isLocalOrPrivateIp(value: string) {
     || (firstGroup >= 0xfe80 && firstGroup <= 0xfebf)
 }
 
+export function isPublicIp(value: unknown) {
+  const normalized = normalizeIp(value)
+  return Boolean(normalized && !isLocalOrPrivateIp(normalized))
+}
+
 function trustedHeaderNames(source: string) {
   if (source === 'nginx-legacy') return [trustedClientIpHeader, 'x-real-ip']
   return [trustedClientIpHeader]
 }
 
-function cloudflareHeaderCandidates(source: IpHeaderSource) {
+type IpCandidate = {
+  value: string | null
+  source: ClientIpHeaderSource
+}
+
+function cloudflareHeaderCandidates(source: IpHeaderSource): IpCandidate[] {
   const cloudflareIp = readHeader(source, 'cf-connecting-ip')
   const rewrittenClientIp = readHeader(source, trustedClientIpHeader)
   const normalizedCloudflareIp = normalizeIp(cloudflareIp)
@@ -132,21 +158,82 @@ function cloudflareHeaderCandidates(source: IpHeaderSource) {
   // it agrees with that rewritten value, which prevents direct-origin spoofing.
   if (!normalizedRewrittenClientIp) return []
   if (normalizedCloudflareIp && normalizedCloudflareIp !== normalizedRewrittenClientIp) {
-    return [rewrittenClientIp]
+    return [{ value: rewrittenClientIp, source: 'x-ecfc-client-ip' }]
   }
-  return [cloudflareIp, rewrittenClientIp]
+  return [
+    { value: cloudflareIp, source: 'cf-connecting-ip' },
+    { value: rewrittenClientIp, source: 'x-ecfc-client-ip' },
+  ]
 }
 
 function trustedClientIpSource() {
   return (process.env.TRUSTED_CLIENT_IP_SOURCE || 'nginx').trim().toLowerCase()
 }
 
-function firstPublicIp(candidates: Array<string | null | undefined>) {
-  for (const candidate of candidates) {
-    const normalized = normalizeIp(candidate)
-    if (normalized && !isLocalOrPrivateIp(normalized)) return normalized
+function candidatesFromHeaders(source: IpHeaderSource, socketRemoteAddress?: string | null): IpCandidate[] {
+  const clientIpSource = trustedClientIpSource()
+  if (clientIpSource === 'cloudflare') return cloudflareHeaderCandidates(source)
+
+  if (clientIpSource === 'nginx-forwarded') {
+    const trustedClientIp = readHeader(source, trustedClientIpHeader)
+    // X-Forwarded-For is only meaningful after the trusted Nginx boundary
+    // has proven that it rewrote the dedicated client-IP header. This keeps a
+    // direct request with a forged XFF from becoming a valid client address.
+    if (!trustedClientIp?.trim()) return []
+    if (!isPublicIp(trustedClientIp)) {
+      return [{ value: trustedClientIp, source: 'x-ecfc-client-ip' }]
+    }
+
+    const forwardedFor = readHeader(source, 'x-forwarded-for')
+    const candidates: IpCandidate[] = forwardedFor
+      ? forwardedFor.split(',').map((value) => ({
+        value: value.trim(),
+        source: 'x-forwarded-for' as const,
+      }))
+      : []
+    candidates.push({ value: readHeader(source, 'x-real-ip'), source: 'x-real-ip' })
+    candidates.push({ value: trustedClientIp, source: 'x-ecfc-client-ip' })
+    return candidates
   }
-  return 'unknown'
+
+  const candidates: IpCandidate[] = trustedHeaderNames(clientIpSource).map((name) => ({
+    value: readHeader(source, name),
+    source: name === 'x-real-ip' ? 'x-real-ip' : 'x-ecfc-client-ip',
+  }))
+
+  if (clientIpSource === 'socket') {
+    candidates.push({ value: socketRemoteAddress || null, source: 'remoteAddress' })
+  }
+  return candidates
+}
+
+function resolveCandidates(candidates: IpCandidate[]): ClientIpResolution {
+  let sawInvalid = false
+  let sawPrivate = false
+
+  for (const candidate of candidates) {
+    const normalized = normalizeIp(candidate.value)
+    if (!candidate.value?.trim()) continue
+    if (!normalized) {
+      sawInvalid = true
+      continue
+    }
+    if (isLocalOrPrivateIp(normalized)) {
+      sawPrivate = true
+      continue
+    }
+    return { ip: normalized, source: candidate.source, status: 'success' }
+  }
+
+  return {
+    ip: 'unknown',
+    source: 'none',
+    status: sawPrivate ? 'private-ip' : sawInvalid ? 'invalid-ip' : 'none',
+  }
+}
+
+function resolveClientIpFromHeaders(source: IpHeaderSource, socketRemoteAddress?: string | null) {
+  return resolveCandidates(candidatesFromHeaders(source, socketRemoteAddress))
 }
 
 /**
@@ -156,7 +243,8 @@ function firstPublicIp(candidates: Array<string | null | undefined>) {
  * browser can send it before an incorrectly configured proxy appends to it.
  */
 export function getClientIp(request: Request) {
-  const resolvedClientIp = getClientIpFromHeaders(request.headers)
+  const resolution = getClientIpResolution(request)
+  const resolvedClientIp = resolution.ip
   if (process.env.DEBUG_CLIENT_IP === 'true' || process.env.IP_DIAGNOSTICS_LOG === 'true') {
     console.info('[ip-diagnostics]', getClientIpDiagnostics(request, resolvedClientIp))
   }
@@ -164,19 +252,18 @@ export function getClientIp(request: Request) {
 }
 
 export function getClientIpFromHeaders(source: IpHeaderSource, socketRemoteAddress?: string | null) {
-  const clientIpSource = trustedClientIpSource()
-  const candidates = clientIpSource === 'cloudflare'
-    ? cloudflareHeaderCandidates(source)
-    : trustedHeaderNames(clientIpSource).map((name) => readHeader(source, name))
-  if (clientIpSource === 'nginx-forwarded') {
-    const forwardedFor = readHeader(source, 'x-forwarded-for')
-    if (forwardedFor) candidates.push(...forwardedFor.split(',').map((value) => value.trim()))
-    candidates.push(readHeader(source, 'x-real-ip'))
-  }
-  if (clientIpSource === 'socket') {
-    candidates.push(socketRemoteAddress || null)
-  }
-  return firstPublicIp(candidates)
+  return resolveClientIpFromHeaders(source, socketRemoteAddress).ip
+}
+
+export function getClientIpResolution(request: Request): ClientIpResolution {
+  return resolveClientIpFromHeaders(request.headers)
+}
+
+export function getClientIpResolutionFromHeaders(
+  source: IpHeaderSource,
+  socketRemoteAddress?: string | null,
+) {
+  return resolveClientIpFromHeaders(source, socketRemoteAddress)
 }
 
 function hasHeaderValue(value: string | null) {
@@ -203,20 +290,48 @@ function maskIpForDiagnostics(value: string | null | undefined) {
   return 'ipv6'
 }
 
+function maskForwardedForDiagnostics(value: string | null) {
+  const values = value
+    ?.split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+  return values?.length ? values.map((part) => maskIpForDiagnostics(part)) : []
+}
+
+function safeTextForDiagnostics(value: string | null) {
+  const normalized = value?.trim().replace(/[\u0000-\u001f\u007f\r\n]+/g, ' ')
+  return normalized ? normalized.slice(0, 255) : null
+}
+
 export function getClientIpDiagnostics(request: Request, resolvedClientIp = getClientIp(request)) {
+  const resolution = getClientIpResolution(request)
   const cfConnectingIp = request.headers.get('cf-connecting-ip')
   const xRealIp = request.headers.get('x-real-ip')
   const xForwardedFor = request.headers.get('x-forwarded-for')
   const trustedClientIp = request.headers.get(trustedClientIpHeader)
   const remoteAddress = request.headers.get('x-ecfc-remote-address')
+  const host = request.headers.get('host')
+  const forwardedHost = request.headers.get('x-forwarded-host')
 
   return {
     source: trustedClientIpSource(),
+    clientIpSource: resolution.source,
+    resolutionStatus: resolution.status,
     hasCfConnectingIp: hasHeaderValue(cfConnectingIp),
     hasXRealIp: hasHeaderValue(xRealIp),
     hasTrustedClientIp: hasHeaderValue(trustedClientIp),
     forwardedForCount: forwardedForCount(xForwardedFor),
     hasRemoteAddress: hasHeaderValue(remoteAddress),
+    hasHost: hasHeaderValue(host),
+    hasForwardedHost: hasHeaderValue(forwardedHost),
+    cfConnectingIp: maskIpForDiagnostics(cfConnectingIp),
+    xForwardedFor: maskForwardedForDiagnostics(xForwardedFor),
+    xRealIp: maskIpForDiagnostics(xRealIp),
+    trustedClientIp: maskIpForDiagnostics(trustedClientIp),
+    remoteAddress: maskIpForDiagnostics(remoteAddress),
+    host: safeTextForDiagnostics(host),
+    forwardedHost: safeTextForDiagnostics(forwardedHost),
     resolvedIp: maskIpForDiagnostics(resolvedClientIp),
   }
 }

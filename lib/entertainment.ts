@@ -2,6 +2,8 @@ import { randomBytes, randomInt } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute, getBeijingDateKey, shiftBeijingDateKey } from '@/lib/beijing-time'
 import { drawDailyPrescriptionReward } from '@/lib/entertainment-rewards'
+import type { DailyPrescriptionUser } from '@/lib/daily-prescription-types'
+import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 
@@ -9,6 +11,14 @@ export const EMPTY_LYRIC_MESSAGE = '今日处方暂未开具，请等待管理�
 export const PRESCRIPTION_HISTORY_PAGE_SIZE = 12
 
 const dailyDrawInclude = {
+  User: {
+    select: {
+      uid: true,
+      username: true,
+      avatarUrl: true,
+      Profile: { select: { avatarUrl: true } },
+    },
+  },
   LyricPrescription: {
     select: {
       id: true,
@@ -24,6 +34,14 @@ type DailyDrawWithLyric = Prisma.EntertainmentDailyDrawGetPayload<{
 }>
 
 const dailyDrawHistoryInclude = {
+  User: {
+    select: {
+      uid: true,
+      username: true,
+      avatarUrl: true,
+      Profile: { select: { avatarUrl: true } },
+    },
+  },
   PointLog: {
     select: {
       points: true,
@@ -39,6 +57,8 @@ type DailyDrawHistoryRow = Prisma.EntertainmentDailyDrawGetPayload<{
 
 export type DailyPrescriptionHistoryRecord = {
   id: string
+  userId: string
+  user: DailyPrescriptionUser
   dateKey: string
   points: number
   rewarded: boolean
@@ -82,6 +102,8 @@ function serializeDailyDraw(draw: DailyDrawWithLyric, totalPoints: number) {
 
   return {
     id: draw.id,
+    userId: draw.userId,
+    user: serializePrescriptionUser(draw.User),
     dateKey: draw.dateKey,
     points: draw.points,
     totalPoints,
@@ -89,6 +111,14 @@ function serializeDailyDraw(draw: DailyDrawWithLyric, totalPoints: number) {
     issuedAt: draw.createdAt.toISOString(),
     issuedAtBeijing: formatBeijingDateTimeMinute(draw.createdAt),
     lyric,
+  }
+}
+
+function serializePrescriptionUser(user: DailyDrawWithLyric['User']): DailyPrescriptionUser {
+  return {
+    username: user.username,
+    uid: user.uid,
+    avatarUrl: profileImageUrl(user.Profile?.avatarUrl) || profileImageUrl(user.avatarUrl),
   }
 }
 
@@ -127,6 +157,8 @@ function serializeDailyDrawHistory(draw: DailyDrawHistoryRow): DailyPrescription
 
   return {
     id: draw.id,
+    userId: draw.userId,
+    user: serializePrescriptionUser(draw.User),
     dateKey: draw.dateKey,
     points,
     rewarded: points > 0,

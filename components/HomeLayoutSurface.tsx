@@ -15,6 +15,7 @@ import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
+import { normalizeActionUrl } from '@/lib/url-safety'
 
 const homeText = {
   checkedIn: '已签到',
@@ -444,7 +445,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           <div><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
         </section>
 
-        {announcement && visible('home.announcement') ? <Link href={announcement.link || announcement.buttonUrl || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
+        {announcement && visible('home.announcement') ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
         {failed ? <p className="community-error">{homeText.loadError}</p> : null}
 
         {device === 'mobile' ? (

@@ -1,7 +1,11 @@
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
 
-export const MAX_CONTENT_IMAGES = 4
+export const MAX_CONTENT_IMAGES = 9
 const imageMarker = /\n?\[\[content-image:([^\]]+)\]\]/g
+
+export function hasTooManyContentImages(value: unknown) {
+  return Array.isArray(value) && value.length > MAX_CONTENT_IMAGES
+}
 
 export function reorderContentImageUrls(urls: readonly string[], fromIndex: number, targetIndex: number) {
   if (

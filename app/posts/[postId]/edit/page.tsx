@@ -3,10 +3,10 @@ import { notFound, redirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { PostEditForm, type ExistingMedia } from '@/components/PostEditForm'
 import { getCurrentUser } from '@/lib/auth'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { isAdminRole } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +22,8 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
       title: true,
       content: true,
       authorId: true,
+      boardId: true,
+      Board: { select: { id: true, name: true, slug: true } },
       PostMedia: {
         where: { type: 'IMAGE' },
         orderBy: { sortOrder: 'asc' },
@@ -33,8 +35,8 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
   if (!post) notFound()
 
   const isOwner = post.authorId === user.id
-  const isAdmin = isAdminRole(user.role)
-  if (!isOwner && !isAdmin) {
+  const canManagePosts = await hasAdminPermission(user, 'post_manage')
+  if (!isOwner && !canManagePosts) {
     return (
       <main className="site-page-main flat-page mx-auto max-w-3xl px-5 py-10">
         <BackButton fallbackHref={`/posts/${postId}`} />
@@ -55,6 +57,11 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
     url: publicImageUrl(media.url) || media.url,
     broken: isSupabaseStorageUrl(media.url),
   }))
+  const boards = await prisma.board.findMany({
+    where: { OR: [{ isActive: true }, { id: post.boardId }] },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, name: true, slug: true },
+  })
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-3xl px-5 py-10">
@@ -64,6 +71,8 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
           postId={post.id}
           initialTitle={post.title}
           initialContent={publicContentImageMarkers(post.content)}
+          initialBoardId={post.boardId}
+          boards={boards}
           initialMedia={initialMedia}
         />
       </div>

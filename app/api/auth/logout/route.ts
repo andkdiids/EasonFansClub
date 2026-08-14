@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { authCookieName, getSessionCookieDeletionOptions } from '@/lib/auth-cookie'
+import { buildPublicAbsoluteUrl } from '@/lib/url-safety'
 
 const noStoreHeaders = {
   'Cache-Control': 'no-store, max-age=0',
@@ -56,7 +57,7 @@ function appendClearCookie(response: NextResponse, options: ClearCookieOptions) 
 export async function POST(request: Request) {
   const accept = request.headers.get('accept') || ''
   const response = accept.includes('text/html')
-    ? NextResponse.redirect(new URL('/login', request.url), { status: 303, headers: noStoreHeaders })
+    ? NextResponse.redirect(buildPublicAbsoluteUrl('/login', request), { status: 303, headers: noStoreHeaders })
     : NextResponse.json({ ok: true }, { headers: noStoreHeaders })
 
   // 1) 正常 Cookie（Domain=.ecfc.fans）

@@ -8,21 +8,27 @@ import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export type ExistingMedia = { id: string; url: string; broken: boolean }
+export type EditableBoard = { id: string; name: string; slug: string }
 
 export function PostEditForm({
   postId,
   initialTitle,
   initialContent,
+  initialBoardId,
+  boards,
   initialMedia,
 }: Readonly<{
   postId: string
   initialTitle: string
   initialContent: string
+  initialBoardId: string
+  boards: EditableBoard[]
   initialMedia: ExistingMedia[]
 }>) {
   const router = useRouter()
   const [title, setTitle] = useState(initialTitle)
   const [content, setContent] = useState(initialContent)
+  const [boardId, setBoardId] = useState(initialBoardId)
   const [media, setMedia] = useState(initialMedia.map((item) => ({ ...item, removed: false })))
   const [addImageUrls, setAddImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
@@ -49,7 +55,7 @@ export function PostEditForm({
       const response = await fetch(`/api/posts/${postId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content, keepMediaIds, addImageUrls }),
+        body: JSON.stringify({ title, content, boardId, keepMediaIds, addImageUrls }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -77,6 +83,13 @@ export function PostEditForm({
           className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2"
           placeholder="请输入帖子标题"
         />
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-black text-slate-700">分类 / 分区</span>
+        <select value={boardId} onChange={(event) => setBoardId(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2">
+          {boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+        </select>
       </label>
 
       <label className="block">
@@ -143,7 +156,7 @@ export function PostEditForm({
         ) : null}
 
         {canAddMore ? (
-          <ContentImageUploader value={addImageUrls} onChange={setAddImageUrls} />
+          <ContentImageUploader value={addImageUrls} onChange={setAddImageUrls} existingCount={keptCount} />
         ) : (
           <p className="text-sm font-bold text-slate-500">已达到图片数量上限，删除部分图片后可继续上传。</p>
         )}

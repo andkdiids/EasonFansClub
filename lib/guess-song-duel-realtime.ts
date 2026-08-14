@@ -212,7 +212,6 @@ export class GuessSongDuelRealtimeHub {
       this.broadcastMatchEvent(matchId, { type: 'MATCH_FINISHED', result: completion.matchResult })
       return
     }
-    if (!completion.questionResult) return
     if (completion.nextServerStartAt) this.scheduleMatch(matchId, completion.nextServerStartAt)
   }
 
@@ -241,8 +240,10 @@ export class GuessSongDuelRealtimeHub {
     const state = await getDuelMatchState(userId, matchId)
     safeSend(socket, { type: 'MATCH_STATE', state })
     this.broadcastMatchEvent(matchId, { type: 'PLAYER_PRESENCE', matchId, userId, isOnline: true, reconnectDeadlineAt: null })
-    if (state.phase === 'STARTING' && state.question?.serverStartedAt) this.scheduleMatch(matchId, state.question.serverStartedAt)
-    else if (state.phase === 'PLAYING' && state.question?.answerDeadlineAt) this.scheduleMatch(matchId, state.question.answerDeadlineAt)
+    if (state.mode === 'BUZZER' || state.question?.isOvertime) {
+      if (state.phase === 'STARTING' && state.question?.serverStartedAt) this.scheduleMatch(matchId, state.question.serverStartedAt)
+      else if (state.phase === 'PLAYING' && state.question?.answerDeadlineAt) this.scheduleMatch(matchId, state.question.answerDeadlineAt)
+    }
   }
 
   private async answer(socket: DuelSocket, command: Extract<DuelClientCommand, { type: 'ANSWER' }>) {
@@ -269,6 +270,7 @@ export class GuessSongDuelRealtimeHub {
       const userId = socket?.duelUserId || await getDuelMatchParticipantId(matchId)
       if (!userId) return
       const state = await getDuelMatchState(userId, matchId)
+      if (state.status === 'PLAYING' && state.mode === 'SCORE' && !state.question?.isOvertime) return
       if (state.status !== 'PLAYING' || !state.question) {
         if (state.result) this.broadcastMatchEvent(matchId, { type: 'MATCH_FINISHED', result: state.result })
         return
@@ -294,12 +296,17 @@ export class GuessSongDuelRealtimeHub {
   }
 
   private async sendMatchState(matchId: string) {
-    const socket = this.firstMatchSocket(matchId)
-    if (!socket?.duelUserId) return
+    const sockets = [...(this.matchSockets.get(matchId) || [])].filter((socket) => socket.readyState === OPEN_STATE && socket.duelUserId)
+    if (!sockets.length) return
     try {
-      const state = await getDuelMatchState(socket.duelUserId, matchId)
-      this.broadcastMatchEvent(matchId, { type: 'MATCH_STATE', state })
-      if (state.status === 'PLAYING' && state.question) {
+      const states = await Promise.all(sockets.map(async (socket) => ({
+        socket,
+        state: await getDuelMatchState(socket.duelUserId as string, matchId),
+      })))
+      for (const item of states) safeSend(item.socket, { type: 'MATCH_STATE', state: item.state })
+      const state = states[0]?.state
+      if (!state) return
+      if (state.status === 'PLAYING' && state.question && (state.mode === 'BUZZER' || state.question.isOvertime)) {
         const startAt = new Date(state.question.serverStartedAt).getTime()
         this.scheduleMatch(matchId, startAt > Date.now() ? state.question.serverStartedAt : state.question.answerDeadlineAt)
       }

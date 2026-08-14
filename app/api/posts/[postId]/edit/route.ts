@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { publicContentImageMarkers } from '@/lib/content-images'
-import { isAdminRole, requireUser } from '@/lib/security'
+import { requireUser } from '@/lib/security'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -34,9 +35,8 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
   }
 
-  const isAdmin = isAdminRole(guard.user.role)
   const isOwner = post.authorId === guard.user.id
-  const canEdit = isOwner || isAdmin
+  const canEdit = isOwner || await hasAdminPermission(guard.user, 'post_manage')
   if (!canEdit) {
     return NextResponse.json({ message: '只有作者或管理员可以编辑该帖子', canEdit: false }, { status: 403 })
   }

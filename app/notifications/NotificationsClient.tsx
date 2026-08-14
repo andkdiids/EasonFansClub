@@ -40,6 +40,7 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
   if (isSystemNotification(item)) return null
 
   const target = getNotificationTarget(item)
+  if (target && target !== item.link) item = { ...item, link: target }
   switch (item.type) {
     case 'LIKE':
       return target ? { label: '查看点赞', href: target } : null

@@ -41,7 +41,7 @@ test('置顶接口在帖子事务锁内先清除旧置顶，再设置新置顶�
 
 test('置顶状态由 Reply.isPinned 保存，删除整棵评论线程时清理状态', () => {
   assert.ok(schema.includes('model Reply {'))
-  assert.ok(schema.includes('isPinned     Boolean        @default(false)'))
+  assert.match(schema, /isPinned\s+Boolean\s+@default\(false\)/)
   assert.ok(schema.includes('@@index([postId, isDeleted, isPinned])'))
   assert.match(migration, /ADD COLUMN `isPinned` BOOLEAN NOT NULL DEFAULT false/)
   assert.ok(deleteRoute.includes('data: { isDeleted: true, isPinned: false, deletedAt: new Date() }'))

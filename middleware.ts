@@ -1,6 +1,7 @@
 import { jwtVerify } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 import { authCookieName } from '@/lib/auth-cookie'
+import { buildPublicAbsoluteUrl, getPublicOrigin, isLocalHostname, safeInternalPath } from '@/lib/url-safety'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
 const immutableCacheValue = 'public, max-age=31536000, immutable'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
@@ -109,37 +110,43 @@ function forbiddenAdminApiResponse() {
 }
 
 function loginRedirect(request: NextRequest) {
-  const loginUrl = new URL('/login', request.url)
-  const nextPath = `${request.nextUrl.pathname}${request.nextUrl.search}` || '/'
-  loginUrl.searchParams.set('next', nextPath)
-  return withNoStoreHeaders(NextResponse.redirect(loginUrl))
+  const nextPath = safeInternalPath(`${request.nextUrl.pathname}${request.nextUrl.search}` || '/', '/')
+  const target = `/login?next=${encodeURIComponent(nextPath)}`
+  const resolvedOrigin = getPublicOrigin(request)
+  const location = buildPublicAbsoluteUrl(target, request)
+  console.warn('[auth.redirect]', {
+    path: request.nextUrl.pathname,
+    host: request.headers.get('host') || '',
+    xfHost: request.headers.get('x-forwarded-host') || '',
+    xfProto: request.headers.get('x-forwarded-proto') || '',
+    resolvedOrigin,
+    redirectTarget: target,
+  })
+  return withNoStoreHeaders(NextResponse.redirect(location))
 }
 
 function adminNoAccessRedirect(request: NextRequest) {
-  const noAccessUrl = new URL('/admin/no-access', request.url)
-  const fromPath = `${request.nextUrl.pathname}${request.nextUrl.search}` || '/admin'
-  noAccessUrl.searchParams.set('from', fromPath)
-  return withNoStoreHeaders(NextResponse.redirect(noAccessUrl))
+  const fromPath = safeInternalPath(`${request.nextUrl.pathname}${request.nextUrl.search}` || '/admin', '/admin')
+  const target = `/admin/no-access?from=${encodeURIComponent(fromPath)}`
+  return withNoStoreHeaders(NextResponse.redirect(buildPublicAbsoluteUrl(target, request)))
 }
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim().toLowerCase()
-  const requestHost = normalizeHost(forwardedHost || request.nextUrl.hostname)
+  const hostHeader = request.headers.get('host')?.split(',')[0]?.trim().toLowerCase()
+  const requestHost = normalizeHost(forwardedHost || hostHeader || request.nextUrl.hostname)
   const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase()
   const isSecure = forwardedProto === 'https' || request.nextUrl.protocol === 'https:'
-  const isLocalHost = requestHost === 'localhost' || requestHost === '127.0.0.1' || requestHost.startsWith('127.0.0.1') || requestHost === '[::1]'
+  const isLocalHost = isLocalHostname(requestHost)
 
   // 强制 HTTPS：非 localhost 的明文 http 请求一律 308 升级到 https，保留原始 host
   // （ecfc.fans 升 ecfc.fans，www.ecfc.fans 升 www.ecfc.fans，不强制 www→apex）。
   // 否则 Secure 会话 Cookie 无法被浏览器存储，移动端 / 微信「关闭重开」后会丢失登录态。
   // （依赖反代转发的 x-forwarded-proto 判断真实协议，避免回源为 http 时误判。）
   if (!isSecure && !isLocalHost) {
-    const secureUrl = request.nextUrl.clone()
-    secureUrl.protocol = 'https:'
-    secureUrl.hostname = requestHost
-    secureUrl.port = ''
-    return withNoStoreHeaders(NextResponse.redirect(secureUrl, 308))
+    const securePath = `${request.nextUrl.pathname}${request.nextUrl.search}` || '/'
+    return withNoStoreHeaders(NextResponse.redirect(buildPublicAbsoluteUrl(securePath, request), 308))
   }
 
   if (guessSongMediaGatewayPaths.has(pathname)) {

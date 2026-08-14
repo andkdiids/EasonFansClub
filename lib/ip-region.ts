@@ -2,6 +2,7 @@ import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { prisma } from '@/lib/prisma'
 import {
   getClientIp,
+  getClientIpResolution,
   type IpHeaderSource,
 } from '@/lib/client-ip'
 
@@ -203,13 +204,26 @@ const MAX_IP_LOCATION_CACHE_ENTRIES = 2000
 type LocationCacheEntry = {
   expiresAt: number
   value: IpLocation | null
+  lookupResult: IpLookupResult
 }
 
+type IpLookupResult =
+  | 'success'
+  | 'timeout'
+  | 'provider-error'
+  | 'unknown-region'
+
 const ipLocationCache = new Map<string, LocationCacheEntry>()
-const ipLocationInFlight = new Map<string, Promise<IpLocation | null>>()
+type LocationLookup = {
+  location: IpLocation | null
+  lookupResult: IpLookupResult
+}
+
+const ipLocationInFlight = new Map<string, Promise<LocationLookup>>()
 
 function stringValue(value: unknown) {
-  return typeof value === 'string' ? value.trim() : ''
+  if (typeof value === 'string') return value.trim()
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function compact(value: string) {
@@ -230,10 +244,56 @@ function canonicalChinaRegion(value: unknown) {
   if (chinaRegionAliases[raw]) return chinaRegionAliases[raw]
   const normalized = compact(raw)
   const alias = Object.entries(chinaRegionAliases).find(([key]) => compact(key) === normalized)
-  return alias?.[1] || null
+  if (alias?.[1]) return alias[1]
+
+  const englishCodes: Record<string, string> = {
+    beijing: 'BJ',
+    tianjin: 'TJ',
+    hebei: 'HE',
+    shanxi: 'SX',
+    innermongolia: 'NM',
+    liaoning: 'LN',
+    jilin: 'JL',
+    heilongjiang: 'HL',
+    shanghai: 'SH',
+    jiangsu: 'JS',
+    zhejiang: 'ZJ',
+    anhui: 'AH',
+    fujian: 'FJ',
+    jiangxi: 'JX',
+    shandong: 'SD',
+    henan: 'HA',
+    hubei: 'HB',
+    hunan: 'HN',
+    guangdong: 'GD',
+    guangxi: 'GX',
+    hainan: 'HI',
+    chongqing: 'CQ',
+    sichuan: 'SC',
+    guizhou: 'GZ',
+    yunnan: 'YN',
+    tibet: 'XZ',
+    xizang: 'XZ',
+    shaanxi: 'SN',
+    gansu: 'GS',
+    qinghai: 'QH',
+    ningxia: 'NX',
+    xinjiang: 'XJ',
+  }
+  const englishBase = normalized
+    .replace(/(?:province|sheng|autonomousregion|zhuangzuzizhiqu|huizuzizhiqu|wewuerzizhiqu|zizhiqu)$/i, '')
+  const englishCode = englishCodes[englishBase]
+  if (englishCode && chinaRegions[englishCode]) return chinaRegions[englishCode]
+
+  const chineseBase = raw.replace(/(?:\u7701|\u5e02|\u81ea\u6cbb\u533a|\u7279\u522b\u884c\u653f\u533a)$/u, '')
+  const chineseMatch = Object.values(chinaRegions).find((region) => region === chineseBase)
+  return chineseMatch || null
 }
 
 function countryName(country: string) {
+  if (country === 'HK') return '\u9999\u6e2f'
+  if (country === 'MO') return '\u6fb3\u95e8'
+  if (country === 'TW') return '\u53f0\u6e7e'
   if (countryNameOverrides[country]) return countryNameOverrides[country]
   try {
     const value = new Intl.DisplayNames(['zh-CN'], { type: 'region' }).of(country)
@@ -252,9 +312,7 @@ function normalizeLocation(input: EdgeGeo | null | undefined): IpLocation | null
   const province = country === 'CN'
     ? canonicalChinaRegion(input.regionCode) || canonicalChinaRegion(input.region)
     : null
-  const label = country === 'CN'
-    ? province || countryName(country)
-    : countryName(country)
+  const label = country === 'CN' ? province : countryName(country)
   if (!label) return null
 
   return {
@@ -346,9 +404,12 @@ function timeoutMs() {
 
 function apiUrl(ip: string) {
   const template = (process.env.IP_LOCATION_API_URL || DEFAULT_IP_LOCATION_API_URL).trim()
+  if (!template.includes('{ip}')) {
+    console.error('[ip-location.config]', { reason: 'missing_ip_placeholder' })
+    return null
+  }
   const encodedIp = encodeURIComponent(ip)
-  if (template.includes('{ip}')) return template.replaceAll('{ip}', encodedIp)
-  return `${template.replace(/\/$/, '')}/${encodedIp}/json/`
+  return template.replaceAll('{ip}', encodedIp)
 }
 
 function cacheTtlMs(value: IpLocation | null) {
@@ -360,15 +421,22 @@ function cacheTtlMs(value: IpLocation | null) {
   return DEFAULT_IP_LOCATION_CACHE_TTL_MS
 }
 
-function cacheLocation(ip: string, value: IpLocation | null) {
+function cacheLocation(ip: string, value: IpLocation | null, lookupResult: IpLookupResult) {
   if (ipLocationCache.size >= MAX_IP_LOCATION_CACHE_ENTRIES) {
     const oldestKey = ipLocationCache.keys().next().value
     if (oldestKey) ipLocationCache.delete(oldestKey)
   }
-  ipLocationCache.set(ip, { expiresAt: Date.now() + cacheTtlMs(value), value })
+  ipLocationCache.set(ip, {
+    expiresAt: Date.now() + cacheTtlMs(value),
+    value,
+    lookupResult,
+  })
 }
 
-async function fetchIpLocation(ip: string): Promise<IpLocation | null> {
+async function fetchIpLocation(ip: string): Promise<LocationLookup> {
+  const url = apiUrl(ip)
+  if (!url) return { location: null, lookupResult: 'provider-error' }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs())
   try {
@@ -379,7 +447,7 @@ async function fetchIpLocation(ip: string): Promise<IpLocation | null> {
     const apiKey = process.env.IP_LOCATION_API_KEY?.trim()
     if (apiKey) headers['X-API-Key'] = apiKey
 
-    const response = await fetch(apiUrl(ip), {
+    const response = await fetch(url, {
       method: 'GET',
       headers,
       cache: 'no-store',
@@ -387,20 +455,26 @@ async function fetchIpLocation(ip: string): Promise<IpLocation | null> {
     })
     if (response.status === 429) {
       console.warn('[ip-location.provider]', { status: 429, reason: 'rate_limited' })
-      return null
+      return { location: null, lookupResult: 'provider-error' }
     }
     if (!response.ok) {
       console.warn('[ip-location.provider]', { status: response.status, reason: 'http_error' })
-      return null
+      return { location: null, lookupResult: 'provider-error' }
     }
     const payload = await response.json().catch(() => null)
     const location = normalizeIpLocationProviderResponse(payload)
-    if (!location) console.warn('[ip-location.provider]', { status: response.status, reason: 'invalid_response' })
-    return location
+    if (!location) {
+      console.warn('[ip-location.provider]', { status: response.status, reason: 'invalid_response' })
+      return { location: null, lookupResult: 'unknown-region' }
+    }
+    return { location, lookupResult: 'success' }
   } catch (error) {
     const reason = error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'request_error'
     console.warn('[ip-location.provider]', { reason })
-    return null
+    return {
+      location: null,
+      lookupResult: reason === 'timeout' ? 'timeout' : 'provider-error',
+    }
   } finally {
     clearTimeout(timeout)
   }
@@ -409,16 +483,18 @@ async function fetchIpLocation(ip: string): Promise<IpLocation | null> {
 async function lookupIpLocation(ip: string) {
   const cached = ipLocationCache.get(ip)
   if (cached) {
-    if (cached.expiresAt > Date.now()) return cached.value
+    if (cached.expiresAt > Date.now()) {
+      return { location: cached.value, lookupResult: cached.lookupResult }
+    }
     ipLocationCache.delete(ip)
   }
 
   const inFlight = ipLocationInFlight.get(ip)
   if (inFlight) return inFlight
 
-  const request = fetchIpLocation(ip).then((location) => {
-    cacheLocation(ip, location)
-    return location
+  const request = fetchIpLocation(ip).then((lookup) => {
+    cacheLocation(ip, lookup.location, lookup.lookupResult)
+    return lookup
   }).finally(() => {
     ipLocationInFlight.delete(ip)
   })
@@ -432,16 +508,37 @@ async function lookupIpLocation(ip: string) {
  * A failed/unknown lookup returns null; it never becomes a province fallback.
  */
 export async function resolveIpLocation(request: Request): Promise<IpLocation | null> {
-  const clientIp = getClientIp(request)
+  const clientIpResolution = getClientIpResolution(request)
+  const clientIp = clientIpResolution.ip
+  const configuredSource = (process.env.TRUSTED_CLIENT_IP_SOURCE || 'nginx').trim().toLowerCase()
 
-  const cloudflareLocation = normalizeLocation(await readCloudflareGeo())
-  if (cloudflareLocation) return cloudflareLocation
+  if (configuredSource === 'cloudflare') {
+    const cloudflareLocation = normalizeLocation(await readCloudflareGeo())
+    if (cloudflareLocation) {
+      logIpLocationDiagnostics(clientIpResolution.source, 'success')
+      return cloudflareLocation
+    }
+  }
 
   const trustedEdgeLocation = readTrustedEdgeGeo(request)
-  if (trustedEdgeLocation) return trustedEdgeLocation
+  if (trustedEdgeLocation) {
+    logIpLocationDiagnostics(clientIpResolution.source, 'success')
+    return trustedEdgeLocation
+  }
 
-  if (clientIp === 'unknown') return null
-  return lookupIpLocation(clientIp)
+  if (clientIpResolution.status !== 'success' || clientIp === 'unknown') {
+    logIpLocationDiagnostics(clientIpResolution.source, clientIpResolution.status)
+    return null
+  }
+
+  const lookup = await lookupIpLocation(clientIp)
+  logIpLocationDiagnostics(clientIpResolution.source, lookup.lookupResult)
+  return lookup.location
+}
+
+function logIpLocationDiagnostics(clientIpSource: string, lookupResult: string) {
+  if (process.env.IP_DIAGNOSTICS_LOG !== 'true' && process.env.DEBUG_CLIENT_IP !== 'true') return
+  console.info('[ip-location.diagnostics]', { clientIpSource, lookupResult })
 }
 
 function isRequest(value: Request | IpLocation | null): value is Request {
@@ -454,17 +551,10 @@ export async function updateUserIpRegion(userId: string, source: Request | IpLoc
     ? await resolveIpLocation(source)
     : source
   const region = location?.label || null
-  if (!region) return null
 
   try {
     await prisma.user.updateMany({
-      where: {
-        id: userId,
-        OR: [
-          { ipRegion: null },
-          { ipRegion: { not: region } },
-        ],
-      },
+      where: { id: userId },
       data: { ipRegion: region, ipRegionUpdatedAt: new Date() },
     })
   } catch (error) {

@@ -14,6 +14,8 @@ export type ReviewPost = {
   isPinned: boolean
   isFeatured: boolean
   User: { uid: number; nickname: string; Profile: { displayName: string | null } | null }
+  ReviewedBy: { id: string; uid: number; username: string; name: string } | null
+  PostModerationHistory: { id: string; actorName: string | null; actorUsername: string | null; actorUid: number | null; action: string; status: PostModerationStatus; titleSnapshot: string | null; rejectionReason: string | null; createdAt: string }[]
   Board: { name: string }
   PostMedia: { id: string; url: string | null; thumbnail: string | null }[]
 }
@@ -81,6 +83,10 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
   }
 
   function requestReview(post: ReviewPost, nextStatus: Exclude<ReviewStatus, 'PENDING'>) {
+    if (post.moderationStatus !== 'PENDING') {
+      setError('只有待审核帖子可以执行最终审核；请等待作者重新编辑后再处理。')
+      return
+    }
     setError('')
     setMessage('')
     setRejectReason(nextStatus === 'REJECTED' ? post.rejectionReason || '' : '')
@@ -90,8 +96,8 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
   async function confirmReview() {
     if (!reviewTarget) return
     const reason = rejectReason.trim()
-    if (reviewTarget.nextStatus === 'REJECTED' && reason.length > 1000) {
-      setError('拒绝原因不能超过 1000 个字符')
+    if (reviewTarget.nextStatus === 'REJECTED' && !reason) {
+      setError('拒绝帖子时必须填写拒绝理由')
       return
     }
     const target = reviewTarget
@@ -120,16 +126,17 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
         const isReviewing = reviewingId === post.id
         return <article key={post.id} className="grid gap-5 py-6 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500"><span className="rounded-full bg-sky-50 px-3 py-1 text-brand-700">[{post.Board.name}]</span><span>{post.User.Profile?.displayName || post.User.nickname}</span><span>UID {post.User.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time>{post.reviewedAt ? <time>审核于 {new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.reviewedAt))}</time> : null}</div>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500"><span className="rounded-full bg-sky-50 px-3 py-1 text-brand-700">[{post.Board.name}]</span><span>{post.User.Profile?.displayName || post.User.nickname}</span><span>UID {post.User.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time>{post.reviewedAt ? <time>审核时间：{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.reviewedAt))}</time> : null}{post.reviewedAt ? <span>审核人：{post.ReviewedBy ? `${post.ReviewedBy.name} · UID ${post.ReviewedBy.uid}` : '原管理员账号已不存在'}</span> : null}</div>
             <h3 className="mt-3 text-xl font-black text-brand-950">{post.title}</h3>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{post.content}</p>
             {queueStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">拒绝原因：{post.rejectionReason}</p> : null}
+            {post.PostModerationHistory.length ? <details className="mt-4 rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-2"><summary className="cursor-pointer text-xs font-black text-brand-700">查看审核历史（{post.PostModerationHistory.length}）</summary><div className="mt-3 space-y-2">{post.PostModerationHistory.map((item) => <div key={item.id} className="border-t border-sky-100 pt-2 text-xs font-bold text-slate-600"><p>{item.action} · {item.status} · {item.actorName || '原账号已不存在'}{item.actorUid ? ` · UID ${item.actorUid}` : ''}</p><p className="mt-1 text-slate-500">{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.createdAt))}{item.rejectionReason ? ` · ${item.rejectionReason}` : ''}</p></div>)}</div></details> : null}
             {post.PostMedia.length ? <div className="mt-4 flex flex-wrap gap-3">{post.PostMedia.map((media) => media.url ? <img key={media.id} src={media.thumbnail || media.url} alt="帖子图片" className="h-28 w-40 rounded-xl object-cover" /> : null)}</div> : null}
           </div>
           <div className="flex flex-wrap items-start gap-2 md:w-32 md:flex-col">
             {queueStatus === 'PENDING' ? <><button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">通过</button><button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">拒绝</button></> : null}
-            {queueStatus === 'APPROVED' ? <button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">重新拒绝</button> : null}
-            {queueStatus === 'REJECTED' ? <button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">重新通过</button> : null}
+            {queueStatus === 'APPROVED' ? <span className="rounded-full border border-slate-200 px-4 py-2 text-xs font-black text-slate-500">已审核；用户重新编辑后才会重新拒绝</span> : null}
+            {queueStatus === 'REJECTED' ? <span className="rounded-full border border-slate-200 px-4 py-2 text-xs font-black text-slate-500">已审核；用户重新编辑后才会重新通过</span> : null}
             <button type="button" disabled={Boolean(reviewingId)} onClick={() => void toggleFlag(post.id, 'isFeatured', !post.isFeatured)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">{post.isFeatured ? '取消精选' : '设置精选'}</button>
             <button type="button" disabled={Boolean(reviewingId)} onClick={() => void toggleFlag(post.id, 'isPinned', !post.isPinned)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">{post.isPinned ? '取消置顶' : '置顶'}</button>
             {isReviewing ? <span className="text-xs font-black text-slate-500">提交中…</span> : null}
@@ -142,7 +149,7 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
       <div className="w-full max-w-lg rounded-3xl border border-sky-100 bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="post-review-dialog-title">
         <h3 id="post-review-dialog-title" className="text-xl font-black text-brand-950">确认{reviewTarget.nextStatus === 'APPROVED' ? '通过' : '拒绝'}帖子</h3>
         <p className="mt-3 break-words text-sm font-bold leading-6 text-slate-600">{reviewTarget.title}</p>
-        {reviewTarget.nextStatus === 'REJECTED' ? <label className="mt-5 block text-sm font-black text-brand-950">拒绝原因（可选）<textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} maxLength={1000} rows={4} className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-brand-500" placeholder="填写原因后，用户会在新的审核通知中看到。" /></label> : null}
+        {reviewTarget.nextStatus === 'REJECTED' ? <label className="mt-5 block text-sm font-black text-brand-950">拒绝原因（必填）<textarea required value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} rows={5} className="mt-2 max-h-48 min-h-28 w-full resize-y overflow-y-auto rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-brand-500" placeholder="请填写拒绝原因，用户会在审核通知中看到。" /></label> : null}
         <div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" onClick={() => setReviewTarget(null)} className="rounded-full bg-sky-50 px-5 py-2.5 text-sm font-black text-brand-700">取消</button><button type="button" onClick={() => void confirmReview()} className={`rounded-full px-5 py-2.5 text-sm font-black text-white ${reviewTarget.nextStatus === 'APPROVED' ? 'bg-emerald-600' : 'bg-red-600'}`}>确认{reviewTarget.nextStatus === 'APPROVED' ? '通过' : '拒绝'}</button></div>
       </div>
     </div> : null}
