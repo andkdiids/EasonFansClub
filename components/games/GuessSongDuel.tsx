@@ -93,6 +93,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const latestMatchRef = useRef<DuelMatchState | null>(null)
   const finishedHandledMatchIdRef = useRef<string | null>(null)
   const syncRequestRef = useRef<{ key: string; generation: number; controller: AbortController; promise: Promise<void> } | null>(null)
+  const createRoomInFlightRef = useRef(false)
   // Keep the Audio element stable while score/presence updates replace the match object.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const audioQuestion = useMemo(() => match?.question || null, [match?.question?.publicToken, match?.question?.audioStartAt, match?.question?.audioUrl, match?.question?.preloadAudioUrl])
@@ -466,6 +467,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   }).join(' · ') : null
 
   async function createRoom() {
+    if (createRoomInFlightRef.current) return
+    createRoomInFlightRef.current = true
     setBusy(true)
     setError('')
     unlockAudio()
@@ -480,6 +483,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     } catch (reason) {
       setDuelError(reason)
     } finally {
+      createRoomInFlightRef.current = false
       setBusy(false)
     }
   }
