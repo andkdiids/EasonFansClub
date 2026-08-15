@@ -100,6 +100,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     desc: '维护音乐专辑、歌曲、巡演和现场资料。',
     items: [
       { href: '/admin/music', title: 'EasMusic 管理', desc: '进入 EasMusic 管理总览及其子模块。' },
+      { href: '/admin/ratings', title: '歌·颂管理', desc: '查看评分统计，处理违规短评；歌曲和专辑仍由曲库管理。' },
     ],
   },
   {

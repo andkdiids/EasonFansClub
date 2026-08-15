@@ -98,7 +98,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
       })),
       moduleData(() => prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: getShanghaiDateKey(today) } },
-        select: { checkDate: true, mood: true, message: true, streakDay: true, points: true, exp: true, createdAt: true },
+        select: { checkDate: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, points: true, exp: true, createdAt: true },
       })),
       moduleData(() => getCheckInMessages({
         selectedDate: today,

@@ -4,7 +4,8 @@ import type { Prisma } from '@prisma/client'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
-import { buildPostReviewUpdate, isPostModerationStatus } from '@/lib/post-moderation'
+import { buildPostReviewUpdate, isPostModerationStatus, POST_REVIEW_PAGE_SIZE } from '@/lib/post-moderation'
+import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds, type PostModerationHistoryRow } from '@/lib/post-moderation-history'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -24,17 +25,13 @@ const reviewSelect = {
   isFeatured: true,
   User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
   ReviewedBy: { select: { id: true, uid: true, username: true, nickname: true, Profile: { select: { displayName: true } } } },
-  PostModerationHistory: {
-    orderBy: { createdAt: 'desc' as const },
-    select: { id: true, actorName: true, actorUsername: true, actorUid: true, action: true, status: true, titleSnapshot: true, rejectionReason: true, createdAt: true },
-  },
   Board: { select: { name: true, slug: true } },
   PostMedia: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
 } as const
 
 type ReviewPostRow = Prisma.PostGetPayload<{ select: typeof reviewSelect }>
 
-function serializePost(post: ReviewPostRow) {
+function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[]) {
   return {
     ...post,
     content: publicContentImageMarkers(post.content),
@@ -45,7 +42,7 @@ function serializePost(post: ReviewPostRow) {
     ReviewedBy: post.ReviewedBy
       ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, username: post.ReviewedBy.username, name: userSnapshotName(post.ReviewedBy) }
       : null,
-    PostModerationHistory: post.PostModerationHistory.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
+    PostModerationHistory: history.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
     PostMedia: post.PostMedia.map((media) => ({ ...media, url: publicImageUrl(media.url), thumbnail: publicImageUrl(media.thumbnail) })),
   }
 }
@@ -55,15 +52,31 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
   const rawStatus = new URL(request.url).searchParams.get('status')
   const status = isPostModerationStatus(rawStatus) ? rawStatus : 'PENDING'
-  const posts = await prisma.post.findMany({
-    where: { moderationStatus: status, isDeleted: false },
-    orderBy: status === 'PENDING'
-      ? [{ createdAt: 'desc' as const }]
-      : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }],
-    take: 200,
-    select: reviewSelect,
-  })
-  return NextResponse.json({ posts: posts.map(serializePost), status }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  const rawPage = Number(new URL(request.url).searchParams.get('page') || '1')
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
+  try {
+    const pageRows = await prisma.post.findMany({
+      where: { moderationStatus: status, isDeleted: false },
+      orderBy: status === 'PENDING'
+        ? [{ createdAt: 'desc' as const }]
+        : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }],
+      skip: (page - 1) * POST_REVIEW_PAGE_SIZE,
+      take: POST_REVIEW_PAGE_SIZE + 1,
+      select: reviewSelect,
+    })
+    const hasMore = pageRows.length > POST_REVIEW_PAGE_SIZE
+    const posts = pageRows.slice(0, POST_REVIEW_PAGE_SIZE)
+    const historyByPostId = await loadPostModerationHistoryByPostIds(posts.map((post) => post.id), 'admin.posts.review.list')
+    return NextResponse.json({
+      posts: posts.map((post) => serializePost(post, historyByPostId.get(post.id) || [])),
+      status,
+      page,
+      hasMore,
+    }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  } catch (error) {
+    console.error('[admin.posts.review.list]', { status, page, error: describePostModerationHistoryError(error) })
+    return NextResponse.json({ message: '审核列表暂时无法加载，请稍后重试', status, page }, { status: 503 })
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -182,7 +195,7 @@ export async function PATCH(request: Request) {
     revalidateTag('trending-posts')
     return NextResponse.json({ post, previousStatus: result.previousStatus })
   } catch (error) {
-    console.error('[admin/posts/review]', { postId, status, error })
+    console.error('[admin/posts/review]', { postId, status, error: describePostModerationHistoryError(error) })
     if (error instanceof Error && error.message === 'POST_ALREADY_REVIEWED') {
       return NextResponse.json({ message: '该帖子已被其他管理员审核，请刷新后查看最新状态' }, { status: 409 })
     }

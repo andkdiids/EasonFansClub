@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getMood } from '@/lib/daily'
+import { getMoodDisplay as resolveMoodDisplay, type CheckInMoodRecord } from '@/lib/checkin-mood'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import {
   compareCheckInMonths,
@@ -36,11 +37,12 @@ function parseInitialMonth(dateKey: string) {
   return parsed ? { year: parsed.year, month: parsed.month } : getCurrentCheckInMonth()
 }
 
-function getMoodDisplay(moodKey: string | null | undefined) {
-  const mood = getMood(moodKey || '')
+function getMoodDisplay(value: CheckInMoodRecord | string | null | undefined) {
+  const display = resolveMoodDisplay(value)
+  const mood = getMood(typeof value === 'string' ? value : value?.mood || '')
   return {
-    icon: mood?.icon || '',
-    label: mood?.label || moodKey || '未填写心情',
+    icon: display.icon || mood?.icon || '',
+    label: display.label || mood?.label || (typeof value === 'string' ? value : value?.moodText || value?.mood) || '未填写心情',
   }
 }
 
@@ -289,7 +291,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                     const record = recordsByDate.get(cell.key)
                     const isFuture = cell.key > currentMonth.dateKey
                     const visibleRecord = record && !isFuture ? record : undefined
-                    const mood = visibleRecord ? getMoodDisplay(visibleRecord.mood) : null
+                    const mood = visibleRecord ? getMoodDisplay(visibleRecord) : null
                     const content = (
                       <>
                         <span className="checkin-history-day-number">{cell.day}</span>
@@ -327,7 +329,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                     {detail ? (
                       <>
                         <dl className="checkin-history-detail-facts">
-                          <div><dt>今日心情</dt><dd>{getMoodDisplay(detail.mood).icon} {getMoodDisplay(detail.mood).label}</dd></div>
+                          <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).icon} {getMoodDisplay(detail).label}</dd></div>
                           <div><dt>挂号时间</dt><dd>{formatBeijingDateTimeMinute(detail.createdAt)}</dd></div>
                           {detail.streakDay > 0 ? <div><dt>连续挂号</dt><dd>{detail.streakDay} 天</dd></div> : null}
                         </dl>

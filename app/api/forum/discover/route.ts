@@ -9,8 +9,10 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import {
   parseForumDiscoveryLimit,
   parseForumDiscoveryMode,
+  stableRecommendationWeight,
   normalizeDiscoveryIds,
   selectRecommendationRows,
+  FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT,
   type ForumDiscoveryMode,
 } from '@/lib/forum-discovery'
 import { prisma } from '@/lib/prisma'
@@ -20,7 +22,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
-const DISCOVERY_CANDIDATE_POOL = 240
+const DISCOVERY_CANDIDATE_POOL = 120
 const DISCOVERY_MAX_RECOMMEND_WINDOWS = 4
 const DISCOVERY_MAX_SEEN_IDS = 500
 const DISCOVERY_FRESH_WINDOW_HOURS = 24
@@ -71,15 +73,6 @@ function parseRecommendationCursor(value: unknown, seed: DiscoveryFeedSeed): Rec
   return { page }
 }
 
-function hashRecommendationValue(value: string) {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return hash >>> 0
-}
-
 function recommendationScore(row: DiscoveryRow, seed: DiscoveryFeedSeed) {
   const ageHours = Math.max(0, (seed.startedAt.getTime() - row.createdAt.getTime()) / (60 * 60 * 1000))
   const freshnessScore = ageHours <= 6
@@ -97,7 +90,7 @@ function recommendationScore(row: DiscoveryRow, seed: DiscoveryFeedSeed) {
     + (row.isFeatured ? 18 : 0)
     + (row.isPinned ? 12 : 0)
     + (row.isRecommended ? 10 : 0)
-  const explorationScore = (hashRecommendationValue(`${seed.value}:${row.id}`) % 1000) / 1000 * 18
+  const explorationScore = stableRecommendationWeight(seed.value, row.id) * 18
   return freshnessScore + qualityScore + explorationScore
 }
 
@@ -235,9 +228,9 @@ function buildWhere({ boardId, query, excludedPostIds, excludedAuthorIds, exclud
   }
 }
 
-function hasInvalidDiscoveryIds(value: unknown) {
+function hasInvalidDiscoveryIds(value: unknown, max = DISCOVERY_MAX_SEEN_IDS) {
   if (value === undefined) return false
-  if (!Array.isArray(value) || value.length > DISCOVERY_MAX_SEEN_IDS) return true
+  if (!Array.isArray(value) || value.length > max) return true
   return value.some((item) => typeof item !== 'string' || !item.trim() || item.trim().length > 80)
 }
 
@@ -256,6 +249,7 @@ export async function POST(request: Request) {
   const rawFeedSeed = body.feedSeed
   const rawSeenPostIds = body.seenPostIds
   const rawSeenAuthorIds = body.seenAuthorIds
+  const rawRecentRecommendedPostIds = body.recentRecommendedPostIds
   if (!requestedMode) return NextResponse.json({ message: 'mode 参数无效' }, { status: 400 })
   if (limit === null) return NextResponse.json({ message: 'limit 参数无效' }, { status: 400 })
   if (rawBoard !== undefined && rawBoard !== null && typeof rawBoard !== 'string') return NextResponse.json({ message: 'board 参数无效' }, { status: 400 })
@@ -266,12 +260,14 @@ export async function POST(request: Request) {
   if (typeof rawCursor === 'string' && (!rawCursor || rawCursor.length > 300)) return NextResponse.json({ message: 'cursor 参数无效' }, { status: 400 })
   if (hasInvalidDiscoveryIds(rawSeenPostIds)) return NextResponse.json({ message: 'seenPostIds 参数无效' }, { status: 400 })
   if (hasInvalidDiscoveryIds(rawSeenAuthorIds)) return NextResponse.json({ message: 'seenAuthorIds 参数无效' }, { status: 400 })
+  if (hasInvalidDiscoveryIds(rawRecentRecommendedPostIds, FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT)) return NextResponse.json({ message: 'recentRecommendedPostIds 参数无效' }, { status: 400 })
   if (typeof rawFeedSeed === 'string' && (!rawFeedSeed || rawFeedSeed.length > 160)) return NextResponse.json({ message: 'feedSeed invalid' }, { status: 400 })
   if (rawFeedSeed !== undefined && rawFeedSeed !== null && typeof rawFeedSeed !== 'string') return NextResponse.json({ message: 'feedSeed invalid' }, { status: 400 })
   const boardValue = sanitizeText(typeof rawBoard === 'string' ? rawBoard : '', 80)
   const query = sanitizeText(typeof rawQuery === 'string' ? rawQuery : '', 100)
   const seenPostIds = normalizeDiscoveryIds(body.seenPostIds)
   const seenAuthorIds = normalizeDiscoveryIds(body.seenAuthorIds)
+  const recentRecommendedPostIds = normalizeDiscoveryIds(body.recentRecommendedPostIds, FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT)
 
   const boards = await prisma.board.findMany({
     where: { isActive: true },
@@ -311,10 +307,12 @@ export async function POST(request: Request) {
     }
     const remainingPostIds = new Set(seenPostIds)
     const remainingAuthorIds = new Set(seenAuthorIds)
+    const recentPostIds = new Set(recentRecommendedPostIds)
     const selectedRows: DiscoveryRow[] = []
     const candidateRows: DiscoveryRow[] = []
     const candidateSize = Math.min(DISCOVERY_CANDIDATE_POOL, Math.max(limit * 12, 96))
-    const selectForPage = (candidates: DiscoveryRow[], allowPreviouslySeenAuthors = false) => {
+    const startWindow = recommendationCursor?.page || 0
+    const selectForPage = (candidates: DiscoveryRow[], allowPreviouslySeenAuthors = false, allowRecentPosts = false) => {
       const ranked = candidates
         .filter((row, index, all) => all.findIndex((candidate) => candidate.id === row.id) === index)
         .sort((left, right) => {
@@ -328,6 +326,7 @@ export async function POST(request: Request) {
         remainingPostIds,
         allowPreviouslySeenAuthors ? new Set(selectedRows.map((row) => row.User.id)) : remainingAuthorIds,
         limit - selectedRows.length,
+        allowRecentPosts ? new Set() : recentPostIds,
       )
       selected.rows.forEach((item) => {
         selectedRows.push(item.row)
@@ -340,7 +339,7 @@ export async function POST(request: Request) {
       const candidates = await prisma.post.findMany({
         where: recommendWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: window * candidateSize,
+        skip: (startWindow + window) * candidateSize,
         take: candidateSize,
         select: {
           ...discoverySelect,
@@ -355,6 +354,7 @@ export async function POST(request: Request) {
     }
 
     if (selectedRows.length < limit) selectForPage(candidateRows, true)
+    if (selectedRows.length < limit) selectForPage(candidateRows, true, true)
 
     if (selectedRows.length === 0) {
       const fallbackCandidates = await prisma.post.findMany({
@@ -367,7 +367,7 @@ export async function POST(request: Request) {
           PostFavorite: currentUserId ? { where: { userId: currentUserId }, select: { id: true }, take: 1 } : false,
         },
       })
-      selectForPage(fallbackCandidates.map((row) => ({ ...row, PostFavorite: row.PostFavorite || [] })), true)
+      selectForPage(fallbackCandidates.map((row) => ({ ...row, PostFavorite: row.PostFavorite || [] })), true, true)
     }
 
     rows = selectedRows

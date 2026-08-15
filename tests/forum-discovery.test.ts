@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   getForumDiscoveryCoverFit,
+  mergeRecentRecommendedPostIds,
   normalizeDiscoveryIds,
   parseForumDiscoveryLimit,
   parseForumDiscoveryMode,
   selectRecommendationRows,
+  stableRecommendationWeight,
 } from '../lib/forum-discovery'
 
 test('发现流封面按 4:3 规则选择裁切或完整展示', () => {
@@ -32,6 +34,8 @@ test('推荐流跨批次同时排除已见帖子和已见作者', () => {
     10,
   )
   assert.deepEqual(second.rows.map((row) => row.id), ['p6'])
+  const recentExcluded = selectRecommendationRows(rows, new Set(), new Set(), 10, new Set(['p1', 'p3']))
+  assert.deepEqual(recentExcluded.rows.map((row) => row.id), ['p2', 'p4'])
 })
 
 test('推荐流排除 ID 会去重并限制输入规模', () => {
@@ -42,6 +46,10 @@ test('推荐流排除 ID 会去重并限制输入规模', () => {
   assert.match(route, /seenAuthorIds/)
   assert.match(route, /feedSeed/)
   assert.match(route, /recommendationScore/)
+  assert.match(route, /recentRecommendedPostIds/)
+  assert.match(route, /DISCOVERY_CANDIDATE_POOL = 120/)
+  assert.match(route, /stableRecommendationWeight/)
+  assert.match(route, /skip: \(startWindow \+ window\) \* candidateSize/)
   assert.match(route, /createdAt: \{ lte: feedSeed/)
   assert.doesNotMatch(route, /randomInt/)
   assert.doesNotMatch(route, /ORDER\s+BY\s+RAND\s*\(/i)
@@ -79,7 +87,7 @@ test('小臣书接口参数有明确边界，非法输入不会静默变成默�
   assert.match(route, /parseForumDiscoveryLimit/)
   assert.match(route, /status: 400/)
   assert.match(route, /status: 404/)
-  assert.match(route, /length > DISCOVERY_MAX_SEEN_IDS/)
+  assert.match(route, /length > max/)
   assert.match(route, /take: 100/)
   assert.match(route, /\.\.\.discoverySelect/)
   assert.doesNotMatch(route, /passwordHash|verificationToken|sessionToken|answer/i)
@@ -120,17 +128,21 @@ test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误
   assert.match(discovery, /new AbortController\(\)/)
   assert.match(discovery, /signal: controller\.signal/)
   assert.match(discovery, /requestRef\.current\?\.controller\.abort\(\)/)
+  assert.match(discovery, /requestSequence\.current \+= 1/)
   assert.match(discovery, /postsRef\.current/)
+  assert.match(discovery, /mergeDiscoveryPosts/)
+  assert.match(discovery, /recentRecommendedPostIds/)
   assert.match(discovery, /autoLoadBlockedRef/)
   assert.match(discovery, /loadPage\(false, true\)/)
   assert.match(discovery, /rootMargin: '420px 0px'/)
   assert.match(discovery, /\[hasMore, loadingMore, loadPage\]/)
   assert.match(discovery, /feedSeed: requestFeedSeed/)
   assert.match(discovery, /payload\.nextCursor === requestCursor/)
-  assert.match(discovery, /DISCOVERY_SESSION_MAX_AGE_MS = 30_000/)
+  assert.match(discovery, /DISCOVERY_SESSION_MAX_AGE_MS = 30 \* 60_000/)
   assert.match(discovery, /storedAge <= DISCOVERY_SESSION_MAX_AGE_MS/)
   assert.match(discovery, /savedAt: Date\.now\(\)/)
-  assert.doesNotMatch(discovery, /setInterval|SWR|mutate\(/i)
+  assert.doesNotMatch(discovery, /setPosts\(\[\]\)/)
+  assert.doesNotMatch(discovery, /setInterval|SWR|mutate\(|addEventListener\(['"](?:focus|online|reconnect)/i)
 })
 
 test('小臣书详情收藏使用明确目标状态，重复请求不会反向切换', () => {
@@ -144,4 +156,41 @@ test('小臣书详情收藏使用明确目标状态，重复请求不会反向�
   assert.match(favoriteRoute, /postFavorite\.deleteMany/)
   assert.match(actions, /body: JSON\.stringify\(\{ isFavorited: nextFavorited \}\)/)
   assert.match(actions, /finally \{[\s\S]*setIsSubmitting\(false\)/)
+})
+test('recommendation seed is reproducible and recent ids stay bounded', () => {
+  const ids = ['p1', 'p2', 'p3', 'p4']
+  const rank = (seed: string) => [...ids].sort((left, right) => stableRecommendationWeight(seed, right) - stableRecommendationWeight(seed, left))
+  assert.deepEqual(rank('seed-a'), rank('seed-a'))
+  assert.notDeepEqual(rank('seed-a'), rank('seed-b'))
+  assert.deepEqual(mergeRecentRecommendedPostIds(['p3', 'p2'], ['p4', 'p1', 'p3'], 3), ['p4', 'p1', 'p3'])
+})
+
+test('recommendation updates stay keyed by post id and interactions do not refresh the feed', () => {
+  const discovery = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
+  const card = readFileSync('components/ForumDiscoveryCard.tsx', 'utf8')
+  const actions = readFileSync('components/PostActions.tsx', 'utf8')
+  assert.match(discovery, /new Map\(payload\.posts\.map\(\(post\) => \[post\.id, post\]\)\)/)
+  assert.match(discovery, /posts\.map\(\(post\) => post\.id\)/)
+  assert.match(discovery, /ecfc:post-interaction/)
+  assert.match(discovery, /ecfc:post-reply-count/)
+  assert.match(discovery, /post\.id !== detail\.postId/)
+  assert.match(discovery, /ForumDiscoveryCard key=\{post\.id\}/)
+  assert.match(card, /refreshOnSuccess=\{false\}/)
+  assert.match(actions, /post\.id === detail\.postId/)
+})
+
+test('mobile forum mode is forced to Xiaochenshu while desktop keeps both mode controls', () => {
+  const home = readFileSync('components/ForumHome.tsx', 'utf8')
+  const discovery = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
+  const detailController = readFileSync('components/ForumDiscoveryDetailController.tsx', 'utf8')
+  const layout = readFileSync('app/layout.tsx', 'utf8')
+  const css = readFileSync('app/globals.css', 'utf8')
+  assert.match(home, /setTheme\(mobile \? 'xiaochenshu'/)
+  assert.match(home, /showModeSwitch=\{!isMobile\}/)
+  assert.match(home, /if \(window\.matchMedia\('\(max-width: 767px\)'\)\.matches\)/)
+  assert.match(discovery, /showModeSwitch && onSwitchToPlaza/)
+  assert.match(detailController, /if \(media\.matches\) root\.dataset\.forumDetailDiscover = 'true'/)
+  assert.match(layout, /dataset\.forumDetailDiscover='true'/)
+  assert.match(css, /@media \(max-width:767px\)[\s\S]*\.forum-discovery-mode-button \{[\s\S]*display:none/)
+  assert.match(css, /@media \(min-width:768px\)[\s\S]*\.forum-discovery-mode-button/)
 })

@@ -13,6 +13,7 @@ import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getCurrentUser } from '@/lib/auth'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { ConcertContributorAttribution } from '@/components/music/ConcertContributorAttribution'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,9 @@ type CityConcert = {
   encore: SetlistItemForBlock[]
   full: SetlistItemForBlock[]
   signature: string
+  contributorUser: { uid: number; username: string } | null
+  setlistContributorUser: { uid: number; username: string } | null
+  encoreContributorUser: { uid: number; username: string } | null
 }
 
 function normalSignature(items: SetlistItemForBlock[]): string {
@@ -84,6 +88,9 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
               },
             },
             _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
+            contributorUser: { select: { uid: true, username: true } },
+            setlistContributorUser: { select: { uid: true, username: true } },
+            encoreContributorUser: { select: { uid: true, username: true } },
           },
         },
       },
@@ -110,6 +117,9 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
       encore,
       full: all,
       signature: normalSignature(normal),
+      contributorUser: concert.contributorUser,
+      setlistContributorUser: concert.setlistContributorUser,
+      encoreContributorUser: concert.encoreContributorUser,
     }
   })
 
@@ -217,5 +227,8 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
       </div>
       {!cityConcerts.length ? <p className="mt-7 border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300">该城市暂无已发布的场次。</p> : null}
     </section>
+    <ConcertContributorAttribution type="SHOW" contributor={firstWithSetlist?.contributorUser} />
+    <ConcertContributorAttribution type="SETLIST" contributor={firstWithSetlist?.setlistContributorUser} />
+    <ConcertContributorAttribution type="ENCORE" contributor={firstWithSetlist?.encoreContributorUser} />
   </MusicArchiveShell>
 }

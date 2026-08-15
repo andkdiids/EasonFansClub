@@ -32,6 +32,9 @@ export async function GET(request: Request) {
       select: {
         id: true,
         mood: true,
+        moodType: true,
+        moodEmoji: true,
+        moodText: true,
         content: true,
         moderationStatus: true,
         createdAt: true,
@@ -75,6 +78,9 @@ export async function GET(request: Request) {
   const mapped = messages.map((message) => ({
     id: message.id,
     mood: message.mood,
+    moodType: message.moodType,
+    moodEmoji: message.moodEmoji,
+    moodText: message.moodText,
     content: publicModerationText(message.content, message.moderationStatus),
     createdAt: message.createdAt,
     ipRegion: message.ipRegion,

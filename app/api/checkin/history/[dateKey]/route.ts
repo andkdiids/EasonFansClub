@@ -18,7 +18,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const record = await prisma.checkIn.findUnique({
     where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: dateKey } },
-    select: { id: true, checkinDateKey: true, mood: true, message: true, createdAt: true, points: true, exp: true, streakDay: true },
+    select: { id: true, checkinDateKey: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, createdAt: true, points: true, exp: true, streakDay: true },
   })
   if (!record) return NextResponse.json({ message: '当天没有挂号记录' }, { status: 404 })
 

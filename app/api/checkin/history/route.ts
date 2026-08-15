@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     prisma.checkIn.findMany({
       where: { userId: user.id, checkinDateKey: { gte: startKey, lt: endKey } },
       orderBy: { checkinDateKey: 'asc' },
-      select: { id: true, checkinDateKey: true, mood: true },
+      select: { id: true, checkinDateKey: true, mood: true, moodType: true, moodEmoji: true, moodText: true },
     }),
     prisma.checkIn.findMany({
       where: { userId: user.id, checkinDateKey: { gte: startKey, lt: endKey }, message: { not: null } },

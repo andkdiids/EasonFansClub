@@ -1,4 +1,5 @@
 import type { AdminActionType, Prisma } from '@prisma/client'
+import { describePostModerationHistoryError, isMissingPostModerationHistoryTableError } from '@/lib/post-moderation-history'
 
 /** Stable operation names used by the admin operation log UI and filters. */
 export const adminAuditOperations = {
@@ -107,19 +108,30 @@ export async function createPostModerationHistory(
     rejectionReason?: string | null
   },
 ) {
-  const actor = await getAuditUserSnapshot(tx, input.actorId)
-  return tx.postModerationHistory.create({
-    data: {
+  try {
+    const actor = await getAuditUserSnapshot(tx, input.actorId)
+    return await tx.postModerationHistory.create({
+      data: {
+        postId: input.postId,
+        actorId: actor.id,
+        actorName: userSnapshotName(actor),
+        actorUsername: actor.username,
+        actorUid: actor.uid,
+        action: input.action,
+        status: input.status,
+        titleSnapshot: input.titleSnapshot || null,
+        rejectionReason: input.rejectionReason || null,
+      },
+    })
+  } catch (error) {
+    if (!isMissingPostModerationHistoryTableError(error)) throw error
+    console.error('[post-moderation-history.write]', {
       postId: input.postId,
-      actorId: actor.id,
-      actorName: userSnapshotName(actor),
-      actorUsername: actor.username,
-      actorUid: actor.uid,
       action: input.action,
       status: input.status,
-      titleSnapshot: input.titleSnapshot || null,
-      rejectionReason: input.rejectionReason || null,
-    },
-  })
+      optionalTableMissing: true,
+      error: describePostModerationHistoryError(error),
+    })
+    return null
+  }
 }
-

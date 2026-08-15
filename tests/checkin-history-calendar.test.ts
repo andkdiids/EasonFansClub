@@ -50,7 +50,7 @@ test('日期键和月份切换使用纯日历值，不受 UTC 跨日影响', () 
 test('月度 API 只返回当前用户指定月份的轻量记录，详情 API 再读取留言', () => {
   assert.match(monthRoute, /getCurrentUser\(\)/)
   assert.match(monthRoute, /where: \{ userId: user\.id, checkinDateKey: \{ gte: startKey, lt: endKey \} \}/)
-  assert.match(monthRoute, /select: \{ id: true, checkinDateKey: true, mood: true \}/)
+  assert.match(monthRoute, /select: \{ id: true, checkinDateKey: true, mood: true, moodType: true, moodEmoji: true, moodText: true \}/)
   assert.match(monthRoute, /hasMessage: recordIdsWithMessages\.has\(record\.id\)/)
   assert.match(monthRoute, /earliestYear/)
   assert.match(detailRoute, /message: true/)

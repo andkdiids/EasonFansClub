@@ -453,6 +453,9 @@ model CheckIn {
   exp              Int              @default(0)
   message          String?
   mood             String?
+  moodType         String?          @db.VarChar(16)
+  moodEmoji        String?          @db.VarChar(32)
+  moodText         String?          @db.VarChar(191)
   checkinDateKey   String
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   dailyMessage     DailyMessage?
@@ -468,6 +471,9 @@ model DailyMessage {
   id               String                 @id @default(cuid())
   date             DateTime
   mood             String?
+  moodType         String?                @db.VarChar(16)
+  moodEmoji        String?                @db.VarChar(32)
+  moodText         String?                @db.VarChar(191)
   content          String
   likeCount        Int                    @default(0)
   commentCount     Int                    @default(0)
@@ -501,6 +507,9 @@ model DailyMessage {
 model FriendActivity {
   id             String        @id @default(cuid())
   mood           String?
+  moodType       String?       @db.VarChar(16)
+  moodEmoji      String?       @db.VarChar(32)
+  moodText       String?       @db.VarChar(191)
   content        String?
   createdAt      DateTime      @default(now())
   actorId        String

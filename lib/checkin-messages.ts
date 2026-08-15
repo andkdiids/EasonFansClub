@@ -32,6 +32,9 @@ export type AnonymousCheckInMessageItem = {
   id: string
   date: string
   mood: string | null
+  moodType: string | null
+  moodEmoji: string | null
+  moodText: string | null
   content: string
   isPinned: boolean
   isFeatured: boolean
@@ -64,6 +67,9 @@ export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): Anonym
     id: item.id,
     date: item.date,
     mood: item.mood,
+    moodType: item.moodType,
+    moodEmoji: item.moodEmoji,
+    moodText: item.moodText,
     content: item.content,
     isPinned: item.isPinned,
     isFeatured: item.isFeatured,

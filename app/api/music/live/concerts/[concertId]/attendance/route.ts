@@ -4,6 +4,7 @@ import { parseAttendanceInput, parseAttendanceVersion, PERSONAL_LIVE_NO_STORE_HE
 import { prisma } from '@/lib/prisma'
 import { checkConcertBadge } from '@/lib/concert-badge'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { deleteFromCos, describeCosError } from '@/lib/tencent-cos'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,9 +96,29 @@ export async function DELETE(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)
   const { concertId } = await params
-  const result = await prisma.userMusicConcert.deleteMany({
-    where: { userId: guard.user.id, concertId },
+  const deleted = await prisma.$transaction(async (tx) => {
+    const attendanceRows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM UserMusicConcert
+      WHERE userId = ${guard.user.id} AND concertId = ${concertId}
+      LIMIT 1
+      FOR UPDATE
+    `
+    const attendanceId = attendanceRows[0]?.id
+    if (!attendanceId) return { count: 0, storageKeys: [] as string[] }
+    const photos = await tx.myLivePhoto.findMany({ where: { attendanceId, userId: guard.user.id }, select: { storageKey: true } })
+    const result = await tx.userMusicConcert.deleteMany({
+      where: { userId: guard.user.id, concertId },
+    })
+    return { count: result.count, storageKeys: photos.map((photo) => photo.storageKey) }
   })
-  if (!result.count) return NextResponse.json({ message: '观演记录不存在' }, { status: 404, headers: PERSONAL_LIVE_NO_STORE_HEADERS })
+  if (!deleted.count) return NextResponse.json({ message: '观演记录不存在' }, { status: 404, headers: PERSONAL_LIVE_NO_STORE_HEADERS })
+  await Promise.all(deleted.storageKeys.map(async (storageKey) => {
+    try {
+      await deleteFromCos(storageKey)
+    } catch (error) {
+      console.error('[attendance.delete.photo.cos]', { storageKey, error: describeCosError(error) })
+    }
+  }))
   return NextResponse.json({ ok: true, message: '已从我的现场移除' }, { headers: PERSONAL_LIVE_NO_STORE_HEADERS })
 }

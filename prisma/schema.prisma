@@ -388,6 +388,9 @@ model CheckIn {
   exp            Int              @default(0)
   message        String?
   mood           String?
+  moodType       String?          @db.VarChar(16)
+  moodEmoji      String?          @db.VarChar(32)
+  moodText       String?          @db.VarChar(191)
   checkinDateKey String
   User           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   DailyMessage   DailyMessage?
@@ -562,6 +565,9 @@ model DailyMessage {
   id                   String                 @id @default(cuid())
   date                 DateTime
   mood                 String?
+  moodType             String?                @db.VarChar(16)
+  moodEmoji            String?                @db.VarChar(32)
+  moodText             String?                @db.VarChar(191)
   content              String
   ipRegion             String?
   likeCount            Int                    @default(0)
@@ -931,6 +937,9 @@ model Follow {
 model FriendActivity {
   id                 String                  @id @default(cuid())
   mood               String?
+  moodType           String?                 @db.VarChar(16)
+  moodEmoji          String?                 @db.VarChar(32)
+  moodText           String?                 @db.VarChar(191)
   content            String?
   moderationStatus   ContentModerationStatus @default(NORMAL)
   moderationReason   String?
@@ -1531,6 +1540,8 @@ model MusicAlbum {
   isFeatured    Boolean                @default(false)
   featuredOrder Int?
   AlbumReview   AlbumReview[]
+  Rating        Rating[]
+  RatingStats   RatingStats?
   MusicSong     MusicSong[]
 
   @@unique([name, artist, releaseYear])
@@ -1648,12 +1659,83 @@ model MusicSong {
   GuessSongQuestion            GuessSongQuestion[]
   MusicConcertSetlistItem      MusicConcertSetlistItem[]
   UserDailyMusicRecommendation UserDailyMusicRecommendation[]
+  Rating                       Rating[]
+  RatingStats                  RatingStats?
   MusicAlbum                   MusicAlbum                     @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, title])
   @@unique([albumId, trackNumber])
   @@index([albumId, trackNumber])
   @@index([title, artist])
+}
+
+model Rating {
+  id          String            @id @default(cuid())
+  userId      String
+  targetType  RatingTargetType
+  songId      String?
+  albumId     String?
+  score       Int
+  createdAt   DateTime          @default(now())
+  User        User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  MusicSong   MusicSong?        @relation(fields: [songId], references: [id], onDelete: Restrict)
+  MusicAlbum  MusicAlbum?       @relation(fields: [albumId], references: [id], onDelete: Restrict)
+  RatingReview RatingReview[]
+
+  @@unique([userId, songId])
+  @@unique([userId, albumId])
+  @@index([targetType, songId, createdAt])
+  @@index([targetType, albumId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model RatingReview {
+  id              String             @id @default(cuid())
+  ratingId        String
+  userId          String
+  content         String             @db.Text
+  likeCount       Int                @default(0)
+  activeKey       String?            @unique
+  deletedAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  Rating          Rating             @relation(fields: [ratingId], references: [id], onDelete: Restrict)
+  User            User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  RatingReviewLike RatingReviewLike[]
+
+  @@index([ratingId, deletedAt, createdAt])
+  @@index([userId, deletedAt, createdAt])
+  @@index([deletedAt, likeCount, createdAt])
+}
+
+model RatingReviewLike {
+  id          String       @id @default(cuid())
+  reviewId    String
+  userId      String
+  createdAt   DateTime     @default(now())
+  RatingReview RatingReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  User        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@index([userId, createdAt])
+}
+
+model RatingStats {
+  id                String           @id @default(cuid())
+  targetType        RatingTargetType
+  songId            String?          @unique
+  albumId           String?          @unique
+  ratingCount       Int              @default(0)
+  ratingScoreTotal  Int              @default(0)
+  averageScore      Float            @default(0)
+  reviewCount       Int              @default(0)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  MusicSong         MusicSong?       @relation(fields: [songId], references: [id], onDelete: Restrict)
+  MusicAlbum        MusicAlbum?      @relation(fields: [albumId], references: [id], onDelete: Restrict)
+
+  @@index([targetType, averageScore, ratingCount])
+  @@index([targetType, updatedAt])
 }
 
 model MusicTour {
@@ -1682,34 +1764,66 @@ model MusicTour {
 }
 
 model MusicConcert {
-  id                      String                    @id @default(cuid())
-  tourId                  String
-  title                   String?
-  concertDate             DateTime
-  startTime               DateTime?
-  endTime                 DateTime?
-  city                    String
-  countryOrRegion         String?
-  stageType               ConcertStageType          @default(NORMAL)
-  venue                   String?
-  sessionNumber           String?
-  posterUrl               String?                   @db.Text
-  description             String?                   @db.Text
-  status                  MusicPublicationStatus    @default(DRAFT)
-  sortOrder               Int                       @default(0)
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  MusicTour               MusicTour                 @relation(fields: [tourId], references: [id], onDelete: Restrict)
-  MusicConcertSetlistItem MusicConcertSetlistItem[]
-  MusicConcertHighlight   MusicConcertHighlight[]
-  UserMusicConcert        UserMusicConcert[]
+  id                         String                    @id @default(cuid())
+  tourId                     String
+  title                      String?
+  concertDate                DateTime
+  startTime                  DateTime?
+  endTime                    DateTime?
+  city                       String
+  countryOrRegion            String?
+  stageType                  ConcertStageType          @default(NORMAL)
+  venue                      String?
+  sessionNumber              String?
+  posterUrl                  String?                   @db.Text
+  description                String?                   @db.Text
+  status                     MusicPublicationStatus    @default(DRAFT)
+  sortOrder                  Int                       @default(0)
+  contributorUserId          String?
+  contributionId             String?
+  setlistContributorUserId   String?
+  setlistContributionId      String?
+  encoreContributorUserId    String?
+  encoreContributionId       String?
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  MusicTour                  MusicTour                 @relation(fields: [tourId], references: [id], onDelete: Restrict)
+  MusicConcertSetlistItem    MusicConcertSetlistItem[]
+  MusicConcertHighlight      MusicConcertHighlight[]
+  UserMusicConcert           UserMusicConcert[]
+  ConcertContributions       ConcertContribution[]     @relation("ConcertContributionTargetShow")
+  contributorUser            User?                     @relation("MusicConcertContributor", fields: [contributorUserId], references: [id], onDelete: Restrict)
+  setlistContributorUser     User?                     @relation("MusicConcertSetlistContributor", fields: [setlistContributorUserId], references: [id], onDelete: Restrict)
+  encoreContributorUser      User?                     @relation("MusicConcertEncoreContributor", fields: [encoreContributorUserId], references: [id], onDelete: Restrict)
 
   @@index([tourId])
   @@index([concertDate])
   @@index([city])
   @@index([status])
   @@index([tourId, concertDate])
+  @@index([tourId, city, concertDate])
   @@index([status, concertDate, createdAt])
+}
+
+model ConcertContribution {
+  id          String                     @id @default(cuid())
+  type        ConcertContributionType
+  submitterId String
+  targetShowId String?
+  payload     Json
+  status      ConcertContributionStatus  @default(PENDING)
+  reviewerId  String?
+  reviewedAt  DateTime?
+  reviewNote  String?                    @db.Text
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  submitter   User                       @relation("ConcertContributionSubmitter", fields: [submitterId], references: [id], onDelete: Restrict)
+  reviewer    User?                      @relation("ConcertContributionReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  targetShow  MusicConcert?              @relation("ConcertContributionTargetShow", fields: [targetShowId], references: [id], onDelete: SetNull)
+
+  @@index([submitterId, status, createdAt])
+  @@index([status, type, createdAt])
+  @@index([targetShowId, type, status])
 }
 
 model UserMusicConcert {
@@ -1724,12 +1838,34 @@ model UserMusicConcert {
   updatedAt    DateTime     @updatedAt
   User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   MusicConcert MusicConcert @relation(fields: [concertId], references: [id], onDelete: Restrict)
+  MyLivePhoto  MyLivePhoto[]
 
   @@unique([userId, concertId])
   @@index([userId])
   @@index([concertId])
   @@index([userId, createdAt])
   @@index([concertId, isPublic])
+}
+
+model MyLivePhoto {
+  id              String               @id @default(cuid())
+  userId          String
+  attendanceId    String
+  category        MyLivePhotoCategory
+  imageUrl        String               @db.Text
+  storageKey      String               @db.VarChar(512)
+  width           Int
+  height          Int
+  sortOrder       Int                  @default(0)
+  watermarked     Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  User            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  UserMusicConcert UserMusicConcert    @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceId, category, sortOrder, createdAt, id])
+  @@index([userId, attendanceId])
+  @@index([userId, createdAt])
 }
 
 model MusicConcertSetlistItem {
@@ -2596,6 +2732,9 @@ model User {
   AlbumReview                                            AlbumReview[]
   AlbumReviewFavorite                                    AlbumReviewFavorite[]
   AlbumReviewLike                                        AlbumReviewLike[]
+  Rating                                                 Rating[]
+  RatingReview                                           RatingReview[]
+  RatingReviewLike                                       RatingReviewLike[]
   AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
   PostReviewedBy                                          Post[]                         @relation("PostReviewedBy")
@@ -2688,6 +2827,12 @@ model User {
   UserBadge                                              UserBadge[]
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
+  MyLivePhoto                                            MyLivePhoto[]
+  ConcertContributionSubmitter                           ConcertContribution[]          @relation("ConcertContributionSubmitter")
+  ConcertContributionReviewer                            ConcertContribution[]          @relation("ConcertContributionReviewer")
+  MusicConcertContributor                                MusicConcert[]                @relation("MusicConcertContributor")
+  MusicConcertSetlistContributor                         MusicConcert[]                @relation("MusicConcertSetlistContributor")
+  MusicConcertEncoreContributor                          MusicConcert[]                @relation("MusicConcertEncoreContributor")
   EHospitalCheckAttempt                                  EHospitalCheckAttempt[]
   StickerPack_StickerPackCreator                         StickerPack[]                  @relation("StickerPackCreator")
   UserStickerPack_UserStickerPackUser                    UserStickerPack[]              @relation("UserStickerPackUser")
@@ -2965,6 +3110,29 @@ enum MessageType {
 enum MusicPublicationStatus {
   DRAFT
   PUBLISHED
+}
+
+enum RatingTargetType {
+  SONG
+  ALBUM
+}
+
+enum ConcertContributionType {
+  SHOW
+  SETLIST
+  ENCORE
+}
+
+enum ConcertContributionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum MyLivePhotoCategory {
+  TICKET
+  LIVE
 }
 
 enum ConcertCategory {

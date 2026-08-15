@@ -3,14 +3,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
-import { getMood } from '@/lib/daily'
+import { getMoodDisplay } from '@/lib/checkin-mood'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
-type CheckIn = { id: string; checkDate: string; mood: string | null; streakDay: number }
+type CheckIn = { id: string; checkDate: string; mood: string | null; moodType?: string | null; moodEmoji?: string | null; moodText?: string | null; streakDay: number }
 type ReplyItem = { id: string; content: string; createdAt: string; ipRegion?: string | null; authorName: string; authorAvatarUrl: string | null }
 type Message = {
   id: string
-  mood: string
+  mood: string | null
+  moodType?: string | null
+  moodEmoji?: string | null
+  moodText?: string | null
   content: string
   createdAt: string
   ipRegion?: string | null
@@ -74,11 +77,11 @@ export function ProfileCheckInCalendar() {
             {Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
               const day = index + 1
               const record = checkIns.data.find((item) => new Date(item.checkDate).getDate() === day)
-              const mood = getMood(record?.mood || '')
+              const mood = getMoodDisplay(record)
               return (
                 <div key={day} className={`flex h-12 flex-col items-center justify-center rounded-lg p-1 text-center text-xs font-black sm:h-[60px] ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'}`}>
                   <span>{day}</span>
-                  <span className="mt-0.5 block text-base leading-none">{mood?.icon || ''}</span>
+                  <span className="mt-0.5 block break-words text-[10px] leading-tight">{mood.formatted || ''}</span>
                 </div>
               )
             })}
@@ -131,7 +134,7 @@ export function ProfileRecentMessages() {
         {messages.failed ? <ModuleFallback /> : null}
         {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
         {!messages.loading && !messages.failed && messages.data.length ? messages.data.map((item) => {
-          const mood = getMood(item.mood)
+          const mood = getMoodDisplay(item)
           const isExpanded = Boolean(expanded[item.id])
           const hasReplies = item.commentCount > 0 || item.comments.length > 0
           return (
@@ -140,7 +143,7 @@ export function ProfileRecentMessages() {
   className=" border border-[var(--border)] bg-[var(--surface-subtle)] p-4"
 >
               <div className="flex items-center gap-2 text-sm font-black text-brand-950">
-                <span className="text-base">{mood?.icon || '🎵'}</span>
+                <span className="text-base">{mood.formatted || '🎵'}</span>
                 <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString('zh-CN')}</time>
                 <IpRegionLabel ipRegion={item.ipRegion} />
               </div>

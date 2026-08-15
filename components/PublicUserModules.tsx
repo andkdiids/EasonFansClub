@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { Pagination } from '@/components/ui/Pagination'
+import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatUid } from '@/lib/uid'
 import { PROFILE_RECORD_PAGE_SIZE, type ProfileRecentMessage, type ProfileRecordPagination } from '@/lib/profile-page'
 import { scrollToSectionTop } from '@/lib/pagination'
@@ -246,10 +247,12 @@ function ModuleContent({
     const messages = items as ProfileRecentMessage[]
     return (
       <div className="space-y-3">
-        {messages.map((message) => (
+        {messages.map((message) => {
+          const mood = getMoodDisplay(message)
+          return (
           <article key={message.id} className="min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)] p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2 text-xs font-black text-brand-950">
-              {message.mood ? <span className="rounded-full bg-sky-50 px-2 py-1 text-brand-700">{message.mood}</span> : null}
+              {mood.formatted ? <span className="rounded-full bg-sky-50 px-2 py-1 text-brand-700">{mood.formatted}</span> : null}
               <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('zh-CN')}</time>
               <IpRegionLabel ipRegion={message.ipRegion} />
             </div>
@@ -285,7 +288,8 @@ function ModuleContent({
               </ul>
             ) : null}
           </article>
-        ))}
+          )
+        })}
         {pageNavigation}
       </div>
     )

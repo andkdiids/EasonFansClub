@@ -1,6 +1,7 @@
 export const FORUM_DISCOVERY_PAGE_SIZE = 12
 export const FORUM_DISCOVERY_MIN_PAGE_SIZE = 8
 export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
+export const FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT = 60
 
 export type ForumDiscoveryMode = 'recommend' | 'latest' | 'hot'
 export type ForumTheme = 'plaza' | 'xiaochenshu'
@@ -89,6 +90,26 @@ export function normalizeDiscoveryIds(values: unknown, max = 500) {
     .slice(0, max))]
 }
 
+export function mergeRecentRecommendedPostIds(
+  current: ReadonlyArray<string> = [],
+  incoming: ReadonlyArray<string> = [],
+  max = FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT,
+) {
+  return [...new Set([...incoming, ...current])]
+    .filter((value) => typeof value === 'string' && value.length > 0)
+    .slice(0, max)
+}
+
+export function stableRecommendationWeight(feedSeed: string, postId: string) {
+  let hash = 2166136261
+  const value = `${feedSeed}:${postId}`
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0) / 4_294_967_296
+}
+
 /**
  * The list is always a 4:3 box. Tall images are cropped, while images that
  * are materially wider than 4:3 are contained so the original is not cut.
@@ -103,12 +124,13 @@ export function selectRecommendationRows<T extends { id: string; author: { id: s
   seenPostIds: ReadonlySet<string> = new Set(),
   seenAuthorIds: ReadonlySet<string> = new Set(),
   limit = FORUM_DISCOVERY_PAGE_SIZE,
+  excludedPostIds: ReadonlySet<string> = new Set(),
 ) {
   const nextPosts = new Set(seenPostIds)
   const nextAuthors = new Set(seenAuthorIds)
   const selected: T[] = []
   for (const row of rows) {
-    if (nextPosts.has(row.id) || nextAuthors.has(row.author.id)) continue
+    if (nextPosts.has(row.id) || excludedPostIds.has(row.id) || nextAuthors.has(row.author.id)) continue
     selected.push(row)
     nextPosts.add(row.id)
     nextAuthors.add(row.author.id)

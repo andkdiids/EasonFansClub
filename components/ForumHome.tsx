@@ -35,23 +35,30 @@ const previewData: ForumFeedResponse = {
 
 export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   const [isMobile, setIsMobile] = useState<boolean | null>(previewMode ? false : null)
-  const [theme, setTheme] = useState<ForumTheme>('xiaochenshu')
+  const [theme, setTheme] = useState<ForumTheme>('plaza')
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)')
-    const syncViewport = () => setIsMobile(media.matches)
-    const syncTheme = () => setTheme(window.localStorage.getItem('ecfc-forum-theme') === 'plaza' ? 'plaza' : 'xiaochenshu')
-    syncViewport()
-    syncTheme()
-    media.addEventListener('change', syncViewport)
-    window.addEventListener('ecfc:forum-theme-change', syncTheme)
+    const syncViewportAndTheme = () => {
+      const mobile = media.matches
+      const savedTheme = window.localStorage.getItem('ecfc-forum-theme')
+      setIsMobile(mobile)
+      setTheme(mobile ? 'xiaochenshu' : savedTheme === 'xiaochenshu' ? 'xiaochenshu' : 'plaza')
+    }
+    syncViewportAndTheme()
+    media.addEventListener('change', syncViewportAndTheme)
+    window.addEventListener('ecfc:forum-theme-change', syncViewportAndTheme)
     return () => {
-      media.removeEventListener('change', syncViewport)
-      window.removeEventListener('ecfc:forum-theme-change', syncTheme)
+      media.removeEventListener('change', syncViewportAndTheme)
+      window.removeEventListener('ecfc:forum-theme-change', syncViewportAndTheme)
     }
   }, [])
 
   function switchTheme(nextTheme: ForumTheme) {
+    if (window.matchMedia('(max-width: 767px)').matches) {
+      setTheme('xiaochenshu')
+      return
+    }
     window.localStorage.setItem('ecfc-forum-theme', nextTheme)
     setTheme(nextTheme)
     window.dispatchEvent(new CustomEvent('ecfc:forum-theme-change', { detail: { theme: nextTheme } }))
@@ -62,8 +69,13 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
   // before the Xiaochenshu feed takes over.
   if (!previewMode && isMobile === null) return null
 
-  if (!previewMode && isMobile && theme === 'xiaochenshu') {
-    return <ForumDiscoveryHome onSwitchToPlaza={() => switchTheme('plaza')} />
+  if (!previewMode && theme === 'xiaochenshu') {
+    return (
+      <ForumDiscoveryHome
+        showModeSwitch={!isMobile}
+        onSwitchToPlaza={isMobile ? undefined : () => switchTheme('plaza')}
+      />
+    )
   }
 
   return (

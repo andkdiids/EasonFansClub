@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { CUSTOM_MOOD_BANNED_WORD_MESSAGE, CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_TYPE, PRESET_MOOD_TYPE, normalizeCustomMoodText, validateCustomMoodInput } from '@/lib/checkin-mood'
 import { getCheckInMessage, invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
@@ -12,6 +13,7 @@ import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { invalidateHomeDataCache } from '@/lib/home-data'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 
 export async function GET() {
@@ -33,7 +35,7 @@ export async function GET() {
       'CheckIn.findUnique checkinApi.todayCheckIn',
       prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
-        select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+        select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
       }),
       8000,
     ),
@@ -77,11 +79,28 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ message: '请先登录后再挂号' }, { status: 401 })
 
   const body = await request.json().catch(() => null)
-  const moodKey = sanitizeText(body?.mood, 40)
-  const requestedMood = getMood(moodKey)
+  const requestedMoodType = body?.moodType === CUSTOM_MOOD_TYPE ? CUSTOM_MOOD_TYPE : PRESET_MOOD_TYPE
+  const moodKey = sanitizeText(body?.moodKey ?? body?.mood, 40)
+  const requestedMood = requestedMoodType === CUSTOM_MOOD_TYPE ? undefined : getMood(moodKey)
+  const customMoodValidation = requestedMoodType === CUSTOM_MOOD_TYPE
+    ? validateCustomMoodInput({
+        emoji: body?.moodEmoji,
+        text: typeof body?.moodText === 'string'
+          ? normalizeCustomMoodText(sanitizeText(body.moodText, 100))
+          : body?.moodText,
+      })
+    : null
+  if (customMoodValidation && !customMoodValidation.ok) {
+    return NextResponse.json({ message: CUSTOM_MOOD_INVALID_MESSAGE }, { status: 400 })
+  }
+  const validatedCustomMood = customMoodValidation?.ok ? customMoodValidation : null
+  if (validatedCustomMood && (await checkBannedWords(validatedCustomMood.text)).blocked) {
+    return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: CUSTOM_MOOD_BANNED_WORD_MESSAGE }, { status: 400 })
+  }
   const preference = await prisma.user.findUnique({ where: { id: user.id }, select: { checkinMoodEnabled: true } })
   if (!preference) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
   const mood = preference.checkinMoodEnabled ? requestedMood : null
+  const customMood = preference.checkinMoodEnabled ? validatedCustomMood : null
   const rawMessage = sanitizeText(body?.message, 300)
   if ((await checkBannedWords(rawMessage)).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
@@ -91,7 +110,7 @@ export async function POST(request: Request) {
   const ipRegion = ipLocation?.label || null
   void updateUserIpRegion(user.id, ipLocation)
 
-  if (preference.checkinMoodEnabled && !mood) {
+  if (preference.checkinMoodEnabled && !mood && !customMood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
   }
 
@@ -101,7 +120,7 @@ export async function POST(request: Request) {
 
   const existing = await prisma.checkIn.findUnique({
     where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
-    select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+    select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
   })
   if (existing) {
     const [profile, history] = await Promise.all([
@@ -155,9 +174,12 @@ export async function POST(request: Request) {
         exp: 0,
         streakDay: nextStreak,
         mood: mood?.key ?? null,
+        moodType: mood ? PRESET_MOOD_TYPE : customMood ? CUSTOM_MOOD_TYPE : null,
+        moodEmoji: customMood?.emoji ?? null,
+        moodText: customMood?.text ?? null,
         message: message || null,
       },
-      select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+      select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
     })
     const ordinaryFeeAward = await awardRegistrationFee(tx, {
       userId: user.id,
@@ -192,7 +214,7 @@ export async function POST(request: Request) {
     const checkIn = await tx.checkIn.update({
       where: { id: createdCheckIn.id },
       data: { points: gainedPoints, exp: gainedExp },
-      select: { id: true, checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+      select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
     })
     let dailyMessageId: string | null = null
     if (message) {
@@ -202,6 +224,9 @@ export async function POST(request: Request) {
           checkInId: checkIn.id,
           date: today,
           mood: mood?.key ?? null,
+          moodType: mood ? PRESET_MOOD_TYPE : customMood ? CUSTOM_MOOD_TYPE : null,
+          moodEmoji: customMood?.emoji ?? null,
+          moodText: customMood?.text ?? null,
           content: message,
           ipRegion,
         },
@@ -217,6 +242,9 @@ export async function POST(request: Request) {
         checkInId: checkIn.id,
         dailyMessageId,
         mood: mood?.key ?? null,
+        moodType: mood ? PRESET_MOOD_TYPE : customMood ? CUSTOM_MOOD_TYPE : null,
+        moodEmoji: customMood?.emoji ?? null,
+        moodText: customMood?.text ?? null,
         content: message || null,
         targetUrl: `/checkin?date=${todayKey}${dailyMessageId ? `&message=${dailyMessageId}` : ''}`,
       },
@@ -265,6 +293,7 @@ export async function POST(request: Request) {
   }
 
   invalidateCheckInMessagesCache()
+  invalidateHomeDataCache()
   const createdMessage = result.dailyMessageId
     ? await getCheckInMessage({
         messageId: result.dailyMessageId,
@@ -294,6 +323,9 @@ const [verifyCheckIn, verifyUser] = await Promise.all([
         points: true,
         exp: true,
         mood: true,
+        moodType: true,
+        moodEmoji: true,
+        moodText: true,
         message: true,
         streakDay: true,
         createdAt: true,

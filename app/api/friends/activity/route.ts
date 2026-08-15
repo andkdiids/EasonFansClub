@@ -88,6 +88,9 @@ export async function GET(request: Request) {
     activities: activities.map((item) => ({
       id: item.id,
       mood: item.mood,
+      moodType: item.moodType,
+      moodEmoji: item.moodEmoji,
+      moodText: item.moodText,
       content: publicModerationText(item.content, item.moderationStatus),
       type: item.type,
       targetUrl: normalizeStoredInternalPath(item.targetUrl),

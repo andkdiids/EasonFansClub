@@ -18,7 +18,7 @@ export async function GET() {
       prisma.checkIn.findMany({
         where: { userId: user.id, checkDate: { gte: monthStart } },
         orderBy: { checkDate: 'asc' },
-        select: { id: true, checkDate: true, mood: true, points: true, exp: true, streakDay: true },
+        select: { id: true, checkDate: true, mood: true, moodType: true, moodEmoji: true, moodText: true, points: true, exp: true, streakDay: true },
       }),
       [],
     ),

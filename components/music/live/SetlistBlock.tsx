@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { isExplicitEncoreSetlistItem, MUSIC_SETLIST_SECTION_LABELS, sortSetlistItems } from '@/lib/music-live'
+import { ConcertContributorAttribution, type ConcertContributor } from '@/components/music/ConcertContributorAttribution'
 
 export type SetlistItemForBlock = {
   id: string
@@ -18,7 +19,7 @@ export type SetlistItemForBlock = {
   MusicSong?: { id?: string | null; title?: string | null } | null
 }
 
-function EncoreSection({ items, headingId }: { items: SetlistItemForBlock[]; headingId: string }) {
+function EncoreSection({ items, headingId, contributor }: { items: SetlistItemForBlock[]; headingId: string; contributor?: ConcertContributor | null }) {
   return (
     <div className="mt-10 border-t border-white/10 pt-8">
       <h3 id={headingId} className="text-xl font-black text-sky-100">Encore</h3>
@@ -37,6 +38,7 @@ function EncoreSection({ items, headingId }: { items: SetlistItemForBlock[]; hea
       ) : (
         <p className="mt-3 text-sm font-medium text-slate-400">暂无 Encore</p>
       )}
+      <ConcertContributorAttribution type="ENCORE" contributor={contributor} />
     </div>
   )
 }
@@ -50,6 +52,8 @@ export function SetlistBlock({
   showEncore = true,
   layout = 'sections',
   showHeading = true,
+  setlistContributor,
+  encoreContributor,
 }: {
   items: SetlistItemForBlock[]
   title: string
@@ -59,6 +63,8 @@ export function SetlistBlock({
   showEncore?: boolean
   layout?: 'sections' | 'columns'
   showHeading?: boolean
+  setlistContributor?: ConcertContributor | null
+  encoreContributor?: ConcertContributor | null
 }) {
   const orderedItems = sortSetlistItems(items)
   // 主歌单与 Encore 拆分：Encore 不混入主歌单
@@ -115,7 +121,8 @@ export function SetlistBlock({
             })}
           </ol>
         ) : null}
-        {showEncoreSection ? <EncoreSection items={encoreItems} headingId={encoreHeadingId} /> : null}
+        <ConcertContributorAttribution type="SETLIST" contributor={setlistContributor} />
+        {showEncoreSection ? <EncoreSection items={encoreItems} headingId={encoreHeadingId} contributor={encoreContributor} /> : null}
       </section>
     )
   }
@@ -179,7 +186,8 @@ export function SetlistBlock({
           </section>
         ))}
       </div>
-      {showEncoreSection ? <EncoreSection items={encoreItems} headingId={encoreHeadingId} /> : null}
+      <ConcertContributorAttribution type="SETLIST" contributor={setlistContributor} />
+      {showEncoreSection ? <EncoreSection items={encoreItems} headingId={encoreHeadingId} contributor={encoreContributor} /> : null}
     </section>
   )
 }

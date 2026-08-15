@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { normalizedCityKey } from '@/lib/music-personal-live'
+import { myLivePhotoOrderBy, myLivePhotoSelect, serializeMyLivePhotos } from '@/lib/my-live-photo-data'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
@@ -34,6 +35,7 @@ export async function GET(_request: Request, { params }: Context) {
         select: {
           mood: true,
           isPublic: true,
+          MyLivePhoto: { orderBy: myLivePhotoOrderBy, select: myLivePhotoSelect },
           MusicConcert: {
             select: {
               id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true,
@@ -65,6 +67,7 @@ export async function GET(_request: Request, { params }: Context) {
       venue: record.MusicConcert.venue,
       sessionNumber: record.MusicConcert.sessionNumber,
       mood: record.mood,
+      photos: serializeMyLivePhotos(record.MyLivePhoto),
       tour: record.MusicConcert.MusicTour,
     })),
   }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120', Vary: 'Cookie' } })

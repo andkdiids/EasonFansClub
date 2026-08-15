@@ -6,6 +6,9 @@ export type CheckInHistoryMonthRecord = {
   id: string
   dateKey: string
   mood: string | null
+  moodType?: string | null
+  moodEmoji?: string | null
+  moodText?: string | null
   hasMessage: boolean
 }
 
@@ -13,6 +16,9 @@ export type CheckInHistoryDetail = {
   id: string
   dateKey: string
   mood: string | null
+  moodType?: string | null
+  moodEmoji?: string | null
+  moodText?: string | null
   message: string | null
   createdAt: string
   points: number

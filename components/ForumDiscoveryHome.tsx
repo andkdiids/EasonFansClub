@@ -7,6 +7,8 @@ import { ForumDiscoveryCard } from '@/components/ForumDiscoveryCard'
 import {
   buildForumDiscoveryTabs,
   FORUM_DISCOVERY_PAGE_SIZE,
+  FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT,
+  mergeRecentRecommendedPostIds,
   type ForumDiscoveryMode,
   type ForumDiscoveryPost,
   type ForumDiscoveryResponse,
@@ -21,11 +23,13 @@ type DiscoverySession = {
   feedSeed?: string | null
   seenPostIds: string[]
   seenAuthorIds: string[]
+  recentRecommendedPostIds?: string[]
   scrollY: number
   savedAt?: number
 }
 
-const DISCOVERY_SESSION_MAX_AGE_MS = 30_000
+const DISCOVERY_SESSION_MAX_AGE_MS = 30 * 60_000
+const DISCOVERY_RECENT_STORAGE_KEY = 'forum-discovery-recent-recommendations'
 
 type DiscoveryRequest = {
   key: string
@@ -45,7 +49,43 @@ function readSession(key: string) {
   }
 }
 
-export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPlaza: () => void }>) {
+function readRecentRecommendedPostIds() {
+  try {
+    const raw = window.sessionStorage.getItem(DISCOVERY_RECENT_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === 'string' && value.length > 0).slice(0, FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function writeRecentRecommendedPostIds(values: ReadonlyArray<string>) {
+  try {
+    window.sessionStorage.setItem(DISCOVERY_RECENT_STORAGE_KEY, JSON.stringify(values))
+  } catch {
+    // Recent recommendation history is only an enhancement; the feed remains usable without storage.
+  }
+}
+
+function mergeDiscoveryPosts(current: ReadonlyArray<ForumDiscoveryPost>, incoming: ReadonlyArray<ForumDiscoveryPost>, reset: boolean) {
+  const next = reset ? [] : [...current]
+  const indexById = new Map(next.map((post, index) => [post.id, index]))
+  incoming.forEach((post) => {
+    const existingIndex = indexById.get(post.id)
+    if (existingIndex === undefined) {
+      indexById.set(post.id, next.length)
+      next.push(post)
+    } else {
+      next[existingIndex] = { ...next[existingIndex], ...post }
+    }
+  })
+  return next
+}
+
+export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: Readonly<{ onSwitchToPlaza?: () => void; showModeSwitch?: boolean }>) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -77,6 +117,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
   const postsRef = useRef<ForumDiscoveryPost[]>([])
   const nextCursorRef = useRef<string | null>(null)
   const feedSeedRef = useRef<string | null>(null)
+  const recentRecommendedPostIdsRef = useRef<string[]>([])
   const requestSequence = useRef(0)
   const requestRef = useRef<DiscoveryRequest | null>(null)
   const autoLoadBlockedRef = useRef(false)
@@ -102,8 +143,9 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
 
     const requestCursor = reset ? null : nextCursorRef.current
     const requestFeedSeed = reset ? null : feedSeedRef.current
+    const requestRecentRecommendedPostIds = reset && mode === 'recommend' ? [...recentRecommendedPostIdsRef.current] : []
     const requestKey = `${sessionKey}:${reset ? 'reset' : `more:${requestCursor || 'start'}`}`
-    if (requestRef.current?.key === requestKey) return requestRef.current.promise
+    if (!reset && requestRef.current?.key === requestKey) return requestRef.current.promise
     requestRef.current?.controller.abort()
     if (reset || manual) autoLoadBlockedRef.current = false
 
@@ -112,15 +154,12 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       hasMoreRef.current = true
       seenPostIdsRef.current = new Set()
       seenAuthorIdsRef.current = new Set()
-      postsRef.current = []
       nextCursorRef.current = null
       feedSeedRef.current = null
-      setPosts([])
       setNextCursor(null)
       setHasMore(true)
       setLoading(true)
       setLoadingMore(false)
-      try { window.sessionStorage.removeItem(sessionKey) } catch { /* best effort */ }
     } else {
       if (!hasMoreRef.current || loadingMoreRef.current) return
       loadingMoreRef.current = true
@@ -146,25 +185,24 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           feedSeed: requestFeedSeed,
           seenPostIds: reset ? [] : [...seenPostIdsRef.current],
           seenAuthorIds: reset ? [] : [...seenAuthorIdsRef.current],
+          recentRecommendedPostIds: requestRecentRecommendedPostIds,
         }),
         })
         const payload = await response.json().catch(() => null) as ForumDiscoveryResponse | { message?: string } | null
         if (!response.ok || !payload || !('posts' in payload)) throw new Error(payload && 'message' in payload ? payload.message : '内容加载失败')
         if (sequence !== requestSequence.current) return
 
-        const incoming = payload.posts
+        const incoming = [...new Map(payload.posts.map((post) => [post.id, post])).values()]
         const currentPosts = postsRef.current
-        const uniqueIncoming = reset
+        const newIncoming = reset
           ? incoming
           : incoming.filter((post) => !currentPosts.some((current) => current.id === post.id))
-        if (!reset && payload.hasMore && (uniqueIncoming.length === 0 || payload.nextCursor === requestCursor)) {
+        if (!reset && payload.hasMore && (newIncoming.length === 0 || payload.nextCursor === requestCursor)) {
           autoLoadBlockedRef.current = true
           setError('加载更多没有返回新内容，请重试')
           return
         }
-        const merged = reset
-          ? incoming
-          : [...currentPosts, ...uniqueIncoming]
+        const merged = mergeDiscoveryPosts(currentPosts, incoming, reset)
         const nextSeenPostIds = reset ? new Set<string>() : new Set(seenPostIdsRef.current)
         const nextSeenAuthorIds = reset ? new Set<string>() : new Set(seenAuthorIdsRef.current)
         incoming.forEach((post) => {
@@ -176,6 +214,11 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
         feedSeedRef.current = payload.feedSeed
         seenPostIdsRef.current = nextSeenPostIds
         seenAuthorIdsRef.current = nextSeenAuthorIds
+        const nextRecentRecommendedPostIds = mode === 'recommend'
+          ? mergeRecentRecommendedPostIds(recentRecommendedPostIdsRef.current, incoming.map((post) => post.id))
+          : recentRecommendedPostIdsRef.current
+        recentRecommendedPostIdsRef.current = nextRecentRecommendedPostIds
+        if (mode === 'recommend') writeRecentRecommendedPostIds(nextRecentRecommendedPostIds)
         hasMoreRef.current = payload.hasMore
         setPosts(merged)
         setBoards(payload.boards)
@@ -191,6 +234,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           feedSeed: payload.feedSeed,
           seenPostIds: [...nextSeenPostIds],
           seenAuthorIds: [...nextSeenAuthorIds],
+          recentRecommendedPostIds: nextRecentRecommendedPostIds,
           scrollY: window.scrollY,
           savedAt: Date.now(),
         })
@@ -220,15 +264,68 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
   useEffect(() => setSearchValue(query), [query])
 
   useEffect(() => {
+    const syncPostInteraction = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        postId?: string
+        isLiked?: boolean
+        likeCount?: number
+        isFavorited?: boolean
+        favoriteCount?: number
+      }>).detail
+      if (!detail?.postId) return
+      setPosts((current) => {
+        let changed = false
+        const next = current.map((post) => {
+          if (post.id !== detail.postId) return post
+          changed = true
+          return {
+            ...post,
+            ...(typeof detail.isLiked === 'boolean' ? { likedByMe: detail.isLiked } : {}),
+            ...(typeof detail.likeCount === 'number' ? { likeCount: Math.max(detail.likeCount, 0) } : {}),
+            ...(typeof detail.isFavorited === 'boolean' ? { favoritedByMe: detail.isFavorited } : {}),
+            ...(typeof detail.favoriteCount === 'number' ? { favoriteCount: Math.max(detail.favoriteCount, 0) } : {}),
+          }
+        })
+        if (changed) postsRef.current = next
+        return changed ? next : current
+      })
+    }
+    window.addEventListener('ecfc:post-interaction', syncPostInteraction)
+    return () => window.removeEventListener('ecfc:post-interaction', syncPostInteraction)
+  }, [])
+
+  useEffect(() => {
+    const syncReplyCount = (event: Event) => {
+      const detail = (event as CustomEvent<{ postId?: string; count?: number }>).detail
+      if (!detail?.postId || typeof detail.count !== 'number') return
+      const count = Math.max(detail.count, 0)
+      setPosts((current) => {
+        const next = current.map((post) => post.id === detail.postId
+          ? { ...post, replyCount: count }
+          : post)
+        if (next.some((post, index) => post !== current[index])) postsRef.current = next
+        return next
+      })
+    }
+    window.addEventListener('ecfc:post-reply-count', syncReplyCount)
+    return () => window.removeEventListener('ecfc:post-reply-count', syncReplyCount)
+  }, [])
+
+  useEffect(() => {
     if (initializedSessionKeyRef.current === sessionKey) return
     initializedSessionKeyRef.current = sessionKey
     const cleanupRequest = () => {
       if (initializedSessionKeyRef.current === sessionKey) initializedSessionKeyRef.current = ''
+      requestSequence.current += 1
       const request = requestRef.current
       request?.controller.abort()
       if (requestRef.current === request) requestRef.current = null
     }
     const stored = readSession(sessionKey)
+    recentRecommendedPostIdsRef.current = mergeRecentRecommendedPostIds(
+      stored?.recentRecommendedPostIds || [],
+      readRecentRecommendedPostIds(),
+    )
     const storedAge = stored && typeof stored.savedAt === 'number' ? Date.now() - stored.savedAt : Number.POSITIVE_INFINITY
     const canRestoreStoredFeed = stored
       && stored.posts.length > 0
@@ -247,6 +344,10 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       hasMoreRef.current = stored.hasMore
       seenPostIdsRef.current = new Set(stored.seenPostIds || stored.posts.map((post) => post.id))
       seenAuthorIdsRef.current = new Set(stored.seenAuthorIds || stored.posts.map((post) => post.author.id))
+      recentRecommendedPostIdsRef.current = mergeRecentRecommendedPostIds(
+        stored.recentRecommendedPostIds || [],
+        recentRecommendedPostIdsRef.current,
+      )
       setRestoreScrollY(Number.isFinite(stored.scrollY) ? Math.max(0, stored.scrollY) : null)
       setLoading(false)
       return cleanupRequest
@@ -377,6 +478,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
       feedSeed: feedSeedRef.current,
       seenPostIds: [...seenPostIdsRef.current],
       seenAuthorIds: [...seenAuthorIdsRef.current],
+      recentRecommendedPostIds: recentRecommendedPostIdsRef.current,
       scrollY: window.scrollY,
       savedAt: Date.now(),
     })
@@ -395,7 +497,9 @@ export function ForumDiscoveryHome({ onSwitchToPlaza }: Readonly<{ onSwitchToPla
           <h1>小臣书</h1>
           <div className="forum-discovery-header-actions">
             {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
-            <button type="button" className="forum-discovery-mode-button" onClick={onSwitchToPlaza} aria-label="切换到广场模式">广场模式</button>
+            {showModeSwitch && onSwitchToPlaza ? (
+              <button type="button" className="forum-discovery-mode-button" onClick={onSwitchToPlaza} aria-label="切换到广场模式">广场模式</button>
+            ) : null}
           </div>
         </div>
         <form className="forum-discovery-search" onSubmit={submitSearch} role="search">

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ModuleFallback } from '@/components/ModuleFallback'
-import { getMood } from '@/lib/daily'
+import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatUid } from '@/lib/uid'
 
 type LoadState<T> = { loading: boolean; failed: boolean; data: T }
@@ -22,6 +22,9 @@ type Post = {
 type DailyMessage = {
   id: string
   mood: string | null
+  moodType?: string | null
+  moodEmoji?: string | null
+  moodText?: string | null
   content: string
   user: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null }
 }
@@ -105,11 +108,11 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
             {messages.failed ? <ModuleFallback /> : null}
             {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
             {!messages.loading && !messages.failed && messages.data.map((item) => {
-              const mood = getMood(item.mood)
+              const mood = getMoodDisplay(item)
               const name = item.user.profile?.displayName || item.user.nickname
               return (
                 <article key={item.id} className="rounded-3xl bg-sky-50/80 p-5">
-                  <p className="font-black text-brand-950">{mood ? `${mood.icon} ` : ''}{name} · Lv.{item.user.level}</p>
+                  <p className="font-black text-brand-950">{mood.formatted ? `${mood.formatted} · ` : ''}{name} · Lv.{item.user.level}</p>
                   <p className="mt-2 line-clamp-2 leading-7 text-slate-600">{item.content}</p>
                 </article>
               )

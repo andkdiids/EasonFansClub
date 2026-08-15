@@ -1,42 +1,21 @@
 'use client'
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
+import { EMOJI_CATEGORIES } from '@/lib/system-emoji'
 
-export const EMOJI_CATEGORIES = [
-  {
-    label: '常用表情',
-    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '🥰', '😍', '😘', '😎', '🤔', '🥹', '😭', '😢', '😡', '😱', '😴', '🙄', '😮', '🥲', '😇', '🙂', '🙃', '😉', '😌', '😋', '🤭', '🫢', '🫣'],
-  },
-  {
-    label: '爱心系列',
-    emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '🩷', '🩵', '🩶', '💕', '💖', '💗', '💓', '💞', '💘', '💝', '💟', '❣️', '❤️‍🔥', '❤️‍🩹', '💔', '💌'],
-  },
-  {
-    label: '互动表情',
-    emojis: ['👍', '👎', '👏', '🙌', '🙏', '🤝', '👌', '✌️', '👀', '🔥', '🎉', '💯', '✨', '🤞', '🤟', '🤘', '👊', '✊', '🤛', '🤜', '👋', '🫶', '💪', '🫡', '🤙', '☝️', '👇', '👉', '👈', '👐'],
-  },
-  {
-    label: '可爱动物',
-    emojis: ['🐱', '🐶', '🐰', '🐻', '🐼', '🐸', '🦊', '🐨', '🐯', '🐷', '🐹', '🐭', '🐮', '🦁', '🐵', '🐧', '🐦', '🐥', '🦄', '🐝', '🦋', '🐢', '🐬', '🐳', '🦦'],
-  },
-  {
-    label: '音乐与E院',
-    emojis: ['🎵', '🎶', '🎤', '🎧', '⭐', '✨', '🌟', '🌙', '💫', '🚑', '💙', '🏥', '🩺', '💊', '🩹', '🎼', '🎹', '🥁', '🎸', '🎺', '🎻', '📻', '💿', '📀', '🎙️', '🎚️', '🎛️'],
-  },
-  {
-    label: '网络常用',
-    emojis: ['🥳', '🤩', '😆', '😅', '🤣', '🥲', '😇', '😜', '😝', '🤗', '🤓', '🧐', '🤪', '😏', '😬', '🫠', '🫥', '🫤', '🥺', '😤', '🤯', '🥶', '🥵', '🤤', '🤫', '🫨', '💀', '👻', '👽', '🤖', '💩', '🌈', '☀️', '☁️', '🍀'],
-  },
-] as const
+export { EMOJI_CATEGORIES }
 
 export const EMOJI_COUNT = new Set(EMOJI_CATEGORIES.flatMap((category) => category.emojis)).size
 
 type EmojiPickerProps = Readonly<{
-  textareaRef: RefObject<HTMLTextAreaElement | null>
+  textareaRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
   value: string
   onChange: (value: string) => void
   maxLength?: number
   disabled?: boolean
+  onSelectEmoji?: (emoji: string) => void
+  triggerEmoji?: string
+  triggerLabel?: string
 }>
 
 export function EmojiPicker({
@@ -45,6 +24,9 @@ export function EmojiPicker({
   onChange,
   maxLength,
   disabled = false,
+  onSelectEmoji,
+  triggerEmoji = '😊',
+  triggerLabel = '打开 Emoji 表情',
 }: EmojiPickerProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -66,6 +48,12 @@ export function EmojiPicker({
   }, [open])
 
   function insertEmoji(emoji: string) {
+    if (onSelectEmoji) {
+      onSelectEmoji(emoji)
+      setOpen(false)
+      return
+    }
+
     const input = textareaRef.current
     const start = input?.selectionStart ?? value.length
     const end = input?.selectionEnd ?? value.length
@@ -87,11 +75,11 @@ export function EmojiPicker({
         className="emoji-picker-trigger"
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
-        aria-label="打开 Emoji 表情"
+        aria-label={triggerLabel}
         aria-expanded={open}
         aria-haspopup="dialog"
       >
-        😊
+        {triggerEmoji}
       </button>
       {open ? (
         <div className="emoji-picker-panel" role="dialog" aria-label={`Emoji 表情面板，共 ${EMOJI_COUNT} 个`}>

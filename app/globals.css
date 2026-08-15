@@ -9,6 +9,47 @@
   font-style: normal;
 }
 
+/* My Live photos: one decoded image per attendance/category, with touch-safe navigation. */
+.my-live-photo-panel { min-width:0; margin-top:16px; border-top:1px solid rgba(186,230,253,.12); padding-top:13px; }
+.my-live-photo-toolbar { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
+.my-live-photo-category-tabs { display:flex; min-width:0; max-width:100%; overflow-x:auto; scrollbar-width:none; }
+.my-live-photo-category-tabs::-webkit-scrollbar { display:none; }
+.my-live-photo-category-tabs button,.my-live-photo-manage-button { min-height:34px; flex:none; border:1px solid rgba(186,230,253,.16); border-radius:999px; padding:0 10px; color:rgba(226,232,240,.7); background:rgba(255,255,255,.035); font:inherit; font-size:11px; font-weight:900; white-space:nowrap; cursor:pointer; }
+.my-live-photo-category-tabs button + button { margin-left:6px; }
+.my-live-photo-category-tabs button.is-active,.my-live-photo-category-tabs button:hover,.my-live-photo-manage-button:hover { border-color:rgba(125,211,252,.48); color:#e0f2fe; background:rgba(125,211,252,.12); }
+.my-live-photo-manage-button { color:#bae6fd; }
+.my-live-photo-carousel { position:relative; min-width:0; margin-top:10px; overflow:hidden; border:1px solid rgba(186,230,253,.12); background:rgba(2,8,18,.28); }
+.my-live-photo-viewport { display:flex; width:100%; min-height:180px; max-height:420px; align-items:center; justify-content:center; overflow:hidden; box-sizing:border-box; touch-action:pan-y; overscroll-behavior-x:contain; }
+.my-live-photo-image { display:block; width:auto; max-width:100%; height:auto; max-height:min(68vw,420px); object-fit:contain; user-select:none; -webkit-user-drag:none; }
+.my-live-photo-arrow { position:absolute; top:50%; display:grid; width:34px; height:54px; place-items:center; transform:translateY(-50%); border:1px solid rgba(255,255,255,.22); border-radius:2px; color:#fff; background:rgba(2,8,18,.66); font-size:30px; line-height:1; cursor:pointer; }
+.my-live-photo-arrow:disabled { opacity:.28; cursor:default; }
+.my-live-photo-arrow-previous { left:8px; }.my-live-photo-arrow-next { right:8px; }
+.my-live-photo-counter { position:absolute; right:8px; bottom:8px; border:1px solid rgba(255,255,255,.16); border-radius:999px; padding:4px 8px; color:#fff; background:rgba(2,8,18,.68); font-size:11px; font-weight:900; pointer-events:none; }
+.my-live-photo-empty { display:grid; min-height:100px; margin-top:10px; place-items:center; border:1px dashed rgba(186,230,253,.14); color:rgba(226,232,240,.55); font-size:11px; font-weight:800; }
+.my-live-photo-manager { margin-top:10px; border:1px solid rgba(186,230,253,.14); padding:10px; background:rgba(255,255,255,.025); }
+.my-live-photo-manager-heading,.my-live-photo-current-actions,.my-live-photo-confirm-actions { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:7px; }
+.my-live-photo-manager-heading { justify-content:space-between; color:#e0f2fe; font-size:11px; }.my-live-photo-manager-heading span { color:rgba(226,232,240,.58); font-size:10px; }
+.my-live-photo-file-picker { display:inline-flex; min-height:36px; align-items:center; margin-top:9px; border:1px solid rgba(125,211,252,.3); padding:0 12px; color:#e0f2fe; background:rgba(125,211,252,.1); font-size:11px; font-weight:900; cursor:pointer; }
+.my-live-photo-file-picker input { position:absolute; width:1px; height:1px; overflow:hidden; opacity:0; }
+.my-live-photo-confirmation { margin-top:9px; border-top:1px solid rgba(186,230,253,.1); padding-top:9px; }.my-live-photo-confirmation p { margin:0; color:#e2e8f0; font-size:11px; font-weight:850; }
+.my-live-photo-confirmation ul { max-height:80px; margin:6px 0 0; overflow:auto; padding-left:16px; color:rgba(226,232,240,.6); font-size:10px; line-height:1.6; }
+.my-live-photo-watermark-option { display:flex; min-width:0; align-items:flex-start; gap:8px; margin-top:9px; color:#e2e8f0; font-size:11px; font-weight:900; cursor:pointer; }.my-live-photo-watermark-option input { flex:none; margin-top:2px; }.my-live-photo-watermark-option span { min-width:0; }.my-live-photo-watermark-option small { display:block; margin-top:3px; overflow-wrap:anywhere; color:rgba(186,230,253,.62); font-size:10px; font-weight:700; line-height:1.45; }
+.my-live-photo-note { margin-top:7px!important; color:rgba(251,191,36,.72)!important; font-size:10px!important; font-weight:700!important; }
+.my-live-photo-confirm-actions { justify-content:flex-end; margin-top:9px; }.my-live-photo-confirm-actions button,.my-live-photo-current-actions button { min-height:32px; border:1px solid rgba(255,255,255,.16); padding:0 10px; color:#dbeafe; background:rgba(255,255,255,.04); font:inherit; font-size:10px; font-weight:900; cursor:pointer; }.my-live-photo-confirm-actions button:last-child { border-color:rgba(125,211,252,.42); color:#06101d; background:#bae6fd; }.my-live-photo-confirm-actions button:disabled,.my-live-photo-current-actions button:disabled { cursor:default; opacity:.45; }
+.my-live-photo-current-actions { margin-top:10px; }.my-live-photo-current-actions span { margin-right:auto; color:rgba(226,232,240,.55); font-size:10px; font-weight:800; }.my-live-photo-current-actions button:last-child { border-color:rgba(248,113,113,.28); color:#fecaca; }
+.my-live-photo-message { margin:8px 0 0; color:#bae6fd; font-size:10px; font-weight:800; line-height:1.5; }
+
+@media (max-width:767px) {
+  .my-live-photo-panel { margin-top:13px; padding-top:11px; }
+  .my-live-photo-toolbar { align-items:flex-start; }
+  .my-live-photo-category-tabs { max-width:calc(100% - 76px); }
+  .my-live-photo-viewport { min-height:130px; max-height:360px; }
+  .my-live-photo-image { max-height:min(60vw,360px); }
+  .my-live-photo-arrow { width:31px; height:48px; }
+  .my-live-photo-current-actions span { width:100%; margin-right:0; }
+  .my-live-photo-current-actions button { flex:1; }
+}
+
 .duel-options button small { margin-left:auto; color:#64748b; font-size:10px; font-weight:900; white-space:nowrap; }
 .duel-options button.is-my-choice { border-color:#2563eb; }
 .duel-options button.is-opponent-choice { box-shadow:inset 0 0 0 1px #f59e0b; }
@@ -281,13 +322,65 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 .duel-modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15,23,42,.42); }.duel-modal { width: min(100%, 390px); padding: 22px; border-radius: 18px; background: white; box-shadow: 0 24px 70px rgba(15,23,42,.25); }.duel-modal h2 { margin: 0; font-size: 20px; font-weight: 950; }.duel-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }.duel-modal-actions button { border: 0; border-radius: 9px; padding: 9px 13px; color: #475569; background: #f1f5f9; font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; }
 @media (max-width: 767px) { .duel-page { padding-inline: 12px; }.duel-topbar { min-height: 55px; }.duel-hero-card { display: grid; padding: 20px; }.duel-stat-strip { justify-content: space-between; }.duel-lobby-grid, .duel-form-grid { grid-template-columns: 1fr; }.duel-panel { padding: 16px; }.duel-room-row { grid-template-columns: 72px 1fr auto; gap: 8px; }.duel-room-row button { grid-column: 3; grid-row: 1; padding-inline: 10px; }.duel-room-count { grid-column: 2; }.duel-players-card { grid-template-columns: 1fr; gap: 14px; min-height: 0; padding: 24px 14px; }.duel-versus { order: 2; }.duel-room-player:last-child { order: 3; }.duel-scoreboard { gap: 5px; padding: 10px 8px; }.duel-score-player { grid-template-columns: auto 1fr; gap: 4px; }.duel-score-player strong { grid-column: 2; font-size: 21px; }.duel-score-player small { grid-column: 2; }.duel-score-player.is-opponent { grid-template-columns: 1fr auto; }.duel-score-player.is-opponent .duel-score-avatar { grid-column: 2; grid-row: 1 / span 2; }.duel-score-player.is-opponent strong, .duel-score-player.is-opponent small { grid-column: 1; }.duel-score-center b { font-size: 20px; }.duel-score-center span { font-size: 9px; }.duel-question-card { min-height: 430px; padding: 18px 13px; }.duel-options { grid-template-columns: 1fr; gap: 9px; margin-top: 18px; }.duel-options button { min-height: 54px; }.duel-result-score { gap: 8px; }.duel-result-score strong { font-size: 38px; } }
 
-/* Mobile-only forum discovery theme. The existing plaza styles remain the
-   default outside this media query and are intentionally not rewritten. */
-.forum-discovery-page,
+/* Forum discovery theme. Mobile keeps the compact Xiaochenshu layout; the
+   desktop rules below keep the two forum modes visually distinct. */
 .forum-discovery-detail-topbar,
 .forum-discovery-action-bar,
 .post-reply-bottom-sheet-backdrop,
 .post-reply-bottom-sheet { display:none; }
+
+.forum-discovery-page { display:block; min-height:100dvh; padding-bottom:34px; color:var(--foreground); background:var(--background); }
+
+@media (min-width:768px) {
+  .forum-discovery-pull-indicator { display:none; }
+  .forum-discovery-header { border-bottom:1px solid var(--border); background:var(--background); }
+  .forum-discovery-header-row { display:flex; width:min(80rem,calc(100% - 40px)); min-height:72px; margin:0 auto; align-items:center; justify-content:space-between; gap:20px; }
+  .forum-discovery-header-row h1 { margin:0; color:var(--foreground); font-size:24px; font-weight:900; letter-spacing:.02em; }
+  .forum-discovery-header-actions { display:flex; align-items:center; gap:10px; }
+  .forum-discovery-publish { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#fff; background:var(--primary); font-size:27px; line-height:1; text-decoration:none; }
+  .forum-discovery-mode-button { min-height:40px; border:1px solid var(--border); border-radius:2px; padding:0 14px; color:var(--foreground); background:var(--surface-elevated); font-size:12px; font-weight:850; }
+  .forum-discovery-search { display:flex; width:min(720px,calc(100% - 40px)); height:42px; margin:18px auto 14px; align-items:center; gap:8px; border:1px solid var(--border); border-radius:2px; padding:0 12px; color:var(--foreground-muted); background:var(--surface-elevated); }
+  .forum-discovery-search input { min-width:0; flex:1; border:0; outline:0; color:var(--foreground); background:transparent; font-size:13px; }
+  .forum-discovery-search button { border:0; padding:0 4px; color:var(--foreground-muted); background:transparent; font-size:20px; line-height:1; }
+  .forum-discovery-tabs { display:flex; width:min(80rem,calc(100% - 40px)); min-width:0; margin:0 auto; overflow-x:auto; border:1px solid var(--border); border-bottom:0; background:var(--surface); scrollbar-width:none; }
+  .forum-discovery-tabs::-webkit-scrollbar { display:none; }
+  .forum-discovery-tabs button { flex:none; min-height:48px; border:0; border-right:1px solid var(--border); border-radius:0; padding:0 20px; color:var(--foreground-muted); background:transparent; font-size:12px; font-weight:800; }
+  .forum-discovery-tabs button[aria-current='page'] { color:var(--primary); background:var(--navigation-active); box-shadow:inset 0 -2px var(--primary); }
+  .forum-discovery-search-label { flex:none; min-height:48px; color:var(--foreground-muted); font-size:12px; line-height:48px; white-space:nowrap; }
+  .forum-discovery-grid { display:grid; width:min(80rem,calc(100% - 40px)); margin:24px auto 0; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+  .forum-discovery-card { min-width:0; overflow:hidden; border:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
+  .forum-discovery-card-link { display:block; color:inherit; text-decoration:none; }
+  .forum-discovery-cover { position:relative; width:100%; aspect-ratio:4 / 3; overflow:hidden; background:var(--surface); }
+  .forum-discovery-cover-image { display:block; width:100%; height:100%; object-position:center; }
+  .forum-discovery-cover-image.is-cover { object-fit:cover; }
+  .forum-discovery-cover-image.is-contain { object-fit:contain; background:var(--background); }
+  .forum-discovery-text-cover { display:flex; align-items:center; justify-content:center; padding:24px; background-color:var(--surface-elevated); background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 23px,color-mix(in srgb,var(--border),transparent 20%) 24px,color-mix(in srgb,var(--border),transparent 20%) 25px); }
+  .forum-discovery-text-cover-title { display:-webkit-box; max-width:100%; overflow:hidden; color:var(--foreground); font-weight:900; line-height:1.35; text-align:center; -webkit-box-orient:vertical; -webkit-line-clamp:4; }
+  .forum-discovery-text-cover-title-large { font-size:24px; }
+  .forum-discovery-text-cover-title-medium { font-size:19px; }
+  .forum-discovery-text-cover-title-small { font-size:15px; }
+  .forum-discovery-card-body { padding:10px 12px 2px; }
+  .forum-discovery-card-badges { display:flex; min-height:16px; gap:5px; overflow:hidden; }
+  .forum-discovery-card-badges span { flex:none; max-width:110px; overflow:hidden; color:var(--primary); font-size:10px; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+  .forum-discovery-card-badges span + span::before { margin-right:5px; color:var(--border); content:'·'; }
+  .forum-discovery-card h2 { display:-webkit-box; max-height:44px; margin:4px 0 0; overflow:hidden; color:var(--foreground); font-size:15px; font-weight:850; line-height:1.45; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+  .forum-discovery-card-meta { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; padding:9px 12px 11px; }
+  .forum-discovery-author { display:flex; min-width:0; align-items:center; gap:7px; color:var(--foreground-muted); font-size:11px; font-weight:750; }
+  .forum-discovery-author > span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .forum-discovery-avatar { display:grid; width:24px; height:24px; flex:none; place-items:center; overflow:hidden; border-radius:50%; color:#fff; background:var(--primary); font-size:10px; }
+  .forum-discovery-avatar img { width:100%; height:100%; object-fit:cover; }
+  .forum-discovery-like-button { display:inline-flex; flex:none; align-items:center; }
+  .forum-discovery-like-button button { display:inline-flex; min-height:28px; align-items:center; gap:3px; border:0; padding:0; color:var(--foreground-muted); background:transparent; font-size:11px; font-weight:750; }
+  .forum-discovery-like-button button[data-liked='true'] { color:var(--danger); }
+  .forum-discovery-like-button p { display:none; }
+  .forum-discovery-skeleton { width:100%; height:230px; background:linear-gradient(100deg,var(--surface) 25%,var(--surface-subtle) 37%,var(--surface) 63%); background-size:400% 100%; animation:forum-discovery-skeleton 1.2s ease infinite; }
+  .forum-discovery-error,.forum-discovery-empty,.forum-discovery-end,.forum-discovery-loading-more,.forum-discovery-load-error { width:min(80rem,calc(100% - 40px)); margin:24px auto; color:var(--foreground-muted); font-size:13px; font-weight:750; text-align:center; }
+  .forum-discovery-error { padding:20px; border:1px solid var(--border); background:var(--surface-elevated); }
+  .forum-discovery-error button,.forum-discovery-load-error button { margin-left:8px; border:0; color:var(--primary); background:transparent; font-weight:900; }
+  .forum-discovery-load-error { padding:10px; color:var(--danger); }
+  .forum-discovery-sentinel { height:1px; }
+  .forum-discovery-back-top { position:fixed; z-index:24; right:20px; bottom:20px; display:grid; width:40px; height:40px; place-items:center; border:1px solid var(--border); border-radius:50%; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 5px 16px rgba(0,0,0,.14); font-size:18px; }
+}
 
 @media (max-width:767px) {
   .forum-discovery-page {
@@ -351,6 +444,7 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
     text-decoration:none;
   }
   .forum-discovery-mode-button {
+    display:none;
     min-height:28px;
     border:1px solid var(--border);
     border-radius:999px;
@@ -789,6 +883,21 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .friend-profile-card-layer { position:absolute; z-index:5; inset:0; display:grid; place-items:center; padding:18px; background:rgba(2,8,18,.42); }.friend-profile-card { position:relative; width:min(310px,100%); border:1px solid var(--border); border-radius:20px; padding:24px 20px 18px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 18px 50px rgba(2,8,18,.28); text-align:center; }.friend-profile-card-close { position:absolute; top:8px; right:10px; width:34px; height:34px; border:0; color:var(--foreground-muted); background:transparent; font-size:21px; }.friend-profile-card-avatar { width:72px; height:72px; margin:0 auto; overflow:hidden; border-radius:50%; background:var(--surface-subtle); }.friend-profile-card h2 { margin-top:10px; font-size:20px; font-weight:950; }.friend-profile-card-meta { display:flex; flex-wrap:wrap; justify-content:center; gap:6px; margin-top:7px; }.friend-profile-card-meta span { border:1px solid var(--border); border-radius:10px; padding:4px 7px; color:var(--primary); font-size:10px; font-weight:850; }.friend-profile-card-bio { margin-top:12px; color:var(--foreground-muted); font-size:12px; line-height:1.6; }.friend-profile-card-status { margin-top:8px; color:var(--success); font-size:10px; font-weight:850; }.friend-profile-card-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px; }.friend-profile-card-actions a,.friend-profile-card-actions button { display:grid; min-height:40px; place-items:center; border:1px solid var(--border); border-radius:10px; color:var(--primary); background:var(--surface); font-size:12px; font-weight:900; text-decoration:none; }.friend-profile-card-actions button { border-color:var(--primary); color:#fff; background:var(--primary); }
 .profile-identity-badge { display:inline-flex; min-height:24px; align-items:center; border:1px solid rgba(255,255,255,.32); border-radius:9999px; padding:4px 8px; color:#fff; background:rgba(2,8,18,.58); font-weight:900; text-shadow:0 1px 3px rgba(0,0,0,.5); white-space:nowrap; backdrop-filter:blur(8px); }
 .emoji-picker { position:relative; display:inline-flex; flex:none; }.emoji-picker-trigger { display:grid; width:44px; height:44px; place-items:center; border:1px solid var(--border); border-radius:12px; padding:0; color:var(--foreground); background:var(--surface-subtle); font-size:21px; line-height:1; cursor:pointer; }.emoji-picker-trigger:hover,.emoji-picker-trigger[aria-expanded='true'] { border-color:var(--primary); background:var(--navigation-active); }.emoji-picker-trigger:disabled { cursor:not-allowed; opacity:.45; }.emoji-picker-panel { position:absolute; z-index:var(--layer-popover); bottom:calc(100% + 8px); left:0; width:min(320px,calc(100vw - 48px)); max-height:min(360px,55vh); overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--border-strong); border-radius:16px; padding:10px 10px max(10px,env(safe-area-inset-bottom)); color:var(--foreground); background:var(--surface-elevated); box-shadow:0 16px 42px rgba(2,8,18,.22); scrollbar-width:thin; }.emoji-picker-category+.emoji-picker-category { margin-top:10px; }.emoji-picker-category h3 { position:sticky; top:-10px; z-index:1; margin:0 -2px 6px; padding:7px 2px 5px; color:var(--foreground-muted); background:var(--surface-elevated); font-size:10px; font-weight:900; letter-spacing:.08em; }.emoji-picker-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px; }.emoji-picker-grid button { display:grid; min-width:0; height:38px; place-items:center; border:0; border-radius:9px; padding:0; color:inherit; background:transparent; font-size:21px; line-height:1; cursor:pointer; }.emoji-picker-grid button:hover,.emoji-picker-grid button:focus-visible { background:var(--navigation-active); outline:1px solid var(--primary); }
+.checkin-custom-mood-panel { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-subtle); }
+.checkin-custom-mood-panel input { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
+.checkin-custom-mood-panel input::placeholder { color:var(--foreground-muted); }
+.checkin-custom-mood-panel .emoji-picker-panel { left:auto; right:0; }
+.checkin-custom-mood-choice { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
+.checkin-custom-mood-choice[aria-pressed='true'] { border-color:var(--primary); background:var(--navigation-active); }
+.checkin-custom-mood-choice:hover { background:var(--surface); }
+.checkin-custom-mood-panel > div:first-child > div:last-child > span { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
+.checkin-custom-mood-panel > div:last-child > button:first-child { color:var(--foreground); border-color:var(--border-strong); background:var(--surface-elevated); }
+.checkin-custom-mood-panel > div:last-child > button:first-child:hover { background:var(--surface); }
+.checkin-custom-mood-panel [class~='text-brand-950'],
+.checkin-custom-mood-panel [class~='text-slate-700'],
+.checkin-custom-mood-panel [class~='text-slate-600'] { color:var(--foreground); }
+.checkin-custom-mood-panel [class~='text-slate-400'],
+.checkin-custom-mood-panel [class~='text-slate-500'] { color:var(--foreground-muted); }
 .friend-chat-sticker-btn { display:grid; width:44px; height:44px; place-items:center; flex:none; border:1px solid var(--border); border-radius:12px; padding:0; color:var(--foreground); background:var(--surface-subtle); font-size:21px; line-height:1; cursor:pointer; }.friend-chat-sticker-btn:hover:not(:disabled) { border-color:var(--primary); background:var(--navigation-active); }.friend-chat-sticker-btn:disabled { cursor:not-allowed; opacity:.45; }
 .friend-chat-sticker-preview { position:relative; display:inline-flex; flex:none; width:44px; height:44px; align-items:center; justify-content:center; border:1px solid var(--primary); border-radius:12px; padding:3px; background:var(--surface-subtle); }.friend-chat-sticker-preview img { width:100%; height:100%; object-fit:contain; }.friend-chat-sticker-remove { position:absolute; top:-6px; right:-6px; display:grid; width:18px; height:18px; place-items:center; border:0; border-radius:50%; color:#fff; background:var(--danger); font-size:12px; line-height:1; cursor:pointer; }
 .friend-chat-sticker-message { display:block; margin:0; padding:0; border:0; background:transparent; border-radius:0; line-height:0; cursor:pointer; }

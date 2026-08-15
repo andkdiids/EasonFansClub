@@ -8,6 +8,7 @@ import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { ConcertContributorAttribution } from '@/components/music/ConcertContributorAttribution'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +27,9 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
               select: { id: true, position: true, displayName: true, MusicSong: { select: { title: true } } },
             },
             _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
+            contributorUser: { select: { uid: true, username: true } },
+            setlistContributorUser: { select: { uid: true, username: true } },
+            encoreContributorUser: { select: { uid: true, username: true } },
           },
         },
       },
@@ -77,6 +81,9 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
               </li>)}
             </ol>
           </div> : <p className="mt-5 border-t border-white/10 pt-4 text-xs font-bold text-slate-400/60">歌单仍在整理。</p>}
+          <ConcertContributorAttribution type="SHOW" contributor={concert.contributorUser} />
+          <ConcertContributorAttribution type="SETLIST" contributor={concert.setlistContributorUser} />
+          <ConcertContributorAttribution type="ENCORE" contributor={concert.encoreContributorUser} />
         </article>)}
       </div> : <p className="mt-7 rounded-[22px] border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300/60">场次资料仍在整理。</p>}
     </section>

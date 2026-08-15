@@ -86,7 +86,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       'CheckIn.findUnique checkin.todayCheckIn',
       prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: sessionUser.id, checkinDateKey: todayKey } },
-        select: { checkDate: true, points: true, exp: true, mood: true, message: true, streakDay: true, createdAt: true },
+        select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
       }),
       8000,
     ),

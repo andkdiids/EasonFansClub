@@ -7,8 +7,7 @@ export function ForumDiscoveryDetailController({ children }: Readonly<{ children
     const root = document.documentElement
     const media = window.matchMedia('(max-width: 767px)')
     const sync = () => {
-      const theme = window.localStorage.getItem('ecfc-forum-theme')
-      if (media.matches && theme !== 'plaza') root.dataset.forumDetailDiscover = 'true'
+      if (media.matches) root.dataset.forumDetailDiscover = 'true'
       else delete root.dataset.forumDetailDiscover
     }
     sync()

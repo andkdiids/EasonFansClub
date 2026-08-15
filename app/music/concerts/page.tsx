@@ -38,6 +38,7 @@ export default async function MusicConcertsPage() {
     cities: [...new Set(MusicConcert.map((concert) => concert.city))],
   }))
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
+    <div className="mb-3 flex justify-end"><Link href="/music/concerts/contribute" className="border border-sky-300/25 bg-sky-300/[0.08] px-4 py-2 text-sm font-black text-sky-100">提供资料</Link></div>
     <div className="flex flex-wrap items-center justify-between gap-3"><Link href="/music" className="text-sm font-black text-sky-300/80">← 返回 EasMusic</Link><Link href="/music/live/me" className="rounded-full border border-sky-200/20 bg-sky-200/[0.07] px-4 py-2 text-sm font-black text-sky-100">我的现场 →</Link></div>
     <header className="py-12 sm:py-16">
       <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">EASON IN CONCERT ARCHIVE</p>

@@ -20,6 +20,10 @@ export const homeCacheHeaders = {
 const homeDataCacheTtlMs = Number(process.env.HOME_DATA_CACHE_TTL_MS || 30000)
 const homeDataCache = new Map<string, { expiresAt: number; promise: Promise<unknown> }>()
 
+export function invalidateHomeDataCache() {
+  homeDataCache.clear()
+}
+
 async function cachedHomeData<T>(key: string, loader: () => Promise<T>): Promise<T> {
   const now = Date.now()
   const cached = homeDataCache.get(key)
@@ -171,6 +175,9 @@ async function getHomeDailyMessagesUncached() {
       select: {
         id: true,
         mood: true,
+        moodType: true,
+        moodEmoji: true,
+        moodText: true,
         content: true,
         moderationStatus: true,
         User: {

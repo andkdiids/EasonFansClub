@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
-import { getMood } from '@/lib/daily'
+import { getMoodDisplay } from '@/lib/checkin-mood'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
@@ -14,6 +14,9 @@ type TimeFilter = 'today' | 'yesterday' | '7days' | 'custom'
 type FriendActivity = {
   id: string
   mood: string | null
+  moodType?: string | null
+  moodEmoji?: string | null
+  moodText?: string | null
   content: string | null
   type: 'CHECKIN' | 'POST'
   targetUrl: string | null
@@ -139,7 +142,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
         {failed ? <p className="rounded-2xl bg-red-50 p-5 text-center text-sm font-black text-red-600">{failed}</p> : null}
         {!loading && !failed && !activities.length ? <p className="rounded-2xl bg-sky-50 p-5 text-center text-sm font-black text-slate-500">该筛选条件下暂无好友动态</p> : null}
         {!loading && !failed ? activities.map((item) => {
-          const mood = item.type === 'CHECKIN' ? getMood(item.mood || '') : null
+          const mood = item.type === 'CHECKIN' ? getMoodDisplay(item) : null
           const name = item.actor.profile?.displayName || item.actor.nickname
           const avatar = profileImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
           const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : '最近发帖'

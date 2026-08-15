@@ -40,6 +40,7 @@ export default async function MusicLivePage() {
     cityCount: new Set(MusicConcert.map((concert) => concert.city)).size,
   }))
   return <MusicArchiveShell backgroundVisual={config.heroVisuals.music}>
+    <div className="mb-3 flex justify-end"><Link href="/music/concerts/contribute" className="border border-sky-300/25 bg-sky-300/[0.08] px-4 py-2 text-sm font-black text-sky-100">提供资料</Link></div>
     <div className="flex flex-wrap items-center justify-between gap-3"><Link href="/music" className="text-sm font-black text-sky-300/80">← 返回 EasMusic</Link><Link href="/music/live/me" className="border border-sky-200/20 bg-sky-200/[0.07] px-4 py-2 text-sm font-black text-sky-100">我的现场 →</Link></div>
     <header className="py-12 sm:py-16"><p className="text-xs font-black tracking-[0.24em] text-sky-300/70">EASON IN CONCERT ARCHIVE</p><h1 className="mt-4 text-5xl font-black tracking-tight text-white sm:text-7xl">Eason in Concert</h1><p className="mt-5 max-w-3xl text-sm font-bold leading-7 text-slate-300/70 sm:text-base">收录陈奕迅巡演、演唱会场次、现场歌单与特别时刻</p></header>
     <section className="mb-14" aria-label="演唱会分类">

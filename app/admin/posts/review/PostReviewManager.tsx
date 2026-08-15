@@ -29,9 +29,11 @@ type ReviewTarget = {
 
 const statusLabels: Record<ReviewStatus, string> = { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已拒绝', VIOLATION: '违规内容' }
 
-export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[] }) {
+export function PostReviewManager({ initialPosts, initialHasMore }: { initialPosts: ReviewPost[]; initialHasMore: boolean }) {
   const [posts, setPosts] = useState(initialPosts)
   const [queueStatus, setQueueStatus] = useState<ReviewStatus>('PENDING')
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(initialHasMore)
   const [loading, setLoading] = useState(false)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
@@ -39,11 +41,11 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  async function loadStatus(nextStatus: ReviewStatus) {
+  async function loadStatus(nextStatus: ReviewStatus, nextPage = 1) {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`/api/admin/posts/review?status=${nextStatus}`, { cache: 'no-store' })
+      const response = await fetch(`/api/admin/posts/review?status=${nextStatus}&page=${nextPage}`, { cache: 'no-store' })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
         setError(data?.message || '列表加载失败')
@@ -51,6 +53,8 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
       }
       setPosts(Array.isArray(data?.posts) ? data.posts as ReviewPost[] : [])
       setQueueStatus(nextStatus)
+      setPage(typeof data?.page === 'number' && data.page > 0 ? data.page : nextPage)
+      setHasMore(data?.hasMore === true)
     } catch {
       setError('列表加载失败，请稍后重试')
     } finally {
@@ -119,7 +123,7 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
     {error ? <p className="mb-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</p> : null}
     <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-sky-700">Post Queue</p><h2 className="mt-1 text-2xl font-black text-brand-950">{statusLabels[queueStatus]}帖子</h2></div><span className="text-sm font-black text-slate-500">{posts.length} 条</span></div>
     <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="帖子审核状态">
-      {postModerationStatuses.map((status) => <button key={status} type="button" role="tab" aria-selected={status === queueStatus} disabled={loading || Boolean(reviewingId) || status === queueStatus} onClick={() => void loadStatus(status)} className={`rounded-full px-4 py-2 text-sm font-black ${status === queueStatus ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'} disabled:opacity-60`}>{statusLabels[status]}</button>)}
+      {postModerationStatuses.map((status) => <button key={status} type="button" role="tab" aria-selected={status === queueStatus} disabled={loading || Boolean(reviewingId) || status === queueStatus} onClick={() => void loadStatus(status, 1)} className={`rounded-full px-4 py-2 text-sm font-black ${status === queueStatus ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'} disabled:opacity-60`}>{statusLabels[status]}</button>)}
     </div>
     <div className="mt-5 divide-y divide-sky-100">
       {posts.map((post) => {
@@ -144,6 +148,11 @@ export function PostReviewManager({ initialPosts }: { initialPosts: ReviewPost[]
         </article>
       })}
       {!posts.length ? <p className="py-10 text-center text-sm font-bold text-slate-500">暂无{statusLabels[queueStatus]}帖子。</p> : null}
+    </div>
+    <div className="mt-5 flex items-center justify-center gap-3 border-t border-sky-100 pt-5">
+      <button type="button" disabled={loading || page <= 1} onClick={() => void loadStatus(queueStatus, page - 1)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">上一页</button>
+      <span className="text-sm font-black text-slate-500">第 {page} 页</span>
+      <button type="button" disabled={loading || !hasMore} onClick={() => void loadStatus(queueStatus, page + 1)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">下一页</button>
     </div>
     {reviewTarget ? <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewTarget(null) }}>
       <div className="w-full max-w-lg rounded-3xl border border-sky-100 bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="post-review-dialog-title">

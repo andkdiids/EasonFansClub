@@ -18,6 +18,9 @@ export type ProfileRecordPagination = {
 export type ProfileRecentMessage = {
   id: string
   mood: string | null
+  moodType: string | null
+  moodEmoji: string | null
+  moodText: string | null
   content: string
   moderationStatus: string
   createdAt: string
@@ -39,6 +42,9 @@ export type ProfileRecentMessage = {
 type ProfileRecentMessageRow = {
   id: string
   mood: string | null
+  moodType: string | null
+  moodEmoji: string | null
+  moodText: string | null
   content: string
   moderationStatus: string
   createdAt: Date
@@ -83,6 +89,9 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerI
   return rows.map((message) => ({
     id: message.id,
     mood: message.mood,
+    moodType: message.moodType,
+    moodEmoji: message.moodEmoji,
+    moodText: message.moodText,
     content: publicModerationText(message.content, message.moderationStatus),
     moderationStatus: message.moderationStatus,
     createdAt: message.createdAt.toISOString(),
@@ -124,6 +133,9 @@ export async function loadProfileRecentMessagesPage(
       select: {
         id: true,
         mood: true,
+        moodType: true,
+        moodEmoji: true,
+        moodText: true,
         content: true,
         moderationStatus: true,
         createdAt: true,

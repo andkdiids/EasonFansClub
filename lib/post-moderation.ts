@@ -1,4 +1,5 @@
 export const postModerationStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'VIOLATION'] as const
+export const POST_REVIEW_PAGE_SIZE = 50
 
 export type PostModerationStatus = typeof postModerationStatuses[number]
 export type PostModerationAccess = 'VISIBLE' | 'PENDING' | 'REJECTED'

@@ -12,6 +12,9 @@ export async function GET(_request: Request, { params }: Context) {
     select: {
       id: true, title: true, concertDate: true, city: true, countryOrRegion: true, venue: true, sessionNumber: true, posterUrl: true, description: true,
       MusicTour: { select: { id: true, name: true, posterUrl: true } },
+      contributorUser: { select: { uid: true, username: true } },
+      setlistContributorUser: { select: { uid: true, username: true } },
+      encoreContributorUser: { select: { uid: true, username: true } },
       MusicConcertSetlistItem: {
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
         select: {

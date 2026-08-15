@@ -14,6 +14,7 @@ import { getSiteAppearance } from '@/lib/site-config'
 import { resolveConcertBySlug } from '@/lib/music-archive'
 import { decodeRouteParam } from '@/lib/music-slug'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { ConcertContributorAttribution } from '@/components/music/ConcertContributorAttribution'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,6 +52,9 @@ export default async function MusicConcertBySlugPage({
       select: {
         id: true, title: true, concertDate: true, city: true, countryOrRegion: true, venue: true, sessionNumber: true, posterUrl: true, description: true,
         MusicTour: { select: { id: true, name: true, posterUrl: true } },
+        contributorUser: { select: { uid: true, username: true } },
+        setlistContributorUser: { select: { uid: true, username: true } },
+        encoreContributorUser: { select: { uid: true, username: true } },
         MusicConcertSetlistItem: {
           orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: { id: true, displayName: true, section: true, position: true, createdAt: true, versionName: true, note: true, isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true, MusicSong: { select: { id: true, title: true } } },
@@ -105,6 +109,9 @@ export default async function MusicConcertBySlugPage({
       </>
     ) : null}
     {concert.MusicConcertHighlight.length ? <section className="mt-14" aria-labelledby="concert-highlights-title"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SPECIAL MOMENTS</p><h2 id="concert-highlights-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">特别时刻</h2><div className="mt-7 grid min-w-0 gap-4 sm:grid-cols-2">{concert.MusicConcertHighlight.map((highlight) => <article key={highlight.id} className="min-w-0 border border-white/10 bg-white/[0.055] p-5 sm:p-6"><span className="border border-sky-300/20 px-2 py-1 text-[10px] font-black text-sky-100/75">{MUSIC_HIGHLIGHT_TYPE_LABELS[highlight.type]}</span><h3 className="mt-4 break-words text-xl font-black text-white">{highlight.title}</h3><p className="mt-3 whitespace-pre-wrap break-words text-sm font-medium leading-7 text-slate-300/70">{highlight.content}</p></article>)}</div></section> : null}
+    <ConcertContributorAttribution type="SHOW" contributor={concert.contributorUser} />
+    <ConcertContributorAttribution type="SETLIST" contributor={concert.setlistContributorUser} />
+    <ConcertContributorAttribution type="ENCORE" contributor={concert.encoreContributorUser} />
     </div>
   </MusicArchiveShell>
 }

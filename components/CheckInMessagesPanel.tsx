@@ -15,7 +15,7 @@ import { anonymizeCheckInMessages, getCheckInMessagePageSize, CHECK_IN_MESSAGE_P
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { checkInMessageAuthorId } from '@/lib/checkin-message-order'
 import { getCheckInReplyToggleLabel, getVisibleCheckInReplyCount } from '@/lib/checkin-reply-display'
-import { getMood } from '@/lib/daily'
+import { getMoodDisplay } from '@/lib/checkin-mood'
 import { profileImageUrl } from '@/lib/images'
 import { scrollToSectionTop } from '@/lib/pagination'
 import { formatUid } from '@/lib/uid'
@@ -540,7 +540,7 @@ export function CheckInMessagesPanel({
 
       <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} ${previewMode ? 'flex-1' : ''} ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
         {messages.length ? visibleMessages.map((item) => {
-          const mood = getMood(item.mood)
+          const mood = getMoodDisplay(item)
           const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null
           const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : '')
           const avatar = profileImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
@@ -591,7 +591,7 @@ export function CheckInMessagesPanel({
                         }}
                       />
                     ) : null}
-                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood ? `${mood.icon} ${mood.label}` : '未填写心情'}</span> : mood ? <span className="text-xs">{mood.icon}</span> : null}
+                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood.formatted || '未填写心情'}</span> : mood.formatted ? <span className="break-words text-xs">{mood.formatted}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
                     <IpRegionLabel ipRegion={item.ipRegion} />

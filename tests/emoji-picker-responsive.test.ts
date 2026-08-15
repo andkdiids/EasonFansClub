@@ -4,11 +4,12 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const picker = read('components/EmojiPicker.tsx')
+const emojiCatalog = read('lib/system-emoji.ts')
 const css = read('app/globals.css')
 
 test('统一 EmojiPicker 提供六类且至少 100 个不同 Unicode Emoji', () => {
-  assert.equal((picker.match(/label: '/g) || []).length, 6)
-  const emojis = new Set([...picker.matchAll(/'([^']*\p{Extended_Pictographic}[^']*)'/gu)].map((match) => match[1]))
+  assert.equal((emojiCatalog.match(/label: '/g) || []).length, 6)
+  const emojis = new Set([...emojiCatalog.matchAll(/'([^']*\p{Extended_Pictographic}[^']*)'/gu)].map((match) => match[1]))
   assert.ok(emojis.size >= 100, `expected at least 100 unique emoji, received ${emojis.size}`)
   for (const emoji of ['😀', '❤️', '👍', '🐱', '🎤', '🚑', '🥳']) {
     assert.ok(emojis.has(emoji))
