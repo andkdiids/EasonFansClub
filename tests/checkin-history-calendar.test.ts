@@ -51,6 +51,9 @@ test('月度 API 只返回当前用户指定月份的轻量记录，详情 API �
   assert.match(monthRoute, /getCurrentUser\(\)/)
   assert.match(monthRoute, /where: \{ userId: user\.id, checkinDateKey: \{ gte: startKey, lt: endKey \} \}/)
   assert.match(monthRoute, /select: \{ id: true, checkinDateKey: true, mood: true, moodType: true, moodEmoji: true, moodText: true \}/)
+  assert.match(monthRoute, /moodType: record\.moodType/)
+  assert.match(monthRoute, /moodEmoji: record\.moodEmoji/)
+  assert.match(monthRoute, /moodText: record\.moodText/)
   assert.match(monthRoute, /hasMessage: recordIdsWithMessages\.has\(record\.id\)/)
   assert.match(monthRoute, /earliestYear/)
   assert.match(detailRoute, /message: true/)
@@ -76,7 +79,7 @@ test('挂号记录按钮、年月选择、日期详情和缓存都在弹窗内�
 })
 
 test('日历状态覆盖心情、今天、未来日期、移动端和深色模式', () => {
-  assert.match(dialog, /getMood\(/)
+  assert.match(dialog, /getMoodDisplay\(/)
   assert.match(dialog, /record\.dateKey > currentMonth\.dateKey/)
   assert.match(dialog, /is-today/)
   assert.match(dialog, /isFutureMonth/)
@@ -86,6 +89,7 @@ test('日历状态覆盖心情、今天、未来日期、移动端和深色模�
   assert.match(css, /safe-area-inset-bottom/)
   assert.match(css, /\.checkin-history-detail-body[^{]*\{[^}]*overflow:auto/)
   assert.match(css, /\.checkin-history-dialog[^{]*\{[^}]*var\(--surface-elevated\)/)
+  assert.match(css, /\.checkin-history-mood-label \{[^}]*text-overflow:ellipsis/)
 })
 
 test('挂号记录统一使用直角和正文色，禁用日期继续弱化', () => {

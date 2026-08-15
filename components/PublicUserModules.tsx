@@ -10,6 +10,7 @@ import { PROFILE_RECORD_PAGE_SIZE, type ProfileRecentMessage, type ProfileRecord
 import { scrollToSectionTop } from '@/lib/pagination'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
+import { PersonalPostPinMenu } from '@/components/PostActions'
 
 type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
 type PostItem = {
@@ -22,6 +23,7 @@ type PostItem = {
   replyCount: number
   likeCount: number
   viewCount: number
+  isProfilePinned: boolean
   board?: { name: string }
 }
 type ReplyItem = { id: string; content: string; post: { id: string; title: string } }
@@ -135,6 +137,12 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
     void loadModule(active, safePage, true)
   }
 
+  const handleProfilePinChanged = useCallback(() => {
+    const currentPostsPage = modulePages.posts
+    void loadModule('posts', 1)
+    if (currentPostsPage > 1) void loadModule('posts', currentPostsPage)
+  }, [loadModule, modulePages.posts])
+
   return (
 <section ref={modulesSectionRef} id="profile-modules" className="h-full min-w-0 scroll-mt-24">
 <div className="flex flex-wrap gap-2 border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
@@ -160,6 +168,7 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
             pagination={state.pagination}
             currentPage={activePage}
             onPageChange={handlePageChange}
+            onProfilePinChanged={handleProfilePinChanged}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
           />
@@ -176,6 +185,7 @@ function ModuleContent({
   pagination,
   currentPage,
   onPageChange,
+  onProfilePinChanged,
   expandedRecentMessages,
   onToggleRecentMessage,
 }: {
@@ -185,6 +195,7 @@ function ModuleContent({
   pagination?: ProfileRecordPagination
   currentPage: number
   onPageChange: (page: number) => void
+  onProfilePinChanged: () => void
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
 }) {
@@ -204,22 +215,31 @@ function ModuleContent({
     return (
       <div className="space-y-3">
         {posts.map((post) => (
-<Link
-  key={post.id}
-  href={`/posts/${post.id}`}
-  className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
->            <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
-              {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
-              {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
-            </div>
-            <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-            {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
-            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
-              <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
-            </p>
-          </Link>
+          <article key={post.id} className="relative min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)]">
+            <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-14">
+              <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
+                <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
+                {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
+                {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
+              </div>
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+              {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
+                <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
+              </p>
+            </Link>
+            {isSelf ? (
+              <div className="absolute right-2 top-2">
+                <PersonalPostPinMenu
+                  postId={post.id}
+                  initialIsPinned={post.isProfilePinned}
+                  onChanged={onProfilePinChanged}
+                />
+              </div>
+            ) : null}
+          </article>
         ))}
         {pageNavigation}
       </div>

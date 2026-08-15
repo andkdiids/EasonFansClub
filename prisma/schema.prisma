@@ -2110,6 +2110,7 @@ model Post {
   likeCount          Int                  @default(0)
   replyCount         Int                  @default(0)
   isPinned           Boolean              @default(false)
+  profilePinnedAt    DateTime?
   isFeatured         Boolean              @default(false)
   isDeleted          Boolean              @default(false)
   deletedAt          DateTime?
@@ -2148,6 +2149,7 @@ model Post {
   sticker            Sticker?             @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
 
   @@index([authorId, createdAt])
+  @@index([authorId, profilePinnedAt, createdAt])
   @@index([boardId, createdAt])
   @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_board_feed_idx")
   @@index([contentType])

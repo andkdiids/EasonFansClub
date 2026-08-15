@@ -42,7 +42,7 @@ export async function GET(request: Request, context: RouteContext) {
       'userModules.posts',
       prisma.post.findMany({
         where: postWhere,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ profilePinnedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         skip: (pagination.page - 1) * pagination.pageSize,
         take: pagination.pageSize,
         select: {
@@ -51,6 +51,7 @@ export async function GET(request: Request, context: RouteContext) {
           content: true,
           moderationStatus: true,
           rejectionReason: true,
+          profilePinnedAt: true,
           ipRegion: true,
           replyCount: true,
           likeCount: true,
@@ -62,7 +63,13 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     return NextResponse.json({
-      items: posts.map(({ Board, ...post }) => ({ ...post, title: publicModerationText(post.title, post.moderationStatus), content: publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus), board: Board })),
+      items: posts.map(({ Board, profilePinnedAt, ...post }) => ({
+        ...post,
+        title: publicModerationText(post.title, post.moderationStatus),
+        content: publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus),
+        board: Board,
+        isProfilePinned: Boolean(profilePinnedAt),
+      })),
       pagination,
     })
   }

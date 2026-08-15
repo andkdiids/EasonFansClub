@@ -701,7 +701,6 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 @media (max-width:380px) {
   .checkin-history-weekdays,.checkin-history-calendar-grid { gap:2px; }
   .checkin-history-day-cell { min-height:58px; padding-inline:1px; }
-  .checkin-history-mood-label { display:none; }
   .checkin-history-mood { font-size:11px; }
 }
 

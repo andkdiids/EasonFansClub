@@ -89,8 +89,14 @@ test('old and new mood records share a display formatter with Emoji plus text', 
   const custom = getMoodDisplay({ moodType: 'CUSTOM', moodEmoji: emoji, moodText: '今天开心' })
   assert.equal(custom.formatted, `${emoji} 今天开心`)
   assert.equal(custom.isCustom, true)
+  assert.equal(getMoodDisplay({ moodType: 'CUSTOM', moodText: '想躺平' }).formatted, '想躺平')
+  assert.equal(getMoodDisplay({ mood: '去看演唱会啦' }).formatted, '去看演唱会啦')
+  assert.equal(getMoodDisplay({ mood: 'NOT_IN_PRESET' }).formatted, 'NOT_IN_PRESET')
+  assert.equal(getMoodDisplay({ moodType: 'CUSTOM', moodEmoji: '🤒' }).formatted, '🤒')
+  assert.equal(getMoodDisplay({ mood: null, moodType: null, moodEmoji: null, moodText: null }).formatted, '')
   assert.equal(getMoodDisplay({ mood: 'HAPPY' }).isCustom, false)
   assert.ok(getMoodDisplay({ mood: 'HAPPY' }).formatted)
+  assert.equal(getMoodDisplay({ mood: '开心' }).formatted, '😀 开心')
 })
 
 test('the existing check-in flow keeps rewards and invalidates relevant caches', () => {

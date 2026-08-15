@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getMood } from '@/lib/daily'
-import { getMoodDisplay as resolveMoodDisplay, type CheckInMoodRecord } from '@/lib/checkin-mood'
+import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import {
   compareCheckInMonths,
@@ -35,15 +34,6 @@ const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 function parseInitialMonth(dateKey: string) {
   const parsed = parseCheckInDateKey(dateKey)
   return parsed ? { year: parsed.year, month: parsed.month } : getCurrentCheckInMonth()
-}
-
-function getMoodDisplay(value: CheckInMoodRecord | string | null | undefined) {
-  const display = resolveMoodDisplay(value)
-  const mood = getMood(typeof value === 'string' ? value : value?.mood || '')
-  return {
-    icon: display.icon || mood?.icon || '',
-    label: display.label || mood?.label || (typeof value === 'string' ? value : value?.moodText || value?.mood) || '未填写心情',
-  }
 }
 
 function cellClassName(cell: CheckInCalendarCell, record: CheckInHistoryMonthRecord | undefined, todayKey: string) {
@@ -292,10 +282,11 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                     const isFuture = cell.key > currentMonth.dateKey
                     const visibleRecord = record && !isFuture ? record : undefined
                     const mood = visibleRecord ? getMoodDisplay(visibleRecord) : null
+                    const moodLabel = mood?.label || (mood?.icon ? '' : '未填写心情')
                     const content = (
                       <>
                         <span className="checkin-history-day-number">{cell.day}</span>
-                        {visibleRecord ? <span className="checkin-history-mood" title={mood?.label}>{mood?.icon ? <span aria-hidden="true">{mood.icon}</span> : null}<span className="checkin-history-mood-label">{mood?.label}</span></span> : null}
+                        {visibleRecord ? <span className="checkin-history-mood" title={mood?.formatted || '未填写心情'}>{mood?.icon ? <span aria-hidden="true">{mood.icon}</span> : null}<span className="checkin-history-mood-label">{moodLabel}</span></span> : null}
                       </>
                     )
                     return visibleRecord ? (
@@ -329,7 +320,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                     {detail ? (
                       <>
                         <dl className="checkin-history-detail-facts">
-                          <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).icon} {getMoodDisplay(detail).label}</dd></div>
+                          <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).formatted || '未填写心情'}</dd></div>
                           <div><dt>挂号时间</dt><dd>{formatBeijingDateTimeMinute(detail.createdAt)}</dd></div>
                           {detail.streakDay > 0 ? <div><dt>连续挂号</dt><dd>{detail.streakDay} 天</dd></div> : null}
                         </dl>

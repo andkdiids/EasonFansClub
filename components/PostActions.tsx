@@ -315,6 +315,84 @@ export function PostManagementMenu({
             </div>
           </div>
         </div>
+  ) : null}
+    </div>
+  )
+}
+
+export function PersonalPostPinMenu({
+  postId,
+  initialIsPinned,
+  onChanged,
+}: Readonly<{
+  postId: string
+  initialIsPinned: boolean
+  onChanged?: () => void
+}>) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [isPinned, setIsPinned] = useState(initialIsPinned)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [menuOpen])
+
+  async function updateProfilePin(nextIsPinned: boolean) {
+    if (isSubmitting) return
+    setError('')
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`/api/posts/${postId}/profile-pin`, {
+        method: nextIsPinned ? 'POST' : 'DELETE',
+        cache: 'no-store',
+      })
+      const data = await response.json().catch(() => ({})) as { isProfilePinned?: unknown; message?: unknown }
+      if (!response.ok) {
+        throw new Error(typeof data.message === 'string' ? data.message : '操作失败，请稍后重试')
+      }
+      setIsPinned(Boolean(data.isProfilePinned))
+      setMenuOpen(false)
+      onChanged?.()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '操作失败，请稍后重试')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div ref={menuRef} className="post-management-menu">
+      <button
+        type="button"
+        className="post-management-menu-trigger"
+        aria-label="个人主页帖子操作"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((value) => !value)}
+      >
+        ⋯
+      </button>
+      {menuOpen ? (
+        <div className="post-management-menu-panel" role="menu">
+          <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updateProfilePin(!isPinned)}>
+            {isPinned ? '取消置顶' : '置顶'}
+          </button>
+          {error ? <p role="alert">{error}</p> : null}
+        </div>
       ) : null}
     </div>
   )

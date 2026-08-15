@@ -130,7 +130,7 @@ async function executePostDelete(postId: string, user: SessionUser, canManagePos
 
     const post = await tx.post.update({
       where: { id: postId },
-      data: { isDeleted: true, deletedAt: new Date() },
+      data: { isDeleted: true, deletedAt: new Date(), profilePinnedAt: null },
       select: { id: true, isDeleted: true, deletedAt: true },
     })
     const postCount = await tx.post.count({

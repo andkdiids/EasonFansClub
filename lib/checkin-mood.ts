@@ -1,4 +1,4 @@
-import { getMood } from '@/lib/daily'
+import { DAILY_MOODS, getMood } from '@/lib/daily'
 import { isAllowedSystemEmoji } from '@/lib/system-emoji'
 
 export const CUSTOM_MOOD_TYPE = 'CUSTOM' as const
@@ -71,21 +71,34 @@ export type MoodDisplay = {
   isCustom: boolean
 }
 
+function cleanMoodPart(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function resolvePresetMood(value: string) {
+  return getMood(value) || getMood(value.toLowerCase()) || DAILY_MOODS.find((mood) => mood.label === value)
+}
+
 export function getMoodDisplay(value: CheckInMoodRecord | string | null | undefined): MoodDisplay {
   const record: CheckInMoodRecord = typeof value === 'string' || value == null ? { mood: value } : value
-  const hasCustomSnapshot = Boolean(record.moodEmoji && record.moodText)
-    && (record.moodType === CUSTOM_MOOD_TYPE || !record.mood)
+  const rawMood = cleanMoodPart(record.mood)
+  const customEmoji = cleanMoodPart(record.moodEmoji)
+  const customText = cleanMoodPart(record.moodText)
+  const preset = resolvePresetMood(rawMood)
+  const isExplicitPreset = record.moodType === PRESET_MOOD_TYPE
+  const isExplicitCustom = record.moodType === CUSTOM_MOOD_TYPE
+  const hasCustomFields = !isExplicitPreset && Boolean(customEmoji || customText)
+  const hasLegacyCustomText = !preset && Boolean(rawMood) && rawMood !== CUSTOM_MOOD_TYPE
 
-  if (hasCustomSnapshot) {
-    const icon = record.moodEmoji || ''
-    const label = record.moodText || ''
+  if ((isExplicitCustom || hasCustomFields || hasLegacyCustomText) && (customEmoji || customText || hasLegacyCustomText)) {
+    const icon = customEmoji
+    const label = customText || (hasLegacyCustomText ? rawMood : '')
     return { icon, label, formatted: [icon, label].filter(Boolean).join(' '), isCustom: true }
   }
 
-  const preset = getMood(record.mood || '')
   if (preset) return { icon: preset.icon, label: preset.label, formatted: `${preset.icon} ${preset.label}`, isCustom: false }
 
-  const label = record.moodText || record.mood || ''
-  const icon = record.moodEmoji || ''
-  return { icon, label, formatted: [icon, label].filter(Boolean).join(' '), isCustom: Boolean(record.moodType === CUSTOM_MOOD_TYPE) }
+  const fallbackLabel = rawMood !== CUSTOM_MOOD_TYPE ? rawMood : ''
+  const label = customText || fallbackLabel
+  return { icon: customEmoji, label, formatted: [customEmoji, label].filter(Boolean).join(' '), isCustom: false }
 }
