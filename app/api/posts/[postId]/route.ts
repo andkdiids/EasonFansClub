@@ -12,7 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
-import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
+import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -372,7 +372,6 @@ export async function PATCH(request: Request, { params }: Params) {
     if (existing.isDeleted) return NextResponse.json({ message: '帖子已删除，无法继续操作' }, { status: 404 })
 
     phase = 'load-permissions'
-    const isAdmin = shouldBypassForbiddenWords(guard.user)
     const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
     const isOwner = existing.authorId === guard.user.id
 
@@ -389,7 +388,6 @@ export async function PATCH(request: Request, { params }: Params) {
         postId,
         existing,
         user: guard.user,
-        isAdmin,
         canManagePosts,
         isOwner,
         body,
@@ -542,7 +540,6 @@ type EditContext = {
     moderationStatus: string
   }
   user: Pick<SessionUser, 'id' | 'role'>
-  isAdmin: boolean
   canManagePosts: boolean
   isOwner: boolean
   body: Record<string, unknown>
@@ -553,7 +550,7 @@ async function handleEditPost(
   request: Request,
   ctx: EditContext,
 ) {
-  const { postId, existing, user, isAdmin, canManagePosts, isOwner, body, setPhase } = ctx
+  const { postId, existing, user, canManagePosts, isOwner, body, setPhase } = ctx
 
   setPhase('edit-authorize')
   if (!isOwner && !canManagePosts) {
@@ -656,7 +653,7 @@ async function handleEditPost(
         summary: createSummary(rawContent),
         boardId: nextBoardId,
         // 管理员编辑沿用现有直接发布豁免；普通用户编辑始终开启新的审核周期。
-        ...(!isAdmin ? {
+        ...(!canManagePosts ? {
           moderationStatus: 'PENDING' as const,
           moderationReason: null,
           matchedBannedWords: null,
@@ -698,7 +695,7 @@ async function handleEditPost(
       })
     }
 
-    if (!isAdmin && lockedExisting.moderationStatus === 'APPROVED') {
+    if (!canManagePosts && lockedExisting.moderationStatus === 'APPROVED') {
       const affectedBoardIds = [...new Set([lockedExisting.boardId, nextBoardId])]
       for (const affectedBoardId of affectedBoardIds) {
         const postCount = await tx.post.count({
@@ -707,7 +704,7 @@ async function handleEditPost(
         await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
       }
     }
-    if (isAdmin && lockedExisting.boardId !== nextBoardId && lockedExisting.moderationStatus === 'APPROVED') {
+    if (canManagePosts && lockedExisting.boardId !== nextBoardId && lockedExisting.moderationStatus === 'APPROVED') {
       for (const affectedBoardId of [lockedExisting.boardId, nextBoardId]) {
         const postCount = await tx.post.count({
           where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
@@ -735,8 +732,8 @@ async function handleEditPost(
     }
   })
 
-  const reviewNotificationKey = isAdmin ? null : `post-review:${postId}:${randomUUID()}`
-  if (!isAdmin) {
+  const reviewNotificationKey = canManagePosts ? null : `post-review:${postId}:${randomUUID()}`
+  if (!canManagePosts) {
     setPhase('edit-moderation-history')
     try {
       await createPostModerationHistory(prisma, {
@@ -809,7 +806,7 @@ async function handleEditPost(
   } catch (error) {
     logPostEditError(error, postId, user.id, 'edit-cache')
   }
-  if (!isAdmin) {
+  if (!canManagePosts) {
     void emitRealtimeToAdmins('notification').catch((error) => {
       logPostEditError(error, postId, user.id, 'edit-realtime')
     })
@@ -818,6 +815,6 @@ async function handleEditPost(
   return NextResponse.json({
     post: { id: transactionResult.post.id, title: transactionResult.post.title, content: publicContentImageMarkers(transactionResult.post.content), moderationStatus: transactionResult.post.moderationStatus, updatedAt: transactionResult.post.updatedAt },
     moderationStatus: transactionResult.post.moderationStatus,
-    message: isAdmin ? '帖子已保存' : '修改已保存，正在等待审核，审核通过后会重新展示。',
+    message: canManagePosts ? '帖子已保存' : '修改已保存，正在等待审核，审核通过后会重新展示。',
   })
 }

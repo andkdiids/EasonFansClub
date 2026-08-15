@@ -180,6 +180,7 @@ export function PostManagementMenu({
   initialIsFeatured,
   canManage,
   canDelete,
+  canEdit,
   redirectTo = '/forum',
 }: Readonly<{
   postId: string
@@ -187,6 +188,7 @@ export function PostManagementMenu({
   initialIsFeatured: boolean
   canManage: boolean
   canDelete: boolean
+  canEdit: boolean
   redirectTo?: string
 }>) {
   const router = useRouter()
@@ -214,7 +216,7 @@ export function PostManagementMenu({
     }
   }, [menuOpen])
 
-  if (!canManage && !canDelete) return null
+  if (!canManage && !canDelete && !canEdit) return null
 
   async function updatePost(payload: { isPinned?: boolean; isFeatured?: boolean; isDeleted?: boolean }) {
     if (isSubmitting) return
@@ -266,6 +268,16 @@ export function PostManagementMenu({
       </button>
       {menuOpen ? (
         <div className="post-management-menu-panel" role="menu">
+          {canEdit ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={isSubmitting}
+              onClick={() => { setMenuOpen(false); router.push(`/posts/${postId}/edit`) }}
+            >
+              编辑帖子
+            </button>
+          ) : null}
           {canManage ? (
             <>
               <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updatePost({ isPinned: !isPinned })}>

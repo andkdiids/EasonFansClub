@@ -644,13 +644,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           authorName={authorName}
           authorAvatar={authorAvatar}
           authorUid={post.User.uid}
-          postActions={canManagePost || canDeletePost ? (
+          postActions={canManagePost || canDeletePost || canEditPost ? (
             <PostManagementMenu
               postId={post.id}
               initialIsPinned={post.isPinned}
               initialIsFeatured={post.isFeatured}
               canManage={canManagePost}
               canDelete={canDeletePost}
+              canEdit={canEditPost}
               redirectTo="/forum"
             />
           ) : null}
@@ -706,14 +707,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {canEditPost ? (
-                <Link
-                  href={`/posts/${post.id}/edit`}
-                  className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50"
-                >
-                  编辑
-                </Link>
-              ) : null}
               {canManagePost ? (
                 <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo="/forum" />
               ) : canDeletePost ? (

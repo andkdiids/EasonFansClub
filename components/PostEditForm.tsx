@@ -10,6 +10,24 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 export type ExistingMedia = { id: string; url: string; broken: boolean }
 export type EditableBoard = { id: string; name: string; slug: string }
 
+function removePendingPostFromDiscoverySessions(postId: string) {
+  try {
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index)
+      if (!key?.startsWith('forum-discovery-session:')) continue
+      const raw = window.sessionStorage.getItem(key)
+      if (!raw) continue
+      const session = JSON.parse(raw) as { posts?: Array<{ id?: string }>; [key: string]: unknown }
+      if (!Array.isArray(session.posts)) continue
+      const posts = session.posts.filter((post) => post?.id !== postId)
+      if (posts.length === session.posts.length) continue
+      window.sessionStorage.setItem(key, JSON.stringify({ ...session, posts }))
+    }
+  } catch {
+    // The server-side moderation filter remains authoritative when storage is unavailable.
+  }
+}
+
 export function PostEditForm({
   postId,
   initialTitle,
@@ -61,6 +79,7 @@ export function PostEditForm({
       if (!response.ok) {
         throw new Error(data?.message || '保存失败，请稍后重试')
       }
+      if (data?.moderationStatus === 'PENDING') removePendingPostFromDiscoverySessions(postId)
       router.push(`/posts/${postId}`)
       router.refresh()
     } catch (reason) {
