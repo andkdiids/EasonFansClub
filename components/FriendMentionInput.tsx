@@ -58,6 +58,7 @@ export function FriendMentionInput({
   onChange,
   onMentionsChange,
   onSubmitShortcut,
+  maxLength,
 }: Readonly<{
   textareaRef: RefObject<HTMLTextAreaElement | null>
   value: string
@@ -65,6 +66,7 @@ export function FriendMentionInput({
   onChange: (value: string) => void
   onMentionsChange: (mentions: MentionDraft[]) => void
   onSubmitShortcut: () => void
+  maxLength?: number
 }>) {
   const rootRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
@@ -204,6 +206,7 @@ export function FriendMentionInput({
       <textarea
         ref={textareaRef}
         value={value}
+        maxLength={maxLength}
         onChange={(event) => {
           const next = event.target.value
           onMentionsChange(reconcileMentions(value, next, mentions))

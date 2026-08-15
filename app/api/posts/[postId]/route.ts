@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory } from '@/lib/admin-audit'
@@ -16,6 +17,130 @@ import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPost
 type Params = { params: Promise<{ postId: string }> }
 
 const POST_DETAIL_REPLY_LIMIT = 50
+
+function redactPostDeleteErrorText(value: string) {
+  return value
+    .replace(/\b(?:mysql|mariadb|postgres(?:ql)?|prisma(?:\+postgres)?):\/\/[^\s'\"]+/gi, (match) => `${match.slice(0, match.indexOf('://') + 3)}[redacted]`)
+    .replace(/\b(password|passwd|secret|token|cookie|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+}
+
+function safePostDeleteErrorMeta(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 20).map(([key, item]) => {
+    if (/authorization|cookie|database|password|secret|token|url/i.test(key)) return [key, '[redacted]']
+    if (typeof item === 'string') return [key, redactPostDeleteErrorText(item).slice(0, 500)]
+    return [key, item]
+  }))
+}
+
+function describePostDeleteError(error: unknown) {
+  const knownError = error instanceof Prisma.PrismaClientKnownRequestError
+  return {
+    errorName: error instanceof Error ? error.name : 'UnknownError',
+    errorCode: knownError ? error.code : undefined,
+    meta: knownError ? safePostDeleteErrorMeta(error.meta) : undefined,
+    message: redactPostDeleteErrorText(error instanceof Error ? error.message : String(error)),
+  }
+}
+
+function postDeleteErrorResponse(error: unknown, postId: string, userId: string) {
+  const errorMessage = error instanceof Error ? error.message : ''
+  const errorCode = error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined
+  console.error('[posts.delete]', { postId, userId, ...describePostDeleteError(error) })
+
+  if (errorMessage === 'POST_DELETE_FORBIDDEN') {
+    return NextResponse.json({ message: '你只能删除自己发布的帖子' }, { status: 403 })
+  }
+  if (errorMessage === 'POST_NOT_FOUND' || errorMessage === 'POST_ALREADY_DELETED' || errorCode === 'P2025') {
+    return NextResponse.json({ message: '帖子不存在或已经被删除' }, { status: 404 })
+  }
+  return NextResponse.json({ message: '删除帖子失败，请稍后重试' }, { status: 500 })
+}
+
+async function executePostDelete(postId: string, user: SessionUser, canManagePosts: boolean) {
+  const existing = await prisma.post.findUnique({
+    where: { id: postId },
+    select: { id: true, authorId: true, isDeleted: true },
+  })
+  if (!existing || existing.isDeleted) throw new Error(existing ? 'POST_ALREADY_DELETED' : 'POST_NOT_FOUND')
+  if (existing.authorId !== user.id && !canManagePosts) throw new Error('POST_DELETE_FORBIDDEN')
+
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    const lockedExisting = await tx.post.findUnique({
+      where: { id: postId },
+      select: {
+        id: true,
+        authorId: true,
+        boardId: true,
+        isDeleted: true,
+        title: true,
+        User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
+      },
+    })
+    if (!lockedExisting) throw new Error('POST_NOT_FOUND')
+    if (lockedExisting.isDeleted) throw new Error('POST_ALREADY_DELETED')
+    if (lockedExisting.authorId !== user.id && !canManagePosts) throw new Error('POST_DELETE_FORBIDDEN')
+
+    const post = await tx.post.update({
+      where: { id: postId },
+      data: { isDeleted: true, deletedAt: new Date() },
+      select: { id: true, isDeleted: true, deletedAt: true },
+    })
+    const postCount = await tx.post.count({
+      where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false },
+    })
+    await tx.board.update({ where: { id: lockedExisting.boardId }, data: { postCount } })
+
+    return {
+      post,
+      audit: {
+        operatorId: user.id,
+        action: 'DELETE_POST' as const,
+        operationType: adminAuditOperations.POST_DELETED,
+        targetType: 'POST',
+        targetId: postId,
+        targetTitle: lockedExisting.title,
+        targetUserId: lockedExisting.authorId,
+        targetUserName: lockedExisting.User.Profile?.displayName || lockedExisting.User.nickname,
+        targetUserUid: lockedExisting.User.uid,
+        metadata: { isDeleted: true },
+      },
+    }
+  })
+}
+
+async function postDeleteResponse(postId: string, user: SessionUser, canManagePosts: boolean) {
+  try {
+    const result = await executePostDelete(postId, user, canManagePosts)
+
+    if (canManagePosts) {
+      try {
+        // Audit is valuable, but a drifted/partially migrated audit table must
+        // not roll back the already committed content deletion.
+        await prisma.$transaction((tx) => createAdminActionAudit(tx, result.audit))
+      } catch (error) {
+        console.error('[posts.delete.audit]', { postId, userId: user.id, ...describePostDeleteError(error) })
+      }
+    }
+
+    try {
+      revalidatePath('/forum')
+      revalidatePath('/community')
+      revalidatePath('/trending')
+      revalidatePath('/rankings')
+      revalidatePath('/search')
+      revalidatePath(`/posts/${postId}`)
+      revalidateTag('trending-posts')
+    } catch (error) {
+      console.error('[posts.delete.cache]', { postId, userId: user.id, ...describePostDeleteError(error) })
+    }
+
+    return NextResponse.json({ ok: true, post: result.post, message: '帖子已删除' })
+  } catch (error) {
+    return postDeleteErrorResponse(error, postId, user.id)
+  }
+}
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -154,6 +279,19 @@ export async function GET(_request: Request, { params }: Params) {
   }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
+export async function DELETE(_request: Request, { params }: Params) {
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+
+  const { postId } = await params
+  try {
+    const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
+    return postDeleteResponse(postId, guard.user, canManagePosts)
+  } catch (error) {
+    return postDeleteErrorResponse(error, postId, guard.user.id)
+  }
+}
+
 export async function PATCH(request: Request, { params }: Params) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
@@ -205,6 +343,13 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ message: '没有可更新的字段' }, { status: 400 })
+  }
+
+  // Keep the legacy PATCH contract for older clients, but route every delete
+  // request through the explicit Post delete flow. Deletion is terminal and
+  // must not share a transaction with pin/feature side effects.
+  if (data.isDeleted === true) {
+    return postDeleteResponse(postId, guard.user, canManagePosts)
   }
 
   const changesModeration = data.isPinned !== undefined || data.isFeatured !== undefined

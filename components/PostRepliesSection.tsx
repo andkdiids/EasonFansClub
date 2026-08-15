@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { DeleteCommentButton } from '@/components/DeleteCommentButton'
+import { DeleteReplyButton, type DeleteCommentResult } from '@/components/DeleteCommentButton'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ImageViewer } from '@/components/ImageViewer'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
@@ -80,10 +80,6 @@ function normalizeReply(value: unknown): ReplyItem | null {
   }
 }
 
-function isAdminRole(role?: string) {
-  return role === 'ADMIN' || role === 'SUPER_ADMIN'
-}
-
 function buildReplyTree(replies: ReplyItem[]) {
   const byParent = new Map<string | null, ReplyItem[]>()
   const ids = new Set(replies.map((reply) => reply.id))
@@ -103,7 +99,7 @@ export function PostRepliesSection({
   initialReplies,
   initialReplyCount,
   currentUserId,
-  currentUserRole,
+  canManageReplies,
   postAuthorId,
   focusId,
   sort,
@@ -116,7 +112,7 @@ export function PostRepliesSection({
   initialReplies: ReplyItem[]
   initialReplyCount: number
   currentUserId?: string
-  currentUserRole?: string
+  canManageReplies?: boolean
   postAuthorId: string
   focusId?: string
   sort: PostReplySort
@@ -129,6 +125,7 @@ export function PostRepliesSection({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [replies, setReplies] = useState(() => initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
+  const [replyCount, setReplyCount] = useState(() => Math.max(initialReplyCount, 0))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
   const [mobileReplySheetOpen, setMobileReplySheetOpen] = useState(false)
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
@@ -140,7 +137,8 @@ export function PostRepliesSection({
   }, [])
   useEffect(() => {
     setReplies(initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
-  }, [initialReplies])
+    setReplyCount(Math.max(initialReplyCount, 0))
+  }, [initialReplies, initialReplyCount])
   const tree = useMemo(() => buildReplyTree(replies), [replies])
   const replyMap = useMemo(() => buildReplyMap(replies), [replies])
   const rootReplies = tree.get(null) || []
@@ -293,20 +291,24 @@ export function PostRepliesSection({
     const created = normalizeReply(reply)
     if (!created) return
     setReplies((current) => current.some((item) => item.id === created.id) ? current : [...current, created])
+    const nextReplyCount = replyCount + 1
+    setReplyCount(nextReplyCount)
     const rootId = created.parentId ? findRootReplyId(created.parentId) : null
     if (rootId) setExpandedReplies((current) => ({ ...current, [rootId]: true }))
-    window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: Math.max(initialReplyCount, replies.length + 1) } }))
+    window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
     if (document.documentElement.dataset.forumDetailDiscover !== 'true') router.refresh()
   }
 
-  function removeReply(replyId: string) {
-    setReplies((current) => {
-      const byParent = buildReplyTree(current)
-      const collectIds = (parentId: string): string[] => (byParent.get(parentId) || []).flatMap((reply) => [reply.id, ...collectIds(reply.id)])
-      const removeIds = new Set([replyId, ...collectIds(replyId)])
-      return current.filter((reply) => !removeIds.has(reply.id))
-    })
-    router.refresh()
+  function removeReply(replyId: string, result: DeleteCommentResult) {
+    const byParent = buildReplyTree(replies)
+    const collectIds = (parentId: string): string[] => (byParent.get(parentId) || []).flatMap((reply) => [reply.id, ...collectIds(reply.id)])
+    const removeIds = new Set([replyId, ...collectIds(replyId)])
+    setReplies((current) => current.filter((reply) => !removeIds.has(reply.id)))
+    const nextReplyCount = typeof result.replyCount === 'number'
+      ? Math.max(result.replyCount, 0)
+      : Math.max(replyCount - removeIds.size, 0)
+    setReplyCount(nextReplyCount)
+    window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
   }
 
   function collectThreadReplies(rootId: string) {
@@ -330,7 +332,7 @@ export function PostRepliesSection({
     const { reply, replyToName } = item
     const name = reply.author.profile?.displayName || reply.author.nickname
     const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
-    const canDelete = currentUserId === reply.author.id || isAdminRole(currentUserRole)
+    const canDelete = currentUserId === reply.author.id || canManageReplies
     const replyBody = splitContentImages(reply.content)
 
     return (
@@ -370,7 +372,7 @@ export function PostRepliesSection({
                 </button>
               ) : null}
               {canDelete ? (
-                <DeleteCommentButton endpoint={`/api/replies/${reply.id}`} label="删除" variant="text" onDeleted={() => removeReply(reply.id)} />
+                <DeleteReplyButton replyId={reply.id} label="删除" variant="text" onDeleted={(result) => removeReply(reply.id, result)} />
               ) : null}
             </div>
             <LikeAvatars
@@ -401,7 +403,7 @@ export function PostRepliesSection({
     const children = collectThreadReplies(reply.id)
     const showAll = Boolean(expandedReplies[reply.id])
     const visibleChildren = showAll ? children : children.slice(0, 3)
-    const canDelete = currentUserId === reply.author.id || isAdminRole(currentUserRole)
+    const canDelete = currentUserId === reply.author.id || canManageReplies
     const replyBody = splitContentImages(reply.content)
 
     return (
@@ -450,7 +452,7 @@ export function PostRepliesSection({
               </button>
             ) : null}
             {canDelete ? (
-              <DeleteCommentButton endpoint={`/api/replies/${reply.id}`} onDeleted={() => removeReply(reply.id)} />
+              <DeleteReplyButton replyId={reply.id} onDeleted={(result) => removeReply(reply.id, result)} />
             ) : null}
           </div>
           <LikeAvatars
@@ -514,7 +516,7 @@ export function PostRepliesSection({
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
       ) : null}
 
-      <h2 className="text-2xl font-black text-brand-950">回复 {Math.max(initialReplyCount, replies.length)}</h2>
+      <h2 className="text-2xl font-black text-brand-950">回复 {replyCount}</h2>
       {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
       <div className="flex items-center justify-end">
         <div role="tablist" aria-label="评论排序" className="post-replies-sort-tabs inline-flex rounded-full bg-slate-100 p-1">

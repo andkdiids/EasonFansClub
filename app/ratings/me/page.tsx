@@ -36,7 +36,7 @@ export default async function MyRatingsPage({ searchParams }: { searchParams: Se
         <div className="mt-5 space-y-3">
           {result.items.map((item) => (
             <Link key={item.id} href={`/ratings/${item.target === 'song' ? 'songs' : 'albums'}/${item.targetId}`} className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-sky-100 bg-white/90 p-3 shadow-sm sm:grid-cols-[5rem_minmax(0,1fr)_auto] sm:gap-4 sm:p-4">
-              <MusicCover src={item.coverUrl} alt={`${item.title}封面`} className="aspect-square w-full border border-sky-100" sizes="80px" />
+              <MusicCover src={item.coverUrl} fallbackSrc={item.fallbackCoverUrl} alt={`${item.title}封面`} className="aspect-square w-full border border-sky-100" sizes="80px" />
               <span className="min-w-0"><strong className="block truncate text-base font-black text-brand-950">{item.title}</strong><span className="mt-1 block truncate text-xs font-bold text-slate-500">{item.target === 'song' ? `《${item.albumName || '未归档'}》` : `${item.releaseYear} · 专辑`} · {item.languageLabel}</span><span className="mt-2 flex items-center gap-2"><RatingStars score={item.score} size="text-base" label={`${item.score}分`} /><span className="text-sm font-black text-amber-600">{item.score}分</span></span></span>
               <span className="text-right text-xs font-bold text-slate-500"><span className="block">{item.review ? '已发表评价' : '仅评分'}</span><time className="mt-1 block" dateTime={item.createdAt}>{item.createdAt.slice(0, 10)}</time></span>
             </Link>

@@ -42,7 +42,7 @@ export function RatingRankingList({ items, target, language, query, page, pageSi
               className="group grid min-w-0 grid-cols-[2.4rem_4.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-sky-100 bg-white/90 p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md sm:grid-cols-[3.2rem_5.25rem_minmax(0,1fr)_auto] sm:gap-4 sm:p-4"
             >
               <span className="text-center text-lg font-black tabular-nums text-brand-500 sm:text-xl">{String((page - 1) * pageSize + index + 1).padStart(2, '0')}</span>
-              <MusicCover src={item.coverUrl} alt={`${item.title}封面`} variant="thumb-sm" className="aspect-square w-full border border-sky-100" sizes="84px" />
+              <MusicCover src={item.coverUrl} fallbackSrc={item.fallbackCoverUrl} alt={`${item.title}封面`} variant="thumb-sm" className="aspect-square w-full border border-sky-100" sizes="84px" />
               <span className="min-w-0">
                 <strong className="block truncate text-base font-black text-brand-950 sm:text-lg">{item.title}</strong>
                 {item.target === 'song' ? <span className="mt-1 block truncate text-sm font-bold text-slate-600">《{item.albumName || '未归档'}》</span> : <span className="mt-1 block truncate text-sm font-bold text-slate-600">{item.artist || '陈奕迅'} · 专辑</span>}

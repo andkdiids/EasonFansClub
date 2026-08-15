@@ -64,6 +64,11 @@ export function scoreToStars(value: number | string | null | undefined) {
   return Number.isFinite(score) ? Math.max(0, Math.min(5, score / 2)) : 0
 }
 
+export function ratingScoreForStarHalf(starIndex: number, half: 'left' | 'right') {
+  if (!Number.isInteger(starIndex) || starIndex < 0 || starIndex > 4) return null
+  return starIndex * 2 + (half === 'left' ? 1 : 2)
+}
+
 export function formatRatingCount(value: number | string | null | undefined) {
   const count = Number(value)
   return Number.isFinite(count) ? Math.max(0, Math.floor(count)).toLocaleString('zh-CN') : '0'

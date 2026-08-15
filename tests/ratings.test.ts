@@ -5,8 +5,38 @@ import {
   formatAverageScore,
   normalizeRatingLanguage,
   parseRatingScore,
+  ratingScoreForStarHalf,
   scoreToStars,
 } from '../lib/rating-types'
+
+test('评分逐颗星左右半区严格映射 1 到 10 分', () => {
+  assert.deepEqual(
+    Array.from({ length: 5 }, (_, index) => [
+      ratingScoreForStarHalf(index, 'left'),
+      ratingScoreForStarHalf(index, 'right'),
+    ]),
+    [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]],
+  )
+  assert.equal(ratingScoreForStarHalf(5, 'left'), null)
+  assert.equal(ratingScoreForStarHalf(-1, 'right'), null)
+})
+
+test('评分选择器事件只绑定在与视觉星星同宽的逐星半区，不使用整行宽度坐标换算', () => {
+  const selector = source('components/ratings/RatingStars.tsx')
+  const ranking = source('components/ratings/RatingRankingList.tsx')
+  const cover = source('components/music/MusicCover.tsx')
+  const service = source('lib/rating-service.ts')
+  assert.match(selector, /rating-stars inline-flex w-fit/)
+  assert.match(selector, /rating-star relative inline-block h-\[1em\] w-\[1em\]/)
+  assert.match(selector, /data-half="left"/)
+  assert.match(selector, /data-half="right"/)
+  assert.doesNotMatch(selector, /getBoundingClientRect|clientX|w-\[220px\]/)
+  assert.match(ranking, /fallbackSrc=\{item\.fallbackCoverUrl\}/)
+  assert.match(cover, /MUSIC_COVER_PLACEHOLDER_SRC/)
+  assert.match(cover, /onError=/)
+  assert.match(service, /isSupabaseStorageUrl/)
+  assert.match(service, /resolveRatingCoverSources/)
+})
 
 function source(path: string) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')

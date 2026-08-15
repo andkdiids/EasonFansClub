@@ -1,7 +1,7 @@
 import { Prisma, RatingTargetType } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
-import { publicImageUrl } from '@/lib/images'
-import { publicImageVariantUrl } from '@/lib/image-variants'
+import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl, type ImageVariant } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
 import {
   formatAverageScore,
@@ -31,6 +31,7 @@ export type RatingListItem = RatingStatsView & {
   languageKey: Exclude<RatingLanguage, 'ALL'>
   languageLabel: string
   coverUrl: string | null
+  fallbackCoverUrl: string | null
 }
 
 export type RatingReviewView = {
@@ -74,6 +75,7 @@ export type SongRatingDetail = {
     languageKey: Exclude<RatingLanguage, 'ALL'>
     languageLabel: string
     coverUrl: string | null
+    fallbackCoverUrl: string | null
     album: {
       id: string
       name: string
@@ -220,6 +222,21 @@ function publicTargetLanguage(songLanguage: string | null | undefined, albumLang
   }
 }
 
+function normalizedRatingCover(value: string | null | undefined, variant: ImageVariant) {
+  const publicUrl = publicImageUrl(value)
+  if (!publicUrl || isSupabaseStorageUrl(publicUrl)) return null
+  return publicImageVariantUrl(publicUrl, variant)
+}
+
+export function resolveRatingCoverSources(primary: string | null | undefined, fallback: string | null | undefined, variant: ImageVariant) {
+  const primaryUrl = normalizedRatingCover(primary, variant)
+  const fallbackUrl = normalizedRatingCover(fallback, variant)
+  return {
+    coverUrl: primaryUrl || fallbackUrl,
+    fallbackCoverUrl: primaryUrl && fallbackUrl !== primaryUrl ? fallbackUrl : null,
+  }
+}
+
 function languageExpression(kind: 'song' | 'album') {
   return kind === 'song'
     ? Prisma.sql`LOWER(COALESCE(NULLIF(s.language, ''), NULLIF(a.language, ''), ''))`
@@ -279,6 +296,7 @@ function searchFilter(query: string, kind: RatingTarget) {
 
 function mapSongRankingRow(row: RawSongRankingRow): RatingListItem {
   const language = publicTargetLanguage(row.language, row.albumLanguage)
+  const cover = resolveRatingCoverSources(row.coverUrl, row.albumCoverUrl, 'thumb-sm')
   return {
     id: row.id,
     target: 'song',
@@ -288,7 +306,7 @@ function mapSongRankingRow(row: RawSongRankingRow): RatingListItem {
     albumName: row.albumName,
     releaseYear: integerValue(row.releaseYear),
     ...language,
-    coverUrl: publicImageVariantUrl(row.coverUrl || row.albumCoverUrl, 'thumb-sm'),
+    ...cover,
     ratingCount: integerValue(row.ratingCount),
     ratingScoreTotal: integerValue(row.ratingScoreTotal),
     averageScore: decimalValue(row.averageScore),
@@ -298,6 +316,7 @@ function mapSongRankingRow(row: RawSongRankingRow): RatingListItem {
 
 function mapAlbumRankingRow(row: RawAlbumRankingRow): RatingListItem {
   const language = publicTargetLanguage(row.language, null)
+  const cover = resolveRatingCoverSources(row.coverUrl, null, 'thumb-sm')
   return {
     id: row.id,
     target: 'album',
@@ -305,7 +324,7 @@ function mapAlbumRankingRow(row: RawAlbumRankingRow): RatingListItem {
     artist: row.artist,
     releaseYear: integerValue(row.releaseYear),
     ...language,
-    coverUrl: publicImageVariantUrl(row.coverUrl, 'thumb-sm'),
+    ...cover,
     ratingCount: integerValue(row.ratingCount),
     ratingScoreTotal: integerValue(row.ratingScoreTotal),
     averageScore: decimalValue(row.averageScore),
@@ -497,6 +516,7 @@ export async function getSongRatingDetail(id: string, viewerId: string | null, s
   ])
   const myReview = myRating ? await getOwnReview(myRating.id, viewerId) : null
   const language = publicTargetLanguage(song.language, song.MusicAlbum.language)
+  const cover = resolveRatingCoverSources(song.coverUrl, song.MusicAlbum.coverUrl, 'large')
   return {
     target: 'song',
     song: {
@@ -505,13 +525,13 @@ export async function getSongRatingDetail(id: string, viewerId: string | null, s
       artist: song.artist,
       releaseYear: song.releaseYear,
       ...language,
-      coverUrl: publicImageVariantUrl(song.coverUrl || song.MusicAlbum.coverUrl, 'large'),
+      ...cover,
       album: {
         id: song.MusicAlbum.id,
         name: song.MusicAlbum.name,
         releaseYear: song.MusicAlbum.releaseYear,
         language: song.MusicAlbum.language,
-        coverUrl: publicImageVariantUrl(song.MusicAlbum.coverUrl, 'thumb-md'),
+        coverUrl: resolveRatingCoverSources(song.MusicAlbum.coverUrl, null, 'thumb-md').coverUrl,
       },
     },
     stats: mapStats(stats),
@@ -564,8 +584,9 @@ export async function getAlbumRatingDetail(id: string, viewerId: string | null, 
       artist: album.artist,
       releaseYear: album.releaseYear,
       ...albumLanguage,
-      coverUrl: publicImageVariantUrl(album.coverUrl, 'large'),
+      coverUrl: resolveRatingCoverSources(album.coverUrl, null, 'large').coverUrl,
       songs: album.MusicSong.map((song) => ({
+        ...resolveRatingCoverSources(song.coverUrl, album.coverUrl, 'thumb-sm'),
         id: song.id,
         target: 'song' as const,
         title: song.title,
@@ -574,7 +595,6 @@ export async function getAlbumRatingDetail(id: string, viewerId: string | null, 
         albumName: album.name,
         releaseYear: song.releaseYear,
         ...publicTargetLanguage(song.language, album.language),
-        coverUrl: publicImageVariantUrl(song.coverUrl || album.coverUrl, 'thumb-sm'),
         ...statsView(song.RatingStats),
         trackNumber: song.trackNumber,
       })),
@@ -808,6 +828,7 @@ export async function getMyRatings({ userId, target, page = 1, pageSize = 30 }: 
       const song = row.MusicSong
       const album = row.MusicAlbum || song?.MusicAlbum
       return {
+        ...resolveRatingCoverSources(song?.coverUrl, song?.MusicAlbum.coverUrl || album?.coverUrl, 'thumb-sm'),
         id: row.id,
         targetId: song?.id || album?.id || '',
         target: song ? 'song' as const : 'album' as const,
@@ -815,7 +836,6 @@ export async function getMyRatings({ userId, target, page = 1, pageSize = 30 }: 
         albumName: song?.MusicAlbum.name || null,
         releaseYear: song?.releaseYear || album?.releaseYear || 0,
         languageLabel: ratingLanguageLabel(song?.language || album?.language),
-        coverUrl: publicImageVariantUrl(song?.coverUrl || song?.MusicAlbum.coverUrl || album?.coverUrl, 'thumb-sm'),
         score: row.score,
         createdAt: row.createdAt.toISOString(),
         review: row.RatingReview[0] || null,

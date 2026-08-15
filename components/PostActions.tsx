@@ -225,11 +225,13 @@ export function PostManagementMenu({
     setError('')
     setIsSubmitting(true)
     try {
-      const response = await fetch(`/api/posts/${postId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      const response = await fetch(`/api/posts/${postId}`, payload.isDeleted
+        ? { method: 'DELETE', cache: 'no-store' }
+        : {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5')
       if (typeof data.post?.isPinned === 'boolean') setIsPinned(data.post.isPinned)
@@ -330,17 +332,16 @@ export function AdminPostActions({
     setError('')
     setMessage('')
     setIsSubmitting(true)
-    const response = await fetch(`/api/posts/${postId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
-    if (!response.ok) {
-      setError(data.message || '管理员操作失败')
-      return
-    }
+    try {
+      const response = await fetch(`/api/posts/${postId}`, payload.isDeleted
+        ? { method: 'DELETE', cache: 'no-store' }
+        : {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '管理员操作失败，请稍后重试')
 
     if (payload.isDeleted) {
       setConfirmDelete(false)
@@ -355,6 +356,11 @@ export function AdminPostActions({
     }
 
     router.refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '管理员操作失败，请稍后重试')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -384,8 +390,8 @@ export function AdminPostActions({
       {confirmDelete ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/25 px-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-[24px] border border-sky-100 bg-white p-6 shadow-2xl shadow-sky-900/15">
-            <h3 className="text-xl font-black text-brand-950">确认删除</h3>
-            <p className="mt-3 text-sm font-bold leading-7 text-slate-600">删除后将无法恢复，是否继续？</p>
+            <h3 className="text-xl font-black text-brand-950">确认删除帖子</h3>
+            <p className="mt-3 text-sm font-bold leading-7 text-slate-600">删除后将无法恢复，确定继续？</p>
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setConfirmDelete(false)}
@@ -434,18 +440,10 @@ export function DeletePostButton({
     setError('')
     setMessage('')
     setIsDeleting(true)
-    const response = await fetch(`/api/posts/${postId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isDeleted: true }),
-    })
-    const data = await response.json().catch(() => ({}))
-    setIsDeleting(false)
-
-    if (!response.ok) {
-      setError(data.message || '删除失败，请稍后再试')
-      return
-    }
+    try {
+      const response = await fetch(`/api/posts/${postId}`, { method: 'DELETE', cache: 'no-store' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '删除帖子失败，请稍后重试')
 
     setConfirmDelete(false)
     setMessage('帖子已删除')
@@ -456,6 +454,11 @@ export function DeletePostButton({
       }, 700)
     } else {
       router.refresh()
+    }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除帖子失败，请稍后重试')
+    } finally {
+      setIsDeleting(false)
     }
   }
 

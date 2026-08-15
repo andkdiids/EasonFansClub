@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
+import { publicModerationText } from '@/lib/content-moderation'
+import { splitContentImages } from '@/lib/content-images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 import { Prisma, type NotificationType, type SystemNotificationType } from '@prisma/client'
 import { parseNotificationReplyTarget, type NotificationReplyTarget } from '@/lib/notification-target'
@@ -11,6 +13,8 @@ import { normalizeActionUrl, normalizeStoredInternalPath } from '@/lib/url-safet
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
+const CONTENT_IMAGE_MARKER = /\[\[content-image:[^\]]+\]\]/g
+const REPLY_UNAVAILABLE_TEXT = '该回复已被删除或不可查看'
 export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system'] as const
 export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
@@ -153,6 +157,28 @@ function resolveNotificationActorText(value: string | null, actorName: string | 
   return value
 }
 
+/**
+ * Notification rows keep the target ID in their existing internal link. The
+ * reply itself remains the source of truth for the preview, so edits/deletes
+ * are reflected without copying a second long body into Notification.
+ */
+export function formatNotificationReplyPreview(input: {
+  content?: string | null
+  moderationStatus?: string | null
+  stickerId?: string | null
+  hasImages?: boolean
+}) {
+  const rawContent = input.content || ''
+  const { text, images } = splitContentImages(rawContent)
+  const imageCount = Math.max(images.length, (rawContent.match(CONTENT_IMAGE_MARKER) || []).length, input.hasImages ? 1 : 0)
+  const parts = []
+  const visibleText = publicModerationText(text, input.moderationStatus).trim()
+  if (visibleText) parts.push(visibleText)
+  if (imageCount > 0) parts.push('[图片]')
+  if (input.stickerId) parts.push('[表情]')
+  return parts.join(' ') || null
+}
+
 export type UnifiedNotification = {
   id: string
   source: 'personal' | 'system'
@@ -176,6 +202,7 @@ export type UnifiedNotification = {
   readAt: Date | null
   replyTarget: NotificationReplyTarget | null
   replyDisabledReason: string | null
+  replyPreview: string | null
 }
 
 export type UnreadSummary = {
@@ -203,6 +230,8 @@ export type UnreadPersonalCounts = {
 type DailyCommentNotificationRow = {
   id: string
   messageId: string
+  content: string
+  moderationStatus: string
   isDeleted: boolean
   DailyMessage: { isDeleted: boolean }
 }
@@ -219,6 +248,8 @@ async function loadDailyNotificationComments(
       select: {
         id: true,
         messageId: true,
+        content: true,
+        moderationStatus: true,
         isDeleted: true,
         DailyMessage: { select: { isDeleted: true } },
       },
@@ -634,6 +665,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
           targetUrl: link,
         }),
         replyDisabledReason: null,
+        replyPreview: null,
       } satisfies UnifiedNotification]
     }
     const item = systemById.get(row.id)
@@ -661,6 +693,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       readAt: item.SystemNotificationRead[0]?.readAt || null,
       replyTarget: null,
       replyDisabledReason: null,
+      replyPreview: null,
     } satisfies UnifiedNotification]
   }).sort(compareNotificationOrder)
 
@@ -669,44 +702,99 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const dailyTargets = targets.filter((target) => target.kind === 'daily-message')
   const feedbackTargets = targets.filter((target) => target.kind === 'feedback')
   const wallTargets = targets.filter((target) => target.kind === 'profile-wall')
-  const [postReplies, dailyCommentLookup, feedbacks, wallMessages] = await Promise.all([
+  const [postReplies, dailyCommentLookup, feedbacks, feedbackReplies, wallMessages] = await Promise.all([
     postTargets.length ? prisma.reply.findMany({
-      where: { id: { in: postTargets.map((target) => target.parentId) }, isDeleted: false },
-      select: { id: true, postId: true },
+      where: { id: { in: postTargets.map((target) => target.parentId) } },
+      select: { id: true, postId: true, content: true, moderationStatus: true, stickerId: true, isDeleted: true },
     }) : [],
     loadDailyNotificationComments(dailyTargets, 'list'),
     feedbackTargets.length ? prisma.feedback.findMany({
       where: { id: { in: feedbackTargets.map((target) => target.resourceId) }, userId },
       select: { id: true, status: true },
     }) : [],
+    feedbackTargets.length ? prisma.feedbackReply.findMany({
+      where: {
+        id: { in: feedbackTargets.map((target) => target.parentId) },
+        Feedback: { userId },
+      },
+      select: {
+        id: true,
+        feedbackId: true,
+        content: true,
+        moderationStatus: true,
+        FeedbackAttachment: { select: { id: true }, take: 1 },
+      },
+    }) : [],
     wallTargets.length ? prisma.profileWallMessage.findMany({
       where: { id: { in: wallTargets.map((target) => target.parentId) }, deletedAt: null },
-      select: { id: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
+      select: { id: true, content: true, moderationStatus: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
     }) : [],
   ])
   const dailyComments = dailyCommentLookup.rows
+  const postReplyById = new Map(postReplies.map((reply) => [reply.id, reply]))
+  const feedbackReplyById = new Map(feedbackReplies.map((reply) => [reply.id, reply]))
 
   const items = merged.map((item) => {
     const target = item.replyTarget
     if (!target) return item
-    if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) {
-      return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
+    if (target.kind === 'post') {
+      const reply = postReplyById.get(target.parentId)
+      if (!reply || reply.postId !== target.resourceId || reply.isDeleted) {
+        return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
+      }
+      return {
+        ...item,
+        replyPreview: formatNotificationReplyPreview({
+          content: reply.content,
+          moderationStatus: reply.moderationStatus,
+          stickerId: reply.stickerId,
+        }),
+      }
     }
     if (target.kind === 'daily-message') {
-      if (dailyCommentLookup.failed) return { ...item, replyDisabledReason: '暂时无法加载回复，请稍后重试' }
+      if (dailyCommentLookup.failed) return { ...item, replyDisabledReason: '暂时无法加载回复，请稍后重试', replyPreview: '暂时无法加载回复，请稍后重试' }
       const comment = dailyComments.find((row) => row.id === target.parentId && row.messageId === target.resourceId)
-      if (!comment) return { ...item, replyDisabledReason: '你暂时无法查看这条回复' }
-      if (comment.isDeleted || comment.DailyMessage.isDeleted) return { ...item, replyDisabledReason: '该回复已被删除' }
+      if (!comment || comment.isDeleted || comment.DailyMessage.isDeleted) {
+        return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
+      }
+      return {
+        ...item,
+        replyPreview: formatNotificationReplyPreview({ content: comment.content, moderationStatus: comment.moderationStatus }),
+      }
     }
     if (target.kind === 'feedback') {
       const feedback = feedbacks.find((row) => row.id === target.resourceId)
-      if (!feedback) return { ...item, replyDisabledReason: '该内容已被删除或无法查看，或你没有查看权限' }
+      const reply = feedbackReplyById.get(target.parentId)
+      if (!feedback || !reply || reply.feedbackId !== feedback.id) {
+        return { ...item, replyDisabledReason: '该内容已被删除或无法查看，或你没有查看权限', replyPreview: REPLY_UNAVAILABLE_TEXT }
+      }
       if (feedback.status === 'RESOLVED' || feedback.status === 'CLOSED') {
-        return { ...item, replyDisabledReason: '该反馈已关闭，无法回复' }
+        return {
+          ...item,
+          replyDisabledReason: '该反馈已关闭，无法回复',
+          replyPreview: formatNotificationReplyPreview({
+            content: reply.content,
+            moderationStatus: reply.moderationStatus,
+            hasImages: reply.FeedbackAttachment.length > 0,
+          }),
+        }
+      }
+      return {
+        ...item,
+        replyPreview: formatNotificationReplyPreview({
+          content: reply.content,
+          moderationStatus: reply.moderationStatus,
+          hasImages: reply.FeedbackAttachment.length > 0,
+        }),
       }
     }
-    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)) {
-      return { ...item, replyDisabledReason: '该内容已被删除或无法查看' }
+    if (target.kind === 'profile-wall') {
+      const message = wallMessages.find((row) => row.id === target.parentId && String(row.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)
+      if (!message) return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
+      return {
+        ...item,
+        replyPreview: formatNotificationReplyPreview({ content: message.content, moderationStatus: message.moderationStatus }),
+      }
     }
     return item
   })
@@ -771,6 +859,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       readAt: null,
       replyTarget: null,
       replyDisabledReason: null,
+      replyPreview: null,
     } satisfies UnifiedNotification
   })
 }

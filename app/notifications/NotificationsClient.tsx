@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { NotificationReplyComposer, type NotificationReplyPayload } from '@/components/NotificationReplyComposer'
 import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
@@ -520,14 +521,24 @@ export function NotificationsClient({
     await navigateToNotification(item)
   }
 
-  async function sendDirectReply(item: UnifiedNotification) {
+  async function sendDirectReply(item: UnifiedNotification, payload: NotificationReplyPayload) {
     const key = `${item.source}:${item.id}`
     const target = item.replyTarget
-    const content = (replyDrafts[key] || '').trim()
-    if (!target || !content || sendingReply) return
+    const content = payload.content.trim()
+    const hasRichContent = Boolean(content || payload.imageUrls.length || payload.stickerId)
+    if (!target || !hasRichContent || sendingReply) return
 
     const request = target.kind === 'post'
-      ? { url: `/api/posts/${target.resourceId}/replies`, body: { content, parentId: target.parentId } }
+      ? {
+          url: `/api/posts/${target.resourceId}/replies`,
+          body: {
+            content: payload.content,
+            parentId: target.parentId,
+            imageUrls: payload.imageUrls,
+            mentions: payload.mentions,
+            stickerId: payload.stickerId,
+          },
+        }
       : target.kind === 'daily-message'
         ? { url: `/api/daily-messages/${target.resourceId}/comments`, body: { content, parentId: target.parentId } }
         : target.kind === 'feedback'
@@ -707,12 +718,18 @@ export function NotificationsClient({
     const systemLike = isSystemLikeNotification(item)
     const isBirthday = isBirthdayNotification(item)
     const isUserReward = item.type === 'USER_REWARD'
+    const isReplyNotification = item.type === 'REPLY' || item.category === 'feedback'
+    const replyPreview = item.replyPreview?.trim() || null
+    const fallbackContent = item.content?.trim() || null
+    const displayReplyPreview = replyPreview || fallbackContent
+    const canDirectReply = isReplyNotification && Boolean(item.replyTarget && !item.replyDisabledReason)
     const smartEntry = getSmartEntry(item)
     // 生日通知轻微视觉强调：浅色背景 + 左侧主题色边框（保持扁平简洁 Windows 风格）
     const emphasisClass = isBirthday && !isNotificationRead(item) ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
     const titleClass = isNotificationRead(item) ? 'font-bold text-slate-700' : 'font-black text-slate-950'
     // 生日通知分类文字显示为「今日」（仅前端展示，不动数据库枚举）
     const displayLabel = isBirthday ? '今日' : item.typeLabel
+    const hasDisplayLabel = Boolean(displayLabel?.trim())
 
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
@@ -762,11 +779,18 @@ export function NotificationsClient({
           {/* 内容区：标题 + 正文 + 智能入口 */}
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span>
+              {hasDisplayLabel ? <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span> : null}
               {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">未读</span> : null}
             </div>
             <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
-            {item.content ? <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward ? '' : 'line-clamp-2'}`}>{item.content}</p> : null}
+            {isReplyNotification && displayReplyPreview ? (
+              <p className="notification-reply-preview mt-0.5 break-words text-xs font-bold leading-4 text-slate-600">
+                {replyPreview && item.actorName ? <span className="font-black text-slate-700">{item.actorName}：</span> : null}
+                {displayReplyPreview}
+              </p>
+            ) : !isReplyNotification && fallbackContent ? (
+              <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward ? '' : 'line-clamp-2'}`}>{fallbackContent}</p>
+            ) : null}
 
             {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
             {smartEntry?.action === 'dock' ? (
@@ -798,7 +822,7 @@ export function NotificationsClient({
             <div className="mt-1 flex flex-wrap items-center justify-between gap-1.5 pt-1">
               <time className="text-[11px] font-bold text-slate-400">{formatTime(item.createdAt)}</time>
               <div className="flex flex-wrap items-center gap-1">
-                {item.replyTarget && !item.replyDisabledReason ? (
+                {canDirectReply ? (
                   <button
                     type="button"
                     onClick={(event) => {
@@ -847,30 +871,18 @@ export function NotificationsClient({
         </article>
 
         {item.replyDisabledReason ? <p className="mt-2 rounded-sm border border-sky-100 bg-white px-4 py-3 text-sm font-black text-slate-500">{item.replyDisabledReason}</p> : null}
-        {replyingKey === itemKey && item.replyTarget ? (
-          <div className="mt-2 rounded-sm border border-sky-100 bg-white p-4">
-            <label htmlFor={`notification-reply-${item.id}`} className="text-xs font-black text-brand-700">
-              回复 @{item.actorName || '对方'}
-            </label>
-            <textarea
-              id={`notification-reply-${item.id}`}
-              value={replyDrafts[itemKey] || ''}
-              maxLength={item.replyTarget.kind === 'daily-message' ? 300 : item.replyTarget.kind === 'profile-wall' ? 500 : 2000}
-              onChange={(event) => setReplyDrafts((current) => ({ ...current, [itemKey]: event.target.value }))}
-              className="mt-2 min-h-20 w-full resize-y rounded-sm border border-sky-100 bg-white px-3 py-2 text-sm font-bold outline-none"
-            />
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => setReplyingKey(null)} className="min-h-10 rounded-sm border border-sky-100 px-4 text-sm font-black text-slate-600">取消</button>
-              <button
-                type="button"
-                disabled={sendingReply === itemKey || !(replyDrafts[itemKey] || '').trim()}
-                onClick={() => void sendDirectReply(item)}
-                className="min-h-10 rounded-sm bg-brand-950 px-4 text-sm font-black text-white disabled:opacity-50"
-              >
-                {sendingReply === itemKey ? '发送中…' : '发送'}
-              </button>
-            </div>
-          </div>
+        {replyingKey === itemKey && item.replyTarget && canDirectReply ? (
+          <NotificationReplyComposer
+            actorName={item.actorName}
+            initialContent={replyDrafts[itemKey] || ''}
+            maxLength={item.replyTarget.kind === 'daily-message' ? 300 : item.replyTarget.kind === 'profile-wall' ? 500 : 5000}
+            rich={item.replyTarget.kind === 'post'}
+            submitting={sendingReply === itemKey}
+            disabled={sendingReply === itemKey}
+            onDraftChange={(content) => setReplyDrafts((current) => ({ ...current, [itemKey]: content }))}
+            onCancel={() => setReplyingKey(null)}
+            onSubmit={(payload) => sendDirectReply(item, payload)}
+          />
         ) : null}
         {replyStatus[itemKey] ? <p className={`mt-2 px-1 py-2 text-sm font-black ${replyStatus[itemKey] === '回复成功' ? 'text-emerald-600' : 'text-red-600'}`}>{replyStatus[itemKey]}</p> : null}
       </div>

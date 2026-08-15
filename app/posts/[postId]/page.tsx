@@ -558,6 +558,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   })
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && await hasAdminPermission(user, 'post_manage'))
+  const canManageReplies = Boolean(user && await hasAdminPermission(user, 'reply_manage'))
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
   const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
   const publicPostContent = publicContentImageMarkers(post.content)
@@ -740,7 +741,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             initialReplies={replyRows}
             initialReplyCount={post.replyCount}
             currentUserId={user?.id}
-            currentUserRole={user?.role}
+            canManageReplies={canManageReplies}
             postAuthorId={post.User.id}
             focusId={focusId}
             sort={commentSort}

@@ -3,17 +3,20 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-export function DeleteCommentButton({
-  endpoint,
-  label = '删除',
-  onDeleted,
-  variant = 'pill',
-}: Readonly<{
+export type DeleteCommentResult = {
+  ok?: boolean
+  message?: string
+  replyCount?: number
+}
+
+type DeleteCommentButtonProps = Readonly<{
   endpoint: string
   label?: string
-  onDeleted?: () => void
+  onDeleted?: (result: DeleteCommentResult) => void
   variant?: 'pill' | 'text'
-}>) {
+}>
+
+export function DeleteCommentButton({ endpoint, label = '删除', onDeleted, variant = 'pill' }: DeleteCommentButtonProps) {
   const router = useRouter()
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -25,19 +28,22 @@ export function DeleteCommentButton({
     setError('')
     setMessage('')
     setIsDeleting(true)
-    const response = await fetch(endpoint, { method: 'DELETE' })
-    const data = await response.json().catch(() => ({}))
-    setIsDeleting(false)
+    try {
+      const response = await fetch(endpoint, { method: 'DELETE', cache: 'no-store' })
+      const data = await response.json().catch(() => ({})) as DeleteCommentResult
+      if (!response.ok) {
+        throw new Error(typeof data.message === 'string' ? data.message : '删除评论失败，请稍后重试')
+      }
 
-    if (!response.ok) {
-      setError(data.message || '删除失败')
-      return
+      setConfirmDelete(false)
+      setMessage('删除成功')
+      onDeleted?.(data)
+      if (!onDeleted) router.refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除评论失败，请稍后重试')
+    } finally {
+      setIsDeleting(false)
     }
-
-    setConfirmDelete(false)
-    setMessage('删除成功')
-    onDeleted?.()
-    if (!onDeleted) router.refresh()
   }
 
   return (
@@ -59,7 +65,7 @@ export function DeleteCommentButton({
         <span className="fixed inset-0 z-50 grid place-items-center bg-slate-950/25 px-4 backdrop-blur-sm">
           <span className="block w-full max-w-sm rounded-[24px] border border-sky-100 bg-white p-6 text-left shadow-2xl shadow-sky-900/15">
             <strong className="block text-xl font-black text-brand-950">确认删除评论</strong>
-            <span className="mt-3 block text-sm font-bold leading-7 text-slate-600">删除后普通用户无法再看到这条评论，是否继续？</span>
+            <span className="mt-3 block text-sm font-bold leading-7 text-slate-600">删除后将无法恢复，确定继续？</span>
             <span className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
@@ -85,5 +91,26 @@ export function DeleteCommentButton({
       {message ? <span className="text-xs font-bold text-emerald-600">{message}</span> : null}
       {error ? <span className="text-xs font-bold text-red-600">{error}</span> : null}
     </span>
+  )
+}
+
+export function DeleteReplyButton({
+  replyId,
+  label,
+  onDeleted,
+  variant,
+}: Readonly<{
+  replyId: string
+  label?: string
+  onDeleted?: (result: DeleteCommentResult) => void
+  variant?: 'pill' | 'text'
+}>) {
+  return (
+    <DeleteCommentButton
+      endpoint={`/api/replies/${encodeURIComponent(replyId)}`}
+      label={label}
+      onDeleted={onDeleted}
+      variant={variant}
+    />
   )
 }

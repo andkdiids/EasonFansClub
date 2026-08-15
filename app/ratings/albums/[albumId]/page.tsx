@@ -55,7 +55,7 @@ export default async function RatingAlbumPage({ params, searchParams }: { params
             {detail.album.songs.map((song) => (
               <Link key={song.id} href={`/ratings/songs/${song.id}`} className="grid grid-cols-[2rem_3.5rem_minmax(0,1fr)_auto] items-center gap-3 py-3 hover:bg-sky-50/60 sm:grid-cols-[2.5rem_4rem_minmax(0,1fr)_auto] sm:gap-4">
                 <span className="text-center text-sm font-black tabular-nums text-brand-500">{String(song.trackNumber).padStart(2, '0')}</span>
-                <MusicCover src={song.coverUrl} alt={`${song.title}封面`} className="aspect-square w-full border border-sky-100" sizes="64px" />
+                <MusicCover src={song.coverUrl} fallbackSrc={song.fallbackCoverUrl} alt={`${song.title}封面`} className="aspect-square w-full border border-sky-100" sizes="64px" />
                 <span className="min-w-0"><strong className="block truncate text-sm font-black text-brand-950 sm:text-base">{song.title}</strong><span className="mt-1 block text-xs font-bold text-slate-500">{song.releaseYear} · {song.languageLabel}</span></span>
                 <span className="text-right"><span className="block text-sm font-black tabular-nums text-amber-600">{formatAverageScore(song.averageScore)}</span><span className="block text-[11px] font-bold text-slate-500">{formatRatingCount(song.ratingCount)} 人</span></span>
               </Link>
