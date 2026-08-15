@@ -11,9 +11,16 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
   const q = new URL(request.url).searchParams.get('q')
   try {
-    if (q) return duelOk({ rooms: [await searchDuelRoom(q)] })
     const activeState = await resolveActiveDuelForUser(guard.user.id)
     for (const affectedRoom of activeState.affectedRooms) await duelRealtimeHub.broadcastRoom(affectedRoom.id, affectedRoom)
+    if (q) {
+      return duelOk({
+        rooms: [await searchDuelRoom(q)],
+        activeRoom: activeState.activeRoom,
+        activeMatch: activeState.activeMatch,
+        isInActiveDuel: activeState.isInActiveDuel,
+      })
+    }
     return duelOk({
       rooms: await listDuelRooms(),
       activeRoom: activeState.activeRoom,

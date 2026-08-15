@@ -57,6 +57,52 @@ function postDeleteErrorResponse(error: unknown, postId: string, userId: string)
   return NextResponse.json({ message: '删除帖子失败，请稍后重试' }, { status: 500 })
 }
 
+function describePostEditError(error: unknown) {
+  const knownError = error instanceof Prisma.PrismaClientKnownRequestError
+  const errorRecord = error && typeof error === 'object' ? error as Record<string, unknown> : undefined
+  const stack = error instanceof Error ? error.stack : undefined
+  return {
+    errorName: error instanceof Error ? error.name : 'UnknownError',
+    errorCode: typeof errorRecord?.code === 'string' ? errorRecord.code : undefined,
+    prismaCode: knownError ? error.code : undefined,
+    meta: knownError ? safePostDeleteErrorMeta(error.meta) : undefined,
+    message: redactPostDeleteErrorText(error instanceof Error ? error.message : String(error)),
+    stack: stack ? redactPostDeleteErrorText(stack).slice(0, 4000) : undefined,
+  }
+}
+
+function logPostEditError(error: unknown, postId: string, userId: string, phase: string) {
+  console.error('[posts.update]', {
+    postId,
+    userId,
+    phase,
+    ...describePostEditError(error),
+  })
+}
+
+function postEditErrorResponse(error: unknown, postId: string, userId: string, phase: string) {
+  logPostEditError(error, postId, userId, phase)
+  const errorMessage = error instanceof Error ? error.message : ''
+  const prismaCode = error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined
+
+  if (errorMessage === 'POST_NOT_FOUND' || errorMessage === 'POST_ALREADY_DELETED' || prismaCode === 'P2025') {
+    return NextResponse.json({ ok: false, code: 'POST_NOT_FOUND', message: '帖子不存在或已经被删除' }, { status: 404 })
+  }
+  if (prismaCode === 'P2003') {
+    return NextResponse.json({ ok: false, code: 'POST_EDIT_REFERENCE_INVALID', message: '帖子关联的板块或用户已失效，请刷新后重试' }, { status: 409 })
+  }
+  if (prismaCode === 'P2002') {
+    return NextResponse.json({ ok: false, code: 'POST_EDIT_CONFLICT', message: '保存发生冲突，请刷新后重试' }, { status: 409 })
+  }
+  if (prismaCode === 'P2021' || prismaCode === 'P2022') {
+    return NextResponse.json({ ok: false, code: 'POST_EDIT_SCHEMA_UNAVAILABLE', message: '帖子服务暂时不可用，请联系管理员' }, { status: 503 })
+  }
+  if (prismaCode === 'P2034') {
+    return NextResponse.json({ ok: false, code: 'POST_EDIT_CONFLICT', message: '保存发生并发冲突，请刷新后重试' }, { status: 409 })
+  }
+  return NextResponse.json({ ok: false, code: 'POST_EDIT_FAILED', message: '保存失败，请稍后重试' }, { status: 500 })
+}
+
 async function executePostDelete(postId: string, user: SessionUser, canManagePosts: boolean) {
   const existing = await prisma.post.findUnique({
     where: { id: postId },
@@ -296,77 +342,98 @@ export async function PATCH(request: Request, { params }: Params) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
-  const { postId } = await params
-  const body = await request.json().catch(() => null)
-  if (!body || typeof body !== 'object') {
-    return NextResponse.json({ message: '请求参数无效' }, { status: 400 })
-  }
+  let postId = 'unknown'
+  let phase = 'params'
 
-  const existing = await prisma.post.findUnique({
-    where: { id: postId },
-    select: {
-      id: true,
-      authorId: true,
-      boardId: true,
-      isDeleted: true,
-      status: true,
-      title: true,
-      content: true,
-      stickerId: true,
-      moderationStatus: true,
-    },
-  })
-  if (!existing) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
-  if (existing.isDeleted) return NextResponse.json({ message: '帖子已删除，无法继续操作' }, { status: 404 })
-
-  const isAdmin = shouldBypassForbiddenWords(guard.user)
-  const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
-  const isOwner = existing.authorId === guard.user.id
-
-  // 编辑意图：请求体带有标题 / 正文 / 媒体（保留或新增）字段。
-  const wantsEdit =
-    typeof body.title === 'string' ||
-    typeof body.content === 'string' ||
-    typeof body.boardId === 'string' ||
-    Array.isArray(body.keepMediaIds) ||
-    Array.isArray(body.addImageUrls)
-  if (wantsEdit) return handleEditPost(request, { postId, existing, user: guard.user, isAdmin, canManagePosts, isOwner, body })
-
-  // 其余情况沿用原有管理/删除逻辑（置顶、精选、删除/恢复）。
-  const data: { isPinned?: boolean; isFeatured?: boolean; isDeleted?: boolean; deletedAt?: Date | null } = {}
-  if (typeof body?.isPinned === 'boolean') data.isPinned = body.isPinned
-  if (typeof body?.isFeatured === 'boolean') data.isFeatured = body.isFeatured
-  if (typeof body?.isDeleted === 'boolean') {
-    data.isDeleted = body.isDeleted
-    data.deletedAt = body.isDeleted ? new Date() : null
-  }
-
-  if (Object.keys(data).length === 0) {
-    return NextResponse.json({ message: '没有可更新的字段' }, { status: 400 })
-  }
-
-  // Keep the legacy PATCH contract for older clients, but route every delete
-  // request through the explicit Post delete flow. Deletion is terminal and
-  // must not share a transaction with pin/feature side effects.
-  if (data.isDeleted === true) {
-    return postDeleteResponse(postId, guard.user, canManagePosts)
-  }
-
-  const changesModeration = data.isPinned !== undefined || data.isFeatured !== undefined
-  if (changesModeration && !canManagePosts) {
-    return NextResponse.json({ message: '只有管理员可以置顶或精选帖子' }, { status: 403 })
-  }
-  if (data.isDeleted !== undefined) {
-    if (data.isDeleted && !isOwner && !canManagePosts) {
-      return NextResponse.json({ message: '只能删除自己发布的帖子' }, { status: 403 })
+  try {
+    ({ postId } = await params)
+    phase = 'parse-body'
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ message: '请求参数无效' }, { status: 400 })
     }
-    if (!data.isDeleted && !canManagePosts) {
-      return NextResponse.json({ message: '只有管理员可以恢复帖子' }, { status: 403 })
-    }
-  }
 
-  const post = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    phase = 'load-post'
+    const existing = await prisma.post.findUnique({
+      where: { id: postId },
+      select: {
+        id: true,
+        authorId: true,
+        boardId: true,
+        isDeleted: true,
+        status: true,
+        title: true,
+        content: true,
+        stickerId: true,
+        moderationStatus: true,
+      },
+    })
+    if (!existing) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
+    if (existing.isDeleted) return NextResponse.json({ message: '帖子已删除，无法继续操作' }, { status: 404 })
+
+    phase = 'load-permissions'
+    const isAdmin = shouldBypassForbiddenWords(guard.user)
+    const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
+    const isOwner = existing.authorId === guard.user.id
+
+    // 编辑意图：请求体带有标题 / 正文 / 媒体（保留或新增）字段。
+    const wantsEdit =
+      typeof body.title === 'string' ||
+      typeof body.content === 'string' ||
+      typeof body.boardId === 'string' ||
+      Array.isArray(body.keepMediaIds) ||
+      Array.isArray(body.addImageUrls)
+    if (wantsEdit) {
+      phase = 'edit'
+      return await handleEditPost(request, {
+        postId,
+        existing,
+        user: guard.user,
+        isAdmin,
+        canManagePosts,
+        isOwner,
+        body,
+        setPhase: (nextPhase) => { phase = nextPhase },
+      })
+    }
+
+    // 其余情况沿用原有管理/删除逻辑（置顶、精选、删除/恢复）。
+    const data: { isPinned?: boolean; isFeatured?: boolean; isDeleted?: boolean; deletedAt?: Date | null } = {}
+    if (typeof body?.isPinned === 'boolean') data.isPinned = body.isPinned
+    if (typeof body?.isFeatured === 'boolean') data.isFeatured = body.isFeatured
+    if (typeof body?.isDeleted === 'boolean') {
+      data.isDeleted = body.isDeleted
+      data.deletedAt = body.isDeleted ? new Date() : null
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ message: '没有可更新的字段' }, { status: 400 })
+    }
+
+    // Keep the legacy PATCH contract for older clients, but route every delete
+    // request through the explicit Post delete flow. Deletion is terminal and
+    // must not share a transaction with pin/feature side effects.
+    if (data.isDeleted === true) {
+      phase = 'delete'
+      return await postDeleteResponse(postId, guard.user, canManagePosts)
+    }
+
+    const changesModeration = data.isPinned !== undefined || data.isFeatured !== undefined
+    if (changesModeration && !canManagePosts) {
+      return NextResponse.json({ message: '只有管理员可以置顶或精选帖子' }, { status: 403 })
+    }
+    if (data.isDeleted !== undefined) {
+      if (data.isDeleted && !isOwner && !canManagePosts) {
+        return NextResponse.json({ message: '只能删除自己发布的帖子' }, { status: 403 })
+      }
+      if (!data.isDeleted && !canManagePosts) {
+        return NextResponse.json({ message: '只有管理员可以恢复帖子' }, { status: 403 })
+      }
+    }
+
+    phase = 'manage-transaction'
+    const post = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const lockedExisting = await tx.post.findUnique({
       where: { id: postId },
       select: {
@@ -447,15 +514,19 @@ export async function PATCH(request: Request, { params }: Params) {
     return updated
   })
 
-  revalidatePath('/forum')
-  revalidatePath('/community')
-  revalidatePath('/trending')
-  revalidatePath('/rankings')
-  revalidatePath('/search')
-  revalidatePath(`/posts/${postId}`)
-  revalidateTag('trending-posts')
+    phase = 'manage-cache'
+    revalidatePath('/forum')
+    revalidatePath('/community')
+    revalidatePath('/trending')
+    revalidatePath('/rankings')
+    revalidatePath('/search')
+    revalidatePath(`/posts/${postId}`)
+    revalidateTag('trending-posts')
 
-  return NextResponse.json({ post })
+    return NextResponse.json({ post })
+  } catch (error) {
+    return postEditErrorResponse(error, postId, guard.user.id, phase)
+  }
 }
 
 type EditContext = {
@@ -475,14 +546,16 @@ type EditContext = {
   canManagePosts: boolean
   isOwner: boolean
   body: Record<string, unknown>
+  setPhase: (phase: string) => void
 }
 
 async function handleEditPost(
   request: Request,
   ctx: EditContext,
 ) {
-  const { postId, existing, user, isAdmin, canManagePosts, isOwner, body } = ctx
+  const { postId, existing, user, isAdmin, canManagePosts, isOwner, body, setPhase } = ctx
 
+  setPhase('edit-authorize')
   if (!isOwner && !canManagePosts) {
     return NextResponse.json({ message: '只能编辑自己发布的帖子' }, { status: 403 })
   }
@@ -492,6 +565,7 @@ async function handleEditPost(
   const hasSticker = Boolean(existing.stickerId)
   const nextBoardId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
 
+  setPhase('edit-board')
   const board = await prisma.board.findFirst({
     where: { id: nextBoardId, isActive: true },
     select: { id: true, slug: true },
@@ -501,6 +575,7 @@ async function handleEditPost(
     return NextResponse.json({ message: '只有内容管理员可以编辑公告区帖子', errors: { boardId: '无权编辑公告区' } }, { status: 403 })
   }
 
+  setPhase('edit-moderation')
   const forbiddenWords = await checkPostForbiddenWords({ title: rawTitle, content: rawContent }, user)
   if (forbiddenWords.blocked) {
     return NextResponse.json({
@@ -525,6 +600,7 @@ async function handleEditPost(
     : []
 
   // 统计当前帖子已保留的图片数量，确保总量不超过上限。
+  setPhase('edit-media-read')
   const currentMedia = await prisma.postMedia.findMany({
     where: { postId, type: 'IMAGE' },
     orderBy: { sortOrder: 'asc' },
@@ -555,8 +631,8 @@ async function handleEditPost(
     })
   }
 
-  const reviewNotificationKey = isAdmin ? null : `post-review:${postId}:${randomUUID()}`
-  const updated = await prisma.$transaction(async (tx) => {
+  setPhase('edit-transaction')
+  const transactionResult = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const lockedExisting = await tx.post.findUnique({
       where: { id: postId },
@@ -622,37 +698,78 @@ async function handleEditPost(
       })
     }
 
-    if (!isAdmin) {
-      await createPostModerationHistory(tx, {
+    if (!isAdmin && lockedExisting.moderationStatus === 'APPROVED') {
+      const affectedBoardIds = [...new Set([lockedExisting.boardId, nextBoardId])]
+      for (const affectedBoardId of affectedBoardIds) {
+        const postCount = await tx.post.count({
+          where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+        })
+        await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
+      }
+    }
+    if (isAdmin && lockedExisting.boardId !== nextBoardId && lockedExisting.moderationStatus === 'APPROVED') {
+      for (const affectedBoardId of [lockedExisting.boardId, nextBoardId]) {
+        const postCount = await tx.post.count({
+          where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+        })
+        await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
+      }
+    }
+
+    return {
+      post: updatedPost,
+      previousModerationStatus: lockedExisting.moderationStatus,
+      previousRejectionReason: lockedExisting.rejectionReason,
+      audit: {
+        operatorId: user.id,
+        action: 'EDIT_POST' as const,
+        operationType: adminAuditOperations.POST_EDITED,
+        targetType: 'POST',
+        targetId: postId,
+        targetTitle: rawTitle,
+        targetUserId: lockedExisting.authorId,
+        targetUserName: lockedExisting.User.Profile?.displayName || lockedExisting.User.nickname,
+        targetUserUid: lockedExisting.User.uid,
+        metadata: { changedFields: ['title', 'content', 'boardId', ...(mediaChanged ? ['media'] : [])] },
+      },
+    }
+  })
+
+  const reviewNotificationKey = isAdmin ? null : `post-review:${postId}:${randomUUID()}`
+  if (!isAdmin) {
+    setPhase('edit-moderation-history')
+    try {
+      await createPostModerationHistory(prisma, {
         postId,
         actorId: user.id,
         action: 'EDITED',
         status: 'PENDING',
         titleSnapshot: rawTitle,
-        rejectionReason: lockedExisting.moderationStatus === 'REJECTED' ? lockedExisting.rejectionReason : null,
+        rejectionReason: transactionResult.previousModerationStatus === 'REJECTED' ? transactionResult.previousRejectionReason : null,
       })
+    } catch (error) {
+      logPostEditError(error, postId, user.id, 'edit-moderation-history')
+    }
+
+    setPhase('edit-activity-cleanup')
+    try {
       // The old approval activity must not keep linking ordinary users to a
       // post that is now waiting for its edited content to be reviewed.
-      await tx.friendActivity.deleteMany({
+      await prisma.friendActivity.deleteMany({
         where: { type: 'POST', targetUrl: `/posts/${postId}` },
       })
+    } catch (error) {
+      logPostEditError(error, postId, user.id, 'edit-activity-cleanup')
+    }
 
-      if (lockedExisting.moderationStatus === 'APPROVED') {
-        const affectedBoardIds = [...new Set([lockedExisting.boardId, nextBoardId])]
-        for (const affectedBoardId of affectedBoardIds) {
-          const postCount = await tx.post.count({
-            where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
-          })
-          await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
-        }
-      }
-
-      const admins = await tx.user.findMany({
+    setPhase('edit-review-notification')
+    try {
+      const admins = await prisma.user.findMany({
         where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
         select: { id: true },
       })
       if (admins.length && reviewNotificationKey) {
-        await tx.notification.createMany({
+        await prisma.notification.createMany({
           data: admins.map((admin) => ({
             recipientId: admin.id,
             type: 'ADMIN' as const,
@@ -664,46 +781,43 @@ async function handleEditPost(
           skipDuplicates: true,
         })
       }
-    } else {
-      await createAdminActionAudit(tx, {
-        operatorId: user.id,
-        action: 'EDIT_POST',
-        operationType: adminAuditOperations.POST_EDITED,
-        targetType: 'POST',
-        targetId: postId,
-        targetTitle: rawTitle,
-        targetUserId: lockedExisting.authorId,
-        targetUserName: lockedExisting.User.Profile?.displayName || lockedExisting.User.nickname,
-        targetUserUid: lockedExisting.User.uid,
-        metadata: { changedFields: ['title', 'content', 'boardId', ...(mediaChanged ? ['media'] : [])] },
-      })
-      if (lockedExisting.boardId !== nextBoardId && lockedExisting.moderationStatus === 'APPROVED') {
-        for (const affectedBoardId of [lockedExisting.boardId, nextBoardId]) {
-          const postCount = await tx.post.count({
-            where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
-          })
-          await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
-        }
-      }
+    } catch (error) {
+      logPostEditError(error, postId, user.id, 'edit-review-notification')
     }
+  } else {
+    setPhase('edit-admin-audit')
+    try {
+      await createAdminActionAudit(prisma, transactionResult.audit)
+    } catch (error) {
+      // Audit history is useful but must not roll back a successful content
+      // update when production is still on the older AdminAction schema.
+      logPostEditError(error, postId, user.id, 'edit-admin-audit')
+    }
+  }
 
-    return updatedPost
-  })
-
-  revalidatePath('/community')
-  revalidatePath('/forum')
-  revalidatePath('/trending')
-  revalidatePath('/rankings')
-  revalidatePath('/search')
-  revalidatePath('/admin/posts/review')
-  revalidatePath('/user/[uid]', 'page')
-  revalidatePath(`/posts/${postId}`)
-  revalidateTag('trending-posts')
-  if (!isAdmin) void emitRealtimeToAdmins('notification')
+  setPhase('edit-cache')
+  try {
+    revalidatePath('/community')
+    revalidatePath('/forum')
+    revalidatePath('/trending')
+    revalidatePath('/rankings')
+    revalidatePath('/search')
+    revalidatePath('/admin/posts/review')
+    revalidatePath('/user/[uid]', 'page')
+    revalidatePath(`/posts/${postId}`)
+    revalidateTag('trending-posts')
+  } catch (error) {
+    logPostEditError(error, postId, user.id, 'edit-cache')
+  }
+  if (!isAdmin) {
+    void emitRealtimeToAdmins('notification').catch((error) => {
+      logPostEditError(error, postId, user.id, 'edit-realtime')
+    })
+  }
 
   return NextResponse.json({
-    post: { id: updated.id, title: updated.title, content: publicContentImageMarkers(updated.content), moderationStatus: updated.moderationStatus, updatedAt: updated.updatedAt },
-    moderationStatus: updated.moderationStatus,
+    post: { id: transactionResult.post.id, title: transactionResult.post.title, content: publicContentImageMarkers(transactionResult.post.content), moderationStatus: transactionResult.post.moderationStatus, updatedAt: transactionResult.post.updatedAt },
+    moderationStatus: transactionResult.post.moderationStatus,
     message: isAdmin ? '帖子已保存' : '修改已保存，正在等待审核，审核通过后会重新展示。',
   })
 }

@@ -15,6 +15,10 @@ export const DUEL_RECONNECT_GRACE_MS = 15_000
 export const DUEL_HEARTBEAT_INTERVAL_MS = 5_000
 export const DUEL_ROOM_POLL_INTERVAL_MS = 2_500
 export const DUEL_ONLINE_TIMEOUT_MS = 20_000
+// Heartbeats normally arrive every five seconds. This larger bound is only a
+// recovery safety net for a crashed browser/server; structural room/member
+// checks remain the primary active-duel decision.
+export const DUEL_STALE_MATCH_MS = 2 * 60_000
 export const DUEL_MIN_VALID_QUESTIONS = 5
 export const DUEL_WIN_REWARD = 7
 export const DUEL_WAITING_ROOM_TTL_MS = 30 * 60_000

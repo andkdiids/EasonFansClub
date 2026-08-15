@@ -5361,6 +5361,10 @@ body:has(.duel-page) .app-page-content {
 .duel-live-pill { margin-left:auto; border:1px solid rgba(84,219,164,.5); border-radius:0; padding:5px 8px; color:#54dba4; background:rgba(84,219,164,.08); font-size:9px; font-weight:900; letter-spacing:.16em; }
 .duel-alert { margin-top:14px; border:1px solid rgba(255,113,106,.42); border-left:3px solid #ff716a; border-radius:0; padding:11px 14px; color:#ffd0cc; background:#171825; font-size:12px; font-weight:800; }
 .duel-alert button { float:right; border:0; color:inherit; background:transparent; font-size:18px; line-height:1; cursor:pointer; }
+.duel-active-banner { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:16px; border:1px solid rgba(255,113,106,.42); border-left:3px solid #ff716a; padding:12px 14px; color:#ffd0cc; background:#171825; font-size:12px; font-weight:850; }
+.duel-active-banner-actions { display:flex; align-items:center; gap:10px; flex:none; }
+.duel-active-banner-actions button { border:1px solid rgba(255,208,204,.42); padding:7px 10px; color:#ffd0cc; background:transparent; font:inherit; font-size:11px; font-weight:850; cursor:pointer; }
+.duel-active-banner-actions button:last-child { border:0; padding:3px 6px; font-size:18px; line-height:1; }
 .duel-lobby,.duel-room-hall,.duel-match-screen,.duel-result-screen { padding-top:30px; }
 .duel-hero-card { position:relative; display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,.58fr); align-items:center; gap:22px; overflow:hidden; border:1px solid var(--duel-line); border-radius:0; padding:clamp(24px,5vw,52px); background:linear-gradient(118deg,#123c36 0%,#0d2130 48%,#08121f 100%); box-shadow:none; }
 .duel-hero-card::before { position:absolute; inset:0; background:linear-gradient(90deg,rgba(84,219,164,.12),transparent 58%); content:''; pointer-events:none; }

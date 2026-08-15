@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DUEL_HEARTBEAT_INTERVAL_MS, DUEL_MODE_RULES, DUEL_ROOM_POLL_INTERVAL_MS, getDuelModeLabel, type DuelMode } from '@/lib/guess-song-duel-config'
 import { canApplyDuelMatchSnapshot } from '@/lib/guess-song-duel-client-state'
-import type { DuelClientCommand, DuelMatchResult, DuelMatchState, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
+import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
 
 type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null }
 type DuelStats = { wins: number; participations: number; winRate: number }
 type DuelHistoryItem = { result: DuelMatchResult; roomCode: string }
 type ApiPayload = { ok?: boolean; message?: string; code?: string; [key: string]: unknown }
 type DuelApiError = Error & { code?: string; status?: number }
+const emptyActiveDuel: DuelActiveState = { activeRoom: null, activeMatch: null, isInActiveDuel: false }
 
 async function api<T extends ApiPayload>(url: string, init?: RequestInit) {
   const response = await fetch(url, { ...init, cache: 'no-store' })
@@ -62,6 +63,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const [room, setRoom] = useState<DuelRoomState | null>(null)
   const [roomId, setRoomId] = useState<string | null>(null)
   const [matchId, setMatchId] = useState<string | null>(null)
+  const [activeDuel, setActiveDuel] = useState<DuelActiveState>(emptyActiveDuel)
   const [match, setMatch] = useState<DuelMatchState | null>(null)
   const [questionResult, setQuestionResult] = useState<DuelMatchState['questionResult']>(null)
   const [view, setView] = useState<'lobby' | 'room' | 'match' | 'result'>('lobby')
@@ -115,6 +117,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     setRoom(null)
     setRoomId(null)
     setMatchId(null)
+    setActiveDuel(emptyActiveDuel)
     setMatch(null)
     setQuestionResult(null)
     setView('lobby')
@@ -124,13 +127,19 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const loadLobby = useCallback(async () => {
     try {
       const [roomData, statData] = await Promise.all([
-        api<{ rooms: DuelRoomState[]; activeRoom: DuelRoomState | null; activeMatch: { id: string; roomId: string; status: 'PLAYING' } | null; isInActiveDuel: boolean }>('/api/entertainment/guess-song/duel/rooms'),
+        api<{ rooms: DuelRoomState[] } & DuelActiveState>('/api/entertainment/guess-song/duel/rooms'),
         api<{ stats: DuelStats; history: DuelHistoryItem[] }>('/api/entertainment/guess-song/duel/stats'),
       ])
       setRooms(roomData.rooms || [])
+      setActiveDuel({ activeRoom: roomData.activeRoom || null, activeMatch: roomData.activeMatch || null, isInActiveDuel: Boolean(roomData.isInActiveDuel && roomData.activeRoom && roomData.activeMatch) })
       setStats(statData.stats || { wins: 0, participations: 0, winRate: 0 })
       setHistory(statData.history || [])
-      if (!roomData.isInActiveDuel && viewRef.current === 'lobby' && (roomIdRef.current || matchIdRef.current)) resetToLobby()
+      const localStateMatchesServer = Boolean(
+        !roomIdRef.current && !matchIdRef.current
+        || roomData.activeRoom?.id === roomIdRef.current
+          && roomData.activeMatch?.id === matchIdRef.current,
+      )
+      if (viewRef.current === 'lobby' && (roomIdRef.current || matchIdRef.current) && (!roomData.isInActiveDuel || !localStateMatchesServer)) resetToLobby()
     } catch (reason) {
       setDuelError(reason)
     }
@@ -178,6 +187,10 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     setRoom(nextRoom)
     setRoomId(nextRoom.id)
     setMatchId(nextRoom.matchId)
+    // A room payload can contain a historical matchId. Only the lobby's
+    // unified server response may establish activeDuel; opening a room is
+    // not itself proof that the linked Match is still active.
+    setActiveDuel(emptyActiveDuel)
     setMatch(null)
     setQuestionResult(null)
     setView(nextRoom.matchId ? 'match' : 'room')
@@ -577,7 +590,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     try {
       await api(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(room.id)}/leave`, { method: 'POST' })
       resetToLobby()
-      void loadLobby()
+      await loadLobby()
     } catch (reason) {
       setDuelError(reason)
     } finally {
@@ -656,13 +669,12 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       const code = (reason as DuelApiError)?.code
       if (!['ROOM_NOT_FOUND', 'ROOM_NOT_MEMBER', 'ROOM_EXPIRED'].includes(code || '')) {
         setDuelError(reason)
-        return
       }
     } finally {
       setBusy(false)
     }
     resetToLobby()
-    void loadLobby()
+    await loadLobby()
   }
 
   const myReady = room ? room.host.id === userId ? room.hostReady : room.challengerReady : false
@@ -686,6 +698,15 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
       {view === 'lobby' ? (
         <section className="duel-lobby">
+          {activeDuel.isInActiveDuel && activeDuel.activeRoom && activeDuel.activeMatch ? (
+            <div className="duel-active-banner" role="status">
+              <span>当前正在进行一场对决，请先结束当前比赛</span>
+              <div className="duel-active-banner-actions">
+                <button type="button" onClick={() => openRoom(activeDuel.activeRoom as DuelRoomState)}>返回当前对局</button>
+                <button type="button" aria-label="重新检查对局状态" title="重新检查对局状态" onClick={() => void loadLobby()}>×</button>
+              </div>
+            </div>
+          ) : null}
           <div className="duel-hero-card">
             <div className="duel-hero-copy">
               <p className="duel-eyebrow">REAL-TIME 1V1 · TWO MODES</p>

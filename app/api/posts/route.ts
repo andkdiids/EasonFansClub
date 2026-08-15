@@ -341,7 +341,7 @@ export async function POST(request: Request) {
             data: admins.map((admin) => ({
               recipientId: admin.id,
               type: 'ADMIN' as const,
-              title: '鏂板笘瀛愬緟瀹℃牳',
+              title: '新帖子待审核',
               content: input.title,
               link: '/admin/posts/review',
               key: `post-review:${result.post.id}`,
