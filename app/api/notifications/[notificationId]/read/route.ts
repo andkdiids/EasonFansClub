@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { markUnifiedNotificationReadWithState } from '@/lib/notifications'
 import { emitRealtime } from '@/lib/realtime'
+import { logNotificationError } from '@/lib/notification-errors'
 import { requireUser } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
@@ -12,7 +13,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ not
   const { notificationId } = await params
   const body = await request.json().catch(() => null)
   const source = body?.source === 'system' ? 'system' : 'personal'
-  const result = await markUnifiedNotificationReadWithState(guard.user.id, source, notificationId)
+  let result
+  try {
+    result = await markUnifiedNotificationReadWithState(guard.user.id, source, notificationId)
+  } catch (error) {
+    logNotificationError('mark-read', { userId: guard.user.id, notificationId, source }, error)
+    return NextResponse.json({ ok: false, code: 'NOTIFICATIONS_ACTION_UNAVAILABLE', message: '通知暂时无法更新，请稍后重试' }, {
+      status: 503,
+      headers: privateHeaders,
+    })
+  }
 
   console.info('[notifications.mark-read]', {
     notificationId,

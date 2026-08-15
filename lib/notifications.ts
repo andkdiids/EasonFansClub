@@ -10,6 +10,7 @@ import { compareNotificationOrder } from '@/lib/notification-order'
 import { clampPaginationPage } from '@/lib/pagination'
 import { formatLikeNotificationText, loadLikeNotificationStats, parseLikeNotificationTarget, reconcileLikeNotifications, type LikeNotificationTargetKind } from '@/lib/like-notifications'
 import { normalizeActionUrl, normalizeStoredInternalPath } from '@/lib/url-safety'
+import { logNotificationError } from '@/lib/notification-errors'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
@@ -256,7 +257,7 @@ async function loadDailyNotificationComments(
     })
     return { rows, failed: false }
   } catch (error) {
-    console.error(`[notifications:${label}:daily-comment-lookup-failed]`, error)
+    logNotificationError('daily-comment-lookup', { label }, error)
     return { rows: [] as DailyCommentNotificationRow[], failed: true }
   }
 }
@@ -385,23 +386,26 @@ async function getDirectMessageUnreadCount(userId: string) {
   } catch (error) {
     // ConversationParticipant.clearedAt was added after the original private
     // message schema. Keep notification counts usable while an older database
-    // is being migrated, but do not turn a second database failure into zero.
-    console.warn('[notifications.unread-summary.direct-messages-compat]', {
-      userId,
-      error: error instanceof Error ? error.name : 'unknown',
-    })
-    const rows = await prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
-      SELECT COUNT(*) AS unreadCount
-      FROM DirectMessage dm
-      INNER JOIN ConversationParticipant cp
-        ON cp.conversationId = dm.conversationId
-       AND cp.userId = ${userId}
-      WHERE dm.senderId <> ${userId}
-        AND dm.isDeleted = false
-        AND cp.isDeleted = false
-        AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
-    `
-    return Number(rows[0]?.unreadCount || 0)
+    // is being migrated. Direct messages are secondary to the notification
+    // list, so a compatibility query failure must not take the whole page down.
+    logNotificationError('unread-summary.direct-messages-compat', { userId }, error)
+    try {
+      const rows = await prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
+        SELECT COUNT(*) AS unreadCount
+        FROM DirectMessage dm
+        INNER JOIN ConversationParticipant cp
+          ON cp.conversationId = dm.conversationId
+         AND cp.userId = ${userId}
+        WHERE dm.senderId <> ${userId}
+          AND dm.isDeleted = false
+          AND cp.isDeleted = false
+          AND (cp.lastReadAt IS NULL OR dm.createdAt > cp.lastReadAt)
+      `
+      return Number(rows[0]?.unreadCount || 0)
+    } catch (fallbackError) {
+      logNotificationError('unread-summary.direct-messages-fallback', { userId }, fallbackError)
+      return 0
+    }
   }
 }
 
@@ -425,9 +429,11 @@ export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: 
 }
 
 export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
-  await reconcileLikeNotifications(userId)
+  void reconcileLikeNotifications(userId).catch((error) => {
+    logNotificationError('unread-summary.like-reconciliation', { userId }, error)
+  })
   const now = new Date()
-  const [personalRows, systemCount, directMessages] = await Promise.all([
+  const [personalResult, systemResult, directMessageResult] = await Promise.allSettled([
     prisma.$queryRaw<Array<{
       replies: bigint | number
       likes: bigint | number
@@ -450,6 +456,25 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
     prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
     getDirectMessageUnreadCount(userId),
   ])
+
+  const personalRows = personalResult.status === 'fulfilled'
+    ? personalResult.value
+    : (() => {
+        logNotificationError('unread-summary.personal-query', { userId }, personalResult.reason)
+        return []
+      })()
+  const systemCount = systemResult.status === 'fulfilled'
+    ? systemResult.value
+    : (() => {
+        logNotificationError('unread-summary.system-query', { userId }, systemResult.reason)
+        return 0
+      })()
+  const directMessages = directMessageResult.status === 'fulfilled'
+    ? directMessageResult.value
+    : (() => {
+        logNotificationError('unread-summary.direct-message-query', { userId }, directMessageResult.reason)
+        return 0
+      })()
 
   const personalRow = personalRows[0]
   const personalCounts = {
@@ -488,6 +513,8 @@ export type UnifiedNotificationPage = {
   pageSize: number
   totalPages: number
   unreadCount: number
+  degraded?: boolean
+  failed?: boolean
 }
 
 type NotificationPageRow = {
@@ -503,8 +530,15 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   pageSize?: number
   category?: NotificationCategory
 } = {}): Promise<UnifiedNotificationPage> {
-  await reconcileLikeNotifications(userId)
-  await reconcileStalePersonalNotifications(userId)
+  // Reconciliation cleans up historical notification ghosts, but it is not
+  // required to render the current page. Run it in the background so a stale
+  // relation or a partially migrated optional table cannot crash the route.
+  void reconcileLikeNotifications(userId).catch((error) => {
+    logNotificationError('list.like-reconciliation', { userId }, error)
+  })
+  void reconcileStalePersonalNotifications(userId).catch((error) => {
+    logNotificationError('list.stale-reconciliation', { userId }, error)
+  })
   const now = new Date()
   const category = parseNotificationCategory(options.category)
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || 20) || 20, 1), MAX_NOTIFICATION_PAGE_SIZE)
@@ -520,46 +554,87 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     ...systemCategory,
     ...(options.unreadOnly ? { SystemNotificationRead: { none: { userId } } } : {}),
   }
-  const [personalTotal, systemTotal, personalUnread, systemUnread] = await Promise.all([
+  const [personalTotalResult, systemTotalResult, personalUnreadResult, systemUnreadResult] = await Promise.allSettled([
     prisma.notification.count({ where: personalWhere }),
     prisma.systemNotification.count({ where: systemWhere }),
     prisma.notification.count({ where: getNotificationVisibilityFilter(userId, { ...personalCategory, isRead: false }) }),
     prisma.systemNotification.count({ where: { ...systemWhere, SystemNotificationRead: { none: { userId } } } }),
   ])
-  const total = personalTotal + systemTotal
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const page = clampPaginationPage(options.page || 1, totalPages)
+  let degraded = false
+  let failed = false
+  const getCount = (result: PromiseSettledResult<number>, phase: string) => {
+    if (result.status === 'fulfilled') return result.value
+    degraded = true
+    logNotificationError(phase, { userId, category }, result.reason)
+    return 0
+  }
+  const personalTotal = getCount(personalTotalResult, 'list.personal-count')
+  let systemTotal = getCount(systemTotalResult, 'list.system-count')
+  const personalUnread = getCount(personalUnreadResult, 'list.personal-unread-count')
+  let systemUnread = getCount(systemUnreadResult, 'list.system-unread-count')
+  let total = personalTotal + systemTotal
+  let totalPages = Math.max(1, Math.ceil(total / pageSize))
+  let page = clampPaginationPage(options.page || 1, totalPages)
   const offset = (page - 1) * pageSize
   const personalCategorySql = getPersonalNotificationCategorySql(category)
   const systemCategorySql = getSystemNotificationCategorySql(category)
   const unreadPersonalSql = options.unreadOnly ? Prisma.sql`AND n.isRead = 0` : Prisma.empty
   const unreadSystemSql = options.unreadOnly ? Prisma.sql`AND snr.id IS NULL` : Prisma.empty
-  const rows = await prisma.$queryRaw<NotificationPageRow[]>(Prisma.sql`
-    SELECT n.id AS id, 'personal' AS source, n.isRead AS isRead, n.createdAt AS createdAt
-    FROM Notification n
-    WHERE n.recipientId = ${userId}
-      ${personalCategorySql}
-      ${unreadPersonalSql}
-    UNION ALL
-    SELECT sn.id AS id, 'system' AS source,
-      CASE WHEN snr.id IS NULL THEN 0 ELSE 1 END AS isRead,
-      COALESCE(sn.publishAt, sn.createdAt) AS createdAt
-    FROM SystemNotification sn
-    LEFT JOIN SystemNotificationRead snr
-      ON snr.notificationId = sn.id AND snr.userId = ${userId}
-    WHERE sn.published = 1
-      AND sn.publishAt <= ${now}
-      AND (sn.expireAt IS NULL OR sn.expireAt > ${now})
-      AND sn.type <> 'UPDATE'
-      ${systemCategorySql}
-      ${unreadSystemSql}
-    ORDER BY isRead ASC, createdAt DESC, source ASC, id ASC
-    LIMIT ${pageSize} OFFSET ${offset}
-  `)
+  let rows: NotificationPageRow[]
+  try {
+    rows = await prisma.$queryRaw<NotificationPageRow[]>(Prisma.sql`
+      SELECT n.id AS id, 'personal' AS source, n.isRead AS isRead, n.createdAt AS createdAt
+      FROM Notification n
+      WHERE n.recipientId = ${userId}
+        ${personalCategorySql}
+        ${unreadPersonalSql}
+      UNION ALL
+      SELECT sn.id AS id, 'system' AS source,
+        CASE WHEN snr.id IS NULL THEN 0 ELSE 1 END AS isRead,
+        COALESCE(sn.publishAt, sn.createdAt) AS createdAt
+      FROM SystemNotification sn
+      LEFT JOIN SystemNotificationRead snr
+        ON snr.notificationId = sn.id AND snr.userId = ${userId}
+      WHERE sn.published = 1
+        AND sn.publishAt <= ${now}
+        AND (sn.expireAt IS NULL OR sn.expireAt > ${now})
+        AND sn.type <> 'UPDATE'
+        ${systemCategorySql}
+        ${unreadSystemSql}
+      ORDER BY isRead ASC, createdAt DESC, source ASC, id ASC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `)
+  } catch (error) {
+    degraded = true
+    logNotificationError('list.union-query', { userId, page, pageSize, category }, error)
+
+    // The personal table is the core notification feed. If the cross-table
+    // union is temporarily unavailable, keep the page usable with a standard
+    // Prisma query instead of throwing into the global error boundary.
+    systemTotal = 0
+    systemUnread = 0
+    total = personalTotal
+    totalPages = Math.max(1, Math.ceil(total / pageSize))
+    page = clampPaginationPage(options.page || 1, totalPages)
+    try {
+      const fallbackRows = await prisma.notification.findMany({
+        where: personalWhere,
+        orderBy: [{ isRead: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: { id: true, isRead: true, createdAt: true },
+      })
+      rows = fallbackRows.map((row) => ({ ...row, source: 'personal' }))
+    } catch (fallbackError) {
+      failed = true
+      logNotificationError('list.personal-fallback-query', { userId, page, pageSize, category }, fallbackError)
+      rows = []
+    }
+  }
 
   const personalIds = rows.filter((row) => row.source === 'personal').map((row) => row.id)
   const systemIds = rows.filter((row) => row.source === 'system').map((row) => row.id)
-  const [personal, system] = await Promise.all([
+  const [personalResult, systemResult] = await Promise.allSettled([
     personalIds.length ? prisma.notification.findMany({
       where: { recipientId: userId, id: { in: personalIds } },
       select: {
@@ -602,6 +677,20 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       },
     }) : [],
   ])
+  const personal = personalResult.status === 'fulfilled'
+    ? personalResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.personal-hydration', { userId, page, pageSize, category }, personalResult.reason)
+        return []
+      })()
+  const system = systemResult.status === 'fulfilled'
+    ? systemResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.system-hydration', { userId, page, pageSize, category }, systemResult.reason)
+        return []
+      })()
 
   const actorIds = personal.flatMap((item) => item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
   const likeTargets = personal.flatMap((item) => {
@@ -609,10 +698,24 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     const target = parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
     return target ? [target] : []
   })
-  const [remarkMap, likeCounts] = await Promise.all([
+  const [remarkResult, likeCountResult] = await Promise.allSettled([
     loadFriendRemarkMap(userId, actorIds),
     loadLikeNotificationStats(likeTargets),
   ])
+  const remarkMap = remarkResult.status === 'fulfilled'
+    ? remarkResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.friend-remarks', { userId, page, pageSize, category }, remarkResult.reason)
+        return new Map<string, string>()
+      })()
+  const likeCounts = likeCountResult.status === 'fulfilled'
+    ? likeCountResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.like-stats', { userId, page, pageSize, category }, likeCountResult.reason)
+        return new Map<string, number>()
+      })()
   const personalById = new Map(personal.map((item) => [item.id, item]))
   const systemById = new Map(system.map((item) => [item.id, item]))
   const merged: UnifiedNotification[] = rows.flatMap((row): UnifiedNotification[] => {
@@ -702,7 +805,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const dailyTargets = targets.filter((target) => target.kind === 'daily-message')
   const feedbackTargets = targets.filter((target) => target.kind === 'feedback')
   const wallTargets = targets.filter((target) => target.kind === 'profile-wall')
-  const [postReplies, dailyCommentLookup, feedbacks, feedbackReplies, wallMessages] = await Promise.all([
+  const [postReplyResult, dailyCommentResult, feedbackResult, feedbackReplyResult, wallMessageResult] = await Promise.allSettled([
     postTargets.length ? prisma.reply.findMany({
       where: { id: { in: postTargets.map((target) => target.parentId) } },
       select: { id: true, postId: true, content: true, moderationStatus: true, stickerId: true, isDeleted: true },
@@ -730,6 +833,42 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       select: { id: true, content: true, moderationStatus: true, User_ProfileWallMessage_receiverIdToUser: { select: { uid: true } } },
     }) : [],
   ])
+  const postReplies = postReplyResult.status === 'fulfilled'
+    ? postReplyResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.reply-hydration', { userId, page, pageSize, category }, postReplyResult.reason)
+        return []
+      })()
+  const dailyCommentLookup = dailyCommentResult.status === 'fulfilled'
+    ? dailyCommentResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.daily-comment-hydration', { userId, page, pageSize, category }, dailyCommentResult.reason)
+        return { rows: [] as DailyCommentNotificationRow[], failed: true }
+      })()
+  const feedbacks = feedbackResult.status === 'fulfilled'
+    ? feedbackResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.feedback-hydration', { userId, page, pageSize, category }, feedbackResult.reason)
+        return []
+      })()
+  const feedbackReplies = feedbackReplyResult.status === 'fulfilled'
+    ? feedbackReplyResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.feedback-reply-hydration', { userId, page, pageSize, category }, feedbackReplyResult.reason)
+        return []
+      })()
+  const wallMessages = wallMessageResult.status === 'fulfilled'
+    ? wallMessageResult.value
+    : (() => {
+        degraded = true
+        logNotificationError('list.wall-message-hydration', { userId, page, pageSize, category }, wallMessageResult.reason)
+        return []
+      })()
+  if (dailyCommentLookup.failed) degraded = true
   const dailyComments = dailyCommentLookup.rows
   const postReplyById = new Map(postReplies.map((reply) => [reply.id, reply]))
   const feedbackReplyById = new Map(feedbackReplies.map((reply) => [reply.id, reply]))
@@ -799,7 +938,16 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     return item
   })
 
-  return { items, total, page, pageSize, totalPages, unreadCount: personalUnread + systemUnread }
+  return {
+    items,
+    total,
+    page,
+    pageSize,
+    totalPages,
+    unreadCount: personalUnread + systemUnread,
+    ...(degraded ? { degraded: true } : {}),
+    ...(failed ? { failed: true } : {}),
+  }
 }
 
 export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number } = {}) {

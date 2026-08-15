@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getUnreadNotificationCount } from '@/lib/notifications'
+import { logNotificationError } from '@/lib/notification-errors'
 import { requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -15,10 +16,7 @@ export async function GET() {
     const count = await getUnreadNotificationCount(guard.user.id)
     return NextResponse.json({ count }, { headers: privateHeaders })
   } catch (error) {
-    console.error('[notifications.unread-count.failed]', {
-      userId: guard.user.id,
-      error: error instanceof Error ? error.name : 'unknown',
-    })
+    logNotificationError('unread-count', { userId: guard.user.id }, error)
     return NextResponse.json({ ok: false, code: 'UNREAD_SUMMARY_UNAVAILABLE', message: '未读统计暂时不可用，请稍后重试' }, {
       status: 503,
       headers: privateHeaders,

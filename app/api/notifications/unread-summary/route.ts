@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getUnreadSummary } from '@/lib/notifications'
+import { logNotificationError } from '@/lib/notification-errors'
 import { requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -13,10 +14,7 @@ export async function GET() {
   try {
     return NextResponse.json(await getUnreadSummary(guard.user.id), { headers: privateHeaders })
   } catch (error) {
-    console.error('[notifications.unread-summary.failed]', {
-      userId: guard.user.id,
-      error: error instanceof Error ? error.name : 'unknown',
-    })
+    logNotificationError('unread-summary', { userId: guard.user.id }, error)
     return NextResponse.json({ ok: false, code: 'UNREAD_SUMMARY_UNAVAILABLE', message: '未读统计暂时不可用，请稍后重试' }, {
       status: 503,
       headers: privateHeaders,

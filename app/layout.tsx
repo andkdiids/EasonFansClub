@@ -12,6 +12,7 @@ import { getCurrentUser, getSessionUserFromCookie } from '@/lib/auth'
 import { calculateGrowthSummary, defaultGrowthLevels, getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { getUnreadSummary } from '@/lib/notifications'
+import { logNotificationError } from '@/lib/notification-errors'
 import { getSiteAppearance } from '@/lib/site-config'
 import './globals.css'
 
@@ -30,7 +31,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const [appearance, unreadSummary, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([
     getSiteAppearance().catch(() => null),
     getUnreadSummary(sessionUser.id).catch((error) => {
-      console.error('[layout.unread-summary]', error)
+      logNotificationError('layout.unread-summary', { userId: sessionUser.id }, error)
       return emptyUnreadSummary
     }),
     hasAdminPermission(sessionUser, 'layout.manage').catch(() => false),

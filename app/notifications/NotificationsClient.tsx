@@ -224,11 +224,15 @@ export function NotificationsClient({
   initialPagination,
   initialCategory = 'all',
   siteLogoUrl,
+  initialLoadError = null,
+  initialLoadWarning = null,
 }: {
   initialNotifications: UnifiedNotification[]
   initialPagination: NotificationPagination
   initialCategory?: NotificationCategory
   siteLogoUrl?: string | null
+  initialLoadError?: string | null
+  initialLoadWarning?: string | null
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -256,6 +260,8 @@ export function NotificationsClient({
   const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[]; all?: boolean } | null>(null)
   const [isClearing, setIsClearing] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [loadError, setLoadError] = useState(initialLoadError || '')
+  const [loadWarning, setLoadWarning] = useState(initialLoadWarning || '')
 
   const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[], nextPagination?: NotificationPagination) => {
     const merged = filterDismissedSystemNotifications(serverNotifications).map((item) => {
@@ -298,16 +304,25 @@ export function NotificationsClient({
           cache: 'no-store',
           signal: controller.signal,
         })
-        if (!response.ok) return
         const data = await response.json().catch(() => null) as {
           notifications?: UnifiedNotification[]
           page?: number
           pageSize?: number
           total?: number
           totalPages?: number
+          message?: string
+          degraded?: boolean
+          failed?: boolean
         } | null
         if (requestSequence !== notificationListRequestSequenceRef.current) return
+        if (!response.ok) {
+          setLoadError(data?.message || '通知加载失败，请重试')
+          setLoadWarning('')
+          return
+        }
         if (Array.isArray(data?.notifications)) {
+          setLoadError(data.failed ? '通知加载失败，请重试' : '')
+          setLoadWarning(data.degraded && !data.failed ? '部分通知暂时无法加载，请点击重试' : '')
           const nextPagination = typeof data.page === 'number' && typeof data.pageSize === 'number' && typeof data.total === 'number' && typeof data.totalPages === 'number'
             ? { page: data.page, pageSize: data.pageSize, total: data.total, totalPages: data.totalPages }
             : undefined
@@ -318,7 +333,10 @@ export function NotificationsClient({
         }
       } catch {
         if (controller.signal.aborted) return
-        // The server-rendered list remains usable when a background refresh fails.
+        if (requestSequence === notificationListRequestSequenceRef.current) {
+          setLoadError('通知加载失败，请重试')
+          setLoadWarning('')
+        }
       }
     })()
     notificationListRequestRef.current = { key: requestKey, promise: request, controller }
@@ -340,17 +358,26 @@ export function NotificationsClient({
       // Ignore malformed return state.
     }
     mergeServerNotifications(initialNotifications, initialPagination)
-  }, [initialNotifications, initialPagination, mergeServerNotifications])
+    setLoadError(initialLoadError || '')
+    setLoadWarning(initialLoadWarning || '')
+  }, [initialLoadError, initialLoadWarning, initialNotifications, initialPagination, mergeServerNotifications])
 
   useEffect(() => {
-    const sync = () => {
+    let initialPageShow = true
+    const sync = (event?: Event) => {
+      if (event?.type === 'pageshow' && initialPageShow) {
+        // The server component already supplied the first page. A pageshow
+        // event is still useful for bfcache restores, but must not duplicate
+        // the first navigation request.
+        initialPageShow = false
+        return
+      }
       if (document.visibilityState === 'visible') void refreshNotifications()
     }
     const onRealtimeEvent = (event: Event) => {
       const detail = (event as CustomEvent<Parameters<typeof shouldRefreshNotificationList>[0]>).detail
       if (detail && shouldRefreshNotificationList(detail)) sync()
     }
-    void refreshNotifications()
     window.addEventListener('pageshow', sync)
     window.addEventListener('realtime:event', onRealtimeEvent)
     document.addEventListener('visibilitychange', sync)
@@ -923,6 +950,30 @@ export function NotificationsClient({
           </button></div>
         </div>
         {actionError ? <p className="mt-3 rounded-sm border border-red-100 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{actionError}</p> : null}
+        {loadError ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800" role="alert">
+            <span>{loadError}</span>
+            <button
+              type="button"
+              onClick={() => void refreshNotifications()}
+              className="min-h-9 rounded-lg bg-amber-800 px-3 text-xs font-black text-white"
+            >
+              重新加载
+            </button>
+          </div>
+        ) : null}
+        {loadWarning ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800" role="status">
+            <span>{loadWarning}</span>
+            <button
+              type="button"
+              onClick={() => void refreshNotifications()}
+              className="min-h-9 rounded-lg bg-amber-800 px-3 text-xs font-black text-white"
+            >
+              重新加载
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="flat-tabs flex overflow-x-auto border-b border-sky-100">
@@ -943,7 +994,12 @@ export function NotificationsClient({
       </div>
 
       <div className="space-y-2">
-        {activeCategory === 'messages' ? (
+        {loadError || (loadWarning && notifications.length === 0) ? (
+          <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-8 text-center" role="alert">
+            <p className="text-lg font-black text-amber-900">通知加载失败，请重试</p>
+            <p className="mt-2 text-sm font-bold text-amber-800">通知数据暂时不可用，现有通知不会被删除。</p>
+          </div>
+        ) : activeCategory === 'messages' ? (
           <div className="rounded-[24px] border border-sky-100 bg-white/82 p-8 text-center">
             <p className="text-lg font-black text-brand-950">未读私信 {unreadSummary.messages} 条</p>
             <p className="mt-2 text-sm font-bold text-slate-500">私信不会复制成普通通知，点击后在好友窗口查看会话。</p>
