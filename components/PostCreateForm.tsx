@@ -20,7 +20,6 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
   function insertEmoji(emoji: string) {
     const input = textareaRef.current
     const start = input?.selectionStart ?? content.length
@@ -36,33 +35,43 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isSubmitting) return
     setErrors({})
     setIsSubmitting(true)
-    const response = await fetch('/api/posts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ boardId, title, content, imageUrls, stickerId: pendingSticker?.id || undefined }),
-    })
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
-    if (!response.ok) {
-      setErrors({ form: data.message, ...data.errors })
-      return
+    try {
+      const response = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boardId, title, content, imageUrls, stickerId: pendingSticker?.id || undefined }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setErrors({ form: typeof data?.message === 'string' ? data.message : '发布帖子暂时失败，请稍后重试', ...data?.errors })
+        return
+      }
+      const postId = typeof data?.post?.id === 'string' ? data.post.id : ''
+      const isPending = data?.moderationStatus === 'PENDING' || data?.post?.moderationStatus === 'PENDING'
+      if (!postId) {
+        console.error('[post:create:invalid-response]', { hasPost: Boolean(data?.post), status: data?.moderationStatus })
+        setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
+        return
+      }
+      if (isPending) {
+        router.push(`/post/submitted?postId=${postId}&status=${data.moderationStatus}`)
+      } else {
+        const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : `/posts/${postId}`
+        router.push(detailUrl)
+      }
+      router.refresh()
+    } catch (error) {
+      console.error('[post:create:request]', {
+        name: error instanceof Error ? error.name : undefined,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      setErrors({ form: '网络连接失败，请检查网络后重试' })
+    } finally {
+      setIsSubmitting(false)
     }
-    const postId = typeof data?.post?.id === 'string' ? data.post.id : ''
-    const isPending = data?.moderationStatus === 'PENDING' || data?.post?.moderationStatus === 'PENDING'
-    if (!postId) {
-      console.error('[post:create:invalid-response]', data)
-      setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
-      return
-    }
-    if (isPending) {
-      router.push(`/post/submitted?postId=${postId}&status=${data.moderationStatus}`)
-    } else {
-      const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : `/posts/${postId}`
-      router.push(detailUrl)
-    }
-    router.refresh()
   }
 
   return (
@@ -103,7 +112,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => setPickerOpen((value) => !value)}
             className="inline-flex h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"
-            aria-label="选择表情包"
+            aria-label="选择表情"
             aria-expanded={pickerOpen}
           >
             😊 表情

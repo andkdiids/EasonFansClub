@@ -150,8 +150,8 @@ export function ContentImageUploader({
   }
 
   return (
-    <div className="space-y-2">
-      <label className="inline-flex cursor-pointer items-center rounded-lg border border-sky-100 bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
+    <div className="post-content-image-uploader w-full min-w-0 max-w-full space-y-2">
+      <label className="post-content-image-uploader-trigger flex w-full min-w-0 max-w-full cursor-pointer box-border items-center rounded-lg border border-sky-100 bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
         {uploading ? '上传中…' : `添加图片（${existingCount + value.length}/${MAX_CONTENT_IMAGES}）`}
         <input
           type="file"

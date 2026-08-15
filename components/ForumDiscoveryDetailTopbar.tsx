@@ -1,12 +1,13 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
-export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid }: Readonly<{
+export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, postActions }: Readonly<{
   authorName: string
   authorAvatar: string | null
   authorUid: number
+  postActions?: ReactNode
 }>) {
   const router = useRouter()
   const [shareMessage, setShareMessage] = useState('')
@@ -42,6 +43,7 @@ export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid
         </span>
         <span>{authorName}</span>
       </div>
+      {postActions ? <span className="forum-discovery-detail-post-actions">{postActions}</span> : null}
       <button type="button" onClick={() => void sharePost()} className="forum-discovery-detail-share" aria-label="分享帖子">↗</button>
       {shareMessage ? <span className="forum-discovery-share-message" role="status">{shareMessage}</span> : null}
     </header>

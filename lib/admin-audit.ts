@@ -28,7 +28,7 @@ export const adminAuditOperationLabels: Record<AdminAuditOperation, string> = {
   POST_EDITED: '管理员编辑帖子',
 }
 
-type AuditTransaction = Prisma.TransactionClient
+type AuditDatabaseClient = Pick<Prisma.TransactionClient, 'user' | 'adminAction' | 'postModerationHistory'>
 
 type UserSnapshot = {
   id: string
@@ -46,7 +46,7 @@ const userSnapshotSelect = {
   Profile: { select: { displayName: true } },
 } as const
 
-export async function getAuditUserSnapshot(tx: AuditTransaction, userId: string): Promise<UserSnapshot> {
+export async function getAuditUserSnapshot(tx: AuditDatabaseClient, userId: string): Promise<UserSnapshot> {
   const user = await tx.user.findUnique({ where: { id: userId }, select: userSnapshotSelect })
   if (!user) throw new Error('AUDIT_OPERATOR_NOT_FOUND')
   return user
@@ -57,7 +57,7 @@ export function userSnapshotName(user: Pick<UserSnapshot, 'nickname' | 'Profile'
 }
 
 export async function createAdminActionAudit(
-  tx: AuditTransaction,
+  tx: AuditDatabaseClient,
   input: {
     operatorId: string
     action: AdminActionType
@@ -98,7 +98,7 @@ export async function createAdminActionAudit(
 export type PostModerationHistoryAction = 'SUBMITTED' | 'EDITED' | 'REVIEW_APPROVED' | 'REVIEW_REJECTED'
 
 export async function createPostModerationHistory(
-  tx: AuditTransaction,
+  tx: AuditDatabaseClient,
   input: {
     postId: string
     actorId: string

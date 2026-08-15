@@ -7,11 +7,13 @@ import { ReplyForm } from '@/components/ReplyForm'
 export function PostReplyBottomSheet({
   open,
   postId,
+  replyTo,
   onClose,
   onReplyCreated,
 }: Readonly<{
   open: boolean
   postId: string
+  replyTo?: { id: string; name: string } | null
   onClose: () => void
   onReplyCreated: (reply: unknown) => void
 }>) {
@@ -151,6 +153,7 @@ export function PostReplyBottomSheet({
         </header>
         <ReplyForm
           postId={postId}
+          replyTo={replyTo}
           autoFocus
           className="post-reply-bottom-form"
           onReplyCancel={requestClose}

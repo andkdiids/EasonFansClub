@@ -90,5 +90,5 @@ test('移动端回复 Bottom Sheet、textarea、action row 和贴纸面板都受
   assert.match(css, /post-reply-bottom-sheet \.post-reply-form > \.relative\.mt-3 \{ display:flex; width:100%; max-width:100%; min-width:0/)
   assert.match(css, /safe-area-inset-left/)
   assert.match(css, /safe-area-inset-right/)
-  assert.doesNotMatch(css, /post-reply-bottom-sheet[^}]*width:100vw/)
+  assert.doesNotMatch(css, /post-reply-bottom-sheet[^}]*?(?<!max-)width:100vw/)
 })

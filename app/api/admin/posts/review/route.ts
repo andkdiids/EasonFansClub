@@ -31,6 +31,176 @@ const reviewSelect = {
 
 type ReviewPostRow = Prisma.PostGetPayload<{ select: typeof reviewSelect }>
 
+type ReviewStatus = 'APPROVED' | 'REJECTED'
+type ReviewAction = 'APPROVE_POST' | 'REJECT_POST'
+
+function safeReviewErrorMeta(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
+  const entries = Object.entries(value as Record<string, unknown>).slice(0, 20)
+  return Object.fromEntries(entries.map(([key, item]) => {
+    if (/authorization|cookie|database|password|secret|token|url/i.test(key)) return [key, '[redacted]']
+    if (typeof item === 'string') return [key, item.slice(0, 500)]
+    return [key, item]
+  }))
+}
+
+function describeReviewError(error: unknown) {
+  const details = describePostModerationHistoryError(error)
+  const rawMeta = (error as { meta?: unknown } | null)?.meta
+  return {
+    errorName: details.name || (error instanceof Error ? error.constructor.name : 'UnknownError'),
+    errorCode: details.code || details.metaCode,
+    message: details.message,
+    meta: safeReviewErrorMeta(rawMeta),
+  }
+}
+
+function logReviewError(scope: string, postId: string, action: ReviewAction, error: unknown) {
+  console.error(`[admin.posts.review.${scope}]`, {
+    postId,
+    action,
+    ...describeReviewError(error),
+  })
+}
+
+async function writeReviewAudit(input: {
+  operatorId: string
+  postId: string
+  action: ReviewAction
+  status: ReviewStatus
+  title: string
+  authorId: string
+  authorName: string
+  authorUid: number
+  rejectionReason: string | null
+}) {
+  const operationType = input.status === 'APPROVED'
+    ? adminAuditOperations.POST_REVIEW_APPROVED
+    : adminAuditOperations.POST_REVIEW_REJECTED
+  const metadata = { moderationStatus: input.status, rejectionReason: input.rejectionReason }
+
+  try {
+    // Prefer the snapshot-rich audit row when the matching schema is present.
+    await createAdminActionAudit(prisma, {
+      operatorId: input.operatorId,
+      action: input.action,
+      operationType,
+      targetType: 'POST',
+      targetId: input.postId,
+      targetTitle: input.title,
+      targetUserId: input.authorId,
+      targetUserName: input.authorName,
+      targetUserUid: input.authorUid,
+      reason: input.rejectionReason,
+      metadata,
+    })
+    return
+  } catch (error) {
+    // The audit schema was extended without a migration in older production
+    // databases. Fall back to the original columns so the audit trail remains
+    // append-only without allowing it to roll back the moderation decision.
+    logReviewError('audit', input.postId, input.action, error)
+  }
+
+  try {
+    await prisma.adminAction.create({
+      data: {
+        adminId: input.operatorId,
+        postId: input.postId,
+        action: input.action,
+        reason: input.rejectionReason,
+        metadata: { ...metadata, operationType, targetType: 'POST', targetTitle: input.title, targetUserId: input.authorId, targetUserName: input.authorName, targetUserUid: input.authorUid },
+      },
+    })
+  } catch (error) {
+    logReviewError('audit-fallback', input.postId, input.action, error)
+  }
+}
+
+async function writeReviewHistory(input: {
+  postId: string
+  actorId: string
+  action: 'REVIEW_APPROVED' | 'REVIEW_REJECTED'
+  status: ReviewStatus
+  titleSnapshot: string
+  rejectionReason: string | null
+}, reviewAction: ReviewAction) {
+  try {
+    await createPostModerationHistory(prisma, input)
+  } catch (error) {
+    logReviewError('history', input.postId, reviewAction, error)
+  }
+}
+
+async function writeReviewNotification(input: {
+  postId: string
+  action: ReviewAction
+  status: ReviewStatus
+  authorId: string
+  operatorId: string
+  title: string
+  rejectionReason: string | null
+  reviewedAt: Date
+}) {
+  try {
+    await prisma.notification.updateMany({
+      where: {
+        type: 'ADMIN',
+        isRead: false,
+        key: { startsWith: `post-review:${input.postId}` },
+      },
+      data: { isRead: true, readAt: input.reviewedAt },
+    })
+  } catch (error) {
+    // Marking the administrator's queue notification read is optional.
+    logReviewError('notification-read', input.postId, input.action, error)
+  }
+
+  try {
+    await prisma.notification.create({
+      data: {
+        recipientId: input.authorId,
+        actorId: input.operatorId,
+        type: 'ADMIN',
+        key: `post-review-result:${input.postId}:${input.status}:${input.reviewedAt.getTime()}`,
+        title: input.status === 'APPROVED' ? '帖子审核通过' : '帖子未通过审核',
+        content: input.status === 'APPROVED'
+          ? `你发布的帖子《${input.title}》已通过审核，现在可以在 E院广场查看。`
+          : input.rejectionReason
+            ? `你发布的帖子《${input.title}》未通过审核。原因：${input.rejectionReason}`
+            : `你发布的帖子《${input.title}》未通过审核，请修改后重新提交。`,
+        link: `/posts/${input.postId}`,
+      },
+    })
+    return true
+  } catch (error) {
+    // Notification failure must not undo a committed moderation decision.
+    logReviewError('notification-create', input.postId, input.action, error)
+    return false
+  }
+}
+
+async function refreshReviewBoardCount(boardId: string, postId: string, action: ReviewAction) {
+  try {
+    const postCount = await prisma.post.count({
+      where: { boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+    })
+    await prisma.board.update({ where: { id: boardId }, data: { postCount } })
+  } catch (error) {
+    logReviewError('board-count', postId, action, error)
+  }
+}
+
+async function writeApprovalFriendActivity(input: { postId: string; authorId: string; title: string; action: ReviewAction }) {
+  try {
+    await prisma.friendActivity.create({
+      data: { actorId: input.authorId, type: 'POST', content: input.title, targetUrl: `/posts/${input.postId}` },
+    })
+  } catch (error) {
+    logReviewError('friend-activity', input.postId, input.action, error)
+  }
+}
+
 function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[]) {
   return {
     ...post,
@@ -83,10 +253,12 @@ export async function PATCH(request: Request) {
   const guard = await requireAdmin('post_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
-  const status = body?.status
-  if (status !== 'APPROVED' && status !== 'REJECTED') {
+  const requestedStatus = body?.status
+  if (requestedStatus !== 'APPROVED' && requestedStatus !== 'REJECTED') {
     return NextResponse.json({ message: '璇烽€夋嫨閫氳繃鎴栨嫆缁濓紒' }, { status: 400 })
   }
+  const status: ReviewStatus = requestedStatus
+  const action: ReviewAction = status === 'APPROVED' ? 'APPROVE_POST' : 'REJECT_POST'
   const postId = sanitizeText(body?.postId, 80)
   if (!postId) return NextResponse.json({ message: '甯栧瓙 ID 鏃犳晥' }, { status: 400 })
   const rejectionReason = status === 'REJECTED'
@@ -124,78 +296,67 @@ export async function PATCH(request: Request) {
         where: { id: postId },
         select: { id: true, moderationStatus: true, reviewedAt: true, rejectionReason: true },
       })
-      const action = status === 'APPROVED' ? 'APPROVE_POST' : 'REJECT_POST'
-      await createAdminActionAudit(tx, {
-        operatorId: guard.user.id,
-        action,
-        operationType: status === 'APPROVED' ? adminAuditOperations.POST_REVIEW_APPROVED : adminAuditOperations.POST_REVIEW_REJECTED,
-        targetType: 'POST',
-        targetId: current.id,
-        targetTitle: current.title,
-        targetUserId: current.authorId,
-        targetUserName: current.User.Profile?.displayName || current.User.nickname,
-        targetUserUid: current.User.uid,
-        reason: updated.rejectionReason,
-        metadata: { moderationStatus: updated.moderationStatus, rejectionReason: updated.rejectionReason },
-      })
-      await createPostModerationHistory(tx, {
-        postId: current.id,
-        actorId: guard.user.id,
-        action: status === 'APPROVED' ? 'REVIEW_APPROVED' : 'REVIEW_REJECTED',
-        status: updated.moderationStatus,
-        titleSnapshot: current.title,
-        rejectionReason: updated.rejectionReason,
-      })
-      const statusChanged = current.moderationStatus !== updated.moderationStatus
-      if (statusChanged) {
-        await tx.notification.updateMany({
-          where: {
-            type: 'ADMIN',
-            isRead: false,
-            key: { startsWith: `post-review:${current.id}` },
-          },
-          data: { isRead: true, readAt: reviewedAt },
-        })
-        const postCount = await tx.post.count({
-          where: { boardId: current.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
-        })
-        await tx.board.update({ where: { id: current.boardId }, data: { postCount } })
-        // 仅在状态实际变化时通知作者（同事务保证不丢失；APPROVED→APPROVED / REJECTED→REJECTED 不重复通知）。
-        await tx.notification.create({
-          data: {
-            recipientId: current.authorId,
-            actorId: guard.user.id,
-            type: 'ADMIN',
-            title: updated.moderationStatus === 'APPROVED' ? '帖子审核通过' : '帖子未通过审核',
-            content: updated.moderationStatus === 'APPROVED'
-              ? `你发布的帖子《${current.title}》已通过审核，现在可以在 E院广场查看。`
-              : updated.rejectionReason
-                ? `你发布的帖子《${current.title}》未通过审核。原因：${updated.rejectionReason}`
-                : `你发布的帖子《${current.title}》未通过审核，请修改后重新提交。`,
-            link: `/posts/${current.id}`,
-          },
-        })
-      }
-      if (updated.moderationStatus === 'APPROVED' && current.moderationStatus !== 'APPROVED') {
-        await tx.friendActivity.create({ data: { actorId: current.authorId, type: 'POST', content: current.title, targetUrl: `/posts/${current.id}` } })
-      }
       return {
         post: updated,
         previousStatus: current.moderationStatus,
-        notificationRecipientIds: statusChanged ? [guard.user.id, current.authorId] : [],
+        reviewedAt,
+        current,
       }
     })
-    const post = result.post
-    emitRealtimeMany(result.notificationRecipientIds, 'notification')
-    revalidatePath('/community')
-    revalidatePath('/forum')
-    revalidatePath('/admin/posts/review')
-    revalidatePath('/user/[uid]', 'page')
-    revalidatePath(`/posts/${postId}`)
-    revalidateTag('trending-posts')
-    return NextResponse.json({ post, previousStatus: result.previousStatus })
+    const current = result.current
+    const reviewStatus = result.post.moderationStatus as ReviewStatus
+    await writeReviewAudit({
+      operatorId: guard.user.id,
+      postId,
+      action,
+      status: reviewStatus,
+      title: current.title,
+      authorId: current.authorId,
+      authorName: current.User.Profile?.displayName || current.User.nickname,
+      authorUid: current.User.uid,
+      rejectionReason: result.post.rejectionReason,
+    })
+    await writeReviewHistory({
+      postId,
+      actorId: guard.user.id,
+      action: reviewStatus === 'APPROVED' ? 'REVIEW_APPROVED' : 'REVIEW_REJECTED',
+      status: reviewStatus,
+      titleSnapshot: current.title,
+      rejectionReason: result.post.rejectionReason,
+    }, action)
+    await writeReviewNotification({
+      postId,
+      action,
+      status: reviewStatus,
+      authorId: current.authorId,
+      operatorId: guard.user.id,
+      title: current.title,
+      rejectionReason: result.post.rejectionReason,
+      reviewedAt: result.reviewedAt,
+    })
+    await refreshReviewBoardCount(current.boardId, postId, action)
+    if (reviewStatus === 'APPROVED') {
+      await writeApprovalFriendActivity({ postId, authorId: current.authorId, title: current.title, action })
+    }
+
+    try {
+      emitRealtimeMany([guard.user.id, current.authorId], 'notification')
+    } catch (error) {
+      logReviewError('realtime', postId, action, error)
+    }
+    try {
+      revalidatePath('/community')
+      revalidatePath('/forum')
+      revalidatePath('/admin/posts/review')
+      revalidatePath('/user/[uid]', 'page')
+      revalidatePath(`/posts/${postId}`)
+      revalidateTag('trending-posts')
+    } catch (error) {
+      logReviewError('cache', postId, action, error)
+    }
+    return NextResponse.json({ post: result.post, previousStatus: result.previousStatus })
   } catch (error) {
-    console.error('[admin/posts/review]', { postId, status, error: describePostModerationHistoryError(error) })
+    logReviewError('core', postId, action, error)
     if (error instanceof Error && error.message === 'POST_ALREADY_REVIEWED') {
       return NextResponse.json({ message: '该帖子已被其他管理员审核，请刷新后查看最新状态' }, { status: 409 })
     }

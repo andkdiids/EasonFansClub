@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type PostInteractionDetail = {
   postId?: string
@@ -170,6 +170,138 @@ export function FavoriteButton({
         {favorited ? '★' : '☆'} {count}
       </button>
       {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
+    </div>
+  )
+}
+
+export function PostManagementMenu({
+  postId,
+  initialIsPinned,
+  initialIsFeatured,
+  canManage,
+  canDelete,
+  redirectTo = '/forum',
+}: Readonly<{
+  postId: string
+  initialIsPinned: boolean
+  initialIsFeatured: boolean
+  canManage: boolean
+  canDelete: boolean
+  redirectTo?: string
+}>) {
+  const router = useRouter()
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [isPinned, setIsPinned] = useState(initialIsPinned)
+  const [isFeatured, setIsFeatured] = useState(initialIsFeatured)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [menuOpen])
+
+  if (!canManage && !canDelete) return null
+
+  async function updatePost(payload: { isPinned?: boolean; isFeatured?: boolean; isDeleted?: boolean }) {
+    if (isSubmitting) return
+    const previousPinned = isPinned
+    const previousFeatured = isFeatured
+    if (typeof payload.isPinned === 'boolean') setIsPinned(payload.isPinned)
+    if (typeof payload.isFeatured === 'boolean') setIsFeatured(payload.isFeatured)
+    setError('')
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`/api/posts/${postId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5')
+      if (typeof data.post?.isPinned === 'boolean') setIsPinned(data.post.isPinned)
+      if (typeof data.post?.isFeatured === 'boolean') setIsFeatured(data.post.isFeatured)
+      if (payload.isDeleted) {
+        setConfirmDelete(false)
+        router.replace(redirectTo)
+        return
+      }
+      setMenuOpen(false)
+      router.refresh()
+    } catch (reason) {
+      if (typeof payload.isPinned === 'boolean') setIsPinned(previousPinned)
+      if (typeof payload.isFeatured === 'boolean') setIsFeatured(previousFeatured)
+      setError(reason instanceof Error ? reason.message : '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div ref={menuRef} className="post-management-menu">
+      <button
+        type="button"
+        className="post-management-menu-trigger"
+        aria-label={'\u5e16\u5b50\u64cd\u4f5c'}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((value) => !value)}
+      >
+        ⋯
+      </button>
+      {menuOpen ? (
+        <div className="post-management-menu-panel" role="menu">
+          {canManage ? (
+            <>
+              <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updatePost({ isPinned: !isPinned })}>
+                {isPinned ? '\u53d6\u6d88\u7f6e\u9876' : '\u7f6e\u9876\u5e16\u5b50'}
+              </button>
+              <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updatePost({ isFeatured: !isFeatured })}>
+                {isFeatured ? '\u53d6\u6d88\u7cbe\u534e' : '\u8bbe\u4e3a\u7cbe\u534e'}
+              </button>
+            </>
+          ) : null}
+          {canDelete ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="is-danger"
+              disabled={isSubmitting}
+              onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}
+            >
+              {'\u5220\u9664\u5e16\u5b50'}
+            </button>
+          ) : null}
+          {error ? <p role="alert">{error}</p> : null}
+        </div>
+      ) : null}
+      {confirmDelete ? (
+        <div className="post-management-menu-confirm-backdrop" role="presentation">
+          <div className="post-management-menu-confirm" role="dialog" aria-modal="true" aria-labelledby={`post-delete-title-${postId}`}>
+            <h2 id={`post-delete-title-${postId}`}>{'\u786e\u8ba4\u5220\u9664\u5e16\u5b50'}</h2>
+            <p>{'\u5220\u9664\u540e\u5c06\u65e0\u6cd5\u6062\u590d\uff0c\u786e\u5b9a\u7ee7\u7eed\uff1f'}</p>
+            <div>
+              <button type="button" disabled={isSubmitting} onClick={() => setConfirmDelete(false)}>{'\u53d6\u6d88'}</button>
+              <button type="button" className="is-danger" disabled={isSubmitting} onClick={() => void updatePost({ isDeleted: true })}>
+                {isSubmitting ? '\u5220\u9664\u4e2d...' : '\u786e\u8ba4\u5220\u9664'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

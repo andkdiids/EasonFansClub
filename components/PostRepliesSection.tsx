@@ -134,7 +134,10 @@ export function PostRepliesSection({
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
   const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
-  const closeMobileReplySheet = useCallback(() => setMobileReplySheetOpen(false), [])
+  const closeMobileReplySheet = useCallback(() => {
+    setMobileReplySheetOpen(false)
+    setReplyTo(null)
+  }, [])
   useEffect(() => {
     setReplies(initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   }, [initialReplies])
@@ -210,6 +213,11 @@ export function PostRepliesSection({
     )
   }
 
+  function openReplyComposer(target: { id: string; name: string }) {
+    setReplyTo(target)
+    if (window.matchMedia('(max-width: 767px)').matches) setMobileReplySheetOpen(true)
+  }
+
   useEffect(() => {
     if (!focusId) return
     let current = replyMap.get(focusId)
@@ -232,6 +240,7 @@ export function PostRepliesSection({
 
   useEffect(() => {
     if (!activeReplyId) return
+    if (window.matchMedia('(max-width: 767px)').matches) return
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(`reply-form-${activeReplyId}`)
       target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -245,6 +254,10 @@ export function PostRepliesSection({
       const detail = (event as CustomEvent<{ postId?: string }>).detail
       if (detail?.postId !== postId || !currentUserId) return
       setReplyTo(null)
+      if (window.matchMedia('(max-width: 767px)').matches) {
+        setMobileReplySheetOpen(true)
+        return
+      }
       window.requestAnimationFrame(() => {
         const composer = document.getElementById(`post-primary-composer-${postId}`)
         composer?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -350,7 +363,7 @@ export function PostRepliesSection({
               {currentUserId ? (
                 <button
                   type="button"
-                  onClick={() => setReplyTo({ id: reply.id, name })}
+                  onClick={() => openReplyComposer({ id: reply.id, name })}
                   className="text-xs font-black text-brand-700"
                 >
                   回复
@@ -367,7 +380,7 @@ export function PostRepliesSection({
               className="mt-1.5"
             />
             {currentUserId && replyTo?.id === reply.id ? (
-              <div id={`reply-form-${reply.id}`} className="mt-3">
+              <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
                 <ReplyForm
                   postId={postId}
                   replyTo={replyTo}
@@ -420,7 +433,7 @@ export function PostRepliesSection({
             {currentUserId ? (
               <button
                 type="button"
-                onClick={() => setReplyTo({ id: reply.id, name })}
+                onClick={() => openReplyComposer({ id: reply.id, name })}
                 className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700"
               >
                 回复
@@ -448,7 +461,7 @@ export function PostRepliesSection({
           />
         </div>
         {currentUserId && replyTo?.id === reply.id ? (
-          <div id={`reply-form-${reply.id}`} className="mt-3">
+          <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
             <ReplyForm
               postId={postId}
               replyTo={replyTo}
@@ -480,11 +493,22 @@ export function PostRepliesSection({
     <section id={`post-comments-${postId}`} className="post-replies-section scroll-mt-16 space-y-3">
       {currentUserId && !replyTo ? (
         <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
-          <ReplyForm
-            postId={postId}
-            onReplyCancel={() => setReplyTo(null)}
-            onReplyCreated={addReply}
-          />
+          <div className="post-replies-desktop-composer">
+            <ReplyForm
+              postId={postId}
+              onReplyCancel={() => setReplyTo(null)}
+              onReplyCreated={addReply}
+            />
+          </div>
+          <div className="post-replies-mobile-composer-trigger">
+            <button
+              type="button"
+              onClick={() => setMobileReplySheetOpen(true)}
+              aria-label={'\u6253\u5f00\u56de\u590d\u7f16\u8f91\u5668'}
+            >
+              {'\u5199\u4e0b\u4f60\u7684\u56de\u590d\uff0c\u8f93\u5165 @ \u63d0\u53ca\u597d\u53cb\u2026'}
+            </button>
+          </div>
         </div>
       ) : !currentUserId ? (
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
@@ -545,6 +569,7 @@ export function PostRepliesSection({
       <PostReplyBottomSheet
         open={mobileReplySheetOpen}
         postId={postId}
+        replyTo={replyTo}
         onClose={closeMobileReplySheet}
         onReplyCreated={addReply}
       />

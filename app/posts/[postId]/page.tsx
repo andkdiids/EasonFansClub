@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { Prisma } from '@prisma/client'
-import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton } from '@/components/PostActions'
+import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton, PostManagementMenu } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
 import { PostMediaCarousel } from '@/components/PostMediaCarousel'
@@ -639,7 +639,21 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             审核未通过{post.rejectionReason ? `：${post.rejectionReason}` : '，请修改后重新提交。'}
           </div>
         ) : null}
-        <ForumDiscoveryDetailTopbar authorName={authorName} authorAvatar={authorAvatar} authorUid={post.User.uid} />
+        <ForumDiscoveryDetailTopbar
+          authorName={authorName}
+          authorAvatar={authorAvatar}
+          authorUid={post.User.uid}
+          postActions={canManagePost || canDeletePost ? (
+            <PostManagementMenu
+              postId={post.id}
+              initialIsPinned={post.isPinned}
+              initialIsFeatured={post.isFeatured}
+              canManage={canManagePost}
+              canDelete={canDeletePost}
+              redirectTo="/forum"
+            />
+          ) : null}
+        />
         <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" /></div>
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="mb-4 flex flex-wrap items-center gap-2">

@@ -302,6 +302,14 @@ export async function PATCH(request: Request, { params }: Params) {
     return updated
   })
 
+  revalidatePath('/forum')
+  revalidatePath('/community')
+  revalidatePath('/trending')
+  revalidatePath('/rankings')
+  revalidatePath('/search')
+  revalidatePath(`/posts/${postId}`)
+  revalidateTag('trending-posts')
+
   return NextResponse.json({ post })
 }
 

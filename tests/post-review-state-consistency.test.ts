@@ -47,9 +47,10 @@ test('审核状态只写入 Post.moderationStatus，并清理互斥审核元数�
 
 test('审核 API 具备四种状态迁移、幂等守卫和并发锁', () => {
   assert.match(reviewRoute, /SELECT \\`id\\` FROM \\`Post\\` WHERE \\`id\\` = \$\{postId\} FOR UPDATE/)
-  assert.match(reviewRoute, /const statusChanged = current\.moderationStatus !== updated\.moderationStatus/)
-  assert.match(reviewRoute, /if \(statusChanged\) \{[\s\S]*tx\.notification\.create/)
-  assert.match(reviewRoute, /APPROVED' && current\.moderationStatus !== 'APPROVED'/)
+  assert.match(reviewRoute, /where: \{ id: postId, isDeleted: false, moderationStatus: 'PENDING' \}/)
+  assert.match(reviewRoute, /reviewStatus === 'APPROVED'/)
+  assert.match(reviewRoute, /writeApprovalFriendActivity/)
+  assert.doesNotMatch(reviewRoute, /tx\.notification\.create/)
   assert.match(reviewRoute, /previousStatus: result\.previousStatus/)
 })
 

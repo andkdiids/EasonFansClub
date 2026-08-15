@@ -3,33 +3,29 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
-
 const reviewRoute = read('app/api/admin/posts/review/route.ts')
 
-test('审核通过 / 拒绝都在同一事务内给作者创建通知', () => {
-  const transactionStart = reviewRoute.indexOf('prisma.$transaction')
-  const notificationCreate = reviewRoute.indexOf('tx.notification.create')
-  const transactionReturn = reviewRoute.indexOf('post: updated')
-  assert.ok(transactionStart > 0 && notificationCreate > transactionStart && transactionReturn > notificationCreate)
-  assert.match(reviewRoute, /recipientId: current\.authorId/)
+test('审核状态先独立提交，通知在提交后发送且不再使用 tx.notification.create', () => {
+  const patch = reviewRoute.slice(reviewRoute.indexOf('export async function PATCH'))
+  const transactionStart = patch.indexOf('prisma.$transaction')
+  const transactionEnd = patch.indexOf('const current = result.current')
+  const notificationCall = patch.indexOf('writeReviewNotification')
+  assert.ok(transactionStart > 0 && transactionEnd > transactionStart && notificationCall > transactionEnd)
+  assert.doesNotMatch(patch, /tx\.notification\.create/)
+  assert.match(reviewRoute, /recipientId: input\.authorId/)
   assert.match(reviewRoute, /type: 'ADMIN'/)
 })
 
-test('只有审核状态实际变化时才通知，重复审核不重复发送', () => {
-  const guardIndex = reviewRoute.indexOf('const statusChanged = current.moderationStatus !== updated.moderationStatus')
-  const notificationCreate = reviewRoute.indexOf('tx.notification.create')
-  assert.ok(guardIndex > 0 && notificationCreate > guardIndex)
-  // 通知创建在最终状态变化守卫之内（守卫结束于 friendActivity 之前不允许跨出）
-  const blockEnd = reviewRoute.indexOf("if (updated.moderationStatus === 'APPROVED' && current.moderationStatus !== 'APPROVED')")
-  assert.ok(notificationCreate < blockEnd)
+test('并发审核只允许 PENDING 状态转换，通知使用本次审核时间生成幂等 key', () => {
+  assert.match(reviewRoute, /moderationStatus: 'PENDING'/)
+  assert.match(reviewRoute, /key: `post-review-result:\$\{input\.postId\}:\$\{input\.status\}:\$\{input\.reviewedAt\.getTime\(\)\}`/)
+  assert.match(reviewRoute, /POST_ALREADY_REVIEWED/)
 })
 
 test('审核通过与拒绝的通知文案和链接正确', () => {
-  assert.match(reviewRoute, /帖子审核通过/)
-  assert.match(reviewRoute, /已通过审核，现在可以在 E院广场查看。/)
+  assert.match(reviewRoute, /title: input\.status === 'APPROVED' \? '帖子审核通过'/)
+  assert.match(reviewRoute, /E院广场查看/)
   assert.match(reviewRoute, /帖子未通过审核/)
-  // 有原因时附带原因，无原因时使用通用文案，不出现空的“原因：”
-  assert.match(reviewRoute, /updated\.rejectionReason\s*\?\s*`你发布的帖子《\$\{current\.title\}》未通过审核。原因：\$\{updated\.rejectionReason\}`\s*:\s*`你发布的帖子《\$\{current\.title\}》未通过审核，请修改后重新提交。`/)
-  // 链接指向用户可见的帖子详情页，而非后台
-  assert.match(reviewRoute, /link: `\/posts\/\$\{current\.id\}`/)
+  assert.match(reviewRoute, /input\.rejectionReason/)
+  assert.match(reviewRoute, /link: `\/posts\/\$\{input\.postId\}`/)
 })
