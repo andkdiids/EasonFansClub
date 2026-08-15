@@ -39,6 +39,8 @@ test('pagination jump accepts valid pages, clamps overflow, and ignores invalid 
   assert.equal(parsePaginationJump('', 3), null)
   assert.equal(parsePaginationJump('abc', 3), null)
   assert.equal(parsePaginationJump('0', 3), null)
+  assert.equal(parsePaginationJump('-1', 3), null)
+  assert.equal(parsePaginationJump('1.5', 3), null)
 })
 
 test('forum page data uses the URL page and only corrects it after a clamped response', () => {

@@ -5242,9 +5242,9 @@ height:330px;
 .friend-dock-count { flex:none; color:var(--foreground-muted); font-size:11px; font-weight:800; white-space:nowrap; }
 
 /* Shared page controls used by the notification center and forum. */
-.pagination-wrap { box-sizing:border-box; display:flex; width:100%; flex-wrap:wrap; align-items:center; justify-content:center; column-gap:24px; row-gap:12px; margin-top:18px; }
-.pagination-nav { display:flex; min-width:0; flex:0 1 auto; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; }
-.pagination-pages { display:flex; min-width:0; flex:0 1 auto; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px; }
+.pagination-wrap { box-sizing:border-box; display:flex; width:100%; max-width:100%; flex-wrap:wrap; align-items:center; justify-content:center; column-gap:24px; row-gap:12px; margin-top:18px; }
+.pagination-nav { box-sizing:border-box; display:flex; min-width:0; max-width:100%; flex:0 1 auto; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; }
+.pagination-pages { box-sizing:border-box; display:flex; min-width:0; max-width:100%; flex:0 1 auto; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px; }
 .pagination-page,.pagination-edge,.pagination-jump button { box-sizing:border-box; display:inline-flex; min-height:40px; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:0; padding:0 11px; color:var(--foreground); background:var(--surface-elevated); font-size:11px; font-weight:850; line-height:1; cursor:pointer; }
 .pagination-page { min-width:40px; }
 .pagination-edge { min-width:72px; }
@@ -5253,7 +5253,7 @@ height:330px;
 .pagination-page.is-current { border-color:#000; color:#fff; background:#000; cursor:default; }
 .pagination-page:disabled,.pagination-edge:disabled,.pagination-jump button:disabled { cursor:not-allowed; opacity:.45; }
 .pagination-ellipsis { display:inline-flex; min-width:20px; min-height:40px; align-items:center; justify-content:center; color:var(--foreground-muted); text-align:center; }
-.pagination-jump { display:flex; min-height:40px; align-items:center; justify-content:center; gap:6px; color:var(--foreground-muted); font-size:11px; font-weight:800; white-space:nowrap; }
+.pagination-jump { box-sizing:border-box; display:flex; min-height:40px; max-width:100%; align-items:center; justify-content:center; gap:6px; color:var(--foreground-muted); font-size:11px; font-weight:800; white-space:nowrap; }
 .pagination-jump input { box-sizing:border-box; width:58px; height:40px; min-height:40px; border:1px solid var(--border); border-radius:0; padding:0 9px; color:var(--foreground); background:var(--surface-elevated); font-size:11px; text-align:center; outline:none; }
 .pagination-jump input:focus { border-color:var(--primary); box-shadow:0 0 0 2px color-mix(in srgb,var(--primary),transparent 82%); }
 .easmusic-mini-player { max-width:calc(100vw - 24px); }
@@ -5270,6 +5270,8 @@ height:330px;
   .pagination-jump { justify-content:center; }
   .easmusic-mini-player { max-width:calc(100vw - 16px); }
 }
+
+.rating-pagination { box-sizing:border-box; width:100%; max-width:100%; padding-inline:16px; }
 
 /* 首页五个模块统一入口按钮：只改变颜色/边框，不产生位移。 */
 .community-panel > header a.home-module-entry {

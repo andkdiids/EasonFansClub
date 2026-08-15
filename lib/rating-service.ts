@@ -114,6 +114,7 @@ export type RatingRankingResult = {
   page: number
   pageSize: number
   total: number
+  totalPages: number
   hasMore: boolean
 }
 
@@ -346,8 +347,7 @@ export async function getRatingRanking({
   pageSize?: number
 }): Promise<RatingRankingResult> {
   const safePageSize = Math.min(Math.max(Math.floor(pageSize) || 30, 1), 50)
-  const safePage = Math.max(Math.floor(page) || 1, 1)
-  const skip = (safePage - 1) * safePageSize
+  const requestedPage = Number.isFinite(page) ? Math.max(Math.floor(page) || 1, 1) : 1
   const filters = [
     Prisma.sql`a.status = ${'PUBLISHED'}`,
     languageFilter(language, target),
@@ -356,30 +356,32 @@ export async function getRatingRanking({
   const where = Prisma.join(filters, ' AND ')
 
   if (target === 'song') {
+    const loadRows = (skip: number) => prisma.$queryRaw<RawSongRankingRow[]>(Prisma.sql`
+      SELECT
+        s.id,
+        s.title,
+        s.artist,
+        s.releaseYear,
+        s.language,
+        s.coverUrl,
+        s.albumId,
+        a.name AS albumName,
+        a.coverUrl AS albumCoverUrl,
+        a.language AS albumLanguage,
+        COALESCE(rs.ratingCount, 0) AS ratingCount,
+        COALESCE(rs.ratingScoreTotal, 0) AS ratingScoreTotal,
+        COALESCE(rs.averageScore, 0) AS averageScore,
+        COALESCE(rs.reviewCount, 0) AS reviewCount
+      FROM MusicSong AS s
+      INNER JOIN MusicAlbum AS a ON a.id = s.albumId
+      LEFT JOIN RatingStats AS rs ON rs.songId = s.id
+      WHERE ${where}
+      ORDER BY COALESCE(rs.averageScore, 0) DESC, COALESCE(rs.ratingCount, 0) DESC, s.id ASC
+      LIMIT ${safePageSize} OFFSET ${skip}
+    `)
+    const skip = (requestedPage - 1) * safePageSize
     const [rows, countRows] = await Promise.all([
-      prisma.$queryRaw<RawSongRankingRow[]>(Prisma.sql`
-        SELECT
-          s.id,
-          s.title,
-          s.artist,
-          s.releaseYear,
-          s.language,
-          s.coverUrl,
-          s.albumId,
-          a.name AS albumName,
-          a.coverUrl AS albumCoverUrl,
-          a.language AS albumLanguage,
-          COALESCE(rs.ratingCount, 0) AS ratingCount,
-          COALESCE(rs.ratingScoreTotal, 0) AS ratingScoreTotal,
-          COALESCE(rs.averageScore, 0) AS averageScore,
-          COALESCE(rs.reviewCount, 0) AS reviewCount
-        FROM MusicSong AS s
-        INNER JOIN MusicAlbum AS a ON a.id = s.albumId
-        LEFT JOIN RatingStats AS rs ON rs.songId = s.id
-        WHERE ${where}
-        ORDER BY COALESCE(rs.averageScore, 0) DESC, COALESCE(rs.ratingCount, 0) DESC, s.id ASC
-        LIMIT ${safePageSize} OFFSET ${skip}
-      `),
+      loadRows(skip),
       prisma.$queryRaw<Array<{ count: number | bigint }>>(Prisma.sql`
         SELECT COUNT(*) AS count
         FROM MusicSong AS s
@@ -388,28 +390,33 @@ export async function getRatingRanking({
       `),
     ])
     const total = integerValue(countRows[0]?.count)
-    return { items: rows.map(mapSongRankingRow), page: safePage, pageSize: safePageSize, total, hasMore: skip + rows.length < total }
+    const totalPages = Math.max(1, Math.ceil(total / safePageSize))
+    const safePage = Math.min(requestedPage, totalPages)
+    const resolvedRows = safePage === requestedPage ? rows : await loadRows((safePage - 1) * safePageSize)
+    return { items: resolvedRows.map(mapSongRankingRow), page: safePage, pageSize: safePageSize, total, totalPages, hasMore: safePage < totalPages }
   }
 
+  const loadRows = (skip: number) => prisma.$queryRaw<RawAlbumRankingRow[]>(Prisma.sql`
+    SELECT
+      a.id,
+      a.name,
+      a.artist,
+      a.releaseYear,
+      a.language,
+      a.coverUrl,
+      COALESCE(rs.ratingCount, 0) AS ratingCount,
+      COALESCE(rs.ratingScoreTotal, 0) AS ratingScoreTotal,
+      COALESCE(rs.averageScore, 0) AS averageScore,
+      COALESCE(rs.reviewCount, 0) AS reviewCount
+    FROM MusicAlbum AS a
+    LEFT JOIN RatingStats AS rs ON rs.albumId = a.id
+    WHERE ${where}
+    ORDER BY COALESCE(rs.averageScore, 0) DESC, COALESCE(rs.ratingCount, 0) DESC, a.id ASC
+    LIMIT ${safePageSize} OFFSET ${skip}
+  `)
+  const skip = (requestedPage - 1) * safePageSize
   const [rows, countRows] = await Promise.all([
-    prisma.$queryRaw<RawAlbumRankingRow[]>(Prisma.sql`
-      SELECT
-        a.id,
-        a.name,
-        a.artist,
-        a.releaseYear,
-        a.language,
-        a.coverUrl,
-        COALESCE(rs.ratingCount, 0) AS ratingCount,
-        COALESCE(rs.ratingScoreTotal, 0) AS ratingScoreTotal,
-        COALESCE(rs.averageScore, 0) AS averageScore,
-        COALESCE(rs.reviewCount, 0) AS reviewCount
-      FROM MusicAlbum AS a
-      LEFT JOIN RatingStats AS rs ON rs.albumId = a.id
-      WHERE ${where}
-      ORDER BY COALESCE(rs.averageScore, 0) DESC, COALESCE(rs.ratingCount, 0) DESC, a.id ASC
-      LIMIT ${safePageSize} OFFSET ${skip}
-    `),
+    loadRows(skip),
     prisma.$queryRaw<Array<{ count: number | bigint }>>(Prisma.sql`
       SELECT COUNT(*) AS count
       FROM MusicAlbum AS a
@@ -417,7 +424,10 @@ export async function getRatingRanking({
     `),
   ])
   const total = integerValue(countRows[0]?.count)
-  return { items: rows.map(mapAlbumRankingRow), page: safePage, pageSize: safePageSize, total, hasMore: skip + rows.length < total }
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
+  const safePage = Math.min(requestedPage, totalPages)
+  const resolvedRows = safePage === requestedPage ? rows : await loadRows((safePage - 1) * safePageSize)
+  return { items: resolvedRows.map(mapAlbumRankingRow), page: safePage, pageSize: safePageSize, total, totalPages, hasMore: safePage < totalPages }
 }
 
 function mapStats(stats: { ratingCount: number; ratingScoreTotal: number; averageScore: number; reviewCount: number } | null | undefined) {

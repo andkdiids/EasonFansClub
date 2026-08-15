@@ -1,5 +1,11 @@
+'use client'
+
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useEffect, useRef } from 'react'
+import { Pagination } from '@/components/ui/Pagination'
 import { MusicCover } from '@/components/music/MusicCover'
+import { scrollToSectionTop } from '@/lib/pagination'
 import { formatAverageScore, formatRatingCount, ratingTargetPath, type RatingLanguage, type RatingTarget } from '@/lib/rating-types'
 import { RatingStars } from './RatingStars'
 import type { RatingListItem } from '@/lib/rating-service'
@@ -13,7 +19,7 @@ function hrefFor({ target, language, query, page }: { target: RatingTarget; lang
   return `/ratings?${params.toString()}`
 }
 
-export function RatingRankingList({ items, target, language, query, page, pageSize, total, hasMore }: Readonly<{
+export function RatingRankingList({ items, target, language, query, page, pageSize, total, totalPages }: Readonly<{
   items: RatingListItem[]
   target: RatingTarget
   language: RatingLanguage
@@ -21,10 +27,25 @@ export function RatingRankingList({ items, target, language, query, page, pageSi
   page: number
   pageSize: number
   total: number
-  hasMore: boolean
+  totalPages: number
 }>) {
+  const router = useRouter()
+  const rankingRef = useRef<HTMLElement>(null)
+  const previousPageRef = useRef(page)
+
+  useEffect(() => {
+    if (previousPageRef.current === page) return
+    previousPageRef.current = page
+    scrollToSectionTop(rankingRef.current)
+  }, [page])
+
+  function goToPage(nextPage: number) {
+    scrollToSectionTop(rankingRef.current)
+    router.push(hrefFor({ target, language, query, page: nextPage }), { scroll: false })
+  }
+
   return (
-    <section aria-labelledby="rating-ranking-title">
+    <section ref={rankingRef} aria-labelledby="rating-ranking-title" className="scroll-mt-24">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
           <p className="text-xs font-black tracking-[0.18em] text-brand-700">RANKING</p>
@@ -63,12 +84,14 @@ export function RatingRankingList({ items, target, language, query, page, pageSi
         <div className="border border-dashed border-sky-200 bg-sky-50/55 p-8 text-center text-sm font-bold text-slate-500">没有匹配的{target === 'song' ? '歌曲' : '专辑'}。</div>
       )}
 
-      {page > 1 || hasMore ? (
-        <nav className="mt-5 flex items-center justify-between gap-3" aria-label="歌·颂排行榜分页">
-          {page > 1 ? <Link href={hrefFor({ target, language, query, page: page - 1 })} className="border border-sky-200 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:border-brand-300">上一页</Link> : <span />}
-          <span className="text-xs font-bold text-slate-500">第 {page} 页</span>
-          {hasMore ? <Link href={hrefFor({ target, language, query, page: page + 1 })} className="border border-sky-200 bg-white px-4 py-2 text-sm font-black text-brand-700 hover:border-brand-300">下一页</Link> : <span />}
-        </nav>
+      {totalPages > 1 ? (
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          onPageChange={goToPage}
+          ariaLabel="歌·颂排行榜分页"
+          className="rating-pagination"
+        />
       ) : null}
     </section>
   )

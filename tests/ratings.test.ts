@@ -83,6 +83,24 @@ test('评分服务使用完整公开曲库、数据库排序分页，并且不�
   assert.doesNotMatch(service, /previewUrl|sourceAudioPath|MusicPlayer|resolveMusicPlayback/)
 })
 
+test('歌·颂榜单复用广场分页组件、页码窗口、跳页输入和榜单滚动定位', () => {
+  const ranking = source('components/ratings/RatingRankingList.tsx')
+  const page = source('app/ratings/page.tsx')
+  const pagination = source('components/ui/Pagination.tsx')
+  const css = source('app/globals.css')
+  const service = source('lib/rating-service.ts')
+  assert.match(ranking, /import \{ Pagination \} from '@\/components\/ui\/Pagination'/)
+  assert.match(ranking, /totalPages > 1/)
+  assert.match(ranking, /scrollToSectionTop\(rankingRef\.current\)/)
+  assert.match(ranking, /router\.push\(hrefFor\(/)
+  assert.match(page, /totalPages=\{ranking\.totalPages\}/)
+  assert.match(service, /const totalPages = Math\.max\(1, Math\.ceil\(total \/ safePageSize\)\)/)
+  assert.match(pagination, /inputMode="numeric"/)
+  assert.match(pagination, /min=\{1\}/)
+  assert.match(pagination, /max=\{safeTotal\}/)
+  assert.match(css, /\.rating-pagination \{[^}]*max-width:100%;[^}]*padding-inline:16px/)
+})
+
 test('评分 transaction 同步维护统计，删除评论只减少 reviewCount', () => {
   const service = source('lib/rating-service.ts')
   assert.match(service, /prisma\.\$transaction\(async \(tx\) => \{[\s\S]*tx\.rating\.create/)

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { PageContainer } from '@/components/PageContainer'
 import { RatingRankingList } from '@/components/ratings/RatingRankingList'
 import { getCurrentUser } from '@/lib/auth'
@@ -28,11 +29,13 @@ export default async function RatingsPage({ searchParams }: { searchParams: Sear
   const target = parseRatingTarget(firstParam(params.type))
   const language = parseRatingLanguage(firstParam(params.language))
   const query = sanitizeText(firstParam(params.q), 100)
-  const page = Math.max(Number(firstParam(params.page) || 1) || 1, 1)
+  const requestedPage = Number(firstParam(params.page) || 1)
+  const page = Number.isSafeInteger(requestedPage) && requestedPage >= 1 ? requestedPage : 1
   const [ranking, user] = await Promise.all([
     getRatingRanking({ target, language, query, page }),
     getCurrentUser().catch(() => null),
   ])
+  if (ranking.page !== page) redirect(ratingsHref({ target, language, query, page: ranking.page }))
 
   return (
     <PageContainer className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-9">
@@ -73,7 +76,7 @@ export default async function RatingsPage({ searchParams }: { searchParams: Sear
       </form>
 
       <div className="mt-8">
-        <RatingRankingList items={ranking.items} target={target} language={language} query={query} page={ranking.page} pageSize={ranking.pageSize} total={ranking.total} hasMore={ranking.hasMore} />
+        <RatingRankingList items={ranking.items} target={target} language={language} query={query} page={ranking.page} pageSize={ranking.pageSize} total={ranking.total} totalPages={ranking.totalPages} />
       </div>
     </PageContainer>
   )

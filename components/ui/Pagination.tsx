@@ -82,8 +82,13 @@ export function Pagination({
           id={`${ariaLabel}-jump`}
           value={jumpValue}
           onChange={(event) => setJumpValue(event.target.value)}
+          type="number"
           inputMode="numeric"
           pattern="[0-9]*"
+          min={1}
+          max={safeTotal}
+          step={1}
+          enterKeyHint="go"
           placeholder={String(safeCurrent)}
           aria-label="页码"
           disabled={disabled}
