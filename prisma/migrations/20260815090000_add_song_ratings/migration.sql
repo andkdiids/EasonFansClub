@@ -13,11 +13,7 @@ CREATE TABLE `Rating` (
   INDEX `Rating_targetType_albumId_createdAt_idx` (`targetType`, `albumId`, `createdAt`),
   INDEX `Rating_userId_createdAt_idx` (`userId`, `createdAt`),
   PRIMARY KEY (`id`),
-  CONSTRAINT `Rating_score_range_chk` CHECK (`score` BETWEEN 1 AND 10),
-  CONSTRAINT `Rating_target_reference_chk` CHECK (
-    (`targetType` = 'SONG' AND `songId` IS NOT NULL AND `albumId` IS NULL)
-    OR (`targetType` = 'ALBUM' AND `albumId` IS NOT NULL AND `songId` IS NULL)
-  )
+  CONSTRAINT `Rating_score_range_chk` CHECK (`score` BETWEEN 1 AND 10)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE `RatingReview` (
@@ -65,11 +61,7 @@ CREATE TABLE `RatingStats` (
   UNIQUE INDEX `RatingStats_albumId_key` (`albumId`),
   INDEX `RatingStats_targetType_averageScore_ratingCount_idx` (`targetType`, `averageScore`, `ratingCount`),
   INDEX `RatingStats_targetType_updatedAt_idx` (`targetType`, `updatedAt`),
-  PRIMARY KEY (`id`),
-  CONSTRAINT `RatingStats_target_reference_chk` CHECK (
-    (`targetType` = 'SONG' AND `songId` IS NOT NULL AND `albumId` IS NULL)
-    OR (`targetType` = 'ALBUM' AND `albumId` IS NOT NULL AND `songId` IS NULL)
-  )
+  PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ALTER TABLE `Rating`
