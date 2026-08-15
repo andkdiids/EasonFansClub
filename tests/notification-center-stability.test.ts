@@ -29,6 +29,7 @@ test('notification API does not repeat the summary query after loading the page'
   assert.doesNotMatch(route, /getUnreadNotificationCount/)
   assert.match(route, /unreadCount: result\.unreadCount/)
   assert.match(route, /logNotificationError\('list'/)
+  assert.match(route, /if \(result\.failed\)[\s\S]*status: 503/)
 })
 
 test('notification client uses server data for the initial render and has local retry UI', () => {

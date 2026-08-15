@@ -28,6 +28,20 @@ export async function GET(request: Request) {
   try {
     const result = await listUnifiedNotificationsPage(guard.user.id, { unreadOnly, page: requestedPage, pageSize, category })
 
+    if (result.failed) {
+      logNotificationError('list.failed', {
+        userId: guard.user.id,
+        page: requestedPage,
+        pageSize,
+        category,
+      }, new Error('notification primary and fallback queries failed'))
+      return NextResponse.json({
+        ok: false,
+        code: 'NOTIFICATIONS_UNAVAILABLE',
+        message: '通知列表暂时无法加载，请稍后重试',
+      }, { status: 503, headers: privateHeaders })
+    }
+
     return NextResponse.json({
       notifications: result.items,
       items: result.items,
