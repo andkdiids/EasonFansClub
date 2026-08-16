@@ -6,12 +6,35 @@ export const clinicPublicHeaders = {
   Vary: 'Cookie',
 }
 
-export function clinicErrorResponse(error: unknown) {
+type ClinicErrorContext = {
+  action?: string
+  recordId?: string
+  consultationId?: string
+  userId?: string
+  anonymous?: boolean
+  contentLength?: number
+}
+
+function getPrismaCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code : undefined
+}
+
+export function clinicErrorResponse(error: unknown, context: ClinicErrorContext = {}) {
   if (error instanceof ClinicServiceError) {
     return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: clinicPublicHeaders })
   }
-  console.error('[clinic.api]', { error: error instanceof Error ? error.name : 'unknown' })
-  return NextResponse.json({ ok: false, code: 'CLINIC_UNAVAILABLE', message: '门诊系统暂时有点忙，请稍后再试。' }, { status: 503, headers: clinicPublicHeaders })
+  console.error(`[${context.action || 'clinic.api'}]`, {
+    ...(context.recordId ? { recordId: context.recordId } : {}),
+    ...(context.consultationId ? { consultationId: context.consultationId } : {}),
+    ...(context.userId ? { userId: context.userId } : {}),
+    ...(typeof context.anonymous === 'boolean' ? { anonymous: context.anonymous } : {}),
+    ...(typeof context.contentLength === 'number' ? { contentLength: context.contentLength } : {}),
+    errorName: error instanceof Error ? error.name : 'unknown',
+    prismaCode: getPrismaCode(error),
+  })
+  return NextResponse.json({ ok: false, code: 'CLINIC_UNAVAILABLE', message: '门诊系统暂时有点忙，请稍后再试。' }, { status: 500, headers: clinicPublicHeaders })
 }
 
 export function clinicOk<T>(data: T, status = 200) {

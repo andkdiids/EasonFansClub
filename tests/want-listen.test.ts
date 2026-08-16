@@ -6,10 +6,11 @@ import {
   buildCantoneseFragmentQuestion,
   buildFalseTitleQuestion,
   buildWantListenQuestion,
+  validateQuestion,
   type WantListenSongCandidate,
 } from '../lib/want-listen-questions'
-import { cleanLyrics, selectLyricFragment, selectSafeLyricSnippet } from '../lib/want-listen-lyrics'
-import { difficultyForQuestion, scoreForWantListenAnswer } from '../lib/want-listen-config'
+import { cleanLyrics, hasSufficientLyricContext, isValidLyricContext, selectLyricFragment, selectSafeLyricSnippet } from '../lib/want-listen-lyrics'
+import { difficultyForQuestion, scoreForWantListenAnswer, WANT_LISTEN_TOTAL_QUESTIONS } from '../lib/want-listen-config'
 import { compareWantListenScores } from '../lib/want-listen-period'
 import { normalizeWantListenTitle } from '../lib/want-listen-title'
 
@@ -59,22 +60,65 @@ test('歌词清洗会移除 LRC 时间轴、metadata、署名和无意义语气�
   assert.equal(selectSafeLyricSnippet(lines, '不存在的歌名'), '靠拥抱亦难任你拥有')
 })
 
+test('歌词上下文有效性会拒绝分隔符、时间轴、空白和过短单侧上下文', () => {
+  assert.equal(isValidLyricContext('——'), false)
+  assert.equal(isValidLyricContext('......'), false)
+  assert.equal(isValidLyricContext('[00:13.20]'), false)
+  assert.equal(isValidLyricContext('仍然在呼吸'), true)
+  assert.equal(hasSufficientLyricContext('', ''), false)
+  assert.equal(hasSufficientLyricContext('——', ''), false)
+  assert.equal(hasSufficientLyricContext('...', '   '), false)
+  assert.equal(hasSufficientLyricContext('[00:13.20]', '——'), false)
+  assert.equal(hasSufficientLyricContext('何来内心交战', ''), false)
+  assert.equal(hasSufficientLyricContext('上一句歌词\n再上一句歌词', ''), true)
+  assert.equal(hasSufficientLyricContext('', '下一句歌词\n再下一句歌词'), true)
+  assert.equal(hasSufficientLyricContext('上一句歌词', '下一句歌词'), true)
+})
+
 test('粤语残片使用连续自然片段，四个歌词选项唯一', () => {
-  const target = song('target', '粤语目标', '谁都只得那双手\n靠拥抱亦难任你拥有')
+  const target = song('target', '粤语目标', '再上一句有效歌词\n谁都只得那双手\n靠拥抱亦难任你拥有\n再下一句有效歌词')
   const pool = [
     target,
-    song('other-1', '粤语一', '明明相隔很远\n仍然记得你的声音'),
-    song('other-2', '粤语二', '如果这都不算爱\n还有什么值得等'),
-    song('other-3', '粤语三', '沿途风光都很好\n只是少了你的拥抱'),
+    song('other-1', '粤语一', '再上一句明明相隔很远\n明明相隔很远\n仍然记得你的声音\n再下一句仍然记得你'),
+    song('other-2', '粤语二', '再上一句如果这都不算爱\n如果这都不算爱\n还有什么值得等\n再下一句值得去等'),
+    song('other-3', '粤语三', '再上一句沿途风光都很好\n沿途风光都很好\n只是少了你的拥抱\n再下一句你的拥抱'),
   ]
   const question = buildCantoneseFragmentQuestion(target, pool, 1, () => 0.27)
   assert.ok(question)
   assert.equal(question.data.options.length, 4)
   assert.equal(new Set(question.data.options.map((option) => normalizeWantListenTitle(option.label))).size, 4)
   assert.match(question.data.maskedContext || '', /____/u)
+  assert.ok(question.data.beforeContext)
+  assert.ok(question.data.afterContext)
   assert.ok(question.data.completeContext)
   assert.ok(question.data.correctLyric)
+  assert.equal(validateQuestion(question.data), true)
   assert.equal(selectLyricFragment(cleanLyrics(target.lyrics), 1)?.context.includes('____'), true)
+})
+
+test('粤语残片会在候选生成前清除空白歌词行、标签和纯符号行', () => {
+  assert.deepEqual(
+    cleanLyrics('——\n...\n[00:13.20]\n[副歌]\n<html>\n仍然在呼吸\n   '),
+    ['仍然在呼吸'],
+  )
+})
+
+test('历史粤语残片题的上下文校验失败时不会被视为有效题', () => {
+  const base = {
+    kind: 'cantonese-fragment' as const,
+    options: [
+      { key: 'correct', label: '仍然在呼吸' },
+      { key: 'wrong-1', label: '曾经爱过你' },
+      { key: 'wrong-2', label: '仍然记得你' },
+      { key: 'wrong-3', label: '再见旧时光' },
+    ],
+    correctLyric: '仍然在呼吸',
+    completeContext: '仍然在呼吸',
+  }
+  assert.equal(validateQuestion({ ...base, maskedContext: '____', beforeContext: '', afterContext: '' }), false)
+  assert.equal(validateQuestion({ ...base, maskedContext: '——', beforeContext: '——', afterContext: '' }), false)
+  assert.equal(validateQuestion({ ...base, maskedContext: '上一句\n____', beforeContext: '上一句', afterContext: '' }), false)
+  assert.equal(validateQuestion({ ...base, maskedContext: '上一句\n再上一句\n____', beforeContext: '上一句\n再上一句', afterContext: '' }), true)
 })
 
 test('防不胜防固定五个真实歌名和一个假歌名，假歌名位置由洗牌决定', () => {
@@ -137,4 +181,15 @@ test('四个想听成就接入现有 SPECIAL 成就同步，不创建第二套�
   for (const title of ['此时无声胜有声', '歌词本', '真的假不了', '不用听了']) assert.match(achievements, new RegExp(title))
   assert.match(achievements, /category: 'SPECIAL'/)
   assert.match(service, /syncUserAchievements\(input\.userId, \['SPECIAL'\]\)/)
+})
+
+test('粤语残片 Session 会二次过滤历史脏题并补齐完整 20 道题', () => {
+  const service = source('lib/want-listen.ts')
+  assert.equal(WANT_LISTEN_TOTAL_QUESTIONS, 20)
+  assert.match(service, /validateQuestion\(question\.data\)/)
+  assert.match(service, /repairCantoneseSessionQuestions/)
+  assert.match(service, /positionsToReplace/)
+  assert.match(service, /questionCount/)
+  assert.match(service, /WANT_LISTEN_TOTAL_QUESTIONS/)
+  assert.match(service, /loadSessionRaw\(userId, sessionId\)/)
 })

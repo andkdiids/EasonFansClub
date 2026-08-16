@@ -7,11 +7,13 @@ import { ClinicTime } from './ClinicTime'
 export function ClinicRecordCard({
   record,
   isAuthenticated,
+  isAspirinPending,
   onAspirin,
   onReport,
 }: Readonly<{
   record: ClinicPublicRecord
   isAuthenticated: boolean
+  isAspirinPending: boolean
   onAspirin: (record: ClinicPublicRecord) => void
   onReport: (target: { recordId: string }) => void
 }>) {
@@ -31,6 +33,7 @@ export function ClinicRecordCard({
           type="button"
           className={`clinic-action-button clinic-aspirin-button ${record.viewerHasAspirin ? 'is-active' : ''}`}
           aria-label={record.viewerHasAspirin ? '取消阿士匹灵' : '给颗阿士匹灵'}
+          disabled={isAspirinPending}
           onClick={() => onAspirin(record)}
         >
           <UiIcon name="pill" />

@@ -1,4 +1,11 @@
-import { cleanLyrics, lyricContext, selectLyricFragment, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
+import {
+  cleanLyrics,
+  hasSufficientLyricContext,
+  isValidLyricContext,
+  lyricContextParts,
+  selectLyricFragment,
+  selectSafeLyricSnippet,
+} from '@/lib/want-listen-lyrics'
 import { normalizeRatingLanguage, ratingLanguageLabel } from '@/lib/rating-types'
 import { normalizeWantListenTitle } from '@/lib/want-listen-title'
 
@@ -30,6 +37,8 @@ export type WantListenStoredQuestion = {
   songId?: string
   hints?: Array<Record<string, unknown>>
   maskedContext?: string
+  beforeContext?: string
+  afterContext?: string
   completeContext?: string
   correctLyric?: string
   falseTitleDifficulty?: 'EASY' | 'NORMAL' | 'HARD'
@@ -40,6 +49,34 @@ export type WantListenBuiltQuestion = {
   data: WantListenStoredQuestion
   correctOptionKey: string
   sourceSongId?: string
+}
+
+function splitContextSides(maskedContext: string | null | undefined) {
+  const lines = typeof maskedContext === 'string' ? maskedContext.split(/\r?\n/u) : []
+  const targetIndex = lines.findIndex((line) => line.includes('____'))
+  if (targetIndex < 0) return { before: '', after: '' }
+  return {
+    before: lines.slice(0, targetIndex).join('\n'),
+    after: lines.slice(targetIndex + 1).join('\n'),
+  }
+}
+
+/**
+ * Validate persisted question data as well as freshly generated data. The
+ * non-Cantonese modes intentionally remain unchanged.
+ */
+export function validateQuestion(question: WantListenStoredQuestion | null | undefined) {
+  if (!question) return false
+  if (question.kind !== 'cantonese-fragment') return true
+  if (!Array.isArray(question.options) || question.options.length !== 4) return false
+  if (!isValidLyricContext(question.correctLyric) || !question.maskedContext?.includes('____')) return false
+
+  const extracted = splitContextSides(question.maskedContext)
+  const before = question.beforeContext !== undefined ? question.beforeContext : extracted.before
+  const after = question.afterContext !== undefined ? question.afterContext : extracted.after
+  if (!hasSufficientLyricContext(before, after)) return false
+  if (!hasSufficientLyricContext(extracted.before, extracted.after)) return false
+  return question.completeContext === undefined || isValidLyricContext(question.completeContext)
 }
 
 export function shuffle<T>(items: readonly T[], random: () => number = Math.random) {
@@ -171,6 +208,7 @@ export function buildCantoneseFragmentQuestion(
 ): WantListenBuiltQuestion | null {
   const source = fragmentFromSong(song, position)
   if (!source) return null
+  const context = lyricContextParts(source.lines, source.fragment)
   const correct = source.fragment.answer
   const answerKey = normalizeWantListenTitle(correct)
   const distractors: string[] = []
@@ -189,18 +227,23 @@ export function buildCantoneseFragmentQuestion(
     { key: 'correct', label: correct },
     ...distractors.map((label, index) => ({ key: `wrong-${index}`, label })),
   ], random)
+  const data: WantListenStoredQuestion = {
+    kind: 'cantonese-fragment',
+    options,
+    songId: song.id,
+    songTitle: song.title.trim(),
+    maskedContext: context.masked,
+    beforeContext: context.before,
+    afterContext: context.after,
+    completeContext: context.complete,
+    correctLyric: correct,
+  }
+  if (!validateQuestion(data)) return null
+
   return {
     sourceSongId: song.id,
     correctOptionKey: 'correct',
-    data: {
-      kind: 'cantonese-fragment',
-      options,
-      songId: song.id,
-      songTitle: song.title.trim(),
-      maskedContext: source.fragment.context,
-      completeContext: lyricContext(source.lines, source.fragment),
-      correctLyric: correct,
-    },
+    data,
   }
 }
 

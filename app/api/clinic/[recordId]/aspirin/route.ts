@@ -7,21 +7,23 @@ type RouteContext = { params: Promise<{ recordId: string }> }
 export async function POST(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  let recordId = ''
   try {
-    const { recordId } = await context.params
+    ({ recordId } = await context.params)
     return clinicOk(await giveClinicAspirin({ userId: guard.user.id, recordId }))
   } catch (error) {
-    return clinicErrorResponse(error)
+    return clinicErrorResponse(error, { action: 'clinic.aspirin', recordId, userId: guard.user.id })
   }
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  let recordId = ''
   try {
-    const { recordId } = await context.params
+    ({ recordId } = await context.params)
     return clinicOk(await removeClinicAspirin({ userId: guard.user.id, recordId }))
   } catch (error) {
-    return clinicErrorResponse(error)
+    return clinicErrorResponse(error, { action: 'clinic.aspirin', recordId, userId: guard.user.id })
   }
 }

@@ -36,6 +36,8 @@ export function ClinicHomeClient({
   const [sort, setSort] = useState<ClinicSort>(initialSort)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [actionMessage, setActionMessage] = useState('')
+  const [aspirinPendingId, setAspirinPendingId] = useState<string | null>(null)
   const [reportTarget, setReportTarget] = useState<{ recordId: string } | null>(null)
   const skipFirstReload = useRef(true)
 
@@ -73,17 +75,21 @@ export function ClinicHomeClient({
   }
 
   async function handleAspirin(record: ClinicPublicRecord) {
-    if (!requireLogin()) return
+    if (!requireLogin() || aspirinPendingId === record.id) return
     const active = record.viewerHasAspirin
+    setAspirinPendingId(record.id)
+    setActionMessage('')
     setData((current) => ({ ...current, items: current.items.map((item) => item.id === record.id ? { ...item, viewerHasAspirin: !active, aspirinCount: Math.max(0, item.aspirinCount + (active ? -1 : 1)) } : item) }))
     try {
-      const response = await fetch(`/api/clinic/records/${record.id}/aspirin`, { method: active ? 'DELETE' : 'POST' })
+      const response = await fetch(`/api/clinic/${record.id}/aspirin`, { method: active ? 'DELETE' : 'POST' })
       const body = await response.json().catch(() => null) as { ok?: boolean; data?: { count?: number }; message?: string }
       if (!response.ok || !body?.ok) throw new Error(body?.message || '药效没有记录下来，请稍后再试。')
       if (typeof body.data?.count === 'number') setData((current) => ({ ...current, items: current.items.map((item) => item.id === record.id ? { ...item, aspirinCount: body.data!.count! } : item) }))
     } catch (requestError) {
       await load(data.page)
-      setError(requestError instanceof Error ? requestError.message : '药效没有记录下来，请稍后再试。')
+      setActionMessage(requestError instanceof Error ? requestError.message : '药效没有记录下来，请稍后再试。')
+    } finally {
+      setAspirinPendingId(null)
     }
   }
 
@@ -119,12 +125,13 @@ export function ClinicHomeClient({
         </div>
       </section>
 
-      {error ? <div className="clinic-error-state" role="alert">{error}<button type="button" onClick={() => void load(data.page)}>重试</button></div> : null}
+      {error ? <p className="clinic-inline-message clinic-list-error" role="alert">{error}<button type="button" onClick={() => void load(data.page)}>重试</button></p> : null}
       {loading && !data.items.length ? <div className="clinic-loading-state">正在读取候诊记录…</div> : null}
       {!loading && !data.items.length ? <section className="clinic-empty-state"><UiIcon name="stethoscope" /><p>今天这里还没有患者挂号。</p><Link href="/clinic/new" className="clinic-secondary-button">来做第一位患者</Link></section> : null}
       <section className="clinic-record-list" aria-live="polite">
-        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { if (requireLogin()) setReportTarget(target) }} />)}
+        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { if (requireLogin()) setReportTarget(target) }} />)}
       </section>
+      {actionMessage ? <p className="clinic-inline-message clinic-action-message" role="status">{actionMessage}</p> : null}
       {data.totalPages > 1 ? <Pagination currentPage={data.page} totalPages={data.totalPages} onPageChange={(page) => void load(page)} disabled={loading} ariaLabel="门诊病历分页" className="clinic-pagination" /> : null}
 
       <footer className="clinic-disclaimer">阿士匹灵门诊部是病友交流与情绪树洞，不提供专业医疗或心理诊断。如遇真实身体或心理健康问题，请及时寻求专业帮助。</footer>

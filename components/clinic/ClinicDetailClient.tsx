@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UiIcon } from '@/components/UiIcon'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
@@ -35,9 +35,18 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   const [draft, setDraft] = useState('')
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [recordAspirinPending, setRecordAspirinPending] = useState(false)
   const [actionError, setActionError] = useState('')
   const [reportTarget, setReportTarget] = useState<{ recordId: string } | { consultationId: string } | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const focusId = useMemo(() => initialFocusId || '', [initialFocusId])
+
+  useLayoutEffect(() => {
+    const textarea = composerRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 112), 180)}px`
+  }, [draft])
 
   function requireLogin() {
     if (isAuthenticated) return true
@@ -46,17 +55,22 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function toggleRecordAspirin() {
-    if (!requireLogin()) return
+    if (!requireLogin() || recordAspirinPending) return
     const active = record.viewerHasAspirin
+    const previousRecord = record
+    setRecordAspirinPending(true)
+    setActionError('')
     setRecord((current) => ({ ...current, viewerHasAspirin: !active, aspirinCount: Math.max(0, current.aspirinCount + (active ? -1 : 1)) }))
     try {
-      const response = await fetch(`/api/clinic/records/${record.id}/aspirin`, { method: active ? 'DELETE' : 'POST' })
+      const response = await fetch(`/api/clinic/${record.id}/aspirin`, { method: active ? 'DELETE' : 'POST' })
       const body = await response.json().catch(() => null) as { ok?: boolean; data?: { count?: number }; message?: string }
       if (!response.ok || !body?.ok) throw new Error(body?.message || '药效没有记录下来，请稍后再试。')
       if (typeof body.data?.count === 'number') setRecord((current) => ({ ...current, aspirinCount: body.data!.count! }))
     } catch (error) {
-      setRecord(initialRecord)
+      setRecord(previousRecord)
       setActionError(error instanceof Error ? error.message : '药效没有记录下来，请稍后再试。')
+    } finally {
+      setRecordAspirinPending(false)
     }
   }
 
@@ -69,7 +83,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
     setSending(true)
     setActionError('')
     try {
-      const response = await fetch(`/api/clinic/records/${record.id}/consultations`, {
+      const response = await fetch(`/api/clinic/${record.id}/consultations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: draft, identityMode, parentId: replyTo }),
@@ -118,7 +132,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
 
   async function deleteRecord() {
     if (!requireLogin() || !window.confirm('删除后，这份病历和下面的全部会诊将不再公开显示，无法恢复。\n\n确定要烧掉这份病历吗？')) return
-    const response = await fetch(`/api/clinic/records/${record.id}`, { method: 'DELETE' })
+    const response = await fetch(`/api/clinic/${record.id}`, { method: 'DELETE' })
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { message?: string }
       setActionError(body?.message || '病历删除失败，请稍后再试。')
@@ -152,7 +166,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
         <div className="clinic-detail-author"><ClinicIdentityBadge identity={record.author} /><span className="clinic-detail-separator">·</span><span>患者诉求：{record.needLabel}</span></div>
         <p className="clinic-detail-content">{record.content}</p>
         <footer className="clinic-detail-actions">
-          <button type="button" className={`clinic-action-button ${record.viewerHasAspirin ? 'is-active' : ''}`} onClick={() => void toggleRecordAspirin()} aria-label={record.viewerHasAspirin ? '取消阿士匹灵' : '给颗阿士匹灵'}><UiIcon name="pill" /><span>{record.viewerHasAspirin ? '已经给药' : '给颗阿士匹灵'}</span><b>{record.aspirinCount}</b></button>
+          <button type="button" className={`clinic-action-button ${record.viewerHasAspirin ? 'is-active' : ''}`} onClick={() => void toggleRecordAspirin()} disabled={recordAspirinPending} aria-label={record.viewerHasAspirin ? '取消阿士匹灵' : '给颗阿士匹灵'}><UiIcon name="pill" /><span>{record.viewerHasAspirin ? '已经给药' : '给颗阿士匹灵'}</span><b>{record.aspirinCount}</b></button>
           <button type="button" className="clinic-action-button" onClick={() => document.getElementById('clinic-consultation-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><UiIcon name="stethoscope" /><span>参与会诊</span><b>{record.consultationCount}</b></button>
           <button type="button" className="clinic-action-button" onClick={() => { void navigator.clipboard?.writeText(window.location.href); setActionError('病历链接已复制。') }}>复制链接</button>
         </footer>
@@ -167,7 +181,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       <section id="clinic-consultation-composer" className="clinic-composer-section">
         <div className="clinic-composer-heading"><div><p className="clinic-kicker">SAY SOMETHING</p><h2>{replyTo ? `回复 @${findParentName(record.consultations, replyTo)}` : '各位医师点睇？'}</h2></div>{replyTo ? <button type="button" className="clinic-text-link" onClick={() => setReplyTo(null)}>取消回复</button> : null}</div>
         <div className="clinic-identity-switch" role="group" aria-label="会诊身份"><button type="button" className={identityMode === 'PUBLIC' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('PUBLIC'))}>用自己的身份</button><button type="button" className={identityMode === 'ANONYMOUS' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('ANONYMOUS'))}>匿名会诊</button></div>
-        <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder="跟患者说点什么……" aria-label="会诊内容" />
+        <textarea ref={composerRef} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder="跟患者说点什么……" aria-label="会诊内容" />
         <div className="clinic-composer-footer"><span>普通病友无法看到匿名医师的真实身份。</span><button type="button" className="clinic-primary-button" disabled={sending} onClick={() => void submitConsultation()}>{sending ? '提交中…' : '参与会诊'}</button></div>
       </section>
 

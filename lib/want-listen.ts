@@ -3,7 +3,7 @@ import { Prisma, type WantListenFakeTitleDifficulty, type WantListenMode } from 
 import { syncUserAchievements } from '@/lib/achievements'
 import { normalizeRatingLanguage } from '@/lib/rating-types'
 import { prisma } from '@/lib/prisma'
-import { cleanLyrics, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
+import { cleanLyrics, selectLyricFragment, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
 import {
   DEFAULT_WANT_LISTEN_CONFIG,
   WANT_LISTEN_MODE_LABELS,
@@ -24,6 +24,7 @@ import {
   effectiveSongYear,
   isValidWantListenSong,
   shuffle,
+  validateQuestion,
   type WantListenBuiltQuestion,
   type WantListenSongCandidate,
   type WantListenStoredQuestion,
@@ -161,7 +162,11 @@ async function loadSongRows() {
 async function loadSongPool(mode: WantListenMode) {
   const songs = (await loadSongRows()).map(mapSong)
   if (mode === 'WANT_LISTEN') return songs.filter(isValidWantListenSong)
-  return songs.filter((song) => normalizeRatingLanguage(effectiveSongLanguage(song)) === 'CANTONESE' && cleanLyrics(song.lyrics).length >= 2)
+  return songs.filter((song) => {
+    const lines = cleanLyrics(song.lyrics)
+    return normalizeRatingLanguage(effectiveSongLanguage(song)) === 'CANTONESE'
+      && Boolean(selectLyricFragment(lines, 1))
+  })
 }
 
 async function loadRealTitles() {
@@ -205,7 +210,7 @@ function buildQuestionForSongMode(pool: readonly WantListenSongCandidate[], posi
 function buildQuestionForCantoneseMode(pool: readonly WantListenSongCandidate[], position: number, usedIds: Set<string>): PreparedQuestion {
   for (const song of selectSongForQuestion(pool, usedIds)) {
     const question = buildCantoneseFragmentQuestion(song, pool, position)
-    if (question) {
+    if (question && validateQuestion(question.data)) {
       usedIds.add(song.id)
       return question
     }
@@ -265,10 +270,13 @@ async function prepareQuestionSet(mode: WantListenMode) {
       ? buildQuestionForSongMode(pool, position, usedIds)
       : buildQuestionForCantoneseMode(pool, position, usedIds))
   }
+  if (mode === 'CANTONESE_FRAGMENT' && (questions.length !== WANT_LISTEN_TOTAL_QUESTIONS || questions.some((question) => !validateQuestion(question.data)))) {
+    throw new WantListenServiceError('当前粤语歌词题库不足，暂时无法组成完整的有效题目。', 409, 'QUESTION_BANK_INSUFFICIENT')
+  }
   return questions
 }
 
-async function loadSession(userId: string, sessionId: string) {
+async function loadSessionRaw(userId: string, sessionId: string) {
   return prisma.wantListenSession.findFirst({
     where: { id: sessionId, userId },
     include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } },
@@ -286,9 +294,70 @@ function storedQuestion(question: SessionWithQuestions['WantListenSessionQuestio
   return question.questionData as unknown as WantListenStoredQuestion
 }
 
+async function repairCantoneseSessionQuestions(session: SessionWithQuestions): Promise<SessionWithQuestions> {
+  if (session.mode !== 'CANTONESE_FRAGMENT' || session.status !== 'IN_PROGRESS') return session
+
+  const byPosition = new Map(session.WantListenSessionQuestion.map((question) => [question.position, question]))
+  const positionsToReplace: Array<{ position: number; question?: SessionWithQuestions['WantListenSessionQuestion'][number] }> = []
+  for (let position = 1; position <= session.questionCount; position += 1) {
+    const question = byPosition.get(position)
+    if (!question || (!question.answeredAt && !validateQuestion(storedQuestion(question)))) {
+      positionsToReplace.push({ position, question })
+    }
+  }
+  if (!positionsToReplace.length) return session
+
+  const pool = await loadSongPool('CANTONESE_FRAGMENT')
+  if (pool.length < 4) throw new WantListenServiceError('当前粤语歌词题库不足，暂时无法补齐有效题目。', 409, 'QUESTION_BANK_INSUFFICIENT')
+
+  const usedIds = new Set<string>()
+  for (const question of session.WantListenSessionQuestion) {
+    const data = storedQuestion(question)
+    if (validateQuestion(data) && data.songId) usedIds.add(data.songId)
+  }
+
+  const replacements = positionsToReplace.map(({ position, question }) => ({
+    position,
+    question,
+    prepared: buildQuestionForCantoneseMode(pool, position, usedIds),
+  }))
+  if (replacements.some(({ prepared }) => !validateQuestion(prepared.data))) {
+    throw new WantListenServiceError('当前粤语歌词题库不足，暂时无法补齐有效题目。', 409, 'QUESTION_BANK_INSUFFICIENT')
+  }
+
+  await transactionWithRetry(async (database) => {
+    const active = await database.wantListenSession.findFirst({ where: { id: session.id, userId: session.userId, status: 'IN_PROGRESS' }, select: { id: true } })
+    if (!active) return
+    for (const replacement of replacements) {
+      const data = {
+        questionData: replacement.prepared.data as unknown as Prisma.InputJsonValue,
+        correctOptionKey: replacement.prepared.correctOptionKey,
+      }
+      if (replacement.question) {
+        await database.wantListenSessionQuestion.updateMany({
+          where: { id: replacement.question.id, sessionId: session.id, answeredAt: null },
+          data: { ...data, publicId: randomUUID(), hintLevel: 1, selectedOptionKey: null, isCorrect: null, awardedScore: 0, answeredAt: null },
+        })
+      } else {
+        await database.wantListenSessionQuestion.create({
+          data: { sessionId: session.id, publicId: randomUUID(), position: replacement.position, ...data },
+        })
+      }
+    }
+  })
+
+  return (await loadSessionRaw(session.userId, session.id)) || session
+}
+
+async function loadSession(userId: string, sessionId: string) {
+  const session = await loadSessionRaw(userId, sessionId)
+  return session ? repairCantoneseSessionQuestions(session) : null
+}
+
 function publicQuestion(session: SessionWithQuestions, question: SessionWithQuestions['WantListenSessionQuestion'][number] | undefined) {
   if (!question || session.status === 'ABANDONED' || session.status === 'EXPIRED') return null
   const data = storedQuestion(question)
+  if (session.mode === 'CANTONESE_FRAGMENT' && !validateQuestion(data)) return null
   const answered = Boolean(question.answeredAt)
   const result = answered
     ? {
@@ -379,6 +448,9 @@ export async function createWantListenSession(userId: string, rawMode: unknown) 
   await ensureModeAvailable(mode)
 
   const prepared = await prepareQuestionSet(mode)
+  if (prepared.length !== WANT_LISTEN_TOTAL_QUESTIONS || (mode === 'CANTONESE_FRAGMENT' && prepared.some((question) => !validateQuestion(question.data)))) {
+    throw new WantListenServiceError('当前粤语歌词题库不足，暂时无法组成完整的有效题目。', 409, 'QUESTION_BANK_INSUFFICIENT')
+  }
   try {
     const created = await transactionWithRetry(async (database) => {
       const sessionId = randomUUID()
@@ -505,6 +577,7 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
   const optionKey = input.optionKey.trim().slice(0, 100)
   if (!optionKey) throw new WantListenServiceError('请选择一个答案。', 400, 'ANSWER_INVALID')
   await expireSessionIfNeeded(input.userId, input.sessionId)
+  await loadSession(input.userId, input.sessionId)
   const result = await transactionWithRetry(async (database) => {
     const session = await database.wantListenSession.findFirst({ where: { id: input.sessionId, userId: input.userId }, include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } } })
     if (!session) throw sessionNotFound()
@@ -638,7 +711,10 @@ export async function getWantListenSummary(userId: string) {
 export async function getWantListenCoverage() {
   const songs = (await loadSongRows()).map(mapSong)
   const validWantListen = songs.filter(isValidWantListenSong)
-  const cantoneseWithLyrics = songs.filter((song) => normalizeRatingLanguage(effectiveSongLanguage(song)) === 'CANTONESE' && cleanLyrics(song.lyrics).length >= 2)
+  const cantoneseWithLyrics = songs.filter((song) => {
+    const lines = cleanLyrics(song.lyrics)
+    return normalizeRatingLanguage(effectiveSongLanguage(song)) === 'CANTONESE' && Boolean(selectLyricFragment(lines, 1))
+  })
   return {
     totalPublishedSongs: songs.length,
     wantListenEligibleSongs: validWantListen.length,
@@ -652,4 +728,5 @@ export async function getWantListenCoverage() {
   }
 }
 
+export { validateQuestion } from '@/lib/want-listen-questions'
 export { WANT_LISTEN_SETTING_KEYS }

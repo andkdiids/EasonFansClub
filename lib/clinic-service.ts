@@ -140,10 +140,15 @@ function publicContent(value: string, words: ModerationWord[]) {
   return maskClinicTextWithWords(value, words)
 }
 
-function cleanClinicContent(value: unknown, maxLength: number) {
-  const content = sanitizeText(value, maxLength)
+function cleanClinicContent(value: unknown, maxLength: number, label = '内容') {
+  // Ask sanitizeText for one extra character so oversized requests are
+  // rejected instead of silently truncated before validation.
+  const content = sanitizeText(value, maxLength + 1)
+  if (content.length > maxLength) {
+    throw new ClinicServiceError('CONTENT_TOO_LONG', `${label}不能超过 ${maxLength} 个字符。`)
+  }
   if (content.replace(/\s/gu, '').length < 2) {
-    throw new ClinicServiceError('CONTENT_TOO_SHORT', '病情描述至少需要 2 个有效字符。')
+    throw new ClinicServiceError('CONTENT_TOO_SHORT', `${label}至少需要 2 个有效字符。`)
   }
   return content
 }
@@ -221,7 +226,7 @@ export async function createClinicConsultation(input: {
   identityMode: ClinicIdentityMode
   parentId?: string | null
 }): Promise<ClinicConsultationCreateResult> {
-  const content = cleanClinicContent(input.content, CLINIC_CONSULTATION_MAX_LENGTH)
+  const content = cleanClinicContent(input.content, CLINIC_CONSULTATION_MAX_LENGTH, '会诊内容')
   const moderation = await checkClinicModeration(content)
   if (moderation.blocked) {
     throw new ClinicServiceError('STRICT_BANNED_WORD', '内容包含严格违禁词，请修改后再提交。')
@@ -578,7 +583,10 @@ export async function giveClinicAspirin(input: { userId: string; recordId?: stri
       try {
         await tx.clinicAspirin.create({ data: { userId: input.userId, recordId: input.recordId } })
       } catch (error) {
-        if (isPrismaCode(error, 'P2002')) return { active: true, created: false }
+        if (isPrismaCode(error, 'P2002')) {
+          const current = await tx.clinicRecord.findUnique({ where: { id: input.recordId }, select: { aspirinCount: true } })
+          return { active: true, created: false, count: current?.aspirinCount || 0 }
+        }
         throw error
       }
       const updated = await tx.clinicRecord.update({ where: { id: input.recordId }, data: { aspirinCount: { increment: 1 } }, select: { aspirinCount: true } })
@@ -590,7 +598,10 @@ export async function giveClinicAspirin(input: { userId: string; recordId?: stri
     try {
       await tx.clinicAspirin.create({ data: { userId: input.userId, consultationId: input.consultationId } })
     } catch (error) {
-      if (isPrismaCode(error, 'P2002')) return { active: true, created: false }
+      if (isPrismaCode(error, 'P2002')) {
+        const current = await tx.clinicConsultation.findUnique({ where: { id: input.consultationId }, select: { aspirinCount: true } })
+        return { active: true, created: false, count: current?.aspirinCount || 0 }
+      }
       throw error
     }
     const updated = await tx.clinicConsultation.update({ where: { id: input.consultationId }, data: { aspirinCount: { increment: 1 } }, select: { aspirinCount: true } })
@@ -602,18 +613,22 @@ export async function removeClinicAspirin(input: { userId: string; recordId?: st
   if (Boolean(input.recordId) === Boolean(input.consultationId)) throw new ClinicServiceError('INVALID_TARGET', '互动目标不正确。')
   return prisma.$transaction(async (tx) => {
     if (input.recordId) {
+      const target = await tx.clinicRecord.findFirst({ where: { id: input.recordId, status: 'ACTIVE' }, select: { id: true, aspirinCount: true } })
+      if (!target) throw new ClinicServiceError('RECORD_NOT_FOUND', '这份病历不存在或已经不再公开。', 404)
       const deleted = await tx.clinicAspirin.deleteMany({ where: { userId: input.userId, recordId: input.recordId } })
-      if (!deleted.count) return { active: false, removed: false }
+      if (!deleted.count) return { active: false, removed: false, count: target.aspirinCount }
       const updated = await tx.clinicRecord.updateMany({ where: { id: input.recordId, aspirinCount: { gt: 0 } }, data: { aspirinCount: { decrement: 1 } } })
       const record = await tx.clinicRecord.findUnique({ where: { id: input.recordId }, select: { aspirinCount: true } })
       return { active: false, removed: updated.count > 0, count: record?.aspirinCount || 0 }
     }
+    const activeTarget = await tx.clinicConsultation.findFirst({ where: { id: input.consultationId, status: 'ACTIVE' }, select: { id: true, aspirinCount: true } })
+    if (!activeTarget) throw new ClinicServiceError('CONSULTATION_NOT_FOUND', '这条会诊不存在或已经被删除。', 404)
     const deleted = await tx.clinicAspirin.deleteMany({ where: { userId: input.userId, consultationId: input.consultationId } })
-    if (!deleted.count) return { active: false, removed: false }
+    if (!deleted.count) return { active: false, removed: false, count: activeTarget.aspirinCount }
     const consultation = await tx.clinicConsultation.findUnique({ where: { id: input.consultationId }, select: { recordId: true } })
     const updated = await tx.clinicConsultation.updateMany({ where: { id: input.consultationId, aspirinCount: { gt: 0 } }, data: { aspirinCount: { decrement: 1 } } })
-    const target = await tx.clinicConsultation.findUnique({ where: { id: input.consultationId }, select: { aspirinCount: true } })
-    return { active: false, removed: updated.count > 0, count: target?.aspirinCount || 0, recordId: consultation?.recordId || null }
+    const current = await tx.clinicConsultation.findUnique({ where: { id: input.consultationId }, select: { aspirinCount: true } })
+    return { active: false, removed: updated.count > 0, count: current?.aspirinCount || 0, recordId: consultation?.recordId || null }
   })
 }
 
