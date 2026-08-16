@@ -15,6 +15,7 @@ import { isAppNavigationActive, primaryNavigation } from './navigation'
 
 const centerItems = [
   { href: '/posts/new', label: '发布帖子', icon: 'forum' as const },
+  { href: '/clinic', label: '阿士匹灵门诊部', icon: 'stethoscope' as const },
   { href: '/checkin', label: '每日挂号', icon: 'check' as const },
   { href: '/games', label: '娱乐天空', icon: 'star' as const },
   { href: '/ratings', label: '歌·颂', icon: 'chart' as const },

@@ -146,7 +146,15 @@ export async function POST(request: Request) {
     stage = 'cover_upload'
     if (coverFile && coverFile.size > 0) {
       const buf = await readFile(coverFile.path)
-      coverUrl = await uploadStickerPackCover({ ownerId: guard.user.id, buffer: buf })
+      coverUrl = await uploadStickerPackCover({
+        ownerId: guard.user.id,
+        buffer: buf,
+        source: {
+          field: 'cover',
+          originalName: coverFile.filename,
+          mimeType: coverFile.mimeType,
+        },
+      })
       console.info('[sticker.uploadPack]', {
         stage: 'cos_upload_success',
         kind: 'cover',
@@ -172,6 +180,11 @@ export async function POST(request: Request) {
         ownerId: guard.user.id,
         type,
         buffer: buf,
+        source: {
+          field: 'stickerFiles',
+          originalName: file.filename,
+          mimeType: file.mimeType,
+        },
       })
       const rawName = stickerNamesRaw[i] || ''
       const trimmed = rawName.trim().slice(0, 4)

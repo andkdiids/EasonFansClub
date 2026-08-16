@@ -16,6 +16,8 @@ const publicExactPaths = new Set([
   '/robots.txt',
   '/manifest.webmanifest',
   '/d89ed4255676640e037130589550e237.txt',
+  '/clinic',
+  '/api/clinic',
 ])
 
 const publicPathPrefixes = [
@@ -25,6 +27,8 @@ const publicPathPrefixes = [
   '/images/',
   '/fonts/',
   '/uploads/',
+  '/clinic/',
+  '/api/clinic/',
 ]
 
 // These endpoints perform their own gateway, ticket, and database checks.

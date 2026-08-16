@@ -6,7 +6,11 @@ import {
   STICKER_MAX_FILE_SIZE,
   STICKER_UNSUPPORTED_FORMAT_MESSAGE,
   STICKER_UPLOAD_FAILED_MESSAGE,
-  STICKER_UPLOAD_MIME_TYPES,
+  STICKER_COVER_ANIMATED_MESSAGE,
+  STICKER_COVER_UNSUPPORTED_FORMAT_MESSAGE,
+  STICKER_FILE_UNRECOGNIZED_MESSAGE,
+  STICKER_IMAGE_UNSUPPORTED_FORMAT_MESSAGE,
+  normalizeStickerMime,
 } from '@/lib/sticker-upload-constraints'
 import { createAnimatedImageVariants, createImageVariants } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
@@ -16,9 +20,19 @@ export {
   STICKER_MAX_FILE_SIZE,
   STICKER_UNSUPPORTED_FORMAT_MESSAGE,
   STICKER_UPLOAD_FAILED_MESSAGE,
+  STICKER_COVER_ANIMATED_MESSAGE,
+  STICKER_COVER_UNSUPPORTED_FORMAT_MESSAGE,
+  STICKER_FILE_UNRECOGNIZED_MESSAGE,
+  STICKER_IMAGE_UNSUPPORTED_FORMAT_MESSAGE,
 } from '@/lib/sticker-upload-constraints'
 
 export type StickerUploadType = 'STATIC' | 'GIF'
+
+export type StickerUploadSource = {
+  field?: string
+  originalName?: string | null
+  mimeType?: string | null
+}
 
 export const STICKER_STATIC_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/apng'] as const
 export const STICKER_GIF_MIME_TYPE = 'image/gif'
@@ -90,8 +104,9 @@ export function getStickerFormDataErrorResponse(error: unknown): {
 
 /** The type selector is only a UI hint; the server always checks the real bytes. */
 export function isStickerMimeAllowed(mime: string, type: StickerUploadType): boolean {
-  const normalized = mime.trim().toLowerCase()
-  return (type === 'STATIC' || type === 'GIF') && (STICKER_UPLOAD_MIME_TYPES as readonly string[]).includes(normalized)
+  if (type !== 'STATIC' && type !== 'GIF') return false
+  const normalized = normalizeStickerMime({ name: '', type: mime })
+  return normalized !== null
 }
 
 export function sanitizeStickerName(value: unknown): string | null {
@@ -104,7 +119,30 @@ export function sanitizeStickerName(value: unknown): string | null {
   return str
 }
 
-async function decodeImageMetadata(input: Buffer) {
+function logImageValidationFailure(
+  source: StickerUploadSource | undefined,
+  input: Buffer,
+  detectedFormat: string | null,
+  reason: string,
+) {
+  console.error('[sticker-upload:image-validation]', {
+    field: source?.field || 'unknown',
+    originalName: source?.originalName || null,
+    mimeType: source?.mimeType || null,
+    normalizedMimeType: source
+      ? normalizeStickerMime({ name: source.originalName, type: source.mimeType })
+      : null,
+    size: input.byteLength,
+    detectedFormat,
+    reason,
+  })
+}
+
+async function decodeImageMetadata(
+  input: Buffer,
+  source?: StickerUploadSource,
+  failureMessage = STICKER_FILE_UNRECOGNIZED_MESSAGE,
+) {
   try {
     const metadata = await sharp(input, {
       animated: true,
@@ -114,12 +152,17 @@ async function decodeImageMetadata(input: Buffer) {
     if (!metadata.format) throw new Error('missing image format')
     return metadata
   } catch {
-    throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
+    logImageValidationFailure(source, input, null, 'decode_failed')
+    throw new StickerUploadError('UNSUPPORTED_FORMAT', failureMessage)
   }
 }
 
-async function decodeImageFormat(input: Buffer): Promise<string> {
-  return (await decodeImageMetadata(input)).format as string
+async function decodeImageFormat(
+  input: Buffer,
+  source?: StickerUploadSource,
+  failureMessage = STICKER_FILE_UNRECOGNIZED_MESSAGE,
+): Promise<string> {
+  return (await decodeImageMetadata(input, source, failureMessage)).format as string
 }
 
 function hasApngAnimation(input: Buffer): boolean {
@@ -386,8 +429,52 @@ function isAnimatedSticker(format: string, metadata: Awaited<ReturnType<typeof d
   return false
 }
 
-export async function convertStaticStickerToWebp(input: Buffer, options?: { flatten?: boolean }): Promise<Buffer> {
-  const format = await decodeImageFormat(input)
+type StickerImageInspection = {
+  metadata: Awaited<ReturnType<typeof decodeImageMetadata>>
+  format: string
+  animated: boolean
+}
+
+/**
+ * Validate the actual image bytes. Browser MIME and multipart MIME are
+ * diagnostic hints only; Sharp's decoded format is the source of truth.
+ */
+export async function validateStickerImageBuffer(params: {
+  buffer: Buffer
+  kind: 'cover' | 'sticker'
+  source?: StickerUploadSource
+}): Promise<StickerImageInspection> {
+  const metadata = await decodeImageMetadata(params.buffer, params.source)
+  const format = metadata.format as string
+  const animated = isAnimatedSticker(format, metadata, params.buffer)
+
+  if (params.kind === 'cover') {
+    if (animated) {
+      logImageValidationFailure(params.source, params.buffer, format, 'animated_cover')
+      throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_COVER_ANIMATED_MESSAGE)
+    }
+    if (!STATIC_COVER_FORMATS.has(format)) {
+      logImageValidationFailure(params.source, params.buffer, format, 'unsupported_cover_format')
+      throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_COVER_UNSUPPORTED_FORMAT_MESSAGE)
+    }
+  } else if (
+    REJECTED_STICKER_FORMATS.has(format)
+    || (!STATIC_STICKER_FORMATS.has(format) && !ANIMATED_STICKER_FORMATS.has(format))
+    || (animated && !ANIMATED_STICKER_FORMATS.has(format))
+  ) {
+    logImageValidationFailure(params.source, params.buffer, format, 'unsupported_sticker_format')
+    throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_IMAGE_UNSUPPORTED_FORMAT_MESSAGE)
+  }
+
+  return { metadata, format, animated }
+}
+
+export async function convertStaticStickerToWebp(
+  input: Buffer,
+  options?: { flatten?: boolean },
+  source?: StickerUploadSource,
+): Promise<Buffer> {
+  const format = await decodeImageFormat(input, source)
   if (REJECTED_STICKER_FORMATS.has(format) || !STATIC_STICKER_FORMATS.has(format)) {
     throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
   }
@@ -471,22 +558,18 @@ export async function uploadStickerImage(params: {
   ownerId: string
   type: StickerUploadType
   buffer: Buffer
+  source?: StickerUploadSource
 }): Promise<{ url: string; format: 'webp' | 'gif' | 'png'; type: StickerUploadType; isAnimated: boolean }> {
-  const { ownerId, buffer } = params
-  if (buffer.byteLength === 0) throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
+  const { ownerId, buffer, source } = params
+  if (buffer.byteLength === 0) {
+    logImageValidationFailure(source, buffer, null, 'empty_file')
+    throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_FILE_UNRECOGNIZED_MESSAGE)
+  }
   if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new StickerUploadError('FILE_TOO_LARGE', STICKER_FILE_TOO_LARGE_MESSAGE)
 
-  const metadata = await decodeImageMetadata(buffer)
-  const format = metadata.format as string
-  if (REJECTED_STICKER_FORMATS.has(format)) {
-    throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
-  }
-
-  const animated = isAnimatedSticker(format, metadata, buffer)
+  const inspection = await validateStickerImageBuffer({ buffer, kind: 'sticker', source })
+  const { metadata, format, animated } = inspection
   if (animated) {
-    if (!ANIMATED_STICKER_FORMATS.has(format)) {
-      throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
-    }
     if (typeof metadata.pages === 'number' && metadata.pages > STICKER_ANIMATED_MAX_FRAMES) {
       throw new StickerUploadError('PROCESSING_FAILED', `动态表情帧数不能超过 ${STICKER_ANIMATED_MAX_FRAMES} 帧`)
     }
@@ -495,7 +578,6 @@ export async function uploadStickerImage(params: {
     const sourceFormat = format === 'gif' ? 'gif' : format === 'png' ? 'png' : 'webp'
     const outputFormat: 'webp' | 'gif' | 'png' = outputIsAnimatedWebp ? 'webp' : sourceFormat
     const outputBody = outputFormat === 'webp' ? output : buffer
-    const contentType = outputFormat === 'gif' ? 'image/gif' : outputFormat === 'png' ? 'image/png' : 'image/webp'
     const generated = await createAnimatedImageVariants(outputBody, {
       sourceMaxWidth: 320,
       variants: ['thumb-sm', 'thumb-md', 'card'],
@@ -510,7 +592,7 @@ export async function uploadStickerImage(params: {
     return { url: family.sourceUrl, format: 'webp', type: 'GIF', isAnimated: true }
   }
 
-  const output = await convertStaticStickerToWebp(buffer)
+  const output = await convertStaticStickerToWebp(buffer, undefined, source)
   const generated = await createImageVariants(output, {
     sourceMaxWidth: STICKER_STATIC_MAX_WIDTH,
     sourceQuality: 85,
@@ -529,17 +611,18 @@ export async function uploadStickerImage(params: {
 export async function uploadStickerPackCover(params: {
   ownerId: string
   buffer: Buffer
+  source?: StickerUploadSource
 }): Promise<string> {
-  const { ownerId, buffer } = params
-  if (buffer.byteLength === 0) throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_UNSUPPORTED_FORMAT_MESSAGE)
-  if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new StickerUploadError('FILE_TOO_LARGE', STICKER_FILE_TOO_LARGE_MESSAGE)
-  const metadata = await decodeImageMetadata(buffer)
-  const format = metadata.format as string
-  if (!STATIC_COVER_FORMATS.has(format) || isAnimatedSticker(format, metadata, buffer)) {
-    throw new StickerUploadError('UNSUPPORTED_FORMAT', '封面必须使用静态图片')
+  const { ownerId, buffer, source } = params
+  if (buffer.byteLength === 0) {
+    logImageValidationFailure(source, buffer, null, 'empty_file')
+    throw new StickerUploadError('UNSUPPORTED_FORMAT', STICKER_FILE_UNRECOGNIZED_MESSAGE)
   }
+  if (buffer.byteLength > STICKER_MAX_FILE_SIZE) throw new StickerUploadError('FILE_TOO_LARGE', STICKER_FILE_TOO_LARGE_MESSAGE)
+  const inspection = await validateStickerImageBuffer({ buffer, kind: 'cover', source })
+  const { metadata, format } = inspection
   const preservesAlpha = metadata.hasAlpha === true
-  const output = await convertStaticStickerToWebp(buffer, preservesAlpha ? undefined : { flatten: true })
+  const output = await convertStaticStickerToWebp(buffer, preservesAlpha ? undefined : { flatten: true }, source)
   const generated = await createImageVariants(output, {
     sourceMaxWidth: STICKER_STATIC_MAX_WIDTH,
     sourceQuality: 85,

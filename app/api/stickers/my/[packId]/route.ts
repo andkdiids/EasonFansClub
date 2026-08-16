@@ -139,6 +139,7 @@ export async function PATCH(
       coverUrl = await uploadStickerPackCover({
         ownerId: guard.user.id,
         buffer: Buffer.from(await coverFile.arrayBuffer()),
+        source: { field: 'cover', originalName: coverFile.name, mimeType: coverFile.type },
       })
     }
     if (!coverUrl) return NextResponse.json({ message: '请选择表情包封面' }, { status: 400 })

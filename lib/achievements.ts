@@ -40,6 +40,8 @@ export async function getUserAchievementStats(userId: string) {
     include: {
       Profile: true,
       GuessSongDuelStats: { select: { wins: true, participations: true } },
+      WantListenStats: { select: { mode: true, totalCorrect: true, perfectGames: true, maxStreak: true, silentMaxStreak: true } },
+      UndercoverStats: { select: { undercoverWins: true, undercoverSurvivalWins: true, undercoverGuessWins: true, successfulUndercoverVotes: true } },
       CheckIn: { select: { checkinDateKey: true } },
       _count: {
         select: {
@@ -61,6 +63,10 @@ export async function getUserAchievementStats(userId: string) {
   const activeDays = Math.max(0, Math.floor((Date.now() - user.createdAt.getTime()) / 86400000))
   // 连续挂号成就按签到记录重算,不读用户表上的连续天数快照
   const checkinStreaks = calculateCheckinStreaks(user.CheckIn.map((item) => item.checkinDateKey))
+  const wantListenCorrectTotal = user.WantListenStats.reduce((sum, item) => sum + item.totalCorrect, 0)
+  const cantonesePerfectGames = user.WantListenStats.find((item) => item.mode === 'CANTONESE_FRAGMENT')?.perfectGames || 0
+  const falseTitleMaxStreak = user.WantListenStats.find((item) => item.mode === 'FALSE_TITLE')?.maxStreak || 0
+  const wantListenSilentMaxStreak = user.WantListenStats.find((item) => item.mode === 'WANT_LISTEN')?.silentMaxStreak || 0
 
   return {
     registered: 1,
@@ -74,6 +80,14 @@ export async function getUserAchievementStats(userId: string) {
     friendTotal: user._count.Friendship_Friendship_userAIdToUser + user._count.Friendship_Friendship_userBIdToUser,
     duelWins: user.GuessSongDuelStats?.wins || 0,
     duelParticipations: user.GuessSongDuelStats?.participations || 0,
+    wantListenCorrectTotal,
+    cantonesePerfectGames,
+    falseTitleMaxStreak,
+    wantListenSilentMaxStreak,
+    undercoverWins: user.UndercoverStats?.undercoverWins || 0,
+    undercoverSurvivalWins: user.UndercoverStats?.undercoverSurvivalWins || 0,
+    undercoverGuessWins: user.UndercoverStats?.undercoverGuessWins || 0,
+    successfulUndercoverVotes: user.UndercoverStats?.successfulUndercoverVotes || 0,
     activeDays,
   }
 }
@@ -143,6 +157,49 @@ export async function syncUserAchievements(userId: string, categories?: Achievem
           description: config.description,
           icon: config.icon,
           category: 'DUEL',
+          rarity: 'EPIC',
+          conditionKey: config.conditionKey,
+          conditionValue: config.conditionValue,
+          isAutoGrant: true,
+          isVisible: true,
+          sortOrder: config.sortOrder,
+        },
+      })
+    }
+  }
+
+  if (!categories?.length || categories.includes('SPECIAL')) {
+    const wantListenAchievements = [
+      { slug: 'want-listen-correct-100', title: '此时无声胜有声', description: '想听三个模式累计答对 100 题。', icon: '🔇', conditionKey: 'wantListenCorrectTotal', conditionValue: 100, sortOrder: 70 },
+      { slug: 'want-listen-cantonese-perfect', title: '歌词本', description: '粤语残片单局 20/20。', icon: '📖', conditionKey: 'cantonesePerfectGames', conditionValue: 1, sortOrder: 71 },
+      { slug: 'want-listen-false-title-streak-27', title: '真的假不了', description: '防不胜防累计连续答对 27 题。', icon: '🧩', conditionKey: 'falseTitleMaxStreak', conditionValue: 27, sortOrder: 72 },
+      { slug: 'want-listen-silent-streak-10', title: '不用听了', description: '想听连续 10 题答对且未开启第 4 层歌词提示。', icon: '🤫', conditionKey: 'wantListenSilentMaxStreak', conditionValue: 10, sortOrder: 73 },
+      { slug: 'undercover-star-acting', title: '演技派', description: '作为卧底首次获胜。', icon: '🎭', conditionKey: 'undercoverWins', conditionValue: 1, sortOrder: 74 },
+      { slug: 'undercover-star-best', title: '全场最佳', description: '作为卧底存活到最后两人并获胜。', icon: '⭐', conditionKey: 'undercoverSurvivalWins', conditionValue: 1, sortOrder: 75 },
+      { slug: 'undercover-star-turnaround', title: '反客为主', description: '卧底被投出后猜中平民词并翻盘。', icon: '🔄', conditionKey: 'undercoverGuessWins', conditionValue: 1, sortOrder: 76 },
+      { slug: 'undercover-star-eagle-eye', title: '火眼金睛', description: '作为平民累计参与成功淘汰卧底 10 次。', icon: '🔎', conditionKey: 'successfulUndercoverVotes', conditionValue: 10, sortOrder: 77 },
+    ] as const
+    for (const config of wantListenAchievements) {
+      await prisma.achievement.upsert({
+        where: { slug: config.slug },
+        update: {
+          title: config.title,
+          description: config.description,
+          icon: config.icon,
+          category: 'SPECIAL',
+          rarity: 'EPIC',
+          conditionKey: config.conditionKey,
+          conditionValue: config.conditionValue,
+          isAutoGrant: true,
+          isVisible: true,
+          sortOrder: config.sortOrder,
+        },
+        create: {
+          slug: config.slug,
+          title: config.title,
+          description: config.description,
+          icon: config.icon,
+          category: 'SPECIAL',
           rarity: 'EPIC',
           conditionKey: config.conditionKey,
           conditionValue: config.conditionValue,

@@ -56,14 +56,23 @@ export async function POST(request: Request) {
 
     try {
       if (kind === 'cover') {
-        const url = await uploadStickerPackCover({ ownerId: guard.user.id, buffer })
+        const url = await uploadStickerPackCover({
+          ownerId: guard.user.id,
+          buffer,
+          source: { field: 'cover', originalName: file.name, mimeType: file.type },
+        })
         return NextResponse.json({
           success: true,
           url: toPublicMediaUrl(url) || url,
           format: 'webp',
         })
       }
-      const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
+      const result = await uploadStickerImage({
+        ownerId: guard.user.id,
+        type,
+        buffer,
+        source: { field: 'file', originalName: file.name, mimeType: file.type },
+      })
       return NextResponse.json({
         success: true,
         url: toPublicMediaUrl(result.url) || result.url,

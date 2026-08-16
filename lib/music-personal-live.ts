@@ -2,7 +2,6 @@ import type { Prisma } from '@prisma/client'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { prisma } from '@/lib/prisma'
-import { myLivePhotoOrderBy, myLivePhotoSelect, serializeMyLivePhotos } from '@/lib/my-live-photo-data'
 
 export const PERSONAL_LIVE_NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store, max-age=0',
@@ -148,16 +147,6 @@ export type PersonalLiveRow = {
   isPublic: boolean
   createdAt: Date
   updatedAt: Date
-  MyLivePhoto?: Array<{
-    id: string
-    category: 'TICKET' | 'LIVE'
-    imageUrl: string
-    width: number
-    height: number
-    sortOrder: number
-    watermarked: boolean
-    createdAt: Date
-  }>
   MusicConcert: {
     id: string
     title: string | null
@@ -381,10 +370,6 @@ const personalConcertSelect = {
       },
     },
   },
-  MyLivePhoto: {
-    orderBy: myLivePhotoOrderBy,
-    select: myLivePhotoSelect,
-  },
 } satisfies Prisma.UserMusicConcertSelect
 
 export async function getPersonalLiveRows(userId: string) {
@@ -428,7 +413,6 @@ export function serializePersonalRecord(row: PersonalLiveRow, fallbacks: Persona
       unavailable: true,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      photos: serializeMyLivePhotos(row.MyLivePhoto || []),
     }
   }
   const concert = row.MusicConcert
@@ -448,7 +432,6 @@ export function serializePersonalRecord(row: PersonalLiveRow, fallbacks: Persona
     isPublic: row.isPublic,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    photos: serializeMyLivePhotos(row.MyLivePhoto || []),
     concert: {
       id: concert.id,
       title: concert.title,

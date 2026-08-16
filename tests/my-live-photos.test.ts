@@ -38,9 +38,13 @@ test('migration只新增照片表和外键，不执行破坏性删除', () => {
   assert.doesNotMatch(sql, /\bDROP\b|\bTRUNCATE\b|DELETE FROM/i)
 })
 
-test('前端和服务端分别声明票根2张、现场6张、总计8张上限', () => {
+test('详情页按两个独立分类渲染并保留票根2张、现场6张、总计8张上限', () => {
   assert.deepEqual(MY_LIVE_PHOTO_LIMITS, { TICKET: 2, LIVE: 6, TOTAL: 8 })
-  assert.match(read('components/music/live/MyLivePhotoPanel.tsx'), /categoryLimit\(activeCategory\)/)
+  const panel = read('components/music/live/MyLivePhotoPanel.tsx')
+  assert.match(panel, /PHOTO_CATEGORIES[^\n]*TICKET[^\n]*LIVE/)
+  assert.match(panel, /categoryLimit\(category\)/)
+  assert.match(panel, /添加票根/)
+  assert.match(panel, /添加现场照片/)
   assert.match(read('lib/my-live-photos.ts'), /categoryCount \+ uploaded\.length > categoryLimit/)
   assert.match(read('lib/my-live-photos.ts'), /totalCount \+ uploaded\.length > MY_LIVE_PHOTO_LIMITS\.TOTAL/)
 })
@@ -163,7 +167,19 @@ test('隐藏记录不会把图片地址发到公共响应，自己的接口仍�
   const ownApi = read('app/api/music/live/attendance/[attendanceId]/photos/route.ts')
   assert.match(publicApi, /UserMusicConcert:[\s\S]*where:[\s\S]*isPublic: true/)
   assert.match(ownApi, /getOwnMyLivePhotos\(guard\.user\.id, attendanceId\)/)
-  assert.match(read('lib/music-personal-live.ts'), /photos: serializeMyLivePhotos\(row\.MyLivePhoto \|\| \[\]\)/)
+  assert.doesNotMatch(read('lib/music-personal-live.ts'), /MyLivePhoto|serializeMyLivePhotos/)
+})
+
+test('My Live 列表不读取或渲染完整照片，场次详情才读取当前用户照片', () => {
+  const dashboard = read('components/music/live/MyLiveDashboard.tsx')
+  const overview = read('lib/music-personal-live.ts')
+  const pagedApi = read('app/api/music/live/me/concerts/route.ts')
+  const detail = read('app/music/live/tours/[tourId]/[city]/[date]/page.tsx')
+  assert.doesNotMatch(dashboard, /MyLivePhotoPanel|MyLivePhoto|photos/)
+  assert.doesNotMatch(overview, /MyLivePhoto|serializeMyLivePhotos/)
+  assert.doesNotMatch(pagedApi, /MyLivePhoto|serializeMyLivePhotos/)
+  assert.match(detail, /MyLivePhoto: \{[\s\S]*myLivePhotoOrderBy[\s\S]*myLivePhotoSelect/)
+  assert.match(detail, /MyLivePhotoPanel attendanceId=\{attendance\.id\}/)
 })
 
 test('删除后按类别重排，TICKET和LIVE排序彼此独立', () => {
@@ -175,22 +191,27 @@ test('删除后按类别重排，TICKET和LIVE排序彼此独立', () => {
   assert.match(read('components/music/live/MyLivePhotoPanel.tsx'), /后移/)
 })
 
-test('轮播只渲染当前图片，支持按钮、pointer swipe、contain和独立场次状态', () => {
+test('详情照片使用独立Section、响应式网格和现有图片预览', () => {
   const panel = read('components/music/live/MyLivePhotoPanel.tsx')
   const css = read('app/globals.css')
-  assert.match(panel, /const activePhoto = activePhotos\[currentIndex\]/)
-  assert.match(panel, /onPointerDown=\{beginSwipe\}/)
-  assert.match(panel, /上一张照片/)
-  assert.match(panel, /下一张照片/)
-  assert.match(css, /\.my-live-photo-image[\s\S]*object-fit:contain/)
-  assert.match(css, /touch-action:pan-y/)
+  assert.match(panel, /<ImageViewer/)
+  assert.match(panel, /my-live-photo-section-title/)
+  assert.match(panel, /my-live-photo-divider/)
+  assert.match(panel, /my-live-photo-grid/)
+  assert.match(panel, /还没有上传票根/)
+  assert.match(panel, /还没有上传现场照片/)
+  assert.match(css, /\.my-live-photo-grid[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)/)
+  assert.match(css, /@media \(min-width:480px\)[\s\S]*\.my-live-photo-grid[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)/)
+  assert.doesNotMatch(panel, /my-live-photo-category-tabs|票根 \$\{|现场 \$\{|添加照片/)
 })
 
 test('旧的无照片记录使用空数组并保持现有My Live统计逻辑', () => {
   const service = read('lib/music-personal-live.ts')
-  assert.match(service, /row\.MyLivePhoto \|\| \[\]/)
+  const panel = read('components/music/live/MyLivePhotoPanel.tsx')
+  assert.doesNotMatch(service, /MyLivePhoto|serializeMyLivePhotos/)
   assert.match(read('components/music/live/MyLiveDashboard.tsx'), /还没有记录看过的演唱会/)
-  assert.match(read('components/music/live/MyLivePhotoPanel.tsx'), /暂无照片|还没有照片/)
+  assert.match(panel, /还没有上传票根/)
+  assert.match(panel, /还没有上传现场照片/)
 })
 
 test('图片上传参数和输出标准固定，避免客户端预处理绕过服务端', () => {

@@ -69,6 +69,7 @@ export async function POST(
       ownerId: guard.user.id,
       type,
       buffer: Buffer.from(await file.arrayBuffer()),
+      source: { field: 'file', originalName: file.name, mimeType: file.type },
     })
 
     const sticker = await prisma.$transaction(async (tx) => {

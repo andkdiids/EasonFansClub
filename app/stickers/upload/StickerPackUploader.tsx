@@ -3,8 +3,15 @@
 import Link from 'next/link'
 import { useCallback, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import {
+  normalizeImageMime,
+  normalizeStickerMime,
   isSupportedStickerFile,
+  STATIC_IMAGE_ACCEPT,
+  STICKER_COVER_ANIMATED_MESSAGE,
+  STICKER_COVER_UNSUPPORTED_FORMAT_MESSAGE,
   STICKER_FILE_TOO_LARGE_MESSAGE,
+  STICKER_FILE_UNRECOGNIZED_MESSAGE,
+  STICKER_IMAGE_UNSUPPORTED_FORMAT_MESSAGE,
   STICKER_MAX_FILE_SIZE,
   STICKER_UPLOAD_ACCEPT,
 } from '@/lib/sticker-upload-constraints'
@@ -23,13 +30,18 @@ const MIN_FILES = 6
 const RECOMMENDED_MIN_FILES = 12
 const RECOMMENDED_MAX_FILES = 24
 
-const COVER_STATIC_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
-const COVER_STATIC_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
 
 function fileExtension(file: File) {
   return file.name.trim().toLowerCase().split('.').pop() || ''
 }
 
+function withMimeType(file: File, mime: string) {
+  if (file.type.trim().toLowerCase() === mime) return file
+  return new File([file], file.name || 'sticker-upload', {
+    type: mime,
+    lastModified: file.lastModified,
+  })
+}
 function ascii(bytes: Uint8Array, start: number, length: number) {
   return String.fromCharCode(...bytes.subarray(start, start + length))
 }
@@ -79,8 +91,7 @@ async function isAnimatedCoverFile(file: File) {
 }
 
 function isStaticCoverCandidate(file: File) {
-  const mime = file.type.trim().toLowerCase()
-  return COVER_STATIC_MIME_TYPES.has(mime) || COVER_STATIC_EXTENSIONS.has(fileExtension(file))
+  return normalizeImageMime(file) !== null
 }
 
 function readAsDataUrl(file: File): Promise<string> {
@@ -116,12 +127,14 @@ export function StickerPackUploader() {
         setError(STICKER_FILE_TOO_LARGE_MESSAGE)
         continue
       }
-      if (!isSupportedStickerFile(f)) {
-        setError('仅支持 JPG / PNG / APNG / WebP / GIF 格式')
+      const normalizedMime = normalizeStickerMime(f)
+      if (!isSupportedStickerFile(f) || !normalizedMime) {
+        setError(STICKER_IMAGE_UNSUPPORTED_FORMAT_MESSAGE)
         continue
       }
-      const preview = await readAsDataUrl(f)
-      accepted.push({ id: `${f.name}-${f.size}-${Math.random()}`, file: f, preview, name: '' })
+      const uploadFile = withMimeType(f, normalizedMime)
+      const preview = await readAsDataUrl(uploadFile)
+      accepted.push({ id: `${f.name}-${f.size}-${Math.random()}`, file: uploadFile, preview, name: '' })
     }
     if (!accepted.length) return
     setError(null)
@@ -150,23 +163,26 @@ export function StickerPackUploader() {
       return
     }
 
-    try {
-      if (await isAnimatedCoverFile(f)) {
-        setError('封面必须使用静态图片')
-        return
-      }
-    } catch {
-      setError('封面图片读取失败，请重新选择')
+    const normalizedMime = normalizeImageMime(f)
+    if (!normalizedMime || !isStaticCoverCandidate(f)) {
+      setError(STICKER_COVER_UNSUPPORTED_FORMAT_MESSAGE)
       return
     }
 
-    if (!isStaticCoverCandidate(f)) {
-      setError('封面仅支持 JPG / PNG / WebP 格式')
+    try {
+      if (await isAnimatedCoverFile(f)) {
+        setError(STICKER_COVER_ANIMATED_MESSAGE)
+        return
+      }
+    } catch {
+      setError(STICKER_FILE_UNRECOGNIZED_MESSAGE)
       return
     }
+
     void (async () => {
-      const preview = await readAsDataUrl(f)
-      setCover({ file: f, preview })
+      const uploadFile = withMimeType(f, normalizedMime)
+      const preview = await readAsDataUrl(uploadFile)
+      setCover({ file: uploadFile, preview })
     })()
   }
 
@@ -389,7 +405,7 @@ export function StickerPackUploader() {
           >
             {cover ? '更换封面' : '选择封面'}
           </button>
-          <input ref={coverInputRef} type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => void onCoverPick(event)} />
+          <input ref={coverInputRef} type="file" accept={STATIC_IMAGE_ACCEPT} className="hidden" onChange={(event) => void onCoverPick(event)} />
           {cover ? (
             <div className="relative h-24 w-24 overflow-hidden rounded-xl ring-1 ring-slate-200">
               {/* eslint-disable-next-line @next/next/no-img-element */}

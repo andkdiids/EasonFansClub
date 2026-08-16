@@ -5,7 +5,6 @@ import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { requireUser, sanitizeText } from '@/lib/security'
-import { myLivePhotoOrderBy, myLivePhotoSelect, serializeMyLivePhotos } from '@/lib/my-live-photo-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +48,6 @@ export async function GET(request: Request) {
       take: pageSize,
       select: {
         id: true, seatInfo: true, mood: true, note: true, isPublic: true, createdAt: true, updatedAt: true,
-        MyLivePhoto: { orderBy: myLivePhotoOrderBy, select: myLivePhotoSelect },
         MusicConcert: {
           select: {
             id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true, posterUrl: true, status: true, stageType: true, tourId: true,
@@ -81,7 +79,7 @@ export async function GET(request: Request) {
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     records: rows.map((row) => {
       const available = row.MusicConcert.status === 'PUBLISHED' && row.MusicConcert.MusicTour.status === 'PUBLISHED'
-      if (!available) return { id: row.id, attendanceId: row.id, concertId: row.MusicConcert.id, unavailable: true, createdAt: row.createdAt, photos: serializeMyLivePhotos(row.MyLivePhoto) }
+      if (!available) return { id: row.id, attendanceId: row.id, concertId: row.MusicConcert.id, unavailable: true, createdAt: row.createdAt }
       return {
         id: row.id,
         attendanceId: row.id,
@@ -92,7 +90,6 @@ export async function GET(request: Request) {
         note: row.note,
         isPublic: row.isPublic,
         createdAt: row.createdAt,
-        photos: serializeMyLivePhotos(row.MyLivePhoto),
         concert: {
           ...row.MusicConcert,
           posterUrl: toPublicMediaUrl(row.MusicConcert.posterUrl),

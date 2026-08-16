@@ -6,9 +6,12 @@ import { useState, type ChangeEvent } from 'react'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 import {
+  normalizeImageMime,
+  normalizeStickerMime,
   isSupportedStickerFile,
   STICKER_FILE_TOO_LARGE_MESSAGE,
   STICKER_MAX_FILE_SIZE,
+  STATIC_IMAGE_ACCEPT,
   STICKER_UPLOAD_ACCEPT,
 } from '@/lib/sticker-upload-constraints'
 
@@ -39,14 +42,17 @@ type EditPack = {
 
 const MAX_FILES = 60
 const MIN_FILES = 6
-const COVER_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
-
-function getExtension(file: File) {
-  return file.name.toLowerCase().split('.').pop() || ''
-}
 
 function isStaticCoverCandidate(file: File) {
-  return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type.toLowerCase()) || COVER_EXTENSIONS.has(getExtension(file))
+  return normalizeImageMime(file) !== null
+}
+
+function withMimeType(file: File, mime: string) {
+  if (file.type.trim().toLowerCase() === mime) return file
+  return new File([file], file.name || 'sticker-upload', {
+    type: mime,
+    lastModified: file.lastModified,
+  })
 }
 
 function readAsDataUrl(file: File): Promise<string> {
@@ -145,10 +151,13 @@ export function StickerPackEditForm({ initialPack }: { initialPack: EditPack }) 
       for (const file of files) {
         if (file.size === 0) throw new Error('请选择有效的表情文件')
         if (file.size > STICKER_MAX_FILE_SIZE) throw new Error(STICKER_FILE_TOO_LARGE_MESSAGE)
-        if (!isSupportedStickerFile(file)) throw new Error('仅支持 JPG / PNG / APNG / WebP / GIF 格式')
+        const normalizedMime = normalizeStickerMime(file)
+        if (!isSupportedStickerFile(file) || !normalizedMime) throw new Error('暂不支持该表情图片格式')
 
-        const form = new FormData()
-        form.append('file', file, file.name)
+        const uploadFile = withMimeType(file, normalizedMime)
+
+       const form = new FormData()
+        form.append('file', uploadFile, uploadFile.name)
         form.append('type', pack.type)
         const response = await fetch(`/api/stickers/my/${pack.id}/stickers`, { method: 'POST', body: form })
         const data = await response.json().catch(() => null) as { message?: string; sticker?: EditSticker } | null
@@ -167,7 +176,8 @@ export function StickerPackEditForm({ initialPack }: { initialPack: EditPack }) 
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    if (!isStaticCoverCandidate(file)) {
+    const normalizedMime = normalizeImageMime(file)
+    if (!normalizedMime || !isStaticCoverCandidate(file)) {
       setError('封面仅支持静态 JPG / PNG / WebP 图片')
       return
     }
@@ -176,8 +186,9 @@ export function StickerPackEditForm({ initialPack }: { initialPack: EditPack }) 
       return
     }
     try {
-      setCoverFile(file)
-      setCoverPreview(await readAsDataUrl(file))
+      const uploadFile = withMimeType(file, normalizedMime)
+      setCoverFile(uploadFile)
+      setCoverPreview(await readAsDataUrl(uploadFile))
       setError(null)
       setMessage('封面已更换，点击保存草稿后生效')
     } catch {
@@ -258,7 +269,7 @@ export function StickerPackEditForm({ initialPack }: { initialPack: EditPack }) 
             <div className="mt-3 flex flex-wrap items-center gap-4">
               <label className={`inline-flex cursor-pointer rounded-full px-4 py-2 text-sm font-black ${editable ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-slate-50 text-slate-400'}`}>
                 {coverFile ? '重新选择封面' : '更换封面'}
-                <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled={!editable} onChange={(event) => void chooseCover(event)} className="hidden" />
+                <input type="file" accept={STATIC_IMAGE_ACCEPT} disabled={!editable} onChange={(event) => void chooseCover(event)} className="hidden" />
               </label>
               {coverPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element

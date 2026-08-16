@@ -17,6 +17,6 @@ export default async function MyLivePage({ searchParams }: { searchParams: Promi
   ])
   const data = JSON.parse(JSON.stringify(overview))
   return <MusicArchiveShell backgroundVisual={config.heroVisuals.music}>
-    <MyLiveDashboard data={data} batchTourId={tourId?.trim() || undefined} watermarkPreview={`${user.username}  UID:${user.uid}`} />
+    <MyLiveDashboard data={data} batchTourId={tourId?.trim() || undefined} />
   </MusicArchiveShell>
 }

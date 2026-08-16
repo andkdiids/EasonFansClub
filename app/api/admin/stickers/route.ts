@@ -124,7 +124,12 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer())
   try {
-    const result = await uploadStickerImage({ ownerId: guard.user.id, type, buffer })
+    const result = await uploadStickerImage({
+      ownerId: guard.user.id,
+      type,
+      buffer,
+      source: { field: 'file', originalName: file.name, mimeType: file.type },
+    })
     const sticker = await createOfficialSticker({
       creatorId: guard.user.id,
       name,

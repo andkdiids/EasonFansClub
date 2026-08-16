@@ -59,6 +59,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     items: [
       { href: '/admin/home', title: '首页内容', desc: '管理首页 Hero、文案、排序和启用状态。' },
       { href: '/admin/posts/review', title: '帖子审核', desc: '审核新帖并处理精选、置顶和拒绝。' },
+      { href: '/admin/clinic', title: '阿士匹灵门诊部', desc: '处理匿名病历、会诊和举报；后台可核对真实用户身份。' },
       { href: '/admin/today', title: '今日管理', desc: '管理历史上的今天内容并审核用户提交。' },
       { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '管理挂号页留言、公告和活动提醒。' },
       { href: '/admin/stickers', title: '表情包审核', desc: '审核用户提交的表情包合集。' },
@@ -92,6 +93,8 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/entertainment/guess-song/leaderboard', title: '听听排行榜', desc: '管理听听周榜、月榜、年榜和成绩补分。' },
       { href: '/admin/entertainment/guess-song/duel', title: '听听·对决管理', desc: '查看实时 1v1 对决、结算、断线与风控审计。' },
       { href: '/admin/entertainment/guess-song#game-config', title: '游戏相关配置', desc: '沿用听听管理页中的游戏配置入口。' },
+      { href: '/admin/entertainment/want-listen', title: '想听', desc: '管理想听开关、三种模式、假歌名库与基础数据概览。' },
+      { href: '/admin/entertainment/undercover-star', title: '卧底巨星', desc: '管理房间制多人游戏开关、词组难度、分类与使用统计。' },
       { href: '/admin/music/songs', title: '曲库管理', desc: '从 EasMusic 歌曲库维护游戏可用曲目。' },
     ],
   },
