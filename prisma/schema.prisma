@@ -1192,7 +1192,7 @@ model WantListenLeaderboardEntry {
   WantListenSession WantListenSession    @relation(fields: [sessionId], references: [id], onDelete: Restrict)
 
   @@unique([userId, mode, periodType, periodKey])
-  @@index([mode, periodType, periodKey, score, correctCount, completionTimeMs])
+  @@index([mode, periodType, periodKey, score, correctCount, completionTimeMs], map: "WantListenLeaderboard_mode_period_score_time_idx")
   @@index([userId, periodType, periodKey])
   @@index([sessionId])
 }

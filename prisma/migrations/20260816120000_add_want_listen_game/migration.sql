@@ -101,7 +101,7 @@ CREATE TABLE `WantListenLeaderboardEntry` (
   `updatedAt` DATETIME(3) NOT NULL,
 
   UNIQUE INDEX `WantListenLeaderboardEntry_userId_mode_periodType_periodKey_key` (`userId`, `mode`, `periodType`, `periodKey`),
-  INDEX `WantListenLeaderboardEntry_mode_periodType_periodKey_score_correctCount_completionTimeMs_idx` (`mode`, `periodType`, `periodKey`, `score`, `correctCount`, `completionTimeMs`),
+  INDEX `WantListenLeaderboard_mode_period_score_time_idx` (`mode`, `periodType`, `periodKey`, `score`, `correctCount`, `completionTimeMs`),
   INDEX `WantListenLeaderboardEntry_userId_periodType_periodKey_idx` (`userId`, `periodType`, `periodKey`),
   INDEX `WantListenLeaderboardEntry_sessionId_idx` (`sessionId`),
   PRIMARY KEY (`id`),

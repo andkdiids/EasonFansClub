@@ -127,7 +127,8 @@ test('Session、假歌名、统计和榜单使用独立的可索引 Prisma 结�
     assert.match(migration, new RegExp(`CREATE TABLE.*${model}`, 's'))
   }
   assert.match(schema, /@@unique\(\[userId, mode, periodType, periodKey\]\)/)
-  assert.match(schema, /@@index\(\[mode, periodType, periodKey, score, correctCount, completionTimeMs\]\)/)
+  assert.match(schema, /@@index\(\[mode, periodType, periodKey, score, correctCount, completionTimeMs\], map: "WantListenLeaderboard_mode_period_score_time_idx"\)/)
+  assert.match(migration, /INDEX `WantListenLeaderboard_mode_period_score_time_idx` \(`mode`, `periodType`, `periodKey`, `score`, `correctCount`, `completionTimeMs`\)/)
 })
 
 test('四个想听成就接入现有 SPECIAL 成就同步，不创建第二套勋章系统', () => {
