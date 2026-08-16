@@ -101,7 +101,7 @@ export function ClinicHomeClient({
     <main className="clinic-page-shell">
       <header className="clinic-hero">
         <div className="clinic-hero-copy">
-          <p className="clinic-kicker"><UiIcon name="stethoscope" /> EASON FANS CLUB · COMMUNITY CLINIC</p>
+          <p className="clinic-kicker"><UiIcon name="stethoscope" /> EASON FANS CLUB · 病友门诊</p>
           <h1>阿士匹灵门诊部</h1>
           <p>今日有咩唔舒服？入嚟坐低讲。</p>
           <div className="clinic-hero-actions">
@@ -110,7 +110,7 @@ export function ClinicHomeClient({
             {isAuthenticated ? <Link href="/clinic/me" className="clinic-text-link">我的门诊 →</Link> : <Link href="/login?redirect=%2Fclinic" className="clinic-text-link">登录后参与互动 →</Link>}
           </div>
         </div>
-        <div className="clinic-hero-mark" aria-hidden="true"><UiIcon name="stethoscope" /><span>DROP IN<br />SIT DOWN</span></div>
+        <div className="clinic-hero-mark" aria-hidden="true"><UiIcon name="stethoscope" /></div>
       </header>
 
       <nav className="clinic-category-nav" aria-label="门诊分类">
@@ -119,7 +119,7 @@ export function ClinicHomeClient({
       </nav>
 
       <section className="clinic-toolbar" aria-label="病历排序">
-        <div><p className="clinic-kicker">WAITING ROOM</p><h2>{category ? clinicCategoryOptions.find((item) => item.value === category)?.label : '候诊大厅'}</h2></div>
+        <div><h2>{category ? clinicCategoryOptions.find((item) => item.value === category)?.label : '候诊大厅'}</h2></div>
         <div className="clinic-sort-tabs" role="tablist" aria-label="病历排序">
           {([['latest', '最新'], ['consultations', '最多人会诊'], ['aspirin', '最多阿士匹灵']] as const).map(([value, label]) => <button type="button" key={value} role="tab" aria-selected={sort === value} className={sort === value ? 'is-active' : ''} onClick={() => setSort(value)}>{label}</button>)}
         </div>

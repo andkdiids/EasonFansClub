@@ -178,20 +178,20 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
         items={setlistItems}
         layout="columns"
         title={`${group.base}站歌单`}
-        eyebrow="LIVE SETLIST"
+
         idPrefix="city-setlist"
         excludeEncore={baseNormal.length > 0}
       />
     ) : (
       <section className="mt-14 border border-white/10 bg-white/[0.05] p-6" aria-label="歌单资料">
-        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SETLIST</p>
+
         <p className="mt-2 text-sm font-bold text-slate-300">暂无歌单资料</p>
       </section>
     )}
 
     <section className="mt-14" aria-labelledby="city-concerts-title">
-      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CONCERTS</p>
-      <h2 id="city-concerts-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">演出场次</h2>
+
+      <h2 id="city-concerts-title" className="text-3xl font-black text-white sm:text-4xl">演出场次</h2>
       <div className="mt-7 grid min-w-0 gap-3 sm:grid-cols-2 md:grid-cols-3">
         {cityConcerts.map((concert, index) => {
           const dateKey = concert.concertDate.slice(0, 10)

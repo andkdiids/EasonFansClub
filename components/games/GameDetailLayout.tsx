@@ -12,7 +12,6 @@ export function GameDetailLayout({ game, actions, children }: Readonly<{
       <Link className="game-detail-back" href="/games">← 返回游戏大厅</Link>
       <section className="game-detail-banner" data-accent={game.accent}>
         <div>
-          <span>{game.eyebrow}</span>
           <h1>{game.title}</h1>
           <p>{game.longDescription}</p>
           <div className="game-detail-tags">{game.tags.map((tag) => <b key={tag}>{tag}</b>)}</div>
@@ -22,12 +21,10 @@ export function GameDetailLayout({ game, actions, children }: Readonly<{
       {children}
       <section className="game-detail-sections">
         <article>
-          <span>HOW TO PLAY</span>
           <h2>玩法说明</h2>
           <ol>{game.rules.map((rule) => <li key={rule}>{rule}</li>)}</ol>
         </article>
         <article>
-          <span>REWARDS</span>
           <h2>奖励与积分</h2>
           <ul>{game.rewards.map((reward) => <li key={reward}>{reward}</li>)}</ul>
         </article>

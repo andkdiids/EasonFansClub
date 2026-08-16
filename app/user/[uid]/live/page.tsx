@@ -56,7 +56,7 @@ export default async function PublicUserLivePage({ params }: { params: Promise<{
   const cities = new Set(user.UserMusicConcert.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>
     <Link href={`/user/${uid}`} className="text-sm font-black text-sky-300/80">← 返回{name}的主页</Link>
-    <header className="py-10 sm:py-14"><p className="text-xs font-black tracking-[0.22em] text-sky-300/65">PUBLIC LIVE HISTORY</p><h1 className="mt-4 break-words text-4xl font-black text-white sm:text-6xl">{name}公开的现场记录</h1></header>
+    <header className="py-10 sm:py-14"><h1 className="break-words text-4xl font-black text-white sm:text-6xl">{name}公开的现场记录</h1></header>
     <dl className="grid grid-cols-3 border-y border-white/10 bg-white/[0.04]">
       {[['公开场次', user.UserMusicConcert.length], ['经历巡演', tours.size], ['去过城市', cities.size]].map(([label, value]) => <div key={String(label)} className="border-r border-white/10 p-4 last:border-r-0 sm:p-6"><dt className="text-xs font-bold text-slate-400">{label}</dt><dd className="mt-2 text-3xl font-black text-white">{value}</dd></div>)}
     </dl>

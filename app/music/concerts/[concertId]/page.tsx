@@ -46,8 +46,7 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
     <section className="mt-10 grid gap-8 md:grid-cols-[320px_minmax(0,1fr)] md:items-start">
       <div className="relative aspect-square overflow-hidden rounded-[28px] border border-white/10 bg-[#0b2038] shadow-[0_30px_90px_rgba(0,0,0,.35)]"><ConcertCover resolvedPosterUrl={resolvedPosterUrl} alt={`${tour.name}演唱会海报`} sizes="(max-width: 767px) 100vw, 320px" className="h-full w-full" /></div>
       <div>
-        <p className="text-xs font-black tracking-[0.24em] text-sky-300/65">CONCERT ARCHIVE · {tour.startDate ? new Date(tour.startDate).getUTCFullYear() : 'YEAR UNKNOWN'}</p>
-        <h1 className="mt-3 text-4xl font-black leading-tight text-white sm:text-6xl">{tour.name}</h1>
+        <h1 className="text-4xl font-black leading-tight text-white sm:text-6xl">{tour.name}</h1>
         {tour.subtitle ? <p className="mt-4 text-xl font-black text-sky-100/70">{tour.subtitle}</p> : null}
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           <div className="rounded-[18px] border border-white/10 bg-white/[0.055] p-4"><span className="text-xs font-black text-slate-300/50">时间</span><strong className="mt-1 block text-sm text-white">{formatLiveDateRange(tour.startDate, tour.endDate)}</strong></div>
@@ -58,8 +57,7 @@ export default async function ConcertArchiveDetailPage({ params }: Readonly<{ pa
       </div>
     </section>
     <section className="mt-14">
-      <p className="text-xs font-black tracking-[0.2em] text-sky-300/60">CONCERT SESSIONS & MATERIALS</p>
-      <h2 className="mt-2 text-3xl font-black text-white">场次与相关资料</h2>
+      <h2 className="text-3xl font-black text-white">场次与相关资料</h2>
       {tour.MusicConcert.length ? <div className="mt-7 space-y-5">
         {tour.MusicConcert.map((concert, index) => <article key={concert.id} className="rounded-[22px] border border-white/10 bg-white/[0.055] p-5 sm:p-6">
           <div className="grid gap-4 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-start">

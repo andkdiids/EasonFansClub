@@ -66,8 +66,7 @@ export function RatingReviews({ reviews, sort, loggedIn, nextPath }: Readonly<{ 
     <section id="reviews" className="scroll-mt-24" aria-labelledby="rating-reviews-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-black tracking-[0.18em] text-brand-700">REVIEWS</p>
-          <h2 id="rating-reviews-title" className="mt-1 text-2xl font-black text-brand-950">大家怎么说</h2>
+          <h2 id="rating-reviews-title" className="text-2xl font-black text-brand-950">大家怎么说</h2>
         </div>
         <div className="flex border border-sky-100 bg-white p-1 text-sm font-black" role="tablist" aria-label="评价排序">
           <Link href={sortHref('hot')} role="tab" aria-selected={sort === 'hot'} className={`px-3 py-2 ${sort === 'hot' ? 'bg-brand-950 text-white' : 'text-slate-500'}`}>热门</Link>
@@ -123,3 +122,5 @@ export function RatingReviews({ reviews, sort, loggedIn, nextPath }: Readonly<{ 
     </section>
   )
 }
+
+undefined

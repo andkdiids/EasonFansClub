@@ -11,7 +11,6 @@ export default async function ClinicAdminPage() {
     <main className="clinic-page-shell clinic-admin-page">
       <div className="clinic-detail-top">
         <a href="/admin">← 返回管理后台</a>
-        <span className="clinic-kicker">CONTENT MANAGEMENT</span>
       </div>
       <section className="clinic-hero">
         <div>

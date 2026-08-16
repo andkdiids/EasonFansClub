@@ -55,22 +55,37 @@ export function EntertainmentCenter() {
   const [drawOpen, setDrawOpen] = useState(false)
 
   useEffect(() => {
+    let active = true
     const controller = new AbortController()
-    fetch('/api/entertainment/daily-draw', {
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-      .then((response) => readJson<DrawStatus>(response))
-      .then((data) => {
-        setStatus(data)
-        if (data.hasDrawn) setDrawOpen(true)
+    const load = () => {
+      setLoading(true)
+      setError('')
+      fetch('/api/entertainment/daily-draw', {
+        cache: 'no-store',
+        signal: controller.signal,
       })
-      .catch((requestError: unknown) => {
-        if (requestError instanceof DOMException && requestError.name === 'AbortError') return
-        setError(requestError instanceof Error ? requestError.message : '娱乐天空加载失败')
-      })
-      .finally(() => setLoading(false))
-    return () => controller.abort()
+        .then((response) => readJson<DrawStatus>(response))
+        .then((data) => {
+          if (!active) return
+          setStatus(data)
+          if (data.hasDrawn) setDrawOpen(true)
+        })
+        .catch((requestError: unknown) => {
+          if (!active || (requestError instanceof DOMException && requestError.name === 'AbortError')) return
+          setError(requestError instanceof Error ? requestError.message : '娱乐天空加载失败')
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    }
+
+    load()
+    window.addEventListener('profile-updated', load)
+    return () => {
+      active = false
+      controller.abort()
+      window.removeEventListener('profile-updated', load)
+    }
   }, [])
 
   async function issueDraw() {
@@ -109,7 +124,6 @@ export function EntertainmentCenter() {
   return (
     <>
       <header className="entertainment-heading">
-        <p>Entertainment</p>
         <h1>娱乐天空</h1>
         <span>每日来一点小惊喜</span>
       </header>
@@ -141,7 +155,6 @@ export function EntertainmentCenter() {
         <section className="daily-draw-panel" aria-labelledby="daily-draw-title">
           <div className="daily-draw-intro">
             <div>
-              <p>Daily prescription</p>
               <h2 id="daily-draw-title">每日抽奖</h2>
               <span>每日 00:00 按北京时间更新</span>
             </div>

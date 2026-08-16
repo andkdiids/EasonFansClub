@@ -46,7 +46,7 @@ export function ClinicComposer({ isAuthenticated }: Readonly<{ isAuthenticated: 
   return (
     <main className="clinic-page-shell clinic-new-page">
       <div className="clinic-detail-back"><Link href="/clinic">← 返回门诊部</Link></div>
-      <header className="clinic-form-heading"><p className="clinic-kicker">NEW CLINIC RECORD</p><h1>我要挂号</h1><p>哪里不舒服？慢慢讲。</p></header>
+      <header className="clinic-form-heading"><h1>我要挂号</h1><p>哪里不舒服？慢慢讲。</p></header>
       <section className="clinic-form-panel">
         <fieldset className="clinic-option-fieldset"><legend>1. 今日症状</legend><div className="clinic-option-grid">{clinicCategoryOptions.map((item) => <label key={item.value} className={category === item.value ? 'is-selected' : ''}><input type="radio" name="clinic-category" value={item.value} checked={category === item.value} onChange={() => setCategory(item.value)} /><span><b>{item.label}</b><small>{item.description}</small></span></label>)}</div></fieldset>
         <fieldset className="clinic-option-fieldset"><legend>2. 我现在需要</legend><div className="clinic-need-grid">{clinicNeedOptions.map((item) => <label key={item.value} className={needType === item.value ? 'is-selected' : ''}><input type="radio" name="clinic-need" value={item.value} checked={needType === item.value} onChange={() => setNeedType(item.value)} /><span>{item.label}</span></label>)}</div></fieldset>

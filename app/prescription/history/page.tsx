@@ -24,7 +24,6 @@ export default async function PrescriptionHistoryPage({ searchParams }: Readonly
       <header className="entertainment-heading">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p>Prescription archive</p>
             <h1>我的处方记录</h1>
             <span>只读取你自己曾经开具的每日处方，不会重新发放挂号费。</span>
           </div>

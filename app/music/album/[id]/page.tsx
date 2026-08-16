@@ -49,8 +49,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
         <MusicCover src={album.coverUrl} alt={`${album.name}专辑封面`} variant="large" className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" priority />
       </MusicDetailReveal>
       <MusicDetailReveal direction="right" delay={0.08}>
-        <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">ALBUM ARCHIVE · {album.language}</p>
-        <h1 className="mt-4 text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{album.name}</h1>
+        <h1 className="text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{album.name}</h1>
         <p className="mt-5 text-xl font-black text-slate-200">{album.artist}</p>
         <div className="mt-4 flex flex-wrap gap-x-3 gap-y-2 text-sm font-bold text-slate-300/65">
           <span>{releaseLabel}</span><span aria-hidden="true">·</span><span>{album.company || '唱片公司待补充'}</span><span aria-hidden="true">·</span><span>{formatTrackCount(album.MusicSong.length)}</span>
@@ -60,16 +59,16 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
     </section>
 
     <MusicDetailReveal delay={0.12} className="mt-14 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-8">
-      <div><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ARCHIVE METADATA</p><h2 className="mt-2 text-3xl font-black text-white">专辑资料</h2></div>
+      <div><h2 className="text-3xl font-black text-white">专辑资料</h2></div>
       <dl className="mt-7 grid gap-x-8 gap-y-6 sm:grid-cols-2 md:grid-cols-3">
         {archiveDetails.map(([label, value]) => <div key={label} className="border-t border-white/10 pt-4"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-base font-black text-slate-100">{value}</dd></div>)}
       </dl>
     </MusicDetailReveal>
 
-    {album.story ? <MusicDetailReveal delay={0.16} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ALBUM STORY</p><h2 className="mt-2 text-3xl font-black text-white">专辑故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{album.story}</p></MusicDetailReveal> : null}
+    {album.story ? <MusicDetailReveal delay={0.16} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><h2 className="text-3xl font-black text-white">专辑故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{album.story}</p></MusicDetailReveal> : null}
 
     <section className="mt-14" aria-labelledby="album-track-list">
-      <div><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TRACK LIST</p><h2 id="album-track-list" className="mt-2 text-3xl font-black text-white sm:text-4xl">歌曲列表</h2></div>
+      <div><h2 id="album-track-list" className="text-3xl font-black text-white sm:text-4xl">歌曲列表</h2></div>
       {album.MusicSong.length ? (
         <MusicAlbumTrackList songs={album.MusicSong.map((song) => ({
           id: song.id,

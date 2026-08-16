@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { gameCatalog, gameCategories, type GameCategoryFilter } from '@/lib/game-catalog'
 import { GameBanner } from './GameBanner'
 import { GameGrid } from './GameGrid'
-import { WaveformBackground } from './WaveformBackground'
 
 type LobbySummary = {
   weeklyBest: number | null
@@ -45,15 +44,14 @@ export function GameCenter() {
 
 return (
   <main className="games-page games-center-background games-full-width">
-    <header className="games-heading">
-        <span>GAMES</span>
+    <div className="games-page-inner">
+      <header className="games-heading">
         <h1>娱乐天空</h1>
         <p>发现更多有趣的互动游戏</p>
       </header>
       <GameBanner games={gameCatalog.filter((game) => game.featured)} />
       <section className="game-duel-entry" aria-labelledby="game-duel-entry-title">
         <div>
-          <span>听听 · ONLINE</span>
           <h2 id="game-duel-entry-title">1v1 对决</h2>
           <p>与好友实时抢答 30 题</p>
         </div>
@@ -62,7 +60,6 @@ return (
       <section className="game-library" aria-labelledby="game-library-title">
         <div className="game-library-heading">
           <div>
-            <span>GAME LIBRARY</span>
             <h2 id="game-library-title">所有游戏</h2>
           </div>
           <label>
@@ -91,6 +88,7 @@ return (
           <GameGrid games={filteredGames} bestScores={{ 'guess-song': bestScore }} />
         )}
       </section>
-    </main>
-  )
+    </div>
+  </main>
+)
 }

@@ -19,10 +19,10 @@ import {
 export const dynamic = 'force-dynamic'
 
 // 核心分类即使没有数据库分类记录也允许访问（与 MusicTour.category 枚举绑定）。
-const FALLBACK_CATEGORY_META: Record<string, { name: string; eyebrow: string }> = {
-  main: { name: '大型演唱会', eyebrow: 'MAIN CONCERTS' },
-  small: { name: '小型企划', eyebrow: 'SPECIAL PROJECTS' },
-  guest: { name: '嘉宾现场', eyebrow: 'GUEST APPEARANCES' },
+const FALLBACK_CATEGORY_META: Record<string, { name: string }> = {
+  main: { name: '大型演唱会' },
+  small: { name: '小型企划' },
+  guest: { name: '嘉宾现场' },
 }
 
 export default async function ConcertCategoryDetailPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -101,8 +101,8 @@ export default async function ConcertCategoryDetailPage({ params }: { params: Pr
     <MusicArchiveShell backgroundVisual={config.heroVisuals.music}>
       <BackBar />
       <header className="py-10 sm:py-12">
-        <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">{FALLBACK_CATEGORY_META[slug]?.eyebrow || 'CONCERT CATEGORY'}</p>
-        <h1 className="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">{category.name}</h1>
+
+        <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">{category.name}</h1>
         <p className="mt-4 text-sm font-bold text-slate-300/60">分类下收录的巡演与现场企划。</p>
       </header>
       <section className="mb-12" aria-label="分类导航">
@@ -112,8 +112,8 @@ export default async function ConcertCategoryDetailPage({ params }: { params: Pr
         <EmptyState slug={slug} categories={enabledCategories} />
       ) : (
         <section aria-labelledby="category-tours-title">
-          <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p>
-          <h2 id="category-tours-title" className="mt-2 text-2xl font-black text-white sm:text-3xl">巡演档案</h2>
+
+          <h2 id="category-tours-title" className="text-2xl font-black text-white sm:text-3xl">巡演档案</h2>
           <div className="mt-7 grid min-w-0 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {resolvedTours.map((tour) => {
               const href = `/music/live/tours/${generateArchiveSlug(tour.name)}${isAdmin && tour.status !== 'PUBLISHED' ? '?preview=1' : ''}`

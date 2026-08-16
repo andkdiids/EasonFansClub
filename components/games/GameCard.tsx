@@ -7,8 +7,6 @@ export function GameCard({ game, bestScore }: Readonly<{ game: GameCatalogItem; 
   const body = (
     <>
       <div className="game-card-cover" data-accent={game.accent}>
-        <span>{game.eyebrow}</span>
-        <strong>{game.coverLabel}</strong>
         <i aria-hidden="true" />
       </div>
       <div className="game-card-body">

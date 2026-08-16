@@ -150,8 +150,7 @@ export function AdminLyricsManager() {
   return (
     <main className="flat-page mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
       <section className="border border-sky-100 bg-white/85 p-6">
-        <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Entertainment CMS</p>
-        <h1 className="mt-2 text-3xl font-black text-brand-950">歌词处方库</h1>
+        <h1 className="text-3xl font-black text-brand-950">歌词处方库</h1>
         <p className="mt-3 text-sm font-bold leading-6 text-slate-600">仅录入单句短歌词。停用内容不会参与新的每日抽奖。</p>
       </section>
 

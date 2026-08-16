@@ -28,7 +28,7 @@ export default async function MyRatingsPage({ searchParams }: { searchParams: Se
   return (
     <PageContainer className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-9">
       <Link href="/ratings" className="text-sm font-black text-brand-700 hover:underline">← 返回歌·颂</Link>
-      <header className="mt-5 border-b border-sky-100 pb-5"><p className="text-xs font-black tracking-[0.2em] text-brand-700">MY RATINGS</p><h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">我的评分</h1><p className="mt-2 text-sm font-bold text-slate-600">评分永久保留；短评可以删除后重新发表。</p></header>
+      <header className="mt-5 border-b border-sky-100 pb-5"><h1 className=" text-3xl font-black text-brand-950 sm:text-4xl">我的评分</h1><p className="mt-2 text-sm font-bold text-slate-600">评分永久保留；短评可以删除后重新发表。</p></header>
       <nav className="mt-5 flex gap-2" aria-label="我的评分分类">
         {[[undefined, '全部'], ['song', '单曲'], ['album', '专辑']].map(([value, label]) => <Link key={label} href={tabHref(value as RatingTarget | undefined)} aria-current={target === value || (!target && !value) ? 'page' : undefined} className={`border px-4 py-2 text-sm font-black ${target === value || (!target && !value) ? 'border-brand-950 bg-brand-950 text-white' : 'border-sky-100 bg-white text-slate-600'}`}>{label}</Link>)}
       </nav>

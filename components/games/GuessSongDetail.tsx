@@ -207,7 +207,6 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
       {pausedChoice && !newGameConfirmOpen ? (
         <div className="guess-session-choice-backdrop" role="presentation" onClick={cancelPausedChoice}>
           <section className="guess-session-choice-modal" role="dialog" aria-modal="true" aria-labelledby="guess-session-choice-title" onClick={(event) => event.stopPropagation()}>
-            <span>PAUSED SESSION</span>
             <h3 id="guess-session-choice-title">发现未完成的游戏</h3>
             <p>你还有一局已暂停的游戏，可以继续之前的进度，或开始新游戏。</p>
             <dl>
@@ -227,7 +226,6 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
       {pausedChoice && newGameConfirmOpen ? (
         <div className="guess-session-choice-backdrop" role="presentation" onClick={() => setNewGameConfirmOpen(false)}>
           <section className="guess-session-choice-modal" role="dialog" aria-modal="true" aria-labelledby="guess-new-game-title" onClick={(event) => event.stopPropagation()}>
-            <span>NEW SESSION</span>
             <h3 id="guess-new-game-title">开始新游戏？</h3>
             <p>你当前还有一局未完成的游戏。开始新游戏后，原有游戏存档将被放弃，且无法恢复。</p>
             <p className="guess-session-choice-highlight">当前分数：{pausedChoice.score} · 连续答对：{pausedChoice.currentStreak}</p>
@@ -270,7 +268,7 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
       {error ? <p className="game-detail-error" role="alert">{error}</p> : null}
       <section className="guess-detail-dashboard">
         <div className="guess-detail-modes" id="difficulty">
-          <header><span>SELECT MODE</span><h2>选择难度</h2></header>
+          <header><h2>选择难度</h2></header>
           <div>
             {modes.map((item) => {
               const active = summary?.activeSessions.find((entry) => entry.mode === item.mode)
@@ -286,7 +284,6 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
               )
             })}
             <Link href="/games/guess-song/duel" className="guess-detail-duel-link">
-              <span>ONLINE MODE</span>
               <strong>1v1 对决</strong>
               <small>与好友实时抢答 30 题</small>
               <b>进入对决 →</b>
@@ -294,7 +291,6 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
           </div>
         </div>
         <aside id="history">
-          <span>YOUR RECORDS</span>
           <h2>我的记录</h2>
           <dl>
             <div><dt>本周最佳</dt><dd>{summary?.weeklyBest ?? '—'}</dd></div>

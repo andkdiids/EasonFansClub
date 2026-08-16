@@ -600,7 +600,6 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     const elapsed = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000))
     return (
       <main className="guess-settlement">
-        <span>SESSION COMPLETE</span>
         <h1>本次挑战结束</h1>
         <strong>{session.score}<small>分</small></strong>
         <div className="guess-settlement-grid">
@@ -629,7 +628,6 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
     return (
       <main className="guess-paused-screen">
         <section className="guess-paused-card" role="status" aria-live="polite">
-          <span>GAME SAVED</span>
           <h1>游戏已暂停</h1>
           <p>当前游戏进度已安全保存，下次进入听听时可以继续。</p>
           <div className="guess-paused-stats">
@@ -739,7 +737,6 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       {pauseOpen ? (
         <div className="game-exit-dialog-backdrop" role="presentation">
           <section className="game-exit-dialog guess-session-pause-dialog" role="dialog" aria-modal="true" aria-labelledby="guess-pause-title">
-            <span>PAUSE SESSION</span>
             <h2 id="guess-pause-title">暂停游戏？</h2>
             <p>当前游戏进度会保存，下次进入听听时可以继续游戏。</p>
             <div>
@@ -752,12 +749,11 @@ export function GuessSongGame({ initialSessionId, exitTarget = '/games/guess-son
       {exitOpen ? (
         <div className="game-exit-dialog-backdrop" role="presentation">
           <section className="game-exit-dialog" role="dialog" aria-modal="true" aria-labelledby="game-exit-title">
-            <span>END SESSION</span>
-            <h2 id="game-exit-title">结束当前游戏？</h2>
+            <h2 id="game-exit-title">退出当前游戏？</h2>
             <p>本局未完成的进度将被放弃，之后无法继续恢复。</p>
             <div>
               <button type="button" onClick={() => setExitOpen(false)} disabled={exiting}>继续游戏</button>
-              <button type="button" onClick={() => void confirmExit()} disabled={exiting}>{exiting ? '正在结束…' : '确认结束本局'}</button>
+              <button type="button" onClick={() => void confirmExit()} disabled={exiting}>{exiting ? '正在退出…' : '确认退出本局'}</button>
             </div>
           </section>
         </div>

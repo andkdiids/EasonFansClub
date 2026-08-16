@@ -226,6 +226,21 @@ export async function awardFeaturedPostRewards(
   })
   if (existingReward) return { registrationFee: 0, experience: 0, dateKey, duplicate: true }
 
+  // PointLog is the registration-fee ledger and ExperienceLog is the EXP
+  // ledger. Either record means this post has already consumed its one-time
+  // featured reward. The check protects against duplicate requests even if a
+  // legacy deployment contains only one side of an otherwise atomic reward.
+  const existingExperienceReward = await tx.experienceLog.findUnique({
+    where: {
+      sourceType_sourceId: {
+        sourceType: EXPERIENCE_REWARD_SOURCES.FEATURED_POST,
+        sourceId: input.postId,
+      },
+    },
+    select: { id: true },
+  })
+  if (existingExperienceReward) return { registrationFee: 0, experience: 0, dateKey, duplicate: true }
+
   const rewardedToday = await tx.pointLog.count({
     where: {
       userId: input.authorId,

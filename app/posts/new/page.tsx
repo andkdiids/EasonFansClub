@@ -26,7 +26,6 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
         <div className="mb-6">
-          <p className="text-sm font-black uppercase text-brand-700">CREATE POST</p>
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
         <PostCreateForm boards={boards} initialBoardSlug={query.board} />

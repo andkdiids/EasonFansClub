@@ -43,7 +43,6 @@ export function WantListenLeaderboard() {
     <main className="want-listen-page want-listen-board-page games-center-background games-full-width">
       <header className="want-listen-heading">
         <Link href="/games/want-listen" className="want-listen-back">← 返回想听</Link>
-        <span>LEADERBOARD</span>
         <h1>想听榜</h1>
         <p>每个模式独立记录，自己的最佳成绩只占一个位置。</p>
       </header>

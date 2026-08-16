@@ -173,13 +173,13 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       </article>
 
       <section id="consultations" className="clinic-consultations-section" aria-labelledby="clinic-consultations-title">
-        <header className="clinic-section-heading"><div><p className="clinic-kicker">CONSULTATION ROOM</p><h2 id="clinic-consultations-title">病友会诊</h2></div><span>{record.consultationCount} 次会诊</span></header>
+        <header className="clinic-section-heading"><div><h2 id="clinic-consultations-title">病友会诊</h2></div><span>{record.consultationCount} 次会诊</span></header>
         {record.bestMouthpiece ? <p className="clinic-best-mouthpiece clinic-detail-best"><span>本楼最佳嘴替</span>「{record.bestMouthpiece.content}」 · {record.bestMouthpiece.mouthpieceCount} 人认同</p> : null}
         {!record.consultations.length ? <p className="clinic-empty-consultation">暂时还没有病友会诊。</p> : <div className="clinic-consultation-list">{record.consultations.map((item) => <ClinicConsultationItem key={item.id} item={item} focusId={focusId} onAspirin={(id) => { const target = findConsultation(record.consultations, id); if (target) void toggleConsultationAspirin(target) }} onMouthpiece={(id) => { const target = findConsultation(record.consultations, id); if (target) void toggleMouthpiece(target) }} onReply={(id) => { const target = findConsultation(record.consultations, id); if (target) openReply(target) }} onDelete={(id) => { const target = findConsultation(record.consultations, id); if (target) void deleteConsultation(target) }} onReport={(id) => { if (requireLogin()) setReportTarget({ consultationId: id }) }} />)}</div>}
       </section>
 
       <section id="clinic-consultation-composer" className="clinic-composer-section">
-        <div className="clinic-composer-heading"><div><p className="clinic-kicker">SAY SOMETHING</p><h2>{replyTo ? `回复 @${findParentName(record.consultations, replyTo)}` : '各位医师点睇？'}</h2></div>{replyTo ? <button type="button" className="clinic-text-link" onClick={() => setReplyTo(null)}>取消回复</button> : null}</div>
+        <div className="clinic-composer-heading"><div><h2>{replyTo ? `回复 @${findParentName(record.consultations, replyTo)}` : '各位医师点睇？'}</h2></div>{replyTo ? <button type="button" className="clinic-text-link" onClick={() => setReplyTo(null)}>取消回复</button> : null}</div>
         <div className="clinic-identity-switch" role="group" aria-label="会诊身份"><button type="button" className={identityMode === 'PUBLIC' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('PUBLIC'))}>用自己的身份</button><button type="button" className={identityMode === 'ANONYMOUS' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('ANONYMOUS'))}>匿名会诊</button></div>
         <textarea ref={composerRef} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder="跟患者说点什么……" aria-label="会诊内容" />
         <div className="clinic-composer-footer"><span>普通病友无法看到匿名医师的真实身份。</span><button type="button" className="clinic-primary-button" disabled={sending} onClick={() => void submitConsultation()}>{sending ? '提交中…' : '参与会诊'}</button></div>

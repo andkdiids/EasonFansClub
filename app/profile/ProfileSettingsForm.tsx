@@ -661,6 +661,9 @@ export function ProfileSettingsForm({
       setUsernameDraft(nextUsername)
       setIsEditingUsername(false)
       setShowUsernameConfirm(false)
+      window.dispatchEvent(new CustomEvent('profile-updated', {
+        detail: { username: nextUsername },
+      }))
       setMessage('用户名已更新，下次可修改时间为一个月后')
       router.refresh()
     } catch {
@@ -734,6 +737,12 @@ export function ProfileSettingsForm({
     if (typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('profile-avatar-updated', {
         detail: { avatarUrl: data?.profile?.avatarUrl || form.avatarUrl },
+      }))
+      window.dispatchEvent(new CustomEvent('profile-updated', {
+        detail: {
+          username: data?.profile?.nickname || form.nickname,
+          avatarUrl: data?.profile?.avatarUrl || form.avatarUrl,
+        },
       }))
     }
     setMessage(data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')

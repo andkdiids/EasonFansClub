@@ -42,9 +42,28 @@ export function DailyPrescriptionDetail() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    request<DrawStatus>({ cache: 'no-store' }).then(setStatus).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : '读取今日状态失败')
-    }).finally(() => setLoading(false))
+    let active = true
+    const controller = new AbortController()
+    const load = () => {
+      setLoading(true)
+      setError('')
+      request<DrawStatus>({ cache: 'no-store', signal: controller.signal }).then((data) => {
+        if (active) setStatus(data)
+      }).catch((reason: unknown) => {
+        if (!active || (reason instanceof DOMException && reason.name === 'AbortError')) return
+        setError(reason instanceof Error ? reason.message : '读取今日状态失败')
+      }).finally(() => {
+        if (active) setLoading(false)
+      })
+    }
+
+    load()
+    window.addEventListener('profile-updated', load)
+    return () => {
+      active = false
+      controller.abort()
+      window.removeEventListener('profile-updated', load)
+    }
   }, [])
 
   async function draw() {
@@ -71,8 +90,7 @@ export function DailyPrescriptionDetail() {
 
   return (
     <section className="daily-game-panel">
-      <header>
-        <span>BEIJING TIME · DAILY</span>
+      <header className="daily-prescription-page-header">
         <h2>今日处方</h2>
         <Link href="/prescription/history" className="daily-prescription-history-link">查看历史处方 →</Link>
       </header>
@@ -85,7 +103,6 @@ export function DailyPrescriptionDetail() {
         <article>
           <header className="daily-prescription-card-header">
             <div>
-              <span>BEIJING TIME · DAILY</span>
               <h3>今日处方</h3>
             </div>
             <PrescriptionUserBadge user={status.draw.user} />

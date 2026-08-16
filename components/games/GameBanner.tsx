@@ -20,14 +20,12 @@ export function GameBanner({ games }: Readonly<{ games: GameCatalogItem[] }>) {
   return (
     <section className="game-banner" data-accent={active.accent} aria-roledescription="carousel">
       <div className="game-banner-copy">
-        <span>{active.eyebrow}</span>
         <h2>{active.title}</h2>
         <p>{active.description}</p>
         {active.available ? <Link href={`/games/${active.slug}`}>查看游戏</Link> : <b>即将开放</b>}
       </div>
       <div className="game-banner-art" aria-hidden="true">
         <i />
-        <strong>{active.coverLabel}</strong>
       </div>
       <nav aria-label="推荐游戏切换">
         {games.map((game, index) => (

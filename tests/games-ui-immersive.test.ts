@@ -13,8 +13,10 @@ const styles = read('app/globals.css')
 test('game center uses a responsive hall with banner, filters, search and skeleton cards', () => {
   const center = read('components/games/GameCenter.tsx')
   const catalog = read('lib/game-catalog.ts')
+  const wantListen = read('app/globals.css')
   assert.match(center, /<GameBanner/)
   assert.match(center, /<GameGrid/)
+  assert.match(center, /className="games-page-inner"/)
   assert.match(center, /gameCategories\.map/)
   assert.match(center, /placeholder="搜索游戏名称"/)
   assert.match(center, /game-grid-skeleton/)
@@ -22,7 +24,10 @@ test('game center uses a responsive hall with banner, filters, search and skelet
   assert.match(catalog, /lyrics-chain/)
   assert.match(catalog, /concert-knowledge/)
   assert.match(styles, /grid-template-columns:repeat\(auto-fill,minmax\(210px,240px\)\)/)
+  assert.match(styles, /\.games-page-inner \{[\s\S]*width:min\(1480px,100%\)/)
+  assert.match(styles, /\.games-page-inner \{[\s\S]*padding:28px clamp\(24px,3\.2vw,48px\) 56px/)
   assert.match(styles, /@media \(max-width:767px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(wantListen, /\.want-listen-page \{ width:100%; padding:20px clamp\(16px,5vw,24px\)/)
 })
 
 test('all games share the detail template while guess song has mode, ranking and history entries', () => {

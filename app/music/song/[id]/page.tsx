@@ -50,8 +50,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
         <MusicCover src={coverUrl} alt={`${song.MusicAlbum.name}专辑封面`} variant="large" className="aspect-square w-full rounded-[24px] border border-white/15 shadow-[0_28px_80px_rgba(35,145,230,.25)]" sizes="(max-width: 767px) 80vw, 320px" priority />
       </MusicDetailReveal>
       <MusicDetailReveal direction="right" delay={0.08}>
-        <p className="text-xs font-black tracking-[0.24em] text-sky-300/70">SONG ARCHIVE</p>
-        <h1 className="mt-4 text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{song.title}</h1>
+        <h1 className="text-5xl font-black tracking-[-0.04em] text-white sm:text-7xl">{song.title}</h1>
         <p className="mt-5 text-xl font-black text-slate-200">{song.artist}</p>
         <p className="mt-3 text-sm font-bold text-slate-300/65">《{song.MusicAlbum.name}》 · {releaseLabel}</p>
         {tags.length ? <div className="mt-5 flex flex-wrap gap-2">{tags.map((tag) => <span key={tag} className="rounded-full border border-sky-200/15 bg-sky-300/[0.08] px-3 py-1.5 text-xs font-black text-sky-100/75">{tag}</span>)}</div> : null}
@@ -60,7 +59,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
     </section>
 
     <MusicDetailReveal delay={0.12} className="mt-14 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8">
-      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CREATIVE CREDITS</p><h2 className="mt-2 text-3xl font-black text-white">创作资料</h2>
+      <h2 className="text-3xl font-black text-white">创作资料</h2>
       <dl className="mt-7 grid gap-4 sm:grid-cols-2 md:grid-cols-3">{credits.map(([label, value]) => <div key={label} className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5"><dt className="text-xs font-black tracking-wider text-sky-200/55">{label}</dt><dd className="mt-2 text-lg font-black text-slate-100">{value || '待补充'}</dd></div>)}</dl>
     </MusicDetailReveal>
 
@@ -68,10 +67,10 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
     <PersonalSongHistory songId={song.id} />
 
     <MusicDetailReveal delay={0.16} className="mt-8 rounded-[30px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_24px_70px_rgba(2,12,27,.25)] backdrop-blur-xl sm:p-9">
-      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">LYRICS ARCHIVE</p><h2 className="mt-2 text-3xl font-black text-white">歌词</h2>
+      <h2 className="text-3xl font-black text-white">歌词</h2>
       <div className="mt-7 pr-3"><p className="whitespace-pre-wrap text-sm font-medium leading-9 text-slate-200/80 sm:text-base">{song.lyrics || '歌词内容暂未收录。'}</p></div>
     </MusicDetailReveal>
 
-    {songStory ? <MusicDetailReveal delay={0.2} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">SONG STORY</p><h2 className="mt-2 text-3xl font-black text-white">歌曲故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{songStory}</p></MusicDetailReveal> : null}
+    {songStory ? <MusicDetailReveal delay={0.2} className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.06] p-6 backdrop-blur-xl sm:p-8"><h2 className="text-3xl font-black text-white">歌曲故事</h2><p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{songStory}</p></MusicDetailReveal> : null}
   </MusicArchiveShell>
 }

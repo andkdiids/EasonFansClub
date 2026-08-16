@@ -49,9 +49,10 @@ test('Duel lobby uses the entertainment games visual system instead of a SaaS da
   const duel = read('components/games/GuessSongDuel.tsx')
   const css = read('app/globals.css')
 
-  assert.match(duel, /LISTEN · DUEL/)
+  assert.doesNotMatch(duel, /LISTEN · DUEL/)
   assert.match(duel, /className="duel-hero-visual"/)
-  assert.match(duel, /PLAY TOGETHER/)
+  assert.match(duel, /1 VS 1/)
+  assert.doesNotMatch(duel, /PLAY TOGETHER/)
   assert.match(css, /body:has\(\.duel-page\)/)
   assert.match(css, /\.duel-page \{[\s\S]*#07101d/)
   assert.match(css, /\.duel-hero-card \{[\s\S]*border-radius:0/)

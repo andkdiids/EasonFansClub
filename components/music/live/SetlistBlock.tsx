@@ -46,7 +46,7 @@ function EncoreSection({ items, headingId, contributor }: { items: SetlistItemFo
 export function SetlistBlock({
   items,
   title,
-  eyebrow = 'LIVE SETLIST',
+
   idPrefix = 'setlist',
   excludeEncore = false,
   showEncore = true,
@@ -57,7 +57,7 @@ export function SetlistBlock({
 }: {
   items: SetlistItemForBlock[]
   title: string
-  eyebrow?: string
+
   idPrefix?: string
   excludeEncore?: boolean
   showEncore?: boolean
@@ -83,8 +83,8 @@ export function SetlistBlock({
     return (
       <section className="concert-setlist-block mt-14" aria-labelledby={showHeading ? headingId : undefined} aria-label={showHeading ? undefined : '完整歌单'}>
         {showHeading ? <>
-        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{eyebrow}</p>
-        <h2 id={headingId} className="mt-2 text-3xl font-black text-white sm:text-4xl">{title}</h2>
+
+        <h2 id={headingId} className="text-3xl font-black text-white sm:text-4xl">{title}</h2>
         </> : null}
         {hasNormal ? (
           <ol className="concert-setlist-items mt-7 gap-x-10 [column-fill:_balance] columns-1 md:columns-3">
@@ -133,8 +133,8 @@ export function SetlistBlock({
   return (
     <section className="concert-setlist-block mt-14" aria-labelledby={showHeading ? headingId : undefined} aria-label={showHeading ? undefined : '完整歌单'}>
       {showHeading ? <>
-      <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">{eyebrow}</p>
-      <h2 id={headingId} className="mt-2 text-3xl font-black text-white sm:text-4xl">{title}</h2>
+
+      <h2 id={headingId} className="text-3xl font-black text-white sm:text-4xl">{title}</h2>
       </> : null}
       <div className="mt-7 space-y-8">
         {grouped.map((group) => (

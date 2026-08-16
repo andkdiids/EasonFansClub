@@ -23,8 +23,7 @@ export default async function AlbumReviewsPage() {
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <Link href="/music" className="text-sm font-black text-sky-300/80">← 返回 EasMusic</Link>
     <header className="py-12 sm:py-16">
-      <p className="text-xs font-black tracking-[0.24em] text-sky-300/65">ALBUM REVIEW ARCHIVE</p>
-      <h1 className="mt-3 text-5xl font-black tracking-tight text-white sm:text-7xl">专辑鉴赏</h1>
+      <h1 className="text-5xl font-black tracking-tight text-white sm:text-7xl">专辑鉴赏</h1>
       <p className="mt-5 max-w-2xl text-sm font-bold leading-7 text-slate-300/70">从制作资料、幕后故事、歌曲解析与时代背景，重新走进一张专辑。</p>
     </header>
     {reviews.length ? <section className="grid gap-5 sm:grid-cols-2 md:grid-cols-3">

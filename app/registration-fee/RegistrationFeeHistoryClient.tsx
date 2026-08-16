@@ -54,8 +54,7 @@ export function RegistrationFeeHistoryClient({ initialData }: { initialData: Reg
     <section className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
         <div>
-          <p className="text-xs font-black tracking-[0.16em] text-[var(--primary)]">REGISTRATION FEE LEDGER</p>
-          <h1 className="mt-2 text-2xl font-black text-[var(--foreground)] sm:text-3xl">挂号费记录</h1>
+          <h1 className="text-2xl font-black text-[var(--foreground)] sm:text-3xl">挂号费记录</h1>
           <p className="mt-2 text-sm font-bold text-[var(--foreground-muted)]">这里沿用现有挂号费流水，奖励说明会原样保留。</p>
         </div>
         <div className="rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-right">
@@ -85,3 +84,5 @@ export function RegistrationFeeHistoryClient({ initialData }: { initialData: Reg
     </section>
   )
 }
+
+undefined

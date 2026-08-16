@@ -102,30 +102,30 @@ export default async function MusicTourPage({ params, searchParams }: { params: 
 
   return <MusicArchiveShell maxWidth="max-w-6xl" backgroundVisual={config.heroVisuals.music}>
     <div className="flex flex-wrap items-center justify-between gap-3"><Link href="/music/concerts" className="text-sm font-black text-sky-300/80">← 返回 Eason in Concert</Link><Link href={`/music/live/me?tourId=${encodeURIComponent(tour.id)}`} className="border border-sky-200/20 bg-sky-200/[0.07] px-4 py-2 text-sm font-black text-sky-100">批量添加场次 →</Link></div>
-    <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedTourPosterUrl} alt={`${tour.name}巡演海报`} sizes="260px" className="h-full w-full" /></div><div className="min-w-0"><p className="text-xs font-black tracking-[0.2em] text-sky-300/65">TOUR ARCHIVE</p><h1 className="mt-4 break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{tour.name}</h1>{tour.subtitle ? <p className="mt-4 break-words text-xl font-black text-slate-200">{tour.subtitle}</p> : null}<p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(tour.startDate, tour.endDate)}</p>{tour.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{tour.description}</p> : null}<dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">场次</dt><dd className="mt-1 text-xl font-black">{tour.MusicConcert.length}</dd></div><div><dt className="text-xs text-slate-400">城市</dt><dd className="mt-1 text-xl font-black">{cityGroups.length}</dd></div></dl></div></section>
+    <section className="mt-8 grid min-w-0 gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-center"><div className="relative mx-auto aspect-square w-full max-w-[260px] border border-white/15 bg-[#0b2038]"><ConcertCover resolvedPosterUrl={resolvedTourPosterUrl} alt={`${tour.name}巡演海报`} sizes="260px" className="h-full w-full" /></div><div className="min-w-0"><h1 className="break-words text-5xl font-black tracking-tight text-white sm:text-7xl">{tour.name}</h1>{tour.subtitle ? <p className="mt-4 break-words text-xl font-black text-slate-200">{tour.subtitle}</p> : null}<p className="mt-4 text-sm font-bold text-sky-200/65">{formatLiveDateRange(tour.startDate, tour.endDate)}</p>{tour.description ? <p className="mt-6 whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{tour.description}</p> : null}<dl className="mt-7 grid grid-cols-2 gap-3 border-t border-white/10 pt-5"><div><dt className="text-xs text-slate-400">场次</dt><dd className="mt-1 text-xl font-black">{tour.MusicConcert.length}</dd></div><div><dt className="text-xs text-slate-400">城市</dt><dd className="mt-1 text-xl font-black">{cityGroups.length}</dd></div></dl></div></section>
 
     {!cityGroups.length ? <p className="mt-7 border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300">该巡演暂无已发布的场次。</p> : null}
 
     {normalGroups.length ? (
       <section className="mt-14" aria-labelledby="tour-cities-title">
-        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">CITY ARCHIVE</p>
-        <h2 id="tour-cities-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">巡演城市</h2>
+
+        <h2 id="tour-cities-title" className="text-3xl font-black text-white sm:text-4xl">巡演城市</h2>
         <TourCityGrid tourSlug={canonicalSlug} tourPosterUrl={tour.posterUrl} items={normalGroups} />
       </section>
     ) : null}
 
     {encoreGroups.length ? (
       <section className="mt-14" aria-labelledby="tour-cities-encore-title">
-        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ENCORE CITIES</p>
-        <h2 id="tour-cities-encore-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">返场城市</h2>
+
+        <h2 id="tour-cities-encore-title" className="text-3xl font-black text-white sm:text-4xl">返场城市</h2>
         <TourCityGrid tourSlug={canonicalSlug} tourPosterUrl={tour.posterUrl} items={encoreGroups} />
       </section>
     ) : null}
 
     {finalGroups.length ? (
       <section className="mt-14" aria-labelledby="tour-cities-final-title">
-        <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">FINAL STATION</p>
-        <h2 id="tour-cities-final-title" className="mt-2 text-3xl font-black text-white sm:text-4xl">最终站</h2>
+
+        <h2 id="tour-cities-final-title" className="text-3xl font-black text-white sm:text-4xl">最终站</h2>
         <TourCityGrid tourSlug={canonicalSlug} tourPosterUrl={tour.posterUrl} items={finalGroups} />
       </section>
     ) : null}

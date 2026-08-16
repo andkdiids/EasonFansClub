@@ -5,6 +5,8 @@ import { ImageViewer } from '@/components/ImageViewer'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 const CONTROL_HIDE_DELAY_MS = 2_200
+const SWIPE_ACTIVATION_THRESHOLD_PX = 12
+const SWIPE_COMMIT_THRESHOLD_PX = 48
 
 export type PostMediaCarouselItem = {
   id: string
@@ -39,6 +41,7 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
   const scrollFrameRef = useRef<number | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const suppressClickRef = useRef(false)
+  const activeIndexRef = useRef(0)
   const itemsKey = items.map((item) => `${item.id}:${item.url}:${item.broken ? 'broken' : 'ok'}`).join('|')
 
   const clearHideControlsTimer = useCallback(() => {
@@ -60,12 +63,14 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
 
   const updateCurrentIndex = useCallback(() => {
     const viewport = viewportRef.current
-    if (!viewport || !viewport.clientWidth || items.length <= 1) return
+    if (!viewport || !viewport.clientWidth || items.length <= 1 || dragRef.current?.horizontal) return
     const nextIndex = Math.min(items.length - 1, Math.max(0, Math.round(viewport.scrollLeft / viewport.clientWidth)))
+    activeIndexRef.current = nextIndex
     setCurrentIndex((current) => current === nextIndex ? current : nextIndex)
   }, [items.length])
 
   useEffect(() => {
+    activeIndexRef.current = 0
     setCurrentIndex(0)
     setFailedImageIds(new Set())
     viewportRef.current?.scrollTo({ left: 0, behavior: 'auto' })
@@ -95,13 +100,14 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
     event?.preventDefault()
     event?.stopPropagation()
     const safeIndex = Math.min(items.length - 1, Math.max(0, nextIndex))
-    if (safeIndex === currentIndex && !viewportRef.current?.scrollLeft) {
+    const viewport = viewportRef.current
+    if (safeIndex === activeIndexRef.current && !viewport?.scrollLeft) {
       showControls()
       return
     }
     showControls()
+    activeIndexRef.current = safeIndex
     setCurrentIndex(safeIndex)
-    const viewport = viewportRef.current
     if (viewport) viewport.scrollTo({ left: safeIndex * viewport.clientWidth, behavior: 'smooth' })
   }
 
@@ -125,8 +131,10 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
     const deltaX = event.clientX - drag.startX
     const deltaY = event.clientY - drag.startY
     if (!drag.horizontal) {
-      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) return
-      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+      const absDeltaX = Math.abs(deltaX)
+      const absDeltaY = Math.abs(deltaY)
+      if (absDeltaX < SWIPE_ACTIVATION_THRESHOLD_PX && absDeltaY < SWIPE_ACTIVATION_THRESHOLD_PX) return
+      if (absDeltaX <= absDeltaY) {
         dragRef.current = null
         return
       }
@@ -143,20 +151,26 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
   function finishPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
+    const deltaX = event.clientX - drag.startX
+    const targetIndex = drag.horizontal && Math.abs(deltaX) >= SWIPE_COMMIT_THRESHOLD_PX
+      ? activeIndexRef.current + (deltaX < 0 ? 1 : -1)
+      : activeIndexRef.current
     if (drag.horizontal && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
-      updateCurrentIndex()
     }
     dragRef.current = null
+    if (drag.horizontal) scrollToIndex(targetIndex)
   }
 
   function handlePointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current
+    const wasHorizontal = drag?.pointerId === event.pointerId && drag.horizontal
     if (drag?.pointerId === event.pointerId && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
     dragRef.current = null
     suppressClickRef.current = false
+    if (wasHorizontal) scrollToIndex(activeIndexRef.current)
   }
 
   function handleClickCapture(event: React.MouseEvent<HTMLDivElement>) {

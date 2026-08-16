@@ -159,7 +159,7 @@ export function ClinicAdminPanel() {
     <section className="clinic-admin-panel">
       <div className="clinic-admin-toolbar">
         <div>
-          <p className="clinic-kicker">MODERATION</p>
+
           <p style={{ margin: '7px 0 0', color: 'var(--foreground-muted)', fontSize: 11 }}>匿名原始身份仅向拥有 clinic_manage 权限的管理员返回。</p>
         </div>
         <nav className="clinic-admin-tabs" aria-label="门诊后台分类">

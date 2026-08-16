@@ -102,7 +102,6 @@ export function HomeHero({
       <div className="community-hero-overlay" />
       {hasHeroCopy ? <div aria-live="polite" className="community-hero-copy">
         {showTitle ? <>
-          <p>WELCOME HOME</p>
           <h1>{siteName}</h1>
           <h2>{title}</h2>
         </> : null}

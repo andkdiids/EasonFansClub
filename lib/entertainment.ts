@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute, getBeijingDateKey, shiftBeijingDateKey } from '@/lib/beijing-time'
 import { drawDailyPrescriptionReward } from '@/lib/entertainment-rewards'
 import type { DailyPrescriptionUser } from '@/lib/daily-prescription-types'
+import { publicModerationUserName } from '@/lib/content-moderation'
 import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
@@ -15,6 +16,7 @@ const dailyDrawInclude = {
     select: {
       uid: true,
       username: true,
+      usernameModerationStatus: true,
       avatarUrl: true,
       Profile: { select: { avatarUrl: true } },
     },
@@ -38,6 +40,7 @@ const dailyDrawHistoryInclude = {
     select: {
       uid: true,
       username: true,
+      usernameModerationStatus: true,
       avatarUrl: true,
       Profile: { select: { avatarUrl: true } },
     },
@@ -114,9 +117,12 @@ function serializeDailyDraw(draw: DailyDrawWithLyric, totalPoints: number) {
   }
 }
 
-function serializePrescriptionUser(user: DailyDrawWithLyric['User']): DailyPrescriptionUser {
+export function serializePrescriptionUser(user: DailyDrawWithLyric['User']): DailyPrescriptionUser {
   return {
-    username: user.username,
+    // The prescription displays the mutable account username, not a snapshot
+    // from the draw. The relation is reloaded on every read, so old draws
+    // follow the current profile while the permanent UID stays unchanged.
+    username: publicModerationUserName(user.username, [user.usernameModerationStatus]),
     uid: user.uid,
     avatarUrl: profileImageUrl(user.Profile?.avatarUrl) || profileImageUrl(user.avatarUrl),
   }

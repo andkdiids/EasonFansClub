@@ -223,33 +223,28 @@ async function drawPrescriptionCanvas(data: PrescriptionImageData, palette: Pres
   context.strokeStyle = palette.borderStrong
   context.stroke()
 
-  context.fillStyle = palette.accent
-  context.font = `700 18px ${FONT_SANS}`
-  context.textAlign = 'left'
-  context.fillText('BEIJING TIME · DAILY', 80, 94)
-
   const userAvatarSize = 56
   const userAvatarX = 818
-  const userAvatarY = 48
+  const userAvatarY = 72
   drawAvatar(context, avatar, userAvatarX, userAvatarY, userAvatarSize, avatarFallback(data.user.uid), palette)
   context.textAlign = 'left'
   context.fillStyle = palette.foreground
   context.font = `700 20px ${FONT_SANS}`
-  context.fillText(truncateCanvasText(context, data.user.username, 230), userAvatarX + userAvatarSize + 16, 76)
+  context.fillText(truncateCanvasText(context, data.user.username, 230), userAvatarX + userAvatarSize + 16, 100)
   context.fillStyle = palette.foregroundMuted
   context.font = `500 16px ${FONT_SANS}`
-  context.fillText(`UID: ${formatUid(data.user.uid)}`, userAvatarX + userAvatarSize + 16, 103)
+  context.fillText(`UID: ${formatUid(data.user.uid)}`, userAvatarX + userAvatarSize + 16, 127)
 
   context.fillStyle = palette.foreground
   context.font = `600 54px "ECFC-Title", ${FONT_SANS}`
   context.textAlign = 'left'
-  context.fillText('今日处方', 80, 166)
+  context.fillText('今日处方', 80, 136)
 
   context.strokeStyle = palette.border
   context.lineWidth = 2
   context.beginPath()
-  context.moveTo(80, 192)
-  context.lineTo(1120, 192)
+  context.moveTo(80, 168)
+  context.lineTo(1120, 168)
   context.stroke()
 
   context.beginPath()
@@ -422,7 +417,6 @@ export function SavePrescriptionButton({ data }: { data: PrescriptionImageData }
         <section className="prescription-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="prescription-preview-title">
           <header className="prescription-preview-header">
             <div>
-              <p>DAILY PRESCRIPTION</p>
               <h2 id="prescription-preview-title">处方图片已生成</h2>
             </div>
             <button type="button" className="prescription-preview-close" onClick={closePreview} aria-label="关闭处方图片预览">×</button>

@@ -605,7 +605,6 @@ export function AdminGuessSongManager() {
   return (
     <main className="flat-page guess-song-admin">
       <header>
-        <p>Entertainment CMS</p>
         <h1>听听题库</h1>
         <span>先创建题目资料，再上传至少 7 秒的音频；服务端会生成私有的 2～7 秒 MP3 变体。</span>
       </header>
@@ -613,7 +612,6 @@ export function AdminGuessSongManager() {
       {error ? <p className="guess-song-error" role="alert">{error}</p> : null}
       <section className="guess-song-admin-config">
         <div>
-          <small>CHALLENGE MODES</small>
           <h2>长期挑战模式</h2>
           <p>前台固定显示简单、进阶、困难、专家四种挑战；历史旧版场次仍由服务端兼容读取。</p>
         </div>

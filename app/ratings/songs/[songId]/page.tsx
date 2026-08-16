@@ -33,8 +33,7 @@ export default async function RatingSongPage({ params, searchParams }: { params:
       <section className="mt-5 grid gap-5 border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7 md:grid-cols-[180px_minmax(0,1fr)] md:items-center">
         <MusicCover src={detail.song.coverUrl} fallbackSrc={detail.song.fallbackCoverUrl} alt={`${detail.song.title}封面`} variant="large" className="mx-auto aspect-square w-full max-w-[180px] border border-sky-100" sizes="180px" priority />
         <div className="min-w-0">
-          <p className="text-xs font-black tracking-[0.2em] text-brand-700">SINGLE RATING</p>
-          <h1 className="mt-2 break-words text-3xl font-black tracking-tight text-brand-950 sm:text-5xl">{detail.song.title}</h1>
+          <h1 className="break-words text-3xl font-black tracking-tight text-brand-950 sm:text-5xl">{detail.song.title}</h1>
           <p className="mt-3 text-sm font-black text-slate-700">《{detail.song.album.name}》</p>
           <p className="mt-2 text-sm font-bold text-slate-500">{detail.song.releaseYear} · {detail.song.languageLabel}</p>
           <Link href={`/ratings/albums/${detail.song.album.id}`} className="mt-3 inline-flex text-sm font-black text-brand-700 hover:underline">查看专辑《{detail.song.album.name}》的歌·颂详情 →</Link>
@@ -59,3 +58,5 @@ export default async function RatingSongPage({ params, searchParams }: { params:
     </PageContainer>
   )
 }
+
+undefined

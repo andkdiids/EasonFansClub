@@ -690,7 +690,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     <main className="duel-page">
       <header className="duel-topbar">
         <Link href="/games/guess-song" className="duel-back" aria-label="返回听听"><span aria-hidden="true">←</span><b>返回听听</b></Link>
-        <div><span>LISTEN · DUEL</span><strong>1v1 对决</strong>{room ? <small>房间 {room.roomCode}</small> : null}</div>
+        <div><strong>1v1 对决</strong>{room ? <small>房间 {room.roomCode}</small> : null}</div>
         {view === 'match' ? <span className="duel-live-pill">LIVE</span> : <span className="duel-top-spacer" />}
       </header>
 
@@ -709,12 +709,11 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
           ) : null}
           <div className="duel-hero-card">
             <div className="duel-hero-copy">
-              <p className="duel-eyebrow">REAL-TIME 1V1 · TWO MODES</p>
               <h1>1v1 对决</h1>
               <p>同一间房间，选择考试型比分或真正的实时抢答。</p>
               <p className="duel-hero-tagline">听得快一点，答案也要快一点。</p>
             </div>
-            <div className="duel-hero-visual" aria-hidden="true"><span>PLAY TOGETHER</span><strong>1 VS 1</strong><i /></div>
+            <div className="duel-hero-visual" aria-hidden="true"><strong>1 VS 1</strong><i /></div>
             <div className="duel-stat-strip">
               <div><strong>{stats.wins}</strong><span>胜场</span></div>
               <div><strong>{stats.participations}</strong><span>参与</span></div>
@@ -751,7 +750,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
       {view === 'room' && room ? (
         <section className="duel-room-hall">
-          <div className="duel-hall-title"><div><p className="duel-eyebrow">ROOM {room.roomCode} · WAITING ROOM</p><h1>听听 · 对决</h1><p className="duel-mode-badge">{getDuelModeLabel(room.mode)}</p><p className="duel-muted">两位玩家都准备后，房主才能开始。</p></div><button type="button" className="duel-ghost-button" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出房间</button></div>
+          <div className="duel-hall-title"><div><h1>听听 · 对决</h1><p className="duel-mode-badge">{getDuelModeLabel(room.mode)}</p><p className="duel-muted">两位玩家都准备后，房主才能开始。</p></div><button type="button" className="duel-ghost-button" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出房间</button></div>
           <div className="duel-players-card">
             <div className="duel-room-player"><div className="duel-large-avatar">{avatar(room.host)}</div><span className="duel-player-role">房主</span><h2>{room.host.name}</h2><p className={room.hostReady ? 'is-ready' : ''}>{room.hostReady ? '✓ 已准备' : '○ 未准备'}</p></div>
             <div className="duel-versus">VS</div>
@@ -784,7 +783,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
               </div>
             ) : <>
             {match.phase === 'STARTING' && countdown > 0 ? <div className="duel-countdown"><span>准备</span><strong>{countdown}</strong></div> : null}
-            <div className="duel-question-heading"><span>{currentQuestion?.isOvertime ? `加赛 ${currentQuestion.overtimeIndex || 1}` : `${activeModeLabel} · QUESTION ${String(match.currentQuestionIndex).padStart(2, '0')} / ${match.totalQuestions}`}</span><span>{audioStarted && !deadlinePassed ? activeMode === 'BUZZER' ? '抢答进行中' : '双方独立作答' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
+            <div className="duel-question-heading"><span>{currentQuestion?.isOvertime ? `加赛 ${currentQuestion.overtimeIndex || 1}` : `${activeModeLabel} · 第 ${String(match.currentQuestionIndex).padStart(2, '0')} / ${match.totalQuestions} 题`}</span><span>{audioStarted && !deadlinePassed ? activeMode === 'BUZZER' ? '抢答进行中' : '双方独立作答' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
             <p className="duel-audio-hint">试听将在题目开始后 2 秒同步播放 · {activeMode === 'BUZZER' ? '本题最多 1 个得分者' : '双方各有一次独立答题机会'}</p>
             {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
             <div className="duel-options">{currentQuestion?.options.map((option) => {
@@ -806,7 +805,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
       {view === 'result' && result ? (
         <section className="duel-result-screen">
-          <p className="duel-eyebrow">{activeModeLabel} · MATCH COMPLETE</p>
           <h1>{result.status === 'INVALID' ? '比赛无效' : result.isDraw ? '平局' : result.winnerId === userId ? '🏆 你赢了' : `${resultWinnerName || '对手'}获胜`}</h1>
           <div className="duel-result-score">
             {result.players.map((player) => (

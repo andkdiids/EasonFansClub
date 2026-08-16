@@ -36,7 +36,6 @@ export default async function WelcomePage() {
         <ThemeToggle className="hero-icon-button" />
       </header>
       <section className="welcome-copy" aria-labelledby="welcome-title">
-        <p className="hero-kicker">WELCOME TO</p>
         <h1 id="welcome-title">私家E院</h1>
         <p className="hero-community">听见 <span>Eason</span>，也听见自己</p>
         <p className="hero-slogan">NOW IS THE ONLY REALITY.</p>
@@ -46,3 +45,5 @@ export default async function WelcomePage() {
     </main>
   )
 }
+
+undefined

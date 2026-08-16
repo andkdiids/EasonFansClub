@@ -33,8 +33,7 @@ export default async function RatingAlbumPage({ params, searchParams }: { params
       <section className="mt-5 grid gap-5 border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7 md:grid-cols-[180px_minmax(0,1fr)] md:items-center">
         <MusicCover src={detail.album.coverUrl} alt={`${detail.album.name}封面`} variant="large" className="mx-auto aspect-square w-full max-w-[180px] border border-sky-100" sizes="180px" priority />
         <div className="min-w-0">
-          <p className="text-xs font-black tracking-[0.2em] text-brand-700">ALBUM RATING</p>
-          <h1 className="mt-2 break-words text-3xl font-black tracking-tight text-brand-950 sm:text-5xl">{detail.album.name}</h1>
+          <h1 className="break-words text-3xl font-black tracking-tight text-brand-950 sm:text-5xl">{detail.album.name}</h1>
           <p className="mt-3 text-sm font-black text-slate-700">{detail.album.artist}</p>
           <p className="mt-2 text-sm font-bold text-slate-500">{detail.album.releaseYear} · {detail.album.languageLabel}</p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -47,7 +46,7 @@ export default async function RatingAlbumPage({ params, searchParams }: { params
 
       <section className="mt-5 border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7" aria-labelledby="rating-album-songs">
         <div className="flex items-end justify-between gap-3">
-          <div><p className="text-xs font-black tracking-[0.18em] text-brand-700">TRACK LIST</p><h2 id="rating-album-songs" className="mt-1 text-2xl font-black text-brand-950">本专辑歌曲</h2></div>
+          <div><h2 id="rating-album-songs" className=" text-2xl font-black text-brand-950">本专辑歌曲</h2></div>
           <span className="text-xs font-bold text-slate-500">{detail.album.songs.length} 首</span>
         </div>
         {detail.album.songs.length ? (
@@ -77,3 +76,5 @@ export default async function RatingAlbumPage({ params, searchParams }: { params
     </PageContainer>
   )
 }
+
+undefined

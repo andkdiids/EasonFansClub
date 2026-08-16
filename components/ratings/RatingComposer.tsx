@@ -75,8 +75,7 @@ export function RatingComposer({ target, targetId, myRating, myReview, stats }: 
     <section className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7" aria-labelledby="rating-composer-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-black tracking-[0.18em] text-brand-700">YOUR RATING</p>
-          <h2 id="rating-composer-title" className="mt-1 text-2xl font-black text-brand-950">{myRating ? '你的评分' : title}</h2>
+          <h2 id="rating-composer-title" className="text-2xl font-black text-brand-950">{myRating ? '你的评分' : title}</h2>
         </div>
         <span className="text-xs font-bold text-slate-500">当前平均 {formatAverageScore(stats.averageScore)} 分</span>
       </div>
@@ -126,3 +125,5 @@ export function RatingComposer({ target, targetId, myRating, myReview, stats }: 
     </section>
   )
 }
+
+undefined

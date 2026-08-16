@@ -71,8 +71,19 @@ function describePostEditError(error: unknown) {
   }
 }
 
+type PostMutationOperation = 'edit' | 'feature' | 'pin' | 'delete' | 'manage'
+
+function getPostMutationOperation(phase: string): PostMutationOperation {
+  if (phase.startsWith('feature')) return 'feature'
+  if (phase.startsWith('pin')) return 'pin'
+  if (phase.startsWith('delete')) return 'delete'
+  if (phase.startsWith('edit')) return 'edit'
+  return 'manage'
+}
+
 function logPostEditError(error: unknown, postId: string, userId: string, phase: string) {
   console.error('[posts.update]', {
+    operation: getPostMutationOperation(phase),
     postId,
     userId,
     phase,
@@ -82,25 +93,32 @@ function logPostEditError(error: unknown, postId: string, userId: string, phase:
 
 function postEditErrorResponse(error: unknown, postId: string, userId: string, phase: string) {
   logPostEditError(error, postId, userId, phase)
+  const operation = getPostMutationOperation(phase)
+  const isFeatureOperation = operation === 'feature'
   const errorMessage = error instanceof Error ? error.message : ''
-  const prismaCode = error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined
+  const errorRecord = error && typeof error === 'object' ? error as Record<string, unknown> : undefined
+  const errorCode = typeof errorRecord?.code === 'string' ? errorRecord.code : undefined
+  const prismaCode = error instanceof Prisma.PrismaClientKnownRequestError ? error.code : errorCode
 
   if (errorMessage === 'POST_NOT_FOUND' || errorMessage === 'POST_ALREADY_DELETED' || prismaCode === 'P2025') {
     return NextResponse.json({ ok: false, code: 'POST_NOT_FOUND', message: '帖子不存在或已经被删除' }, { status: 404 })
   }
   if (prismaCode === 'P2003') {
-    return NextResponse.json({ ok: false, code: 'POST_EDIT_REFERENCE_INVALID', message: '帖子关联的板块或用户已失效，请刷新后重试' }, { status: 409 })
+    return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_REFERENCE_INVALID' : 'POST_EDIT_REFERENCE_INVALID', message: isFeatureOperation ? '设置精华所需的帖子或作者关联已失效，请刷新后重试' : '帖子关联的板块或用户已失效，请刷新后重试' }, { status: 409 })
   }
   if (prismaCode === 'P2002') {
-    return NextResponse.json({ ok: false, code: 'POST_EDIT_CONFLICT', message: '保存发生冲突，请刷新后重试' }, { status: 409 })
+    return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_CONFLICT' : 'POST_EDIT_CONFLICT', message: isFeatureOperation ? '设置精华发生重复提交，请刷新后重试' : '保存发生冲突，请刷新后重试' }, { status: 409 })
   }
   if (prismaCode === 'P2021' || prismaCode === 'P2022') {
-    return NextResponse.json({ ok: false, code: 'POST_EDIT_SCHEMA_UNAVAILABLE', message: '帖子服务暂时不可用，请联系管理员' }, { status: 503 })
+    return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_SCHEMA_UNAVAILABLE' : 'POST_EDIT_SCHEMA_UNAVAILABLE', message: '帖子服务暂时不可用，请联系管理员' }, { status: 503 })
+  }
+  if (prismaCode === 'P1001' || prismaCode === 'P1002' || prismaCode === 'P1008' || prismaCode === 'P1017' || prismaCode === 'P2024' || prismaCode === 'P2028') {
+    return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_DATABASE_UNAVAILABLE' : 'POST_EDIT_DATABASE_UNAVAILABLE', message: '帖子服务暂时不可用，请联系管理员' }, { status: 503 })
   }
   if (prismaCode === 'P2034') {
-    return NextResponse.json({ ok: false, code: 'POST_EDIT_CONFLICT', message: '保存发生并发冲突，请刷新后重试' }, { status: 409 })
+    return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_CONFLICT' : 'POST_EDIT_CONFLICT', message: isFeatureOperation ? '设置精华发生并发冲突，请刷新后重试' : '保存发生并发冲突，请刷新后重试' }, { status: 409 })
   }
-  return NextResponse.json({ ok: false, code: 'POST_EDIT_FAILED', message: '保存失败，请稍后重试' }, { status: 500 })
+  return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_FAILED' : 'POST_EDIT_FAILED', message: isFeatureOperation ? '设置精华失败，请稍后重试' : '保存失败，请稍后重试' }, { status: 500 })
 }
 
 async function executePostDelete(postId: string, user: SessionUser, canManagePosts: boolean) {
@@ -353,7 +371,12 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ message: '请求参数无效' }, { status: 400 })
     }
 
-    phase = 'load-post'
+    const requestKind: 'feature' | 'pin' | 'manage' = typeof body.isFeatured === 'boolean'
+      ? 'feature'
+      : typeof body.isPinned === 'boolean'
+        ? 'pin'
+        : 'manage'
+    phase = `${requestKind}-load-post`
     const existing = await prisma.post.findUnique({
       where: { id: postId },
       select: {
@@ -371,7 +394,7 @@ export async function PATCH(request: Request, { params }: Params) {
     if (!existing) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
     if (existing.isDeleted) return NextResponse.json({ message: '帖子已删除，无法继续操作' }, { status: 404 })
 
-    phase = 'load-permissions'
+    phase = `${requestKind}-load-permissions`
     const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
     const isOwner = existing.authorId === guard.user.id
 
@@ -429,9 +452,15 @@ export async function PATCH(request: Request, { params }: Params) {
       }
     }
 
-    phase = 'manage-transaction'
+    const mutationKind: 'feature' | 'pin' | 'manage' = data.isFeatured !== undefined
+      ? 'feature'
+      : data.isPinned !== undefined
+        ? 'pin'
+        : 'manage'
+    phase = `${mutationKind}-lock`
     const post = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+      phase = `${mutationKind}-load`
     const lockedExisting = await tx.post.findUnique({
       where: { id: postId },
       select: {
@@ -447,6 +476,7 @@ export async function PATCH(request: Request, { params }: Params) {
     })
     if (!lockedExisting) throw new Error('POST_NOT_FOUND')
 
+    phase = `${mutationKind}-update`
     const updated = await tx.post.update({
       where: { id: postId },
       data,
@@ -464,6 +494,7 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     if (data.isFeatured === true && !lockedExisting.isFeatured) {
+      phase = 'feature-reward'
       await awardFeaturedPostRewards(tx, {
         postId,
         authorId: lockedExisting.authorId,
@@ -488,31 +519,48 @@ export async function PATCH(request: Request, { params }: Params) {
       },
     }
     if (canManagePosts && changedDeleted) {
-      await createAdminActionAudit(tx, {
-        ...auditTarget,
-        action: data.isDeleted ? 'DELETE_POST' : 'RESTORE_POST',
-        operationType: data.isDeleted ? adminAuditOperations.POST_DELETED : adminAuditOperations.POST_RESTORED,
-      })
+      phase = 'manage-audit'
+      try {
+        await createAdminActionAudit(tx, {
+          ...auditTarget,
+          action: data.isDeleted ? 'DELETE_POST' : 'RESTORE_POST',
+          operationType: data.isDeleted ? adminAuditOperations.POST_DELETED : adminAuditOperations.POST_RESTORED,
+        })
+      } catch (error) {
+        // Audit history is diagnostic/append-only data. It must not roll back
+        // a successful post state change or its account-consistent reward.
+        logPostEditError(error, postId, guard.user.id, 'manage-audit')
+      }
     }
     if (canManagePosts && changedPinned) {
-      await createAdminActionAudit(tx, {
-        ...auditTarget,
-        action: data.isPinned ? 'PIN_POST' : 'UNPIN_POST',
-        operationType: data.isPinned ? adminAuditOperations.POST_PINNED : adminAuditOperations.POST_UNPINNED,
-      })
+      phase = 'pin-audit'
+      try {
+        await createAdminActionAudit(tx, {
+          ...auditTarget,
+          action: data.isPinned ? 'PIN_POST' : 'UNPIN_POST',
+          operationType: data.isPinned ? adminAuditOperations.POST_PINNED : adminAuditOperations.POST_UNPINNED,
+        })
+      } catch (error) {
+        logPostEditError(error, postId, guard.user.id, 'pin-audit')
+      }
     }
     if (canManagePosts && changedFeatured) {
-      await createAdminActionAudit(tx, {
-        ...auditTarget,
-        action: data.isFeatured ? 'FEATURE_POST' : 'UNFEATURE_POST',
-        operationType: data.isFeatured ? adminAuditOperations.POST_FEATURED : adminAuditOperations.POST_UNFEATURED,
-      })
+      phase = 'feature-audit'
+      try {
+        await createAdminActionAudit(tx, {
+          ...auditTarget,
+          action: data.isFeatured ? 'FEATURE_POST' : 'UNFEATURE_POST',
+          operationType: data.isFeatured ? adminAuditOperations.POST_FEATURED : adminAuditOperations.POST_UNFEATURED,
+        })
+      } catch (error) {
+        logPostEditError(error, postId, guard.user.id, 'feature-audit')
+      }
     }
 
     return updated
   })
 
-    phase = 'manage-cache'
+    phase = `${mutationKind}-cache`
     revalidatePath('/forum')
     revalidatePath('/community')
     revalidatePath('/trending')

@@ -229,7 +229,6 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
           <section className="checkin-history-dialog" role="dialog" aria-modal="true" aria-labelledby="checkin-history-title">
             <header className="checkin-history-dialog-header">
               <div className="checkin-history-dialog-heading">
-                <p>PERSONAL CHECK-IN ARCHIVE</p>
                 <button
                   id="checkin-history-title"
                   type="button"
@@ -309,7 +308,6 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                 <article className="checkin-history-detail" role="dialog" aria-modal="true" aria-labelledby="checkin-history-detail-title">
                   <header>
                     <div>
-                      <p>CHECK-IN DETAIL</p>
                       <h2 id="checkin-history-detail-title">{selectedRecord.dateKey.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$1年$2月$3日')}</h2>
                     </div>
                     <button type="button" className="checkin-history-close" onClick={() => setSelectedRecord(null)} aria-label="关闭当天详情">×</button>
@@ -340,3 +338,6 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
     </>
   )
 }
+
+undefined
+undefined

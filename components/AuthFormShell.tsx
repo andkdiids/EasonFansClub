@@ -37,9 +37,7 @@ export function AuthFormShell({
       <div className="auth-page-overlay" />
       <header className="auth-page-header"><Link href="/" aria-label={siteName}><BrandMark logoUrl={publicImageUrl(logoUrl)} inverse compact /></Link><ThemeToggle className="hero-icon-button" /></header>
       <div className="auth-page-layout">
-        <section className="auth-brand-copy" aria-label="网站介绍"><p>WELCOME TO</p>
-
-<h2>私家E院</h2>
+        <section className="auth-brand-copy" aria-label="网站介绍"><h2>私家E院</h2>
 
 <span>
   听见 Eason，也听见自己
@@ -49,7 +47,7 @@ export function AuthFormShell({
   NOW IS THE ONLY REALITY.
 </em></section>
         <section className="auth-form-panel">
-          <div className="auth-form-heading"><p>MEMBER ACCESS</p><h1>{title}</h1><span>{subtitle}</span></div>
+          <div className="auth-form-heading"><h1>{title}</h1><span>{subtitle}</span></div>
           <div className="auth-form-content">{children}</div>
           <div className="auth-form-footer">{footer}</div>
         </section>
@@ -57,3 +55,6 @@ export function AuthFormShell({
     </main>
   )
 }
+
+undefined
+undefined

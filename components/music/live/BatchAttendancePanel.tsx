@@ -231,8 +231,8 @@ export function BatchAttendancePanel({ open, tourId, onClose, onSaved }: Readonl
       <header className="shrink-0 border-b border-white/10 px-4 pb-4 pt-5 sm:px-7 sm:pt-7">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-black tracking-[0.18em] text-sky-300/60">EASON IN CONCERT · MY LIVE</p>
-            <h2 id="batch-attendance-title" className="mt-2 text-2xl font-black text-white sm:text-3xl">批量添加场次</h2>
+
+            <h2 id="batch-attendance-title" className="text-2xl font-black text-white sm:text-3xl">批量添加场次</h2>
             <p className="mt-2 text-sm font-bold leading-6 text-slate-300/70">一次选择多个城市和场次，保存后统一更新你的现场记录。</p>
           </div>
           <button type="button" onClick={requestClose} disabled={busy} aria-label="关闭批量添加场次" className="shrink-0 px-2 py-1 text-2xl leading-none text-slate-300 disabled:opacity-50">×</button>

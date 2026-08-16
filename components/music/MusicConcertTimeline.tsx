@@ -43,10 +43,10 @@ type MyLiveStatus = 'loading' | 'ready' | 'anonymous' | 'error'
 
 type ConcertCategorySlug = string
 
-const FALLBACK_CATEGORY_LABELS: Record<string, { eyebrow: string; label: string }> = {
-  main: { eyebrow: 'MAIN CONCERTS', label: '大型演唱会' },
-  small: { eyebrow: 'SPECIAL PROJECTS', label: '小型企划' },
-  guest: { eyebrow: 'GUEST APPEARANCES', label: '嘉宾现场' },
+const FALLBACK_CATEGORY_LABELS: Record<string, { label: string }> = {
+  main: { label: '大型演唱会' },
+  small: { label: '小型企划' },
+  guest: { label: '嘉宾现场' },
 }
 
 function formatYear(value: Date | string | null | undefined) {
@@ -237,9 +237,8 @@ function MyLiveCenter({ data, status, onRetry, loginHref }: Readonly<{ data: Con
   return <section data-testid="my-live-card" className={`music-concert-gallery-my-live${status === 'error' ? ' is-error' : ''}`} aria-labelledby="concert-gallery-my-live-title">
     <span className="music-concert-gallery-corner is-top" aria-hidden="true" />
     <span className="music-concert-gallery-corner is-bottom" aria-hidden="true" />
-    <p>PRIVATE LIVE COLLECTION</p>
-    <h2 id="concert-gallery-my-live-title">MY LIVE</h2>
-    <strong>我的现场收藏</strong>
+
+    <strong id="concert-gallery-my-live-title">我的现场收藏</strong>
     <div className="music-concert-gallery-live-stats">
       <div><b>{value(data?.attendedShowCount)}</b><span>观看现场数</span></div>
       <div><b>{value(data?.attendedTourCount)}</b><span>观看巡演数</span></div>
@@ -321,7 +320,6 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
   }
   // Tab 必须显示分类 name（如「Live拉阔音乐会」「专辑签售会」），绝不允许回退显示 slug 文本。
   const tabLabel = (slug: string) => (categoryBySlug.get(slug)?.name) || FALLBACK_CATEGORY_LABELS[slug]?.label || slug
-  const activeLabel = { eyebrow: FALLBACK_CATEGORY_LABELS[activeCategory]?.eyebrow || activeCategory.toUpperCase(), label: tabLabel(activeCategory) }
 
   function selectCategory(nextCategory: ConcertCategorySlug) {
     if (nextCategory === activeCategory) return
@@ -434,7 +432,7 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
 
   return <section className={`music-concert-gallery${compact ? ' is-compact' : ''}`} aria-label="Eason in Concert 互动式演唱会展厅">
     <header className="music-concert-gallery-switcher">
-      <p>{activeLabel.eyebrow}</p>
+
       <div role="tablist" aria-label="演唱会分类">
         {orderedSlugs.map((category) => <button key={category} type="button" role="tab" aria-selected={category === activeCategory} onClick={() => selectCategory(category)}>{tabLabel(category)}</button>)}
       </div>

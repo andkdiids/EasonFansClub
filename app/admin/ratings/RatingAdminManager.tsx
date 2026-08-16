@@ -33,7 +33,7 @@ export function RatingAdminManager({ initial }: Readonly<{ initial: AdminRatingO
 
   return (
     <>
-      <header className="border-b border-sky-100 pb-5"><Link href="/admin" className="text-sm font-black text-brand-700">← 返回后台</Link><p className="mt-5 text-xs font-black tracking-[0.2em] text-brand-700">RATING ADMIN</p><h1 className="mt-2 text-3xl font-black text-brand-950">歌·颂管理</h1><p className="mt-2 text-sm font-bold text-slate-600">评价管理与评分统计。歌曲、专辑基础资料继续由 EasMusic 曲库维护。</p></header>
+      <header className="border-b border-sky-100 pb-5"><Link href="/admin" className="text-sm font-black text-brand-700">← 返回后台</Link><h1 className="mt-5 text-3xl font-black text-brand-950">歌·颂管理</h1><p className="mt-2 text-sm font-bold text-slate-600">评价管理与评分统计。歌曲、专辑基础资料继续由 EasMusic 曲库维护。</p></header>
       <section className="grid gap-3 sm:grid-cols-3" aria-label="歌·颂评分统计">
         <div className="border border-sky-100 bg-white/90 p-5 shadow-sm"><span className="text-xs font-black text-slate-500">评分总数</span><strong className="mt-2 block text-3xl font-black text-brand-950">{formatRatingCount(overview.stats.ratingCount)}</strong></div>
         <div className="border border-sky-100 bg-white/90 p-5 shadow-sm"><span className="text-xs font-black text-slate-500">平均分</span><strong className="mt-2 block text-3xl font-black text-amber-600">{formatAverageScore(overview.stats.averageScore)}</strong></div>

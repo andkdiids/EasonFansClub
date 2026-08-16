@@ -88,8 +88,7 @@ export function TodayPageClient({ month, day, initialEvents }: { month: number; 
   return <main className="site-page-main flat-page mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-5 sm:py-9">
     <section className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <p className="text-sm font-black uppercase tracking-[0.2em] text-sky-700">ON THIS DAY</p>
-        <h1 className="mt-2 text-4xl font-black text-brand-950 sm:text-6xl">历史上的今天</h1>
+        <h1 className="text-4xl font-black text-brand-950 sm:text-6xl">历史上的今天</h1>
         <p className="mt-3 text-lg font-black text-slate-600">{month} 月 {day} 日 · 记录 Eason 与 E 友的时间线</p>
       </div>
       <button type="button" onClick={() => setOpen((value) => !value)} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">提交今日内容</button>
@@ -130,3 +129,5 @@ export function TodayPageClient({ month, day, initialEvents }: { month: number; 
     </section>
   </main>
 }
+
+undefined

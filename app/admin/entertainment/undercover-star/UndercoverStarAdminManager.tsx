@@ -114,7 +114,7 @@ export function UndercoverStarAdminManager() {
 
   return (
     <main className="undercover-admin-page admin-mobile-page mx-auto max-w-7xl space-y-5 px-4 py-7 sm:px-5">
-      <header className="border-b border-sky-100 pb-5"><Link href="/admin" className="text-sm font-black text-brand-700">← 返回后台</Link><p className="mt-5 text-xs font-black tracking-[0.2em] text-brand-700">UNDERCOVER STAR ADMIN</p><h1 className="mt-2 text-3xl font-black text-brand-950">卧底巨星</h1><p className="mt-2 text-sm font-bold text-slate-500">管理多人房间制游戏的启用状态、服务端词组与运行概览。</p></header>
+      <header className="border-b border-sky-100 pb-5"><Link href="/admin" className="text-sm font-black text-brand-700">← 返回后台</Link><h1 className="mt-5 text-3xl font-black text-brand-950">卧底巨星</h1><p className="mt-2 text-sm font-bold text-slate-500">管理多人房间制游戏的启用状态、服务端词组与运行概览。</p></header>
       {message ? <p role="status" className="bg-emerald-50 p-3 text-sm font-black text-emerald-700">{message}</p> : null}
       {error ? <p role="alert" className="bg-red-50 p-3 text-sm font-black text-red-700">{error}</p> : null}
       <section className="border border-sky-100 bg-white p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-black text-brand-950">基础设置</h2><p className="mt-1 text-sm font-bold text-slate-500">停用只阻止新房间，已经开始的对局仍可正常完成。</p></div><button type="button" onClick={() => void toggleEnabled()} className={`px-4 py-3 text-sm font-black text-white ${config?.enabled ? 'bg-emerald-700' : 'bg-slate-600'}`}>{config?.enabled ? '已启用' : '已停用'}</button></div></section>

@@ -48,7 +48,6 @@ export function GuessSongRiskManager() {
   return (
     <section className="guess-song-risk">
       <header>
-        <small>LISTEN RISK CONTROL</small>
         <h2>听听风控</h2>
         <p>记录组合异常信号；单独的高分、偶尔快速答题或网络重复请求不会被判定为作弊。</p>
       </header>

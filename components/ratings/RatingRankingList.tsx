@@ -48,8 +48,7 @@ export function RatingRankingList({ items, target, language, query, page, pageSi
     <section ref={rankingRef} aria-labelledby="rating-ranking-title" className="scroll-mt-24">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-black tracking-[0.18em] text-brand-700">RANKING</p>
-          <h2 id="rating-ranking-title" className="mt-1 text-2xl font-black text-brand-950">{target === 'song' ? '单曲榜' : '专辑榜'}</h2>
+          <h2 id="rating-ranking-title" className="text-2xl font-black text-brand-950">{target === 'song' ? '单曲榜' : '专辑榜'}</h2>
         </div>
         <span className="text-xs font-bold text-slate-500">共 {total.toLocaleString('zh-CN')} 项 · 每页 {pageSize}</span>
       </div>
@@ -96,3 +95,5 @@ export function RatingRankingList({ items, target, language, query, page, pageSi
     </section>
   )
 }
+
+undefined

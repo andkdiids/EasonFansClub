@@ -168,10 +168,9 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
 
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
       {isExpired ? (
-        <section className="want-listen-ended"><span>SESSION EXPIRED</span><h1>本局游戏已结束，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>
+        <section className="want-listen-ended"><h1>本局游戏已结束，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>
       ) : isSettlement ? (
         <section className="want-listen-settlement">
-          <span>GAME COMPLETE</span>
           <h1>{WANT_LISTEN_MODE_LABELS[session.mode]}完成</h1>
           <strong>{session.score}<small> 分</small></strong>
           <div><span>答对<strong>{session.correctCount} / {session.totalQuestions}</strong></span><span>完成用时<strong>{Math.max(1, Math.round((session.completionTimeMs || 0) / 1000))} 秒</strong></span></div>
@@ -180,7 +179,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
         </section>
       ) : question ? (
         <section className="want-listen-question-panel">
-          <div className="want-listen-question-intro"><span>QUESTION {String(question.position).padStart(2, '0')}</span><p>{session.mode === 'WANT_LISTEN' ? '线索会逐步出现，答案由服务端判定。' : session.mode === 'CANTONESE_FRAGMENT' ? '选择歌词中消失的那一段。' : '六个歌名里，只有一个不存在。'}</p></div>
+          <div className="want-listen-question-intro"><span>第 {String(question.position).padStart(2, '0')} 题</span><p>{session.mode === 'WANT_LISTEN' ? '线索会逐步出现，答案由服务端判定。' : session.mode === 'CANTONESE_FRAGMENT' ? '选择歌词中消失的那一段。' : '六个歌名里，只有一个不存在。'}</p></div>
           {session.mode === 'WANT_LISTEN' ? <div className="want-listen-hints" aria-label="歌曲线索">{question.hints.map((hint, index) => <div key={index} className={`want-listen-hint hint-${index + 1}`}>{hint.type === 'album-cover' && typeof hint.coverUrl === 'string' ? <><img src={hint.coverUrl} alt="专辑封面线索" /><span>{hintText(hint)}</span></> : <><span className="want-listen-hint-index">0{index + 1}</span><strong>{hintText(hint)}</strong></>}</div>)}</div> : null}
           {session.mode === 'CANTONESE_FRAGMENT' && question.context ? <pre className="want-listen-lyric-context">{question.context}</pre> : null}
           <div className={`want-listen-options mode-${session.mode.toLowerCase()}`}>

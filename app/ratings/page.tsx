@@ -42,8 +42,7 @@ export default async function RatingsPage({ searchParams }: { searchParams: Sear
       <header className="border-b border-sky-100 pb-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-black tracking-[0.24em] text-brand-700">EASON FANS CLUB · RATING</p>
-            <h1 className="mt-2 text-4xl font-black tracking-tight text-brand-950 sm:text-5xl">歌·颂</h1>
+            <h1 className="text-4xl font-black tracking-tight text-brand-950 sm:text-5xl">歌·颂</h1>
             <p className="mt-3 text-sm font-bold leading-6 text-slate-600 sm:text-base">为每一首歌、每一张专辑留下你的分数。</p>
           </div>
           {user ? <Link href="/ratings/me" className="border border-sky-200 bg-white px-4 py-2.5 text-sm font-black text-brand-700 hover:border-brand-300">我的评分</Link> : null}
@@ -81,3 +80,5 @@ export default async function RatingsPage({ searchParams }: { searchParams: Sear
     </PageContainer>
   )
 }
+
+undefined

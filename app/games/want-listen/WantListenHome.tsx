@@ -82,7 +82,6 @@ export function WantListenHome() {
     <main className="want-listen-page games-center-background games-full-width">
       <header className="want-listen-heading">
         <Link href="/games" className="want-listen-back">← 返回娱乐天空</Link>
-        <span>SILENT MUSIC QUIZ</span>
         <h1>想听</h1>
         <p>没有声音，你还认得出这些歌吗？</p>
       </header>
@@ -98,7 +97,7 @@ export function WantListenHome() {
           const stats = summary?.modes[mode]
           return (
             <article key={mode} className={`want-listen-mode-card${enabled || active ? '' : ' is-disabled'}`}>
-              <span>MODE 0{WANT_LISTEN_MODES.indexOf(mode) + 1}</span>
+              <span>模式 0{WANT_LISTEN_MODES.indexOf(mode) + 1}</span>
               <h2>{WANT_LISTEN_MODE_LABELS[mode]}</h2>
               <p>{WANT_LISTEN_MODE_DESCRIPTIONS[mode]}</p>
               <div className="want-listen-mode-meta">
@@ -115,7 +114,7 @@ export function WantListenHome() {
 
       <section className="want-listen-summary-panel" aria-labelledby="want-listen-summary-title">
         <div className="want-listen-panel-heading">
-          <div><span>YOUR RECORDS</span><h2 id="want-listen-summary-title">我的数据</h2></div>
+          <div><h2 id="want-listen-summary-title">我的数据</h2></div>
           <Link href="/games/want-listen/leaderboard">查看排行榜 →</Link>
         </div>
         <div className="want-listen-total-stats">
