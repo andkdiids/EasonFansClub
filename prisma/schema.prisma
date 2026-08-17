@@ -2844,7 +2844,7 @@ model ContentModerationScanJob {
 model SiteSetting {
   id        String               @id @default(cuid())
   key       String               @unique
-  value     String
+  value     String               @db.Text
   valueType SiteSettingValueType @default(TEXT)
   group     String               @default("general")
   label     String?

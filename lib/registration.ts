@@ -1,3 +1,4 @@
+import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAccountSecuritySettings } from '@/lib/account-security'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
@@ -46,6 +47,44 @@ export type {
   RegistrationControlSettings,
   RegistrationDailyScheduleWindow,
 } from '@/lib/registration-availability'
+
+/**
+ * Maps a registration-control persistence error to a stable API error payload.
+ * Extracted so the admin security-settings route can return readable messages
+ * while the mapping itself stays unit-testable outside a Next.js route module.
+ */
+export function registrationControlWriteError(error: unknown) {
+  const code = typeof error === 'object' && error && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : 'UNKNOWN'
+  console.error('[registration-control.save]', {
+    code,
+    message: error instanceof Error ? error.message : 'Unknown database error',
+  })
+
+  if (code === 'P2000') {
+    return NextResponse.json({
+      code: 'REGISTRATION_SETTING_TOO_LONG',
+      message: '注册配置内容超出当前数据库字段长度，请先应用 SiteSetting.value 的 TEXT 字段升级。',
+    }, { status: 500 })
+  }
+  if (code === 'P2022') {
+    return NextResponse.json({
+      code: 'REGISTRATION_SETTING_SCHEMA_INCOMPATIBLE',
+      message: '注册配置字段与当前数据库结构不兼容，请检查待执行的数据库迁移。',
+    }, { status: 500 })
+  }
+  if (code === 'P2025') {
+    return NextResponse.json({
+      code: 'REGISTRATION_SETTING_NOT_FOUND',
+      message: '注册配置记录不存在或已变化，请刷新后重试。',
+    }, { status: 409 })
+  }
+  return NextResponse.json({
+    code: 'REGISTRATION_SETTING_UPDATE_FAILED',
+    message: '数据库更新失败，注册设置未保存，请稍后重试。',
+  }, { status: 500 })
+}
 
 export const registrationModes = ['PHONE', 'EMAIL', 'BOTH', 'CLOSED'] as const
 export type RegistrationMode = (typeof registrationModes)[number]
@@ -184,11 +223,16 @@ export async function setRegistrationControlSettings(
     closedTitle: settings.closedTitle || '当前暂停注册',
     closedMessage: settings.closedMessage || '注册入口目前暂时关闭，请稍后再来。',
   }
-  await Promise.all(Object.entries(registrationControlSettingDefinitions).map(([name, definition]) => database.siteSetting.upsert({
-    where: { key: definition.key },
-    update: { value: values[name as keyof typeof values], valueType: 'TEXT', group: 'system', label: definition.label },
-    create: { key: definition.key, value: values[name as keyof typeof values], valueType: 'TEXT', group: 'system', label: definition.label },
-  })))
+  // Keep writes ordered inside the interactive transaction. This makes the
+  // settings and the accompanying admin audit entry one atomic update while
+  // avoiding concurrent queries on the same transaction connection.
+  for (const [name, definition] of Object.entries(registrationControlSettingDefinitions)) {
+    await database.siteSetting.upsert({
+      where: { key: definition.key },
+      update: { value: values[name as keyof typeof values], valueType: 'TEXT', group: 'system', label: definition.label },
+      create: { key: definition.key, value: values[name as keyof typeof values], valueType: 'TEXT', group: 'system', label: definition.label },
+    })
+  }
 }
 
 /**

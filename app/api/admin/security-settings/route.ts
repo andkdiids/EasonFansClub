@@ -5,6 +5,7 @@ import {
   getRegistrationControlSettings,
   getRegistrationPolicy,
   parseRegistrationControlInput,
+  registrationControlWriteError,
   REGISTRATION_DAILY_SCHEDULE_VALIDATION_MESSAGE,
   REGISTRATION_ONE_TIME_VALIDATION_MESSAGE,
   serializeRegistrationAvailability,
@@ -44,27 +45,31 @@ export async function PUT(request: Request) {
         : { ...before, mode: 'MANUAL' as const, override: 'NONE' as const }
     const reason = action === 'OPEN_NOW' ? '立即开放注册' : action === 'CLOSE_NOW' ? '立即关闭注册' : '停止限时开放注册'
 
-    await prisma.$transaction(async (tx) => {
-      await setRegistrationControlSettings(next, tx)
-      await tx.adminAction.create({
-        data: {
-          adminId: guard.user.id,
-          action: 'UPDATE_SETTING',
-          reason,
-          metadata: {
-            before: serializeRegistrationControlSettings(before),
-            after: serializeRegistrationControlSettings(next),
+    try {
+      await prisma.$transaction(async (tx) => {
+        await setRegistrationControlSettings(next, tx)
+        await tx.adminAction.create({
+          data: {
+            adminId: guard.user.id,
+            action: 'UPDATE_SETTING',
+            reason,
+            metadata: {
+              before: serializeRegistrationControlSettings(before),
+              after: serializeRegistrationControlSettings(next),
+            },
           },
-        },
+        })
       })
-    })
 
-    const policy = await getRegistrationPolicy()
-    return NextResponse.json({
-      message: `${reason}已生效`,
-      registrationControl: serializeRegistrationControlSettings(policy.registrationControl),
-      availability: serializeRegistrationAvailability(policy.registrationAvailability),
-    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
+      const policy = await getRegistrationPolicy()
+      return NextResponse.json({
+        message: `${reason}已生效`,
+        registrationControl: serializeRegistrationControlSettings(policy.registrationControl),
+        availability: serializeRegistrationAvailability(policy.registrationAvailability),
+      }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
+    } catch (error) {
+      return registrationControlWriteError(error)
+    }
   }
 
   if (body && typeof body === 'object' && body.registrationControl) {
@@ -91,27 +96,31 @@ export async function PUT(request: Request) {
       // override so the new window is evaluated immediately.
       override: parsed.mode === 'MANUAL' ? before.override : 'NONE' as const,
     }
-    await prisma.$transaction(async (tx) => {
-      await setRegistrationControlSettings(next, tx)
-      await tx.adminAction.create({
-        data: {
-          adminId: guard.user.id,
-          action: 'UPDATE_SETTING',
-          reason: '更新注册开放控制',
-          metadata: {
-            before: serializeRegistrationControlSettings(before),
-            after: serializeRegistrationControlSettings(next),
+    try {
+      await prisma.$transaction(async (tx) => {
+        await setRegistrationControlSettings(next, tx)
+        await tx.adminAction.create({
+          data: {
+            adminId: guard.user.id,
+            action: 'UPDATE_SETTING',
+            reason: '更新注册开放控制',
+            metadata: {
+              before: serializeRegistrationControlSettings(before),
+              after: serializeRegistrationControlSettings(next),
+            },
           },
-        },
+        })
       })
-    })
 
-    const policy = await getRegistrationPolicy()
-    return NextResponse.json({
-      message: '注册开放设置已保存并立即生效',
-      registrationControl: serializeRegistrationControlSettings(policy.registrationControl),
-      availability: serializeRegistrationAvailability(policy.registrationAvailability),
-    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
+      const policy = await getRegistrationPolicy()
+      return NextResponse.json({
+        message: '注册开放设置已保存并立即生效',
+        registrationControl: serializeRegistrationControlSettings(policy.registrationControl),
+        availability: serializeRegistrationAvailability(policy.registrationAvailability),
+      }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
+    } catch (error) {
+      return registrationControlWriteError(error)
+    }
   }
 
   const settings = parseAccountSecuritySettings(body)
