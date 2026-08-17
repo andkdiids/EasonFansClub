@@ -84,12 +84,20 @@ export function UndercoverStarClient() {
       setStats(statsData.stats)
       setActiveRoom(data.activeRoom)
       setActiveMatch(data.activeMatch)
-      if (resumeActive && data.activeMatch) {
+      // 房间生命周期校验：
+      // - PLAYING 进行中对局 → 完整恢复（场景1：刷新或重新进入均可）。
+      // - WAITING 等候室 → 恢复正常房间视图。
+      // - FINISHED / 已退出 / 房间关闭 / 无进行中对局 → 统一进入大厅，
+      //   不自动恢复上一局（场景2/3）。大厅会以「查看结果」入口呈现一次，
+      //   需用户主动点击，绝不直接渲染游戏页。
+      if (!resumeActive) {
+        setView('LOBBY')
+      } else if (data.activeMatch && data.activeMatch.status === 'PLAYING') {
         roomRef.current = null
         setRoomId(data.activeMatch.roomId)
         setMatchId(data.activeMatch.matchId)
         setView('MATCH')
-      } else if (resumeActive && data.activeRoom) {
+      } else if (data.activeRoom) {
         roomRef.current = data.activeRoom
         setRoom(data.activeRoom)
         setRoomId(data.activeRoom.roomId)
@@ -258,7 +266,8 @@ export function UndercoverStarClient() {
 
   function resetToLobby() {
     const status: LobbyActiveMatch['status'] = snapshot?.status === 'FINISHED' ? 'FINISHED' : 'PLAYING'
-    const resumableMatch = matchId && roomId ? { matchId, roomId, status } : null
+    // FINISHED 本局不保留「继续对局」入口：返回大厅即彻底退出，结束页面只展示一次。
+    const resumableMatch = matchId && roomId && status === 'PLAYING' ? { matchId, roomId, status } : null
     realtimeRef.current?.stop(); snapshotRef.current = null; roomRef.current = null; setSnapshot(null); setPrivateState(null); setRoom(null); setRoomId(null); setMatchId(null); setView('LOBBY'); setError(''); setMessage(''); if (resumableMatch?.roomId) setActiveMatch(resumableMatch); void loadLobby(false)
   }
 
