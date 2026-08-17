@@ -60,3 +60,13 @@ test('编辑不触发发帖奖励、频率限制或重复创建帖子', () => {
   assert.match(editHandler, /tx\.post\.update\(/)
   assert.doesNotMatch(editHandler, /tx\.post\.create\(/)
 })
+
+test('桌面端遗留操作区为作者/管理员提供编辑入口，且与移动端共用同一权限', () => {
+  // 桌面端可见的 .post-detail-legacy-actions 区域在 canEditPost 为真时渲染编辑链接，
+  // 与删除按钮同处右侧操作组，风格一致。
+  assert.match(detail, /post-detail-legacy-actions/)
+  assert.match(detail, /canEditPost \? \([\s\S]*?Link href=\{\`\/posts\/\$\{post\.id\}\/edit\`\}/)
+  // 编辑权限统一：作者本人或拥有 post_manage 权限的管理员，不依赖旧管理员字段。
+  assert.match(detail, /const canEditPost = Boolean\(user && \(user\.id === post\.User\.id \|\| canManagePost\)\)/)
+  assert.match(detail, /const canManagePost = Boolean\(user && await hasAdminPermission\(user, 'post_manage'\)\)/)
+})

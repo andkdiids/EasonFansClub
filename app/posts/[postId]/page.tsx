@@ -707,6 +707,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {canEditPost ? (
+                <Link href={`/posts/${post.id}/edit`} className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-black text-brand-700">
+                  编辑帖子
+                </Link>
+              ) : null}
               {canManagePost ? (
                 <AdminPostActions postId={post.id} isPinned={post.isPinned} isFeatured={post.isFeatured} redirectTo="/forum" />
               ) : canDeletePost ? (
