@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomState } from '@/lib/undercover-star-protocol'
-import { canApplyUndercoverPrivateState, canApplyUndercoverSnapshot } from '@/lib/undercover-star-client-state'
+import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '@/lib/undercover-star-client-state'
 import { UndercoverStarRealtimeClient } from '@/lib/undercover-star-realtime-client'
 
 type LobbyResponse = { rooms: UndercoverRoomState[]; activeRoom: UndercoverRoomState | null; activeMatch: { matchId: string; roomId: string; status: 'PLAYING' | 'FINISHED' } | null; isInActiveGame: boolean }
@@ -66,6 +66,7 @@ export function UndercoverStarClient() {
   const [error, setError] = useState('')
   const realtimeRef = useRef<UndercoverStarRealtimeClient | null>(null)
   const snapshotRef = useRef<UndercoverPublicMatchSnapshot | null>(null)
+  const roomRef = useRef<UndercoverRoomState | null>(null)
 
   async function loadLobby(resumeActive = true) {
     setLoading(true)
@@ -79,10 +80,12 @@ export function UndercoverStarClient() {
       setActiveRoom(data.activeRoom)
       setActiveMatch(data.activeMatch)
       if (resumeActive && data.activeMatch) {
+        roomRef.current = null
         setRoomId(data.activeMatch.roomId)
         setMatchId(data.activeMatch.matchId)
         setView('MATCH')
       } else if (resumeActive && data.activeRoom) {
+        roomRef.current = data.activeRoom
         setRoom(data.activeRoom)
         setRoomId(data.activeRoom.roomId)
         setView('ROOM')
@@ -109,6 +112,7 @@ export function UndercoverStarClient() {
       fetchMatch: async (id) => (await request<{ snapshot: UndercoverPublicMatchSnapshot }>(`/api/entertainment/undercover-star/matches/${id}`)).snapshot,
       onRoom: (state) => {
         if (state.status === 'CANCELLED') {
+          roomRef.current = null
           setMessage('房间已关闭，已返回大厅。')
           setRoom(null)
           setRoomId(null)
@@ -116,6 +120,11 @@ export function UndercoverStarClient() {
           void loadLobby()
           return
         }
+        // Drop stale realtime room states (older lastActivityAt or a broadcast
+        // from a room the viewer has already left) so a slow in-flight HTTP
+        // response can never hide a newer join/ready/start.
+        if (!canApplyUndercoverRoomState(roomRef.current, state)) return
+        roomRef.current = state
         setRoom(state)
         setRoomId(state.roomId)
         if (state.matchId) {
@@ -142,6 +151,20 @@ export function UndercoverStarClient() {
   useEffect(() => {
     if (!matchId) return
     let cancelled = false
+    // Non-host players learn that a match started from a ROOM_STATE broadcast
+    // (matchId set) but may not have a match snapshot yet. Fetch the
+    // authoritative public snapshot immediately so the view is not stuck on
+    // "正在恢复对局…" waiting for a WS MATCH_STATE frame that may be delayed.
+    if (!snapshotRef.current) {
+      void request<{ snapshot: UndercoverPublicMatchSnapshot }>(`/api/entertainment/undercover-star/matches/${matchId}`).then((data) => {
+        if (cancelled) return
+        if (canApplyUndercoverSnapshot(snapshotRef.current, data.snapshot)) {
+          snapshotRef.current = data.snapshot
+          setSnapshot(data.snapshot)
+          setView('MATCH')
+        }
+      }).catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : '对局状态加载失败。') })
+    }
     void request<{ privateState: UndercoverPrivateState }>(`/api/entertainment/undercover-star/matches/${matchId}/private`).then((data) => {
       if (cancelled) return
       if (canApplyUndercoverPrivateState(snapshotRef.current, data.privateState)) setPrivateState(data.privateState)
@@ -155,7 +178,7 @@ export function UndercoverStarClient() {
     setBusy(true); setError('')
     try {
       const data = await request<{ room: UndercoverRoomState }>('/api/entertainment/undercover-star/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: createPassword }) })
-      setRoom(data.room); setActiveRoom(data.room); setActiveMatch(null); setRoomId(data.room.roomId); setMatchId(null); setCreatePassword(''); setView('ROOM')
+      roomRef.current = data.room; setRoom(data.room); setActiveRoom(data.room); setActiveMatch(null); setRoomId(data.room.roomId); setMatchId(null); setCreatePassword(''); setView('ROOM')
     } catch (reason) { setError(reason instanceof Error ? reason.message : '创建房间失败。') } finally { setBusy(false) }
   }
 
@@ -164,7 +187,7 @@ export function UndercoverStarClient() {
     setBusy(true); setError('')
     try {
       const data = await request<{ room: UndercoverRoomState }>('/api/entertainment/undercover-star/rooms/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomCode: code, password: roomPassword }) })
-      setRoom(data.room); setActiveRoom(data.room); setActiveMatch(data.room.matchId ? { matchId: data.room.matchId, roomId: data.room.roomId, status: 'PLAYING' } : null); setRoomId(data.room.roomId); setMatchId(data.room.matchId); setRoomPassword(''); setView(data.room.matchId ? 'MATCH' : 'ROOM')
+      roomRef.current = data.room; setRoom(data.room); setActiveRoom(data.room); setActiveMatch(data.room.matchId ? { matchId: data.room.matchId, roomId: data.room.roomId, status: 'PLAYING' } : null); setRoomId(data.room.roomId); setMatchId(data.room.matchId); setRoomPassword(''); setView(data.room.matchId ? 'MATCH' : 'ROOM')
     } catch (reason) { setError(reason instanceof Error ? reason.message : '加入房间失败。') } finally { setBusy(false) }
   }
 
@@ -178,7 +201,7 @@ export function UndercoverStarClient() {
     setBusy(true); setError('')
     try {
       const data = await request<{ room?: UndercoverRoomState; match?: MatchStateResponse }>(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
-      if (data.room) { setRoom(data.room); setActiveRoom(data.room); setRoomId(data.room.roomId) }
+      if (data.room) { roomRef.current = data.room; setRoom(data.room); setActiveRoom(data.room); setRoomId(data.room.roomId) }
       if (data.match) {
         snapshotRef.current = data.match.snapshot
         setSnapshot(data.match.snapshot)
@@ -195,7 +218,7 @@ export function UndercoverStarClient() {
     if (!roomId) return
     const succeeded = await roomAction(`/api/entertainment/undercover-star/rooms/${roomId}/leave`)
     if (!succeeded) return
-    realtimeRef.current?.stop(); setRoom(null); setActiveRoom(null); setActiveMatch(null); setRoomId(null); setMatchId(null); setView('LOBBY'); await loadLobby()
+    realtimeRef.current?.stop(); roomRef.current = null; setRoom(null); setActiveRoom(null); setActiveMatch(null); setRoomId(null); setMatchId(null); setView('LOBBY'); await loadLobby()
   }
 
   async function matchAction(url: string, body: Record<string, unknown>) {
@@ -220,15 +243,17 @@ export function UndercoverStarClient() {
   function resetToLobby() {
     const status: LobbyActiveMatch['status'] = snapshot?.status === 'FINISHED' ? 'FINISHED' : 'PLAYING'
     const resumableMatch = matchId && roomId ? { matchId, roomId, status } : null
-    realtimeRef.current?.stop(); snapshotRef.current = null; setSnapshot(null); setPrivateState(null); setRoom(null); setRoomId(null); setMatchId(null); setView('LOBBY'); setError(''); setMessage(''); if (resumableMatch?.roomId) setActiveMatch(resumableMatch); void loadLobby(false)
+    realtimeRef.current?.stop(); snapshotRef.current = null; roomRef.current = null; setSnapshot(null); setPrivateState(null); setRoom(null); setRoomId(null); setMatchId(null); setView('LOBBY'); setError(''); setMessage(''); if (resumableMatch?.roomId) setActiveMatch(resumableMatch); void loadLobby(false)
   }
 
   function resumeActiveGame() {
     if (activeMatch) {
+      roomRef.current = null
       setRoomId(activeMatch.roomId)
       setMatchId(activeMatch.matchId)
       setView('MATCH')
     } else if (activeRoom) {
+      roomRef.current = activeRoom
       setRoom(activeRoom)
       setRoomId(activeRoom.roomId)
       setView('ROOM')

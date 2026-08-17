@@ -685,9 +685,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <PostViewCounter postId={post.id} initialCount={post.viewCount} />
             <span>回复 {post.replyCount}</span>
           </div>
-          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700">{safePublicPostContent}</div>
+          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700 post-detail-body">{safePublicPostContent}</div>
           {post.sticker?.url ? (
-            <div className="mt-6">
+            <div className="mt-6 post-detail-sticker">
               {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={publicImageVariantUrl(post.sticker.url, 'thumb-md') || post.sticker.url} alt={publicModerationText(post.sticker.name, post.sticker.moderationStatus) || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" loading="lazy" />
             </div>
@@ -723,7 +723,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             }))}
             totalCount={post.likeCount}
             listUrl={`/api/posts/${post.id}/like`}
-            className="mt-3"
+            className="mt-3 post-detail-like-avatars"
           />
         </article>
 

@@ -238,7 +238,8 @@ function MyLiveCenter({ data, status, onRetry, loginHref }: Readonly<{ data: Con
     <span className="music-concert-gallery-corner is-top" aria-hidden="true" />
     <span className="music-concert-gallery-corner is-bottom" aria-hidden="true" />
 
-    <strong id="concert-gallery-my-live-title">我的现场收藏</strong>
+    <strong id="concert-gallery-my-live-title">My Live</strong>
+    <span className="music-concert-gallery-my-live-sub">我的现场</span>
     <div className="music-concert-gallery-live-stats">
       <div><b>{value(data?.attendedShowCount)}</b><span>观看现场数</span></div>
       <div><b>{value(data?.attendedTourCount)}</b><span>观看巡演数</span></div>

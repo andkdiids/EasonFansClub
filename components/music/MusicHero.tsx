@@ -8,7 +8,7 @@ export function MusicHero({ albums }: Readonly<{ albums: MusicCarouselAlbum[] }>
   return <section className="relative w-full pt-4 sm:pt-6">
     <header className="relative mx-auto max-w-3xl text-center">
 
-      <h1 className="text-[38px font-black tracking-[-0.05em] text-white sm:text-5xl md:text-[64px]">EasMusic</h1>
+      <h1 className="mt-3 text-[38px] font-black tracking-[-0.05em] text-white sm:text-5xl md:text-[64px]">EasMusic</h1>
       <p className="mx-auto mt-4 max-w-xl text-sm font-medium leading-7 text-slate-300/75 sm:text-base">在旋律中遇见陈奕迅，<br className="sm:hidden" />聆听每一个时代的故事。</p>
       <div className="mt-6"><MusicSearchDialog variant="glass" /></div>
     </header>

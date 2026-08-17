@@ -14,12 +14,14 @@ type Options = {
 }
 
 const OPEN_STATE = 1
+const CONNECT_TIMEOUT_MS = 6_000
 
 export class UndercoverStarRealtimeClient {
   private socket: WebSocket | null = null
   private reconnectTimer: number | null = null
   private fallbackTimer: number | null = null
   private pingTimer: number | null = null
+  private connectTimer: number | null = null
   private generation = 0
   private failures = 0
   private options: Options
@@ -44,9 +46,11 @@ export class UndercoverStarRealtimeClient {
     if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer)
     if (this.fallbackTimer !== null) window.clearInterval(this.fallbackTimer)
     if (this.pingTimer !== null) window.clearInterval(this.pingTimer)
+    if (this.connectTimer !== null) window.clearTimeout(this.connectTimer)
     this.reconnectTimer = null
     this.fallbackTimer = null
     this.pingTimer = null
+    this.connectTimer = null
     const socket = this.socket
     this.socket = null
     if (socket && socket.readyState < 2) socket.close(1000, 'client stop')
@@ -65,14 +69,25 @@ export class UndercoverStarRealtimeClient {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws/undercover`)
     this.socket = socket
+    // A WebSocket can sit in CONNECTING forever if a reverse proxy accepts the
+    // TCP/HTTP upgrade but never completes it (onopen and onclose never fire).
+    // Without this guard the client would believe it is "connecting", never
+    // subscribe, never start the fallback poll, and miss every broadcast. Force
+    // the socket closed so onclose runs and the fallback/reconnect path engages.
+    this.connectTimer = window.setTimeout(() => {
+      if (generation !== this.generation) return
+      if (socket.readyState !== OPEN_STATE) socket.close(1000, 'connect timeout')
+    }, CONNECT_TIMEOUT_MS)
     socket.onopen = () => {
       if (generation !== this.generation) return
+      this.clearConnectTimer()
       this.failures = 0
       this.options.onStatus?.('connected')
       this.stopFallback()
       if (this.options.matchId) this.send({ type: 'JOIN_MATCH', matchId: this.options.matchId })
       else if (this.options.roomId) this.send({ type: 'JOIN_ROOM', roomId: this.options.roomId })
       this.pingTimer = window.setInterval(() => this.send({ type: 'PING' }), 25_000)
+      this.resync(generation)
     }
     socket.onmessage = (message) => {
       if (generation !== this.generation) return
@@ -88,6 +103,7 @@ export class UndercoverStarRealtimeClient {
     }
     socket.onclose = () => {
       if (generation !== this.generation) return
+      this.clearConnectTimer()
       this.socket = null
       if (this.pingTimer !== null) window.clearInterval(this.pingTimer)
       this.pingTimer = null
@@ -97,6 +113,31 @@ export class UndercoverStarRealtimeClient {
       const delay = Math.min(8_000, 500 * 2 ** Math.min(this.failures - 1, 4))
       this.reconnectTimer = window.setTimeout(() => this.connect(generation), delay)
     }
+  }
+
+  // One-shot authoritative snapshot on (re)connect. The JOIN_* command already
+  // makes the hub send current state, but a separate HTTP read guarantees
+  // convergence even if that WS frame is dropped, arrives before the socket is
+  // fully subscribed, or was sent for a state the client has since moved past.
+  // The onRoom/onMatch callbacks apply their own staleness guards, so a late
+  // HTTP response can never clobber a newer WS snapshot.
+  private resync(generation: number) {
+    if (this.options.matchId && this.options.fetchMatch) {
+      void this.options.fetchMatch(this.options.matchId).then((state) => {
+        if (generation !== this.generation || !state) return
+        this.options.onMatch?.(state)
+      })
+    } else if (this.options.roomId && this.options.fetchRoom) {
+      void this.options.fetchRoom(this.options.roomId).then((state) => {
+        if (generation !== this.generation || !state) return
+        this.options.onRoom?.(state)
+      })
+    }
+  }
+
+  private clearConnectTimer() {
+    if (this.connectTimer !== null) window.clearTimeout(this.connectTimer)
+    this.connectTimer = null
   }
 
   private handleEvent(event: UndercoverRealtimeEvent) {

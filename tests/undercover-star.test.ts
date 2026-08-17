@@ -18,8 +18,8 @@ import {
   isUndercoverCategory,
   isUndercoverDifficulty,
 } from '../lib/undercover-star-config'
-import { canApplyUndercoverPrivateState, canApplyUndercoverSnapshot } from '../lib/undercover-star-client-state'
-import type { UndercoverPrivateState, UndercoverPublicMatchSnapshot } from '../lib/undercover-star-protocol'
+import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '../lib/undercover-star-client-state'
+import type { UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomState } from '../lib/undercover-star-protocol'
 
 const root = join(process.cwd())
 
@@ -46,6 +46,23 @@ function snapshot(revision: number, phase: UndercoverPublicMatchSnapshot['phase'
     lastRoundResult: null,
     finalResult: null,
   } as UndercoverPublicMatchSnapshot
+}
+
+function room(roomId: string, lastActivityAt: string, currentCount = 1): UndercoverRoomState {
+  return {
+    roomId,
+    roomCode: '123456',
+    viewerUserId: 'u1',
+    status: 'WAITING',
+    isPublic: true,
+    hasPassword: false,
+    hostId: 'u1',
+    currentCount,
+    maxPlayers: 4,
+    players: [],
+    matchId: null,
+    lastActivityAt,
+  } as UndercoverRoomState
 }
 
 test('undercover title normalization removes presentation differences before comparison', () => {
@@ -173,4 +190,78 @@ test('finished matches remain resumable after a lobby refresh', () => {
   assert.match(service, /activeMatch: finishedMatch \? \{ matchId: finishedMatch\.id, roomId: finishedMatch\.roomId, status: finishedMatch\.status \}/)
   assert.match(protocol, /activeMatch: \{ matchId: string; roomId: string; status: UndercoverMatchStatus \} \| null/)
   assert.match(client, /activeMatch\?\.status === 'FINISHED'/)
+})
+
+test('room state guard drops stale realtime room states so a late response cannot hide a newer join', () => {
+  const base = room('room-1', '2026-08-17T00:00:00.000Z', 1)
+  assert.equal(canApplyUndercoverRoomState(null, base), true)
+  assert.equal(canApplyUndercoverRoomState(base, room('room-1', '2026-08-17T00:00:01.000Z', 2)), true)
+  assert.equal(canApplyUndercoverRoomState(room('room-1', '2026-08-17T00:00:05.000Z', 2), base), false)
+  assert.equal(canApplyUndercoverRoomState(base, room('room-2', '2026-08-17T00:00:10.000Z')), false)
+})
+
+test('match snapshot guard isolates games and treats equal revisions as idempotent', () => {
+  const gameA = snapshot(5)
+  const gameB = { ...snapshot(5), matchId: 'match-2' } as UndercoverPublicMatchSnapshot
+  assert.equal(canApplyUndercoverSnapshot(gameA, gameB), false)
+  assert.equal(canApplyUndercoverSnapshot(gameA, snapshot(5)), true)
+  assert.equal(canApplyUndercoverSnapshot(gameA, snapshot(6)), true)
+})
+
+test('join path broadcasts the authoritative, viewer-specific room snapshot to every subscribed socket', () => {
+  const realtime = source('lib/undercover-star-realtime.ts')
+  const joinRoute = source('app/api/entertainment/undercover-star/rooms/join/route.ts')
+  const readyRoute = source('app/api/entertainment/undercover-star/rooms/[roomId]/ready/route.ts')
+  assert.match(joinRoute, /undercoverRealtimeHub\.broadcastRoom\(state\.roomId\)/)
+  assert.match(joinRoute, /for \(const affected of result\.affectedRooms\) await undercoverRealtimeHub\.broadcastRoom\(affected\.roomId\)/)
+  assert.match(readyRoute, /undercoverRealtimeHub\.broadcastRoom\(roomId\)/)
+  assert.match(realtime, /async broadcastRoom\(roomId: string\)/)
+  assert.match(realtime, /getUndercoverRoomState\(userId, roomId\)/)
+  assert.match(realtime, /ROOM_STATE/)
+})
+
+test('start is authoritative and atomic: broadcasts room + match and guards a second start', () => {
+  const startRoute = source('app/api/entertainment/undercover-star/rooms/[roomId]/start/route.ts')
+  const service = source('lib/undercover-star.ts')
+  assert.match(startRoute, /undercoverRealtimeHub\.broadcastRoom\(roomId\)/)
+  assert.match(startRoute, /undercoverRealtimeHub\.broadcastMatchState\(result\.matchId\)/)
+  assert.match(service, /isolationLevel: 'Serializable'/)
+  assert.match(service, /lockRoom\(tx, roomId\)/)
+  assert.match(service, /room\.hostId !== userId/)
+  assert.match(service, /if \(room\.UndercoverMatch\) throw/)
+})
+
+test('realtime client fails fast on a hanging upgrade, resyncs on connect, and only polls while disconnected', () => {
+  const realtimeClient = source('lib/undercover-star-realtime-client.ts')
+  assert.match(realtimeClient, /CONNECT_TIMEOUT_MS/)
+  assert.match(realtimeClient, /'connect timeout'/)
+  assert.match(realtimeClient, /private resync\(generation: number\)/)
+  assert.match(realtimeClient, /this\.options\.fetchMatch\(this\.options\.matchId\)/)
+  // Fallback starts on close, stops on open, and skips every tick the socket is open.
+  assert.match(realtimeClient, /startFallback\(generation\)/)
+  assert.match(realtimeClient, /this\.stopFallback\(\)/)
+  assert.match(realtimeClient, /this\.socket\?\.readyState === OPEN_STATE/)
+  assert.match(realtimeClient, /window\.setInterval\(\(\) => void poll\(\), 3_000\)/)
+})
+
+test('client component guards room updates and fetches the authoritative match snapshot when missing', () => {
+  const client = source('app/games/undercover-star/UndercoverStarClient.tsx')
+  const clientState = source('lib/undercover-star-client-state.ts')
+  assert.match(clientState, /export function canApplyUndercoverRoomState/)
+  assert.match(clientState, /next\.lastActivityAt >= current\.lastActivityAt/)
+  assert.match(client, /canApplyUndercoverRoomState\(roomRef\.current, state\)/)
+  assert.match(client, /roomRef\.current = state/)
+  assert.match(client, /\/api\/entertainment\/undercover-star\/matches\/\$\{matchId\}/)
+  assert.match(client, /canApplyUndercoverSnapshot\(snapshotRef\.current, data\.snapshot\)/)
+})
+
+test('match and private endpoints serve viewer-specific state and never the full role array', () => {
+  const service = source('lib/undercover-star.ts')
+  const matchRoute = source('app/api/entertainment/undercover-star/matches/[matchId]/route.ts')
+  const privateRoute = source('app/api/entertainment/undercover-star/matches/[matchId]/private/route.ts')
+  assert.match(matchRoute, /getUndercoverMatchSnapshot\(guard\.user\.id, matchId\)/)
+  assert.match(privateRoute, /getUndercoverPrivateState\(guard\.user\.id, matchId\)/)
+  assert.match(service, /match\.status === 'FINISHED' \? \{ role: player\.role, word: player\.word \}/)
+  assert.doesNotMatch(matchRoute, /civilianWord|undercoverWord/u)
+  assert.doesNotMatch(privateRoute, /civilianWord|undercoverWord/u)
 })
