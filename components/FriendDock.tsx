@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import {
   useCallback,
@@ -16,7 +16,7 @@ import {
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import type { FriendDockUser, RelationshipStatus } from '@/lib/friend-types'
+import type { FriendDockUser, RelationshipStatus, UndercoverPresence } from '@/lib/friend-types'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { mergeUniqueFriendPage, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
@@ -93,6 +93,7 @@ export function FriendDock({
   unreadSummary?: UnreadSummary
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [friends, setFriends] = useState<FriendDockUser[]>([])
@@ -936,6 +937,34 @@ export function FriendDock({
     })
   }
 
+  async function followFriendToRoom(friend: FriendDockUser) {
+    const presence = friend.undercoverPresence
+    if (!presence || presence.status !== 'WAITING' || !presence.canJoin) return
+    setError('')
+    let password = ''
+    if (presence.requiresPassword) {
+      const prompted = window.prompt(`输入「${friend.profile?.displayName || friend.nickname}」的房间密码以加入`) as string | null
+      if (prompted === null) return
+      password = prompted
+    }
+    try {
+      const response = await fetch('/api/entertainment/undercover-star/rooms/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomCode: presence.roomCode, password }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(data.error || data.message || '加入好友房间失败')
+        return
+      }
+      // 加入成功后直接进入卧底巨星大厅；客户端会自动恢复 activeRoom。
+      router.push('/games/undercover-star')
+    } catch (followError) {
+      setError(followError instanceof Error ? followError.message : '加入好友房间失败')
+    }
+  }
+
   async function sendFriendRequest(friend: FriendDockUser) {
     const response = await fetch('/api/friends/request', {
       method: 'POST',
@@ -1228,6 +1257,7 @@ export function FriendDock({
                   onMove={(groupId) => void moveFriendToGroup(friend, groupId)}
                   onAdd={() => void sendFriendRequest(friend)}
                   onDecide={(action) => void decideRequest(friend, action)}
+                  onFollow={() => void followFriendToRoom(friend)}
                 />
               )) : groupedFriendSections.map((group) => {
                 const collapsed = collapsedGroupIds.has(group.id)
@@ -1256,6 +1286,7 @@ export function FriendDock({
                         onMove={(groupId) => void moveFriendToGroup(friend, groupId)}
                         onAdd={() => void sendFriendRequest(friend)}
                         onDecide={(action) => void decideRequest(friend, action)}
+                        onFollow={() => void followFriendToRoom(friend)}
                       />
                     )) : null}
                     {!collapsed && groupFriends[group.id] === undefined && loadingGroupIds.has(group.id) ? <p className="friend-dock-empty">加载分组成员中…</p> : null}
@@ -1324,6 +1355,7 @@ function FriendRow({
   onMove,
   onAdd,
   onDecide,
+  onFollow,
 }: {
   friend: FriendDockUser
   groups: FriendGroup[]
@@ -1333,12 +1365,14 @@ function FriendRow({
   onMove: (groupId: string | null) => void
   onAdd: () => void
   onDecide: (action: 'accept' | 'reject') => void
+  onFollow: () => void
 }) {
   const [actionsOpen, setActionsOpen] = useState(false)
   const name = friend.profile?.displayName || friend.nickname
   const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const status = friend.relationshipStatus || 'FRIEND'
   const canOpenProfile = status === 'FRIEND'
+  const presence = friend.undercoverPresence
   return (
     <article className={`friend-dock-row ${friend.unreadCount ? 'has-unread' : ''}`}>
       <button type="button" className="friend-dock-avatar-button" onClick={canOpenProfile ? onProfile : undefined} disabled={!canOpenProfile} aria-label={canOpenProfile ? `查看${name}的资料卡` : undefined}>
@@ -1350,10 +1384,14 @@ function FriendRow({
           <small>UID {formatUid(friend.uid)} · {friend.levelName || '初入E院'}</small>
         </button>
         {!searching ? (
-          <button type="button" className="friend-dock-conversation-preview" onClick={onChat}>
-            <span>{!friend.lastMessage ? '暂无私信' : (friend.lastMessage.type === 'STICKER' ? '[表情]' : friend.lastMessage.content)}</span>
-            {friend.lastMessageAt ? <time>{formatConversationTime(friend.lastMessageAt)}</time> : null}
-          </button>
+          presence ? (
+            <UndercoverPresenceLine presence={presence} onFollow={onFollow} />
+          ) : (
+            <button type="button" className="friend-dock-conversation-preview" onClick={onChat}>
+              <span>{!friend.lastMessage ? '暂无私信' : (friend.lastMessage.type === 'STICKER' ? '[表情]' : friend.lastMessage.content)}</span>
+              {friend.lastMessageAt ? <time>{formatConversationTime(friend.lastMessageAt)}</time> : null}
+            </button>
+          )
         ) : <RelationshipActions status={status} onChat={onChat} onAdd={onAdd} onDecide={onDecide} />}
       </div>
       {friend.unreadCount ? <b className="friend-dock-row-unread">{friend.unreadCount > 99 ? '99+' : friend.unreadCount}</b> : null}
@@ -1379,6 +1417,22 @@ function FriendRow({
         </div>
       ) : null}
     </article>
+  )
+}
+
+function UndercoverPresenceLine({ presence, onFollow }: { presence: UndercoverPresence; onFollow: () => void }) {
+  const isWaiting = presence.status === 'WAITING'
+  return (
+    <div className="friend-dock-presence">
+      <span className="friend-dock-presence-label">{isWaiting ? '卧底巨星 · 房间中' : '卧底巨星 · 游戏中'}</span>
+      {isWaiting ? (
+        presence.canJoin ? (
+          <button type="button" className="friend-dock-presence-follow" onClick={onFollow}>跟随进入</button>
+        ) : (
+          <span className="friend-dock-presence-full">房间已满</span>
+        )
+      ) : null}
+    </div>
   )
 }
 

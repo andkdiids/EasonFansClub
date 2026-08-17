@@ -16,10 +16,15 @@ export async function POST(request: Request, { params }: Context) {
   try {
     const { roomId } = await params
     const result = await startUndercoverMatch(guard.user.id, roomId)
-    await undercoverRealtimeHub.broadcastRoom(roomId)
-    undercoverRealtimeHub.broadcastMatchState(result.matchId)
     const match = await getUndercoverMatchState(guard.user.id, result.matchId)
-    undercoverRealtimeHub.scheduleMatch(result.matchId, match.snapshot.phaseDeadline)
+    // 业务 mutation 已成功，HTTP 必须返回成功；广播失败不得影响业务结果。
+    try {
+      await undercoverRealtimeHub.broadcastRoom(roomId)
+      undercoverRealtimeHub.broadcastMatchState(result.matchId)
+      undercoverRealtimeHub.scheduleMatch(result.matchId, match.snapshot.phaseDeadline)
+    } catch (broadcastError) {
+      console.error('[undercover-star.broadcast] start', broadcastError)
+    }
     return undercoverOk({ room: await getUndercoverRoomState(guard.user.id, roomId), match }, { status: 201 })
   } catch (error) {
     return undercoverError(error, '开始卧底巨星失败。')

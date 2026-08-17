@@ -20,7 +20,12 @@ export async function POST(request: Request, { params }: Context) {
     const { roomId } = await params
     if (typeof body?.ready !== 'boolean') return undercoverInputError('准备状态无效。', 'READY_INVALID', 400)
     await setUndercoverReady(guard.user.id, roomId, body.ready)
-    await undercoverRealtimeHub.broadcastRoom(roomId)
+    // 业务 mutation 已成功，HTTP 必须返回成功；广播失败不得影响业务结果。
+    try {
+      await undercoverRealtimeHub.broadcastRoom(roomId)
+    } catch (broadcastError) {
+      console.error('[undercover-star.broadcast] ready', broadcastError)
+    }
     return undercoverOk({ room: await getUndercoverRoomState(guard.user.id, roomId) })
   } catch (error) {
     return undercoverError(error, '更新准备状态失败。')

@@ -29,9 +29,9 @@ export async function POST(request: Request) {
   if (!guard.user) return guard.response
   const limit = await consumeRateLimit(guard.user.id, 'undercover-star-room-create', 8, 60)
   if (limit.limited) return undercoverInputError('创建房间过于频繁，请稍后再试。', 'RATE_LIMITED', 429)
-  const body = await request.json().catch(() => null) as { password?: unknown } | null
+  const body = await request.json().catch(() => null) as { password?: unknown; difficulty?: unknown } | null
   try {
-    const result = await createUndercoverRoom(guard.user.id, { password: readUndercoverString(body?.password, 32) })
+    const result = await createUndercoverRoom(guard.user.id, { password: readUndercoverString(body?.password, 32), difficulty: body?.difficulty })
     for (const room of result.affectedRooms) await undercoverRealtimeHub.broadcastRoom(room.roomId)
     await undercoverRealtimeHub.broadcastRoom(result.room.roomId)
     return undercoverOk({ room: result.room }, { status: 201 })

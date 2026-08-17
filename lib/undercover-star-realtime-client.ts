@@ -1,4 +1,4 @@
-import type { UndercoverPublicMatchSnapshot, UndercoverRoomState, UndercoverRealtimeEvent } from '@/lib/undercover-star-protocol'
+import type { UndercoverPublicMatchSnapshot, UndercoverRoomMessagePublic, UndercoverRoomState, UndercoverRealtimeEvent } from '@/lib/undercover-star-protocol'
 
 type RealtimeStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
@@ -11,6 +11,8 @@ type Options = {
   onMatch?: (state: UndercoverPublicMatchSnapshot) => void
   onStatus?: (status: RealtimeStatus) => void
   onError?: (message: string) => void
+  onKicked?: (payload: { roomId: string }) => void
+  onChatMessage?: (message: UndercoverRoomMessagePublic) => void
 }
 
 const OPEN_STATE = 1
@@ -151,6 +153,8 @@ export class UndercoverStarRealtimeClient {
       return
     }
     if (event.type === 'ERROR') this.options.onError?.(event.message)
+    if (event.type === 'ROOM_KICKED') this.options.onKicked?.(event)
+    if (event.type === 'ROOM_CHAT_MESSAGE') this.options.onChatMessage?.(event.message)
   }
 
   private startFallback(generation: number) {

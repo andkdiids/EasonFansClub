@@ -23,8 +23,13 @@ export async function POST(request: Request, { params }: Context) {
       expectedRevision: readUndercoverInteger(body?.expectedRevision),
       expectedRound: readUndercoverInteger(body?.expectedRound),
     })
-    undercoverRealtimeHub.broadcastMatchState(matchId)
-    undercoverRealtimeHub.scheduleMatch(matchId, state.snapshot.phaseDeadline)
+    // 业务 mutation 已成功，HTTP 必须返回成功；广播失败不得影响业务结果。
+    try {
+      undercoverRealtimeHub.broadcastMatchState(matchId)
+      undercoverRealtimeHub.scheduleMatch(matchId, state.snapshot.phaseDeadline)
+    } catch (broadcastError) {
+      console.error('[undercover-star.broadcast] description', broadcastError)
+    }
     return undercoverOk(state)
   } catch (error) {
     return undercoverError(error, '提交描述失败。')

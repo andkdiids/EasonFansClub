@@ -6,6 +6,14 @@ export type RelationshipStatus =
   | 'SELF'
   | 'BLOCKED'
 
+export type UndercoverPresence = {
+  status: 'WAITING' | 'PLAYING'
+  roomId: string
+  roomCode: string
+  canJoin: boolean
+  requiresPassword: boolean
+}
+
 export type FriendDockUser = {
   id: string
   uid: number
@@ -35,4 +43,5 @@ export type FriendDockUser = {
     senderId: string
     type?: string | null
   } | null
+  undercoverPresence?: UndercoverPresence | null
 }

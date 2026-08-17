@@ -1224,6 +1224,8 @@ model UndercoverRoom {
   passwordHash         String?
   isPublic             Boolean                @default(true)
   status               UndercoverRoomStatus   @default(WAITING)
+  difficulty           UndercoverDifficulty   @default(NORMAL)
+  currentMatchId       String?
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
   lastActivityAt       DateTime               @default(now())
@@ -1231,10 +1233,12 @@ model UndercoverRoom {
   hostId               String
   Host                 User                   @relation("UndercoverRoomHost", fields: [hostId], references: [id], onDelete: Cascade)
   UndercoverRoomPlayer UndercoverRoomPlayer[]
-  UndercoverMatch      UndercoverMatch?
+  UndercoverMatch      UndercoverMatch[]
+  UndercoverRoomMessage UndercoverRoomMessage[]
 
   @@index([status, isPublic, lastActivityAt])
   @@index([hostId, status])
+  @@index([currentMatchId])
   @@index([lastActivityAt])
 }
 
@@ -1279,13 +1283,16 @@ model UndercoverMatch {
   finishedAt             DateTime?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
-  roomId                 String                  @unique
+  roomId                 String
+  matchNumber            Int                     @default(1)
+  difficulty             UndercoverDifficulty    @default(NORMAL)
   wordPairId             String
   Room                   UndercoverRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
   WordPair               UndercoverWordPair      @relation(fields: [wordPairId], references: [id], onDelete: Restrict)
   UndercoverMatchPlayer  UndercoverMatchPlayer[]
   UndercoverDescription  UndercoverDescription[]
   UndercoverVote         UndercoverVote[]
+  UndercoverMatchResult  UndercoverMatchResult[]
 
   @@index([status, phase, phaseDeadline])
   @@index([roomId, status])
@@ -1362,6 +1369,8 @@ model UndercoverStats {
   successfulUndercoverVotes Int      @default(0)
   undercoverSurvivalWins    Int      @default(0)
   undercoverGuessWins       Int      @default(0)
+  xp                        Int      @default(0)
+  level                     Int      @default(1)
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   userId                    String   @unique
@@ -1369,6 +1378,33 @@ model UndercoverStats {
 
   @@index([totalWins, userId])
   @@index([totalGames, userId])
+}
+
+model UndercoverRoomMessage {
+  id        String   @id @default(cuid())
+  content   String   @db.VarChar(200)
+  createdAt DateTime @default(now())
+  roomId    String
+  userId    String
+  Room      UndercoverRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  User      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+}
+
+model UndercoverMatchResult {
+  id         String          @id @default(cuid())
+  role       UndercoverRole
+  isWin      Boolean         @default(false)
+  xpAwarded  Int             @default(0)
+  createdAt  DateTime        @default(now())
+  matchId    String
+  userId     String
+  Match      UndercoverMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  User       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@index([userId, createdAt])
 }
 
 model GuessSongPlayRequest {
@@ -3181,6 +3217,8 @@ model User {
   UndercoverRoom_UndercoverRoomHost                      UndercoverRoom[]               @relation("UndercoverRoomHost")
   UndercoverRoomPlayer                                   UndercoverRoomPlayer[]
   UndercoverMatchPlayer                                  UndercoverMatchPlayer[]
+  UndercoverRoomMessage                                  UndercoverRoomMessage[]
+  UndercoverMatchResult                                  UndercoverMatchResult[]
   UndercoverStats                                        UndercoverStats?
   ClinicRecordAuthor                                     ClinicRecord[]                 @relation("ClinicRecordAuthor")
   ClinicConsultationAuthor                               ClinicConsultation[]           @relation("ClinicConsultationAuthor")

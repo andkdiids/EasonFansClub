@@ -22,8 +22,13 @@ export async function POST(request: Request, { params }: Context) {
       guess: readUndercoverString(body?.guess, 191),
       expectedRevision: readUndercoverInteger(body?.expectedRevision),
     })
-    undercoverRealtimeHub.broadcastMatchState(matchId)
-    undercoverRealtimeHub.scheduleMatch(matchId, state.snapshot.phaseDeadline)
+    // 业务 mutation 已成功，HTTP 必须返回成功；广播失败不得影响业务结果。
+    try {
+      undercoverRealtimeHub.broadcastMatchState(matchId)
+      undercoverRealtimeHub.scheduleMatch(matchId, state.snapshot.phaseDeadline)
+    } catch (broadcastError) {
+      console.error('[undercover-star.broadcast] guess', broadcastError)
+    }
     return undercoverOk(state)
   } catch (error) {
     return undercoverError(error, '提交猜词失败。')

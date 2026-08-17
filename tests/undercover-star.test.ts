@@ -19,7 +19,8 @@ import {
   isUndercoverDifficulty,
 } from '../lib/undercover-star-config'
 import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '../lib/undercover-star-client-state'
-import type { UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomState } from '../lib/undercover-star-protocol'
+import { matchSnapshot, privateState, type MatchRow } from '../lib/undercover-star'
+import type { UndercoverFinalPlayer, UndercoverFinalResult, UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomState } from '../lib/undercover-star-protocol'
 
 const root = join(process.cwd())
 
@@ -40,7 +41,8 @@ function snapshot(revision: number, phase: UndercoverPublicMatchSnapshot['phase'
     currentSpeakerId: null,
     players: [],
     descriptions: [],
-    voteProgress: { submitted: 0, total: 3, stage: null },
+    descriptionHistory: [],
+    voteProgress: { submitted: 0, total: 3, stage: null, abstained: 0 },
     tieCandidates: [],
     roundHistory: [],
     lastRoundResult: null,
@@ -57,6 +59,7 @@ function room(roomId: string, lastActivityAt: string, currentCount = 1): Underco
     isPublic: true,
     hasPassword: false,
     hostId: 'u1',
+    difficulty: 'NORMAL',
     currentCount,
     maxPlayers: 4,
     players: [],
@@ -125,9 +128,20 @@ test('database structure covers room lifecycle, private state, idempotency, and 
   assert.match(schema, /@@unique\(\[roomId, userId\]\)/)
   assert.match(schema, /@@unique\(\[matchId, round, matchPlayerId\]\)/)
   assert.match(schema, /@@unique\(\[matchId, round, stage, voterId\]\)/)
-  assert.match(schema, /roomId\s+String\s+@unique/)
+  // 1:N：UndercoverMatch.roomId 不再是 @unique；Room 通过 currentMatchId 指向当前 PLAYING 对局。
+  const undercoverMatchModel = schema.match(/model UndercoverMatch \{[\s\S]*?\n\}/)
+  assert.ok(undercoverMatchModel, 'UndercoverMatch model 应存在')
+  assert.doesNotMatch(undercoverMatchModel![0], /roomId\s+String\s+@unique/)
+  assert.match(schema, /currentMatchId\s+String\?/)
+  assert.match(schema, /matchNumber\s+Int/)
   assert.match(schema, /@@index\(\[status, finishedAt\]\)/)
   assert.doesNotMatch(migration, /DROP TABLE|DROP COLUMN|TRUNCATE/i)
+  // 2.0 迁移：仅新增列/表，向后兼容，不删除任何历史数据。
+  const migration2 = source('prisma/migrations/20260820000000_undercover_star_two_point_zero/migration.sql')
+  assert.match(migration2, /currentMatchId/)
+  assert.match(migration2, /UndercoverRoomMessage/)
+  assert.match(migration2, /UndercoverMatchResult/)
+  assert.doesNotMatch(migration2, /DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM/i)
 })
 
 test('public snapshot and private routes do not expose hidden role pairs before the match ends', () => {
@@ -220,7 +234,7 @@ test('join path broadcasts the authoritative, viewer-specific room snapshot to e
   assert.match(realtime, /ROOM_STATE/)
 })
 
-test('start is authoritative and atomic: broadcasts room + match and guards a second start', () => {
+test('start is authoritative and atomic: 1:N, sets currentMatchId, blocks only a live second start', () => {
   const startRoute = source('app/api/entertainment/undercover-star/rooms/[roomId]/start/route.ts')
   const service = source('lib/undercover-star.ts')
   assert.match(startRoute, /undercoverRealtimeHub\.broadcastRoom\(roomId\)/)
@@ -228,7 +242,36 @@ test('start is authoritative and atomic: broadcasts room + match and guards a se
   assert.match(service, /isolationLevel: 'Serializable'/)
   assert.match(service, /lockRoom\(tx, roomId\)/)
   assert.match(service, /room\.hostId !== userId/)
-  assert.match(service, /if \(room\.UndercoverMatch\) throw/)
+  // 1:N：不再用一对一 UndercoverMatch 关系阻止重开，而是用 room.status 守卫，
+  // 并为每一局写入独立的 currentMatchId 与递增 matchNumber。
+  assert.doesNotMatch(service, /if \(room\.UndercoverMatch\) throw/)
+  assert.match(service, /currentMatchId: match\.id/)
+  assert.match(service, /matchNumber/)
+  assert.match(service, /room\.status !== 'WAITING'/)
+})
+
+test('Room 1:N Match 生命周期核心不变量', () => {
+  const service = source('lib/undercover-star.ts')
+  // Match1 FINISHED 后 Room 回到 WAITING（绝不保持 FINISHED/CANCELLED）。
+  assert.match(service, /status: 'WAITING', currentMatchId: null/)
+  // 结束一局必须清空 currentMatchId，并重置所有在房玩家的准备状态。
+  assert.match(service, /currentMatchId: null, closedAt: null/)
+  assert.match(service, /where: \{ roomId: match\.roomId, leftAt: null \},\s*[\s\S]*?isReady: false/)
+  // WAITING 房间的 currentMatchId 必须为 null（公开房列表据此过滤）。
+  assert.match(service, /currentMatchId: null, Host: \{ status: 'ACTIVE'/)
+  // 真正 PLAYING 的对局才算 active game；WAITING 房间不会触发 active-game 提示。
+  assert.match(service, /currentMatch\.status === 'PLAYING'[\s\S]*?isInActiveGame: true/)
+  assert.match(service, /isInActiveGame: false/)
+})
+
+test('P0: 陈旧 PLAYING 房间安全收敛，FINISHED Match 不阻挡下一局', () => {
+  const service = source('lib/undercover-star.ts')
+  // 仅当 currentMatch 真实处于 PLAYING 才抛出 MATCH_ACTIVE；否则把陈旧 PLAYING 房间收敛为 WAITING。
+  assert.match(service, /if \(currentMatchStatus === 'PLAYING'\) \{\s*[\s\S]*?throw new UndercoverStarServiceError\('你正在进行一局卧底巨星/)
+  assert.match(service, /where: \{ id: membership\.roomId, status: 'PLAYING' \},\s*data: \{ status: 'WAITING', currentMatchId: null/)
+  // 同一房间可创建 Match2：start 不再因历史 Match 报错，且每局新建随机 id 的 Match。
+  assert.doesNotMatch(service, /MATCH_ALREADY_EXISTS/)
+  assert.match(service, /undercoverMatch\.count\(\{ where: \{ roomId/)
 })
 
 test('realtime client fails fast on a hanging upgrade, resyncs on connect, and only polls while disconnected', () => {
@@ -264,4 +307,225 @@ test('match and private endpoints serve viewer-specific state and never the full
   assert.match(service, /match\.status === 'FINISHED' \? \{ role: player\.role, word: player\.word \}/)
   assert.doesNotMatch(matchRoute, /civilianWord|undercoverWord/u)
   assert.doesNotMatch(privateRoute, /civilianWord|undercoverWord/u)
+})
+
+// ---------------------------------------------------------------------------
+// 身份隐藏回归测试：游戏中猜自己的身份，游戏结束后揭晓真相。
+// 核心安全红线：PLAYING（含 ROLE_REVEAL 任何阶段）的 privateState 绝不能返回 role；
+// 仅 FINISHED 才正式揭晓。否则用户开 DevTools 即可作弊。
+// ---------------------------------------------------------------------------
+
+type MockUser = {
+  id: string
+  uid: number
+  name: string
+  avatarUrl: string | null
+  Profile: { displayName: string | null; displayNameModerationStatus: string; avatarUrl: string | null } | null
+}
+
+function mockUser(id: string, uid: number, name: string): MockUser {
+  return { id, uid, name, avatarUrl: null, Profile: null }
+}
+
+function mockPlayer(id: string, userId: string, uid: number, name: string, role: 'CIVILIAN' | 'UNDERCOVER', word: string, isAlive = true) {
+  return {
+    id,
+    role,
+    word,
+    roleConfirmedAt: null,
+    isAlive,
+    eliminatedAt: null,
+    lastSeenAt: null,
+    User: mockUser(userId, uid, name),
+  }
+}
+
+function makeMatch(overrides: Record<string, unknown> = {}): MatchRow {
+  const base: Record<string, unknown> = {
+    id: 'match-1',
+    roomId: 'room-1',
+    status: 'PLAYING',
+    phase: 'ROLE_REVEAL',
+    round: 1,
+    revision: 1,
+    phaseDeadline: null,
+    currentSpeakerId: 'player-1',
+    undercoverGuessAt: null,
+    Room: { id: 'room-1', roomCode: '123456', hostId: 'u1', status: 'PLAYING' },
+    UndercoverMatchPlayer: [
+      mockPlayer('player-1', 'u1', 1, '小明', 'UNDERCOVER', '苹果'),
+      mockPlayer('player-2', 'u2', 2, '小红', 'CIVILIAN', '梨'),
+      mockPlayer('player-3', 'u3', 3, '小张', 'CIVILIAN', '梨'),
+    ],
+    UndercoverDescription: [],
+    UndercoverVote: [],
+    roundHistory: [],
+    tieCandidateIds: [],
+    finalResult: null,
+  }
+  return { ...base, ...overrides } as unknown as MatchRow
+}
+
+function finishedFinalResult(): UndercoverFinalResult {
+  return {
+    winner: 'UNDERCOVER',
+    reason: 'UNDERCOVER_GUESS_CORRECT',
+    civilianWord: '梨',
+    undercoverWord: '苹果',
+    undercoverPlayerId: 'player-1',
+    players: [
+      { playerId: 'player-1', userId: 'u1', role: 'UNDERCOVER', word: '苹果', isAlive: true, totalVotesReceived: 0 },
+      { playerId: 'player-2', userId: 'u2', role: 'CIVILIAN', word: '梨', isAlive: true, totalVotesReceived: 1 },
+      { playerId: 'player-3', userId: 'u3', role: 'CIVILIAN', word: '梨', isAlive: false, totalVotesReceived: 2 },
+    ],
+  }
+}
+
+test('PLAYING + ROLE_REVEAL: privateState 不包含 role（只能拿到 word）', () => {
+  const match = makeMatch({ phase: 'ROLE_REVEAL' })
+  const state = privateState(match, 'u1')
+  assert.equal(state.role, undefined)
+  assert.equal(state.word, '苹果')
+})
+
+test('PLAYING + DESCRIPTION: privateState 不包含 role', () => {
+  const match = makeMatch({ phase: 'DESCRIBING' })
+  const state = privateState(match, 'u1')
+  assert.equal(state.role, undefined)
+  assert.equal(state.word, '苹果')
+})
+
+test('PLAYING + VOTE: privateState 不包含 role', () => {
+  const match = makeMatch({ phase: 'VOTING' })
+  const state = privateState(match, 'u1')
+  assert.equal(state.role, undefined)
+  assert.equal(state.word, '苹果')
+})
+
+test('PLAYING reconnect（任何阶段）: privateState 不包含 role', () => {
+  for (const phase of ['ROLE_REVEAL', 'DESCRIBING', 'VOTING', 'TIE_VOTING', 'UNDERCOVER_GUESS']) {
+    const match = makeMatch({ phase })
+    const reconnected = privateState(match, 'u2')
+    assert.equal(reconnected.role, undefined, `reconnect during PLAYING/${phase} must not leak role`)
+    assert.ok(reconnected.word, `word must remain available during PLAYING/${phase}`)
+  }
+})
+
+test('FINISHED: finalResult 包含所有玩家的 role', () => {
+  const match = makeMatch({ status: 'FINISHED', phase: 'FINISHED', finalResult: finishedFinalResult() })
+  const snapshot = matchSnapshot(match, new Date())
+  assert.ok(snapshot.finalResult, 'FINISHED 必须返回 finalResult')
+  for (const player of snapshot.finalResult!.players) {
+    assert.ok(player.role === 'CIVILIAN' || player.role === 'UNDERCOVER', '每个玩家都必须有明确 role')
+  }
+})
+
+test('FINISHED: 能明确识别哪个玩家是 UNDERCOVER', () => {
+  const match = makeMatch({ status: 'FINISHED', phase: 'FINISHED', finalResult: finishedFinalResult() })
+  const snapshot = matchSnapshot(match, new Date())
+  const undercover = snapshot.finalResult!.players.filter((player) => player.role === 'UNDERCOVER')
+  assert.equal(undercover.length, 1)
+  assert.equal(undercover[0]!.playerId, 'player-1')
+  assert.equal(snapshot.finalResult!.undercoverPlayerId, 'player-1')
+})
+
+test('FINISHED: 所有普通玩家显示 CIVILIAN', () => {
+  const match = makeMatch({ status: 'FINISHED', phase: 'FINISHED', finalResult: finishedFinalResult() })
+  const snapshot = matchSnapshot(match, new Date())
+  for (const player of snapshot.finalResult!.players) {
+    if (player.playerId !== 'player-1') assert.equal(player.role, 'CIVILIAN')
+  }
+})
+
+test('FINISHED: 不同 viewer 看到的最终身份结果一致', () => {
+  const match = makeMatch({ status: 'FINISHED', phase: 'FINISHED', finalResult: finishedFinalResult() })
+  const snapshot = matchSnapshot(match, new Date())
+  const undercoverViewer = privateState(match, 'u1')
+  const civilianViewer = privateState(match, 'u2')
+  assert.equal(undercoverViewer.role, 'UNDERCOVER')
+  assert.equal(civilianViewer.role, 'CIVILIAN')
+  // 公共快照对所有 viewer 一致：卧底身份唯一且相同。
+  assert.equal(snapshot.finalResult!.undercoverPlayerId, 'player-1')
+  assert.equal(snapshot.finalResult!.players.find((player) => player.playerId === 'player-1')!.role, 'UNDERCOVER')
+  assert.equal(undercoverViewer.role, civilianViewer.role === 'CIVILIAN' ? 'UNDERCOVER' : 'UNDERCOVER')
+})
+
+// ===========================================================================
+// Phase 3：房主踢人（kick）
+// ===========================================================================
+
+test('kick route 走服务端权限校验并广播剩余成员、单独通知被踢者', () => {
+  const route = source('app/api/entertainment/undercover-star/rooms/[roomId]/kick/route.ts')
+  const hub = source('lib/undercover-star-realtime.ts')
+  // 1. 只把目标 userId 透传给服务层，不信任前端。
+  assert.match(route, /kickUndercoverPlayer\(guard\.user\.id, roomId, targetUserId\)/)
+  // 2. 剩余成员立即收到权威 ROOM_STATE（人数/准备数下降）。
+  assert.match(route, /undercoverRealtimeHub\.broadcastRoom\(result\.affectedRoomId\)/)
+  // 3. 只通知被踢玩家本人。
+  assert.match(route, /undercoverRealtimeHub\.notifyRoomKicked\(roomId, targetUserId\)/)
+  // 4. 复用既有 realtime hub，不另起第二套 websocket。
+  assert.match(hub, /class UndercoverStarRealtimeHub/)
+  assert.match(hub, /notifyRoomKicked\(roomId: string, targetUserId: string\)/)
+})
+
+test('kick 服务端权限规则：仅房主、非房主、非自己、WAITING、无当前对局', () => {
+  const service = source('lib/undercover-star.ts')
+  assert.match(service, /export async function kickUndercoverPlayer\(hostId: string, roomId: string, targetUserId: string/)
+  // 仅房主可踢。
+  assert.match(service, /if \(room\.hostId !== hostId\) throw new UndercoverStarServiceError\('只有房主可以踢出玩家。', 403, 'NOT_HOST'\)/)
+  // 房主不能踢自己（应走退出房间逻辑）。
+  assert.match(service, /if \(targetUserId === hostId\) throw new UndercoverStarServiceError\('房主不能踢出自己[^']*', 409, 'CANNOT_KICK_HOST'\)/)
+  // WAITING 之外拒绝。
+  assert.match(service, /throw new UndercoverStarServiceError\('房间不在等待状态，无法踢出玩家。', 409, 'ROOM_NOT_WAITING'\)/)
+  // 有当前对局时拒绝。
+  assert.match(service, /if \(room\.currentMatchId\) throw new UndercoverStarServiceError\('对局进行中，不能踢出玩家。', 409, 'MATCH_IN_PROGRESS'\)/)
+})
+
+test('PLAYING 进行中禁止踢人（currentMatch 真实 PLAYING）', () => {
+  const service = source('lib/undercover-star.ts')
+  // 即便房间状态非 WAITING，只要当前对局真实 PLAYING 也返回 MATCH_IN_PROGRESS。
+  assert.match(service, /if \(currentMatch && currentMatch\.status === 'PLAYING'\) \{\s*throw new UndercoverStarServiceError\('对局进行中，不能踢出玩家。', 409, 'MATCH_IN_PROGRESS'\)/)
+})
+
+test('被踢玩家仅标记离开：leftAt 设置 + isReady 重置，不删除行', () => {
+  const service = source('lib/undercover-star.ts')
+  assert.match(service, /await tx\.undercoverRoomPlayer\.update\(\{ where: \{ id: target\.id \}, data: \{ leftAt: now, isReady: false, updatedAt: now \} \}\)/)
+  // 不出现 delete。
+  assert.doesNotMatch(service, /undercoverRoomPlayer\.delete\(/)
+})
+
+test('踢出后权威 room snapshot 不再包含该成员（roomInclude 已过滤 leftAt:null）', () => {
+  const service = source('lib/undercover-star.ts')
+  assert.match(service, /UndercoverRoomPlayer: \{\s*where: \{ leftAt: null \}/)
+})
+
+test('房间清空才关闭：剩余成员仍在房间', () => {
+  const service = source('lib/undercover-star.ts')
+  assert.match(service, /const remaining = await tx\.undercoverRoomPlayer\.count\(\{ where: \{ roomId, leftAt: null \} \}\)/)
+  assert.match(service, /if \(!remaining\) await closeWaitingRoomTx\(tx, roomId, now\)/)
+  assert.match(service, /else await tx\.undercoverRoom\.update\(\{ where: \{ id: roomId \}, data: \{ lastActivityAt: now, updatedAt: now \} \}\)/)
+})
+
+test('ROOM_KICKED 只发送给目标用户，不含成员列表/私密数据', () => {
+  const hub = source('lib/undercover-star-realtime.ts')
+  assert.match(hub, /notifyRoomKicked\(roomId: string, targetUserId: string\)/)
+  assert.match(hub, /for \(const socket of \[\.\.\.sockets\]\) \{\s*if \(socket\.undercoverUserId === targetUserId\) safeSend\(socket, \{ type: 'ROOM_KICKED', roomId \}\)/)
+  // 事件定义仅含 roomId，不含 word/role/MatchPlayer。
+  const protocol = source('lib/undercover-star-protocol.ts')
+  assert.match(protocol, /\| \{ type: 'ROOM_KICKED'; roomId: string \}/)
+})
+
+test('重复 kick 幂等：目标已离开时直接成功，不产生重复副作用', () => {
+  const service = source('lib/undercover-star.ts')
+  assert.match(service, /const target = room\.UndercoverRoomPlayer\.find\(\(item\) => item\.User\.id === targetUserId && !item\.leftAt\)/)
+  assert.match(service, /if \(!target\) \{\s*\/\/ 幂等[^]*return \{ affectedRoomId: null as string \| null, kicked: false \}/)
+})
+
+test('被踢玩家之后可重新加入 WAITING 房间（kick 非永久封禁，无 kickBan）', () => {
+  const service = source('lib/undercover-star.ts')
+  // join 复用历史成员行并将 leftAt 置空，使被踢者能再次进入（不新增 ban 体系）。
+  assert.match(service, /await tx\.undercoverRoomPlayer\.update\(\{ where: \{ id: historicalPlayer\.id \}, data: \{ leftAt: null, isReady: historicalPlayer\.leftAt \? false : historicalPlayer\.isReady/)
+  // 本轮不引入任何黑名单/封禁字段。
+  const schema = source('prisma/schema.prisma')
+  assert.doesNotMatch(schema, /kickBan|bannedUserIds|KickBan|BannedUser/i)
 })

@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto'
 import {
   Prisma,
   type UndercoverDifficulty,
+  type UndercoverMatchStatus,
   type UndercoverVoteStage,
   type UndercoverWinnerSide,
   type UndercoverWordCategory,
@@ -10,8 +11,9 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
-import { sanitizeText } from '@/lib/security'
+import { consumeRateLimit, sanitizeText } from '@/lib/security'
 import { syncUserAchievements } from '@/lib/achievements'
+import { containsBannedWord, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import {
   UNDERCOVER_DESCRIPTION_MS,
   UNDERCOVER_GUESS_MS,
@@ -28,6 +30,8 @@ import {
   undercoverDifficultyLabels,
   isUndercoverCategory,
   isUndercoverDifficulty,
+  computeUndercoverXp,
+  levelFromXp,
 } from '@/lib/undercover-star-config'
 import {
   isDirectUndercoverWordMention,
@@ -35,13 +39,16 @@ import {
 } from '@/lib/undercover-star-title'
 import type {
   UndercoverActiveState,
+  UndercoverDescriptionByRound,
   UndercoverDescriptionPublic,
   UndercoverFinalPlayer,
   UndercoverFinalResult,
   UndercoverMatchPlayerPublic,
   UndercoverPrivateState,
   UndercoverPublicMatchSnapshot,
+  UndercoverPresence,
   UndercoverRoomPlayerPublic,
+  UndercoverRoomMessagePublic,
   UndercoverRoomState,
   UndercoverRoundResult,
 } from '@/lib/undercover-star-protocol'
@@ -65,6 +72,9 @@ const publicUserSelect = {
       avatarUrl: true,
     },
   },
+  UndercoverStats: {
+    select: { level: true },
+  },
 } as const
 
 const roomInclude = {
@@ -74,7 +84,6 @@ const roomInclude = {
     orderBy: { joinedAt: 'asc' as const },
     include: { User: { select: publicUserSelect } },
   },
-  UndercoverMatch: { select: { id: true, status: true, phase: true } },
 } as const
 
 const matchInclude = {
@@ -92,7 +101,7 @@ const matchInclude = {
 }
 
 type RoomRow = Prisma.UndercoverRoomGetPayload<{ include: typeof roomInclude }>
-type MatchRow = Prisma.UndercoverMatchGetPayload<{ include: typeof matchInclude }>
+export type MatchRow = Prisma.UndercoverMatchGetPayload<{ include: typeof matchInclude }>
 
 type StoredDescription = {
   playerId: string
@@ -164,6 +173,7 @@ function publicUser(user: PublicUserRow): UndercoverRoomPlayerPublic {
     uid: user.uid,
     name: getPublicUserDisplayName(user),
     avatarUrl: profileImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
+    level: user.UndercoverStats?.level || 1,
     playerId: '',
     isHost: false,
     isReady: false,
@@ -188,10 +198,11 @@ function roomState(room: RoomRow, viewerId?: string, now = new Date()): Undercov
     isPublic: room.isPublic,
     hasPassword: Boolean(room.passwordHash),
     hostId: room.hostId,
+    difficulty: room.difficulty,
     currentCount: players.length,
     maxPlayers: UNDERCOVER_MAX_PLAYERS,
     players: viewerId ? players.map((player) => ({ ...player, isOnline: player.isOnline || player.userId === viewerId })) : players,
-    matchId: room.UndercoverMatch?.id || null,
+    matchId: room.currentMatchId || null,
     lastActivityAt: room.lastActivityAt.toISOString(),
   }
 }
@@ -294,7 +305,7 @@ async function loadMatch(database: Database, matchId: string) {
 async function loadActiveMemberships(tx: Prisma.TransactionClient, userId: string) {
   return tx.undercoverRoomPlayer.findMany({
     where: { userId, leftAt: null, Room: { status: { in: ['WAITING', 'PLAYING'] } } },
-    select: { id: true, roomId: true, isReady: true, Room: { select: { id: true, status: true, hostId: true } } },
+    select: { id: true, roomId: true, isReady: true, Room: { select: { id: true, status: true, hostId: true, currentMatchId: true } } },
     orderBy: { joinedAt: 'desc' },
   })
 }
@@ -312,13 +323,41 @@ async function closeWaitingRoomTx(tx: Prisma.TransactionClient, roomId: string, 
 
 async function cleanupWaitingMembershipsTx(tx: Prisma.TransactionClient, userId: string, now: Date, keepRoomId?: string) {
   const memberships = await loadActiveMemberships(tx, userId)
+  if (!memberships.length) return []
+
+  // 收集处于 PLAYING 的房间所指向的 currentMatchId，批量查询其真实状态，
+  // 以区分「真正进行中的对局」与「状态卡住的陈旧 PLAYING 房间」。
+  const currentMatchIds = memberships
+    .filter((membership) => membership.Room.status === 'PLAYING' && membership.Room.currentMatchId)
+    .map((membership) => membership.Room.currentMatchId as string)
+  const matchStatusById = new Map<string, UndercoverMatchStatus>()
+  if (currentMatchIds.length) {
+    const matches = await tx.undercoverMatch.findMany({
+      where: { id: { in: currentMatchIds } },
+      select: { id: true, status: true },
+    })
+    for (const match of matches) matchStatusById.set(match.id, match.status)
+  }
+
   const affectedRoomIds: string[] = []
 
   for (const membership of memberships) {
     if (keepRoomId && membership.roomId === keepRoomId) continue
     if (membership.Room.status === 'PLAYING') {
-      throw new UndercoverStarServiceError('你正在进行一局卧底巨星，请先返回当前对局。', 409, 'MATCH_ACTIVE')
+      const currentMatchId = membership.Room.currentMatchId
+      const currentMatchStatus = currentMatchId ? matchStatusById.get(currentMatchId) : undefined
+      if (currentMatchStatus === 'PLAYING') {
+        // 真正进行中的对局：阻止加入第二个房间。
+        throw new UndercoverStarServiceError('你正在进行一局卧底巨星，请先返回当前对局。', 409, 'MATCH_ACTIVE')
+      }
+      // 陈旧 PLAYING 房间（currentMatch 不存在或已结束）：安全收敛为 WAITING，
+      // 避免永久卡住用户。
+      await tx.undercoverRoom.updateMany({
+        where: { id: membership.roomId, status: 'PLAYING' },
+        data: { status: 'WAITING', currentMatchId: null, lastActivityAt: now, updatedAt: now },
+      })
     }
+    // 此时房间在语义上等同于 WAITING：正常离开或关闭。
     if (membership.Room.hostId === userId) {
       await closeWaitingRoomTx(tx, membership.roomId, now)
     } else {
@@ -370,7 +409,7 @@ export async function saveUndercoverConfig(config: UndercoverConfig, database: P
 export async function listUndercoverRooms() {
   await expireWaitingRooms()
   const rooms = await prisma.undercoverRoom.findMany({
-    where: { status: 'WAITING', isPublic: true, passwordHash: null, UndercoverMatch: null, Host: { status: 'ACTIVE', isDeleted: false } },
+    where: { status: 'WAITING', isPublic: true, passwordHash: null, currentMatchId: null, Host: { status: 'ACTIVE', isDeleted: false } },
     include: roomInclude,
     orderBy: [{ lastActivityAt: 'desc' }, { createdAt: 'desc' }],
     take: 80,
@@ -382,7 +421,7 @@ export async function getUndercoverRoomByCode(value: unknown) {
   await expireWaitingRooms()
   const roomCode = validateRoomCode(value)
   const room = await prisma.undercoverRoom.findUnique({ where: { roomCode }, include: roomInclude })
-  if (!room || room.status !== 'WAITING' || room.UndercoverMatch || room.UndercoverRoomPlayer.length >= UNDERCOVER_MAX_PLAYERS) {
+  if (!room || room.status !== 'WAITING' || room.currentMatchId || room.UndercoverRoomPlayer.length >= UNDERCOVER_MAX_PLAYERS) {
     throw new UndercoverStarServiceError('房间不存在、已开始或已满。', 404, 'ROOM_NOT_JOINABLE')
   }
   return roomState(room)
@@ -404,9 +443,37 @@ export async function resolveActiveUndercoverState(userId: string): Promise<Unde
   })
   const membership = memberships[0]
   if (membership) {
-    const room = roomState(membership.Room, userId)
-    const matchId = membership.Room.UndercoverMatch?.status === 'PLAYING' ? membership.Room.UndercoverMatch.id : null
-    return { activeRoom: room, activeMatch: matchId ? { matchId, roomId: membership.roomId, status: 'PLAYING' } : null, isInActiveGame: Boolean(matchId) }
+    const room = membership.Room
+    if (room.status === 'PLAYING') {
+      const currentMatchId = room.currentMatchId
+      const currentMatch = currentMatchId
+        ? await prisma.undercoverMatch.findUnique({ where: { id: currentMatchId }, select: { id: true, status: true, roomId: true } })
+        : null
+      if (currentMatch && currentMatch.status === 'PLAYING') {
+        return {
+          activeRoom: roomState(room, userId),
+          activeMatch: { matchId: currentMatch.id, roomId: room.id, status: 'PLAYING' },
+          isInActiveGame: true,
+        }
+      }
+      // 陈旧 PLAYING 房间（currentMatch 不存在或已结束）：安全收敛为 WAITING。
+      await prisma.undercoverRoom.updateMany({
+        where: { id: room.id, status: 'PLAYING' },
+        data: { status: 'WAITING', currentMatchId: null, lastActivityAt: new Date(), updatedAt: new Date() },
+      })
+      const recovered = { ...room, status: 'WAITING' as const, currentMatchId: null }
+      return {
+        activeRoom: roomState(recovered, userId),
+        activeMatch: null,
+        isInActiveGame: false,
+      }
+    }
+    // WAITING 房间：不在进行中的对局，不会触发 active-game 提示。
+    return {
+      activeRoom: roomState(room, userId),
+      activeMatch: null,
+      isInActiveGame: false,
+    }
   }
 
   // Finished matches remain readable to their original players so a refresh on
@@ -423,11 +490,12 @@ export async function resolveActiveUndercoverState(userId: string): Promise<Unde
   }
 }
 
-export async function createUndercoverRoom(userId: string, input: { password?: unknown }, now = new Date()) {
+export async function createUndercoverRoom(userId: string, input: { password?: unknown; difficulty?: unknown }, now = new Date()) {
   const config = await getUndercoverConfig()
   if (!config.enabled) throw new UndercoverStarServiceError('卧底巨星目前暂时关闭，请稍后再试。', 409, 'GAME_DISABLED')
   const password = validateRoomPassword(input.password)
   const passwordHash = password ? await hashPassword(password) : null
+  const difficulty = isUndercoverDifficulty(input.difficulty) ? input.difficulty : 'NORMAL'
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
@@ -441,6 +509,7 @@ export async function createUndercoverRoom(userId: string, input: { password?: u
             passwordHash,
             isPublic: !passwordHash,
             status: 'WAITING',
+            difficulty,
             hostId: userId,
             lastActivityAt: now,
             updatedAt: now,
@@ -551,7 +620,20 @@ export async function leaveUndercoverRoom(userId: string, roomId: string, now = 
     await lockRoom(tx, roomId)
     const room = await tx.undercoverRoom.findUnique({ where: { id: roomId }, include: roomInclude })
     if (!room) throw new UndercoverStarServiceError('房间不存在。', 404, 'ROOM_NOT_FOUND')
-    if (room.status === 'PLAYING') throw new UndercoverStarServiceError('对局进行中，请关闭页面后通过重连继续。', 409, 'MATCH_IN_PROGRESS')
+    if (room.status === 'PLAYING') {
+      const currentMatchId = room.currentMatchId
+      const currentMatch = currentMatchId
+        ? await tx.undercoverMatch.findUnique({ where: { id: currentMatchId }, select: { id: true, status: true } })
+        : null
+      if (currentMatch && currentMatch.status === 'PLAYING') {
+        throw new UndercoverStarServiceError('对局进行中，请关闭页面后通过重连继续。', 409, 'MATCH_IN_PROGRESS')
+      }
+      // 陈旧 PLAYING 房间（currentMatch 不存在或已结束）：收敛为 WAITING 后再离开。
+      await tx.undercoverRoom.updateMany({
+        where: { id: roomId, status: 'PLAYING' },
+        data: { status: 'WAITING', currentMatchId: null, lastActivityAt: now, updatedAt: now },
+      })
+    }
     const player = room.UndercoverRoomPlayer.find((item) => item.User.id === userId)
     if (!player) return { affectedRoomIds: [] as string[] }
     if (room.hostId === userId) await closeWaitingRoomTx(tx, roomId, now)
@@ -565,6 +647,40 @@ export async function leaveUndercoverRoom(userId: string, roomId: string, now = 
   })
   const rooms = await Promise.all(result.affectedRoomIds.map((id) => loadRoom(prisma, id).catch(() => null)))
   return { affectedRooms: rooms.filter((room): room is RoomRow => Boolean(room)).map((room) => roomState(room, undefined, now)) }
+}
+
+export async function kickUndercoverPlayer(hostId: string, roomId: string, targetUserId: string, now = new Date()) {
+  const result = await undercoverTransaction(async (tx) => {
+    await lockRoom(tx, roomId)
+    await lockUser(tx, targetUserId)
+    const room = await tx.undercoverRoom.findUnique({ where: { id: roomId }, include: roomInclude })
+    if (!room) throw new UndercoverStarServiceError('房间不存在。', 404, 'ROOM_NOT_FOUND')
+    // 真正进行中的对局禁止踢人：即便前端因旧状态误显示按钮，API 也必须明确拒绝。
+    if (room.status !== 'WAITING') {
+      const currentMatchId = room.currentMatchId
+      const currentMatch = currentMatchId
+        ? await tx.undercoverMatch.findUnique({ where: { id: currentMatchId }, select: { id: true, status: true } })
+        : null
+      if (currentMatch && currentMatch.status === 'PLAYING') {
+        throw new UndercoverStarServiceError('对局进行中，不能踢出玩家。', 409, 'MATCH_IN_PROGRESS')
+      }
+      throw new UndercoverStarServiceError('房间不在等待状态，无法踢出玩家。', 409, 'ROOM_NOT_WAITING')
+    }
+    if (room.currentMatchId) throw new UndercoverStarServiceError('对局进行中，不能踢出玩家。', 409, 'MATCH_IN_PROGRESS')
+    if (room.hostId !== hostId) throw new UndercoverStarServiceError('只有房主可以踢出玩家。', 403, 'NOT_HOST')
+    if (targetUserId === hostId) throw new UndercoverStarServiceError('房主不能踢出自己，需要离开请使用退出房间。', 409, 'CANNOT_KICK_HOST')
+    const target = room.UndercoverRoomPlayer.find((item) => item.User.id === targetUserId && !item.leftAt)
+    if (!target) {
+      // 幂等：目标早已离开或不是当前成员，直接视为成功，避免并发二次踢产生异常状态。
+      return { affectedRoomId: null as string | null, kicked: false }
+    }
+    await tx.undercoverRoomPlayer.update({ where: { id: target.id }, data: { leftAt: now, isReady: false, updatedAt: now } })
+    const remaining = await tx.undercoverRoomPlayer.count({ where: { roomId, leftAt: null } })
+    if (!remaining) await closeWaitingRoomTx(tx, roomId, now)
+    else await tx.undercoverRoom.update({ where: { id: roomId }, data: { lastActivityAt: now, updatedAt: now } })
+    return { affectedRoomId: roomId, kicked: true }
+  })
+  return result
 }
 
 function assertExpectedState(match: MatchRow, expectedRevision?: number, expectedRound?: number) {
@@ -621,12 +737,13 @@ function finalResultFromJson(value: Prisma.JsonValue | null | undefined): Underc
   return value as unknown as UndercoverFinalResult
 }
 
-function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPublicMatchSnapshot {
+export function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPublicMatchSnapshot {
   const players: UndercoverMatchPlayerPublic[] = match.UndercoverMatchPlayer.map((player) => ({
     userId: player.User.id,
     uid: player.User.uid,
     name: getPublicUserDisplayName(player.User),
     avatarUrl: profileImageUrl(player.User.Profile?.avatarUrl || player.User.avatarUrl),
+    level: player.User.UndercoverStats?.level || 1,
     playerId: player.id,
     isHost: player.User.id === match.Room.hostId,
     isAlive: player.isAlive,
@@ -646,14 +763,17 @@ function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPublicMatch
       isAuto: description.isAuto,
     }
   })
+  const descriptionHistory = descriptionHistoryByRound(match)
   const stage: UndercoverVoteStage | null = match.phase === 'VOTING' ? 'MAIN' : match.phase === 'TIE_VOTING' ? 'TIE' : null
+  const stageVotes = stage ? match.UndercoverVote.filter((vote) => vote.round === match.round && vote.stage === stage) : []
   const voteProgress = stage
     ? {
-        submitted: match.UndercoverVote.filter((vote) => vote.round === match.round && vote.stage === stage).length,
+        submitted: stageVotes.length,
         total: activeMatchPlayers(match).length,
         stage,
+        abstained: stageVotes.filter((vote) => vote.isAbstain).length,
       }
-    : { submitted: 0, total: activeMatchPlayers(match).length, stage: null }
+    : { submitted: 0, total: activeMatchPlayers(match).length, stage: null, abstained: 0 }
   const history = historyPublic(match, readHistory(match.roundHistory))
   return {
     matchId: match.id,
@@ -667,6 +787,7 @@ function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPublicMatch
     currentSpeakerId: match.currentSpeakerId,
     players,
     descriptions,
+    descriptionHistory,
     voteProgress,
     tieCandidates: readStringArray(match.tieCandidateIds),
     roundHistory: history,
@@ -675,7 +796,7 @@ function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPublicMatch
   }
 }
 
-function privateState(match: MatchRow, userId: string): UndercoverPrivateState {
+export function privateState(match: MatchRow, userId: string): UndercoverPrivateState {
   const player = matchPlayerForUser(match, userId)
   const stage = match.phase === 'VOTING' ? 'MAIN' : match.phase === 'TIE_VOTING' ? 'TIE' : null
   const existingDescription = match.UndercoverDescription.find((item) => item.round === match.round && item.matchPlayerId === player.id)
@@ -685,7 +806,8 @@ function privateState(match: MatchRow, userId: string): UndercoverPrivateState {
   return {
     matchId: match.id,
     playerId: player.id,
-    role: player.role,
+    // 安全红线：PLAYING（含 ROLE_REVEAL 任何阶段）绝不返回 role，仅在 FINISHED 揭晓。
+    ...(match.status === 'FINISHED' ? { role: player.role } : {}),
     word: player.word,
     roleConfirmed: Boolean(player.roleConfirmedAt),
     isAlive: player.isAlive,
@@ -815,20 +937,24 @@ export async function startUndercoverMatch(userId: string, roomId: string, now =
     if (players.length < UNDERCOVER_MIN_PLAYERS) throw new UndercoverStarServiceError('至少需要3名玩家才能开始。', 409, 'NOT_ENOUGH_PLAYERS')
     if (players.length > UNDERCOVER_MAX_PLAYERS) throw new UndercoverStarServiceError('房间人数超过上限。', 409, 'ROOM_FULL')
     if (players.some((player) => !player.isReady)) throw new UndercoverStarServiceError('请等待所有玩家准备。', 409, 'PLAYERS_NOT_READY')
-    if (room.UndercoverMatch) throw new UndercoverStarServiceError('这间房已经创建过对局。', 409, 'MATCH_ALREADY_EXISTS')
-    const pairs = await tx.undercoverWordPair.findMany({ where: { enabled: true }, orderBy: [{ usageCount: 'asc' }, { updatedAt: 'asc' }], take: 500 })
+    // 词库必须按房间当前难度抽取，不混抽其它难度。
+    const pairs = await tx.undercoverWordPair.findMany({ where: { enabled: true, difficulty: room.difficulty }, orderBy: [{ usageCount: 'asc' }, { updatedAt: 'asc' }], take: 500 })
     const validPairs = pairs.filter((candidate) => {
       const civilianWord = normalizeUndercoverWord(candidate.civilianWord)
       const undercoverWord = normalizeUndercoverWord(candidate.undercoverWord)
       return Boolean(civilianWord && undercoverWord && civilianWord !== undercoverWord)
     })
     const pair = randomItem(validPairs)
-    if (!pair) throw new UndercoverStarServiceError('当前题库暂时不足，请稍后再试。', 409, 'WORD_POOL_INSUFFICIENT')
+    if (!pair) throw new UndercoverStarServiceError('当前难度暂无可用词组，请更换难度后再开始。', 409, 'WORD_POOL_EMPTY')
     const undercoverIndex = randomInt(players.length)
+    // 1:N：同一房间可多次开局；每局编号递增，不复用旧 Match。
+    const matchNumber = (await tx.undercoverMatch.count({ where: { roomId } })) + 1
     const match = await tx.undercoverMatch.create({
       data: {
         id: randomUUID(),
         roomId,
+        matchNumber,
+        difficulty: room.difficulty,
         wordPairId: pair.id,
         civilianWord: pair.civilianWord,
         undercoverWord: pair.undercoverWord,
@@ -853,10 +979,28 @@ export async function startUndercoverMatch(userId: string, roomId: string, now =
       select: { id: true, roomId: true },
     })
     await tx.undercoverWordPair.update({ where: { id: pair.id }, data: { usageCount: { increment: 1 } } })
-    await tx.undercoverRoom.update({ where: { id: roomId }, data: { status: 'PLAYING', lastActivityAt: now, updatedAt: now } })
+    // Room 进入 PLAYING 并指向本局；WAITING 房间的 currentMatchId 必须为 null。
+    await tx.undercoverRoom.update({ where: { id: roomId }, data: { status: 'PLAYING', currentMatchId: match.id, lastActivityAt: now, updatedAt: now } })
     return match
   })
   return { matchId: result.id, roomId: result.roomId }
+}
+
+export async function updateUndercoverRoomDifficulty(hostId: string, roomId: string, difficulty: unknown, now = new Date()) {
+  if (!isUndercoverDifficulty(difficulty)) throw new UndercoverStarServiceError('难度无效。', 400, 'DIFFICULTY_INVALID')
+  return undercoverTransaction(async (tx) => {
+    await lockUser(tx, hostId)
+    await lockRoom(tx, roomId)
+    const room = await tx.undercoverRoom.findUnique({ where: { id: roomId }, select: { id: true, hostId: true, status: true, currentMatchId: true, difficulty: true } })
+    if (!room) throw new UndercoverStarServiceError('房间不存在。', 404, 'ROOM_NOT_FOUND')
+    if (room.hostId !== hostId) throw new UndercoverStarServiceError('只有房主可以修改难度。', 403, 'HOST_ONLY')
+    // 仅 WAITING 且未绑定进行中对局时可改；PLAYING 或已开局时禁止。
+    if (room.status !== 'WAITING') throw new UndercoverStarServiceError('对局已经开始，不能修改难度。', 409, 'ROOM_NOT_WAITING')
+    if (room.currentMatchId) throw new UndercoverStarServiceError('本局已开始，不能修改难度。', 409, 'MATCH_IN_PROGRESS')
+    if (room.difficulty === difficulty) return difficulty
+    await tx.undercoverRoom.update({ where: { id: roomId }, data: { difficulty, updatedAt: now } })
+    return difficulty
+  })
 }
 
 async function finishMatchTx(
@@ -934,13 +1078,46 @@ async function finishMatchTx(
     where: { id: match.id },
     data: { finalResult: inputJson(finalResult) },
   })
+  // 一局结束：Match 永久保持 FINISHED，但 Room 必须回到 WAITING，
+  // 以便同一房间可以开始下一局（新 Match，不复用）。清空 currentMatchId 并重置准备状态。
+  await tx.undercoverRoomPlayer.updateMany({
+    where: { roomId: match.roomId, leftAt: null },
+    data: { isReady: false, updatedAt: now },
+  })
   await tx.undercoverRoom.updateMany({
     where: { id: match.roomId },
-    data: { status: 'FINISHED', closedAt: now, lastActivityAt: now, updatedAt: now },
+    data: { status: 'WAITING', currentMatchId: null, closedAt: null, lastActivityAt: now, updatedAt: now },
   })
 
   for (const player of players) {
     const isWinner = (player.role === 'UNDERCOVER' && winner === 'UNDERCOVER') || (player.role === 'CIVILIAN' && winner === 'CIVILIAN')
+    const xpEarned = computeUndercoverXp({ isWin: isWinner })
+    // 幂等结算：matchId+userId 唯一约束保证同一玩家在一局内只结算一次。
+    // 若 Result 已存在（并发/重复 finish 触发 P2002），该玩家的统计
+    // （games/wins/losses/XP/level）必须立即跳过，绝不能继续往下累加，
+    // 否则会出现重复结算。禁止“catch P2002 后继续 upsert”的旧写法。
+    let createdResult = true
+    try {
+      await tx.undercoverMatchResult.create({
+        data: {
+          id: randomUUID(),
+          matchId: match.id,
+          userId: player.User.id,
+          role: player.role,
+          isWin: isWinner,
+          xpAwarded: xpEarned,
+          createdAt: now,
+        },
+      })
+    } catch (error) {
+      if (errorCode(error) !== 'P2002') throw error
+      createdResult = false
+    }
+    if (!createdResult) continue
+    // 读取当前累计 XP 以计算新等级（等级由 XP 推导，避免与 XP 数据不同步）。
+    const current = await tx.undercoverStats.findUnique({ where: { userId: player.User.id }, select: { xp: true } })
+    const newXp = (current?.xp || 0) + xpEarned
+    const newLevel = levelFromXp(newXp)
     await tx.undercoverStats.upsert({
       where: { userId: player.User.id },
       update: {
@@ -954,6 +1131,8 @@ async function finishMatchTx(
         successfulUndercoverVotes: { increment: player.role === 'CIVILIAN' && successfulVoters.has(player.id) ? 1 : 0 },
         undercoverSurvivalWins: { increment: player.role === 'UNDERCOVER' && reason === 'UNDERCOVER_SURVIVAL' ? 1 : 0 },
         undercoverGuessWins: { increment: player.role === 'UNDERCOVER' && reason === 'UNDERCOVER_GUESS_CORRECT' ? 1 : 0 },
+        xp: newXp,
+        level: newLevel,
         updatedAt: now,
       },
       create: {
@@ -969,6 +1148,8 @@ async function finishMatchTx(
         successfulUndercoverVotes: player.role === 'CIVILIAN' && successfulVoters.has(player.id) ? 1 : 0,
         undercoverSurvivalWins: player.role === 'UNDERCOVER' && reason === 'UNDERCOVER_SURVIVAL' ? 1 : 0,
         undercoverGuessWins: player.role === 'UNDERCOVER' && reason === 'UNDERCOVER_GUESS_CORRECT' ? 1 : 0,
+        xp: xpEarned,
+        level: newLevel,
         createdAt: now,
         updatedAt: now,
       },
@@ -1082,6 +1263,37 @@ function currentRoundDescriptions(match: MatchRow): StoredDescription[] {
     .map((description) => ({ playerId: description.matchPlayerId, content: description.content, isAuto: description.isAuto }))
 }
 
+/**
+ * 按轮分组全部发言（含当前轮），用于发言历史。
+ * 注意：必须包含该轮全部 Description，绝不能按 speaker 排除最后一人（生产历史 Bug 不在本阶段修复，
+ * 但本序列化不应建立在此类 N-1 数据之上）。轮内按 createdAt 升序，轮次按 round 升序。
+ */
+function descriptionHistoryByRound(match: MatchRow): UndercoverDescriptionByRound[] {
+  const byRound = new Map<number, Array<{ entry: UndercoverDescriptionPublic; createdAt: Date }>>()
+  for (const description of match.UndercoverDescription) {
+    const player = playerById(match, description.matchPlayerId)
+    const entry: UndercoverDescriptionPublic = {
+      playerId: description.matchPlayerId,
+      userId: player?.User.id || '',
+      name: player ? getPublicUserDisplayName(player.User) : '玩家',
+      round: description.round,
+      content: description.content,
+      isAuto: description.isAuto,
+    }
+    const list = byRound.get(description.round) || []
+    list.push({ entry, createdAt: description.createdAt })
+    byRound.set(description.round, list)
+  }
+  return Array.from(byRound.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([round, list]) => ({
+      round,
+      descriptions: list
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((item) => item.entry),
+    }))
+}
+
 async function settleVoteStageTx(tx: Prisma.TransactionClient, match: MatchRow, stage: UndercoverVoteStage, now: Date): Promise<FinishResult | null> {
   const votes = await tx.undercoverVote.findMany({ where: { matchId: match.id, round: match.round, stage } })
   const alive = await tx.undercoverMatchPlayer.findMany({ where: { matchId: match.id, isAlive: true }, orderBy: { createdAt: 'asc' }, include: { User: { select: publicUserSelect } } })
@@ -1188,7 +1400,7 @@ async function fillMissingVotesAndSettleTx(tx: Prisma.TransactionClient, match: 
   return settleVoteStageTx(tx, refreshed, stage, now)
 }
 
-export async function submitUndercoverVote(userId: string, matchId: string, input: { targetId?: unknown; expectedRevision?: number; expectedRound?: number }, now = new Date()) {
+export async function submitUndercoverVote(userId: string, matchId: string, input: { targetId?: unknown; abstain?: unknown; expectedRevision?: number; expectedRound?: number }, now = new Date()) {
   await advanceExpiredUndercoverMatch(matchId, now)
   const finish = await undercoverTransaction(async (tx): Promise<FinishResult | null> => {
     let result: FinishResult | null = null
@@ -1201,13 +1413,19 @@ export async function submitUndercoverVote(userId: string, matchId: string, inpu
     if (existing) return null
     assertExpectedState(match, input.expectedRevision, input.expectedRound)
     if (!player.isAlive) throw new UndercoverStarServiceError('被淘汰后不能投票。', 403, 'PLAYER_ELIMINATED')
-    const targetId = typeof input.targetId === 'string' ? input.targetId : ''
-    if (!targetId) throw new UndercoverStarServiceError('请选择一名玩家投票。', 400, 'VOTE_TARGET_REQUIRED')
-    if (targetId === player.id) throw new UndercoverStarServiceError('不能投自己。', 400, 'CANNOT_VOTE_SELF')
-    const target = match.UndercoverMatchPlayer.find((item) => item.id === targetId)
-    if (!target || !target.isAlive) throw new UndercoverStarServiceError('不能投已淘汰的玩家。', 400, 'VOTE_TARGET_INVALID')
-    if (stage === 'TIE' && !readStringArray(match.tieCandidateIds).includes(targetId)) throw new UndercoverStarServiceError('加赛只能投平票候选人。', 400, 'TIE_TARGET_INVALID')
-    await tx.undercoverVote.create({ data: { id: randomUUID(), matchId, round: match.round, stage, voterId: player.id, targetId, isAbstain: false } })
+    // 明确弃票：targetId 必须为空，isAbstain=true，不计入候选票。
+    const wantAbstain = input.abstain === true
+    if (wantAbstain) {
+      await tx.undercoverVote.create({ data: { id: randomUUID(), matchId, round: match.round, stage, voterId: player.id, targetId: null, isAbstain: true } })
+    } else {
+      const targetId = typeof input.targetId === 'string' ? input.targetId : ''
+      if (!targetId) throw new UndercoverStarServiceError('请选择一名玩家投票，或选择弃票。', 400, 'VOTE_TARGET_REQUIRED')
+      if (targetId === player.id) throw new UndercoverStarServiceError('不能投自己。', 400, 'CANNOT_VOTE_SELF')
+      const target = match.UndercoverMatchPlayer.find((item) => item.id === targetId)
+      if (!target || !target.isAlive) throw new UndercoverStarServiceError('不能投已淘汰的玩家。', 400, 'VOTE_TARGET_INVALID')
+      if (stage === 'TIE' && !readStringArray(match.tieCandidateIds).includes(targetId)) throw new UndercoverStarServiceError('加赛只能投平票候选人。', 400, 'TIE_TARGET_INVALID')
+      await tx.undercoverVote.create({ data: { id: randomUUID(), matchId, round: match.round, stage, voterId: player.id, targetId, isAbstain: false } })
+    }
     await tx.undercoverMatchPlayer.update({ where: { id: player.id }, data: { lastSeenAt: now, isOnline: true, updatedAt: now } })
     const total = await tx.undercoverMatchPlayer.count({ where: { matchId, isAlive: true } })
     const submitted = await tx.undercoverVote.count({ where: { matchId, round: match.round, stage } })
@@ -1428,11 +1646,14 @@ export async function deleteUndercoverWordPair(id: string) {
 
 export async function getUndercoverUserStats(userId: string) {
   const stats = await prisma.undercoverStats.findUnique({ where: { userId } })
+  const xp = stats?.xp || 0
   return {
     totalGames: stats?.totalGames || 0,
     totalWins: stats?.totalWins || 0,
     totalLosses: stats?.totalLosses || 0,
     winRate: stats?.totalGames ? Math.round((stats.totalWins / stats.totalGames) * 10000) / 100 : 0,
+    xp,
+    level: levelFromXp(xp),
     civilianGames: stats?.civilianGames || 0,
     civilianWins: stats?.civilianWins || 0,
     undercoverGames: stats?.undercoverGames || 0,
@@ -1465,4 +1686,180 @@ export async function getUndercoverAdminOverview(now = new Date()) {
     enabledWordPairs,
     totalWordPairs: allWordPairs,
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 等候聊天室（Phase 4）
+//
+// 仅在 Room 处于 WAITING 且没有进行中对局（currentMatchId === null）时开放。
+// 聊天消息是独立事件：不触发 revision++、不改变 gameplay state、不刷新
+// ready、也不刷新 lastActivityAt（除非站内过期策略明确需要聊天算活跃）。
+// 被踢/已离开玩家因不再属于有效成员而自然失去读写权限。
+// ─────────────────────────────────────────────────────────────────────────
+
+type RoomMessageRow = Prisma.UndercoverRoomMessageGetPayload<{ include: { User: { select: typeof publicUserSelect } } }>
+
+function roomMessagePublic(row: RoomMessageRow): UndercoverRoomMessagePublic {
+  return {
+    id: row.id,
+    roomId: row.roomId,
+    userId: row.userId,
+    name: getPublicUserDisplayName(row.User),
+    avatarUrl: profileImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
+    content: row.content,
+    createdAt: row.createdAt.toISOString(),
+  }
+}
+
+function assertRoomChatMember(room: { UndercoverRoomPlayer: Array<{ id: string }> }) {
+  // 调用方已用 where: { userId, leftAt: null } 过滤，存在即表示是当前有效成员。
+  if (!room.UndercoverRoomPlayer.length) throw new UndercoverStarServiceError('你不在这个房间中。', 403, 'ROOM_NOT_MEMBER')
+}
+
+export async function getRoomMessages(userId: string, roomId: string, limit = 50) {
+  const room = await prisma.undercoverRoom.findUnique({
+    where: { id: roomId },
+    include: { UndercoverRoomPlayer: { where: { userId, leftAt: null }, select: { id: true } } },
+  })
+  if (!room) throw new UndercoverStarServiceError('房间不存在。', 404, 'ROOM_NOT_FOUND')
+  // 非成员（含被踢/已离开）禁止读取聊天历史。
+  assertRoomChatMember(room)
+  // 查询最新 limit 条后反转，按 createdAt 旧 → 新返回；最多读取 50～100 条。
+  const rows = await prisma.undercoverRoomMessage.findMany({
+    where: { roomId },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(limit, 1), 100),
+    include: { User: { select: publicUserSelect } },
+  })
+  return rows.reverse().map(roomMessagePublic)
+}
+
+export async function sendRoomMessage(userId: string, roomId: string, rawContent: unknown, now = new Date()) {
+  const room = await prisma.undercoverRoom.findUnique({
+    where: { id: roomId },
+    include: { UndercoverRoomPlayer: { where: { userId, leftAt: null }, select: { id: true } } },
+  })
+  if (!room) throw new UndercoverStarServiceError('房间不存在。', 404, 'ROOM_NOT_FOUND')
+  assertRoomChatMember(room)
+  // 等候聊天室关闭条件：房间已开始（PLAYING）或存在进行中对局。
+  if (room.status !== 'WAITING' || room.currentMatchId) {
+    throw new UndercoverStarServiceError('当前不在等候阶段，无法发送聊天。', 409, 'ROOM_CHAT_UNAVAILABLE')
+  }
+
+  const raw = typeof rawContent === 'string' ? rawContent : ''
+  const content = raw.trim()
+  if (!content) throw new UndercoverStarServiceError('消息不能为空。', 400, 'CHAT_EMPTY')
+  if (content.length > 200) throw new UndercoverStarServiceError('消息不能超过 200 字。', 400, 'CHAT_TOO_LONG')
+  const safe = sanitizeText(content, 200)
+
+  // 轻量频率限制：1 秒最多 2 条、10 秒最多 8 条（复用站内 rate limit 设施）。
+  const fast = await consumeRateLimit(userId, 'undercover_chat_fast', 2, 1)
+  if (fast.limited) throw new UndercoverStarServiceError('发送过快，请稍后再试。', 429, 'ROOM_CHAT_RATE_LIMITED')
+  const slow = await consumeRateLimit(userId, 'undercover_chat_slow', 8, 10)
+  if (slow.limited) throw new UndercoverStarServiceError('发送过于频繁，请稍后再试。', 429, 'ROOM_CHAT_RATE_LIMITED')
+
+  // 复用站内统一违禁词审核；管理员/超级管理员按现行策略绕过。
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } })
+  if (!shouldBypassForbiddenWords(user) && (await containsBannedWord(safe))) {
+    throw new UndercoverStarServiceError('内容包含违禁词，请修改后再提交。', 400, 'CHAT_CONTAINS_BANNED_WORD')
+  }
+
+  const created = await prisma.undercoverRoomMessage.create({
+    data: { id: randomUUID(), roomId, userId, content: safe, createdAt: now },
+    include: { User: { select: publicUserSelect } },
+  })
+  return roomMessagePublic(created)
+}
+
+/**
+ * 批量聚合好友的卧底巨星在线状态（presence）。
+ *
+ * 目标：好友列表一次请求即可得到全部好友的 presence，绝不做 N+1。
+ *
+ * 数据来源均为权威记录：
+ * - UndercoverRoomPlayer（userId + leftAt=null 的有效成员）
+ * - Room（status / currentMatchId / passwordHash / roomCode）
+ * - 仅当 Room 处于 PLAYING 时，才批量二次查询 currentMatch 的真实状态。
+ *
+ * 返回结果严格过滤敏感字段：
+ * 不暴露 passwordHash / word / role / Match privateState。
+ * 只告诉客户端 roomId / roomCode / status / canJoin / requiresPassword。
+ */
+export async function getUndercoverPresenceForUsers(userIds: string[]): Promise<Map<string, UndercoverPresence>> {
+  const result = new Map<string, UndercoverPresence>()
+  if (!userIds.length) return result
+
+  // 查询 1：所有有效（未离开）且所在房间处于 WAITING/PLAYING 的成员关系。
+  const memberships = await prisma.undercoverRoomPlayer.findMany({
+    where: {
+      userId: { in: userIds },
+      leftAt: null,
+      Room: { status: { in: ['WAITING', 'PLAYING'] } },
+    },
+    select: {
+      userId: true,
+      Room: {
+        select: {
+          id: true,
+          status: true,
+          currentMatchId: true,
+          roomCode: true,
+          passwordHash: true,
+          UndercoverRoomPlayer: { where: { leftAt: null }, select: { id: true } },
+        },
+      },
+    },
+  })
+
+  // 收集所有 PLAYING 房间指向的 currentMatchId，批量校验真实对局状态。
+  const playingRooms = memberships.filter((membership) => membership.Room.status === 'PLAYING')
+  const currentMatchIds = playingRooms
+    .map((membership) => membership.Room.currentMatchId)
+    .filter((id): id is string => Boolean(id))
+  const matchStatusById = new Map<string, string>()
+  if (currentMatchIds.length) {
+    // 查询 2：批量确认 PLAYING 房间的真实 Match 状态。
+    const matches = await prisma.undercoverMatch.findMany({
+      where: { id: { in: currentMatchIds } },
+      select: { id: true, status: true },
+    })
+    matches.forEach((match) => matchStatusById.set(match.id, match.status))
+  }
+
+  for (const membership of memberships) {
+    const room = membership.Room
+    const aliveCount = room.UndercoverRoomPlayer.length
+    const requiresPassword = Boolean(room.passwordHash)
+
+    if (room.status === 'PLAYING') {
+      // 必须同时满足：currentMatchId 非空 且 对应 Match 真在 PLAYING。
+      // 否则视为陈旧 PLAYING（Match 已结束/不存在），忽略 presence（不显示"游戏中"）。
+      const currentMatchId = room.currentMatchId
+      const currentMatchStatus = currentMatchId ? matchStatusById.get(currentMatchId) : undefined
+      if (!currentMatchId || currentMatchStatus !== 'PLAYING') continue
+      // 游戏中：仅展示状态，不允许中途加入。
+      result.set(membership.userId, {
+        status: 'PLAYING',
+        roomId: room.id,
+        roomCode: room.roomCode,
+        canJoin: false,
+        requiresPassword: false,
+      })
+      continue
+    }
+
+    // WAITING 且 currentMatchId 为空：房间中（可跟随进入的前提）。
+    // 若 currentMatchId 非空（理论不该出现在 WAITING，但做防御）也忽略 presence。
+    if (room.currentMatchId) continue
+    const canJoin = aliveCount < UNDERCOVER_MAX_PLAYERS
+    result.set(membership.userId, {
+      status: 'WAITING',
+      roomId: room.id,
+      roomCode: room.roomCode,
+      canJoin,
+      requiresPassword,
+    })
+  }
+
+  return result
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getUndercoverPresenceForUsers } from '@/lib/undercover-star'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { publicImageUrl } from '@/lib/images'
@@ -131,9 +132,10 @@ export async function GET(request: Request) {
   const visibleRows = orderedFriendRows.slice(pageStart, pageStart + pageSize)
   const visibleFriendIds = visibleRows.map(({ friend }) => friend.id)
   const visibleConversationIds = visibleRows.flatMap(({ conversation }) => conversation ? [conversation.id] : [])
-  const [unreadByConversation, remarkMap] = await Promise.all([
+  const [unreadByConversation, remarkMap, presenceByFriend] = await Promise.all([
     getUnreadCounts(user.id, visibleConversationIds),
     loadFriendRemarkMap(user.id, visibleFriendIds),
+    getUndercoverPresenceForUsers(visibleFriendIds),
   ])
 
   const friends = visibleRows.map(({ friend, conversation }) => {
@@ -154,6 +156,7 @@ export async function GET(request: Request) {
       // and deleted messages from changing the displayed order.
       lastMessageAt: conversation?.DirectMessage[0]?.createdAt || null,
       unreadCount: conversation ? unreadByConversation.get(conversation.id) || 0 : 0,
+      undercoverPresence: presenceByFriend.get(friend.id) || null,
     }
   })
 
