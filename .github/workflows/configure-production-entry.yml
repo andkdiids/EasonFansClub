@@ -162,6 +162,7 @@ jobs:
                     proxy_set_header X-ECFC-Remote-Address \$realip_remote_addr;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$remote_addr;
+                    proxy_set_header True-Client-IP \$remote_addr;
                     proxy_set_header X-Forwarded-Proto \$scheme;
                     # The app reads this only when TRUSTED_CLIENT_IP_SOURCE=cloudflare.
                     # Keep the provider-supplied client address available instead of
@@ -238,6 +239,7 @@ jobs:
                     proxy_set_header X-ECFC-Remote-Address \$realip_remote_addr;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$remote_addr;
+                    proxy_set_header True-Client-IP \$remote_addr;
                     proxy_set_header X-Forwarded-Proto \$scheme;
                     # The app reads this only when TRUSTED_CLIENT_IP_SOURCE=cloudflare.
                     # Keep the provider-supplied client address available instead of

@@ -6,6 +6,7 @@ import {
   normalizeIpLocationProviderResponse,
   normalizeIpRegionFromGeo,
   resolveIpLocation,
+  setCloudflareGeoContextReaderForTests,
 } from '../lib/ip-region'
 import {
   getClientIp,
@@ -314,6 +315,280 @@ test('reports the selected trusted header and refuses forged forwarded headers',
   } finally {
     if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
     else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+  }
+})
+
+test('True-Client-IP 仅在 Cloudflare 模式且与可信重写值一致时作为候选，且无法绕过可信来源', () => {
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  try {
+    // Cloudflare 模式：cf-connecting-ip 缺失时，true-client-ip 与 x-ecfc-client-ip
+    // 一致即可作为候选被解析（source 标记为 true-client-ip）。
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'cloudflare'
+    assert.equal(getClientIp(new Request('https://ecfc.fans', {
+      headers: { 'true-client-ip': '203.0.113.30', 'x-ecfc-client-ip': '203.0.113.30' },
+    })), '203.0.113.30')
+    assert.equal(
+      getClientIpResolution(new Request('https://ecfc.fans', {
+        headers: { 'true-client-ip': '203.0.113.30', 'x-ecfc-client-ip': '203.0.113.30' },
+      })).source,
+      'true-client-ip',
+    )
+
+    // Cloudflare 模式：true-client-ip 与可信重写值不一致时被丢弃，不能污染结果。
+    assert.equal(getClientIp(new Request('https://ecfc.fans', {
+      headers: {
+        'cf-connecting-ip': '203.0.113.30',
+        'true-client-ip': '9.9.9.9',
+        'x-ecfc-client-ip': '203.0.113.30',
+      },
+    })), '203.0.113.30')
+
+    // Nginx 模式（生产默认）：伪造 true-client-ip / cf-connecting-ip 都无法覆盖
+    // 可信的 x-ecfc-client-ip（对应任务 Test 8：非可信链路下伪造 header 无效）。
+    process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+    assert.equal(getClientIp(new Request('https://ecfc.fans', {
+      headers: {
+        'x-ecfc-client-ip': '203.0.113.30',
+        'true-client-ip': '9.9.9.9',
+        'cf-connecting-ip': '9.9.9.9',
+        'x-forwarded-for': '9.9.9.9',
+      },
+    })), '203.0.113.30')
+    assert.equal(
+      getClientIpResolution(new Request('https://ecfc.fans', {
+        headers: {
+          'x-ecfc-client-ip': '203.0.113.30',
+          'true-client-ip': '9.9.9.9',
+        },
+      })).source,
+      'x-ecfc-client-ip',
+    )
+  } finally {
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+  }
+})
+
+test('realIpRewriteMismatch 诊断标记 Nginx realip 未生效的链路', () => {
+  // realip 生效：X-ECFC-Client-IP（$remote_addr）与 CF-Connecting-IP 一致 → 不报警。
+  assert.equal(getClientIpDiagnostics(new Request('https://ecfc.fans', {
+    headers: { 'x-ecfc-client-ip': '203.0.113.40', 'cf-connecting-ip': '203.0.113.40' },
+  }), '203.0.113.40').realIpRewriteMismatch, false)
+
+  // realip 未生效：可信重写值与 Cloudflare 头不一致（典型为中间代理占据 $remote_addr）→ 报警。
+  assert.equal(getClientIpDiagnostics(new Request('https://ecfc.fans', {
+    headers: { 'x-ecfc-client-ip': '198.51.100.7', 'cf-connecting-ip': '203.0.113.40' },
+  }), '198.51.100.7').realIpRewriteMismatch, true)
+
+  // 未经过 Cloudflare（无 CF-Connecting-IP）时不误报。
+  assert.equal(getClientIpDiagnostics(new Request('https://ecfc.fans', {
+    headers: { 'x-ecfc-client-ip': '203.0.113.40' },
+  }), '203.0.113.40').realIpRewriteMismatch, false)
+
+  // 缺少可信重写值时不误报。
+  assert.equal(getClientIpDiagnostics(new Request('https://ecfc.fans', {
+    headers: { 'cf-connecting-ip': '203.0.113.40' },
+  }), 'unknown').realIpRewriteMismatch, false)
+
+  // 报警标记本身不含完整 IP（隐私）。
+  const diagnostics = getClientIpDiagnostics(new Request('https://ecfc.fans', {
+    headers: { 'x-ecfc-client-ip': '198.51.100.7', 'cf-connecting-ip': '203.0.113.40' },
+  }), '198.51.100.7')
+  assert.equal(diagnostics.realIpRewriteMismatch, true)
+  assert.doesNotMatch(JSON.stringify(diagnostics.realIpRewriteMismatch), /\d+\.\d+\.\d+\.\d+/)
+})
+
+test('TRUSTED_CLIENT_IP_SOURCE=cloudflare 不再隐式启用 Cloudflare Geo：cf 返回广东时仍以 provider 为准', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  const previousCfGeo = process.env.TRUSTED_CLOUDFLARE_GEO_CONTEXT
+  const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
+
+  process.env.IP_LOCATION_API_URL = 'https://unit.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'cloudflare'
+  delete process.env.TRUSTED_CLOUDFLARE_GEO_CONTEXT
+  process.env.IP_DIAGNOSTICS_LOG = 'false'
+  clearIpLocationCacheForTests()
+
+  // Simulate the production bug condition: a real Next.js request context in
+  // which getCloudflareContext returns a cf object that is NOT bound to the
+  // current client IP and resolves to Guangdong.
+  setCloudflareGeoContextReaderForTests(async () => ({
+    country: 'CN',
+    region: 'Guangdong',
+    regionCode: 'GD',
+  }))
+
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ country_code: 'CN', region_code: 'YN' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+
+  try {
+    const request = new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-ecfc-client-ip': '106.60.110.101', 'cf-connecting-ip': '106.60.110.101' },
+    })
+
+    // Default (switch off): IP source does NOT control Geo source → provider wins → 云南, never 广东.
+    assert.equal((await resolveIpLocation(request))?.label, '云南')
+
+    // Explicit switch on: cf context wins → 广东 (proves the switch is what gates it).
+    process.env.TRUSTED_CLOUDFLARE_GEO_CONTEXT = 'true'
+    assert.equal((await resolveIpLocation(request))?.label, '广东')
+  } finally {
+    globalThis.fetch = originalFetch
+    setCloudflareGeoContextReaderForTests(null)
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+    if (previousCfGeo === undefined) delete process.env.TRUSTED_CLOUDFLARE_GEO_CONTEXT
+    else process.env.TRUSTED_CLOUDFLARE_GEO_CONTEXT = previousCfGeo
+    if (previousDiagnostics === undefined) delete process.env.IP_DIAGNOSTICS_LOG
+    else process.env.IP_DIAGNOSTICS_LOG = previousDiagnostics
+  }
+})
+
+test('不同真实公网 IP 的 Geo 结果按 IP 独立缓存且互不污染', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
+
+  process.env.IP_LOCATION_API_URL = 'https://unit.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  process.env.IP_DIAGNOSTICS_LOG = 'false'
+  clearIpLocationCacheForTests()
+
+  const ipToRegion: Record<string, string> = {
+    '106.60.110.101': 'YN',
+    '39.144.138.232': 'SC',
+    '39.65.220.46': 'SD',
+  }
+  let fetchCalls = 0
+  globalThis.fetch = async (input) => {
+    fetchCalls += 1
+    const url = String(input)
+    const ip = Object.keys(ipToRegion).find((key) => url.includes(encodeURIComponent(key)))
+    return new Response(
+      JSON.stringify({ country_code: 'CN', region_code: ip ? ipToRegion[ip] : '44' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+
+  try {
+    const yunnan = new Request('https://ecfc.fans/api/posts', { headers: { 'x-ecfc-client-ip': '106.60.110.101' } })
+    const sichuan = new Request('https://ecfc.fans/api/posts', { headers: { 'x-ecfc-client-ip': '39.144.138.232' } })
+    const shandong = new Request('https://ecfc.fans/api/posts', { headers: { 'x-ecfc-client-ip': '39.65.220.46' } })
+
+    assert.equal((await resolveIpLocation(yunnan))?.label, '云南')
+    assert.equal((await resolveIpLocation(sichuan))?.label, '四川')
+    assert.equal((await resolveIpLocation(shandong))?.label, '山东')
+
+    const callsAfterFirstRound = fetchCalls
+    assert.equal(callsAfterFirstRound, 3)
+
+    // Second round must hit the per-IP cache, not re-query the provider, and
+    // each IP must still resolve to its own province (no cross-IP pollution).
+    assert.equal((await resolveIpLocation(yunnan))?.label, '云南')
+    assert.equal((await resolveIpLocation(sichuan))?.label, '四川')
+    assert.equal((await resolveIpLocation(shandong))?.label, '山东')
+    assert.equal(fetchCalls, callsAfterFirstRound)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+    if (previousDiagnostics === undefined) delete process.env.IP_DIAGNOSTICS_LOG
+    else process.env.IP_DIAGNOSTICS_LOG = previousDiagnostics
+  }
+})
+
+test('主 Geo provider 返回 429 时回退到 fallback provider 并返回其结果', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousFallbackUrl = process.env.IP_LOCATION_FALLBACK_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
+
+  process.env.IP_LOCATION_API_URL = 'https://primary.test/{ip}/json/'
+  process.env.IP_LOCATION_FALLBACK_API_URL = 'https://fallback.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  process.env.IP_DIAGNOSTICS_LOG = 'false'
+  clearIpLocationCacheForTests()
+
+  const requestedUrls: string[] = []
+  globalThis.fetch = async (input) => {
+    const url = String(input)
+    requestedUrls.push(url)
+    if (url.startsWith('https://primary.test')) return new Response('', { status: 429 })
+    return new Response(JSON.stringify({ country_code: 'CN', region_code: 'YN' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  try {
+    const location = await resolveIpLocation(new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-ecfc-client-ip': '106.60.110.101' },
+    }))
+    assert.equal(location?.label, '云南')
+    assert.ok(requestedUrls.some((url) => url.startsWith('https://primary.test')))
+    assert.ok(requestedUrls.some((url) => url.startsWith('https://fallback.test')))
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousFallbackUrl === undefined) delete process.env.IP_LOCATION_FALLBACK_API_URL
+    else process.env.IP_LOCATION_FALLBACK_API_URL = previousFallbackUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+    if (previousDiagnostics === undefined) delete process.env.IP_DIAGNOSTICS_LOG
+    else process.env.IP_DIAGNOSTICS_LOG = previousDiagnostics
+  }
+})
+
+test('主 provider 与 fallback 全部失败时返回 null，绝不退回广东', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousFallbackUrl = process.env.IP_LOCATION_FALLBACK_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
+
+  process.env.IP_LOCATION_API_URL = 'https://primary.test/{ip}/json/'
+  process.env.IP_LOCATION_FALLBACK_API_URL = 'https://fallback.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  process.env.IP_DIAGNOSTICS_LOG = 'false'
+  clearIpLocationCacheForTests()
+
+  globalThis.fetch = async (input) => {
+    const url = String(input)
+    if (url.startsWith('https://primary.test')) return new Response('', { status: 429 })
+    return new Response('', { status: 500 })
+  }
+
+  try {
+    const location = await resolveIpLocation(new Request('https://ecfc.fans/api/posts', {
+      headers: { 'x-ecfc-client-ip': '106.60.110.101' },
+    }))
+    assert.equal(location, null)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousFallbackUrl === undefined) delete process.env.IP_LOCATION_FALLBACK_API_URL
+    else process.env.IP_LOCATION_FALLBACK_API_URL = previousFallbackUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+    if (previousDiagnostics === undefined) delete process.env.IP_DIAGNOSTICS_LOG
+    else process.env.IP_DIAGNOSTICS_LOG = previousDiagnostics
   }
 })
 

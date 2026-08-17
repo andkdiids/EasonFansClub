@@ -205,6 +205,7 @@ type LocationCacheEntry = {
   expiresAt: number
   value: IpLocation | null
   lookupResult: IpLookupResult
+  provider: string | null
 }
 
 type IpLookupResult =
@@ -217,6 +218,8 @@ const ipLocationCache = new Map<string, LocationCacheEntry>()
 type LocationLookup = {
   location: IpLocation | null
   lookupResult: IpLookupResult
+  provider: string | null
+  cacheHit: boolean
 }
 
 const ipLocationInFlight = new Map<string, Promise<LocationLookup>>()
@@ -371,7 +374,16 @@ export function normalizeIpLocationProviderResponse(payload: unknown): IpLocatio
   })
 }
 
-async function readCloudflareGeo(): Promise<EdgeGeo | null> {
+type CloudflareGeoContextReader = () => Promise<EdgeGeo | null>
+
+// In a real Cloudflare Workers/OpenNext deployment the worker entrypoint
+// populates the request's cf metadata from the actual client. Under PM2 +
+// Nginx the @opennextjs/cloudflare adapter can still synthesize a cf object
+// (via wrangler/getPlatformProxy, cached on the global scope) that is NOT
+// derived from the current request's client IP — so it must never be
+// auto-enabled. It is gated behind TRUSTED_CLOUDFLARE_GEO_CONTEXT and is fully
+// decoupled from which client-IP header is trusted.
+async function defaultCloudflareGeoContextReader(): Promise<EdgeGeo | null> {
   try {
     const context = await getCloudflareContext({ async: true })
     if (!context.cf) return null
@@ -381,9 +393,20 @@ async function readCloudflareGeo(): Promise<EdgeGeo | null> {
       regionCode: context.cf.regionCode,
     }
   } catch {
-    // The normal PM2 runtime has no Cloudflare request context.
     return null
   }
+}
+
+let cloudflareGeoContextReader: CloudflareGeoContextReader = defaultCloudflareGeoContextReader
+
+async function readCloudflareGeo(): Promise<EdgeGeo | null> {
+  return cloudflareGeoContextReader()
+}
+
+export function setCloudflareGeoContextReaderForTests(
+  reader: CloudflareGeoContextReader | null,
+) {
+  cloudflareGeoContextReader = reader ?? defaultCloudflareGeoContextReader
 }
 
 function readTrustedEdgeGeo(request: Request): IpLocation | null {
@@ -402,14 +425,36 @@ function timeoutMs() {
     : DEFAULT_IP_LOCATION_TIMEOUT_MS
 }
 
-function apiUrl(ip: string) {
-  const template = (process.env.IP_LOCATION_API_URL || DEFAULT_IP_LOCATION_API_URL).trim()
-  if (!template.includes('{ip}')) {
+function cloudflareGeoContextEnabled() {
+  return process.env.TRUSTED_CLOUDFLARE_GEO_CONTEXT === 'true'
+}
+
+// Primary provider first, then an optional fallback provider. Both must contain
+// the {ip} placeholder. No fallback URL configured ⇒ a primary failure returns
+// null (never a province fallback).
+function configuredApiUrlTemplates(): string[] {
+  const templates: string[] = []
+  const primary = (process.env.IP_LOCATION_API_URL || DEFAULT_IP_LOCATION_API_URL).trim()
+  if (primary.includes('{ip}')) {
+    templates.push(primary)
+  } else {
     console.error('[ip-location.config]', { reason: 'missing_ip_placeholder' })
-    return null
   }
-  const encodedIp = encodeURIComponent(ip)
-  return template.replaceAll('{ip}', encodedIp)
+  const fallback = process.env.IP_LOCATION_FALLBACK_API_URL?.trim()
+  if (fallback && fallback.includes('{ip}')) templates.push(fallback)
+  return templates
+}
+
+function buildProviderUrl(template: string, ip: string) {
+  return template.replaceAll('{ip}', encodeURIComponent(ip))
+}
+
+function providerLabel(template: string) {
+  try {
+    return new URL(template.replace('{ip}', '0.0.0.0')).origin
+  } catch {
+    return 'unknown'
+  }
 }
 
 function cacheTtlMs(value: IpLocation | null) {
@@ -421,7 +466,12 @@ function cacheTtlMs(value: IpLocation | null) {
   return DEFAULT_IP_LOCATION_CACHE_TTL_MS
 }
 
-function cacheLocation(ip: string, value: IpLocation | null, lookupResult: IpLookupResult) {
+function cacheLocation(
+  ip: string,
+  value: IpLocation | null,
+  lookupResult: IpLookupResult,
+  provider: string | null,
+) {
   if (ipLocationCache.size >= MAX_IP_LOCATION_CACHE_ENTRIES) {
     const oldestKey = ipLocationCache.keys().next().value
     if (oldestKey) ipLocationCache.delete(oldestKey)
@@ -430,13 +480,14 @@ function cacheLocation(ip: string, value: IpLocation | null, lookupResult: IpLoo
     expiresAt: Date.now() + cacheTtlMs(value),
     value,
     lookupResult,
+    provider,
   })
 }
 
-async function fetchIpLocation(ip: string): Promise<LocationLookup> {
-  const url = apiUrl(ip)
-  if (!url) return { location: null, lookupResult: 'provider-error' }
-
+async function fetchOneProvider(
+  url: string,
+  label: string,
+): Promise<{ location: IpLocation | null; lookupResult: IpLookupResult }> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs())
   try {
@@ -454,23 +505,23 @@ async function fetchIpLocation(ip: string): Promise<LocationLookup> {
       signal: controller.signal,
     })
     if (response.status === 429) {
-      console.warn('[ip-location.provider]', { status: 429, reason: 'rate_limited' })
+      console.warn('[ip-location.provider]', { provider: label, status: 429, reason: 'rate_limited' })
       return { location: null, lookupResult: 'provider-error' }
     }
     if (!response.ok) {
-      console.warn('[ip-location.provider]', { status: response.status, reason: 'http_error' })
+      console.warn('[ip-location.provider]', { provider: label, status: response.status, reason: 'http_error' })
       return { location: null, lookupResult: 'provider-error' }
     }
     const payload = await response.json().catch(() => null)
     const location = normalizeIpLocationProviderResponse(payload)
     if (!location) {
-      console.warn('[ip-location.provider]', { status: response.status, reason: 'invalid_response' })
+      console.warn('[ip-location.provider]', { provider: label, status: response.status, reason: 'invalid_response' })
       return { location: null, lookupResult: 'unknown-region' }
     }
     return { location, lookupResult: 'success' }
   } catch (error) {
     const reason = error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'request_error'
-    console.warn('[ip-location.provider]', { reason })
+    console.warn('[ip-location.provider]', { provider: label, reason })
     return {
       location: null,
       lookupResult: reason === 'timeout' ? 'timeout' : 'provider-error',
@@ -480,11 +531,40 @@ async function fetchIpLocation(ip: string): Promise<LocationLookup> {
   }
 }
 
-async function lookupIpLocation(ip: string) {
+// Try the primary provider, then the optional fallback. The first success wins;
+// every failure mode (429, timeout, http error, invalid response) falls through
+// to the next provider, and an exhaustive failure returns null — never a
+// province fallback.
+async function fetchIpLocation(ip: string): Promise<LocationLookup> {
+  const templates = configuredApiUrlTemplates()
+  if (!templates.length) {
+    return { location: null, lookupResult: 'provider-error', provider: null, cacheHit: false }
+  }
+
+  let lastResult: IpLookupResult = 'provider-error'
+  let lastProvider: string | null = null
+  for (const template of templates) {
+    const label = providerLabel(template)
+    lastProvider = label
+    const result = await fetchOneProvider(buildProviderUrl(template, ip), label)
+    if (result.location) {
+      return { location: result.location, lookupResult: 'success', provider: label, cacheHit: false }
+    }
+    lastResult = result.lookupResult
+  }
+  return { location: null, lookupResult: lastResult, provider: lastProvider, cacheHit: false }
+}
+
+async function lookupIpLocation(ip: string): Promise<LocationLookup> {
   const cached = ipLocationCache.get(ip)
   if (cached) {
     if (cached.expiresAt > Date.now()) {
-      return { location: cached.value, lookupResult: cached.lookupResult }
+      return {
+        location: cached.value,
+        lookupResult: cached.lookupResult,
+        provider: cached.provider,
+        cacheHit: true,
+      }
     }
     ipLocationCache.delete(ip)
   }
@@ -493,7 +573,7 @@ async function lookupIpLocation(ip: string) {
   if (inFlight) return inFlight
 
   const request = fetchIpLocation(ip).then((lookup) => {
-    cacheLocation(ip, lookup.location, lookup.lookupResult)
+    cacheLocation(ip, lookup.location, lookup.lookupResult, lookup.provider)
     return lookup
   }).finally(() => {
     ipLocationInFlight.delete(ip)
@@ -502,43 +582,82 @@ async function lookupIpLocation(ip: string) {
   return request
 }
 
+type IpLocationDiagnostics = {
+  clientIpSource: string
+  geoSource: 'cloudflare-context' | 'trusted-edge' | 'provider' | 'none'
+  lookupResult: string
+  provider: string | null
+  cacheHit: boolean
+}
+
+function logIpLocationDiagnostics(diagnostics: IpLocationDiagnostics) {
+  if (process.env.IP_DIAGNOSTICS_LOG !== 'true' && process.env.DEBUG_CLIENT_IP !== 'true') return
+  console.info('[ip-location.diagnostics]', diagnostics)
+}
+
 /**
- * Resolve one request's location. The client IP is obtained once from the
- * trusted proxy contract, then the location lookup is cached by that exact IP.
- * A failed/unknown lookup returns null; it never becomes a province fallback.
+ * Resolve one request's location. The authoritative client IP is obtained once
+ * from the trusted proxy contract, then the location lookup is cached by that
+ * exact IP. A failed/unknown lookup returns null; it never becomes a province
+ * fallback.
+ *
+ * Which client-IP header is trusted (TRUSTED_CLIENT_IP_SOURCE) is decoupled from
+ * where Geo metadata comes from. Cloudflare request-context geo is only
+ * consulted under the separate, explicit TRUSTED_CLOUDFLARE_GEO_CONTEXT switch
+ * (default off) — it must never be auto-enabled by trusting a Cloudflare IP
+ * header, because under PM2 + Nginx the cf object is not bound to the real
+ * client IP and would pin every user to one shared region.
  */
 export async function resolveIpLocation(request: Request): Promise<IpLocation | null> {
   const clientIpResolution = getClientIpResolution(request)
   const clientIp = clientIpResolution.ip
-  const configuredSource = (process.env.TRUSTED_CLIENT_IP_SOURCE || 'nginx').trim().toLowerCase()
 
-  if (configuredSource === 'cloudflare') {
+  if (cloudflareGeoContextEnabled()) {
     const cloudflareLocation = normalizeLocation(await readCloudflareGeo())
     if (cloudflareLocation) {
-      logIpLocationDiagnostics(clientIpResolution.source, 'success')
+      logIpLocationDiagnostics({
+        clientIpSource: clientIpResolution.source,
+        geoSource: 'cloudflare-context',
+        lookupResult: 'success',
+        provider: null,
+        cacheHit: false,
+      })
       return cloudflareLocation
     }
   }
 
   const trustedEdgeLocation = readTrustedEdgeGeo(request)
   if (trustedEdgeLocation) {
-    logIpLocationDiagnostics(clientIpResolution.source, 'success')
+    logIpLocationDiagnostics({
+      clientIpSource: clientIpResolution.source,
+      geoSource: 'trusted-edge',
+      lookupResult: 'success',
+      provider: null,
+      cacheHit: false,
+    })
     return trustedEdgeLocation
   }
 
   if (clientIpResolution.status !== 'success' || clientIp === 'unknown') {
-    logIpLocationDiagnostics(clientIpResolution.source, clientIpResolution.status)
+    logIpLocationDiagnostics({
+      clientIpSource: clientIpResolution.source,
+      geoSource: 'none',
+      lookupResult: clientIpResolution.status,
+      provider: null,
+      cacheHit: false,
+    })
     return null
   }
 
   const lookup = await lookupIpLocation(clientIp)
-  logIpLocationDiagnostics(clientIpResolution.source, lookup.lookupResult)
+  logIpLocationDiagnostics({
+    clientIpSource: clientIpResolution.source,
+    geoSource: lookup.location ? 'provider' : 'none',
+    lookupResult: lookup.lookupResult,
+    provider: lookup.provider,
+    cacheHit: lookup.cacheHit,
+  })
   return lookup.location
-}
-
-function logIpLocationDiagnostics(clientIpSource: string, lookupResult: string) {
-  if (process.env.IP_DIAGNOSTICS_LOG !== 'true' && process.env.DEBUG_CLIENT_IP !== 'true') return
-  console.info('[ip-location.diagnostics]', { clientIpSource, lookupResult })
 }
 
 function isRequest(value: Request | IpLocation | null): value is Request {

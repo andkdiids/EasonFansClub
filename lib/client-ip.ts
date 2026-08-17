@@ -4,6 +4,7 @@ export type IpHeaderSource = Readonly<Record<string, HeaderValue>> | Pick<Header
 
 export type ClientIpHeaderSource =
   | 'cf-connecting-ip'
+  | 'true-client-ip'
   | 'x-ecfc-client-ip'
   | 'x-forwarded-for'
   | 'x-real-ip'
@@ -149,8 +150,10 @@ type IpCandidate = {
 
 function cloudflareHeaderCandidates(source: IpHeaderSource): IpCandidate[] {
   const cloudflareIp = readHeader(source, 'cf-connecting-ip')
+  const trueClientIp = readHeader(source, 'true-client-ip')
   const rewrittenClientIp = readHeader(source, trustedClientIpHeader)
   const normalizedCloudflareIp = normalizeIp(cloudflareIp)
+  const normalizedTrueClientIp = normalizeIp(trueClientIp)
   const normalizedRewrittenClientIp = normalizeIp(rewrittenClientIp)
 
   // Nginx overwrites X-ECFC-Client-IP after the realip module has validated
@@ -162,6 +165,9 @@ function cloudflareHeaderCandidates(source: IpHeaderSource): IpCandidate[] {
   }
   return [
     { value: cloudflareIp, source: 'cf-connecting-ip' },
+    ...(normalizedTrueClientIp && normalizedTrueClientIp === normalizedRewrittenClientIp
+      ? [{ value: trueClientIp, source: 'true-client-ip' as const }]
+      : []),
     { value: rewrittenClientIp, source: 'x-ecfc-client-ip' },
   ]
 }
@@ -307,6 +313,7 @@ function safeTextForDiagnostics(value: string | null) {
 export function getClientIpDiagnostics(request: Request, resolvedClientIp = getClientIp(request)) {
   const resolution = getClientIpResolution(request)
   const cfConnectingIp = request.headers.get('cf-connecting-ip')
+  const trueClientIp = request.headers.get('true-client-ip')
   const xRealIp = request.headers.get('x-real-ip')
   const xForwardedFor = request.headers.get('x-forwarded-for')
   const trustedClientIp = request.headers.get(trustedClientIpHeader)
@@ -314,18 +321,35 @@ export function getClientIpDiagnostics(request: Request, resolvedClientIp = getC
   const host = request.headers.get('host')
   const forwardedHost = request.headers.get('x-forwarded-host')
 
+  // When the Nginx realip module rewrites $remote_addr from Cloudflare's
+  // CF-Connecting-IP, X-ECFC-Client-IP ($remote_addr) equals CF-Connecting-IP.
+  // A mismatch means realip did not fire — typically an intermediate proxy
+  // reached Nginx from outside the trusted Cloudflare ranges, so $remote_addr
+  // is the proxy address rather than the real user. That is the condition in
+  // which every request resolves to one shared (often Guangdong) IP region.
+  const normalizedTrustedForCompare = normalizeIp(trustedClientIp)
+  const normalizedCfForCompare = normalizeIp(cfConnectingIp)
+  const realIpRewriteMismatch = Boolean(
+    normalizedTrustedForCompare
+      && normalizedCfForCompare
+      && normalizedTrustedForCompare !== normalizedCfForCompare,
+  )
+
   return {
     source: trustedClientIpSource(),
     clientIpSource: resolution.source,
     resolutionStatus: resolution.status,
     hasCfConnectingIp: hasHeaderValue(cfConnectingIp),
+    hasTrueClientIp: hasHeaderValue(trueClientIp),
     hasXRealIp: hasHeaderValue(xRealIp),
     hasTrustedClientIp: hasHeaderValue(trustedClientIp),
     forwardedForCount: forwardedForCount(xForwardedFor),
     hasRemoteAddress: hasHeaderValue(remoteAddress),
     hasHost: hasHeaderValue(host),
     hasForwardedHost: hasHeaderValue(forwardedHost),
+    realIpRewriteMismatch,
     cfConnectingIp: maskIpForDiagnostics(cfConnectingIp),
+    trueClientIp: maskIpForDiagnostics(trueClientIp),
     xForwardedFor: maskForwardedForDiagnostics(xForwardedFor),
     xRealIp: maskIpForDiagnostics(xRealIp),
     trustedClientIp: maskIpForDiagnostics(trustedClientIp),
