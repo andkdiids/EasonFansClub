@@ -118,9 +118,9 @@ export function ClinicHomeClient({
 
   return (
     <main className="clinic-page-shell">
-      <header className="clinic-hero">
+      <header className="clinic-hero clinic-home-hero">
         <div className="clinic-hero-copy">
-          <p className="clinic-kicker"><UiIcon name="stethoscope" /> EASON FANS CLUB · 病友门诊</p>
+          <p className="clinic-kicker"><UiIcon name="stethoscope" /> ECFC · 病友门诊</p>
           <h1>阿士匹灵门诊部</h1>
           <p>今日有咩唔舒服？入嚟坐低讲。</p>
           <div className="clinic-hero-actions">
@@ -129,7 +129,15 @@ export function ClinicHomeClient({
             {isAuthenticated ? <Link href="/clinic/me" className="clinic-text-link">我的门诊 →</Link> : <Link href="/login?redirect=%2Fclinic" className="clinic-text-link">登录后参与互动 →</Link>}
           </div>
         </div>
-        <div className="clinic-hero-mark" aria-hidden="true"><UiIcon name="stethoscope" /></div>
+        <aside className="clinic-hero-info" aria-label="门诊说明">
+          <div className="clinic-info-card">
+            <h2>门诊说明</h2>
+            <p>这里是阿士匹灵门诊部。</p>
+            <p>主要提供给需要挂号、会诊的 EF，聊聊最近的烦恼，听听大家的意见。</p>
+            <p>门诊发帖及参与会诊不会获得任何挂号费、经验或其他奖励。</p>
+            <p>如果只是想聊天、分享日常或水帖，请前往 E院广场。</p>
+          </div>
+        </aside>
       </header>
 
       <nav className="clinic-category-nav" aria-label="门诊分类">

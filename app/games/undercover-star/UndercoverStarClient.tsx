@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { UndercoverDescriptionByRound, UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomMessagePublic, UndercoverRoomState } from '@/lib/undercover-star-protocol'
+import type { UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomMessagePublic, UndercoverRoomState } from '@/lib/undercover-star-protocol'
 import type { UndercoverDifficulty } from '@prisma/client'
 import { undercoverDifficultyLabels } from '@/lib/undercover-star-config'
 import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '@/lib/undercover-star-client-state'
@@ -240,7 +240,7 @@ export function UndercoverStarClient() {
         setView('MATCH')
       }
       return true
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '操作失败。') } finally { setBusy(false) }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '操作暂未成功，请稍候重试。') } finally { setBusy(false) }
   }
 
   async function leaveWaitingRoom() {
@@ -266,7 +266,7 @@ export function UndercoverStarClient() {
       setVoteAbstain(false)
       if (data.snapshot.status === 'FINISHED') realtimeRef.current?.stop()
       return true
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '提交失败。'); return false } finally { setBusy(false) }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '提交暂未成功，请稍候重试。'); return false } finally { setBusy(false) }
   }
 
   const countdown = useCountdown(snapshot?.phaseDeadline || null)
@@ -324,10 +324,10 @@ export function UndercoverStarClient() {
         </div>
       ) : null}
       {view === 'ROOM' && room ? (
-        <>
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
           <Room room={room} busy={busy} onReady={(ready) => void roomAction(`/api/entertainment/undercover-star/rooms/${room.roomId}/ready`, { ready })} onStart={() => void roomAction(`/api/entertainment/undercover-star/rooms/${room.roomId}/start`)} onLeave={() => void leaveWaitingRoom()} onKick={(targetUserId) => void kickPlayer(targetUserId)} onDifficulty={(value) => void roomAction(`/api/entertainment/undercover-star/rooms/${room.roomId}/difficulty`, { difficulty: value })} />
           <RoomChat roomId={room.roomId} viewerUserId={room.viewerUserId} />
-        </>
+        </div>
       ) : null}
       {view === 'MATCH' && snapshot && privateState ? <Match snapshot={snapshot} privateState={privateState} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} voteOptions={voteOptions} countdown={countdown} showPrivate={showPrivate} description={description} guess={guess} voteTarget={voteTarget} voteAbstain={voteAbstain} busy={busy} onShowPrivate={setShowPrivate} onVoteAbstain={setVoteAbstain} onDescription={setDescription} onGuess={setGuess} onVoteTarget={setVoteTarget} onConfirmRole={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/role-confirm`, { expectedRevision: snapshot.revision })} onDescriptionSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/descriptions`, { content: description, expectedRevision: snapshot.revision, expectedRound: snapshot.round }).then((success) => { if (success) setDescription('') })} onVoteSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/votes`, voteAbstain ? { abstain: true, expectedRevision: snapshot.revision, expectedRound: snapshot.round } : { targetId: voteTarget, expectedRevision: snapshot.revision, expectedRound: snapshot.round })} onGuessSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/guess`, { guess, expectedRevision: snapshot.revision }).then((success) => { if (success) setGuess('') })} onBack={resetToLobby} /> : view === 'MATCH' ? <div className="border border-sky-100 bg-white p-6 text-sm font-bold text-slate-500">正在恢复对局…</div> : null}
       </div>
@@ -466,7 +466,7 @@ function Room({ room, busy, onReady, onStart, onLeave, onKick, onDifficulty }: {
   const [difficulty, setDifficulty] = useState<UndercoverDifficulty>(room.difficulty)
   useEffect(() => { setDifficulty(room.difficulty) }, [room.difficulty])
   async function changeDifficulty(value: UndercoverDifficulty) { if (busy || value === difficulty) return; setDifficulty(value); try { await onDifficulty(value) } catch { setDifficulty(room.difficulty) } }
-  return <section className="space-y-5"><div className="border border-sky-100 bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className=" text-2xl font-black text-brand-950">房间 {room.roomCode}</h2><p className="mt-2 text-sm font-bold text-slate-500">{room.hasPassword ? '私密房间' : '公开房间'} · {room.currentCount} / {room.maxPlayers} 人 · 难度 {undercoverDifficultyLabels[difficulty]}</p></div><div className="text-right text-xs font-bold text-slate-500">{room.players.length < 3 ? '至少需要 3 名玩家才能开始。' : allReady ? '所有玩家已准备。' : '等待所有玩家准备。'}</div></div><div className="mt-7 grid grid-cols-2 gap-3">{room.players.map((player) => <div key={player.playerId} className={`border p-4 text-center sm:p-6 ${player.isHost ? 'bg-sky-50/40' : 'border-sky-100'}`}><div className="mx-auto flex justify-center"><Avatar user={player} /></div><strong className="mt-3 block truncate text-sm font-black text-brand-950">{player.name}</strong><small className="mt-1 block text-xs font-bold text-slate-400">Lv.{player.level}</small><small className={`mt-1 block text-xs font-black ${player.isHost ? 'text-brand-700' : player.isReady ? 'text-emerald-700' : 'text-slate-400'}`}>{player.isHost ? '房主' : player.isReady ? '已准备' : '未准备'}</small>{isHost && !player.isHost ? <button type="button" disabled={busy} onClick={() => onKick(player.userId)} className="mt-3 border border-red-200 px-3 py-2 text-xs font-black text-red-700">踢出</button> : null}</div>)}{Array.from({ length: Math.max(0, 4 - room.players.length) }).map((_, index) => <div key={`empty-${index}`} className="border border-dashed border-sky-200 p-4 text-center text-sm font-bold text-slate-400 sm:p-6">等待玩家加入</div>)}</div><div className="mt-6 border border-sky-100 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs font-black text-slate-500">房间难度</span>{isHost ? <select value={difficulty} disabled={busy} onChange={(event) => void changeDifficulty(event.target.value as UndercoverDifficulty)} className="border border-sky-100 px-3 py-2 text-sm font-bold">{['EASY','NORMAL','HARD'].map((value) => <option key={value} value={value}>{undercoverDifficultyLabels[value as UndercoverDifficulty]}</option>)}</select> : <span className="text-sm font-bold text-slate-700">{undercoverDifficultyLabels[difficulty]}</span>}</div></div><div className="mt-6 flex flex-wrap gap-3"><button type="button" disabled={busy || !me} onClick={() => onReady(!(me?.isReady || false))} className="bg-sky-700 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{me?.isReady ? '取消准备' : '准备'}</button>{isHost ? <button type="button" disabled={busy || !allReady} onClick={onStart} className="bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">开始游戏</button> : null}<button type="button" disabled={busy} onClick={onLeave} className="border border-red-200 px-5 py-3 text-sm font-black text-red-700">退出房间</button></div></div><p className="border-l-2 border-amber-400 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">房主退出后，等待房会立即关闭；对局开始后可以通过刷新页面恢复观看。</p></section>
+  return <section className="space-y-5"><div className="border border-sky-100 bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className=" text-2xl font-black text-brand-950">房间 {room.roomCode}</h2><p className="mt-2 text-sm font-bold text-slate-500">{room.hasPassword ? '私密房间' : '公开房间'} · {room.currentCount} / {room.maxPlayers} 人 · 难度 {undercoverDifficultyLabels[difficulty]}</p></div><div className="text-right text-xs font-bold text-slate-500">{room.players.length < 3 ? '至少需要 3 名玩家才能开始。' : allReady ? '所有玩家已准备。' : '等待所有玩家准备。'}</div></div><div className="mt-7 space-y-2"><p className="text-xs font-black text-slate-500">房间玩家 {room.currentCount} / {room.maxPlayers}</p>{room.players.map((player) => <div key={player.playerId} className={`flex items-center gap-3 border p-3 ${player.isHost ? 'bg-sky-50/40' : 'border-sky-100'}`}><Avatar user={player} small /><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="min-w-0 truncate text-sm font-black text-brand-950">{player.name}</span><span className="shrink-0 text-xs font-bold text-slate-400">Lv.{player.level}</span></div><div className={`mt-0.5 text-xs font-black ${player.isHost ? 'text-brand-700' : player.isReady ? 'text-emerald-700' : 'text-slate-400'}`}>{player.isHost ? '房主' : player.isReady ? '已准备' : '未准备'}</div></div>{isHost && !player.isHost ? <button type="button" disabled={busy} onClick={() => onKick(player.userId)} className="shrink-0 border border-red-200 px-3 py-1.5 text-xs font-black text-red-700">踢出</button> : null}</div>)}</div><div className="mt-6 border border-sky-100 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs font-black text-slate-500">房间难度</span>{isHost ? <select value={difficulty} disabled={busy} onChange={(event) => void changeDifficulty(event.target.value as UndercoverDifficulty)} className="border border-sky-100 px-3 py-2 text-sm font-bold">{['EASY','NORMAL','HARD'].map((value) => <option key={value} value={value}>{undercoverDifficultyLabels[value as UndercoverDifficulty]}</option>)}</select> : <span className="text-sm font-bold text-slate-700">{undercoverDifficultyLabels[difficulty]}</span>}</div></div><div className="mt-6 flex flex-wrap gap-3"><button type="button" disabled={busy || !me} onClick={() => onReady(!(me?.isReady || false))} className="bg-sky-700 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{me?.isReady ? '取消准备' : '准备'}</button>{isHost ? <button type="button" disabled={busy || !allReady} onClick={onStart} className="bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">开始游戏</button> : null}<button type="button" disabled={busy} onClick={onLeave} className="border border-red-200 px-5 py-3 text-sm font-black text-red-700">退出房间</button></div></div><p className="border-l-2 border-amber-400 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">房主退出后，等待房会立即关闭；对局开始后可以通过刷新页面恢复观看。</p></section>
 }
 
 function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeaker, voteOptions, countdown, showPrivate, description, guess, voteTarget, voteAbstain, busy, onShowPrivate, onDescription, onGuess, onVoteTarget, onVoteAbstain, onConfirmRole, onDescriptionSubmit, onVoteSubmit, onGuessSubmit, onBack }: { snapshot: UndercoverPublicMatchSnapshot; privateState: UndercoverPrivateState; currentRoundDescriptions: UndercoverPublicMatchSnapshot['descriptions']; currentSpeaker?: UndercoverPublicMatchSnapshot['players'][number]; voteOptions: UndercoverPublicMatchSnapshot['players']; countdown: number | null; showPrivate: boolean; description: string; guess: string; voteTarget: string | null; voteAbstain: boolean; busy: boolean; onShowPrivate: (value: boolean) => void; onDescription: (value: string) => void; onGuess: (value: string) => void; onVoteTarget: (value: string | null) => void; onVoteAbstain: (value: boolean) => void; onConfirmRole: () => void; onDescriptionSubmit: () => void; onVoteSubmit: () => void; onGuessSubmit: () => void; onBack: () => void }) {
@@ -474,17 +474,178 @@ function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeake
   useEffect(() => {
     if (privateState.roleConfirmed) onShowPrivate(false)
   }, [onShowPrivate, privateState.roleConfirmed])
-  return <section className="space-y-5"><div className="flex flex-wrap items-center justify-between gap-3 border border-sky-100 bg-white px-5 py-4 shadow-sm"><div><p className="text-xs font-black tracking-[0.16em] text-brand-700">第 {snapshot.round} 轮 · {phaseTitle(snapshot.phase)}</p><h2 className="mt-1 text-xl font-black text-brand-950">卧底巨星</h2></div><div className="flex items-center gap-3"><span className="text-sm font-black text-brand-700">{countdown === null ? '—' : `${countdown}s`}</span><button type="button" onClick={() => onShowPrivate(!showPrivate)} className="border border-sky-200 px-3 py-2 text-xs font-black text-brand-700">{showPrivate ? '隐藏我的词' : '查看我的词'}</button></div></div>{(snapshot.phase === 'ROLE_REVEAL' || showPrivate) && !isFinished ? <section className="mx-auto max-w-md border border-sky-100 bg-white p-6 text-center shadow-sm sm:p-10"><p className="text-xs font-black tracking-[0.16em] text-slate-500">你的词</p>{showPrivate ? <><p className="mt-4 text-4xl font-black text-brand-950">{privateState.word}</p></> : <p className="mt-8 text-2xl font-black text-slate-400">词已隐藏</p>}<button type="button" disabled={busy || (snapshot.phase === 'ROLE_REVEAL' && privateState.roleConfirmed)} onClick={snapshot.phase === 'ROLE_REVEAL' ? onConfirmRole : () => onShowPrivate(false)} className="mt-8 w-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{snapshot.phase === 'ROLE_REVEAL' ? (privateState.roleConfirmed ? '已确认，等待其他玩家' : '我知道了') : '关闭私密信息'}</button></section> : null}{!isFinished && snapshot.phase !== 'ROLE_REVEAL' ? <><section className="border border-sky-100 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-lg font-black text-brand-950">玩家状态</h3><span className="text-xs font-bold text-slate-500">已投票 {snapshot.voteProgress.submitted} / {snapshot.voteProgress.total}</span></div><div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">{snapshot.players.map((player) => <div key={player.playerId} className={`border p-3 ${player.playerId === snapshot.currentSpeakerId ? 'border-amber-400 bg-amber-50' : 'border-sky-100'} ${!player.isAlive ? 'opacity-45' : ''}`}><div className="flex items-center gap-2"><Avatar user={player} small /><span className="min-w-0 truncate text-sm font-black text-brand-950">{player.name}</span></div><small className="mt-2 block text-xs font-bold text-slate-500">{!player.isAlive ? '已淘汰' : player.playerId === snapshot.currentSpeakerId ? '正在描述' : '存活'}</small></div>)}</div></section>{snapshot.phase === 'DESCRIBING' ? <section className="border border-sky-100 bg-white p-5 shadow-sm"><h3 className="text-lg font-black text-brand-950">轮到谁描述？</h3><p className="mt-2 text-sm font-bold text-slate-500">{currentSpeaker ? `当前：${currentSpeaker.name}` : '等待服务端推进。'} · 不能直接说出自己的词语。</p><div className="mt-5 space-y-3">{currentRoundDescriptions.map((item) => <div key={`${item.round}-${item.playerId}`} className="border-l-2 border-sky-300 bg-sky-50/50 p-3"><strong className="text-xs font-black text-brand-700">{item.name}</strong><p className="mt-1 break-words text-sm font-bold text-brand-950">{item.content}</p></div>)}</div>{privateState.canDescribe ? <div className="mt-5"><textarea value={description} onChange={(event) => onDescription(event.target.value)} maxLength={30} rows={3} className="block w-full resize-none border border-sky-100 p-3 text-sm font-bold outline-none focus:border-brand-400" placeholder="用一句话描述你的词（最多 30 字）" /><div className="mt-2 flex items-center justify-between"><span className="text-xs font-bold text-slate-400">{description.length} / 30</span><button type="button" disabled={busy || !description.trim()} onClick={onDescriptionSubmit} className="bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-40">提交描述</button></div></div> : <p className="mt-5 bg-slate-50 p-3 text-sm font-bold text-slate-500">等待其他玩家描述，提交后不能修改。</p>}</section> : null}{snapshot.phase === 'VOTING' || snapshot.phase === 'TIE_VOTING' ? <section className="border border-sky-100 bg-white p-5 shadow-sm"><h3 className="text-lg font-black text-brand-950">{snapshot.phase === 'TIE_VOTING' ? '平票加赛：选出一人' : '谁最可疑？'}</h3><p className="mt-2 text-sm font-bold text-slate-500">所有人投完前不会显示票数与投票对象。</p><div className="mt-5 grid gap-3 sm:grid-cols-2">{voteOptions.map((player) => <button type="button" key={player.playerId} disabled={privateState.voteSubmitted || !privateState.canVote} onClick={() => { onVoteTarget(player.playerId); onVoteAbstain(false) }} className={`flex items-center gap-3 border p-3 text-left ${voteTarget === player.playerId ? 'border-brand-600 bg-sky-50' : 'border-sky-100'} disabled:cursor-not-allowed disabled:opacity-60`}><Avatar user={player} small /><span className="min-w-0 flex-1 truncate text-sm font-black text-brand-950">{player.name}</span>{voteTarget === player.playerId ? <span className="text-xs font-black text-brand-700">已选</span> : null}</button>)}</div><button type="button" disabled={privateState.voteSubmitted || !privateState.canVote} onClick={() => { onVoteAbstain(true); onVoteTarget(null) }} className={`mt-3 flex w-full items-center justify-center gap-2 border p-3 text-sm font-black ${voteAbstain ? 'border-brand-600 bg-sky-50 text-brand-700' : 'border-sky-100 text-slate-700'} disabled:cursor-not-allowed disabled:opacity-60`}>弃权（本轮不投任何人）</button>{privateState.canVote && !privateState.voteSubmitted ? <button type="button" disabled={busy || (!voteTarget && !voteAbstain)} onClick={onVoteSubmit} className="mt-5 bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-40">确认提交</button> : <p className="mt-5 bg-slate-50 p-3 text-sm font-bold text-slate-500">{voteAbstain ? '你已选择弃票，等待其他玩家。' : '已投票，等待其他玩家。'}</p>}</section> : null}{snapshot.phase === 'UNDERCOVER_GUESS' ? <section className="border border-red-200 bg-red-50 p-5 shadow-sm">{snapshot.viewerUndercoverFound ? <><h3 className="text-lg font-black text-red-900">你被发现了</h3><p className="mt-2 text-sm font-bold leading-6 text-red-800">现在只有一次机会猜出平民的词。猜中即可翻盘。</p><input value={guess} onChange={(event) => onGuess(event.target.value)} maxLength={80} className="mt-5 block w-full border border-red-200 bg-white p-3 text-sm font-bold" placeholder="输入你认为的平民词" /><button type="button" disabled={busy || !guess.trim()} onClick={onGuessSubmit} className="mt-4 bg-red-800 px-5 py-3 text-sm font-black text-white disabled:opacity-40">提交猜词</button></> : <p className="mt-2 text-sm font-bold text-red-800">卧底正在进行最后猜词，其他玩家请等待结果。</p>}</section> : null}</> : null}<SpeechHistory history={snapshot.descriptionHistory} currentRound={snapshot.round} />{isFinished && snapshot.finalResult ? <Finished snapshot={snapshot} onBack={onBack} /> : null}</section>
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
+      <section className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border border-sky-100 bg-white px-5 py-4 shadow-sm">
+          <div>
+            <p className="text-xs font-black tracking-[0.16em] text-brand-700">第 {snapshot.round} 轮 · {phaseTitle(snapshot.phase)}</p>
+            <h2 className="mt-1 text-xl font-black text-brand-950">卧底巨星</h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-black text-brand-700">{countdown === null ? '—' : `${countdown}s`}</span>
+            <button type="button" onClick={() => onShowPrivate(!showPrivate)} className="border border-sky-200 px-3 py-2 text-xs font-black text-brand-700">{showPrivate ? '隐藏我的词' : '查看我的词'}</button>
+          </div>
+        </div>
+        {(snapshot.phase === 'ROLE_REVEAL' || showPrivate) && !isFinished ? (
+          <section className="mx-auto max-w-md border border-sky-100 bg-white px-5 py-4 text-center shadow-sm sm:px-7">
+            <p className="text-xs font-black tracking-[0.16em] text-slate-500">你的词</p>
+            {showPrivate ? <p className="mt-2 text-2xl font-black text-brand-950">{privateState.word}</p> : <p className="mt-2 text-xl font-black text-slate-400">词已隐藏</p>}
+            <button type="button" disabled={busy || (snapshot.phase === 'ROLE_REVEAL' && privateState.roleConfirmed)} onClick={snapshot.phase === 'ROLE_REVEAL' ? onConfirmRole : () => onShowPrivate(false)} className="mt-8 w-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{snapshot.phase === 'ROLE_REVEAL' ? (privateState.roleConfirmed ? '已确认，等待其他玩家' : '我知道了') : '关闭私密信息'}</button>
+          </section>
+        ) : null}
+        {!isFinished && snapshot.phase !== 'ROLE_REVEAL' ? (
+          <>
+            <section className="border border-sky-100 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-lg font-black text-brand-950">玩家状态</h3>
+                <span className="text-xs font-bold text-slate-500">已投票 {snapshot.voteProgress.submitted} / {snapshot.voteProgress.total}</span>
+              </div>
+              <div className="mt-4 space-y-2">
+                {snapshot.players.map((player) => (
+                  <div key={player.playerId} className={`flex items-center gap-3 border p-3 ${player.playerId === snapshot.currentSpeakerId ? 'border-amber-400 bg-amber-50' : 'border-sky-100'} ${!player.isAlive ? 'opacity-45' : ''}`}>
+                    <Avatar user={player} small />
+                    <span className="min-w-0 flex-1 truncate text-sm font-black text-brand-950">{player.name}</span>
+                    <small className="shrink-0 text-xs font-bold text-slate-500">{!player.isAlive ? '已淘汰' : player.playerId === snapshot.currentSpeakerId ? '正在描述' : '存活'}</small>
+                  </div>
+                ))}
+              </div>
+            </section>
+            {snapshot.phase === 'DESCRIBING' ? (
+              <section className="border border-sky-100 bg-white p-5 shadow-sm">
+                <h3 className="text-lg font-black text-brand-950">轮到谁描述？</h3>
+                <p className="mt-2 text-sm font-bold text-slate-500">{currentSpeaker ? `当前：${currentSpeaker.name}` : '等待服务端推进。'} · 不能直接说出自己的词语。</p>
+                <p className="mt-5 bg-sky-50 p-3 text-sm font-bold text-brand-700">请在右侧发言区写下你的描述。</p>
+              </section>
+            ) : null}
+            {snapshot.phase === 'VOTING' || snapshot.phase === 'TIE_VOTING' ? (
+              <section className="border border-sky-100 bg-white p-5 shadow-sm">
+                <h3 className="text-lg font-black text-brand-950">{snapshot.phase === 'TIE_VOTING' ? '平票加赛：选出一人' : '谁最可疑？'}</h3>
+                <p className="mt-2 text-sm font-bold text-slate-500">所有人投完前不会显示票数与投票对象。</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  {voteOptions.map((player) => (
+                    <button type="button" key={player.playerId} disabled={privateState.voteSubmitted || !privateState.canVote} onClick={() => { onVoteTarget(player.playerId); onVoteAbstain(false) }} className={`flex items-center gap-3 border p-3 text-left ${voteTarget === player.playerId ? 'border-brand-600 bg-sky-50' : 'border-sky-100'} disabled:cursor-not-allowed disabled:opacity-60`}>
+                      <Avatar user={player} small />
+                      <span className="min-w-0 flex-1 truncate text-sm font-black text-brand-950">{player.name}</span>
+                      {voteTarget === player.playerId ? <span className="text-xs font-black text-brand-700">已选</span> : null}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" disabled={privateState.voteSubmitted || !privateState.canVote} onClick={() => { onVoteAbstain(true); onVoteTarget(null) }} className={`mt-3 flex w-full items-center justify-center gap-2 border p-3 text-sm font-black ${voteAbstain ? 'border-brand-600 bg-sky-50 text-brand-700' : 'border-sky-100 text-slate-700'} disabled:cursor-not-allowed disabled:opacity-60`}>弃权（本轮不投任何人）</button>
+                {privateState.canVote && !privateState.voteSubmitted ? (
+                  <button type="button" disabled={busy || (!voteTarget && !voteAbstain)} onClick={onVoteSubmit} className="mt-5 bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-40">确认提交</button>
+                ) : (
+                  <p className="mt-5 bg-slate-50 p-3 text-sm font-bold text-slate-500">{voteAbstain ? '你已选择弃票，等待其他玩家。' : '已投票，等待其他玩家。'}</p>
+                )}
+              </section>
+            ) : null}
+            {snapshot.phase === 'UNDERCOVER_GUESS' ? (
+              <section className="border border-red-200 bg-red-50 p-5 shadow-sm">
+                {snapshot.viewerUndercoverFound ? (
+                  <>
+                    <h3 className="text-lg font-black text-red-900">你被发现了</h3>
+                    <p className="mt-2 text-sm font-bold leading-6 text-red-800">现在只有一次机会猜出平民的词。猜中即可翻盘。</p>
+                    <input value={guess} onChange={(event) => onGuess(event.target.value)} maxLength={80} className="mt-5 block w-full border border-red-200 bg-white p-3 text-sm font-bold" placeholder="输入你认为的平民词" />
+                    <button type="button" disabled={busy || !guess.trim()} onClick={onGuessSubmit} className="mt-4 bg-red-800 px-5 py-3 text-sm font-black text-white disabled:opacity-40">提交猜词</button>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm font-bold text-red-800">卧底正在进行最后猜词，其他玩家请等待结果。</p>
+                )}
+              </section>
+            ) : null}
+          </>
+        ) : null}
+        {isFinished && snapshot.finalResult ? <Finished snapshot={snapshot} onBack={onBack} /> : null}
+      </section>
+      <SpeechRoom snapshot={snapshot} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} description={description} onDescription={onDescription} onDescriptionSubmit={onDescriptionSubmit} busy={busy} privateState={privateState} />
+    </div>
+  )
+
 }
 
-function SpeechHistory({ history, currentRound }: { history: UndercoverDescriptionByRound[]; currentRound: number }) {
-  const [open, setOpen] = useState<Record<number, boolean>>({})
-  if (!history.length) return null
-  return <section className="border border-sky-100 bg-white p-5 shadow-sm"><h3 className="text-lg font-black text-brand-950">发言历史</h3><div className="mt-3 space-y-3">{history.map((entry) => {
-    const isCurrent = entry.round === currentRound
-    const isOpen = open[entry.round] ?? isCurrent
-    return <div key={entry.round} className="border border-sky-100"><button type="button" onClick={() => setOpen((prev) => ({ ...prev, [entry.round]: !isOpen }))} className="flex w-full items-center justify-between px-3 py-2 text-left"><span className="text-sm font-black text-brand-700">第 {entry.round} 轮{isCurrent ? '（当前）' : ''}</span><span className="text-xs font-bold text-slate-400">{isOpen ? '收起 ▲' : '展开 ▼'}</span></button>{isOpen ? <div className="space-y-2 border-t border-sky-50 px-3 py-2">{entry.descriptions.length === 0 ? <p className="text-xs font-bold text-slate-400">暂无发言</p> : entry.descriptions.map((item) => <div key={`${item.round}-${item.playerId}`} className="border-l-2 border-sky-300 bg-sky-50/50 p-2"><strong className="text-xs font-black text-brand-700">{item.name}</strong><p className="mt-1 break-words text-sm font-bold text-brand-950">{item.content}</p></div>)}</div> : null}</div>
-  })}</div></section>
+function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, description, onDescription, onDescriptionSubmit, busy, privateState }: { snapshot: UndercoverPublicMatchSnapshot; currentRoundDescriptions: UndercoverPublicMatchSnapshot['descriptions']; currentSpeaker?: UndercoverPublicMatchSnapshot['players'][number]; description: string; onDescription: (value: string) => void; onDescriptionSubmit: () => void; busy: boolean; privateState: UndercoverPrivateState }) {
+  const isFinished = snapshot.status === 'FINISHED' || snapshot.phase === 'FINISHED'
+  const pastRounds = snapshot.descriptionHistory.filter((entry) => entry.round < snapshot.round)
+  const isDescribing = snapshot.phase === 'DESCRIBING'
+  const [expanded, setExpanded] = useState(false)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const nearBottomRef = useRef(true)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)')
+    const apply = () => setExpanded(!mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+  useEffect(() => {
+    const el = listRef.current
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [pastRounds, currentRoundDescriptions])
+  function onScroll() {
+    const el = listRef.current
+    if (!el) return
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+  }
+  if (isFinished) return null
+  return (
+    <section className="border border-sky-100 bg-white shadow-sm lg:sticky lg:top-4">
+      <div className="flex items-center justify-between gap-3 border-b border-sky-100 px-4 py-3">
+        <h3 className="text-base font-black text-brand-950">发言区</h3>
+        <button type="button" onClick={() => setExpanded((value) => !value)} className="text-xs font-black text-brand-700 lg:hidden">{expanded ? '收起 ▲' : '展开全部发言 ▼'}</button>
+      </div>
+      <div ref={listRef} onScroll={onScroll} className={`${expanded ? 'block' : 'hidden'} lg:block max-h-[60vh] space-y-4 overflow-y-auto p-4`}>
+        {pastRounds.length === 0 && currentRoundDescriptions.length === 0 ? (
+          <p className="py-6 text-center text-sm font-bold text-slate-400">还没有人发言。</p>
+        ) : null}
+        {pastRounds.map((entry) => (
+          <div key={entry.round}>
+            <p className="text-xs font-black tracking-wide text-slate-400">第 {entry.round} 轮</p>
+            <div className="mt-2 space-y-2">
+              {entry.descriptions.length === 0 ? (
+                <p className="text-xs font-bold text-slate-400">暂无发言</p>
+              ) : entry.descriptions.map((item) => (
+                <div key={`${item.round}-${item.playerId}`} className="border-l-2 border-sky-300 bg-sky-50/50 p-2">
+                  <strong className="text-xs font-black text-brand-700">{item.name}</strong>
+                  <p className="mt-1 break-words text-sm font-bold text-brand-950">{item.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        {isDescribing ? (
+          <div>
+            <p className="text-xs font-black tracking-wide text-emerald-700">第 {snapshot.round} 轮（进行中）</p>
+            <div className="mt-2 space-y-2">
+              {currentRoundDescriptions.length === 0 ? (
+                <p className="text-xs font-bold text-slate-400">等待发言…</p>
+              ) : currentRoundDescriptions.map((item) => (
+                <div key={`${item.round}-${item.playerId}`} className="border-l-2 border-emerald-300 bg-emerald-50/50 p-2">
+                  <strong className="text-xs font-black text-emerald-700">{item.name}</strong>
+                  <p className="mt-1 break-words text-sm font-bold text-brand-950">{item.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div className="border-t border-sky-100 p-4">
+        {currentSpeaker && isDescribing ? (
+          <p className="mb-2 text-xs font-black text-emerald-700">当前发言：{currentSpeaker.name}（正在描述）</p>
+        ) : null}
+        {isDescribing && privateState.canDescribe ? (
+          <div>
+            <textarea value={description} onChange={(event) => onDescription(event.target.value)} maxLength={30} rows={3} className="block w-full resize-none border border-sky-100 p-3 text-sm font-bold outline-none focus:border-brand-400" placeholder="用一句话描述你的词（最多 30 字）" />
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400">{description.length} / 30</span>
+              <button type="button" disabled={busy || !description.trim()} onClick={onDescriptionSubmit} className="bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-40">提交描述</button>
+            </div>
+          </div>
+        ) : isDescribing ? (
+          <p className="text-xs font-bold text-slate-400">等待其他玩家描述，提交后不能修改。</p>
+        ) : null}
+      </div>
+    </section>
+  )
 }
 
 function Finished({ snapshot, onBack }: { snapshot: UndercoverPublicMatchSnapshot; onBack: () => void }) {
