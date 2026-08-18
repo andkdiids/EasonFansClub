@@ -232,6 +232,8 @@ export async function PATCH(request: Request) {
   const normalizedPhone = phone ? normalizePhoneNumber(phone, phoneCountry) : null
   const requestedWallVisibility = body?.wallVisibility === undefined ? undefined : sanitizeText(body.wallVisibility, 20)
   const wallVisibility = requestedWallVisibility as ProfileWallVisibility | undefined
+  // 生日公开开关：只控制生日祝福卡片是否展示生日日期，不影响生日纪念通知与卡片本身。
+  const birthdayPublic = typeof body?.birthdayPublic === 'boolean' ? body.birthdayPublic : undefined
   const hasLocation = Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'location'))
   const location = hasLocation ? normalizeUserLocationInput(body.location) : undefined
   if (hasLocation && location === undefined) {
@@ -255,6 +257,7 @@ export async function PATCH(request: Request) {
     birthMonth?: number
     birthDay?: number
     birthdaySetAt?: Date
+    birthdayPublic?: boolean
   } = {}
 
   if (nickname) {
@@ -341,6 +344,8 @@ export async function PATCH(request: Request) {
     data.birthDay = birthDayRaw
     data.birthdaySetAt = now
   }
+
+  if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic
 
   const nicknameChanged = Boolean(nickname && current && nickname !== current.nickname)
   const canChangeNickname =

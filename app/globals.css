@@ -354,6 +354,65 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .prescription-history-page .prescription-save-action { min-width:0; margin-left:0; justify-self:end; }
 .prescription-history-page .prescription-save-button { min-height:32px; padding:0 11px; font-size:10px; white-space:nowrap; }
 
+/* 生日祝福卡片：桌面端 / 移动端统一 4:3 横版，内部元素用容器查询单位随卡片宽度等比缩放。 */
+.birthday-card-page { display:flex; flex-direction:column; align-items:center; padding:28px 16px 48px; }
+.birthday-card-page-title { margin:0 0 18px; font-size:22px; font-weight:900; color:var(--foreground); }
+.birthday-card-shell { display:flex; flex-direction:column; align-items:center; gap:18px; width:100%; }
+.birthday-card-frame {
+  position:relative;
+  width:100%;
+  max-width:540px;
+  aspect-ratio:4 / 3;
+  container-type:inline-size;
+  border-radius:22px;
+  overflow:hidden;
+  background:linear-gradient(160deg,#FFF7F1 0%,#FFE3EC 100%);
+  box-shadow:0 18px 50px rgba(194,84,122,.22), inset 0 0 0 1px rgba(255,255,255,.6);
+}
+.birthday-card-content {
+  position:absolute; inset:0;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; color:#5A3D3D; padding:4cqw;
+  background:
+    radial-gradient(circle at 90% 12%, rgba(194,84,122,.10), transparent 38%),
+    radial-gradient(circle at 8% 92%, rgba(194,84,122,.10), transparent 42%);
+}
+.birthday-card-emoji { font-size:10cqw; line-height:1; }
+.birthday-card-title { margin-top:0; font-size:7cqw; font-weight:800; font-family:"Songti SC","STSong","SimSun",serif; color:#C2547A; letter-spacing:.04em; }
+.birthday-card-avatar {
+  position:relative;
+  width:20cqw; height:20cqw; margin-top:1.5cqw;
+  border-radius:50%;
+  overflow:hidden;
+  background:#C2547A;
+  box-shadow:0 0 0 1.2cqw #D9A441;
+  display:grid; place-items:center;
+}
+.birthday-card-avatar-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.birthday-card-avatar-fallback { color:#FFFFFF; font-size:8cqw; font-weight:800; font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
+.birthday-card-name { margin-top:1.2cqw; font-size:5cqw; font-weight:800; color:#5A3D3D; }
+.birthday-card-uid { margin-top:.3cqw; font-size:3cqw; color:#A98585; letter-spacing:.06em; }
+.birthday-card-date { margin-top:.6cqw; font-size:3.2cqw; font-weight:600; color:#C2547A; }
+.birthday-card-divider { width:30cqw; height:0; margin:1.8cqw 0 1.6cqw; border-top:2px solid rgba(217,164,65,.7); position:relative; }
+.birthday-card-divider::after {
+  content:""; position:absolute; left:50%; top:50%; width:2.2cqw; height:2.2cqw;
+  transform:translate(-50%,-50%) rotate(45deg); background:#D9A441;
+}
+.birthday-card-blessing { margin:0; max-width:84cqw; font-size:3.8cqw; line-height:1.5; font-family:"Songti SC","STSong","SimSun",serif; color:#5A3D3D; }
+.birthday-card-brand { margin-top:1cqw; font-size:3.4cqw; font-weight:800; font-family:"Songti SC","STSong","SimSun",serif; color:#C2547A; }
+.birthday-card-save-action { display:flex; align-items:center; flex-wrap:wrap; gap:10px; justify-content:center; }
+.birthday-card-save-button {
+  min-height:42px; border:1px solid #C2547A; border-radius:999px; padding:0 22px;
+  color:#C2547A; background:transparent; font-size:14px; font-weight:850; cursor:pointer; touch-action:manipulation;
+}
+.birthday-card-save-button:hover:not(:disabled) { color:#FFFFFF; background:#C2547A; }
+.birthday-card-save-button:disabled { cursor:wait; opacity:.62; }
+.birthday-card-save-message { color:var(--foreground-muted); font-size:12px; }
+.birthday-card-locked { display:flex; flex-direction:column; align-items:center; gap:14px; margin-top:16vh; text-align:center; color:var(--foreground-muted); }
+.birthday-card-locked-emoji { font-size:64px; }
+.birthday-card-locked-text { margin:0; max-width:320px; font-size:15px; line-height:1.7; }
+
+
 /* Personal check-in archive: the calendar is deliberately self-contained so opening it does not disturb the message panels below. */
 .checkin-history-trigger { display:inline-flex; min-height:38px; align-items:center; justify-content:center; gap:7px; margin-top:14px; border:1px solid var(--border-strong); border-radius:10px; padding:0 14px; color:var(--primary); background:var(--surface-subtle); font-size:12px; font-weight:900; }
 .checkin-history-trigger:hover:not(:disabled) { border-color:var(--primary); background:var(--accent); }

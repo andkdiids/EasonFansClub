@@ -23,6 +23,7 @@ type InitialProfile = {
   birthMonth: number | null
   birthDay: number | null
   birthdaySetAt: string | null
+  birthdayPublic: boolean
 }
 
 export function ProfileEditorDrawer({

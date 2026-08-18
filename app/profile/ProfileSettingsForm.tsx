@@ -27,6 +27,7 @@ type InitialProfile = {
   birthMonth: number | null
   birthDay: number | null
   birthdaySetAt: string | null
+  birthdayPublic: boolean
 }
 
 type UploadKind = 'avatar' | 'background'
@@ -586,6 +587,8 @@ export function ProfileSettingsForm({
         phone: normalizedPhone?.e164 || '',
         phoneCountry: normalizedPhone?.country || phoneCountry,
         wallVisibility: form.wallVisibility,
+        // 生日公开开关：始终提交，服务端直接写回（不影响生日纪念通知与卡片本身）。
+        birthdayPublic: Boolean(form.birthdayPublic),
         // 生日仅在未设置时提交；已设置则由服务端忽略。
         ...(form.birthdaySetAt
           ? {}
@@ -857,6 +860,19 @@ export function ProfileSettingsForm({
               </label>
             </div>
           )}
+
+          <label className="flex items-center justify-between rounded-2xl border border-white bg-white/78 p-4">
+            <span>
+              <span className="text-sm font-black text-slate-700">生日公开</span>
+              <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">开启后，生日祝福卡片上会展示你的生日日期；关闭仅隐藏日期，不影响生日纪念通知与卡片。</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={form.birthdayPublic}
+              onChange={(event) => update('birthdayPublic', event.target.checked)}
+              className="h-5 w-5 shrink-0 accent-sky-600"
+            />
+          </label>
         </section>
 
         <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">

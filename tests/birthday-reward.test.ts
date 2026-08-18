@@ -54,7 +54,8 @@ test('birthday greeting never leaks birthday date or user name (4: 不泄露生�
   assert.doesNotMatch(birthdayLib, /BIRTHDAY_GREETING_CONTENT = [`$]/)
   // 创建通知时不写入生日月/日，也不带 actor（不泄露他人身份）
   assert.match(birthdayLib, /actorId:\s*null/)
-  assert.match(birthdayLib, /link:\s*null/)
+  // 生日纪念通知跳转到生日祝福卡片页，而非不存在的 /profile/edit（曾导致 404）
+  assert.match(birthdayLib, /link:\s*'\/birthday-card'/)
   // 安全修复：发送前必须读取用户生日月/日并校验今天匹配，杜绝登录链路误发
   const greetFn = birthdayLib.slice(
     birthdayLib.indexOf('export async function sendBirthdayGreeting'),

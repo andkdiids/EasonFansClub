@@ -3145,6 +3145,7 @@ model User {
   birthMonth                                             Int?
   birthDay                                               Int?
   birthdaySetAt                                          DateTime?
+  birthdayPublic                                         Boolean                        @default(true)
   uid                                                    Int                            @unique @default(autoincrement())
   experience                                             Int                            @default(0)
   securityQuestionRecoveryEnabled                        Boolean                        @default(false)
@@ -3709,6 +3710,7 @@ enum NotificationType {
   BIRTHDAY_GREETING
   GUESS_SONG_DUEL_INVITE
   USER_REWARD
+  FRIEND_BIRTHDAY
 }
 
 enum PageLayoutRevisionSource {

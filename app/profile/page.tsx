@@ -49,6 +49,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       birthMonth: true,
       birthDay: true,
       birthdaySetAt: true,
+      birthdayPublic: true,
       experience: true,
       createdAt: true,
       Profile: true,
@@ -87,6 +88,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     birthMonth: profile.birthMonth,
     birthDay: profile.birthDay,
     birthdaySetAt: profile.birthdaySetAt ? profile.birthdaySetAt.toISOString() : null,
+    birthdayPublic: profile.birthdayPublic,
     wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
   }
 

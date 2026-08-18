@@ -61,7 +61,9 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
     case 'BADGE':
       return { label: '查看徽章', href: '/profile/badges' }
     case 'BIRTHDAY_GREETING':
-      return { label: '编辑资料', href: '/profile/edit' }
+      return { label: '查看生日卡片', href: '/birthday-card' }
+    case 'FRIEND_BIRTHDAY':
+      return target ? { label: '去好友主页', href: target } : null
     case 'USER_REWARD':
       return { label: '查看成长', href: item.link || '/profile' }
     case 'ANNOUNCEMENT':
