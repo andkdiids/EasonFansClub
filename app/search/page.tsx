@@ -18,7 +18,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const q = (params.q || '').trim()
   const numericUid = /^\d+$/.test(q) ? Number(q) : null
 
-  const [posts, boards, users, albums, songs, hotKeywords] = q
+  const [posts, , users, albums, songs, hotKeywords] = q
     ? await Promise.all([
         prisma.post.findMany({
           where: {
@@ -147,85 +147,67 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             </div>
           </section>
         ) : (
-          <section className="grid gap-6 md:grid-cols-[1fr_320px]">
-            <div className="space-y-3">
-              {posts.map((post) => (
-                <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
-                  <p className="font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
-                  <p className="mt-2 text-sm text-slate-500">
-                    {post.Board.name} · {resolveFriendDisplayName({
-                      viewerId: viewer?.id,
-                      targetUserId: post.User.id,
-                      fallbackName: getPublicUserDisplayName(post.User),
-                      remarkMap,
-                    })} · 回复 {post.replyCount}
-                  </p>
-                </Link>
-              ))}
-              {albums.length ? <h2 className="pt-3 text-lg font-black text-brand-950">专辑</h2> : null}
-              {albums.map((album) => (
-                <Link key={album.id} href={`/music/album/${album.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
-                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{album.coverUrl ? <Image src={album.coverUrl} alt="" fill sizes="56px" loading="lazy" className="object-cover" /> : '♪'}</span>
-                  <span><strong className="block font-black text-slate-950">{album.name}</strong><small className="mt-1 block text-sm text-slate-500">{album.artist} · {album.releaseYear}</small></span>
-                </Link>
-              ))}
-              {songs.length ? <h2 className="pt-3 text-lg font-black text-brand-950">歌曲</h2> : null}
-              {songs.map((song) => (
-                <Link key={song.id} href={`/music/song/${song.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
-                  <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{song.coverUrl ? <Image src={song.coverUrl} alt="" fill sizes="56px" loading="lazy" className="object-cover" /> : '♪'}</span>
-                  <span><strong className="block font-black text-slate-950">{song.title}</strong><small className="mt-1 block text-sm text-slate-500">{song.artist} · {song.MusicAlbum.name} · {song.previewUrl ? '支持试听' : '暂无试听'}</small></span>
-                </Link>
-              ))}
-              {posts.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
-            </div>
-            <aside className="space-y-4">
-              <div className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
-                <h2 className="font-black text-brand-950">相关板块</h2>
-                <div className="mt-3 space-y-2">
-                  {boards.map((board) => (
-                    <Link key={board.id} href={`/boards/${board.slug}`} className="block font-bold text-slate-700">
-                      {board.name}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
-                <h2 className="font-black text-brand-950">相关用户</h2>
-                <div className="mt-3 space-y-2">
-                  {users.map((item) => {
-                    const name = resolveFriendDisplayName({
-                      viewerId: viewer?.id,
-                      targetUserId: item.id,
-                      fallbackName: getPublicUserDisplayName(item),
-                      remarkMap,
-                    })
-                    const avatar = profileImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
-                    const growth = calculateGrowthSummary(item.experience, growthLevels)
-                    const status = friendIds.has(item.id) ? 'FRIEND' : sentIds.has(item.id) ? 'PENDING' : receivedIds.has(item.id) ? 'RECEIVED' : 'NONE'
-                    return (
-                      <article key={item.id} className="border-b border-sky-100 py-3 last:border-0">
-                        <Link href={`/user/${formatUid(item.uid)}`} className="flex items-center gap-3 font-bold text-slate-700">
-                          <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden bg-brand-950 text-white">
-                            {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt={name} className="h-full w-full object-cover" loading="lazy" /> : formatUid(item.uid).slice(0, 1)}
-                          </span>
-                          <span>
-                            <strong className="block text-brand-950">{name}</strong>
-                            <small>UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.Post} 帖</small>
-                          </span>
-                        </Link>
-                        <p className="mt-2 text-xs font-bold text-slate-500">{publicModerationText(item.Profile?.bio || `入院于 ${item.createdAt.toLocaleDateString('zh-CN')}`, item.Profile?.bioModerationStatus)}</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={`/user/${formatUid(item.uid)}`} className="border border-sky-100 px-3 py-2 text-xs font-black text-brand-700">查看主页</Link>
-                          {viewer && viewer.id !== item.id && status !== 'RECEIVED' ? <AddFriendButton uid={item.uid} initialStatus={status} /> : null}
-                          {status === 'RECEIVED' && receivedRequestBySender.get(item.id) ? <FriendRequestDecision requestId={receivedRequestBySender.get(item.id)!} /> : null}
-                        </div>
-                        {item.Post.length ? <div className="mt-2 space-y-1">{item.Post.map((post) => <Link key={post.id} href={`/posts/${post.id}`} className="block truncate text-xs font-bold text-slate-600">帖子 · {publicModerationText(post.title, post.moderationStatus)}</Link>)}</div> : null}
-                      </article>
-                    )
-                  })}
-                </div>
-              </div>
-            </aside>
+          <section className="mx-auto max-w-[1100px] space-y-3">
+            {posts.map((post) => (
+              <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
+                <p className="font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
+                <p className="mt-2 text-sm text-slate-500">
+                  {post.Board.name} · {resolveFriendDisplayName({
+                    viewerId: viewer?.id,
+                    targetUserId: post.User.id,
+                    fallbackName: getPublicUserDisplayName(post.User),
+                    remarkMap,
+                  })} · 回复 {post.replyCount}
+                </p>
+              </Link>
+            ))}
+            {users.length ? <h2 className="pt-3 text-lg font-black text-brand-950">用户</h2> : null}
+            {users.map((item) => {
+              const name = resolveFriendDisplayName({
+                viewerId: viewer?.id,
+                targetUserId: item.id,
+                fallbackName: getPublicUserDisplayName(item),
+                remarkMap,
+              })
+              const avatar = profileImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
+              const growth = calculateGrowthSummary(item.experience, growthLevels)
+              const status = friendIds.has(item.id) ? 'FRIEND' : sentIds.has(item.id) ? 'PENDING' : receivedIds.has(item.id) ? 'RECEIVED' : 'NONE'
+              return (
+                <article key={item.id} className="rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
+                  <Link href={`/user/${formatUid(item.uid)}`} className="flex items-center gap-3 font-bold text-slate-700">
+                    <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden bg-brand-950 text-white">
+                      {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt={name} className="h-full w-full object-cover" loading="lazy" /> : formatUid(item.uid).slice(0, 1)}
+                    </span>
+                    <span>
+                      <strong className="block text-brand-950">{name}</strong>
+                      <small>UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.Post} 帖</small>
+                    </span>
+                  </Link>
+                  <p className="mt-2 text-xs font-bold text-slate-500">{publicModerationText(item.Profile?.bio || `入院于 ${item.createdAt.toLocaleDateString('zh-CN')}`, item.Profile?.bioModerationStatus)}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Link href={`/user/${formatUid(item.uid)}`} className="border border-sky-100 px-3 py-2 text-xs font-black text-brand-700">查看主页</Link>
+                    {viewer && viewer.id !== item.id && status !== 'RECEIVED' ? <AddFriendButton uid={item.uid} initialStatus={status} /> : null}
+                    {status === 'RECEIVED' && receivedRequestBySender.get(item.id) ? <FriendRequestDecision requestId={receivedRequestBySender.get(item.id)!} /> : null}
+                  </div>
+                  {item.Post.length ? <div className="mt-2 space-y-1">{item.Post.map((post) => <Link key={post.id} href={`/posts/${post.id}`} className="block truncate text-xs font-bold text-slate-600">帖子 · {publicModerationText(post.title, post.moderationStatus)}</Link>)}</div> : null}
+                </article>
+              )
+            })}
+            {albums.length ? <h2 className="pt-3 text-lg font-black text-brand-950">专辑</h2> : null}
+            {albums.map((album) => (
+              <Link key={album.id} href={`/music/album/${album.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
+                <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{album.coverUrl ? <Image src={album.coverUrl} alt="" fill sizes="56px" loading="lazy" className="object-cover" /> : '♪'}</span>
+                <span><strong className="block font-black text-slate-950">{album.name}</strong><small className="mt-1 block text-sm text-slate-500">{album.artist} · {album.releaseYear}</small></span>
+              </Link>
+            ))}
+            {songs.length ? <h2 className="pt-3 text-lg font-black text-brand-950">歌曲</h2> : null}
+            {songs.map((song) => (
+              <Link key={song.id} href={`/music/song/${song.id}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
+                <span className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-sky-50 text-brand-500">{song.coverUrl ? <Image src={song.coverUrl} alt="" fill sizes="56px" loading="lazy" className="object-cover" /> : '♪'}</span>
+                <span><strong className="block font-black text-slate-950">{song.title}</strong><small className="mt-1 block text-sm text-slate-500">{song.artist} · {song.MusicAlbum.name} · {song.previewUrl ? '支持试听' : '暂无试听'}</small></span>
+              </Link>
+            ))}
+            {posts.length + users.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-center text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
           </section>
         )}
       </PageContainer>
