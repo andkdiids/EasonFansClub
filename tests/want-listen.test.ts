@@ -154,8 +154,10 @@ test('粤语残片使用连续自然片段，四个歌词选项唯一', () => {
   assert.equal(question.data.options.length, 4)
   assert.equal(new Set(question.data.options.map((option) => normalizeWantListenTitle(option.label))).size, 4)
   assert.match(question.data.maskedContext || '', /____/u)
-  assert.ok(question.data.beforeContext)
-  assert.ok(question.data.afterContext)
+  // 隐藏句随机落在窗口中的任意一句，因此 before/after 中有一侧可能为空；
+  // 只要任意一侧存在上下文（配合 validateQuestion 的充足性校验）即可。
+  assert.ok(question.data.beforeContext || question.data.afterContext)
+  assert.equal(question.data.maskedContext?.split('\n').length, 3, '歌词窗口固定三句')
   assert.ok(question.data.completeContext)
   assert.ok(question.data.correctLyric)
   assert.equal(validateQuestion(question.data), true)
@@ -250,6 +252,103 @@ test('粤语残片永远不会展示超过三行歌词', () => {
     const parts = lyricContextParts(lines, fragment)
     assert.ok(parts.masked.split('\n').length <= 3, `位置 ${index} 不应超过三行`)
   }
+})
+
+// 顺序返回给定值的随机函数，便于精确控制隐藏位置与片段。
+// selectLyricFragment 依次调用 random()：① 选隐藏槽 ② 选片段长度 ③ 选片段起点。
+function seqRandom(values: number[]) {
+  let index = 0
+  return () => {
+    const value = values[index % values.length]
+    index += 1
+    return value
+  }
+}
+
+const fragmentSong = (): WantListenSongCandidate => ({
+  id: 'frag-target',
+  title: '残片测试曲',
+  releaseYear: 1998,
+  language: '粤语',
+  lyricist: null,
+  composer: null,
+  arranger: null,
+  producer: null,
+  lyrics: '月儿高挂天空上\n霓虹灯下人潮涌\n旧日时光轻轻淌\n街角咖啡香四溢\n晚风吻过你脸庞',
+  description: null,
+  story: null,
+  album: { id: 'a', name: '残片专辑', releaseYear: 1998, language: '粤语', coverUrl: null },
+})
+
+function maskedLineOf(fragment: LyricFragment | null, slot: number) {
+  if (!fragment) throw new Error('fragment 为 null')
+  const lines = cleanLyrics(fragmentSong().lyrics)
+  const parts = lyricContextParts(lines, fragment)
+  return parts.masked.split('\n')[slot]
+}
+
+test('粤语残片可以隐藏上一句（隐藏区域随机落在上句）', () => {
+  const lines = cleanLyrics(fragmentSong().lyrics)
+  // 0 → 选第 0 槽（上一句）；0 → 片段长度 4；0.5 → 片段起点居中（部分隐藏）
+  const fragment = selectLyricFragment(lines, 1, seqRandom([0, 0, 0.5]))
+  assert.ok(fragment)
+  assert.equal(fragment.hiddenSlot, 0)
+  const maskedLines = lyricContextParts(lines, fragment).masked.split('\n')
+  assert.equal(maskedLines.length, 3)
+  assert.ok(maskedLines[0].includes('____'))
+  assert.ok(maskedLines[0] !== '____', '上一句为部分隐藏，应保留左右歌词')
+  assert.ok(!maskedLines[1].includes('____'))
+  assert.ok(!maskedLines[2].includes('____'))
+})
+
+test('粤语残片可以隐藏中间一句（隐藏区域随机落在中句）', () => {
+  const lines = cleanLyrics(fragmentSong().lyrics)
+  // 0.5 → 选第 1 槽（中间）；0 → 片段长度 4；0.5 → 部分隐藏
+  const fragment = selectLyricFragment(lines, 1, seqRandom([0.5, 0, 0.5]))
+  assert.ok(fragment)
+  assert.equal(fragment.hiddenSlot, 1)
+  const maskedLines = lyricContextParts(lines, fragment).masked.split('\n')
+  assert.equal(maskedLines.length, 3)
+  assert.ok(maskedLines[1].includes('____'))
+  assert.ok(maskedLines[1] !== '____', '中间句为部分隐藏，应保留左右歌词')
+  assert.ok(!maskedLines[0].includes('____'))
+  assert.ok(!maskedLines[2].includes('____'))
+})
+
+test('粤语残片可以隐藏下一句（隐藏区域随机落在下句）', () => {
+  const lines = cleanLyrics(fragmentSong().lyrics)
+  // 0.99 → 选第 2 槽（下一句）；0 → 片段长度 4；0.5 → 部分隐藏
+  const fragment = selectLyricFragment(lines, 1, seqRandom([0.99, 0, 0.5]))
+  assert.ok(fragment)
+  assert.equal(fragment.hiddenSlot, 2)
+  const maskedLines = lyricContextParts(lines, fragment).masked.split('\n')
+  assert.equal(maskedLines.length, 3)
+  assert.ok(maskedLines[2].includes('____'))
+  assert.ok(maskedLines[2] !== '____', '下一句为部分隐藏，应保留左右歌词')
+  assert.ok(!maskedLines[0].includes('____'))
+  assert.ok(!maskedLines[1].includes('____'))
+})
+
+test('粤语残片支持局部歌词缺失（隐藏连续片段而非整句）', () => {
+  const lines = cleanLyrics(fragmentSong().lyrics)
+  // 选中间句并隐藏中间 4 字：被挖空行仍保留前后歌词，不等于整行占位。
+  const fragment = selectLyricFragment(lines, 1, seqRandom([0.5, 0, 0.5]))
+  assert.ok(fragment)
+  const hidden = maskedLineOf(fragment, fragment.hiddenSlot ?? 1)
+  assert.ok(hidden.includes('____'))
+  assert.ok(hidden !== '____', '局部缺失应保留句子其余部分')
+  // 答案至少含 4 个有效字（不含标点）。
+  assert.ok([...fragment.answer].filter((ch) => !/[，。！？；;,.!?、:：\s]/.test(ch)).length >= 4)
+})
+
+test('粤语残片支持整句歌词隐藏（隐藏长度可达完整一句）', () => {
+  const lines = cleanLyrics(fragmentSong().lyrics)
+  // 0 → 选第 0 槽；0.99 → 片段长度取到上限（整句）；0 → 起点无影响
+  const fragment = selectLyricFragment(lines, 1, seqRandom([0, 0.99, 0]))
+  assert.ok(fragment)
+  const hidden = maskedLineOf(fragment, fragment.hiddenSlot ?? 0)
+  assert.equal(hidden, '____', '整句隐藏时该行应完全被占位替代')
+  assert.equal(fragment.answer.replace(/[\s\p{P}\p{S}]+/gu, ''), fragment.sourceLine.replace(/[\s\p{P}\p{S}]+/gu, ''), '整句隐藏时答案为整句歌词')
 })
 
 test('防不胜防固定五个真实歌名和一个假歌名，假歌名位置由洗牌决定', () => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { postModerationStatuses, type PostModerationStatus } from '@/lib/post-moderation'
 
 export type ReviewPost = {
@@ -40,6 +40,22 @@ export function PostReviewManager({ initialPosts, initialHasMore }: { initialPos
   const [rejectReason, setRejectReason] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  // 进入页面或组件被 Next.js 客户端导航复用时，保证列表始终与当前选中 Tab 对齐：
+  // 若服务端预取的初始列表与当前 queueStatus 不一致（例如复用上一轮 Tab 的列表数据），
+  // 则按当前状态重新拉取，避免「待审核 Tab 却显示已通过列表」。正常首屏（初始列表已为
+  // PENDING）不重复请求，兼顾无闪烁与数据正确性。
+  const didMountRef = useRef(false)
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      const mismatched = initialPosts.some((post) => post.moderationStatus !== queueStatus)
+      if (!mismatched) return
+    }
+    void loadStatus(queueStatus, 1)
+    // 仅在挂载时做一次一致性校验；queueStatus 变化由下方依赖触发刷新。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueStatus])
 
   async function loadStatus(nextStatus: ReviewStatus, nextPage = 1) {
     setLoading(true)

@@ -196,9 +196,9 @@ export function buildWantListenQuestion(
   }
 }
 
-function fragmentFromSong(song: WantListenSongCandidate, position: number) {
+function fragmentFromSong(song: WantListenSongCandidate, position: number, random: () => number = Math.random) {
   const lines = cleanLyrics(song.lyrics)
-  const fragment = selectLyricFragment(lines, position)
+  const fragment = selectLyricFragment(lines, position, random)
   if (!fragment) return null
   return { fragment, lines }
 }
@@ -209,14 +209,14 @@ export function buildCantoneseFragmentQuestion(
   position: number,
   random: () => number = Math.random,
 ): WantListenBuiltQuestion | null {
-  const source = fragmentFromSong(song, position)
+  const source = fragmentFromSong(song, position, random)
   if (!source) return null
   const context = lyricContextParts(source.lines, source.fragment)
   const correct = source.fragment.answer
   const answerKey = normalizeWantListenTitle(correct)
   const distractors: string[] = []
   for (const candidate of shuffle(pool.filter((item) => item.id !== song.id), random)) {
-    const fragment = fragmentFromSong(candidate, position)?.fragment
+    const fragment = fragmentFromSong(candidate, position, random)?.fragment
     if (!fragment) continue
     const key = normalizeWantListenTitle(fragment.answer)
     if (!key || key === answerKey || distractors.some((item) => normalizeWantListenTitle(item) === key)) continue

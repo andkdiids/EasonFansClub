@@ -141,6 +141,14 @@ export type UndercoverPublicMatchSnapshot = {
   serverNow: string
   phaseDeadline: string | null
   currentSpeakerId: string | null
+  /**
+   * 当前请求用户是否为「被投出、正在最后猜词」的卧底。
+   * 仅在 status=PLAYING 且 phase=UNDERCOVER_GUESS、且该 viewer 的角色为 UNDERCOVER、尚未提交猜词时为 true。
+   * 该字段由服务端按 viewerId 计算，HTTP 状态接口与 WebSocket MATCH_STATE 推送均按各自连接用户单独构建，
+   * 因此不同玩家收到的内容不同：卧底本人看到「你被发现了 / 进行最后猜词」，其他玩家看到中性等待文案。
+   * 注意：此字段不泄露其他玩家的身份，仅表示「viewer 自己是否就是那个被投出的卧底」。
+   */
+  viewerUndercoverFound: boolean
   players: UndercoverMatchPlayerPublic[]
   descriptions: UndercoverDescriptionPublic[]
   descriptionHistory: UndercoverDescriptionByRound[]

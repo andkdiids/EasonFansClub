@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UiIcon } from '@/components/UiIcon'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
@@ -38,15 +38,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   const [recordAspirinPending, setRecordAspirinPending] = useState(false)
   const [actionError, setActionError] = useState('')
   const [reportTarget, setReportTarget] = useState<{ recordId: string } | { consultationId: string } | null>(null)
-  const composerRef = useRef<HTMLTextAreaElement>(null)
   const focusId = useMemo(() => initialFocusId || '', [initialFocusId])
-
-  useLayoutEffect(() => {
-    const textarea = composerRef.current
-    if (!textarea) return
-    textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 112), 180)}px`
-  }, [draft])
 
   function requireLogin() {
     if (isAuthenticated) return true
@@ -181,7 +173,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       <section id="clinic-consultation-composer" className="clinic-composer-section">
         <div className="clinic-composer-heading"><div><h2>{replyTo ? `回复 @${findParentName(record.consultations, replyTo)}` : '各位医师点睇？'}</h2></div>{replyTo ? <button type="button" className="clinic-text-link" onClick={() => setReplyTo(null)}>取消回复</button> : null}</div>
         <div className="clinic-identity-switch" role="group" aria-label="会诊身份"><button type="button" className={identityMode === 'PUBLIC' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('PUBLIC'))}>用自己的身份</button><button type="button" className={identityMode === 'ANONYMOUS' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('ANONYMOUS'))}>匿名会诊</button></div>
-        <textarea ref={composerRef} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder="跟患者说点什么……" aria-label="会诊内容" />
+        <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder="跟患者说点什么……" aria-label="会诊内容" />
         <div className="clinic-composer-footer"><span>普通病友无法看到匿名医师的真实身份。</span><button type="button" className="clinic-primary-button" disabled={sending} onClick={() => void submitConsultation()}>{sending ? '提交中…' : '参与会诊'}</button></div>
       </section>
 

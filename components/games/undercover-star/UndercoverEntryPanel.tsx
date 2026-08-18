@@ -42,9 +42,9 @@ export function UndercoverEntryPanel({ roomCode, password, createPassword, creat
           <button type="button" onClick={onCreate} disabled={busy} className="w-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50">创建房间</button>
         </div>
       ) : (
-        <form onSubmit={onJoin} className="mt-5 space-y-3">
-          <input required value={roomCode} onChange={(event) => onRoomCode(event.target.value)} inputMode="numeric" maxLength={6} className="block w-full border border-sky-100 px-3 py-3 text-sm font-bold" placeholder="6 位房间号" />
-          <input value={password} onChange={(event) => onPassword(event.target.value)} type="password" maxLength={32} className="block w-full border border-sky-100 px-3 py-3 text-sm font-bold" placeholder="密码房请输入密码" />
+        <form onSubmit={onJoin} autoComplete="off" className="mt-5 space-y-3">
+          <input required value={roomCode} onChange={(event) => onRoomCode(event.target.value)} name="uc-join-room-code" autoComplete="off" inputMode="numeric" maxLength={6} className="block w-full border border-sky-100 px-3 py-3 text-sm font-bold" placeholder="6 位房间号" />
+          <input value={password} onChange={(event) => onPassword(event.target.value)} type="password" name="uc-join-room-password" autoComplete="new-password" maxLength={32} className="block w-full border border-sky-100 px-3 py-3 text-sm font-bold" placeholder="密码房请输入密码" />
           <button disabled={busy} className="w-full bg-sky-700 px-5 py-3 text-sm font-black text-white disabled:opacity-50">加入房间</button>
         </form>
       )}

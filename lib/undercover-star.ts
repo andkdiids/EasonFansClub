@@ -745,7 +745,7 @@ function finalResultFromJson(value: Prisma.JsonValue | null | undefined): Underc
   return value as unknown as UndercoverFinalResult
 }
 
-export function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPublicMatchSnapshot {
+export function matchSnapshot(match: MatchRow, now = new Date(), viewerId?: string | null): UndercoverPublicMatchSnapshot {
   const players: UndercoverMatchPlayerPublic[] = match.UndercoverMatchPlayer.map((player) => ({
     userId: player.User.id,
     uid: player.User.uid,
@@ -783,6 +783,8 @@ export function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPubl
       }
     : { submitted: 0, total: activeMatchPlayers(match).length, stage: null, abstained: 0 }
   const history = historyPublic(match, readHistory(match.roundHistory))
+  const viewerPlayer = viewerId ? match.UndercoverMatchPlayer.find((item) => item.User.id === viewerId) || null : null
+  const viewerUndercoverFound = match.status === 'PLAYING' && match.phase === 'UNDERCOVER_GUESS' && Boolean(viewerPlayer && viewerPlayer.role === 'UNDERCOVER' && !match.undercoverGuessAt)
   return {
     matchId: match.id,
     roomId: match.roomId,
@@ -793,6 +795,7 @@ export function matchSnapshot(match: MatchRow, now = new Date()): UndercoverPubl
     serverNow: now.toISOString(),
     phaseDeadline: match.phaseDeadline?.toISOString() || null,
     currentSpeakerId: match.currentSpeakerId,
+    viewerUndercoverFound,
     players,
     descriptions,
     descriptionHistory,
@@ -843,7 +846,7 @@ async function loadMatchForUser(matchId: string, userId: string) {
 export async function getUndercoverMatchSnapshot(userId: string, matchId: string, now = new Date()) {
   await advanceExpiredUndercoverMatch(matchId, now)
   const match = await loadMatchForUser(matchId, userId)
-  return matchSnapshot(match, now)
+  return matchSnapshot(match, now, userId)
 }
 
 export async function getUndercoverPrivateState(userId: string, matchId: string, now = new Date()) {
@@ -855,7 +858,7 @@ export async function getUndercoverPrivateState(userId: string, matchId: string,
 export async function getUndercoverMatchState(userId: string, matchId: string, now = new Date()) {
   await advanceExpiredUndercoverMatch(matchId, now)
   const match = await loadMatchForUser(matchId, userId)
-  return { snapshot: matchSnapshot(match, now), privateState: privateState(match, userId) }
+  return { snapshot: matchSnapshot(match, now, userId), privateState: privateState(match, userId) }
 }
 
 function randomItem<T>(items: T[]) {

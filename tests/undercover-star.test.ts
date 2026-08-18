@@ -39,6 +39,7 @@ function snapshot(revision: number, phase: UndercoverPublicMatchSnapshot['phase'
     serverNow: new Date().toISOString(),
     phaseDeadline: null,
     currentSpeakerId: null,
+    viewerUndercoverFound: false,
     players: [],
     descriptions: [],
     descriptionHistory: [],
@@ -529,4 +530,37 @@ test('被踢玩家之后可重新加入 WAITING 房间（kick 非永久封禁，
   // 本轮不引入任何黑名单/封禁字段。
   const schema = source('prisma/schema.prisma')
   assert.doesNotMatch(schema, /kickBan|bannedUserIds|KickBan|BannedUser/i)
+})
+
+test('卧底被投出进入最后猜词阶段：卧底本人视图 viewerUndercoverFound=true 且可猜词', () => {
+  const match = makeMatch({ phase: 'UNDERCOVER_GUESS', currentSpeakerId: null, undercoverGuessAt: null })
+  const undercoverView = matchSnapshot(match, new Date(), 'u1')
+  assert.equal(undercoverView.phase, 'UNDERCOVER_GUESS')
+  assert.equal(undercoverView.viewerUndercoverFound, true, '卧底本人应看到「你被发现了 / 进行最后猜词」')
+  assert.equal(privateState(match, 'u1').canGuess, true, '卧底本人可提交猜词')
+  // PLAYING 阶段安全红线：快照绝不泄露任何玩家角色/词
+  const undercoverPlayer = undercoverView.players.find((player) => player.userId === 'u1')
+  assert.equal(undercoverPlayer?.role, undefined)
+})
+
+test('卧底被投出进入最后猜词阶段：平民视图 viewerUndercoverFound=false 只看等待文案', () => {
+  const match = makeMatch({ phase: 'UNDERCOVER_GUESS', currentSpeakerId: null, undercoverGuessAt: null })
+  const civilianView = matchSnapshot(match, new Date(), 'u2')
+  assert.equal(civilianView.phase, 'UNDERCOVER_GUESS')
+  assert.equal(civilianView.viewerUndercoverFound, false, '平民不应看到「你被发现了」')
+  assert.equal(privateState(match, 'u2').canGuess, false, '平民不可提交猜词')
+  const civilianThree = matchSnapshot(match, new Date(), 'u3')
+  assert.equal(civilianThree.viewerUndercoverFound, false, '另一名平民同样看不到被投出提示')
+})
+
+test('最后猜词阶段：不同身份玩家收到不同的 viewerUndercoverFound（接口层按 viewerId 区分）', () => {
+  const match = makeMatch({ phase: 'UNDERCOVER_GUESS', currentSpeakerId: null, undercoverGuessAt: null })
+  const undercover = matchSnapshot(match, new Date(), 'u1').viewerUndercoverFound
+  const civilian = matchSnapshot(match, new Date(), 'u3').viewerUndercoverFound
+  assert.notEqual(undercover, civilian, '卧底与平民的展示标记必须不同')
+  assert.equal(undercover, true)
+  assert.equal(civilian, false)
+  // 卧底已提交猜词后标记失效（等待结算，最终进入 FINISHED）
+  const guessed = makeMatch({ phase: 'UNDERCOVER_GUESS', undercoverGuessAt: new Date() })
+  assert.equal(matchSnapshot(guessed, new Date(), 'u1').viewerUndercoverFound, false, '已猜词后不再提示被投出')
 })
