@@ -7,12 +7,6 @@ import { ProfileSettingsForm } from './ProfileSettingsForm'
 import type { UserLocation } from '@/lib/user-location'
 
 type InitialProfile = {
-  username: string
-  usernameChange: {
-    lastChangedAt: string | null
-    nextAllowedAt: string | null
-    canChange: boolean
-  }
   nickname: string
   nicknameViolation: boolean
   avatarUrl: string

@@ -8,7 +8,7 @@ import {
   setUndercoverPresence,
   touchUndercoverPresence,
 } from '@/lib/undercover-star'
-import type { UndercoverClientCommand, UndercoverRealtimeEvent, UndercoverRoomMessagePublic } from '@/lib/undercover-star-protocol'
+import type { UndercoverClientCommand, UndercoverRealtimeEvent } from '@/lib/undercover-star-protocol'
 
 const OPEN_STATE = 1
 const MAX_COMMAND_BYTES = 16_384
@@ -132,15 +132,6 @@ export class UndercoverStarRealtimeHub {
     if (!sockets) return
     for (const socket of [...sockets]) {
       if (socket.undercoverUserId === targetUserId) safeSend(socket, { type: 'ROOM_KICKED', roomId })
-    }
-  }
-
-  /** 向房间内所有在线有效成员广播一条等候聊天室消息。best-effort：广播失败不影响已写入的 DB 记录。 */
-  broadcastRoomChat(roomId: string, message: UndercoverRoomMessagePublic) {
-    const sockets = this.roomSockets.get(roomId)
-    if (!sockets) return
-    for (const socket of [...sockets]) {
-      if (socket.readyState === OPEN_STATE && socket.undercoverUserId) safeSend(socket, { type: 'ROOM_CHAT_MESSAGE', message })
     }
   }
 

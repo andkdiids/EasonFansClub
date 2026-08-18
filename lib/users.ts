@@ -1,6 +1,5 @@
 import type { Prisma, User } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { normalizeLoginAccount } from '@/lib/login-account'
 import { getPhoneLookupVariants, type PhoneCountryCode } from '@/lib/phone-number'
 
 export const inactiveUserStatuses = ['BANNED', 'DELETED', 'MERGED', 'DISABLED'] as const
@@ -40,14 +39,13 @@ export function isCompleteActiveUser(
 export async function findCompleteActiveUserByIdentifier(identifier: string) {
   const normalized = identifier.trim()
   const lower = normalized.toLowerCase()
-  const normalizedAccount = normalizeLoginAccount(identifier)
   const phoneVariants = getPhoneLookupVariants(normalized)
 
   const user = await prisma.user.findFirst({
     where: {
       status: 'ACTIVE',
       isDeleted: false,
-      OR: [...phoneVariants.map((phone) => ({ phone })), { email: lower }, { usernameNormalized: normalizedAccount }],
+      OR: [...phoneVariants.map((phone) => ({ phone })), { email: lower }],
     },
     select: {
       id: true,
@@ -66,15 +64,15 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
   return user
 }
 
-export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email' | 'account', identifier: string, phoneCountry: PhoneCountryCode = 'CN') {
+export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email', identifier: string, phoneCountry: PhoneCountryCode = 'CN') {
   const normalized = identifier.trim()
-  const lookup = identifierType === 'email' ? normalized.toLowerCase() : identifierType === 'account' ? normalizeLoginAccount(identifier) : normalized
+  const lookup = identifierType === 'email' ? normalized.toLowerCase() : normalized
   const phoneVariants = identifierType === 'phone' ? getPhoneLookupVariants(identifier, phoneCountry) : []
 
   const user = await prisma.user.findFirst({
     where: {
       isDeleted: false,
-      ...(identifierType === 'email' ? { email: lookup } : identifierType === 'phone' ? { phone: { in: phoneVariants.length ? phoneVariants : [lookup] } } : { usernameNormalized: lookup }),
+      ...(identifierType === 'email' ? { email: lookup } : { phone: { in: phoneVariants.length ? phoneVariants : [lookup] } }),
     },
     select: {
       id: true,

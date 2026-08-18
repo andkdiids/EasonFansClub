@@ -8,6 +8,7 @@ import type { UndercoverDifficulty } from '@prisma/client'
 import { undercoverDifficultyLabels } from '@/lib/undercover-star-config'
 import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '@/lib/undercover-star-client-state'
 import { UndercoverStarRealtimeClient } from '@/lib/undercover-star-realtime-client'
+import { UndercoverStarChatClient } from '@/lib/undercover-star-chat-realtime-client'
 
 type LobbyResponse = { rooms: UndercoverRoomState[]; activeRoom: UndercoverRoomState | null; activeMatch: { matchId: string; roomId: string; status: 'PLAYING' | 'FINISHED' } | null; isInActiveGame: boolean }
 type LobbyActiveMatch = NonNullable<LobbyResponse['activeMatch']>
@@ -69,7 +70,6 @@ export function UndercoverStarClient() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const realtimeRef = useRef<UndercoverStarRealtimeClient | null>(null)
-  const chatMessageRef = useRef<((message: UndercoverRoomMessagePublic) => void) | null>(null)
   const snapshotRef = useRef<UndercoverPublicMatchSnapshot | null>(null)
   const roomRef = useRef<UndercoverRoomState | null>(null)
 
@@ -154,8 +154,19 @@ export function UndercoverStarClient() {
         setView('MATCH')
       },
       onStatus: (status) => { if (status === 'disconnected') setMessage('实时连接暂时中断，正在恢复对局状态。') },
-      onError: (reason) => setError(reason),
-      onChatMessage: (message) => chatMessageRef.current?.(message),
+      onError: (reason) => {
+        // 进入已失效/已销毁的房间：清空房间视图并回大厅，提示「请重新创建」。
+        if (reason.includes('房间已失效')) {
+          roomRef.current = null
+          setRoom(null)
+          setRoomId(null)
+          setMatchId(null)
+          setView('LOBBY')
+          void loadLobby()
+          return
+        }
+        setError(reason)
+      },
       onKicked: () => {
         // 被房主移出：清理本地房间状态、停止该 Room 的 realtime 订阅、返回大厅。
         realtimeRef.current?.stop(); roomRef.current = null; setRoom(null); setActiveRoom(null); setActiveMatch(null); setRoomId(null); setMatchId(null); setView('LOBBY'); setError(''); setMessage('你已被房主移出房间。'); void loadLobby()
@@ -304,7 +315,7 @@ export function UndercoverStarClient() {
       {view === 'ROOM' && room ? (
         <>
           <Room room={room} busy={busy} onReady={(ready) => void roomAction(`/api/entertainment/undercover-star/rooms/${room.roomId}/ready`, { ready })} onStart={() => void roomAction(`/api/entertainment/undercover-star/rooms/${room.roomId}/start`)} onLeave={() => void leaveWaitingRoom()} onKick={(targetUserId) => void kickPlayer(targetUserId)} onDifficulty={(value) => void roomAction(`/api/entertainment/undercover-star/rooms/${room.roomId}/difficulty`, { difficulty: value })} />
-          <RoomChat roomId={room.roomId} viewerUserId={room.viewerUserId} registerChat={(handler) => { chatMessageRef.current = handler; return () => { if (chatMessageRef.current === handler) chatMessageRef.current = null } }} />
+          <RoomChat roomId={room.roomId} viewerUserId={room.viewerUserId} />
         </>
       ) : null}
       {view === 'MATCH' && snapshot && privateState ? <Match snapshot={snapshot} privateState={privateState} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} voteOptions={voteOptions} countdown={countdown} showPrivate={showPrivate} description={description} guess={guess} voteTarget={voteTarget} voteAbstain={voteAbstain} busy={busy} onShowPrivate={setShowPrivate} onVoteAbstain={setVoteAbstain} onDescription={setDescription} onGuess={setGuess} onVoteTarget={setVoteTarget} onConfirmRole={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/role-confirm`, { expectedRevision: snapshot.revision })} onDescriptionSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/descriptions`, { content: description, expectedRevision: snapshot.revision, expectedRound: snapshot.round }).then((success) => { if (success) setDescription('') })} onVoteSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/votes`, voteAbstain ? { abstain: true, expectedRevision: snapshot.revision, expectedRound: snapshot.round } : { targetId: voteTarget, expectedRevision: snapshot.revision, expectedRound: snapshot.round })} onGuessSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/guess`, { guess, expectedRevision: snapshot.revision }).then((success) => { if (success) setGuess('') })} onBack={resetToLobby} /> : view === 'MATCH' ? <div className="border border-sky-100 bg-white p-6 text-sm font-bold text-slate-500">正在恢复对局…</div> : null}
@@ -313,75 +324,121 @@ export function UndercoverStarClient() {
   )
 }
 
-function RoomChat({ roomId, viewerUserId, registerChat }: { roomId: string; viewerUserId: string | null; registerChat: (handler: (message: UndercoverRoomMessagePublic) => void) => () => void }) {
+function RoomChat({ roomId, viewerUserId }: { roomId: string; viewerUserId: string | null }) {
   const [messages, setMessages] = useState<UndercoverRoomMessagePublic[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setChatError] = useState('')
+  const [newCount, setNewCount] = useState(0)
   const listRef = useRef<HTMLDivElement | null>(null)
   const nearBottomRef = useRef(true)
+  const chatClientRef = useRef<UndercoverStarChatClient | null>(null)
   const EMOJIS = ['😀', '😂', '😍', '👍', '🎉', '🔥', '😅', '🤔']
 
-  useEffect(() => {
-    let cancelled = false
-    void request<{ messages: UndercoverRoomMessagePublic[] }>(`/api/entertainment/undercover-star/rooms/${roomId}/messages`).then((data) => {
-      if (cancelled) return
-      setMessages(data.messages)
-      nearBottomRef.current = true
-      requestAnimationFrame(() => { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight })
-    }).catch((reason: unknown) => { if (!cancelled) setChatError(reason instanceof Error ? reason.message : '聊天记录加载失败。') })
-    const handler = (message: UndercoverRoomMessagePublic) => {
-      // 按 message.id 去重，避免 POST 响应与 ROOM_CHAT_MESSAGE 广播重复显示自己的消息。
-      setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]))
-    }
-    const unregister = registerChat(handler)
-    // 离开房间/被踢/解散/开始游戏：组件卸载即清理本地消息与草稿（reconnect 时重新拉取历史）。
-    return () => { cancelled = true; unregister(); setMessages([]); setDraft(''); setChatError('') }
-  }, [roomId, registerChat])
-
-  const scrollToBottom = useCallback(() => { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight }, [])
+  const scrollToBottom = useCallback(() => {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    nearBottomRef.current = true
+  }, [])
 
   // 仅当用户当前在底部附近时才自动跟随；主动上翻历史时（near-bottom 失效）不强制拉到底部。
   useEffect(() => { if (nearBottomRef.current) scrollToBottom() }, [messages, scrollToBottom])
+
+  // 等候聊天室走独立实时频道（undercover-chat）：进入房间先 HTTP 拉取最近 50 条历史，
+  // 之后由 WS 增量追加；WS 断开时客户端自动 HTTP 兜底轮询恢复，不依赖页面轮询。
+  useEffect(() => {
+    let cancelled = false
+    const client = new UndercoverStarChatClient({
+      roomId,
+      fetchMessages: async (id) => (await request<{ messages: UndercoverRoomMessagePublic[] }>(`/api/entertainment/undercover-star/rooms/${id}/messages`)).messages,
+      onHistory: (loaded) => {
+        if (cancelled) return
+        setMessages(loaded)
+        setNewCount(0)
+        requestAnimationFrame(scrollToBottom)
+      },
+      onChatMessage: (message) => {
+        if (cancelled) return
+        // 按 message.id 去重，避免 POST 响应与 ROOM_CHAT_MESSAGE 广播重复显示自己的消息。
+        setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]))
+        // 不在底部（正在看历史）时不强制滚动，改为累计「X条新消息」提示。
+        if (!nearBottomRef.current) setNewCount((count) => count + 1)
+      },
+      onError: (reason) => { if (!cancelled) setChatError(reason) },
+    })
+    chatClientRef.current = client
+    client.start()
+    return () => {
+      cancelled = true
+      client.stop()
+      chatClientRef.current = null
+      setMessages([])
+      setDraft('')
+      setChatError('')
+      setNewCount(0)
+    }
+  }, [roomId, scrollToBottom])
 
   function onScroll() {
     const el = listRef.current
     if (!el) return
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    if (nearBottomRef.current && newCount > 0) setNewCount(0)
   }
 
-  function insertEmoji(emoji: string) {
-    setDraft((prev) => (prev + emoji).slice(0, 200))
-  }
-
-  async function send() {
-    const text = draft.trim()
+  async function sendMessage(content: string) {
+    const text = content.trim()
     if (!text || sending) return
     setSending(true); setChatError('')
     try {
       const data = await request<{ message: UndercoverRoomMessagePublic }>(`/api/entertainment/undercover-star/rooms/${roomId}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: text }) })
       setMessages((prev) => (prev.some((item) => item.id === data.message.id) ? prev : [...prev, data.message]))
-      setDraft('')
-    } catch (reason) { setChatError(reason instanceof Error ? reason.message : '发送失败。') } finally { setSending(false) }
+      setNewCount(0)
+      if (!nearBottomRef.current) scrollToBottom()
+      return data.message
+    } catch (reason) {
+      setChatError(reason instanceof Error ? reason.message : '发送失败。')
+      return null
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function send() {
+    const sent = await sendMessage(draft)
+    if (sent) setDraft('')
+  }
+
+  // 表情即时发送：点击即发，不进入草稿、不刷新页面、不重新拉取聊天记录。
+  function insertEmoji(emoji: string) {
+    void sendMessage(emoji)
   }
 
   return (
     <section className="border border-sky-100 bg-white p-5 shadow-sm sm:p-6">
       <h3 className="text-lg font-black text-brand-950">等候聊天室</h3>
-      <div ref={listRef} onScroll={onScroll} className="mt-3 max-h-72 space-y-3 overflow-y-auto touch-action-pan-y pr-1">
-        {messages.length === 0 ? <p className="py-6 text-center text-sm font-bold text-slate-400">还没有人说话，来打个招呼吧～</p> : messages.map((message) => (
-          <div key={message.id} className="flex gap-2">
-            {message.avatarUrl ? <Image src={message.avatarUrl} alt="" width={32} height={32} unoptimized className="size-8 shrink-0 rounded-full object-cover" /> : <span className="size-8 flex shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-brand-700">{message.name.slice(0, 1)}</span>}
-            <div className="min-w-0">
-              <div className="flex items-baseline gap-2"><span className="truncate text-xs font-black text-brand-700">{message.name}{message.userId === viewerUserId ? '（我）' : ''}</span><span className="shrink-0 text-[10px] font-bold text-slate-400">{new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></div>
-              <p className={`break-words text-sm font-bold leading-6 ${message.userId === viewerUserId ? 'text-brand-800' : 'text-slate-700'}`}>{message.content}</p>
+      <div className="relative">
+        <div ref={listRef} onScroll={onScroll} className="mt-3 max-h-72 space-y-3 overflow-y-auto touch-action-pan-y pr-1">
+          {messages.length === 0 ? <p className="py-6 text-center text-sm font-bold text-slate-400">还没有人说话，来打个招呼吧～</p> : messages.map((message) => (
+            <div key={message.id} className="flex gap-2">
+              {message.avatarUrl ? <Image src={message.avatarUrl} alt="" width={32} height={32} unoptimized className="size-8 shrink-0 rounded-full object-cover" /> : <span className="size-8 flex shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-brand-700">{message.name.slice(0, 1)}</span>}
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-2"><span className="truncate text-xs font-black text-brand-700">{message.name}{message.userId === viewerUserId ? '（我）' : ''}</span><span className="shrink-0 text-[10px] font-bold text-slate-400">{new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></div>
+                <p className={`break-words text-sm font-bold leading-6 ${message.userId === viewerUserId ? 'text-brand-800' : 'text-slate-700'}`}>{message.content}</p>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+        {newCount > 0 ? (
+          <button type="button" onClick={() => { scrollToBottom(); setNewCount(0) }} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-brand-950 px-4 py-1.5 text-xs font-black text-white shadow-lg">
+            {newCount} 条新消息 ↓
+          </button>
+        ) : null}
       </div>
       {error ? <p role="alert" className="mt-2 bg-red-50 p-2 text-xs font-black text-red-700">{error}</p> : null}
       <div className="mt-3 flex flex-wrap gap-1">
-        {EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)} className="rounded border border-sky-100 px-2 py-1 text-base leading-none">{emoji}</button>)}
+        {EMOJIS.map((emoji) => <button key={emoji} type="button" disabled={sending} onClick={() => insertEmoji(emoji)} className="rounded border border-sky-100 px-2 py-1 text-base leading-none disabled:opacity-50">{emoji}</button>)}
       </div>
       <div className="mt-2 flex items-end gap-2">
         <textarea value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 200))} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} maxLength={200} rows={1} placeholder="说点什么…（最多 200 字）" className="max-h-24 min-h-[2.5rem] flex-1 resize-none border border-sky-100 px-3 py-2 text-sm font-bold outline-none focus:border-brand-400" />

@@ -7,7 +7,6 @@ import { getGrowthSummarySafe } from '@/lib/growth'
 import { profileImageUrl } from '@/lib/images'
 import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
-import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
@@ -35,8 +34,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     select: {
       id: true,
       uid: true,
-      username: true,
-      usernameChangedAt: true,
       nickname: true,
       usernameModerationStatus: true,
       nicknameModerationStatus: true,
@@ -68,7 +65,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
-  const usernameChange = getUsernameChangeAvailability(profile.usernameChangedAt)
   const [growth, recentMessagesPage, defaultAvatarOptions] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
@@ -76,12 +72,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   ])
 
   const profileEditorInitialProfile = {
-    username: profile.username,
-    usernameChange: {
-      lastChangedAt: usernameChange.lastChangedAt ? usernameChange.lastChangedAt.toISOString() : null,
-      nextAllowedAt: usernameChange.nextAllowedAt ? usernameChange.nextAllowedAt.toISOString() : null,
-      canChange: usernameChange.canChange,
-    },
     nickname: displayName,
     nicknameViolation: profile.nicknameModerationStatus === 'VIOLATION' || profile.Profile.displayNameModerationStatus === 'VIOLATION',
     avatarUrl: avatar || '',

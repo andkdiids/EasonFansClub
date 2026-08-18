@@ -188,7 +188,18 @@ export class GuessSongDuelRealtimeHub {
   async publishSubmission(matchId: string, outcome: Awaited<ReturnType<typeof submitDuelAnswer>>) {
     if ('userId' in outcome && outcome.userId) {
       this.broadcastMatchEvent(matchId, { type: 'PLAYER_ANSWERED', matchId, questionIndex: outcome.questionIndex, userId: outcome.userId })
-      this.sendToUser(outcome.userId, { type: 'ANSWER_ACCEPTED', matchId, questionIndex: outcome.questionIndex, userId: outcome.userId })
+      // Feedback travels only to the answering player. The opponent's socket
+      // never receives selectedOptionKey / correct / correctOptionKey, so SCORE
+      // stays isolated while BUZZER keeps its own reveal path untouched.
+      this.sendToUser(outcome.userId, {
+        type: 'ANSWER_ACCEPTED',
+        matchId,
+        questionIndex: outcome.questionIndex,
+        userId: outcome.userId,
+        correct: outcome.correct,
+        correctOptionKey: outcome.correctOptionKey,
+        selectedOptionKey: outcome.selectedOptionKey,
+      })
     }
     await this.publishCompletion(matchId, outcome.questionCompletion)
   }

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DUEL_HEARTBEAT_INTERVAL_MS, DUEL_MODE_RULES, DUEL_ROOM_POLL_INTERVAL_MS, getDuelModeLabel, type DuelMode } from '@/lib/guess-song-duel-config'
 import { canApplyDuelMatchSnapshot } from '@/lib/guess-song-duel-client-state'
-import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
+import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelOption, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
 
 type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null }
 type DuelStats = { wins: number; participations: number; winRate: number }
@@ -79,6 +79,17 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const [selectedFriendId, setSelectedFriendId] = useState('')
   const [audioBlocked, setAudioBlocked] = useState(false)
   const [clockTick, setClockTick] = useState(Date.now())
+  // SCORE per-user answer feedback. Captured from the ANSWER_ACCEPTED event so
+  // only the answering player ever sees their own correct/incorrect result.
+  // The opponent's socket never receives this event, keeping SCORE isolated.
+  const [answerFeedback, setAnswerFeedback] = useState<{
+    questionIndex: number
+    options: DuelOption[]
+    selectedOptionKey: string
+    correct: boolean
+    correctOptionKey: string
+  } | null>(null)
+  const answerFeedbackTimerRef = useRef<number | null>(null)
 
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -337,6 +348,20 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       return
     }
     if (event.type === 'QUESTION_START' || event.type === 'PLAYER_ANSWERED' || event.type === 'QUESTION_RESULT' || event.type === 'MATCH_FINISHED' || event.type === 'ANSWER_ACCEPTED') {
+      if (event.type === 'ANSWER_ACCEPTED' && event.userId === userId && activeMode === 'SCORE' && currentQuestion) {
+        // Per-user feedback only: capture the just-answered question so the
+        // answerer sees their own correct/incorrect result. The opponent never
+        // receives this event, so their options stay untouched.
+        setAnswerFeedback({
+          questionIndex: event.questionIndex,
+          options: currentQuestion.options,
+          selectedOptionKey: event.selectedOptionKey,
+          correct: event.correct,
+          correctOptionKey: event.correctOptionKey,
+        })
+        if (answerFeedbackTimerRef.current) window.clearTimeout(answerFeedbackTimerRef.current)
+        answerFeedbackTimerRef.current = window.setTimeout(() => setAnswerFeedback(null), 1600)
+      }
       void syncDuelState(true)
       return
     }
@@ -786,15 +811,30 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
             <div className="duel-question-heading"><span>{currentQuestion?.isOvertime ? `加赛 ${currentQuestion.overtimeIndex || 1}` : `${activeModeLabel} · 第 ${String(match.currentQuestionIndex).padStart(2, '0')} / ${match.totalQuestions} 题`}</span><span>{audioStarted && !deadlinePassed ? activeMode === 'BUZZER' ? '抢答进行中' : '双方独立作答' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
             <p className="duel-audio-hint">试听将在题目开始后 2 秒同步播放 · {activeMode === 'BUZZER' ? '本题最多 1 个得分者' : '双方各有一次独立答题机会'}</p>
             {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
-            <div className="duel-options">{currentQuestion?.options.map((option) => {
-              const mine = me?.selectedOptionKey === option.key
-              const theirs = activeMode === 'BUZZER' && opponent?.selectedOptionKey === option.key
-              const correct = activeMode === 'BUZZER' && questionResult?.correctOptionKey === option.key
-              const mineLabel = activeMode === 'BUZZER' && me?.answerCorrect === false ? '我的错误抢答' : questionResult && me?.answerCorrect !== null ? me?.answerCorrect ? '我答对了' : '我答错了' : '我的选择'
-              const theirsLabel = activeMode === 'BUZZER' && opponent?.answerCorrect === false ? '对方错误抢答' : questionResult && opponent?.answerCorrect !== null ? opponent?.answerCorrect ? '对方答对了' : '对方答错了' : '对方选择'
-              return <button key={option.key} type="button" className={[me?.submitted || Boolean(questionResult) ? 'is-submitted' : '', mine ? 'is-my-choice' : '', theirs ? 'is-opponent-choice' : '', correct ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} onClick={() => void submitAnswer(option.key)} disabled={!audioStarted || deadlinePassed || Boolean(me?.submitted) || Boolean(questionResult)} aria-label={`${option.label}${mine ? `，${mineLabel}` : ''}${theirs ? `，${theirsLabel}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{mine ? <small>{mineLabel}</small> : null}{theirs ? <small>{theirsLabel}</small> : null}</button>
-            })}</div>
-             <div className="duel-answer-status">{me?.submitted ? activeMode === 'BUZZER' ? '✓ 已作答，本题资格已锁定' : '✓ 已作答，等待对手' : audioStarted && !deadlinePassed ? '选择一个答案，提交后不可修改' : '请等待题目开始'}{opponent?.submitted ? <span> · 对手已作答</span> : null}</div>
+            {answerFeedback && activeMode === 'SCORE' ? (
+              <>
+                <div className="duel-options">{answerFeedback.options.map((option) => {
+                  const mineRight = answerFeedback.correct && answerFeedback.selectedOptionKey === option.key
+                  const mineWrong = !answerFeedback.correct && answerFeedback.selectedOptionKey === option.key
+                  const isCorrect = answerFeedback.correctOptionKey === option.key
+                  const label = mineRight ? '我答对了' : mineWrong ? '我的错误选择' : isCorrect ? '正确答案' : ''
+                  return <button key={option.key} type="button" className={[mineRight ? 'is-correct-choice' : '', mineWrong ? 'is-wrong-choice' : '', isCorrect ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} disabled aria-label={`${option.label}${label ? `，${label}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{label ? <small>{label}</small> : null}</button>
+                })}</div>
+                <div className="duel-answer-status">{answerFeedback.correct ? '✅ 回答正确！' : `❌ 回答错误，正确答案：${answerFeedback.correctOptionKey}`}</div>
+              </>
+            ) : (
+              <>
+                <div className="duel-options">{currentQuestion?.options.map((option) => {
+                  const mine = me?.selectedOptionKey === option.key
+                  const theirs = activeMode === 'BUZZER' && opponent?.selectedOptionKey === option.key
+                  const correct = activeMode === 'BUZZER' && questionResult?.correctOptionKey === option.key
+                  const mineLabel = activeMode === 'BUZZER' && me?.answerCorrect === false ? '我的错误抢答' : questionResult && me?.answerCorrect !== null ? me?.answerCorrect ? '我答对了' : '我答错了' : '我的选择'
+                  const theirsLabel = activeMode === 'BUZZER' && opponent?.answerCorrect === false ? '对方错误抢答' : questionResult && opponent?.answerCorrect !== null ? opponent?.answerCorrect ? '对方答对了' : '对方答错了' : '对方选择'
+                  return <button key={option.key} type="button" className={[me?.submitted || Boolean(questionResult) ? 'is-submitted' : '', mine ? 'is-my-choice' : '', theirs ? 'is-opponent-choice' : '', correct ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} onClick={() => void submitAnswer(option.key)} disabled={!audioStarted || deadlinePassed || Boolean(me?.submitted) || Boolean(questionResult)} aria-label={`${option.label}${mine ? `，${mineLabel}` : ''}${theirs ? `，${theirsLabel}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{mine ? <small>{mineLabel}</small> : null}{theirs ? <small>{theirsLabel}</small> : null}</button>
+                })}</div>
+                 <div className="duel-answer-status">{me?.submitted ? activeMode === 'BUZZER' ? '✓ 已作答，本题资格已锁定' : '✓ 已作答，等待对手' : audioStarted && !deadlinePassed ? '选择一个答案，提交后不可修改' : '请等待题目开始'}{opponent?.submitted ? <span> · 对手已作答</span> : null}</div>
+              </>
+            )}
              {lastRoundSummary ? <div className="duel-question-result">上一题：{lastRoundSummary}</div> : null}
              {questionResult ? <div className="duel-question-result"><b>本题答案：{questionResult.correctLabel}</b><span>{activeMode === 'BUZZER' ? questionResult.answers.some((answer) => answer.correct) ? '本题已分出胜负' : '本题无人得分' : `${questionResult.answers.filter((answer) => answer.correct).length} 人答对`}</span></div> : null}
             </>}

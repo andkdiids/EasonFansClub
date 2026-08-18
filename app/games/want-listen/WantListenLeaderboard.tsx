@@ -40,7 +40,8 @@ export function WantListenLeaderboard() {
   }, [mode, period])
 
   return (
-    <main className="want-listen-page want-listen-board-page games-center-background games-full-width">
+    <main className="games-page games-full-width">
+      <div className="games-page-inner want-listen-page want-listen-board-page">
       <header className="want-listen-heading">
         <Link href="/games/want-listen" className="want-listen-back">← 返回想听</Link>
         <h1>想听榜</h1>
@@ -53,7 +54,8 @@ export function WantListenLeaderboard() {
         {board?.rows.map((row) => <article key={row.userId}><span>{row.rank}</span><span className="want-listen-board-user">{row.user.avatarUrl ? <img src={row.user.avatarUrl} alt="" /> : <i>{String(row.user.uid).slice(-1)}</i>}<b>{row.user.nickname}</b></span><strong>{row.score}</strong><span>{row.correctCount}/20</span><span>{Math.max(1, Math.round(row.completionTimeMs / 1000))}s</span></article>)}
         {!loading && !board?.rows.length ? <p className="want-listen-board-empty">当前周期还没有完成成绩。</p> : null}
       </section>
-      {board?.self ? <p className="want-listen-board-self">我的最佳：{board.self.score} 分 · 答对 {board.self.correctCount}/20 · {Math.max(1, Math.round(board.self.completionTimeMs / 1000))} 秒</p> : null}
+        {board?.self ? <p className="want-listen-board-self">我的最佳：{board.self.score} 分 · 答对 {board.self.correctCount}/20 · {Math.max(1, Math.round(board.self.completionTimeMs / 1000))} 秒</p> : null}
+      </div>
     </main>
   )
 }

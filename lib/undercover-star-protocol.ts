@@ -192,3 +192,9 @@ export type UndercoverClientCommand =
   | { type: 'SYNC_ROOM'; roomId: string }
   | { type: 'SYNC_MATCH'; matchId: string }
   | { type: 'PING' }
+
+// 聊天室独立频道的客户端指令（与游戏同步频道 undercover-realtime 完全隔离）。
+export type UndercoverClientChatCommand =
+  | { type: 'JOIN_ROOM_CHAT'; roomId: string }
+  | { type: 'SYNC_ROOM_CHAT'; roomId: string }
+  | { type: 'PING' }

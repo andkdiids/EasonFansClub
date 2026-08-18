@@ -8,10 +8,12 @@ import { hasValidRequestOrigin } from './lib/security'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
 import { undercoverRealtimeHub } from './lib/undercover-star-realtime'
+import { undercoverChatHub } from './lib/undercover-star-chat-realtime'
 
 const websocketPath = '/ws'
 const duelWebsocketPath = '/ws/duel'
 const undercoverWebsocketPath = '/ws/undercover'
+const undercoverChatWebsocketPath = '/ws/undercover-chat'
 const maxPayload = 4096
 const maxConnectionsPerUser = 8
 const maxConnectionsPerIp = 20
@@ -100,7 +102,7 @@ function parsePort() {
 
 async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
   const url = requestUrl(request)
-  if (url.pathname !== websocketPath && url.pathname !== duelWebsocketPath && url.pathname !== undercoverWebsocketPath) {
+  if (url.pathname !== websocketPath && url.pathname !== duelWebsocketPath && url.pathname !== undercoverWebsocketPath && url.pathname !== undercoverChatWebsocketPath) {
     rejectUpgrade(socket, 404, 'Not Found')
     return null
   }
@@ -137,7 +139,7 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
       rejectUpgrade(socket, 429, 'Too Many Requests')
       return null
     }
-    return { user, ip, channel: url.pathname === duelWebsocketPath ? 'duel' as const : url.pathname === undercoverWebsocketPath ? 'undercover' as const : 'summary' as const }
+    return { user, ip, channel: url.pathname === duelWebsocketPath ? 'duel' as const : url.pathname === undercoverWebsocketPath ? 'undercover' as const : url.pathname === undercoverChatWebsocketPath ? 'undercover-chat' as const : 'summary' as const }
   } catch (error) {
     console.error('[realtime.authorize]', error)
     rejectUpgrade(socket, 503, 'Service Unavailable')
@@ -163,7 +165,7 @@ async function start() {
     perMessageDeflate: false,
   })
 
-  websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string; channel: 'summary' | 'duel' | 'undercover' }) => {
+  websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string; channel: 'summary' | 'duel' | 'undercover' | 'undercover-chat' }) => {
     const { user, ip } = auth
     socket.isAlive = true
     socket.realtimeUserId = user.id
@@ -177,9 +179,12 @@ async function start() {
       ? realtimeHub.add(user.id, socket)
       : auth.channel === 'duel'
         ? () => duelRealtimeHub.detach(socket)
-        : () => undercoverRealtimeHub.detach(socket)
+        : auth.channel === 'undercover-chat'
+          ? () => undercoverChatHub.detach(socket)
+          : () => undercoverRealtimeHub.detach(socket)
     if (auth.channel === 'duel') duelRealtimeHub.attach(user.id, socket)
     if (auth.channel === 'undercover') undercoverRealtimeHub.attach(user.id, socket)
+    if (auth.channel === 'undercover-chat') undercoverChatHub.attach(user.id, socket)
 
     const cleanup = () => {
       if (closed) return
@@ -203,6 +208,10 @@ async function start() {
       }
       if (auth.channel === 'undercover') {
         void undercoverRealtimeHub.handleMessage(socket, data)
+        return
+      }
+      if (auth.channel === 'undercover-chat') {
+        void undercoverChatHub.handleMessage(socket, data)
         return
       }
       socket.close(1008, 'read-only realtime channel')

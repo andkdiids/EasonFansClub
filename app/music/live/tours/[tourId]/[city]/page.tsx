@@ -31,9 +31,9 @@ type CityConcert = {
   encore: SetlistItemForBlock[]
   full: SetlistItemForBlock[]
   signature: string
-  contributorUser: { uid: number; username: string } | null
-  setlistContributorUser: { uid: number; username: string } | null
-  encoreContributorUser: { uid: number; username: string } | null
+  contributorUser: { uid: number; nickname: string } | null
+  setlistContributorUser: { uid: number; nickname: string } | null
+  encoreContributorUser: { uid: number; nickname: string } | null
 }
 
 function normalSignature(items: SetlistItemForBlock[]): string {
@@ -88,9 +88,9 @@ export default async function MusicTourCityPage({ params, searchParams }: { para
               },
             },
             _count: { select: { MusicConcertSetlistItem: true, MusicConcertHighlight: true } },
-            contributorUser: { select: { uid: true, username: true } },
-            setlistContributorUser: { select: { uid: true, username: true } },
-            encoreContributorUser: { select: { uid: true, username: true } },
+            contributorUser: { select: { uid: true, nickname: true } },
+            setlistContributorUser: { select: { uid: true, nickname: true } },
+            encoreContributorUser: { select: { uid: true, nickname: true } },
           },
         },
       },

@@ -151,3 +151,15 @@ test('SCORE: WebSocket MATCH_STATE 按 socket 用户分别生成，不能把 A �
   assert.match(realtime, /sockets\.map\(async \(socket\) => \(\{[\s\S]*getDuelMatchState\(socket\.duelUserId as string, matchId\)/)
   assert.match(realtime, /safeSend\(item\.socket, \{ type: 'MATCH_STATE', state: item\.state \}\)/)
 })
+
+test('SCORE: 作答正误只通过 ANSWER_ACCEPTED 推送给本人，携带自己的正误与正确答案', () => {
+  const realtime = source('lib/guess-song-duel-realtime.ts')
+  assert.match(realtime, /this\.sendToUser\(outcome\.userId, \{[\s\S]*type: 'ANSWER_ACCEPTED'/)
+  assert.match(realtime, /correct: outcome\.correct,/)
+  assert.match(realtime, /correctOptionKey: outcome\.correctOptionKey,/)
+  assert.match(realtime, /selectedOptionKey: outcome\.selectedOptionKey,/)
+  const protocol = source('lib/guess-song-duel-protocol.ts')
+  assert.match(protocol, /type: 'ANSWER_ACCEPTED'; matchId: string; questionIndex: number; userId: string; correct: boolean; correctOptionKey: string; selectedOptionKey: string \}/)
+  const service = source('lib/guess-song-duel-service.ts')
+  assert.match(service, /selectedOptionKey: optionKey, correct, correctOptionKey: question\.correctOptionKey, questionCompletion \}/)
+})

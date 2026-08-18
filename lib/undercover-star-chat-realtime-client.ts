@@ -1,24 +1,27 @@
-import type { UndercoverPublicMatchSnapshot, UndercoverRoomState, UndercoverRealtimeEvent } from '@/lib/undercover-star-protocol'
+import type { UndercoverRoomMessagePublic, UndercoverRealtimeEvent } from '@/lib/undercover-star-protocol'
 import { UNDERCOVER_PRESENCE_HEARTBEAT_MS } from '@/lib/undercover-star-config'
 
 type RealtimeStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
 type Options = {
-  roomId?: string | null
-  matchId?: string | null
-  fetchRoom?: (roomId: string) => Promise<UndercoverRoomState | null>
-  fetchMatch?: (matchId: string) => Promise<UndercoverPublicMatchSnapshot | null>
-  onRoom?: (state: UndercoverRoomState) => void
-  onMatch?: (state: UndercoverPublicMatchSnapshot) => void
+  roomId: string
+  fetchMessages?: (roomId: string) => Promise<UndercoverRoomMessagePublic[]>
+  onChatMessage?: (message: UndercoverRoomMessagePublic) => void
+  onHistory?: (messages: UndercoverRoomMessagePublic[]) => void
   onStatus?: (status: RealtimeStatus) => void
   onError?: (message: string) => void
-  onKicked?: (payload: { roomId: string }) => void
 }
 
 const OPEN_STATE = 1
 const CONNECT_TIMEOUT_MS = 6_000
 
-export class UndercoverStarRealtimeClient {
+/**
+ * 卧底巨星等候聊天室实时客户端（undercover-chat）。
+ *
+ * 与游戏同步客户端（UndercoverStarRealtimeClient，/ws/undercover）完全独立：
+ * 只负责聊天消息的实时收发，不订阅任何房间/对局状态，避免聊天流量影响游戏同步。
+ */
+export class UndercoverStarChatClient {
   private socket: WebSocket | null = null
   private reconnectTimer: number | null = null
   private fallbackTimer: number | null = null
@@ -28,7 +31,7 @@ export class UndercoverStarRealtimeClient {
   private failures = 0
   private options: Options
 
-  constructor(options: Options = {}) {
+  constructor(options: Options) {
     this.options = options
   }
 
@@ -69,13 +72,8 @@ export class UndercoverStarRealtimeClient {
     if (generation !== this.generation || typeof window === 'undefined') return
     this.options.onStatus?.('connecting')
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/undercover`)
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/undercover-chat`)
     this.socket = socket
-    // A WebSocket can sit in CONNECTING forever if a reverse proxy accepts the
-    // TCP/HTTP upgrade but never completes it (onopen and onclose never fire).
-    // Without this guard the client would believe it is "connecting", never
-    // subscribe, never start the fallback poll, and miss every broadcast. Force
-    // the socket closed so onclose runs and the fallback/reconnect path engages.
     this.connectTimer = window.setTimeout(() => {
       if (generation !== this.generation) return
       if (socket.readyState !== OPEN_STATE) socket.close(1000, 'connect timeout')
@@ -86,8 +84,7 @@ export class UndercoverStarRealtimeClient {
       this.failures = 0
       this.options.onStatus?.('connected')
       this.stopFallback()
-      if (this.options.matchId) this.send({ type: 'JOIN_MATCH', matchId: this.options.matchId })
-      else if (this.options.roomId) this.send({ type: 'JOIN_ROOM', roomId: this.options.roomId })
+      this.send({ type: 'JOIN_ROOM_CHAT', roomId: this.options.roomId })
       this.pingTimer = window.setInterval(() => this.send({ type: 'PING' }), UNDERCOVER_PRESENCE_HEARTBEAT_MS)
       this.resync(generation)
     }
@@ -97,7 +94,7 @@ export class UndercoverStarRealtimeClient {
         const event = JSON.parse(String(message.data)) as UndercoverRealtimeEvent
         this.handleEvent(event)
       } catch {
-        this.options.onError?.('实时同步消息无效。')
+        this.options.onError?.('聊天室消息无效。')
       }
     }
     socket.onerror = () => {
@@ -117,24 +114,13 @@ export class UndercoverStarRealtimeClient {
     }
   }
 
-  // One-shot authoritative snapshot on (re)connect. The JOIN_* command already
-  // makes the hub send current state, but a separate HTTP read guarantees
-  // convergence even if that WS frame is dropped, arrives before the socket is
-  // fully subscribed, or was sent for a state the client has since moved past.
-  // The onRoom/onMatch callbacks apply their own staleness guards, so a late
-  // HTTP response can never clobber a newer WS snapshot.
+  // 一次性权威历史恢复：WS 订阅可能因帧丢失/竞态未能即时生效，HTTP 拉取保证收敛。
   private resync(generation: number) {
-    if (this.options.matchId && this.options.fetchMatch) {
-      void this.options.fetchMatch(this.options.matchId).then((state) => {
-        if (generation !== this.generation || !state) return
-        this.options.onMatch?.(state)
-      })
-    } else if (this.options.roomId && this.options.fetchRoom) {
-      void this.options.fetchRoom(this.options.roomId).then((state) => {
-        if (generation !== this.generation || !state) return
-        this.options.onRoom?.(state)
-      })
-    }
+    if (!this.options.fetchMessages) return
+    void this.options.fetchMessages(this.options.roomId).then((messages) => {
+      if (generation !== this.generation) return
+      this.options.onHistory?.(messages)
+    }).catch(() => {})
   }
 
   private clearConnectTimer() {
@@ -143,17 +129,11 @@ export class UndercoverStarRealtimeClient {
   }
 
   private handleEvent(event: UndercoverRealtimeEvent) {
-    if (event.type === 'ROOM_STATE') {
-      this.options.onRoom?.(event.state)
-      return
-    }
-    if (event.type === 'MATCH_STATE') {
-      this.options.onMatch?.(event.state)
-      if (event.state.status === 'FINISHED') this.stop()
+    if (event.type === 'ROOM_CHAT_MESSAGE') {
+      this.options.onChatMessage?.(event.message)
       return
     }
     if (event.type === 'ERROR') this.options.onError?.(event.message)
-    if (event.type === 'ROOM_KICKED') this.options.onKicked?.(event)
   }
 
   private startFallback(generation: number) {
@@ -161,18 +141,14 @@ export class UndercoverStarRealtimeClient {
     const poll = async () => {
       if (generation !== this.generation || this.socket?.readyState === OPEN_STATE) return
       try {
-        if (this.options.matchId && this.options.fetchMatch) {
-          const state = await this.options.fetchMatch(this.options.matchId)
-          if (generation !== this.generation || !state) return
-          this.options.onMatch?.(state)
-          if (state.status === 'FINISHED') this.stop()
-        } else if (this.options.roomId && this.options.fetchRoom) {
-          const state = await this.options.fetchRoom(this.options.roomId)
-          if (generation !== this.generation || !state) return
-          this.options.onRoom?.(state)
+        if (this.options.fetchMessages) {
+          const messages = await this.options.fetchMessages(this.options.roomId)
+          if (generation !== this.generation) return
+          // 兜底轮询只恢复完整历史；增量去重由 onChatMessage 的 message.id 去重保证。
+          this.options.onHistory?.(messages)
         }
-      } catch (error) {
-        this.options.onError?.(error instanceof Error ? error.message : '恢复对局状态失败。')
+      } catch {
+        // 静默：等待下次轮询或重连。
       }
     }
     void poll()

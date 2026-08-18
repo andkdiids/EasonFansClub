@@ -79,7 +79,8 @@ export function WantListenHome() {
   const activeByMode = new Map((summary?.activeSessions || []).map((session) => [session.mode, session]))
 
   return (
-    <main className="want-listen-page games-center-background games-full-width">
+    <main className="games-page games-full-width">
+      <div className="games-page-inner want-listen-page">
       <header className="want-listen-heading">
         <Link href="/games" className="want-listen-back">← 返回娱乐天空</Link>
         <h1>想听</h1>
@@ -131,6 +132,7 @@ export function WantListenHome() {
           })}
         </div>
       </section>
+      </div>
     </main>
   )
 }

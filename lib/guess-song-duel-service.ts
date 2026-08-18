@@ -2047,7 +2047,8 @@ export async function submitDuelAnswer(input: {
       const questionCompletion = scoreProgressAfter.submitted
         ? await completeScoreSubmissionTx(tx, input.matchId, receivedAt)
         : null
-      return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, userId: input.userId, questionCompletion }
+      // Per-user feedback only; the opponent never receives these fields.
+      return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, userId: input.userId, selectedOptionKey: optionKey, correct, correctOptionKey: question.correctOptionKey, questionCompletion }
     }
     const question = await tx.guessSongDuelQuestion.findUnique({ where: { matchId_questionIndex: { matchId: input.matchId, questionIndex: match.currentQuestionIndex } } })
     if (!question || question.matchId !== input.matchId || input.roundId !== question.id || input.questionId !== question.publicToken || input.questionToken !== question.publicToken) {
@@ -2098,7 +2099,7 @@ export async function submitDuelAnswer(input: {
       const answerCount = await tx.guessSongDuelAnswer.count({ where: { matchId: input.matchId, questionId: question.id } })
       if (answerCount >= 2) questionCompletion = await completeQuestionTx(tx, input.matchId, question.questionIndex, receivedAt)
     }
-    return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, userId: input.userId, questionCompletion }
+    return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, userId: input.userId, selectedOptionKey: optionKey, correct, correctOptionKey: question.correctOptionKey, questionCompletion }
   }, { timeout: 15_000 })
   if (outcome.questionCompletion?.syncUserIds.length) await syncDuelUsers(outcome.questionCompletion.syncUserIds)
   return outcome

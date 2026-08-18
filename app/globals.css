@@ -245,6 +245,7 @@
 .duel-options button.is-my-choice { border-color:#2563eb; }
 .duel-options button.is-opponent-choice { box-shadow:inset 0 0 0 1px #f59e0b; }
 .duel-options button.is-correct-choice { border-color:#059669; background:#ecfdf5; }
+.duel-options button.is-wrong-choice { border-color:#dc2626; background:#fef2f2; }
 
 /* Entertainment center */
 .entertainment-page { width:min(80rem,calc(100% - 40px)); color:var(--foreground); }
@@ -3490,7 +3491,7 @@ body:has(.game-detail-page) .site-footer-info { color:rgba(226,232,240,.62); bor
 @keyframes game-skeleton { to { background-position:-220% 0; } }
 
 .game-detail-back { display:inline-flex; min-height:44px; align-items:center; color:#93a7ba; font-size:11px; font-weight:800; text-decoration:none; }
-.game-detail-banner { display:grid; min-height:390px; grid-template-columns:minmax(0,1fr) 280px; align-items:center; margin-top:16px; border:1px solid var(--game-line); padding:clamp(30px,5vw,70px); background:linear-gradient(120deg,#13253a,#091522 70%); }
+.game-detail-banner { display:grid; min-height:220px; grid-template-columns:minmax(0,1fr) 280px; align-items:center; margin-top:16px; border:1px solid var(--game-line); padding:clamp(22px,3vw,40px); background:linear-gradient(120deg,#13253a,#091522 70%); }
 .game-detail-banner[data-accent='green'] { background:linear-gradient(120deg,#123c36,#091522 70%); }
 .game-detail-banner[data-accent='violet'] { background:linear-gradient(120deg,#31264d,#091522 70%); }
 .game-detail-banner[data-accent='amber'] { background:linear-gradient(120deg,#49391f,#091522 70%); }
@@ -3529,7 +3530,7 @@ body:has(.game-detail-page) .site-footer-info { color:rgba(226,232,240,.62); bor
 .game-detail-sections article { border:1px solid var(--game-line); padding:24px; background:#0c1725; }
 .game-detail-sections h2 { margin:0; font-size:19px; }
 .game-detail-sections :where(ul,ol) { margin:18px 0 0; padding-left:18px; color:#8fa4b8; font-size:11px; line-height:1.9; }
-.daily-game-panel { margin-top:18px; }
+.daily-game-panel { max-width:760px; margin-top:18px; }
 .daily-game-panel>button { min-height:46px; margin-top:18px; border:1px solid #54dba4; padding:0 20px; color:#07130e; background:#54dba4; font-weight:900; }
 .daily-game-panel article { display:grid; gap:10px; margin-top:18px; border-left:3px solid #54dba4; padding:18px; background:#101e2e; }
 .daily-game-panel article>strong { color:#54dba4; font-size:28px; }

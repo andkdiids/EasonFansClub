@@ -54,9 +54,9 @@ export default async function MusicConcertBySlugPage({
       select: {
         id: true, title: true, concertDate: true, city: true, countryOrRegion: true, venue: true, sessionNumber: true, posterUrl: true, description: true,
         MusicTour: { select: { id: true, name: true, posterUrl: true } },
-        contributorUser: { select: { uid: true, username: true } },
-        setlistContributorUser: { select: { uid: true, username: true } },
-        encoreContributorUser: { select: { uid: true, username: true } },
+        contributorUser: { select: { uid: true, nickname: true } },
+        setlistContributorUser: { select: { uid: true, nickname: true } },
+        encoreContributorUser: { select: { uid: true, nickname: true } },
         MusicConcertSetlistItem: {
           orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: { id: true, displayName: true, section: true, position: true, createdAt: true, versionName: true, note: true, isEncore: true, isRequest: true, isDebut: true, isGuest: true, isMedley: true, isSpecial: true, MusicSong: { select: { id: true, title: true } } },

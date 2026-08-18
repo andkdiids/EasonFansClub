@@ -78,19 +78,16 @@ export async function GET(request: Request) {
       const normalized = {
         uid: formatUid(friend.uid).toLocaleLowerCase('zh-CN'),
         rawUid: String(friend.uid),
-        username: friend.username.toLocaleLowerCase('zh-CN'),
         nickname: friend.nickname.toLocaleLowerCase('zh-CN'),
         displayName: (friend.Profile?.displayName || '').toLocaleLowerCase('zh-CN'),
         remark: (remarkMap.get(friend.id) || '').toLocaleLowerCase('zh-CN'),
       }
       const matchRank = !q ? 0
         : normalized.uid === q || normalized.rawUid === q ? 1
-          : normalized.username === q ? 2
-              : normalized.nickname === q || normalized.displayName === q || normalized.remark === q ? 3
-              : normalized.username.includes(q) ? 4
-                : normalized.nickname.includes(q) || normalized.displayName.includes(q) || normalized.remark.includes(q) ? 5
-                  : normalized.uid.startsWith(q) || normalized.rawUid.startsWith(q) ? 6
-                    : 99
+          : normalized.nickname === q || normalized.displayName === q || normalized.remark === q ? 2
+            : normalized.uid.startsWith(q) || normalized.rawUid.startsWith(q) ? 3
+              : normalized.nickname.includes(q) || normalized.displayName.includes(q) || normalized.remark.includes(q) ? 4
+                : 99
       const stat = statsByFriend.get(friend.id)
       return {
         id: friend.id,

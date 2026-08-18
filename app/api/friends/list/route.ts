@@ -182,7 +182,6 @@ async function searchUsers(currentUserId: string, q: string) {
         OR: [
           ...(Number.isSafeInteger(numericUid) && Number(numericUid) > 0 ? [{ uid: Number(numericUid) }] : []),
           { nickname: { contains: q } },
-          { username: { contains: q } },
           { Profile: { displayName: { contains: q } } },
         ],
       },

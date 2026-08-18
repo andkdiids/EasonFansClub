@@ -349,8 +349,13 @@ export async function PATCH(request: Request) {
     now.getTime() - current.nicknameChangedAt.getTime() >= 1000 * 60 * 60 * 24 * 30
 
   if (nicknameChanged && !canChangeNickname) {
-    delete data.nickname
-    delete data.nicknameModerationStatus
+    const nextAllowedAt = new Date(current.nicknameChangedAt!.getTime() + 1000 * 60 * 60 * 24 * 30)
+    const daysRemaining = Math.max(1, Math.ceil((nextAllowedAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+    return NextResponse.json({
+      code: 'NICKNAME_CHANGE_COOLDOWN',
+      message: `昵称每 30 天只能修改一次，距离下次修改还有 ${daysRemaining} 天`,
+      nextAllowedAt: nextAllowedAt.toISOString(),
+    }, { status: 429 })
   }
 
   const profile = await prisma.$transaction(async (tx) => {

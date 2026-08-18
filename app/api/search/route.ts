@@ -48,7 +48,6 @@ export async function GET(request: Request) {
         OR: [
           ...(Number.isSafeInteger(numericUid) && Number(numericUid) > 0 ? [{ uid: Number(numericUid) }] : []),
           { nickname: { contains: keyword } },
-          { username: { contains: keyword } },
           { Profile: { displayName: { contains: keyword } } },
         ],
       },

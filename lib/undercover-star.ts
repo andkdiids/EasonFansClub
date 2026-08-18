@@ -545,7 +545,7 @@ export async function joinUndercoverRoom(userId: string, roomId: string, input: 
     if (room.status === 'FINISHED' || room.status === 'CANCELLED') throw new UndercoverStarServiceError('房间已经结束。', 409, 'ROOM_FINISHED')
     if (room.lastActivityAt < roomCutoff(now)) {
       await closeWaitingRoomTx(tx, roomId, now)
-      throw new UndercoverStarServiceError('房间已过期。', 410, 'ROOM_EXPIRED')
+      throw new UndercoverStarServiceError('房间已失效，请重新创建。', 410, 'ROOM_EXPIRED')
     }
     if (room.passwordHash) {
       const password = typeof input.password === 'string' ? input.password : ''
@@ -573,7 +573,14 @@ export async function joinUndercoverRoom(userId: string, roomId: string, input: 
 }
 
 export async function getUndercoverRoomState(userId: string, roomId: string, now = new Date()) {
-  const room = await loadRoom(prisma, roomId)
+  let room: Awaited<ReturnType<typeof loadRoom>>
+  try {
+    room = await loadRoom(prisma, roomId)
+  } catch (error) {
+    // 房间不存在 → 对用户统一提示「已失效」，引导重新创建。
+    if (errorCode(error) === 'ROOM_NOT_FOUND') throw new UndercoverStarServiceError('房间已失效，请重新创建。', 410, 'ROOM_EXPIRED')
+    throw error
+  }
   const wasMember = room.UndercoverRoomPlayer.some((player) => player.User.id === userId)
   if (room.status === 'WAITING' && room.lastActivityAt < roomCutoff(now)) {
     await undercoverTransaction(async (tx) => {
@@ -583,7 +590,8 @@ export async function getUndercoverRoomState(userId: string, roomId: string, now
   }
   const current = await loadRoom(prisma, roomId)
   const member = current.UndercoverRoomPlayer.some((player) => player.User.id === userId)
-  if (!member && !(wasMember && current.status === 'CANCELLED')) throw new UndercoverStarServiceError('你不在这个房间中。', 403, 'ROOM_NOT_MEMBER')
+  // 非成员访问：房间已关闭 / 过期 / 不存在，均提示「已失效，请重新创建」，避免泄露房间存在性。
+  if (!member && !(wasMember && current.status === 'CANCELLED')) throw new UndercoverStarServiceError('房间已失效，请重新创建。', 410, 'ROOM_EXPIRED')
   return roomState(current, userId, now)
 }
 
@@ -1500,6 +1508,10 @@ export async function advanceExpiredUndercoverMatch(matchId: string, now = new D
 export async function touchUndercoverPresence(userId: string, roomId: string, matchId?: string, now = new Date()) {
   await prisma.undercoverRoomPlayer.updateMany({ where: { roomId, userId, leftAt: null }, data: { lastSeenAt: now, updatedAt: now } })
   if (matchId) await prisma.undercoverMatchPlayer.updateMany({ where: { matchId, userId }, data: { isOnline: true, lastSeenAt: now, updatedAt: now } })
+  // 心跳续活：WAITING 房间随任意成员心跳刷新 lastActivityAt，避免「浏览器未关闭、仅挂机」的房间被误删；
+  // 一旦所有成员断开（不再有 PING），lastActivityAt 停止更新，房间将在 TTL 内被清理。
+  // 仅对 WAITING 房间生效；PLAYING 房间本就不会因 TTL 自动销毁。
+  await prisma.undercoverRoom.updateMany({ where: { id: roomId, status: 'WAITING' }, data: { lastActivityAt: now, updatedAt: now } })
 }
 
 export async function setUndercoverPresence(userId: string, roomId: string, matchId: string | undefined, online: boolean, now = new Date()) {
@@ -1692,8 +1704,9 @@ export async function getUndercoverAdminOverview(now = new Date()) {
 // 等候聊天室（Phase 4）
 //
 // 仅在 Room 处于 WAITING 且没有进行中对局（currentMatchId === null）时开放。
-// 聊天消息是独立事件：不触发 revision++、不改变 gameplay state、不刷新
-// ready、也不刷新 lastActivityAt（除非站内过期策略明确需要聊天算活跃）。
+// 聊天消息是独立事件：不触发 revision++、不改变 gameplay state、不刷新 ready。
+// 但「房间聊天」本身算作活动时间（需求第七节），发送消息会刷新房间的
+// lastActivityAt，避免活跃聊天中的等候室被误判为失活而提前销毁。
 // 被踢/已离开玩家因不再属于有效成员而自然失去读写权限。
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -1768,6 +1781,8 @@ export async function sendRoomMessage(userId: string, roomId: string, rawContent
     data: { id: randomUUID(), roomId, userId, content: safe, createdAt: now },
     include: { User: { select: publicUserSelect } },
   })
+  // 聊天即活动：刷新房间 lastActivityAt，使活跃聊天中的等候室不被 TTL 清理。
+  await prisma.undercoverRoom.updateMany({ where: { id: roomId, status: 'WAITING' }, data: { lastActivityAt: now, updatedAt: now } })
   return roomMessagePublic(created)
 }
 

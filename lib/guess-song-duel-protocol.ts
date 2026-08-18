@@ -145,7 +145,7 @@ export type DuelRealtimeEvent =
   | { type: 'MATCH_STARTING'; matchId: string; serverStartAt: string; questionIndex: number; totalQuestions: number }
   | { type: 'QUESTION_START'; state: DuelQuestionState; players: DuelPlayerState[]; completedQuestionCount: number }
   | { type: 'PLAYER_ANSWERED'; matchId: string; questionIndex: number; userId: string }
-  | { type: 'ANSWER_ACCEPTED'; matchId: string; questionIndex: number; userId: string }
+  | { type: 'ANSWER_ACCEPTED'; matchId: string; questionIndex: number; userId: string; correct: boolean; correctOptionKey: string; selectedOptionKey: string }
   | { type: 'QUESTION_RESULT'; matchId: string; result: DuelQuestionResult; nextServerStartAt: string | null }
   | { type: 'PLAYER_PRESENCE'; matchId: string; userId: string; isOnline: boolean; reconnectDeadlineAt: string | null }
   | { type: 'MATCH_FINISHED'; result: DuelMatchResult }

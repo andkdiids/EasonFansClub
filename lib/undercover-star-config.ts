@@ -3,7 +3,12 @@ import type { UndercoverDifficulty, UndercoverMatchPhase, UndercoverRole, Underc
 export const UNDERCOVER_STAR_SLUG = 'undercover-star'
 export const UNDERCOVER_MIN_PLAYERS = 3
 export const UNDERCOVER_MAX_PLAYERS = 4
-export const UNDERCOVER_WAITING_TTL_MS = 30 * 60 * 1000
+// WAITING 房间最长存活时间：超过该时长无任何活动（心跳 / 聊天 / 加入 / 准备等）即自动销毁。
+// 注意：此处直接决定「房主关闭网页多久后房间消失」，需求定为 15 分钟。
+export const UNDERCOVER_WAITING_TTL_MS = 15 * 60 * 1000
+// 等候室心跳间隔：客户端每 30 秒发送一次 PING，服务端据此续活房间 lastActivityAt。
+// 仅依赖心跳（beforeunload 不可靠），断开连接后无 PING，房间将在 TTL 内被清理。
+export const UNDERCOVER_PRESENCE_HEARTBEAT_MS = 30_000
 export const UNDERCOVER_ROLE_REVEAL_MS = 45 * 1000
 export const UNDERCOVER_DESCRIPTION_MS = 60 * 1000
 export const UNDERCOVER_VOTING_MS = 45 * 1000
