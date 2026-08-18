@@ -101,6 +101,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const matchIdRef = useRef<string | null>(null)
   const viewRef = useRef<'lobby' | 'room' | 'match' | 'result'>('lobby')
   const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  // 记录已播放音频的题目 token，保证每道题只播放一次，且不会在题目切换残留。
+  const playedAudioTokenRef = useRef<string | null>(null)
   const syncSequenceRef = useRef(0)
   const requestGenerationRef = useRef(0)
   const latestMatchRef = useRef<DuelMatchState | null>(null)
@@ -472,16 +474,25 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       nextAudio.preload = 'auto'
       nextAudio.controls = false
     }
-    const delay = Math.max(0, new Date(question.audioStartAt).getTime() - (Date.now() + offsetRef.current))
-    const timer = window.setTimeout(() => {
-      void audio.play().catch(() => setAudioBlocked(true))
-    }, delay)
+    // 新题就绪：清空“已播放”标记，真正的播放交给下方时钟门控，绝不立即出声。
+    playedAudioTokenRef.current = null
     return () => {
-      window.clearTimeout(timer)
       audio.pause()
       audio.src = ''
     }
   }, [audioQuestion, view])
+
+  // 时钟驱动播放门控：只有本地时间（含服务器时钟偏移）到达服务端下发的
+  // audioStartAt 才播放，且每道题只播放一次。这保证双方在同一服务器时刻同步
+  // 出声——先收到题目的客户端也只会等待，不会提前播放；收到晚也不会错过同步点。
+  useEffect(() => {
+    if (!audioQuestion || view !== 'match') return
+    if (playedAudioTokenRef.current === audioQuestion.publicToken) return
+    const startAt = new Date(audioQuestion.audioStartAt).getTime()
+    if (clockTick + offsetRef.current < startAt) return
+    playedAudioTokenRef.current = audioQuestion.publicToken
+    void currentAudioRef.current?.play().catch(() => setAudioBlocked(true))
+  }, [audioQuestion, view, clockTick])
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockTick(Date.now()), 200)
@@ -810,7 +821,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
             {match.phase === 'STARTING' && countdown > 0 ? <div className="duel-countdown"><span>准备</span><strong>{countdown}</strong></div> : null}
             <div className="duel-question-heading"><span>{currentQuestion?.isOvertime ? `加赛 ${currentQuestion.overtimeIndex || 1}` : `${activeModeLabel} · 第 ${String(match.currentQuestionIndex).padStart(2, '0')} / ${match.totalQuestions} 题`}</span><span>{audioStarted && !deadlinePassed ? activeMode === 'BUZZER' ? '抢答进行中' : '双方独立作答' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
             <p className="duel-audio-hint">试听将在题目开始后 2 秒同步播放 · {activeMode === 'BUZZER' ? '本题最多 1 个得分者' : '双方各有一次独立答题机会'}</p>
-            {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
+            {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); playedAudioTokenRef.current = audioQuestion?.publicToken ?? null; void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
             {answerFeedback && activeMode === 'SCORE' ? (
               <>
                 <div className="duel-options">{answerFeedback.options.map((option) => {

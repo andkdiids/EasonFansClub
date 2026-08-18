@@ -70,6 +70,10 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [nexting, setNexting] = useState(false)
   const [error, setError] = useState('')
   const [exitOpen, setExitOpen] = useState(false)
+  // 答案揭晓守卫：进入新题（question.id 变化）时强制重置为 false，
+  // 只有在当前题作答成功后才置为 true。这样上一题的作答/反馈/选项高亮
+  // 绝不会残留到下一题（防不胜防模式下杜绝答案闪现）。
+  const [revealed, setRevealed] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -106,6 +110,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
         body: JSON.stringify({ questionId: session.question.id, optionKey }),
       })
       setSession(data.state)
+      setRevealed(true)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '答案提交失败，请稍后重试。')
     } finally {
@@ -138,6 +143,12 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
       setNexting(false)
     }
   }
+
+  // 进入新题时重置揭晓状态：题目 id 变化即清空上一题的作答/反馈/高亮。
+  // 恢复已答题目时（resume）会随之把 revealed 设为 true，正常展示既有结果。
+  useEffect(() => {
+    setRevealed(Boolean(session?.question?.result))
+  }, [session?.question?.id, session?.question?.result])
 
   async function abandon() {
     if (!session) return router.push('/games/want-listen')
@@ -184,13 +195,13 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
           {session.mode === 'CANTONESE_FRAGMENT' && question.context ? <pre className="want-listen-lyric-context">{question.context}</pre> : null}
           <div className={`want-listen-options mode-${session.mode.toLowerCase()}`}>
             {question.options.map((option) => {
-              const selected = result?.selectedOptionKey === option.key
-              const correct = result?.correctOptionKey === option.key
+              const selected = revealed && result?.selectedOptionKey === option.key
+              const correct = revealed && result?.correctOptionKey === option.key
               const incorrect = selected && !correct
               return <button key={option.key} type="button" onClick={() => void answer(option.key)} disabled={Boolean(result) || answering} className={`${selected ? 'is-selected ' : ''}${correct ? 'is-correct ' : ''}${incorrect ? 'is-incorrect' : ''}`}>{option.label}</button>
             })}
           </div>
-          {result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>你的答案：{question.options.find((option) => option.key === result.selectedOptionKey)?.label || '—'}</span><span>正确答案：{result.correctAnswer}</span><span>本题得分：{result.awardedScore}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}{result.songTitle ? <small>歌曲：{result.songTitle}</small> : null}{session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void nextQuestion()} disabled={nexting}>{nexting ? '加载中…' : '下一题 →'}</button> : null}</div> : null}
+          {revealed && result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>你的答案：{question.options.find((option) => option.key === result.selectedOptionKey)?.label || '—'}</span><span>正确答案：{result.correctAnswer}</span><span>本题得分：{result.awardedScore}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}{result.songTitle ? <small>歌曲：{result.songTitle}</small> : null}{session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void nextQuestion()} disabled={nexting}>{nexting ? '加载中…' : '下一题 →'}</button> : null}</div> : null}
           {!result && session.mode === 'WANT_LISTEN' ? <button type="button" className="want-listen-hint-button" onClick={() => void requestHint()} disabled={hinting || question.hintLevel >= 4}>{question.hintLevel >= 4 ? '已显示全部提示' : hinting ? '正在准备提示…' : '再给点提示'}</button> : null}
         </section>
       ) : <section className="want-listen-ended"><h1>当前题目不可用，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>}

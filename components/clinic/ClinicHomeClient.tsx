@@ -19,6 +19,21 @@ type ClinicListData = {
   totalPages: number
 }
 
+// 把当前列表状态（页码/筛选/排序）编码进 URL，使刷新、分享、浏览器返回都能恢复。
+// 用 replaceState 而非 router.push，避免在每次翻页时新增一条历史记录。
+function buildClinicListHref(page: number, category: ClinicCategory | undefined, sort: ClinicSort): string {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('sort', sort)
+  if (category) params.set('category', category)
+  return `/clinic?${params.toString()}`
+}
+
+function syncClinicListUrl(href: string) {
+  if (typeof window === 'undefined') return
+  window.history.replaceState(null, '', href)
+}
+
 export function ClinicHomeClient({
   initialData,
   initialCategory,
@@ -64,6 +79,7 @@ export function ClinicHomeClient({
       return
     }
     void load(1)
+    syncClinicListUrl(buildClinicListHref(1, category, sort))
     // category and sort intentionally trigger one stable reload path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, sort])
@@ -97,6 +113,9 @@ export function ClinicHomeClient({
     setCategory(next)
   }
 
+  // 当前列表 URL（含页码/筛选/排序），用于帖子详情返回时精准恢复。
+  const listReturnHref = buildClinicListHref(data.page, category, sort)
+
   return (
     <main className="clinic-page-shell">
       <header className="clinic-hero">
@@ -129,10 +148,10 @@ export function ClinicHomeClient({
       {loading && !data.items.length ? <div className="clinic-loading-state">正在读取候诊记录…</div> : null}
       {!loading && !data.items.length ? <section className="clinic-empty-state"><UiIcon name="stethoscope" /><p>今天这里还没有患者挂号。</p><Link href="/clinic/new" className="clinic-secondary-button">来做第一位患者</Link></section> : null}
       <section className="clinic-record-list" aria-live="polite">
-        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { if (requireLogin()) setReportTarget(target) }} />)}
+        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} returnHref={listReturnHref} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { if (requireLogin()) setReportTarget(target) }} />)}
       </section>
       {actionMessage ? <p className="clinic-inline-message clinic-action-message" role="status">{actionMessage}</p> : null}
-      {data.totalPages > 1 ? <Pagination currentPage={data.page} totalPages={data.totalPages} onPageChange={(page) => void load(page)} disabled={loading} ariaLabel="门诊病历分页" className="clinic-pagination" /> : null}
+      {data.totalPages > 1 ? <Pagination currentPage={data.page} totalPages={data.totalPages} onPageChange={(page) => { syncClinicListUrl(buildClinicListHref(page, category, sort)); void load(page) }} disabled={loading} ariaLabel="门诊病历分页" className="clinic-pagination" /> : null}
 
       <footer className="clinic-disclaimer">阿士匹灵门诊部是病友交流与情绪树洞，不提供专业医疗或心理诊断。如遇真实身体或心理健康问题，请及时寻求专业帮助。</footer>
       {reportTarget ? <ClinicReportDialog target={reportTarget} onClose={() => setReportTarget(null)} /> : null}

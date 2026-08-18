@@ -3320,7 +3320,26 @@ box-shadow:none;
   padding:0;
   background: transparent;
 }
+.game-detail-page {
+  position:relative;
+  isolation:isolate;
+  width:100%;
+  min-height:100dvh;
+  margin:0;
+  padding:0;
+  background: transparent;
+}
 .games-page-inner {
+  box-sizing:border-box;
+  width:min(1480px,100%);
+  margin-inline:auto;
+  padding:28px clamp(24px,3.2vw,48px) 56px;
+  color:#f4f8fb;
+}
+/* Game-detail pages (听听 / 每日处方) reuse the hall's content container so the
+   visual width and gutters match 娱乐天空大厅 exactly. The outer <main> stays
+   full-width (background layer via ::before); only the inner box is capped. */
+.game-detail-inner {
   box-sizing:border-box;
   width:min(1480px,100%);
   margin-inline:auto;
@@ -3492,6 +3511,8 @@ body:has(.game-detail-page) .site-footer-info { color:rgba(226,232,240,.62); bor
 
 .game-detail-back { display:inline-flex; min-height:44px; align-items:center; color:#93a7ba; font-size:11px; font-weight:800; text-decoration:none; }
 .game-detail-banner { display:grid; min-height:220px; grid-template-columns:minmax(0,1fr) 280px; align-items:center; margin-top:16px; border:1px solid var(--game-line); padding:clamp(22px,3vw,40px); background:linear-gradient(120deg,#13253a,#091522 70%); }
+/* 每日处方 Hero 比听听更紧凑，内容集中；不影响听听 */
+.game-detail-banner[data-slug='daily-prescription'] { min-height:150px; }
 .game-detail-banner[data-accent='green'] { background:linear-gradient(120deg,#123c36,#091522 70%); }
 .game-detail-banner[data-accent='violet'] { background:linear-gradient(120deg,#31264d,#091522 70%); }
 .game-detail-banner[data-accent='amber'] { background:linear-gradient(120deg,#49391f,#091522 70%); }
@@ -3759,7 +3780,8 @@ align-self:center;border:1px solid rgba(171,199,220,.2); padding:22px 28px; back
 @keyframes guess-particle { to { opacity:0; transform:translate(var(--x,100px),var(--y,-80px)) rotate(180deg); } }
 
 @media (max-width:767px) {
-  .games-page,.game-detail-page { width:calc(100% - 28px); padding:18px 0 calc(var(--mobile-fixed-total-height) + 20px); }
+  .games-page { width:calc(100% - 28px); padding:18px 0 calc(var(--mobile-fixed-total-height) + 20px); }
+  .game-detail-inner { width:100%; padding:18px 16px calc(var(--mobile-fixed-total-height) + 20px); }
   .game-banner { min-height:275px; grid-template-columns:1fr; margin-top:15px; }
   .game-banner-copy { padding:24px 20px 82px; }
   .game-banner-art { position:absolute; right:-20px; bottom:-65px; width:210px; min-height:210px; opacity:.55; }
@@ -4658,7 +4680,7 @@ body:has(.games-full-width) .app-shell main {
     width: 100%;
     padding: 20px clamp(16px,5vw,24px) calc(var(--mobile-fixed-total-height) + 20px);
   }
-  .game-detail-page {
+  .game-detail-inner {
     width: 100%;
     box-sizing: border-box;
     padding-left: 16px;
@@ -4667,7 +4689,7 @@ body:has(.games-full-width) .app-shell main {
 }
 @media (max-width: 380px) {
   .games-page-inner { padding-inline:16px; }
-  .game-detail-page { padding-left:12px; padding-right:12px; }
+  .game-detail-inner { padding-left:12px; padding-right:12px; }
 }
 @media (max-width:767px) and (max-height:760px) {
 

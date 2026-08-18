@@ -193,3 +193,19 @@ test('粤语残片 Session 会二次过滤历史脏题并补齐完整 20 道题'
   assert.match(service, /WANT_LISTEN_TOTAL_QUESTIONS/)
   assert.match(service, /loadSessionRaw\(userId, sessionId\)/)
 })
+
+test('防不胜防进入新题会重置揭晓状态，未答题不泄露答案', () => {
+  const game = source('app/games/want-listen/WantListenGame.tsx')
+  const service = source('lib/want-listen.ts')
+  // 客户端：题目 id 变化即重置 reveal 守卫，作答成功后才显示答案与高亮，
+  // 上一题的作答/反馈/选项颜色绝不残留到下一题（杜绝答案闪现）。
+  assert.match(game, /const \[revealed, setRevealed\] = useState\(false\)/)
+  assert.match(game, /setRevealed\(Boolean\(session\?\.question\?\.result\)\)\s*\}, \[session\?\.question\?\.id(?:\s*,\s*session\?\.question\?\.result)?\]\)/)
+  assert.match(game, /setRevealed\(true\)/)
+  assert.match(game, /revealed && result \? <div className={`want-listen-answer-result/)
+  // 服务端：未答题的 question 不携带 correctOptionKey / correctAnswer，
+  // 仅在已作答（answeredAt）时随 result 一并返回正确答案。
+  assert.match(service, /const answered = Boolean\(question\.answeredAt\)/)
+  assert.match(service, /const result = answered\s*\?/)
+  assert.doesNotMatch(service, /correctOptionKey: question\.correctOptionKey,\s*\n\s*options:/)
+})

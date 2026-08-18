@@ -136,3 +136,19 @@ test('返回大厅会清除 active match，旧请求不能重新拉回结算页'
   assert.match(client, /setView\('lobby'\)/)
   assert.match(client, /requestGenerationRef\.current === generation/)
 })
+
+test('BUZZER 音频由服务端 audioStartAt 统一驱动，客户端不提前播放', () => {
+  const client = source('components/games/GuessSongDuel.tsx')
+  const realtime = source('lib/guess-song-duel-realtime.ts')
+  const service = source('lib/guess-song-duel-service.ts')
+  // 客户端：本地时钟（含服务器偏移）到达 audioStartAt 才播放，且每题只播一次。
+  assert.match(client, /playedAudioTokenRef/)
+  assert.match(client, /clockTick \+ offsetRef\.current >= new Date\(.+audioStartAt/)
+  // 不再用一次性 setTimeout(delay) 按 Date\.now\(\) 立即/提前播放。
+  assert.doesNotMatch(client, /void audio\.play\(\)\.catch\(\(\) => setAudioBlocked\(true\)\)\s*\}, delay\)/)
+  // 服务端仍是唯一权威：QUESTION_START 由 tickMatch 在 serverStartedAt 时刻广播，
+  // audioStartAt 由服务端计算并随题目下发。
+  assert.match(realtime, /broadcastMatchEvent\(matchId, startEvent\)/)
+  assert.match(realtime, /toQuestionStart\(state\)/)
+  assert.match(service, /audioStartAt: times\.audioStartAt\.toISOString\(\)/)
+})

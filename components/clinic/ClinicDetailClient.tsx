@@ -28,7 +28,7 @@ function findParentName(items: ClinicPublicConsultation[], id: string) {
   return item?.author?.displayName || '这位医师'
 }
 
-export function ClinicDetailClient({ record: initialRecord, isAuthenticated, initialFocusId }: Readonly<{ record: ClinicPublicRecordDetail; isAuthenticated: boolean; initialFocusId?: string | null }>) {
+export function ClinicDetailClient({ record: initialRecord, isAuthenticated, initialFocusId, returnHref }: Readonly<{ record: ClinicPublicRecordDetail; isAuthenticated: boolean; initialFocusId?: string | null; returnHref?: string | null }>) {
   const router = useRouter()
   const [record, setRecord] = useState(initialRecord)
   const [identityMode, setIdentityMode] = useState<'PUBLIC' | 'ANONYMOUS'>('PUBLIC')
@@ -160,7 +160,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
 
   return (
     <main className="clinic-page-shell clinic-detail-page">
-      <div className="clinic-detail-back"><Link href="/clinic">← 返回候诊大厅</Link></div>
+      <div className="clinic-detail-back"><Link href={returnHref || '/clinic'}>← 返回候诊大厅</Link></div>
       <article className="clinic-detail-record">
         <header className="clinic-detail-header"><div><span className="clinic-category-label">{record.categoryLabel}</span><span className="clinic-record-time"><ClinicTime value={record.createdAt} /></span></div><div className="clinic-detail-header-actions"><button type="button" className="clinic-more-button" aria-label="病历举报" onClick={() => { if (requireLogin()) setReportTarget({ recordId: record.id }) }}>···</button>{record.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => void deleteRecord()}>烧掉这份病历</button> : null}</div></header>
         <div className="clinic-detail-author"><ClinicIdentityBadge identity={record.author} /><span className="clinic-detail-separator">·</span><span>患者诉求：{record.needLabel}</span></div>

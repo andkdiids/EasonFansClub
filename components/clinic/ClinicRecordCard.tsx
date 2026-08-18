@@ -8,15 +8,20 @@ export function ClinicRecordCard({
   record,
   isAuthenticated,
   isAspirinPending,
+  returnHref,
   onAspirin,
   onReport,
 }: Readonly<{
   record: ClinicPublicRecord
   isAuthenticated: boolean
   isAspirinPending: boolean
+  returnHref?: string
   onAspirin: (record: ClinicPublicRecord) => void
   onReport: (target: { recordId: string }) => void
 }>) {
+  // 携带返回地址，详情页据此精准回到原列表状态（页码/筛选/排序）。
+  const detailHref = returnHref ? `/clinic/${record.id}?from=${encodeURIComponent(returnHref)}` : `/clinic/${record.id}`
+  const consultationHref = `${detailHref}#consultations`
   return (
     <article className="clinic-record-card" data-clinic-record-card>
       <header className="clinic-record-card-header">
@@ -24,7 +29,7 @@ export function ClinicRecordCard({
         <span className="clinic-record-time"><ClinicTime value={record.createdAt} /></span>
         <button type="button" className="clinic-more-button" aria-label="病历更多操作" onClick={() => onReport({ recordId: record.id })}>···</button>
       </header>
-      <Link href={`/clinic/${record.id}`} className="clinic-record-card-main">
+      <Link href={detailHref} className="clinic-record-card-main">
         <div className="clinic-record-meta"><span className="clinic-category-label">{record.categoryLabel}</span><span>患者诉求：{record.needLabel}</span></div>
         <p className="clinic-record-content">{record.content}</p>
       </Link>
@@ -40,7 +45,7 @@ export function ClinicRecordCard({
           <span>{record.viewerHasAspirin ? '已经给药' : '给颗阿士匹灵'}</span>
           <b>{record.aspirinCount}</b>
         </button>
-        <Link href={`/clinic/${record.id}#consultations`} className="clinic-action-button">
+        <Link href={consultationHref} className="clinic-action-button">
           <UiIcon name="stethoscope" />
           <span>会诊</span>
           <b>{record.consultationCount}</b>
