@@ -73,8 +73,11 @@ export function getUnreadNotificationWhere(userId: string, extra: Prisma.Notific
 export function getNotificationCategoryFilter(category: string): Prisma.NotificationWhereInput {
   if (category === 'all') return {}
   // 留言墙互动从回复 / 点赞分类中剥离，避免同一通知同时出现在多个 Tab。
-  if (category === 'reply') return { type: 'REPLY', OR: [{ link: null }, { link: { not: { contains: '/wall' } } }] }
-  if (category === 'like') return { type: 'LIKE', OR: [{ link: null }, { link: { not: { contains: '/wall' } } }] }
+  // 反馈回复通知类型为 REPLY 且 link 以 /feedback/ 开头，已在 getNotificationCategory
+  // 中归为 'feedback'。这里排除 /feedback/，使「回复/点赞」标签的筛选与 getUnreadSummary
+  // 的计数原始 SQL 保持一致（避免反馈回复出现在回复标签却不被计数）。
+  if (category === 'reply') return { type: 'REPLY', OR: [{ link: null }, { AND: [{ link: { not: { contains: '/wall' } } }, { link: { not: { startsWith: '/feedback/' } } }] }] }
+  if (category === 'like') return { type: 'LIKE', OR: [{ link: null }, { AND: [{ link: { not: { contains: '/wall' } } }, { link: { not: { startsWith: '/feedback/' } } }] }] }
   if (category === 'wall') return { AND: [{ type: { in: ['REPLY', 'LIKE'] } }, { link: { startsWith: '/user/' } }, { link: { contains: '/wall' } }] }
   if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'FRIEND_BIRTHDAY'] } }
   if (category === 'messages') return { type: 'MESSAGE' }
@@ -104,8 +107,9 @@ function getSystemNotificationCategoryFilter(category: NotificationCategory): Pr
 // behind on a later page.
 function getPersonalNotificationCategorySql(category: NotificationCategory) {
   switch (category) {
-    case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '%/wall%')")
-    case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '%/wall%')")
+    // 与 getNotificationCategoryFilter / getUnreadSummary 保持一致：回复/点赞排除 /feedback/。
+    case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR (n.link NOT LIKE '%/wall%' AND n.link NOT LIKE '/feedback/%'))")
+    case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR (n.link NOT LIKE '%/wall%' AND n.link NOT LIKE '/feedback/%'))")
     case 'wall': return Prisma.raw("AND n.type IN ('REPLY','LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%'")
     case 'friend': return Prisma.raw("AND n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'FRIEND_BIRTHDAY')")
     case 'messages': return Prisma.raw("AND n.type = 'MESSAGE'")
@@ -716,17 +720,18 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     loadFriendRemarkMap(userId, actorIds),
     loadLikeNotificationStats(likeTargets),
   ])
+  // 好友备注与点赞统计属于「增强数据」：即使查询失败，通知条目本身仍可正常渲染
+  // （好友名回退到展示名、点赞通知回退到存储时生成的标题）。这类失败不应把整页
+  // 标记为 degraded，否则前端会误报「部分通知无法加载」。
   const remarkMap = remarkResult.status === 'fulfilled'
     ? remarkResult.value
     : (() => {
-        degraded = true
         logNotificationError('list.friend-remarks', { userId, page, pageSize, category }, remarkResult.reason)
         return new Map<string, string>()
       })()
   const likeCounts = likeCountResult.status === 'fulfilled'
     ? likeCountResult.value
     : (() => {
-        degraded = true
         logNotificationError('list.like-stats', { userId, page, pageSize, category }, likeCountResult.reason)
         return new Map<string, number>()
       })()
@@ -887,12 +892,17 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const postReplyById = new Map(postReplies.map((reply) => [reply.id, reply]))
   const feedbackReplyById = new Map(feedbackReplies.map((reply) => [reply.id, reply]))
 
+  // 逐条占位容错：当某条通知关联的内容（帖子/评论/回复/反馈/留言墙）缺失或被删除时，
+  // 保留通知记录并以占位文案展示，而不是让单条异常拖垮整页。同时收集这些通知的 ID，
+  // 便于服务端定位「是哪一条通知导致加载异常」。
+  const fallbackItemIds: string[] = []
   const items = merged.map((item) => {
     const target = item.replyTarget
     if (!target) return item
     if (target.kind === 'post') {
       const reply = postReplyById.get(target.parentId)
       if (!reply || reply.postId !== target.resourceId || reply.isDeleted) {
+        fallbackItemIds.push(item.id)
         return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
       }
       return {
@@ -905,9 +915,13 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       }
     }
     if (target.kind === 'daily-message') {
-      if (dailyCommentLookup.failed) return { ...item, replyDisabledReason: '暂时无法加载回复，请稍后重试', replyPreview: '暂时无法加载回复，请稍后重试' }
+      if (dailyCommentLookup.failed) {
+        fallbackItemIds.push(item.id)
+        return { ...item, replyDisabledReason: '暂时无法加载回复，请稍后重试', replyPreview: '暂时无法加载回复，请稍后重试' }
+      }
       const comment = dailyComments.find((row) => row.id === target.parentId && row.messageId === target.resourceId)
       if (!comment || comment.isDeleted || comment.DailyMessage.isDeleted) {
+        fallbackItemIds.push(item.id)
         return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
       }
       return {
@@ -919,6 +933,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       const feedback = feedbacks.find((row) => row.id === target.resourceId)
       const reply = feedbackReplyById.get(target.parentId)
       if (!feedback || !reply || reply.feedbackId !== feedback.id) {
+        fallbackItemIds.push(item.id)
         return { ...item, replyDisabledReason: '该内容已被删除或无法查看，或你没有查看权限', replyPreview: REPLY_UNAVAILABLE_TEXT }
       }
       if (feedback.status === 'RESOLVED' || feedback.status === 'CLOSED') {
@@ -943,7 +958,10 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     }
     if (target.kind === 'profile-wall') {
       const message = wallMessages.find((row) => row.id === target.parentId && String(row.User_ProfileWallMessage_receiverIdToUser.uid) === String(Number(target.resourceId)))
-      if (!message) return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
+      if (!message) {
+        fallbackItemIds.push(item.id)
+        return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
+      }
       return {
         ...item,
         replyPreview: formatNotificationReplyPreview({ content: message.content, moderationStatus: message.moderationStatus }),
@@ -951,6 +969,19 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     }
     return item
   })
+
+  // 服务端诊断日志：记录导致占位（内容缺失/无权限/查询失败）的具体通知 ID，
+  // 直接回应「是哪一个 notificationId 导致加载失败」的排查需求。
+  if (fallbackItemIds.length) {
+    logNotificationError('list.item-fallback', {
+      userId,
+      page,
+      pageSize,
+      category,
+      count: fallbackItemIds.length,
+      sampleNotificationIds: fallbackItemIds.slice(0, 25).join(','),
+    }, new Error('notification(s) rendered with placeholder due to missing related content'))
+  }
 
   return {
     items,

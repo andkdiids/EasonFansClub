@@ -144,7 +144,7 @@ export function hasSufficientLyricContext(before: string | null | undefined, aft
   return (beforeCount > 0 && afterCount > 0) || beforeCount >= 2 || afterCount >= 2
 }
 
-export function lyricContextParts(lines: readonly string[], fragment: LyricFragment, radius = CONTEXT_RADIUS) {
+export function lyricContextParts(lines: readonly string[], fragment: LyricFragment) {
   const explicitIndex = Number.isInteger(fragment.lineIndex) ? fragment.lineIndex : null
   const lineIndex = explicitIndex ?? lines.indexOf(fragment.sourceLine)
   if (lineIndex < 0) {
@@ -156,7 +156,18 @@ export function lyricContextParts(lines: readonly string[], fragment: LyricFragm
     }
   }
 
-  const { before, after } = contextLinesForIndex(lines, lineIndex, radius)
+  // 每道题只展示三句歌词：上一句（隐藏目标句用占位）、目标句、下一句。
+  // 歌曲边界处若某一侧没有有效歌词，则向另一侧补足两句，始终保证展示三句、
+  // 不出现孤立的单句，也不超过三行。
+  const beforeAll = validContextLines(lines.slice(0, lineIndex))
+  const afterAll = validContextLines(lines.slice(lineIndex + 1))
+  let beforeCount = beforeAll.length > 0 ? 1 : 0
+  let afterCount = afterAll.length > 0 ? 1 : 0
+  if (beforeAll.length === 0) afterCount = Math.min(2, afterAll.length)
+  else if (afterAll.length === 0) beforeCount = Math.min(2, beforeAll.length)
+
+  const before = beforeAll.slice(-beforeCount)
+  const after = afterAll.slice(0, afterCount)
   const maskedLines = [...before, fragment.context, ...after]
   const completeLines = [...before, fragment.sourceLine, ...after]
   return {
@@ -215,6 +226,6 @@ export function selectSafeLyricSnippet(lines: readonly string[], title: string) 
   return selected
 }
 
-export function lyricContext(lines: readonly string[], fragment: LyricFragment, radius = CONTEXT_RADIUS) {
-  return lyricContextParts(lines, fragment, radius).masked
+export function lyricContext(lines: readonly string[], fragment: LyricFragment) {
+  return lyricContextParts(lines, fragment).masked
 }

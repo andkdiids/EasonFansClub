@@ -4,7 +4,6 @@ import {
   isValidLyricContext,
   lyricContextParts,
   selectLyricFragment,
-  selectSafeLyricSnippet,
 } from '@/lib/want-listen-lyrics'
 import { normalizeRatingLanguage, ratingLanguageLabel } from '@/lib/rating-types'
 import { normalizeWantListenTitle } from '@/lib/want-listen-title'
@@ -19,6 +18,8 @@ export type WantListenSongCandidate = {
   arranger: string | null
   producer: string | null
   lyrics: string | null
+  description: string | null
+  story: string | null
   album: {
     id: string
     name: string
@@ -156,30 +157,32 @@ export function buildWantListenQuestion(
   const distractors = chooseSongDistractors(song, pool, random)
   if (distractors.length < 3) return null
 
-  const lines = cleanLyrics(song.lyrics)
-  const safeLyric = selectSafeLyricSnippet(lines, song.title)
-  const credits = [
-    ['作词', song.lyricist],
-    ['作曲', song.composer],
-    ['编曲', song.arranger],
-    ['制作人', song.producer],
-  ].filter((item): item is [string, string] => Boolean(item[1]?.trim()))
+  // 想听模式线索：每一步提供全新的歌曲信息；缺失的数据直接跳过（不展示空内容）。
+  // 线索1：年份 + 语言（always 存在，由 isValidWantListenSong 保证）
+  // 线索2：专辑（有封面带封面，无封面仅专辑名，绝不重复年份）
+  // 线索3：作词人
+  // 线索4：作曲人
+  const albumHint = song.album.name
+    ? (song.album.coverUrl
+        ? { type: 'album-cover', albumName: song.album.name, coverUrl: song.album.coverUrl }
+        : { type: 'album-text', text: `专辑：《${song.album.name}》` })
+    : null
+  const lyricistHint = song.lyricist?.trim()
+    ? { type: 'credit', label: '作词', value: song.lyricist.trim() }
+    : null
+  const composerHint = song.composer?.trim()
+    ? { type: 'credit', label: '作曲', value: song.composer.trim() }
+    : null
 
-  const fallbackHint = song.album.name
-    ? `专辑：《${song.album.name}》${song.album.releaseYear ? ` · ${song.album.releaseYear}` : ''}`
-    : `曲序：${song.id}`
   const hints: Array<Record<string, unknown>> = [
     { type: 'year-language', text: `${year} · ${languageLabel}` },
-    song.album.coverUrl
-      ? { type: 'album-cover', albumName: song.album.name, coverUrl: song.album.coverUrl }
-      : { type: 'album-text', text: fallbackHint },
-    credits.length
-      ? { type: 'credits', credits: credits.map(([label, value]) => ({ label, value })) }
-      : { type: 'song-info', text: `${fallbackHint} · 曲序资料来自 EasMusic` },
-    safeLyric
-      ? { type: 'lyric', text: safeLyric }
-      : { type: 'song-info', text: fallbackHint },
-  ]
+    ...(albumHint ? [albumHint] : []),
+    ...(lyricistHint ? [lyricistHint] : []),
+    ...(composerHint ? [composerHint] : []),
+  ].filter(Boolean) as Array<Record<string, unknown>>
+
+  // 最终线索：歌曲介绍（description 优先，回退 story），缺失则不展示。
+  const songIntro = song.description?.trim() || song.story?.trim() || null
 
   const options = shuffle([
     { key: 'correct', label: song.title.trim() },
@@ -189,7 +192,7 @@ export function buildWantListenQuestion(
   return {
     sourceSongId: song.id,
     correctOptionKey: 'correct',
-    data: { kind: 'want-listen', options, songId: song.id, songTitle: song.title.trim(), hints },
+    data: { kind: 'want-listen', options, songId: song.id, songTitle: song.title.trim(), hints, completeContext: songIntro ?? undefined },
   }
 }
 

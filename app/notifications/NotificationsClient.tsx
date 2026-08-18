@@ -985,18 +985,6 @@ export function NotificationsClient({
             </button>
           </div>
         ) : null}
-        {loadWarning ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800" role="status">
-            <span>{loadWarning}</span>
-            <button
-              type="button"
-              onClick={() => void refreshNotifications()}
-              className="min-h-9 rounded-lg bg-amber-800 px-3 text-xs font-black text-white"
-            >
-              重新加载
-            </button>
-          </div>
-        ) : null}
       </div>
 
       <div className="flat-tabs flex overflow-x-auto border-b border-sky-100">

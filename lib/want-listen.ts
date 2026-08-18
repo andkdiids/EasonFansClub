@@ -65,6 +65,8 @@ type SongRow = {
   arranger: string | null
   producer: string | null
   lyrics: string | null
+  description: string | null
+  story: string | null
   MusicAlbum: {
     id: string
     name: string
@@ -130,6 +132,8 @@ function mapSong(row: SongRow): WantListenSongCandidate {
     arranger: row.arranger,
     producer: row.producer,
     lyrics: row.lyrics,
+    description: row.description,
+    story: row.story,
     album: {
       id: row.MusicAlbum.id,
       name: row.MusicAlbum.name,
@@ -154,6 +158,8 @@ async function loadSongRows() {
       arranger: true,
       producer: true,
       lyrics: true,
+      description: true,
+      story: true,
       MusicAlbum: { select: { id: true, name: true, releaseYear: true, language: true, coverUrl: true } },
     },
   })

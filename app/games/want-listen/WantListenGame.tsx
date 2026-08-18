@@ -51,6 +51,7 @@ async function request<T>(url: string, init?: RequestInit) {
 function hintText(hint: Record<string, unknown>) {
   if (typeof hint.text === 'string') return hint.text
   if (hint.type === 'album-cover' && typeof hint.albumName === 'string') return `专辑：《${hint.albumName}》`
+  if (hint.type === 'credit' && typeof hint.label === 'string' && typeof hint.value === 'string') return `${hint.label}：${hint.value}`
   if (hint.type === 'credits' && Array.isArray(hint.credits)) {
     return hint.credits.map((item) => {
       if (!item || typeof item !== 'object') return ''

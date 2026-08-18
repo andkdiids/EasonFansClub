@@ -9,7 +9,7 @@ import {
   validateQuestion,
   type WantListenSongCandidate,
 } from '../lib/want-listen-questions'
-import { cleanLyrics, hasSufficientLyricContext, isValidLyricContext, selectLyricFragment, selectSafeLyricSnippet } from '../lib/want-listen-lyrics'
+import { cleanLyrics, hasSufficientLyricContext, isValidLyricContext, lyricContextParts, selectLyricFragment, selectSafeLyricSnippet, type LyricFragment } from '../lib/want-listen-lyrics'
 import { difficultyForQuestion, scoreForWantListenAnswer, WANT_LISTEN_TOTAL_QUESTIONS } from '../lib/want-listen-config'
 import { compareWantListenScores } from '../lib/want-listen-period'
 import { normalizeWantListenTitle } from '../lib/want-listen-title'
@@ -18,6 +18,14 @@ const root = join(process.cwd())
 
 function source(relativePath: string) {
   return readFileSync(join(root, relativePath), 'utf8')
+}
+
+// 与 WantListenGame.hintText 等价的纯函数，仅用于断言线索文本。
+function hintTextFromHint(hint: Record<string, unknown>) {
+  if (typeof hint.text === 'string') return hint.text
+  if (hint.type === 'album-cover' && typeof hint.albumName === 'string') return `专辑：《${hint.albumName}》`
+  if (hint.type === 'credit' && typeof hint.label === 'string' && typeof hint.value === 'string') return `${hint.label}：${hint.value}`
+  return ''
 }
 
 function song(id: string, title: string, lyrics: string, language = '粤语', releaseYear = 2006): WantListenSongCandidate {
@@ -31,11 +39,13 @@ function song(id: string, title: string, lyrics: string, language = '粤语', re
     arranger: null,
     producer: null,
     lyrics,
+    description: null,
+    story: null,
     album: { id: `album-${id}`, name: `专辑 ${id}`, releaseYear, language, coverUrl: null },
   }
 }
 
-test('想听的歌曲题有四个唯一真实歌名选项，并提供四层提示资料', () => {
+test('想听的歌曲题有四个唯一真实歌名选项，并提供四层逐步线索（年份语言/专辑/作词/作曲）', () => {
   const target = song('target', '目标之歌', '夜色很长仍然想你\n街灯照着没有标题的句子')
   const pool = [
     target,
@@ -47,11 +57,67 @@ test('想听的歌曲题有四个唯一真实歌名选项，并提供四层提�
   assert.ok(question)
   assert.equal(question.data.options.length, 4)
   assert.equal(new Set(question.data.options.map((option) => normalizeWantListenTitle(option.label))).size, 4)
-  assert.equal(question.data.hints?.length, 4)
+  const hints = question.data.hints || []
+  assert.equal(hints.length, 4)
+  // 线索1：年份 + 语言
+  assert.equal(hints[0].type, 'year-language')
+  assert.match(String(hints[0].text), /·/)
+  // 线索2：专辑（无封面时仅专辑名，不重复年份）
+  assert.ok(hints[1].type === 'album-cover' || hints[1].type === 'album-text')
+  assert.match(hintTextFromHint(hints[1]), /专辑/)
+  assert.doesNotMatch(hintTextFromHint(hints[1]), /\d{4}/)
+  // 线索3：作词人
+  assert.equal(hints[2].type, 'credit')
+  assert.equal(hints[2].label, '作词')
+  assert.equal(hints[2].value, '黄伟文')
+  // 线索4：作曲人
+  assert.equal(hints[3].type, 'credit')
+  assert.equal(hints[3].label, '作曲')
+  assert.equal(hints[3].value, 'Eric Kwok')
+  // 每一步线索提供全新信息，彼此不重复（专辑/作词/作曲与年份语言无重叠）
+  assert.notEqual(hintTextFromHint(hints[2]), hintTextFromHint(hints[3]))
   assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 1), 400)
   assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 2), 300)
   assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 3), 200)
   assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 4), 100)
+})
+
+test('想听线索在歌曲资料缺失时自动跳过，不产生空内容', () => {
+  const sparse = {
+    ...song('sparse', '稀少奇歌', '歌词一行\n歌词二行'),
+    album: { id: 'a', name: '', releaseYear: 2000, language: '国语', coverUrl: null },
+    lyricist: null,
+    composer: null,
+    description: null,
+    story: null,
+  }
+  const pool = [sparse, song('w1', '甲', '歌词'), song('w2', '乙', '歌词'), song('w3', '丙', '歌词')]
+  const question = buildWantListenQuestion(sparse, pool, () => 0.31)
+  assert.ok(question)
+  // 仅保留年份+语言线索，专辑/作词/作曲均因缺失被跳过
+  assert.equal((question.data.hints || []).length, 1)
+  assert.equal((question.data.hints || [])[0].type, 'year-language')
+  // 完整线索（歌曲介绍）缺失则不展示
+  assert.equal(question.data.completeContext, undefined)
+})
+
+test('想听最终线索展示歌曲介绍（description 优先，回退 story）', () => {
+  const withStory = {
+    ...song('story', '介绍之歌', '歌词一行\n歌词二行'),
+    description: null,
+    story: '这首歌讲述了一段归途。',
+  }
+  const withDesc = {
+    ...song('desc', '介绍之二', '歌词一行\n歌词二行'),
+    description: '官方简介内容。',
+    story: '应被覆盖的 story。',
+  }
+  const qStory = buildWantListenQuestion(withStory, [withStory, song('w1', '甲', '歌词'), song('w2', '乙', '歌词'), song('w3', '丙', '歌词')], () => 0.31)
+  const qDesc = buildWantListenQuestion(withDesc, [withDesc, song('w1', '甲', '歌词'), song('w2', '乙', '歌词'), song('w3', '丙', '歌词')], () => 0.31)
+  assert.ok(qStory)
+  assert.ok(qDesc)
+  assert.equal(qStory.data.completeContext, '这首歌讲述了一段归途。')
+  assert.equal(qDesc.data.completeContext, '官方简介内容。')
 })
 
 test('歌词清洗会移除 LRC 时间轴、metadata、署名和无意义语气词', () => {
@@ -119,6 +185,71 @@ test('历史粤语残片题的上下文校验失败时不会被视为有效题',
   assert.equal(validateQuestion({ ...base, maskedContext: '——', beforeContext: '——', afterContext: '' }), false)
   assert.equal(validateQuestion({ ...base, maskedContext: '上一句\n____', beforeContext: '上一句', afterContext: '' }), false)
   assert.equal(validateQuestion({ ...base, maskedContext: '上一句\n再上一句\n____', beforeContext: '上一句\n再上一句', afterContext: '' }), true)
+})
+
+test('粤语残片歌词展示固定三句：上一句 / 隐藏目标 / 下一句', () => {
+  const lines = ['第一句有效歌词', '第二句有效歌词', '第三句有效歌词', '第四句有效歌词', '第五句有效歌词']
+  const fragment: LyricFragment = {
+    answer: '第三句',
+    context: '第三句有效歌词'.replace('第三句', '____'),
+    sourceLine: '第三句有效歌词',
+    lineIndex: 2,
+  }
+  const parts = lyricContextParts(lines, fragment)
+  const maskedLines = parts.masked.split('\n')
+  assert.equal(maskedLines.length, 3)
+  assert.equal(maskedLines[0], '第二句有效歌词')
+  assert.equal(maskedLines[1], '____有效歌词')
+  assert.equal(maskedLines[2], '第四句有效歌词')
+  assert.equal(parts.complete.split('\n').length, 3)
+  assert.equal(parts.before, '第二句有效歌词')
+  assert.equal(parts.after, '第四句有效歌词')
+})
+
+test('粤语残片在歌曲开头边界时向后补足两句', () => {
+  const lines = ['第一句有效歌词', '第二句有效歌词', '第三句有效歌词']
+  const fragment: LyricFragment = {
+    answer: '第一句',
+    context: '____有效歌词',
+    sourceLine: '第一句有效歌词',
+    lineIndex: 0,
+  }
+  const parts = lyricContextParts(lines, fragment)
+  const maskedLines = parts.masked.split('\n')
+  assert.equal(maskedLines.length, 3)
+  assert.equal(maskedLines[0], '____有效歌词')
+  assert.equal(maskedLines[1], '第二句有效歌词')
+  assert.equal(maskedLines[2], '第三句有效歌词')
+})
+
+test('粤语残片在歌曲结尾边界时向前补足两句', () => {
+  const lines = ['第一句有效歌词', '第二句有效歌词', '第三句有效歌词']
+  const fragment: LyricFragment = {
+    answer: '第三句',
+    context: '____有效歌词',
+    sourceLine: '第三句有效歌词',
+    lineIndex: 2,
+  }
+  const parts = lyricContextParts(lines, fragment)
+  const maskedLines = parts.masked.split('\n')
+  assert.equal(maskedLines.length, 3)
+  assert.equal(maskedLines[0], '第一句有效歌词')
+  assert.equal(maskedLines[1], '第二句有效歌词')
+  assert.equal(maskedLines[2], '____有效歌词')
+})
+
+test('粤语残片永远不会展示超过三行歌词', () => {
+  const lines = Array.from({ length: 12 }, (_, index) => `第${index + 1}句有效歌词`)
+  for (let index = 0; index < lines.length; index += 1) {
+    const fragment: LyricFragment = {
+      answer: `第${index + 1}句`,
+      context: `____有效歌词`,
+      sourceLine: lines[index],
+      lineIndex: index,
+    }
+    const parts = lyricContextParts(lines, fragment)
+    assert.ok(parts.masked.split('\n').length <= 3, `位置 ${index} 不应超过三行`)
+  }
 })
 
 test('防不胜防固定五个真实歌名和一个假歌名，假歌名位置由洗牌决定', () => {
