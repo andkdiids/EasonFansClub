@@ -8,7 +8,53 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
 import type { SessionUser } from '@/lib/auth'
-import { isAppNavigationActive, primaryNavigation, quickNavigation } from './navigation'
+import { isAppNavigationActive, primaryNavigation, quickNavigation, type AppNavigationItem } from './navigation'
+
+type NavLeafProps = { item: AppNavigationItem; pathname: string; unreadCount: number }
+type NavGroupProps = { item: AppNavigationItem; pathname: string; unreadCount: number }
+
+function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
+  const active = isAppNavigationActive(pathname, item)
+  return <Link href={item.href} aria-current={active ? 'page' : undefined}>
+    <UiIcon name={item.icon} />
+    <span>{item.label}</span>
+    {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+  </Link>
+}
+
+function NavGroup({ item, pathname, unreadCount }: Readonly<NavGroupProps>) {
+  const children = item.children
+  const parentActive = isAppNavigationActive(pathname, item)
+  const childActive = (children ?? []).some((child) => isAppNavigationActive(pathname, child))
+  const [open, setOpen] = useState(childActive)
+
+  useEffect(() => {
+    if (childActive) setOpen(true)
+  }, [childActive, pathname])
+
+  if (!children?.length) return null
+
+  return <div className="sidebar-nav-group">
+    <div className="sidebar-nav-group-head">
+      <Link href={item.href} aria-current={parentActive ? 'page' : undefined} className="sidebar-nav-group-link">
+        <UiIcon name={item.icon} />
+        <span>{item.label}</span>
+      </Link>
+      <button
+        type="button"
+        className="sidebar-nav-group-toggle"
+        aria-expanded={open}
+        aria-label={open ? `收起${item.label}子菜单` : `展开${item.label}子菜单`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <UiIcon name="arrow-up" />
+      </button>
+    </div>
+    {open ? <div className="sidebar-nav-children" role="group" aria-label={item.label}>{children.map((child) => (
+      <NavLeaf key={child.label} item={child} pathname={pathname} unreadCount={unreadCount} />
+    ))}</div> : null}
+  </div>
+}
 
 export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: Readonly<{ user: SessionUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
@@ -45,14 +91,10 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
   }
 
   function navigation(items: typeof primaryNavigation, label: string) {
-    return <nav className="sidebar-nav" aria-label={label}>{items.map((item) => {
-      const active = isAppNavigationActive(pathname, item)
-      return <Link key={`${label}-${item.label}`} href={item.href} aria-current={active ? 'page' : undefined}>
-        <UiIcon name={item.icon} />
-        <span>{item.label}</span>
-        {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
-      </Link>
-    })}</nav>
+    return <nav className="sidebar-nav" aria-label={label}>{items.map((item) => item.children?.length
+      ? <NavGroup key={`${label}-${item.label}`} item={item} pathname={pathname} unreadCount={unreadCount} />
+      : <NavLeaf key={`${label}-${item.label}`} item={item} pathname={pathname} unreadCount={unreadCount} />
+    )}</nav>
   }
 
   return <aside className="app-sidebar">

@@ -260,6 +260,8 @@ export function NotificationsClient({
   const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[]; all?: boolean } | null>(null)
   const [isClearing, setIsClearing] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [allReadError, setAllReadError] = useState('')
+  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false)
   const [loadError, setLoadError] = useState(initialLoadError || '')
   const [loadWarning, setLoadWarning] = useState(initialLoadWarning || '')
 
@@ -597,6 +599,8 @@ export function NotificationsClient({
   }
 
   async function markAllRead() {
+    // 防止连续点击产生多个请求（与单条已读、清除互不干扰）。
+    if (isMarkingAllRead) return
     const previousSummary = unreadSummary
     const previousNotifications = notifications
     const optimisticReadAt = new Date()
@@ -618,6 +622,7 @@ export function NotificationsClient({
       optimisticReadRef.current.set(key, optimisticReadAt)
       persistOptimisticRead(key, optimisticReadAt)
     })
+    // 乐观更新：先让列表与未读角标立即归零，不等服务端返回。
     setNotifications((current) => current.map((row) => ({
       ...row,
       isRead: true,
@@ -625,9 +630,15 @@ export function NotificationsClient({
       readAt: row.readAt || optimisticReadAt,
     })))
     setSummaryOverride(zeroSummary)
-    setIsUpdating(true)
+    setIsMarkingAllRead(true)
+    setAllReadError('')
     try {
-      const response = await fetch('/api/notifications/read-all', { method: 'POST' })
+      // keepalive：即使用户立刻切走页面 / 关闭标签页，请求仍会被发出并完成，
+      // 避免"点了没反应、回来还是未读"的问题。
+      const response = await fetch('/api/notifications/read-all', {
+        method: 'POST',
+        keepalive: true,
+      })
       if (!response.ok) {
         optimisticItems.forEach((item) => {
           const key = notificationKey(item)
@@ -636,6 +647,7 @@ export function NotificationsClient({
         })
         setNotifications(previousNotifications)
         setSummaryOverride(previousSummary)
+        setAllReadError('操作失败，请重试')
         return
       }
       await refreshUnreadSummary()
@@ -648,8 +660,9 @@ export function NotificationsClient({
       })
       setNotifications(previousNotifications)
       setSummaryOverride(previousSummary)
+      setAllReadError('操作失败，请重试')
     } finally {
-      setIsUpdating(false)
+      setIsMarkingAllRead(false)
     }
   }
 
@@ -928,14 +941,15 @@ export function NotificationsClient({
           <div className="flex flex-wrap gap-2"><button
             type="button"
             onClick={markAllRead}
-            disabled={isUpdating || unreadCount === 0}
+            disabled={isMarkingAllRead || unreadCount === 0}
             className="inline-flex h-11 items-center justify-center rounded-xl bg-brand-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            全部已读
+            {isMarkingAllRead ? '处理中…' : unreadCount === 0 ? '已全部读' : '全部已读'}
           </button><button
             type="button"
             onClick={() => {
               setActionError('')
+              setAllReadError('')
               setClearConfirm({
                 title: '确认清除全部通知？',
                 description: '全部通知将从通知中心移除，此操作无法撤销。',
@@ -943,13 +957,14 @@ export function NotificationsClient({
                 all: true,
               })
             }}
-            disabled={isUpdating || pagination.total === 0}
+            disabled={isUpdating || isMarkingAllRead || pagination.total === 0}
             className="inline-flex h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-5 text-sm font-black text-slate-600 disabled:opacity-50"
           >
             清除通知
           </button></div>
         </div>
         {actionError ? <p className="mt-3 rounded-sm border border-red-100 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{actionError}</p> : null}
+        {allReadError ? <p className="mt-3 rounded-sm border border-red-100 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{allReadError}</p> : null}
         {loadError ? (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800" role="alert">
             <span>{loadError}</span>

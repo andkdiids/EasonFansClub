@@ -198,12 +198,13 @@ test('one user room ownership and historical room membership are handled transac
 
 test('finished matches remain resumable after a lobby refresh', () => {
   const service = source('lib/undercover-star.ts')
-  const client = source('app/games/undercover-star/UndercoverStarClient.tsx')
   const protocol = source('lib/undercover-star-protocol.ts')
+  const profileCard = source('components/games/undercover-star/UndercoverProfileCard.tsx')
   assert.match(service, /status: 'FINISHED', UndercoverMatchPlayer: \{ some: \{ userId \} \}/)
   assert.match(service, /activeMatch: finishedMatch \? \{ matchId: finishedMatch\.id, roomId: finishedMatch\.roomId, status: finishedMatch\.status \}/)
   assert.match(protocol, /activeMatch: \{ matchId: string; roomId: string; status: UndercoverMatchStatus \} \| null/)
-  assert.match(client, /activeMatch\?\.status === 'FINISHED'/)
+  // FINISHED 的「查看结果」入口现由档案卡片呈现（客户端不再内联），仍可经 resumeActiveGame 恢复。
+  assert.match(profileCard, /activeMatch\?\.status === 'FINISHED'/)
 })
 
 test('room state guard drops stale realtime room states so a late response cannot hide a newer join', () => {

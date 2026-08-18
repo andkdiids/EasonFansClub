@@ -1091,8 +1091,6 @@ export async function markPersonalNotificationsForTargetRead(input: {
 }
 
 export async function markAllUnifiedNotificationsRead(userId: string) {
-  await reconcileLikeNotifications(userId)
-  await reconcileStalePersonalNotifications(userId)
   const now = new Date()
   const unreadSystem = await prisma.systemNotification.findMany({
     where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } },
@@ -1121,6 +1119,16 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
         ]
       : []),
   ])
+
+  // 对账（清理历史幽灵通知 / 点赞聚合）属于维护性工作，不是"全部已读"的必要路径。
+  // 列表接口已经在后台异步对账，这里改为后台执行，避免阻塞用户点击的响应时间，
+  // 让"全部已读"在一笔事务内完成（一次 UPDATE WHERE isRead=false + 系统通知已读标记）。
+  void reconcileLikeNotifications(userId).catch((error) => {
+    logNotificationError('read-all.like-reconciliation', { userId }, error)
+  })
+  void reconcileStalePersonalNotifications(userId).catch((error) => {
+    logNotificationError('read-all.stale-reconciliation', { userId }, error)
+  })
 }
 
 /**

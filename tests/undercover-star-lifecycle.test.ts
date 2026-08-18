@@ -32,8 +32,15 @@ test('刷新公开房只列 WAITING 房间，不恢复任何进行中/已结束�
 })
 
 test('FINISHED 仅以大厅「查看结果」入口呈现一次，需用户主动点击', () => {
-  // 大厅提示区分 FINISHED（查看结果）与 PLAYING（继续对局），不自动渲染结算页。
-  assert.match(client, /activeMatch\?\.status === 'FINISHED' \? '查看结果' : '继续对局'/)
+  const profileCard = readFileSync('components/games/undercover-star/UndercoverProfileCard.tsx', 'utf8')
+  // 旧的内联 Banner（在客户端直接渲染结算页入口）已删除，大厅顶部不再常驻提示。
+  assert.doesNotMatch(client, /activeMatch\?\.status === 'FINISHED' \? '查看结果' : '继续对局'/)
+  // 大厅改为将 activeMatch / activeRoom 与 resume 回调交给「卧底巨星档案」卡片处理。
+  assert.match(client, /<UndercoverProfileCard[\s\S]*?activeMatch=\{activeMatch\}[\s\S]*?activeRoom=\{activeRoom\}[\s\S]*?onViewHistory=\{resumeActiveGame\}/)
+  // 档案卡片内，FINISHED 仅以「查看结果」入口呈现，需用户主动点击（不自动渲染结算页）。
+  assert.match(profileCard, /activeMatch\?\.status === 'FINISHED'/)
+  assert.match(profileCard, /上一局已结算/)
+  assert.match(profileCard, /查看结果/)
 })
 
 test('退出等候室：调用 leave API 并彻底清理客户端状态（场景3 / 测试4/5）', () => {
