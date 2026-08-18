@@ -81,6 +81,7 @@ const categoryLabels: Record<NotificationCategory, string> = {
   messages: '私信',
   feedback: '反馈',
   system: '系统',
+  wall: '留言墙',
 }
 
 const typeIcon: Record<string, string> = {
@@ -90,6 +91,7 @@ const typeIcon: Record<string, string> = {
   messages: '✉',
   feedback: '!',
   system: 'i',
+  wall: '✎',
 }
 
 function formatTime(value: Date | string) {
@@ -192,12 +194,13 @@ function mergeUnreadSummary(base: UnreadSummary, items: UnifiedNotification[], d
   for (const item of items) {
     if (isNotificationRead(item)) continue
     next.total = change(next.total)
-    if (item.source === 'system' || item.category === 'system' || item.category === 'reply' || item.category === 'like') {
+    if (item.source === 'system' || item.category === 'system' || item.category === 'reply' || item.category === 'like' || item.category === 'wall') {
       next.notifications = change(next.notifications)
     }
     if (item.source === 'system' || item.category === 'system') next.system = change(next.system)
     if (item.category === 'reply') next.replies = change(next.replies)
     if (item.category === 'like') next.likes = change(next.likes)
+    if (item.category === 'wall') next.wall = change(next.wall)
     if (item.category === 'friend') next.friendRequests = change(next.friendRequests)
     if (item.category === 'messages') {
       next.messages = change(next.messages)
@@ -443,6 +446,7 @@ export function NotificationsClient({
       messages: unreadSummary.messages,
       feedback: unreadSummary.feedback,
       system: unreadSummary.system,
+      wall: unreadSummary.wall,
     } satisfies Record<NotificationCategory, number>
   }, [unreadSummary])
 
@@ -610,6 +614,7 @@ export function NotificationsClient({
       system: 0,
       replies: 0,
       likes: 0,
+      wall: 0,
       feedbackReplies: 0,
       feedback: 0,
       friendRequests: 0,
@@ -696,6 +701,7 @@ export function NotificationsClient({
         system: 0,
         replies: 0,
         likes: 0,
+        wall: 0,
         feedbackReplies: 0,
         feedback: 0,
         friendRequests: 0,

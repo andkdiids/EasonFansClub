@@ -1157,12 +1157,6 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .sidebar-nav a b { margin-left:auto; border-radius:9px; padding:2px 6px; color:var(--primary); background:var(--accent); font-size:10px; }
 .sidebar-section-label { margin:4px 0 0; padding:0 26px; color:var(--foreground-muted); font-size:10px; }
 .sidebar-nav-quick { padding-top:5px; }.sidebar-nav-quick a { min-height:32px; font-size:11px; }
-.sidebar-nav-group-head { display:flex; align-items:center; padding-right:8px; }
-.sidebar-nav-group-link { flex:1; }
-.sidebar-nav-group-toggle { display:flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; border:0; background:none; color:var(--foreground-muted); cursor:pointer; }
-.sidebar-nav-group-toggle svg { width:14px; height:14px; transition:transform 150ms ease; }
-.sidebar-nav-group-toggle[aria-expanded='false'] svg { transform:rotate(180deg); }
-.sidebar-nav-children a { padding:0 20px 0 48px; }
 .sidebar-user { margin-top:auto; padding:14px 20px 16px; border-top:1px solid var(--border); background:color-mix(in srgb,var(--surface),transparent 65%); }
 .sidebar-user-row { display:flex; align-items:center; gap:9px; color:var(--foreground); text-decoration:none; }.sidebar-user-row>span:last-child { display:flex; min-width:0; flex:1; flex-direction:column; gap:3px; }.sidebar-user-row strong { max-width:92px; overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.sidebar-user-row small,.sidebar-user>small { display:block; color:var(--foreground-muted); font-size:9px; }
 .sidebar-avatar,.hero-avatar { position:relative; display:grid; flex:none; width:34px; height:34px; place-items:center; overflow:hidden; border-radius:50%; background:var(--primary); color:#fff; font-weight:700; }
@@ -3557,7 +3551,7 @@ body:has(.game-detail-page) .site-footer-info { color:rgba(226,232,240,.62); bor
 .game-detail-sections article { border:1px solid var(--game-line); padding:24px; background:#0c1725; }
 .game-detail-sections h2 { margin:0; font-size:19px; }
 .game-detail-sections :where(ul,ol) { margin:18px 0 0; padding-left:18px; color:#8fa4b8; font-size:11px; line-height:1.9; }
-.daily-game-panel { max-width:760px; margin-top:18px; }
+.daily-game-panel { margin-top:18px; }
 .daily-game-panel>button { min-height:46px; margin-top:18px; border:1px solid #54dba4; padding:0 20px; color:#07130e; background:#54dba4; font-weight:900; }
 .daily-game-panel article { display:grid; gap:10px; margin-top:18px; border-left:3px solid #54dba4; padding:18px; background:#101e2e; }
 .daily-game-panel article>strong { color:#54dba4; font-size:28px; }

@@ -13,20 +13,9 @@ export const primaryNavigation: AppNavigationItem[] = [
   { href: '/forum', label: 'E院广场', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
   { href: '/music', label: 'EasMusic', icon: 'music', activePrefixes: ['/music'], mobile: true },
   { href: '/today', label: '今日', icon: 'archive', activePrefixes: ['/today'] },
-  {
-    href: '/games',
-    label: '娱乐天空',
-    icon: 'star',
-    activePrefixes: ['/games', '/entertainment'],
-    children: [
-      { href: '/games/guess-song', label: '听听', icon: 'music', activePrefixes: ['/games/guess-song'] },
-      { href: '/games/undercover-star', label: '卧底巨星', icon: 'star', activePrefixes: ['/games/undercover-star'] },
-      { href: '/games/guess-song/duel', label: '1v1 对决', icon: 'activity', activePrefixes: ['/games/guess-song/duel'] },
-      { href: '/games/daily-prescription', label: '每日处方', icon: 'check', activePrefixes: ['/games/daily-prescription'] },
-      { href: '/clinic', label: '阿士匹灵门诊部', icon: 'stethoscope', activePrefixes: ['/clinic'] },
-      { href: '/ratings', label: '歌·颂', icon: 'music', activePrefixes: ['/ratings'] },
-    ],
-  },
+  { href: '/games', label: '娱乐天空', icon: 'star', activePrefixes: ['/games', '/entertainment'] },
+  { href: '/clinic', label: '阿士匹灵门诊部', icon: 'stethoscope', activePrefixes: ['/clinic'] },
+  { href: '/ratings', label: '歌·颂', icon: 'music', activePrefixes: ['/ratings'] },
   { href: '/activities', label: '活动中心', icon: 'calendar', activePrefixes: ['/activities'] },
   { href: '/notifications', label: '消息', icon: 'bell', activePrefixes: ['/notifications'], showsUnread: true },
   { href: '/profile', label: '我的', icon: 'user', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },
@@ -35,7 +24,6 @@ export const primaryNavigation: AppNavigationItem[] = [
 export const quickNavigation: AppNavigationItem[] = [
   { href: '/checkin', label: '每日挂号', icon: 'check', activePrefixes: [] },
   { href: '/friends', label: '好友动态', icon: 'friends', activePrefixes: ['/friends'] },
-  { href: '/trending', label: '热门帖子', icon: 'chart', activePrefixes: ['/trending'] },
   { href: '/stickers', label: '表情包商店', icon: 'sticker', activePrefixes: ['/stickers', '/profile/stickers'] },
   { href: '/feedback', label: '反馈与更新', icon: 'feedback', activePrefixes: ['/feedback'] },
 ]

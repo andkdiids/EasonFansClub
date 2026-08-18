@@ -16,7 +16,7 @@ export { getNotificationTarget } from '@/lib/notification-target'
 const MAX_NOTIFICATION_PAGE_SIZE = 50
 const CONTENT_IMAGE_MARKER = /\[\[content-image:[^\]]+\]\]/g
 const REPLY_UNAVAILABLE_TEXT = '该回复已被删除或不可查看'
-export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system'] as const
+export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system', 'wall'] as const
 export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
 
@@ -46,6 +46,8 @@ const systemTypeLabels: Record<string, string> = {
 
 export function getNotificationCategory(type: string, link?: string | null) {
   if (link?.startsWith('/feedback/')) return 'feedback'
+  // 留言墙互动（留言 / 回复 / 点赞）集中在独立的「留言墙」分类，不再混入回复 / 点赞。
+  if (link && /^\/user\/\d+\/wall(\?|$)/.test(link)) return 'wall'
   if (type === 'REPLY') return 'reply'
   if (type === 'LIKE') return 'like'
   if (type === 'FRIEND_REQUEST' || type === 'FOLLOW' || type === 'GUESS_SONG_DUEL_INVITE') return 'friend'
@@ -69,8 +71,10 @@ export function getUnreadNotificationWhere(userId: string, extra: Prisma.Notific
 
 export function getNotificationCategoryFilter(category: string): Prisma.NotificationWhereInput {
   if (category === 'all') return {}
-  if (category === 'reply') return { type: 'REPLY' }
-  if (category === 'like') return { type: 'LIKE' }
+  // 留言墙互动从回复 / 点赞分类中剥离，避免同一通知同时出现在多个 Tab。
+  if (category === 'reply') return { type: 'REPLY', OR: [{ link: null }, { link: { not: { contains: '/wall' } } }] }
+  if (category === 'like') return { type: 'LIKE', OR: [{ link: null }, { link: { not: { contains: '/wall' } } }] }
+  if (category === 'wall') return { AND: [{ type: { in: ['REPLY', 'LIKE'] } }, { link: { startsWith: '/user/' } }, { link: { contains: '/wall' } }] }
   if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE'] } }
   if (category === 'messages') return { type: 'MESSAGE' }
   if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
@@ -99,8 +103,9 @@ function getSystemNotificationCategoryFilter(category: NotificationCategory): Pr
 // behind on a later page.
 function getPersonalNotificationCategorySql(category: NotificationCategory) {
   switch (category) {
-    case 'reply': return Prisma.raw("AND n.type = 'REPLY'")
-    case 'like': return Prisma.raw("AND n.type = 'LIKE'")
+    case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '%/wall%')")
+    case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '%/wall%')")
+    case 'wall': return Prisma.raw("AND n.type IN ('REPLY','LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%'")
     case 'friend': return Prisma.raw("AND n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE')")
     case 'messages': return Prisma.raw("AND n.type = 'MESSAGE'")
     case 'feedback': return Prisma.raw("AND n.link LIKE '/feedback/%'")
@@ -112,6 +117,7 @@ function getPersonalNotificationCategorySql(category: NotificationCategory) {
 function getSystemNotificationCategorySql(category: NotificationCategory) {
   if (category === 'feedback') return Prisma.raw("AND sn.link LIKE '/feedback/%'")
   if (category === 'system') return Prisma.raw("AND (sn.link IS NULL OR sn.link NOT LIKE '/feedback/%')")
+  if (category === 'wall') return Prisma.raw('AND 1 = 0')
   if (category !== 'all') return Prisma.raw('AND 1 = 0')
   return Prisma.empty
 }
@@ -211,6 +217,7 @@ export type UnreadSummary = {
   system: number
   replies: number
   likes: number
+  wall: number
   feedbackReplies: number
   feedback: number
   friendRequests: number
@@ -222,6 +229,7 @@ export type UnreadSummary = {
 export type UnreadPersonalCounts = {
   replies: number
   likes: number
+  wall?: number
   friendRequests: number
   messages: number
   feedback: number
@@ -357,7 +365,7 @@ async function reconcileStalePersonalNotifications(userId: string) {
     if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) staleIds.add(item.id)
     if (target.kind === 'daily-message' && !dailyCommentLookup.failed && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId && !comment.isDeleted && !comment.DailyMessage.isDeleted)) staleIds.add(item.id)
     if (target.kind === 'feedback' && !feedbacks.some((feedback) => feedback.id === target.resourceId)) staleIds.add(item.id)
-    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)) staleIds.add(item.id)
+    if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === String(Number(target.resourceId)))) staleIds.add(item.id)
   }
 
   if (staleIds.size) {
@@ -410,6 +418,7 @@ async function getDirectMessageUnreadCount(userId: string) {
 }
 
 export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: number, directMessages: number): UnreadSummary {
+  const wall = personal.wall ?? 0
   const system = personal.system + systemCount
   const notifications = system + personal.replies + personal.likes
   const friendRequests = personal.friendRequests
@@ -419,12 +428,13 @@ export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: 
     system,
     replies: personal.replies,
     likes: personal.likes,
+    wall,
     feedbackReplies,
     feedback: feedbackReplies,
     friendRequests,
     directMessages,
     messages: directMessages,
-    total: notifications + feedbackReplies + friendRequests + directMessages,
+    total: notifications + feedbackReplies + friendRequests + directMessages + wall,
   }
 }
 
@@ -437,14 +447,16 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
     prisma.$queryRaw<Array<{
       replies: bigint | number
       likes: bigint | number
+      wall: bigint | number
       friendRequests: bigint | number
       messages: bigint | number
       feedback: bigint | number
       systemCount: bigint | number
     }>>`
       SELECT
-        COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS replies,
-        COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS likes,
+        COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') AND (n.link IS NULL OR n.link NOT LIKE '%/wall%') THEN 1 END) AS replies,
+        COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') AND (n.link IS NULL OR n.link NOT LIKE '%/wall%') THEN 1 END) AS likes,
+        COUNT(CASE WHEN n.type IN ('REPLY', 'LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%' THEN 1 END) AS wall,
         COUNT(CASE WHEN n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
         COUNT(CASE WHEN n.type = 'MESSAGE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS messages,
         COUNT(CASE WHEN n.link LIKE '/feedback/%' THEN 1 END) AS feedback,
@@ -480,6 +492,7 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
   const personalCounts = {
     replies: Number(personalRow?.replies || 0),
     likes: Number(personalRow?.likes || 0),
+    wall: Number(personalRow?.wall || 0),
     friendRequests: Number(personalRow?.friendRequests || 0),
     messages: Number(personalRow?.messages || 0),
     feedback: Number(personalRow?.feedback || 0),
@@ -928,7 +941,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       }
     }
     if (target.kind === 'profile-wall') {
-      const message = wallMessages.find((row) => row.id === target.parentId && String(row.User_ProfileWallMessage_receiverIdToUser.uid) === target.resourceId)
+      const message = wallMessages.find((row) => row.id === target.parentId && String(row.User_ProfileWallMessage_receiverIdToUser.uid) === String(Number(target.resourceId)))
       if (!message) return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
       return {
         ...item,

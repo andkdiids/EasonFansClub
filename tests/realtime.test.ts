@@ -8,6 +8,7 @@ const summary = {
   system: 1,
   replies: 1,
   likes: 0,
+  wall: 0,
   feedbackReplies: 0,
   feedback: 0,
   friendRequests: 0,

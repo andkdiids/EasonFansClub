@@ -77,6 +77,17 @@ function findRootId(messages: WallMessage[], id: string): string | null {
   return null
 }
 
+// 返回从根到目标 id（不含自身）的所有祖先 id，用于自动展开楼中楼回复的全部层级。
+function collectWallAncestorIds(messages: WallMessage[], id: string, trail: string[] = []): string[] | null {
+  for (const message of messages) {
+    const nextTrail = [...trail, message.id]
+    if (message.id === id) return trail
+    const found = collectWallAncestorIds(message.children || [], id, nextTrail)
+    if (found) return found
+  }
+  return null
+}
+
 function insertWallMessage(messages: WallMessage[], created: WallMessage) {
   if (!created.parentId) return { messages: [created, ...messages], inserted: true, rootId: created.id }
 
@@ -175,7 +186,15 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
       setError('该内容已被删除或无法查看')
       return
     }
-    if (rootId !== focusId) setExpanded((current) => ({ ...current, [rootId]: true }))
+    // 自动展开从根留言到目标回复的全部祖先层级，确保被折叠的楼中楼回复也能显示。
+    const ancestorIds = collectWallAncestorIds(messages, focusId) ?? []
+    if (ancestorIds.length) {
+      setExpanded((current) => {
+        const next = { ...current }
+        for (const id of ancestorIds) next[id] = true
+        return next
+      })
+    }
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(`wall-message-${focusId}`)
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' })

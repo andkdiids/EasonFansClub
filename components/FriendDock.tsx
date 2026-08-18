@@ -55,6 +55,7 @@ const emptySummary: UnreadSummary = {
   system: 0,
   replies: 0,
   likes: 0,
+  wall: 0,
   feedbackReplies: 0,
   feedback: 0,
   friendRequests: 0,

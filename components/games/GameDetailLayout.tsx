@@ -20,16 +20,18 @@ export function GameDetailLayout({ game, actions, children }: Readonly<{
           <aside>{actions}</aside>
         </section>
         {children}
-        <section className="game-detail-sections">
-          <article>
-            <h2>玩法说明</h2>
-            <ol>{game.rules.map((rule) => <li key={rule}>{rule}</li>)}</ol>
-          </article>
-          <article>
-            <h2>奖励与积分</h2>
-            <ul>{game.rewards.map((reward) => <li key={reward}>{reward}</li>)}</ul>
-          </article>
-        </section>
+        {game.slug !== 'daily-prescription' ? (
+          <section className="game-detail-sections">
+            <article>
+              <h2>玩法说明</h2>
+              <ol>{game.rules.map((rule) => <li key={rule}>{rule}</li>)}</ol>
+            </article>
+            <article>
+              <h2>奖励与积分</h2>
+              <ul>{game.rewards.map((reward) => <li key={reward}>{reward}</li>)}</ul>
+            </article>
+          </section>
+        ) : null}
       </div>
     </main>
   )
