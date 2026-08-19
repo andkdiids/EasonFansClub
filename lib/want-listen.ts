@@ -486,8 +486,15 @@ function wantListenGameType(mode: WantListenMode) {
 export async function createWantListenSession(userId: string, rawMode: unknown, meta: { ip?: string | null; userAgent?: string | null } = {}) {
   const mode = ensureMode(rawMode)
   const now = new Date()
+  // 1) 已过期的进行中会话 → EXPIRED（清理 TTL 过期残留）
   await prisma.wantListenSession.updateMany({ where: { userId, mode, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
-  const existing = await prisma.wantListenSession.findFirst({ where: { userId, mode, status: 'IN_PROGRESS', expiresAt: { gt: now } }, orderBy: { createdAt: 'desc' } })
+  // 2) 同模式所有有效进行中会话：保留最新一次，其余历史残留 → ABANDONED（不删除数据）
+  const activeSessions = await prisma.wantListenSession.findMany({ where: { userId, mode, status: 'IN_PROGRESS' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+  if (activeSessions.length > 1) {
+    await prisma.wantListenSession.updateMany({ where: { id: { in: activeSessions.slice(1).map((session) => session.id) } }, data: { status: 'ABANDONED', activeKey: null } })
+  }
+  // 3) 已有唯一有效进行中会话 → 直接返回其 sessionId（继续游戏），不重复创建
+  const existing = activeSessions[0]
   if (existing) {
     const restored = await loadSession(userId, existing.id)
     if (!restored) throw sessionNotFound()
@@ -882,12 +889,18 @@ function serializeStats(row: StatsRow | undefined) {
 
 export async function getWantListenSummary(userId: string) {
   const now = new Date()
+  // 已过期的进行中会话 → EXPIRED（避免过期残留让前端误判为「继续游戏」）
   await prisma.wantListenSession.updateMany({ where: { userId, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
   const [config, rows, active] = await Promise.all([
     getWantListenConfig(),
     prisma.wantListenStats.findMany({ where: { userId }, select: { mode: true, gamesPlayed: true, totalQuestions: true, totalCorrect: true, bestScore: true, currentStreak: true, maxStreak: true, perfectGames: true, silentCurrentStreak: true, silentMaxStreak: true } }),
-    prisma.wantListenSession.findMany({ where: { userId, status: 'IN_PROGRESS' }, orderBy: { updatedAt: 'desc' }, select: { id: true, mode: true, currentQuestion: true, score: true, correctCount: true, expiresAt: true } }),
+    prisma.wantListenSession.findMany({ where: { userId, status: 'IN_PROGRESS', expiresAt: { gt: now } }, orderBy: { updatedAt: 'desc' }, select: { id: true, mode: true, currentQuestion: true, score: true, correctCount: true, expiresAt: true } }),
   ])
+  // 每个模式只暴露最新一个有效进行中会话，避免同模式多 session 残留时前端 Map 状态混乱
+  const latestActiveByMode = new Map<string, (typeof active)[number]>()
+  for (const session of active) {
+    if (!latestActiveByMode.has(session.mode)) latestActiveByMode.set(session.mode, session)
+  }
   const byMode = new Map(rows.map((row) => [row.mode, row]))
   const modeStats = Object.fromEntries(WANT_LISTEN_MODES.map((mode) => [mode, serializeStats(byMode.get(mode))])) as Record<WantListenMode, ReturnType<typeof serializeStats>>
   const totalQuestions = rows.reduce((sum, row) => sum + row.totalQuestions, 0)
@@ -906,7 +919,7 @@ export async function getWantListenSummary(userId: string) {
       accuracy: totalQuestions ? Math.round((totalCorrect / totalQuestions) * 1000) / 10 : 0,
       bestMode: totalQuestions ? skilledMode.mode : null,
     },
-    activeSessions: active.map((session) => ({ ...session, expiresAt: session.expiresAt.toISOString() })),
+    activeSessions: Array.from(latestActiveByMode.values()).map((session) => ({ ...session, expiresAt: session.expiresAt.toISOString() })),
   }
 }
 

@@ -11,6 +11,6 @@ export async function GET() {
   try {
     return wantListenOk(await getWantListenSummary(guard.user.id))
   } catch (error) {
-    return handleWantListenError(error, 'summary')
+    return handleWantListenError(error, 'summary', { operation: 'summary', userId: guard.user.id })
   }
 }

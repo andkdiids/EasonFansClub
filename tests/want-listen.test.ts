@@ -507,3 +507,73 @@ test('防不胜防进入新题会重置揭晓状态，未答题不泄露答案',
   assert.match(service, /const result = answered\s*\?/)
   assert.doesNotMatch(service, /correctOptionKey: question\.correctOptionKey,\s*\n\s*options:/)
 })
+
+test('错误日志：服务端记录 operation / userId / mode / device / stack，数据库迁移失配返回明确 code', () => {
+  const api = source('lib/want-listen-api.ts')
+  const sessionsRoute = source('app/api/entertainment/want-listen/sessions/route.ts')
+  const summaryRoute = source('app/api/entertainment/want-listen/summary/route.ts')
+  // 1) 结构化日志：operation + userId + mode + device + stack
+  assert.match(api, /handleWantListenError\(error: unknown, operation: string, context/)
+  assert.match(api, /const logContext = \{\s+operation,/)
+  assert.match(api, /userId: context\.userId/)
+  assert.match(api, /mode: context\.mode/)
+  assert.match(api, /device,\s+ip: context\.ip/)
+  assert.match(api, /stack\s*\?/)
+  assert.match(api, /console\.error\(`\[want-listen\.\$\{operation\}\]`, JSON\.stringify\(logContext\)\)/)
+  // 2) device 检测：iOS / Android / 桌面
+  assert.match(api, /MOBILE_IOS/)
+  assert.match(api, /MOBILE_ANDROID/)
+  assert.match(api, /return 'DESKTOP'/)
+  // 3) 数据库迁移失配（P2010/P2011/P2021 → Unknown column/table）识别
+  assert.match(api, /P2010/)
+  assert.match(api, /P2011/)
+  assert.match(api, /P2021/)
+  assert.match(api, /DATABASE_MIGRATION_OUT_OF_SYNC/)
+  // 4) 业务异常仍返回原文案与状态码，未知异常保持友好提示（生产不泄露堆栈）
+  assert.match(api, /isServiceError = error instanceof WantListenServiceError/)
+  assert.match(api, /WantListenServiceError'/)
+  assert.match(api, /\(error as WantListenServiceError\)\.message, \(error as WantListenServiceError\)\.status, \(error as WantListenServiceError\)\.code/)
+  assert.match(api, /想听服务暂时不可用，请稍后再试。/)
+  // 5) 路由：POST 全链路 try/catch，创建会话时记录 userId/mode/ip/userAgent/device 上下文
+  assert.match(sessionsRoute, /let userId: string \| undefined/)
+  assert.match(sessionsRoute, /let mode: unknown/)
+  assert.match(sessionsRoute, /handleWantListenError\(error, 'sessions\.create', \{ operation: 'sessions\.create', userId, mode, ip, userAgent \}\)/)
+  assert.match(sessionsRoute, /createWantListenSession\(guard\.user\.id, mode,/)
+  // 6) summary 路由同样带上 userId 上下文
+  assert.match(summaryRoute, /handleWantListenError\(error, 'summary', \{ operation: 'summary', userId: guard\.user\.id \}\)/)
+})
+
+test('session 生命周期：同用户同模式仅保留一个有效 IN_PROGRESS，旧残留标记 ABANDONED 不删除', () => {
+  const service = source('lib/want-listen.ts')
+  // 1) create 前：过期进行中 → EXPIRED
+  assert.match(service, /updateMany\(\{ where: \{ userId, mode, status: 'IN_PROGRESS', expiresAt: \{ lte: now \} \}, data: \{ status: 'EXPIRED', activeKey: null \} \}\)/)
+  // 2) 同模式多个进行中：保留最新一次，其余 → ABANDONED（不删除数据）
+  assert.match(service, /const activeSessions = await prisma\.wantListenSession\.findMany\(\{ where: \{ userId, mode, status: 'IN_PROGRESS' \}, orderBy: \{ createdAt: 'desc' \}/)
+  assert.match(service, /activeSessions\.slice\(1\)\.map\(\(session\) => session\.id\)/)
+  assert.match(service, /status: 'ABANDONED', activeKey: null/)
+  // 3) 已有唯一有效进行中会话 → 返回其 sessionId（继续游戏），不重复创建
+  assert.match(service, /const existing = activeSessions\[0\]/)
+  assert.match(service, /return \{ resumed: true, session: toPublicState\(restored\) \}/)
+})
+
+test('首页状态：summary 过滤过期进行中会话，每模式仅返回最新一个（前端据此显示继续游戏）', () => {
+  const service = source('lib/want-listen.ts')
+  const home = source('app/games/want-listen/WantListenHome.tsx')
+  // 1) summary 先过期清理 + 只查未过期进行中
+  assert.match(service, /status: 'IN_PROGRESS', expiresAt: \{ gt: now \}/)
+  // 2) 每模式仅保留最新一个（Map 去重）
+  assert.match(service, /latestActiveByMode = new Map<string, \(typeof active\)\[number\]>\(\)/)
+  assert.match(service, /if \(!latestActiveByMode\.has\(session\.mode\)\) latestActiveByMode\.set\(session\.mode, session\)/)
+  assert.match(service, /activeSessions: Array\.from\(latestActiveByMode\.values\(\)\)/)
+  // 3) 前端：存在进行中会话 → 按钮显示「继续第 X 题」（而非开始游戏）
+  assert.match(home, /active \? `继续第 \$\{active\.currentQuestion\} 题`/)
+})
+
+test('历史残留清理脚本：过期→EXPIRED、每用户每模式保留最新、其余→ABANDONED、不删除数据', () => {
+  const script = source('scripts/cleanup-want-listen-stale-sessions.ts')
+  assert.match(script, /status: 'IN_PROGRESS', expiresAt: \{ lte: now \}/)
+  assert.match(script, /status: 'EXPIRED', activeKey: null/)
+  assert.match(script, /groupKey = `\$\{row\.userId\}:\$\{row\.mode\}`/)
+  assert.match(script, /status: 'ABANDONED', activeKey: null/)
+  assert.doesNotMatch(script, /deleteMany/)
+})
