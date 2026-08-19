@@ -57,6 +57,26 @@
 .want-listen-game-header span { color:var(--foreground-muted); font-size:9px; }
 .want-listen-game-header strong { margin-top:7px; color:var(--foreground); font-size:17px; }
 .want-listen-game-header>button { justify-content:center; border-right:0; color:var(--danger); cursor:pointer; }
+/* 顶部控制：左侧退出 / 右侧暂停（参考听听游戏页的浮动控制，浅色主题适配） */
+.want-listen-game.has-top-controls { padding-top:max(76px,calc(env(safe-area-inset-top) + 64px)); }
+.want-listen-game-exit-button,.want-listen-game-pause-button { position:fixed; z-index:20; top:max(16px,env(safe-area-inset-top)); display:flex; min-width:44px; min-height:44px; align-items:center; border:1px solid var(--border); border-radius:0; padding:0 14px; font-size:11px; font-weight:850; backdrop-filter:blur(12px); cursor:pointer; }
+.want-listen-game-exit-button { left:max(16px,env(safe-area-inset-left)); gap:8px; color:var(--foreground-muted); background:color-mix(in srgb,var(--background) 88%,transparent); }
+.want-listen-game-pause-button { right:max(16px,env(safe-area-inset-right)); justify-content:center; gap:6px; color:var(--foreground); background:color-mix(in srgb,var(--background) 88%,transparent); }
+.want-listen-game-exit-button:hover { color:var(--danger); }
+.want-listen-game-pause-button:hover { border-color:var(--primary); color:var(--primary); }
+.want-listen-game-pause-button:disabled { cursor:wait; opacity:.55; }
+/* 暂停遮罩 */
+.want-listen-pause-backdrop { position:fixed; inset:0; z-index:30; display:grid; place-items:center; background:color-mix(in srgb,var(--background) 78%,transparent); backdrop-filter:blur(4px); padding:20px; }
+.want-listen-pause-card { width:min(360px,100%); border:1px solid var(--border); background:var(--surface); padding:26px 24px; text-align:center; box-shadow:0 18px 46px rgba(0,0,0,.14); }
+.want-listen-pause-card h2 { margin:0; color:var(--foreground); font-size:21px; font-weight:900; }
+.want-listen-pause-card dl { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:20px 0 0; }
+.want-listen-pause-card dl div { border:1px solid var(--border); padding:12px 8px; }
+.want-listen-pause-card dt { color:var(--foreground-muted); font-size:10px; }
+.want-listen-pause-card dd { margin:7px 0 0; color:var(--foreground); font-size:18px; font-weight:900; }
+.want-listen-pause-actions { display:grid; gap:10px; margin-top:22px; }
+.want-listen-pause-actions button { min-height:44px; border:1px solid var(--border); border-radius:0; background:var(--background); color:var(--foreground); font-size:12px; font-weight:850; cursor:pointer; }
+.want-listen-pause-actions button.is-danger { border-color:var(--danger); color:var(--danger); }
+.want-listen-pause-actions button:disabled { cursor:wait; opacity:.55; }
 .want-listen-question-panel { margin-top:24px; border:1px solid var(--border); background:var(--surface); }
 .want-listen-question-intro { display:flex; align-items:center; justify-content:space-between; gap:14px; border-bottom:1px solid var(--border); padding:17px 22px; }
 .want-listen-question-intro>span { margin:0; }
@@ -113,7 +133,7 @@
 .want-listen-board-filters button[aria-pressed='true'] { border-color:var(--primary); color:var(--primary); background:var(--navigation-active); }
 .want-listen-board { margin-top:14px; border:1px solid var(--border); background:var(--surface); }
 .want-listen-board.is-loading { opacity:.55; }
-.want-listen-board-head,.want-listen-board article { display:grid; grid-template-columns:70px minmax(150px,1fr) 110px 90px 90px; align-items:center; gap:12px; }
+.want-listen-board-head,.want-listen-board article { display:grid; grid-template-columns:70px minmax(150px,1fr) 110px 90px 90px 90px; align-items:center; gap:12px; }
 .want-listen-board-head { border-bottom:1px solid var(--border); padding:10px 16px; color:var(--foreground-muted); font-size:10px; font-weight:900; }
 .want-listen-board article { min-height:66px; border-bottom:1px solid var(--border); padding:10px 16px; color:var(--foreground); font-size:12px; }
 .want-listen-board article:last-of-type { border-bottom:0; }
@@ -166,10 +186,16 @@
   .want-listen-board-filters { align-items:stretch; flex-direction:column; }
   .want-listen-board-filters>div { width:100%; }
   .want-listen-board-filters button { flex:1; padding-inline:7px; }
-  .want-listen-board-head,.want-listen-board article { grid-template-columns:38px minmax(0,1fr) 62px 52px; gap:7px; padding-inline:9px; }
+  .want-listen-board-head,.want-listen-board article { grid-template-columns:38px minmax(0,1fr) 54px 44px 44px; gap:7px; padding-inline:9px; }
   .want-listen-board-head span:last-child,.want-listen-board article>span:last-child { display:none; }
   .want-listen-board article { min-height:60px; }
   .want-listen-board article>strong { font-size:15px; }
+  .want-listen-game.has-top-controls { padding-top:max(66px,calc(env(safe-area-inset-top) + 58px)); }
+  .want-listen-game-exit-button,.want-listen-game-pause-button { top:max(10px,env(safe-area-inset-top)); min-height:40px; padding:0 12px; font-size:10px; }
+  .want-listen-game-exit-button { left:max(10px,env(safe-area-inset-left)); }
+  .want-listen-game-pause-button { right:max(10px,env(safe-area-inset-right)); }
+  .want-listen-pause-card { padding:22px 16px; }
+  .want-listen-pause-card dl { gap:6px; }
 }
 
 /* 卧底巨星：沿用娱乐天空的直角信息布局，并把动态对局的安全区域与深色主题集中在本页。 */

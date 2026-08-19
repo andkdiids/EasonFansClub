@@ -464,6 +464,34 @@ test('无尽模式：三个模式统一生效，连击/生命/总答题数字段
   assert.match(config, /WANT_LISTEN_MODES = \['WANT_LISTEN', 'CANTONESE_FRAGMENT', 'FALSE_TITLE'\]/)
 })
 
+test('顶部控制：左侧退出 / 右侧暂停（复用听听浮动控制，浅色主题适配），业务逻辑不动', () => {
+  const game = source('app/games/want-listen/WantListenGame.tsx')
+  const css = source('app/globals.css')
+  // 1) 顶部浮动按钮：退出在左、暂停在右，小尺寸边框低存在感
+  assert.match(game, /want-listen-game-exit-button/)
+  assert.match(game, /want-listen-game-pause-button/)
+  assert.match(css, /\.want-listen-game-exit-button \{[^}]*left:max\(16px,env\(safe-area-inset-left\)\)/)
+  assert.match(css, /\.want-listen-game-pause-button \{[^}]*right:max\(16px,env\(safe-area-inset-right\)\)/)
+  assert.match(css, /\.want-listen-game-exit-button,.want-listen-game-pause-button \{[^}]*border:1px solid var\(--border\)[^}]*font-size:11px/)
+  // 2) 暂停：点击遮罩游戏区域，显示继续挑战 / 结束挑战 / 退出游戏
+  assert.match(game, /want-listen-pause-backdrop/)
+  assert.match(game, /游戏已暂停/)
+  assert.match(game, /继续挑战/)
+  assert.match(game, /setPaused\(false\)/)
+  assert.match(css, /\.want-listen-pause-backdrop \{[^}]*position:fixed/)
+  // 3) 退出确认文案统一
+  assert.match(game, /确定退出本次挑战吗？/)
+  assert.match(game, /退出后本次挑战进度不会保存。/)
+  // 4) 不修改业务逻辑：答题/下一题/结束挑战 API 均保留，未新增暂停 API
+  assert.match(game, /\/answer/)
+  assert.match(game, /\/next/)
+  assert.match(game, /\/finish/)
+  assert.match(game, /\/abandon/)
+  assert.doesNotMatch(game, /\/pause/)
+  // 5) 移动端适配
+  assert.match(css, /\.want-listen-game-exit-button,.want-listen-game-pause-button \{[^}]*top:max\(10px,env\(safe-area-inset-top\)\)[^}]*min-height:40px/)
+})
+
 test('防不胜防进入新题会重置揭晓状态，未答题不泄露答案', () => {
   const game = source('app/games/want-listen/WantListenGame.tsx')
   const service = source('lib/want-listen.ts')

@@ -76,6 +76,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [hinting, setHinting] = useState(false)
   const [nexting, setNexting] = useState(false)
   const [finishing, setFinishing] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [error, setError] = useState('')
   const [exitOpen, setExitOpen] = useState(false)
   // 答案揭晓守卫：进入新题（question.id 变化）时强制重置为 false，
@@ -192,15 +193,18 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const isExpired = session.status === 'EXPIRED'
 
   return (
-    <main className="want-listen-game">
+    <main className={`want-listen-game${session.status === 'IN_PROGRESS' ? ' has-top-controls' : ''}`}>
+      {session.status === 'IN_PROGRESS' ? (
+        <>
+          <button type="button" className="want-listen-game-exit-button" onClick={() => setExitOpen(true)} aria-label="退出游戏">← <span>退出游戏</span></button>
+          <button type="button" className="want-listen-game-pause-button" onClick={() => setPaused(true)} disabled={answering || nexting} aria-label="暂停游戏">{paused ? '已暂停' : '暂停游戏'}</button>
+        </>
+      ) : null}
       <header className="want-listen-game-header">
-        <Link href="/games/want-listen">← 返回想听</Link>
         <div><span>{session.modeLabel}</span><strong>{session.totalQuestions === null ? `无尽 · 第 ${String(session.currentQuestion).padStart(2, '0')} 题` : `${String(session.currentQuestion).padStart(2, '0')} / ${session.totalQuestions}`}</strong></div>
         <div><span>答对</span><strong>{session.correctCount}</strong></div>
         <div><span>连击</span><strong>{session.currentStreak}</strong></div>
-        {session.totalQuestions === null && session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void finishGame()} disabled={finishing}>{finishing ? '结算中…' : '结束挑战'}</button> : null}
         <div><span>分数</span><strong>{session.score}</strong></div>
-        <button type="button" onClick={() => setExitOpen(true)}>退出</button>
       </header>
 
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
@@ -232,7 +236,25 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
         </section>
       ) : <section className="want-listen-ended"><h1>当前题目不可用，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>}
 
-      {exitOpen ? <div className="want-listen-modal-backdrop" role="presentation" onClick={() => setExitOpen(false)}><section className="want-listen-modal" role="dialog" aria-modal="true" aria-labelledby="want-listen-exit-title" onClick={(event) => event.stopPropagation()}><h2 id="want-listen-exit-title">退出本局？</h2><p>退出将放弃本局成绩（不计入排行榜）。想要结算成绩请使用「结束挑战」。</p><div><button type="button" onClick={() => setExitOpen(false)}>继续游戏</button><button type="button" className="is-danger" onClick={() => void abandon()}>退出</button></div></section></div> : null}
+      {paused ? (
+        <div className="want-listen-pause-backdrop" role="presentation">
+          <section className="want-listen-pause-card" role="dialog" aria-modal="true" aria-labelledby="want-listen-pause-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="want-listen-pause-title">游戏已暂停</h2>
+            <dl>
+              <div><dt>分数</dt><dd>{session.score}</dd></div>
+              <div><dt>答对</dt><dd>{session.correctCount}</dd></div>
+              <div><dt>最高连击</dt><dd>{session.maxStreak}</dd></div>
+            </dl>
+            <div className="want-listen-pause-actions">
+              <button type="button" onClick={() => setPaused(false)}>继续挑战</button>
+              <button type="button" onClick={() => { setPaused(false); void finishGame() }} disabled={finishing}>{finishing ? '结算中…' : '结束挑战'}</button>
+              <button type="button" className="is-danger" onClick={() => { setPaused(false); void abandon() }}>退出游戏</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {exitOpen ? <div className="want-listen-modal-backdrop" role="presentation" onClick={() => setExitOpen(false)}><section className="want-listen-modal" role="dialog" aria-modal="true" aria-labelledby="want-listen-exit-title" onClick={(event) => event.stopPropagation()}><h2 id="want-listen-exit-title">确定退出本次挑战吗？</h2><p>退出后本次挑战进度不会保存。</p><div><button type="button" onClick={() => setExitOpen(false)}>继续游戏</button><button type="button" className="is-danger" onClick={() => void abandon()}>退出游戏</button></div></section></div> : null}
     </main>
   )
 }
