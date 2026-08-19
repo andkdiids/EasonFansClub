@@ -17,6 +17,7 @@ const clinicAuthorSelect = {
   nickname: true,
   usernameModerationStatus: true,
   nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
   avatarUrl: true,
   Profile: {
     select: {

@@ -27,6 +27,7 @@ export async function GET(_request: Request, { params }: Params) {
           nickname: true,
           usernameModerationStatus: true,
           nicknameModerationStatus: true,
+          nicknameViolationDisplay: true,
           avatarUrl: true,
           Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },

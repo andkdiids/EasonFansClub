@@ -187,6 +187,7 @@ export async function POST(request: Request, { params }: Params) {
             nickname: true,
             usernameModerationStatus: true,
             nicknameModerationStatus: true,
+            nicknameViolationDisplay: true,
             level: true,
             avatarUrl: true,
             Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },

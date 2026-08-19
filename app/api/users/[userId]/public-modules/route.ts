@@ -162,7 +162,7 @@ export async function GET(request: Request, context: RouteContext) {
               title: true,
               content: true,
               moderationStatus: true,
-              User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
+              User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             },
           },
         },

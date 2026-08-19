@@ -305,6 +305,7 @@ const publicFriendSelect = {
   nickname: true,
   usernameModerationStatus: true,
   nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
   bioModerationStatus: true,
   avatarUrl: true,
   bio: true,

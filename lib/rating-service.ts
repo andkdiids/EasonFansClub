@@ -441,6 +441,7 @@ const userSelect = {
   username: true,
   usernameModerationStatus: true,
   nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
   avatarUrl: true,
   level: true,
   Profile: { select: { avatarUrl: true, displayName: true, displayNameModerationStatus: true } },

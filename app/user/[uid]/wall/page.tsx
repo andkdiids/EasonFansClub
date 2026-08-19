@@ -20,7 +20,7 @@ export default async function ProfileWallPage({ params, searchParams }: { params
     getCurrentUser(),
     prisma.user.findFirst({
       where: { uid: numericUid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-      select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } },
+      select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } },
     }),
   ])
   if (!target) notFound()

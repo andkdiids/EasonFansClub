@@ -158,6 +158,7 @@ export async function loadProfileRecentMessagesPage(
                 nickname: true,
                 usernameModerationStatus: true,
                 nicknameModerationStatus: true,
+                nicknameViolationDisplay: true,
                 avatarUrl: true,
                 Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
               },

@@ -15,7 +15,7 @@ export async function GET() {
   const conversationRows = await prisma.conversation.findMany({
     where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
     include: {
-      ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } } },
+      ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } } },
       DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true } },
     },
   })

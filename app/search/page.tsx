@@ -31,7 +31,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             ],
           },
           include: {
-            User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
+            User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             Board: { select: { name: true, slug: true } },
           },
           take: 20,
@@ -54,7 +54,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             ],
           },
           select: {
-            id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+            id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
             Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
             _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } } } },
             Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, moderationStatus: true } },

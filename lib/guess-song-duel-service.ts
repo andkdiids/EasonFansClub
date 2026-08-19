@@ -49,6 +49,7 @@ const publicUserSelect = {
   nickname: true,
   usernameModerationStatus: true,
   nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
   avatarUrl: true,
   isOnline: true,
   Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },

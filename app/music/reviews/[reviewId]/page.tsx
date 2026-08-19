@@ -19,7 +19,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
       where: { id: reviewId, status: 'PUBLISHED' },
       include: {
         MusicAlbum: { select: { id: true, name: true, releaseYear: true, language: true, coverUrl: true, _count: { select: { MusicSong: true } } } },
-        User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
+        User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
       },
     }),
     getCurrentUser(),

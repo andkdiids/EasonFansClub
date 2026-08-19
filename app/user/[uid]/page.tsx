@@ -36,6 +36,7 @@ export default async function PublicUserPage({ params }: PageProps) {
       nickname: true,
       usernameModerationStatus: true,
       nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
       bioModerationStatus: true,
       experience: true,
       avatarUrl: true,

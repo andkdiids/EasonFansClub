@@ -21,7 +21,7 @@ export async function GET(_request: Request, context: RouteContext) {
     orderBy: { createdAt: 'asc' },
     take: COMMENT_PAGE_SIZE,
     include: {
-      User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
+      User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
     },
   })
 
@@ -93,7 +93,7 @@ export async function POST(request: Request, context: RouteContext) {
         ipRegion,
         parentId: parentId || null,
       },
-      include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } },
+      include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } },
     })
 
     await tx.dailyMessage.update({

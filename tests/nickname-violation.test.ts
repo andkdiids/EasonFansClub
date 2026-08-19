@@ -131,7 +131,7 @@ test('七/所有展示接口一致：publicUserSelect 包含违规展示字段',
   assert.equal(sel.nicknameViolationDisplay, true)
 })
 
-test('七/所有展示接口一致：昵称违规优先返回展示昵称，用户名/主页违规仍遮罩', () => {
+test('七/所有展示接口一致：昵称违规优先返回展示昵称，用户名违规仍遮罩', () => {
   // 昵称违规优先返回生效展示昵称（源码确认分支存在）
   assert.match(friendRemarksSrc, /if \(user\.nicknameModerationStatus === 'VIOLATION'\)/)
   // 用户名违规仍遮罩为「违规用户」
@@ -139,12 +139,48 @@ test('七/所有展示接口一致：昵称违规优先返回展示昵称，用�
     getPublicUserDisplayName({ username: 'x', usernameModerationStatus: 'VIOLATION' }),
     '违规用户',
   )
-  // 主页展示名违规仍遮罩
+})
+
+test('二/昵称合法后即使 Profile 残留违规标记也正常显示（问题2修复）', () => {
+  // 用户昵称已合法（NORMAL），但 Profile.displayNameModerationStatus 仍为 VIOLATION（历史残留）
+  // → 必须显示昵称，不得再显示「违规用户」
   assert.equal(
     getPublicUserDisplayName({
-      nickname: 'y',
-      Profile: { displayName: 'z', displayNameModerationStatus: 'VIOLATION' },
+      nickname: '新合法昵称',
+      nicknameModerationStatus: 'NORMAL',
+      Profile: { displayName: '新合法昵称', displayNameModerationStatus: 'VIOLATION' },
+    }),
+    '新合法昵称',
+  )
+  // 源码确认：展示函数不再因 Profile 残留标记返回「违规用户」
+  assert.doesNotMatch(friendRemarksSrc, /profile\?\.displayNameModerationStatus === 'VIOLATION'/)
+})
+
+test('一/昵称违规但无展示昵称（历史遗留）时遮罩，不泄露真实昵称', () => {
+  assert.equal(
+    getPublicUserDisplayName({
+      nickname: '真实违规昵称',
+      nicknameModerationStatus: 'VIOLATION',
+      nicknameViolationDisplay: null,
     }),
     '违规用户',
   )
+})
+
+test('二/历史违规用户修复脚本：区分仍违规与已合法两种情况', () => {
+  const repairSrc = source('scripts/repair-violating-user-display-names.ts')
+  // 扫描条件：用户级违规 或 Profile 残留违规标记
+  assert.match(repairSrc, /nicknameModerationStatus: 'VIOLATION'/)
+  assert.match(repairSrc, /displayNameModerationStatus: 'VIOLATION'/)
+  // 情况A：仍违规 → 生成唯一安全展示昵称
+  assert.match(repairSrc, /generateUniqueViolationNickname\(client, Math\.random\)/)
+  assert.match(repairSrc, /KEEP_VIOLATION/)
+  // 情况B：已合法 → 恢复正常展示，清除违规标记
+  assert.match(repairSrc, /nicknameModerationStatus: 'NORMAL', nicknameViolationDisplay: null/)
+  assert.match(repairSrc, /displayName: currentNickname, displayNameModerationStatus: 'NORMAL'/)
+  assert.match(repairSrc, /NORMAL_RESTORE/)
+  // 不删除任何数据，仅更新状态与写日志
+  assert.doesNotMatch(repairSrc, /\.deleteMany|\.delete\(/)
+  // 修复类型与输出字段
+  assert.match(repairSrc, /KEEP_VIOLATION=|NORMAL_RESTORE=/)
 })

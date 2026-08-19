@@ -37,6 +37,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       nickname: true,
       usernameModerationStatus: true,
       nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
       bioModerationStatus: true,
       avatarUrl: true,
       backgroundUrl: true,

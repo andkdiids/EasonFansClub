@@ -28,7 +28,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
         take: 20,
-        include: { User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } } },
+        include: { User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } } },
       },
     },
   })
