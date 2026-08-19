@@ -139,6 +139,8 @@ function loadPost(postId: string, userId?: string) {
           nickname: true,
           usernameModerationStatus: true,
           nicknameModerationStatus: true,
+
+          nicknameViolationDisplay: true,
           level: true,
           avatarUrl: true,
           status: true,
@@ -161,6 +163,8 @@ function loadPost(postId: string, userId?: string) {
               nickname: true,
               usernameModerationStatus: true,
               nicknameModerationStatus: true,
+
+              nicknameViolationDisplay: true,
               avatarUrl: true,
               Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
             },
@@ -196,6 +200,8 @@ const replyDetailSelect = {
           nickname: true,
           usernameModerationStatus: true,
           nicknameModerationStatus: true,
+
+          nicknameViolationDisplay: true,
           avatarUrl: true,
           Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
         },
@@ -221,6 +227,8 @@ const replyDetailSelect = {
       nickname: true,
       usernameModerationStatus: true,
       nicknameModerationStatus: true,
+
+      nicknameViolationDisplay: true,
       level: true,
       avatarUrl: true,
       status: true,
@@ -306,6 +314,7 @@ type FocusedReply = {
     nickname: string
     usernameModerationStatus: 'NORMAL' | 'VIOLATION'
     nicknameModerationStatus: 'NORMAL' | 'VIOLATION'
+    nicknameViolationDisplay: string | null
     level: number
     avatarUrl: string | null
     profile: { displayName: string; displayNameModerationStatus: 'NORMAL' | 'VIOLATION'; avatarUrl: string | null } | null
@@ -363,6 +372,8 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
             nickname: true,
             usernameModerationStatus: true,
             nicknameModerationStatus: true,
+
+            nicknameViolationDisplay: true,
             level: true,
             avatarUrl: true,
             Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },

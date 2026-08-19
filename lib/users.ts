@@ -19,6 +19,8 @@ export function publicUserSelect() {
     exp: true,
     points: true,
     createdAt: true,
+    nicknameModerationStatus: true,
+    nicknameViolationDisplay: true,
     Profile: true,
   } satisfies Prisma.UserSelect
 }
@@ -88,6 +90,8 @@ export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' 
       emailVerifiedAt: true,
       usernameModerationStatus: true,
       nicknameModerationStatus: true,
+
+      nicknameViolationDisplay: true,
       Profile: { select: { id: true, displayName: true, displayNameModerationStatus: true } },
     },
   })

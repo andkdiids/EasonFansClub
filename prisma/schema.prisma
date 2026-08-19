@@ -3122,6 +3122,8 @@ model User {
   bioModerationStatus                                    ContentModerationStatus        @default(NORMAL)
   moderationReason                                       String?
   matchedBannedWords                                     String?                        @db.Text
+  nicknameViolationDisplay                               String?                        @db.VarChar(32)
+  nicknameViolationCount                                 Int                            @default(0)
   role                                                   UserRole                       @default(USER)
   canPlayFullMusic                                       Boolean                        @default(false)
   level                                                  Int                            @default(1)
@@ -3296,6 +3298,7 @@ model User {
   @@index([uid])
   @@index([username])
   @@index([birthMonth, birthDay])
+  @@index([nicknameViolationDisplay])
 }
 
 model UserAchievement {
@@ -3939,4 +3942,21 @@ enum VerificationStatus {
   NONE
   PENDING
   VERIFIED
+}
+
+/// 昵称违规记录，供后台审核与处罚冷却追溯。
+/// userId 为普通标量（非 Prisma 关系），避免改动 User 关系列表。
+model NicknameViolationLog {
+  id                   String    @id @default(cuid())
+  userId               String
+  originalNickname     String?   @db.VarChar(32)
+  reason               String?
+  violationGeneratedAt DateTime  @default(now())
+  generatedDisplayName String    @db.VarChar(32)
+  resolvedAt           DateTime?
+  resolvedNickname     String?   @db.VarChar(32)
+  violationCount       Int       @default(1)
+  createdAt            DateTime  @default(now())
+
+  @@index([userId])
 }

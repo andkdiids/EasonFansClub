@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { activeUserWhere } from '@/lib/friends'
+import { VIOLATION_USER_TEXT } from '@/lib/content-moderation'
 
 export type FriendRemarkMap = ReadonlyMap<string, string>
 
@@ -8,6 +9,7 @@ type PublicNameUser = {
   username?: string | null
   usernameModerationStatus?: string | null
   nicknameModerationStatus?: string | null
+  nicknameViolationDisplay?: string | null
   Profile?: { displayName?: string | null; displayNameModerationStatus?: string | null } | null
 }
 
@@ -16,16 +18,32 @@ type SerializedNameUser = {
   username?: string | null
   usernameModerationStatus?: string | null
   nicknameModerationStatus?: string | null
+  nicknameViolationDisplay?: string | null
   profile?: { displayName?: string | null; displayNameModerationStatus?: string | null } | null
 }
 
+/**
+ * 统一展示昵称（需求 七：所有展示接口均经此函数读取「生效展示昵称」）。
+ *
+ *  - 昵称违规（nicknameModerationStatus === 'VIOLATION'）：返回生成的唯一展示昵称
+ *    nicknameViolationDisplay（如「违规昵称A82KD92L」），不再统一显示「违规用户」。
+ *    若展示昵称缺失（异常兜底）才退回「违规用户」。
+ *  - 用户名 / 个人主页展示名违规：沿用原「违规用户」遮罩。
+ *  - 正常：优先 Profile.displayName，其次 nickname，最后「已注销用户」。
+ */
 export function getPublicUserDisplayName(user: PublicNameUser | SerializedNameUser) {
   const profile = 'Profile' in user ? user.Profile : 'profile' in user ? user.profile : null
+
+  if (user.nicknameModerationStatus === 'VIOLATION') {
+    const display = user.nicknameViolationDisplay?.trim()
+    if (display) return display
+  }
+
   if (
     user.usernameModerationStatus === 'VIOLATION' ||
-    user.nicknameModerationStatus === 'VIOLATION' ||
     profile?.displayNameModerationStatus === 'VIOLATION'
-  ) return '违规用户'
+  ) return VIOLATION_USER_TEXT
+
   return profile?.displayName?.trim() || user.nickname?.trim() || '已注销用户'
 }
 

@@ -3,7 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { publicModerationText } from '@/lib/content-moderation'
+import { publicModerationText, VIOLATION_USER_TEXT } from '@/lib/content-moderation'
 
 export const TRENDING_PAGE_SIZE = 15
 export type TrendingRange = 7 | 30
@@ -29,6 +29,7 @@ export type TrendingPost = {
   moderationStatus: string
   usernameModerationStatus: string
   nicknameModerationStatus: string
+  nicknameViolationDisplay: string | null
   displayNameModerationStatus: string | null
 }
 
@@ -67,6 +68,7 @@ export const getTrendingPosts = unstable_cache(
         u.uid AS authorUid,
         u.usernameModerationStatus,
         u.nicknameModerationStatus,
+        u.nicknameViolationDisplay,
         pr.displayNameModerationStatus,
         COALESCE(NULLIF(pr.displayName, ''), u.nickname) AS authorName,
         COALESCE(NULLIF(pr.avatarUrl, ''), u.avatarUrl) AS authorAvatarUrl,
@@ -107,7 +109,12 @@ export const getTrendingPosts = unstable_cache(
         ...row,
         title: publicModerationText(row.title, row.moderationStatus),
         summary: publicModerationText(publicContentImageMarkers(row.summary), row.moderationStatus),
-        authorName: row.usernameModerationStatus === 'VIOLATION' || row.nicknameModerationStatus === 'VIOLATION' || row.displayNameModerationStatus === 'VIOLATION' ? '违规用户' : row.authorName,
+        // 昵称违规优先展示唯一违规展示昵称，与 getPublicUserDisplayName 保持一致
+        authorName: row.nicknameModerationStatus === 'VIOLATION'
+          ? (row.nicknameViolationDisplay || VIOLATION_USER_TEXT)
+          : row.usernameModerationStatus === 'VIOLATION' || row.displayNameModerationStatus === 'VIOLATION'
+            ? VIOLATION_USER_TEXT
+            : row.authorName,
         hotScore: Number(row.hotScore),
         authorAvatarUrl: publicImageUrl(row.authorAvatarUrl),
         imageUrl: publicImageUrl(row.imageUrl),

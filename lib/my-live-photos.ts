@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import type { Prisma } from '@prisma/client'
 import sharp, { type Metadata, type OutputInfo } from 'sharp'
 import { isAnimatedImageInput } from '@/lib/image-webp'
@@ -144,13 +145,156 @@ function fitWatermarkText(username: string, uid: number, width: number, height: 
   }
 }
 
+/**
+ * 水印中文字体解析。
+ *
+ * 中文显示异常的根因：sharp 的 SVG 渲染（librsvg / resvg，走系统 fontconfig）
+ * 只在「服务器实际安装」的字体里挑选字形。原 font-family 把 Arial 排在最前，
+ * 而 Linux 服务器上 Microsoft YaHei / PingFang / Noto CJK 通常并未安装，
+ * 中文回退链耗尽后落到无 CJK 字形的默认字体，于是变成方框/乱码。
+ *
+ * 这里把中文字体提到最前，并在运行时探测服务器已安装的 CJK 字体，
+ * 让真正可用的中文字体排在第一位。若服务器完全没有中文字体，
+ * 仍需运维安装（见要求 #5，优先 NotoSansCJK-Regular.ttc）。
+ */
+
+type CjkFontCandidate = { family: string; paths: readonly string[] }
+
+const CJK_FONT_CANDIDATES: readonly CjkFontCandidate[] = [
+  {
+    family: 'Noto Sans CJK SC',
+    paths: [
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
+      '/usr/share/fonts/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
+      '/usr/share/fonts/google-noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/google-noto-cjk/NotoSansCJKsc-Regular.otf',
+      'C:/Windows/Fonts/NotoSansCJK-Regular.ttc',
+      '/System/Library/Fonts/Supplemental/NotoSansCJK-Regular.ttc',
+    ],
+  },
+  {
+    family: 'Noto Sans SC',
+    paths: [
+      '/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf',
+      '/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf',
+      'C:/Windows/Fonts/NotoSansSC-Regular.ttf',
+      '/System/Library/Fonts/Supplemental/NotoSansSC-Regular.ttf',
+    ],
+  },
+  {
+    family: 'Source Han Sans SC',
+    paths: [
+      '/usr/share/fonts/opentype/source-han-sans/SourceHanSansSC-Regular.otf',
+      '/usr/share/fonts/adobe-source-han-sans/SourceHanSansSC-Regular.otf',
+    ],
+  },
+  {
+    family: 'Microsoft YaHei',
+    paths: [
+      'C:/Windows/Fonts/msyh.ttc',
+      'C:/Windows/Fonts/msyhbd.ttc',
+      '/usr/share/fonts/truetype/windows/msyh.ttc',
+    ],
+  },
+  {
+    family: 'PingFang SC',
+    paths: ['/System/Library/Fonts/PingFang.ttc'],
+  },
+  {
+    family: 'WenQuanYi Micro Hei',
+    paths: [
+      '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+      '/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc',
+    ],
+  },
+  {
+    family: 'WenQuanYi Zen Hei',
+    paths: ['/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc', '/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc'],
+  },
+  {
+    family: 'Heiti SC',
+    paths: ['/System/Library/Fonts/STHeiti Light.ttc', '/System/Library/Fonts/Hiragino Sans GB.ttc'],
+  },
+  {
+    family: 'SimHei',
+    paths: ['C:/Windows/Fonts/simhei.ttf'],
+  },
+]
+
+const EMOJI_FONT_CANDIDATES: readonly CjkFontCandidate[] = [
+  {
+    family: 'Noto Color Emoji',
+    paths: [
+      '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',
+      '/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf',
+      'C:/Windows/Fonts/NotoColorEmoji.ttf',
+      '/System/Library/Fonts/Apple Color Emoji.ttc',
+    ],
+  },
+  {
+    family: 'Apple Color Emoji',
+    paths: ['/System/Library/Fonts/Apple Color Emoji.ttc'],
+  },
+  {
+    family: 'Segoe UI Emoji',
+    paths: ['C:/Windows/Fonts/seguiemj.ttf'],
+  },
+]
+
+function safeExists(path: string): boolean {
+  try {
+    return existsSync(path)
+  } catch {
+    return false
+  }
+}
+
+export function detectInstalledCjkFamilies(): string[] {
+  const installed: string[] = []
+  for (const candidate of [...CJK_FONT_CANDIDATES, ...EMOJI_FONT_CANDIDATES]) {
+    if (candidate.paths.some(safeExists)) installed.push(candidate.family)
+  }
+  return installed
+}
+
+export function isCjkFontAvailable(): boolean {
+  return CJK_FONT_CANDIDATES.some((candidate) => candidate.paths.some(safeExists))
+}
+
+let cachedWatermarkFontFamily: string | null = null
+
+/**
+ * 返回水印使用的 font-family 列表：已安装的中文字体优先排在前面，
+ * 其后补列其余候选中文字体，再补 emoji 字体，最后回退到通用 sans-serif。
+ * 这样在「服务器已安装某中文字体」时能正确渲染中文；若都未安装，
+ * 仍向渲染器请求这些家族名（fontconfig 可能通过其它途径识别），
+ * 但真正的修复仍依赖运维安装中文字体。
+ */
+export function resolveCjkWatermarkFontFamily(): string {
+  if (cachedWatermarkFontFamily) return cachedWatermarkFontFamily
+  const installed = new Set(detectInstalledCjkFamilies())
+  const cjkOrdered = [
+    ...CJK_FONT_CANDIDATES.filter((c) => installed.has(c.family)).map((c) => c.family),
+    ...CJK_FONT_CANDIDATES.filter((c) => !installed.has(c.family)).map((c) => c.family),
+  ]
+  const emojiOrdered = EMOJI_FONT_CANDIDATES.map((c) => c.family)
+  cachedWatermarkFontFamily = [...cjkOrdered, ...emojiOrdered, 'sans-serif'].join(', ')
+  return cachedWatermarkFontFamily
+}
+
 export function buildMyLivePhotoWatermarkSvg({ username, uid, width, height }: { username: string; uid: number; width: number; height: number }) {
   const fitted = fitWatermarkText(username, uid, width, height)
   const escapedText = escapeXml(fitted.text)
   const baseline = Math.min(fitted.overlayHeight - fitted.padding, fitted.padding + fitted.fontSize)
   const radius = Math.max(2, Math.round(fitted.fontSize * 0.24))
   const strokeWidth = Math.max(0.5, fitted.fontSize * 0.045)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${fitted.overlayWidth}" height="${fitted.overlayHeight}" viewBox="0 0 ${fitted.overlayWidth} ${fitted.overlayHeight}"><rect x="0" y="0" width="${fitted.overlayWidth}" height="${fitted.overlayHeight}" rx="${radius}" fill="#000" fill-opacity="0.28"/><text x="${fitted.overlayWidth - fitted.padding}" y="${baseline}" text-anchor="end" fill="#fff" stroke="#000" stroke-opacity="0.34" stroke-width="${strokeWidth}" paint-order="stroke" font-family="Arial, Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="${fitted.fontSize}" font-weight="600">${escapedText}</text></svg>`
+  const fontFamily = resolveCjkWatermarkFontFamily()
+  const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+  const svg = `${xmlDeclaration}<svg xmlns="http://www.w3.org/2000/svg" width="${fitted.overlayWidth}" height="${fitted.overlayHeight}" viewBox="0 0 ${fitted.overlayWidth} ${fitted.overlayHeight}"><rect x="0" y="0" width="${fitted.overlayWidth}" height="${fitted.overlayHeight}" rx="${radius}" fill="#000" fill-opacity="0.28"/><text x="${fitted.overlayWidth - fitted.padding}" y="${baseline}" text-anchor="end" fill="#fff" stroke="#000" stroke-opacity="0.34" stroke-width="${strokeWidth}" paint-order="stroke" font-family="${fontFamily}" font-size="${fitted.fontSize}" font-weight="600">${escapedText}</text></svg>`
   return {
     svg,
     text: fitted.text,

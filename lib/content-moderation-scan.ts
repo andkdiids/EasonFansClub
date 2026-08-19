@@ -1,4 +1,5 @@
 import { findMatchedBannedWords, getEnabledBannedWords, type ModerationWord } from '@/lib/content-moderation'
+import { generateUniqueViolationNickname } from '@/lib/nickname-violation'
 import { prisma } from '@/lib/prisma'
 
 const BATCH_SIZE = 200
@@ -54,6 +55,9 @@ async function scanUsers(words: ModerationWord[], summary: ModerationScanSummary
         username: true,
         nickname: true,
         bio: true,
+        nicknameModerationStatus: true,
+        nicknameViolationDisplay: true,
+        nicknameViolationCount: true,
         Profile: { select: { id: true, displayName: true, bio: true } },
       },
     })
@@ -68,6 +72,9 @@ async function scanUsers(words: ModerationWord[], summary: ModerationScanSummary
       const allMatches = [...usernameMatches, ...nicknameMatches, ...bioMatches, ...profileDisplayMatches, ...profileBioMatches]
       const uniqueMatches = [...new Map(allMatches.map((row) => [row.normalizedWord, row])).values()]
 
+      const alreadyNicknameViolation = user.nicknameModerationStatus === 'VIOLATION'
+      const nicknameNewlyViolated = nicknameMatches.length > 0 && !alreadyNicknameViolation
+
       if (usernameMatches.length || nicknameMatches.length || bioMatches.length) {
         const data: Record<string, unknown> = {
           ...(usernameMatches.length ? { usernameModerationStatus: 'VIOLATION' as const } : {}),
@@ -78,7 +85,30 @@ async function scanUsers(words: ModerationWord[], summary: ModerationScanSummary
             matchedBannedWords: storedWords(uniqueMatches),
           } : {}),
         }
+
+        // 昵称违规：仅对「新」违规生成唯一展示昵称 + 违规计数 + 记录；
+        // 已处于违规状态的用户保留原有展示昵称，避免重复计数（需求 四）。
+        if (nicknameNewlyViolated) {
+          const count = (user.nicknameViolationCount || 0) + 1
+          const display = await generateUniqueViolationNickname(prisma, Math.random)
+          data.nicknameViolationDisplay = display
+          data.nicknameViolationCount = count
+        }
+
         await prisma.user.update({ where: { id: user.id }, data })
+
+        if (nicknameNewlyViolated) {
+          await prisma.nicknameViolationLog.create({
+            data: {
+              userId: user.id,
+              originalNickname: user.nickname,
+              reason: 'BANNED_WORD',
+              generatedDisplayName: data.nicknameViolationDisplay as string,
+              violationCount: data.nicknameViolationCount as number,
+            },
+          })
+        }
+
         if (usernameMatches.length || nicknameMatches.length) summary.username += 1
         if (bioMatches.length) summary.bio += 1
       }

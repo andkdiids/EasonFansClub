@@ -11,6 +11,7 @@ import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry,
 import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -36,6 +37,40 @@ function serializeUsernameChange(lastChangedAt: Date | null | undefined, now = n
     lastChangedAt: availability.lastChangedAt?.toISOString() || null,
     nextAllowedAt: availability.nextAllowedAt?.toISOString() || null,
     canChange: availability.canChange,
+  }
+}
+
+/**
+ * 昵称修改冷却（需求 五）：冷却天数由 nicknameViolationCount 动态计算：
+ *  - 0~1 次违规：30 天（普通修改 / 首次违规整改）
+ *  - 2 次及以上违规：60 天（整改后再次违规）
+ */
+function getNicknameChangeAvailability(
+  lastChangedAt: Date | null | undefined,
+  cooldownDays: number,
+  now = new Date(),
+) {
+  const canChange =
+    !lastChangedAt ||
+    now.getTime() - lastChangedAt.getTime() >= 1000 * 60 * 60 * 24 * cooldownDays
+  const nextAllowedAt =
+    lastChangedAt && !canChange
+      ? new Date(lastChangedAt.getTime() + 1000 * 60 * 60 * 24 * cooldownDays)
+      : null
+  return { lastChangedAt, nextAllowedAt, canChange, cooldownDays }
+}
+
+function serializeNicknameChange(
+  lastChangedAt: Date | null | undefined,
+  cooldownDays: number,
+  now = new Date(),
+) {
+  const availability = getNicknameChangeAvailability(lastChangedAt, cooldownDays, now)
+  return {
+    lastChangedAt: availability.lastChangedAt?.toISOString() || null,
+    nextAllowedAt: availability.nextAllowedAt?.toISOString() || null,
+    canChange: availability.canChange,
+    cooldownDays: availability.cooldownDays,
   }
 }
 
@@ -162,6 +197,10 @@ export async function GET(request: Request) {
       birthDay: true,
       birthdaySetAt: true,
       usernameChangedAt: true,
+      nicknameChangedAt: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
+      nicknameViolationCount: true,
       ipRegion: true,
       Profile: true,
       UserBadge: {
@@ -181,7 +220,7 @@ export async function GET(request: Request) {
   })
 
   if (!profile) return NextResponse.json({ profile: null })
-  const { Profile, UserBadge, _count, usernameChangedAt, ...user } = profile
+  const { Profile, UserBadge, _count, usernameChangedAt, nicknameChangedAt, nicknameViolationCount, ...user } = profile
   return NextResponse.json({
     profile: {
       ...user,
@@ -203,6 +242,7 @@ export async function GET(request: Request) {
       },
     },
     usernameChange: serializeUsernameChange(usernameChangedAt),
+    nicknameChange: serializeNicknameChange(nicknameChangedAt, computeNicknameCooldownDays(nicknameViolationCount ?? 0)),
   })
 }
 
@@ -218,8 +258,15 @@ export async function PATCH(request: Request) {
   const rawNickname = typeof body?.nickname === 'string' ? body.nickname : ''
   const nickname = sanitizeText(body?.nickname, 32)
   const bio = sanitizeText(body?.bio, 300)
-  if (nickname && (await checkBannedWords(nickname)).blocked) {
-    return NextResponse.json({ error: USERNAME_CONTAINS_BANNED_WORD, message: USERNAME_BANNED_WORD_MESSAGE }, { status: 400 })
+
+  // 昵称命中违禁词：不再拒绝，改为「系统自动替换」流程（需求 三 / 四）。
+  // 保留真实昵称，标记违规并生成唯一展示昵称；bio 仍按原规则拦截。
+  let nicknameViolation: { reason: string; matchedWords: string[] } | null = null
+  if (nickname) {
+    const result = await checkBannedWords(nickname)
+    if (result.blocked) {
+      nicknameViolation = { reason: 'BANNED_WORD', matchedWords: result.matchedWords }
+    }
   }
   if (body?.bio !== undefined && (await checkBannedWords(bio)).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
@@ -260,10 +307,6 @@ export async function PATCH(request: Request) {
     birthdayPublic?: boolean
   } = {}
 
-  if (nickname) {
-    data.nickname = nickname
-    data.nicknameModerationStatus = 'NORMAL'
-  }
   if (body?.bio !== undefined) {
     data.bio = bio
     data.bioModerationStatus = 'NORMAL'
@@ -289,7 +332,18 @@ export async function PATCH(request: Request) {
 
   const current = await prisma.user.findUnique({
     where: { id: guard.user.id },
-    select: { nickname: true, nicknameChangedAt: true, email: true, phone: true, birthMonth: true, birthDay: true, birthdaySetAt: true },
+    select: {
+      nickname: true,
+      nicknameChangedAt: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
+      nicknameViolationCount: true,
+      email: true,
+      phone: true,
+      birthMonth: true,
+      birthDay: true,
+      birthdaySetAt: true,
+    },
   })
 
   if (!current) return NextResponse.json({ message: '账号不存在' }, { status: 404 })
@@ -348,27 +402,48 @@ export async function PATCH(request: Request) {
   if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic
 
   const nicknameChanged = Boolean(nickname && current && nickname !== current.nickname)
+  const currentCooldownDays = computeNicknameCooldownDays(current?.nicknameViolationCount ?? 0)
   const canChangeNickname =
     !nicknameChanged ||
     !current?.nicknameChangedAt ||
-    now.getTime() - current.nicknameChangedAt.getTime() >= 1000 * 60 * 60 * 24 * 30
+    now.getTime() - current.nicknameChangedAt.getTime() >= 1000 * 60 * 60 * 24 * currentCooldownDays
 
   if (nicknameChanged && !canChangeNickname) {
-    const nextAllowedAt = new Date(current.nicknameChangedAt!.getTime() + 1000 * 60 * 60 * 24 * 30)
+    const nextAllowedAt = new Date(current.nicknameChangedAt!.getTime() + 1000 * 60 * 60 * 24 * currentCooldownDays)
     const daysRemaining = Math.max(1, Math.ceil((nextAllowedAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
     return NextResponse.json({
       code: 'NICKNAME_CHANGE_COOLDOWN',
-      message: `昵称每 30 天只能修改一次，距离下次修改还有 ${daysRemaining} 天`,
+      message: `昵称每 ${currentCooldownDays} 天只能修改一次，距离下次修改还有 ${daysRemaining} 天`,
       nextAllowedAt: nextAllowedAt.toISOString(),
     }, { status: 429 })
   }
 
   const profile = await prisma.$transaction(async (tx) => {
+    // 昵称处理：违规 → 系统自动替换并生成唯一展示昵称；正常 / 修正 → 清除违规标记。
+    const isNicknameViolation = Boolean(nicknameViolation)
+    const nicknameUpdate: Prisma.UserUpdateInput = {}
+    if (nickname) {
+      if (isNicknameViolation) {
+        const count = (current?.nicknameViolationCount || 0) + 1
+        const display = await generateUniqueViolationNickname(tx, Math.random)
+        nicknameUpdate.nickname = nickname
+        nicknameUpdate.nicknameModerationStatus = 'VIOLATION'
+        nicknameUpdate.nicknameViolationDisplay = display
+        nicknameUpdate.nicknameViolationCount = count
+        nicknameUpdate.nicknameChangedAt = now
+      } else {
+        nicknameUpdate.nickname = nickname
+        nicknameUpdate.nicknameModerationStatus = 'NORMAL'
+        nicknameUpdate.nicknameViolationDisplay = null
+        nicknameUpdate.nicknameChangedAt = now
+      }
+    }
+
     const updated = await tx.user.update({
       where: { id: guard.user.id },
       data: {
         ...data,
-        ...(nicknameChanged && canChangeNickname ? { nicknameChangedAt: now } : {}),
+        ...nicknameUpdate,
       },
       select: {
         id: true,
@@ -382,13 +457,44 @@ export async function PATCH(request: Request) {
         backgroundUrl: true,
         bio: true,
         ipRegion: true,
+        nicknameModerationStatus: true,
+        nicknameViolationDisplay: true,
+        nicknameViolationCount: true,
       },
     })
+
+    // 修正违规：关闭最近一条尚未解决的违规记录（需求 三 / 六）。
+    if (nickname && !isNicknameViolation && current?.nicknameModerationStatus === 'VIOLATION') {
+      const openLog = await tx.nicknameViolationLog.findFirst({
+        where: { userId: guard.user.id, resolvedAt: null },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      })
+      if (openLog) {
+        await tx.nicknameViolationLog.update({
+          where: { id: openLog.id },
+          data: { resolvedAt: now, resolvedNickname: nickname },
+        })
+      }
+    }
+
+    // 昵称违规：写一条违规记录（需求 六）。
+    if (nickname && isNicknameViolation) {
+      await tx.nicknameViolationLog.create({
+        data: {
+          userId: guard.user.id,
+          originalNickname: nickname,
+          reason: nicknameViolation!.reason,
+          generatedDisplayName: updated.nicknameViolationDisplay!,
+          violationCount: updated.nicknameViolationCount!,
+        },
+      })
+    }
 
     const profileRecord = await tx.profile.upsert({
       where: { userId: guard.user.id },
       update: {
-        ...(data.nickname ? { displayName: data.nickname, displayNameModerationStatus: 'NORMAL' as const } : {}),
+        ...(nickname && !isNicknameViolation ? { displayName: nickname, displayNameModerationStatus: 'NORMAL' as const } : {}),
         ...(data.avatarUrl !== undefined ? { avatarUrl: data.avatarUrl } : {}),
         ...(data.backgroundUrl !== undefined ? { backgroundUrl: data.backgroundUrl } : {}),
         ...(data.bio !== undefined ? { bio: data.bio, bioModerationStatus: 'NORMAL' as const } : {}),
@@ -452,6 +558,11 @@ export async function PATCH(request: Request) {
     profile,
     emailVerificationSent,
     nicknameUpdated: !nicknameChanged || canChangeNickname,
-    nicknameMessage: nicknameChanged && !canChangeNickname ? '昵称 30 天内只能修改一次，其他资料已保存' : undefined,
+    nicknameViolation: Boolean(nicknameViolation),
+    nicknameMessage: nicknameChanged && !canChangeNickname
+      ? `昵称每 ${currentCooldownDays} 天只能修改一次，其他资料已保存`
+      : nicknameViolation
+        ? '昵称包含违禁词，已被系统替换为临时展示昵称，整改后可重新修改'
+        : undefined,
   })
 }

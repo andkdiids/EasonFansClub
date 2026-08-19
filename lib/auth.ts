@@ -107,6 +107,8 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
             isDeleted: true,
             usernameModerationStatus: true,
             nicknameModerationStatus: true,
+
+            nicknameViolationDisplay: true,
             Profile: { select: { id: true, avatarUrl: true, displayName: true, displayNameModerationStatus: true } },
           },
         }),
