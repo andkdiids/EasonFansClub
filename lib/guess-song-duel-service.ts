@@ -1759,14 +1759,17 @@ async function settleMatchTx(
 
   let rewardAmount = 0
   if (input.valid) {
+    // 反作弊：获胜方若存在可疑答题记录（isSuspiciousAnswer），取消胜场与奖金，
+    // 避免机器人通过脚本抢答刷取注册费奖励；正常玩家不受影响。
+    const winnerSuspicious = Boolean(input.winnerId && players.some((player) => player.userId === input.winnerId && player.suspicious))
     for (const player of players) {
       await tx.guessSongDuelStats.upsert({
         where: { userId: player.userId },
-        update: { participations: { increment: 1 }, ...(input.winnerId === player.userId ? { wins: { increment: 1 } } : {}) },
-        create: { userId: player.userId, participations: 1, wins: input.winnerId === player.userId ? 1 : 0 },
+        update: { participations: { increment: 1 }, ...(input.winnerId === player.userId && !winnerSuspicious ? { wins: { increment: 1 } } : {}) },
+        create: { userId: player.userId, participations: 1, wins: input.winnerId === player.userId && !winnerSuspicious ? 1 : 0 },
       })
     }
-    if (input.winnerId) {
+    if (input.winnerId && !winnerSuspicious) {
       const { dateKey } = getShanghaiDayRange(input.now)
       const reward = await awardRegistrationFee(tx, {
         userId: input.winnerId,

@@ -17,9 +17,11 @@ type WantListenScore = {
 export async function recordWantListenLeaderboard(sessionId: string, database: Database = prisma) {
   const session = await database.wantListenSession.findUnique({
     where: { id: sessionId },
-    select: { id: true, userId: true, mode: true, status: true, score: true, correctCount: true, completionTimeMs: true, completedAt: true },
+    select: { id: true, userId: true, mode: true, status: true, score: true, correctCount: true, completionTimeMs: true, completedAt: true, antiCheatStatus: true },
   })
   if (!session || session.status !== 'COMPLETED' || !session.completedAt || session.completionTimeMs === null) return
+  // 只有 antiCheatStatus = CLEAN 的成绩才进入排行榜（反作弊过滤）
+  if (session.antiCheatStatus !== 'CLEAN') return
 
   const score: WantListenScore = {
     score: session.score,
@@ -100,7 +102,13 @@ export async function getWantListenLeaderboard(input: {
   const periodType = parseWantListenPeriod(input.period)
   const period = getWantListenPeriod(periodType)
   const limit = Math.max(1, Math.min(100, input.limit || 50))
-  const where = { mode: input.mode, periodType, periodKey: period.periodKey }
+  const where = {
+    mode: input.mode,
+    periodType,
+    periodKey: period.periodKey,
+    // 只有 antiCheatStatus = CLEAN 的场次才进入排行榜
+    WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const } },
+  }
   const rows = await prisma.wantListenLeaderboardEntry.findMany({
     where,
     orderBy: [
@@ -128,8 +136,14 @@ export async function getWantListenLeaderboard(input: {
   })
 
   const self = input.userId
-    ? await prisma.wantListenLeaderboardEntry.findUnique({
-      where: { userId_mode_periodType_periodKey: { userId: input.userId, mode: input.mode, periodType, periodKey: period.periodKey } },
+    ? await prisma.wantListenLeaderboardEntry.findFirst({
+      where: {
+        userId: input.userId,
+        mode: input.mode,
+        periodType,
+        periodKey: period.periodKey,
+        WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const } },
+      },
       include: {
         User: {
           select: {

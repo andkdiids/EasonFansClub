@@ -356,8 +356,12 @@ test('防不胜防固定五个真实歌名和一个假歌名，假歌名位置�
   assert.ok(question)
   assert.equal(question.data.options.length, 6)
   assert.equal(new Set(question.data.options.map((option) => normalizeWantListenTitle(option.label))).size, 6)
-  assert.equal(question.correctOptionKey, 'fake')
-  assert.equal(question.data.options.filter((option) => option.key === 'fake').length, 1)
+  // 反作弊：选项 key 必须是随机生成的，不能是语义化 key（fake/correct 等）
+  assert.notEqual(question.correctOptionKey, 'fake')
+  assert.notEqual(question.correctOptionKey, 'correct')
+  assert.ok(question.data.options.every((option) => !/^(correct|wrong-\d|real-\d|fake)$/.test(option.key)))
+  const correctLabel = question.data.options.find((option) => option.key === question.correctOptionKey)?.label
+  assert.equal(correctLabel, '不存在之歌')
 })
 
 test('假歌名标准化会识别全角、空格、大小写和常见标点冲突', () => {

@@ -1,4 +1,4 @@
-import { consumeRateLimit, rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
 import { answerWantListenQuestion } from '@/lib/want-listen'
 import { handleWantListenError, wantListenError, wantListenOk } from '@/lib/want-listen-api'
 
@@ -19,6 +19,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       sessionId,
       publicQuestionId: sanitizeText(body?.questionId, 200),
       optionKey: sanitizeText(body?.optionKey, 100),
+      ip: getClientIp(request),
+      userAgent: request.headers.get('user-agent'),
     }))
   } catch (error) {
     return handleWantListenError(error, 'sessions.answer')

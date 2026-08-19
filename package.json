@@ -24,6 +24,7 @@
     "checkin:audit-duplicates": "tsx scripts/audit-checkin-duplicates.ts",
     "moderation:scan": "tsx scripts/scan-content-moderation.ts",
     "nickname:repair": "tsx scripts/repair-nickname-violations.ts",
+    "anti-cheat:scan": "tsx scripts/scan-entertainment-anti-cheat.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

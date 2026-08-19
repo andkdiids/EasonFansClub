@@ -1120,6 +1120,10 @@ model WantListenSession {
   completedAt                DateTime?
   completionTimeMs           Int?
   expiresAt                  DateTime
+  antiCheatStatus            GameAntiCheatStatus          @default(CLEAN)
+  antiCheatReasons           Json?
+  ipAddress                  String?
+  userAgent                  String?
   createdAt                  DateTime                     @default(now())
   updatedAt                  DateTime                     @updatedAt
   User                       User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1131,6 +1135,7 @@ model WantListenSession {
   @@index([mode, status, completedAt])
   @@index([userId, completedAt])
   @@index([createdAt, userId])
+  @@index([antiCheatStatus, status, completedAt])
 }
 
 model WantListenSessionQuestion {
@@ -1143,6 +1148,8 @@ model WantListenSessionQuestion {
   selectedOptionKey String?
   isCorrect         Boolean?
   awardedScore      Int               @default(0)
+  questionStartedAt DateTime?
+  answerLatencyMs   Int?
   answeredAt        DateTime?
   createdAt         DateTime          @default(now())
   sessionId         String
@@ -1151,6 +1158,7 @@ model WantListenSessionQuestion {
   @@unique([sessionId, position])
   @@index([sessionId, answeredAt])
   @@index([sessionId, position])
+  @@index([sessionId, questionStartedAt])
 }
 
 model WantListenStats {
@@ -1559,6 +1567,26 @@ model GuessSongRiskLog {
   @@index([userId, createdAt])
   @@index([riskScore, createdAt])
   @@index([sessionId])
+}
+
+model GameAntiCheatLog {
+  id                String                       @id @default(cuid())
+  userId            String
+  gameType          String
+  sessionId         String?
+  questionCount     Int?
+  fastestAnswerTime Int?                         // 单题最快答题耗时（毫秒）
+  averageAnswerTime Int?                         // 平均答题耗时（毫秒）
+  ip                String?
+  userAgent         String?
+  suspiciousType    GameAntiCheatSuspiciousType
+  details           Json?
+  createdAt         DateTime                     @default(now())
+  User              User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([gameType, createdAt])
+  @@index([suspiciousType, createdAt])
 }
 
 model GuessSongDuelRoom {
@@ -3217,6 +3245,7 @@ model User {
   WantListenSession                                      WantListenSession[]
   WantListenStats                                        WantListenStats[]
   WantListenLeaderboardEntry                             WantListenLeaderboardEntry[]
+  GameAntiCheatLog                                       GameAntiCheatLog[]
   UndercoverRoom_UndercoverRoomHost                      UndercoverRoom[]               @relation("UndercoverRoomHost")
   UndercoverRoomPlayer                                   UndercoverRoomPlayer[]
   UndercoverMatchPlayer                                  UndercoverMatchPlayer[]
@@ -3565,6 +3594,20 @@ enum WantListenPeriodType {
   DAY
   WEEK
   ALL
+}
+
+enum GameAntiCheatStatus {
+  CLEAN
+  SUSPICIOUS
+  CHEAT_DETECTED
+}
+
+enum GameAntiCheatSuspiciousType {
+  FAST_ANSWER
+  REPEATED_SUBMIT
+  INVALID_SCORE
+  ANSWER_LEAK
+  ABNORMAL_PATTERN
 }
 
 enum UndercoverRoomStatus {

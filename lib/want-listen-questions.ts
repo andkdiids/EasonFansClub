@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   cleanLyrics,
   hasSufficientLyricContext,
@@ -78,6 +79,14 @@ export function validateQuestion(question: WantListenStoredQuestion | null | und
   if (!hasSufficientLyricContext(before, after)) return false
   if (!hasSufficientLyricContext(extracted.before, extracted.after)) return false
   return question.completeContext === undefined || isValidLyricContext(question.completeContext)
+}
+
+/**
+ * 选项 key 使用随机 UUID，杜绝语义化 key（correct/fake）泄露答案。
+ * 客户端拿到的 options 只有随机 key + 文案，无法从中推导正确答案。
+ */
+function randomOptionKey(): string {
+  return randomUUID()
 }
 
 export function shuffle<T>(items: readonly T[], random: () => number = Math.random) {
@@ -184,14 +193,15 @@ export function buildWantListenQuestion(
   // 最终线索：歌曲介绍（description 优先，回退 story），缺失则不展示。
   const songIntro = song.description?.trim() || song.story?.trim() || null
 
+  const correctKey = randomOptionKey()
   const options = shuffle([
-    { key: 'correct', label: song.title.trim() },
-    ...distractors.map((candidate, index) => ({ key: `wrong-${index}`, label: candidate.title.trim() })),
+    { key: correctKey, label: song.title.trim() },
+    ...distractors.map((candidate) => ({ key: randomOptionKey(), label: candidate.title.trim() })),
   ], random)
 
   return {
     sourceSongId: song.id,
-    correctOptionKey: 'correct',
+    correctOptionKey: correctKey,
     data: { kind: 'want-listen', options, songId: song.id, songTitle: song.title.trim(), hints, completeContext: songIntro ?? undefined },
   }
 }
@@ -226,9 +236,10 @@ export function buildCantoneseFragmentQuestion(
   }
   if (distractors.length < 3) return null
 
+  const correctKey = randomOptionKey()
   const options = shuffle([
-    { key: 'correct', label: correct },
-    ...distractors.map((label, index) => ({ key: `wrong-${index}`, label })),
+    { key: correctKey, label: correct },
+    ...distractors.map((label) => ({ key: randomOptionKey(), label })),
   ], random)
   const data: WantListenStoredQuestion = {
     kind: 'cantonese-fragment',
@@ -245,7 +256,7 @@ export function buildCantoneseFragmentQuestion(
 
   return {
     sourceSongId: song.id,
-    correctOptionKey: 'correct',
+    correctOptionKey: correctKey,
     data,
   }
 }
@@ -260,12 +271,13 @@ export function buildFalseTitleQuestion(
   if (titles.length < 5 || !fakeTitle.trim()) return null
   const real = shuffle(titles, random).slice(0, 5)
   if (real.length < 5) return null
+  const fakeKey = randomOptionKey()
   const options = shuffle([
-    ...real.map((label, index) => ({ key: `real-${index}`, label })),
-    { key: 'fake', label: fakeTitle.trim() },
+    ...real.map((label) => ({ key: randomOptionKey(), label })),
+    { key: fakeKey, label: fakeTitle.trim() },
   ], random)
   return {
-    correctOptionKey: 'fake',
+    correctOptionKey: fakeKey,
     data: { kind: 'false-title', options, falseTitleDifficulty: difficulty },
   }
 }

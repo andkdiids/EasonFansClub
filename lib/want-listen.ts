@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma, type WantListenFakeTitleDifficulty, type WantListenMode } from '@prisma/client'
+import {
+  assessWantListenLatencies,
+  averageAnswerTime,
+  computeServerElapsedMs,
+  fastestAnswerTime,
+  isSingleAnswerTooFast,
+  recordAntiCheatLog,
+} from '@/lib/anti-cheat'
 import { syncUserAchievements } from '@/lib/achievements'
 import { normalizeRatingLanguage } from '@/lib/rating-types'
 import { prisma } from '@/lib/prisma'
@@ -441,7 +449,11 @@ async function ensureModeAvailable(mode: WantListenMode) {
   if (!isWantListenModeEnabled(config, mode)) throw new WantListenServiceError('该游戏模式当前已暂停，请稍后再试。', 409, 'MODE_DISABLED')
 }
 
-export async function createWantListenSession(userId: string, rawMode: unknown) {
+function wantListenGameType(mode: WantListenMode) {
+  return `want-listen:${mode}`
+}
+
+export async function createWantListenSession(userId: string, rawMode: unknown, meta: { ip?: string | null; userAgent?: string | null } = {}) {
   const mode = ensureMode(rawMode)
   const now = new Date()
   await prisma.wantListenSession.updateMany({ where: { userId, mode, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
@@ -469,12 +481,16 @@ export async function createWantListenSession(userId: string, rawMode: unknown) 
           currentQuestion: 1,
           questionCount: WANT_LISTEN_TOTAL_QUESTIONS,
           expiresAt: new Date(now.getTime() + WANT_LISTEN_SESSION_TTL_MS),
+          ipAddress: meta.ip?.slice(0, 64) || null,
+          userAgent: meta.userAgent?.slice(0, 500) || null,
           WantListenSessionQuestion: {
             create: prepared.map((question, index) => ({
               publicId: randomUUID(),
               position: index + 1,
               questionData: question.data as unknown as Prisma.InputJsonValue,
               correctOptionKey: question.correctOptionKey,
+              // 服务端记录第 1 题的开始时间，后续题目在 next 时记录
+              ...(index === 0 ? { questionStartedAt: now } : {}),
             })),
           },
         },
@@ -579,7 +595,7 @@ async function updateWantListenStats(database: Prisma.TransactionClient, session
   })
 }
 
-export async function answerWantListenQuestion(input: { userId: string; sessionId: string; publicQuestionId: string; optionKey: string }) {
+export async function answerWantListenQuestion(input: { userId: string; sessionId: string; publicQuestionId: string; optionKey: string; ip?: string | null; userAgent?: string | null }) {
   const optionKey = input.optionKey.trim().slice(0, 100)
   if (!optionKey) throw new WantListenServiceError('请选择一个答案。', 400, 'ANSWER_INVALID')
   await expireSessionIfNeeded(input.userId, input.sessionId)
@@ -592,14 +608,30 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
     const current = session.WantListenSessionQuestion.find((question) => question.position === session.currentQuestion)
     if (!current) throw new WantListenServiceError('当前题目不存在，请重新开始。', 409, 'QUESTION_MISSING')
     if (current.publicId !== input.publicQuestionId) throw new WantListenServiceError('当前题目已变化，请刷新后继续。', 409, 'QUESTION_MISMATCH')
-    if (current.answeredAt) return { duplicate: true, sessionId: session.id, questionId: current.id, finalized: session.status === 'COMPLETED' }
+    if (current.answeredAt) {
+      // 重复提交：同一题只能提交一次（需求 6），记录异常
+      await recordAntiCheatLog(database, {
+        userId: session.userId,
+        gameType: wantListenGameType(session.mode),
+        sessionId: session.id,
+        questionCount: session.questionCount,
+        ip: input.ip,
+        userAgent: input.userAgent,
+        suspiciousType: 'REPEATED_SUBMIT',
+        details: { reason: `重复提交第 ${current.position} 题`, questionId: current.id } as Prisma.InputJsonValue,
+      })
+      return { duplicate: true, sessionId: session.id, questionId: current.id, finalized: session.status === 'COMPLETED' }
+    }
     const data = storedQuestion(current)
     if (!data.options?.some((option) => option.key === optionKey)) throw new WantListenServiceError('请选择当前题目中的一个选项。', 400, 'ANSWER_INVALID')
     const isCorrect = optionKey === current.correctOptionKey
     const awardedScore = isCorrect ? scoreForWantListenAnswer(session.mode, current.hintLevel) : 0
+    // 服务端计时：耗时 = answeredAt - questionStartedAt，不信任客户端时间
+    const answeredAt = new Date()
+    const latencyMs = computeServerElapsedMs(current.questionStartedAt, answeredAt)
     const updatedQuestionCount = await database.wantListenSessionQuestion.updateMany({
       where: { id: current.id, answeredAt: null },
-      data: { selectedOptionKey: optionKey, isCorrect, awardedScore, answeredAt: new Date() },
+      data: { selectedOptionKey: optionKey, isCorrect, awardedScore, answeredAt, answerLatencyMs: latencyMs },
     })
     if (updatedQuestionCount.count !== 1) return { duplicate: true, sessionId: session.id, questionId: current.id, finalized: session.status === 'COMPLETED' }
     const finalScore = session.score + awardedScore
@@ -617,7 +649,46 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
       },
       include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } },
     })
-    if (isFinal) {
+
+    // 反作弊评估：基于服务端记录的每题耗时
+    const answeredLatencies = updated.WantListenSessionQuestion
+      .filter((question) => question.answeredAt && question.answerLatencyMs !== null && question.answerLatencyMs !== undefined)
+      .map((question) => question.answerLatencyMs as number)
+    const fastest = fastestAnswerTime(answeredLatencies)
+    const average = averageAnswerTime(answeredLatencies)
+    const assessment = assessWantListenLatencies(answeredLatencies)
+    const fastCount = answeredLatencies.filter((ms) => isSingleAnswerTooFast(ms)).length
+    const antiCheatContext = {
+      userId: session.userId,
+      gameType: wantListenGameType(session.mode),
+      sessionId: session.id,
+      questionCount: updated.questionCount,
+      fastestAnswerTime: fastest,
+      averageAnswerTime: average,
+      ip: input.ip,
+      userAgent: input.userAgent,
+    }
+    if (assessment.suspicious && session.antiCheatStatus !== 'SUSPICIOUS') {
+      // 高风险：平均 <2s 或连续 5 题 <1s → 标记 SUSPICIOUS，不进排行榜
+      await database.wantListenSession.update({
+        where: { id: session.id },
+        data: { antiCheatStatus: 'SUSPICIOUS', antiCheatReasons: assessment.reasons as unknown as Prisma.InputJsonValue },
+      })
+      await recordAntiCheatLog(database, {
+        ...antiCheatContext,
+        suspiciousType: 'FAST_ANSWER',
+        details: { reasons: assessment.reasons, mode: session.mode, score: finalScore, correctCount: finalCorrectCount, latencies: answeredLatencies } as Prisma.InputJsonValue,
+      })
+    } else if (isSingleAnswerTooFast(latencyMs) && fastCount === 1 && session.antiCheatStatus !== 'SUSPICIOUS') {
+      // 单题 <1s：记录异常但暂不升级会话状态（避免正常波动误伤）
+      await recordAntiCheatLog(database, {
+        ...antiCheatContext,
+        suspiciousType: 'FAST_ANSWER',
+        details: { reason: `单题答题时间 ${latencyMs}ms 低于 1 秒`, mode: session.mode, latencyMs } as Prisma.InputJsonValue,
+      })
+    }
+
+    if (isFinal && !assessment.suspicious) {
       await updateWantListenStats(database, session, current.id, isCorrect, current.hintLevel, finalScore, finalCorrectCount)
       await recordWantListenLeaderboard(session.id, database)
     }
@@ -647,6 +718,11 @@ export async function nextWantListenQuestion(userId: string, sessionId: string) 
   if (session.currentQuestion >= session.questionCount) return toPublicState(session)
   const updated = await prisma.wantListenSession.updateMany({ where: { id: session.id, userId, status: 'IN_PROGRESS', currentQuestion: session.currentQuestion }, data: { currentQuestion: { increment: 1 } } })
   if (updated.count !== 1) return getWantListenSessionState(userId, sessionId)
+  // 服务端记录下一题的开始时间（用于反作弊耗时校验）
+  await prisma.wantListenSessionQuestion.updateMany({
+    where: { sessionId: session.id, position: session.currentQuestion + 1, answeredAt: null },
+    data: { questionStartedAt: new Date() },
+  })
   return getWantListenSessionState(userId, sessionId)
 }
 

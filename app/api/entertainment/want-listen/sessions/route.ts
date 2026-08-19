@@ -1,4 +1,4 @@
-import { consumeRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { createWantListenSession, getWantListenSummary } from '@/lib/want-listen'
 import { handleWantListenError, wantListenError, wantListenOk } from '@/lib/want-listen-api'
 
@@ -24,7 +24,10 @@ export async function POST(request: Request) {
   if (limit.limited) return wantListenError('创建游戏过于频繁，请稍后再试。', 429, 'RATE_LIMITED')
   const body = await request.json().catch(() => null) as { mode?: unknown } | null
   try {
-    return wantListenOk(await createWantListenSession(guard.user.id, body?.mode), 201)
+    return wantListenOk(await createWantListenSession(guard.user.id, body?.mode, {
+      ip: getClientIp(request),
+      userAgent: request.headers.get('user-agent'),
+    }), 201)
   } catch (error) {
     return handleWantListenError(error, 'sessions.create')
   }
