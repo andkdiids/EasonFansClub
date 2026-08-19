@@ -23,9 +23,18 @@ async function main() {
   const [{ prisma }] = await Promise.all([import('../lib/prisma')])
   const { assessWantListenLatencies, maxConsecutiveFastAnswers, averageAnswerTime, ANTI_CHEAT_AVERAGE_FAST_MS, ANTI_CHEAT_CONSECUTIVE_FAST_COUNT, ANTI_CHEAT_MIN_SAMPLES } = await import('../lib/anti-cheat')
 
-  const report: Array<{ userId: string; game: string; score: number; completionTimeMs: number | null; risk: string; reason: string }> = []
+  const report: Array<{
+    uid: number
+    userId: string
+    game: string
+    mode: string
+    score: number
+    completionTimeMs: number | null
+    averageAnswerTimeMs: number | null
+    risk: string
+    reason: string
+  }> = []
   let flagged = 0
-  let skipped = 0
 
   // ---------- 1) 想听 / 粤语残片 / 防不胜防 ----------
   for (let skip = 0; ; skip += BATCH_SIZE) {
@@ -45,6 +54,7 @@ async function main() {
         completedAt: true,
         ipAddress: true,
         userAgent: true,
+        User: { select: { uid: true } },
         WantListenSessionQuestion: { select: { answerLatencyMs: true }, orderBy: { position: 'asc' } },
       },
     })
@@ -58,7 +68,7 @@ async function main() {
 
       // 完成总时长平均 < 2 秒/题
       if (session.completionTimeMs !== null && session.questionCount > 0 && session.completionTimeMs < session.questionCount * ANTI_CHEAT_AVERAGE_FAST_MS) {
-        reasons.push(`总完成时间 ${session.completionTimeMs}ms / ${session.questionCount} 题，平均低于 ${ANTI_CHEAT_AVERAGE_FAST_MS / 1000} 秒/题`)
+        reasons.push(`总完成时间 ${session.completionTimeMs}ms / ${session.questionCount} 题，平均 ${(session.completionTimeMs / session.questionCount).toFixed(0)}ms/题，低于 ${ANTI_CHEAT_AVERAGE_FAST_MS / 1000} 秒/题`)
       }
       // 单题耗时序列评估（至少 ANTI_CHEAT_MIN_SAMPLES 道有记录）
       if (latencies.length >= ANTI_CHEAT_MIN_SAMPLES) {
@@ -79,6 +89,8 @@ async function main() {
       if (!reasons.length) continue
 
       const risk = reasons.length >= 2 ? 'HIGH' : 'MEDIUM'
+      const avgMs = latencies.length ? averageAnswerTime(latencies)
+        : session.completionTimeMs !== null && session.questionCount > 0 ? Math.round(session.completionTimeMs / session.questionCount) : null
       await prisma.$transaction(async (tx) => {
         await tx.wantListenSession.update({
           where: { id: session.id },
@@ -91,7 +103,7 @@ async function main() {
             sessionId: session.id,
             questionCount: session.questionCount,
             fastestAnswerTime: latencies.length ? Math.min(...latencies) : null,
-            averageAnswerTime: averageAnswerTime(latencies),
+            averageAnswerTime: avgMs,
             ip: session.ipAddress,
             userAgent: session.userAgent,
             suspiciousType: 'FAST_ANSWER',
@@ -104,36 +116,71 @@ async function main() {
       })
       flagged += 1
       report.push({
+        uid: session.User?.uid ?? 0,
         userId: session.userId,
-        game: `想听:${session.mode}`,
+        game: '想听',
+        mode: session.mode,
         score: session.score,
         completionTimeMs: session.completionTimeMs,
+        averageAnswerTimeMs: avgMs,
         risk,
         reason: reasons.join('；'),
       })
     }
-    void skipped
   }
 
   // ---------- 2) 听听（guess-song）已有风险场次 ----------
-  const cheatSessions = await prisma.guessSongSession.count({ where: { status: 'CHEAT_DETECTED' } })
-  const invalidSessions = await prisma.guessSongSession.count({ where: { isValid: false } })
+  const riskSessions = await prisma.guessSongSession.findMany({
+    where: { OR: [{ status: 'CHEAT_DETECTED' }, { isValid: false }] },
+    orderBy: { riskScore: 'desc' },
+    take: 200,
+    select: { id: true, userId: true, mode: true, score: true, correctCount: true, riskScore: true, createdAt: true, User: { select: { uid: true } } },
+  })
   // ---------- 3) 听听·对决可疑场次 ----------
-  const suspiciousDuels = await prisma.guessSongDuelMatch.count({ where: { isSuspicious: true } })
+  const suspiciousDuels = await prisma.guessSongDuelMatch.findMany({
+    where: { isSuspicious: true },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    select: { id: true, winnerId: true, mode: true, rewardAmount: true, createdAt: true, Winner: { select: { uid: true } } },
+  })
 
   console.info('')
   console.info('=== 娱乐天空反作弊扫描结果 ===')
-  console.info(`[want-listen] 新标记 SUSPICIOUS: ${flagged}`)
-  console.info(`[guess-song] 已有 CHEAT_DETECTED 场次: ${cheatSessions}（原有 riskScore 机制）`)
-  console.info(`[guess-song] 已有 isValid=false 场次: ${invalidSessions}（原有 riskScore 机制）`)
-  console.info(`[duel]      已有 isSuspicious 场次: ${suspiciousDuels}（原标记，已阻止奖金/胜场）`)
+  console.info(`[want-listen] 本次新标记 SUSPICIOUS: ${flagged}`)
+  console.info(`[guess-song] 已有风险场次: ${riskSessions.length}`)
+  console.info(`[duel]      已有 isSuspicious 场次: ${suspiciousDuels.length}`)
+  console.info('')
+
   if (report.length) {
-    console.info('')
-    console.info('--- 检测报告 ---')
+    console.info('--- 想听 / 粤语残片 / 防不胜防 异常名单 ---')
+    console.info('UID\t游戏\t模式\t成绩\t完成时间(ms)\t平均答速(ms/题)\t风险\t原因')
     for (const row of report) {
-      console.info(`${row.risk}\t${row.userId}\t${row.game}\tscore=${row.score}\t完成=${row.completionTimeMs}ms\t${row.reason}`)
+      console.info(`${row.uid}\t${row.game}\t${row.mode}\t${row.score}\t${row.completionTimeMs ?? '-'}\t${row.averageAnswerTimeMs ?? '-'}\t${row.risk}\t${row.reason}`)
     }
+    console.info('')
+  } else {
+    console.info('--- 想听 / 粤语残片 / 防不胜防：本次未发现新异常场次 ---')
+    console.info('')
   }
+
+  if (riskSessions.length) {
+    console.info('--- 听听（guess-song）已有风险场次名单 ---')
+    console.info('UID\t模式\t成绩\t答对\triskScore\t创建时间')
+    for (const row of riskSessions) {
+      console.info(`${row.User?.uid ?? 0}\t${row.mode}\t${row.score}\t${row.correctCount}\t${row.riskScore}\t${row.createdAt.toISOString()}`)
+    }
+    console.info('')
+  }
+
+  if (suspiciousDuels.length) {
+    console.info('--- 听听·对决（duel）可疑场次名单 ---')
+    console.info('UID\t模式\t奖金\t创建时间')
+    for (const row of suspiciousDuels) {
+      console.info(`${row.Winner?.uid ?? 0}\t${row.mode}\t${row.rewardAmount}\t${row.createdAt.toISOString()}`)
+    }
+    console.info('')
+  }
+
   await prisma.$disconnect()
 }
 

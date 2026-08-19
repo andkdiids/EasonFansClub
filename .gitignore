@@ -13,6 +13,7 @@ node_modules/
 dist/
 coverage/
 *.log
+backups/
 tsconfig.tsbuildinfo
 public/uploads/
 tmp/easmusic-live-visual/
