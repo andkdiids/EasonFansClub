@@ -10,6 +10,8 @@ type Database = Prisma.TransactionClient | typeof prisma
 type WantListenScore = {
   score: number
   correctCount: number
+  maxStreak: number
+  totalQuestions: number
   completionTimeMs: number
   achievedAt: Date
 }
@@ -17,7 +19,7 @@ type WantListenScore = {
 export async function recordWantListenLeaderboard(sessionId: string, database: Database = prisma) {
   const session = await database.wantListenSession.findUnique({
     where: { id: sessionId },
-    select: { id: true, userId: true, mode: true, status: true, score: true, correctCount: true, completionTimeMs: true, completedAt: true, antiCheatStatus: true },
+    select: { id: true, userId: true, mode: true, status: true, score: true, correctCount: true, maxStreak: true, totalQuestions: true, completionTimeMs: true, completedAt: true, antiCheatStatus: true },
   })
   if (!session || session.status !== 'COMPLETED' || !session.completedAt || session.completionTimeMs === null) return
   // 只有 antiCheatStatus = CLEAN 的成绩才进入排行榜（反作弊过滤）
@@ -26,6 +28,8 @@ export async function recordWantListenLeaderboard(sessionId: string, database: D
   const score: WantListenScore = {
     score: session.score,
     correctCount: session.correctCount,
+    maxStreak: session.maxStreak,
+    totalQuestions: session.totalQuestions,
     completionTimeMs: session.completionTimeMs,
     achievedAt: session.completedAt,
   }
@@ -68,6 +72,8 @@ function serializeLeaderboardRow(row: {
   mode: WantListenMode
   score: number
   correctCount: number
+  maxStreak: number
+  totalQuestions: number
   completionTimeMs: number
   achievedAt: Date
   User: LeaderboardUser
@@ -80,6 +86,8 @@ function serializeLeaderboardRow(row: {
     mode: row.mode,
     score: row.score,
     correctCount: row.correctCount,
+    maxStreak: row.maxStreak,
+    totalQuestions: row.totalQuestions,
     completionTimeMs: row.completionTimeMs,
     achievedAt: row.achievedAt.toISOString(),
     user: {
@@ -114,6 +122,7 @@ export async function getWantListenLeaderboard(input: {
     orderBy: [
       { score: 'desc' },
       { correctCount: 'desc' },
+      { maxStreak: 'desc' },
       { completionTimeMs: 'asc' },
       { achievedAt: 'asc' },
       { id: 'asc' },

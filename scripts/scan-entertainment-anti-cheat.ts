@@ -50,6 +50,7 @@ async function main() {
         score: true,
         correctCount: true,
         questionCount: true,
+        totalQuestions: true,
         completionTimeMs: true,
         completedAt: true,
         ipAddress: true,
@@ -65,10 +66,12 @@ async function main() {
         .map((question) => question.answerLatencyMs)
         .filter((ms): ms is number => ms !== null && ms !== undefined)
       const reasons: string[] = []
+      // 已答总题数：无尽模式用 totalQuestions，历史固定题数用 questionCount
+      const answeredTotal = session.totalQuestions || session.questionCount || 0
 
       // 完成总时长平均 < 2 秒/题
-      if (session.completionTimeMs !== null && session.questionCount > 0 && session.completionTimeMs < session.questionCount * ANTI_CHEAT_AVERAGE_FAST_MS) {
-        reasons.push(`总完成时间 ${session.completionTimeMs}ms / ${session.questionCount} 题，平均 ${(session.completionTimeMs / session.questionCount).toFixed(0)}ms/题，低于 ${ANTI_CHEAT_AVERAGE_FAST_MS / 1000} 秒/题`)
+      if (session.completionTimeMs !== null && answeredTotal > 0 && session.completionTimeMs < answeredTotal * ANTI_CHEAT_AVERAGE_FAST_MS) {
+        reasons.push(`总完成时间 ${session.completionTimeMs}ms / ${answeredTotal} 题，平均 ${(session.completionTimeMs / answeredTotal).toFixed(0)}ms/题，低于 ${ANTI_CHEAT_AVERAGE_FAST_MS / 1000} 秒/题`)
       }
       // 单题耗时序列评估（至少 ANTI_CHEAT_MIN_SAMPLES 道有记录）
       if (latencies.length >= ANTI_CHEAT_MIN_SAMPLES) {
@@ -90,7 +93,7 @@ async function main() {
 
       const risk = reasons.length >= 2 ? 'HIGH' : 'MEDIUM'
       const avgMs = latencies.length ? averageAnswerTime(latencies)
-        : session.completionTimeMs !== null && session.questionCount > 0 ? Math.round(session.completionTimeMs / session.questionCount) : null
+        : session.completionTimeMs !== null && answeredTotal > 0 ? Math.round(session.completionTimeMs / answeredTotal) : null
       await prisma.$transaction(async (tx) => {
         await tx.wantListenSession.update({
           where: { id: session.id },
@@ -101,7 +104,7 @@ async function main() {
             userId: session.userId,
             gameType: `want-listen:${session.mode}`,
             sessionId: session.id,
-            questionCount: session.questionCount,
+            questionCount: answeredTotal || null,
             fastestAnswerTime: latencies.length ? Math.min(...latencies) : null,
             averageAnswerTime: avgMs,
             ip: session.ipAddress,

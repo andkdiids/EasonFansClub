@@ -31,7 +31,13 @@ type SessionState = {
   modeLabel: string
   status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'EXPIRED'
   currentQuestion: number
-  totalQuestions: number
+  totalQuestions: number | null
+  totalAnswered: number
+  currentStreak: number
+  maxStreak: number
+  wrongCount: number
+  livesRemaining: number
+  maxWrongCount: number
   score: number
   correctCount: number
   startedAt: string
@@ -69,6 +75,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [answering, setAnswering] = useState(false)
   const [hinting, setHinting] = useState(false)
   const [nexting, setNexting] = useState(false)
+  const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState('')
   const [exitOpen, setExitOpen] = useState(false)
   // 答案揭晓守卫：进入新题（question.id 变化）时强制重置为 false，
@@ -145,6 +152,21 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     }
   }
 
+  // 无尽模式：主动结束并保存本次成绩
+  async function finishGame() {
+    if (!session || finishing || session.status !== 'IN_PROGRESS') return
+    if (!window.confirm('结束本次无尽挑战并保存成绩？\n\n当前进度会以本次成绩进入排行榜与个人统计。')) return
+    setFinishing(true)
+    setError('')
+    try {
+      setSession(await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/finish`, { method: 'POST' }))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '结束挑战失败，请稍后重试。')
+    } finally {
+      setFinishing(false)
+    }
+  }
+
   // 进入新题时重置揭晓状态：题目 id 变化即清空上一题的作答/反馈/高亮。
   // 恢复已答题目时（resume）会随之把 revealed 设为 true，正常展示既有结果。
   useEffect(() => {
@@ -173,7 +195,10 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     <main className="want-listen-game">
       <header className="want-listen-game-header">
         <Link href="/games/want-listen">← 返回想听</Link>
-        <div><span>{session.modeLabel}</span><strong>{String(session.currentQuestion).padStart(2, '0')} / {session.totalQuestions}</strong></div>
+        <div><span>{session.modeLabel}</span><strong>{session.totalQuestions === null ? `无尽 · 第 ${String(session.currentQuestion).padStart(2, '0')} 题` : `${String(session.currentQuestion).padStart(2, '0')} / ${session.totalQuestions}`}</strong></div>
+        <div><span>答对</span><strong>{session.correctCount}</strong></div>
+        <div><span>连击</span><strong>{session.currentStreak}</strong></div>
+        {session.totalQuestions === null && session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void finishGame()} disabled={finishing}>{finishing ? '结算中…' : '结束挑战'}</button> : null}
         <div><span>分数</span><strong>{session.score}</strong></div>
         <button type="button" onClick={() => setExitOpen(true)}>退出</button>
       </header>
@@ -185,7 +210,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
         <section className="want-listen-settlement">
           <h1>{WANT_LISTEN_MODE_LABELS[session.mode]}完成</h1>
           <strong>{session.score}<small> 分</small></strong>
-          <div><span>答对<strong>{session.correctCount} / {session.totalQuestions}</strong></span><span>完成用时<strong>{Math.max(1, Math.round((session.completionTimeMs || 0) / 1000))} 秒</strong></span></div>
+          <div><span>答对<strong>{session.correctCount}</strong></span><span>最高连击<strong>{session.maxStreak}</strong></span><span>完成用时<strong>{Math.max(1, Math.round((session.completionTimeMs || 0) / 1000))} 秒</strong></span></div>
           {result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>正确答案：{result.correctAnswer}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}</div> : null}
           <nav><Link href="/games/want-listen">返回想听</Link><Link href="/games/want-listen/leaderboard">查看排行榜</Link></nav>
         </section>
@@ -207,7 +232,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
         </section>
       ) : <section className="want-listen-ended"><h1>当前题目不可用，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>}
 
-      {exitOpen ? <div className="want-listen-modal-backdrop" role="presentation" onClick={() => setExitOpen(false)}><section className="want-listen-modal" role="dialog" aria-modal="true" aria-labelledby="want-listen-exit-title" onClick={(event) => event.stopPropagation()}><h2 id="want-listen-exit-title">退出本局？</h2><p>未完成的对局会标记为已退出，不会计入完整排行榜成绩。</p><div><button type="button" onClick={() => setExitOpen(false)}>继续游戏</button><button type="button" className="is-danger" onClick={() => void abandon()}>退出</button></div></section></div> : null}
+      {exitOpen ? <div className="want-listen-modal-backdrop" role="presentation" onClick={() => setExitOpen(false)}><section className="want-listen-modal" role="dialog" aria-modal="true" aria-labelledby="want-listen-exit-title" onClick={(event) => event.stopPropagation()}><h2 id="want-listen-exit-title">退出本局？</h2><p>退出将放弃本局成绩（不计入排行榜）。想要结算成绩请使用「结束挑战」。</p><div><button type="button" onClick={() => setExitOpen(false)}>继续游戏</button><button type="button" className="is-danger" onClick={() => void abandon()}>退出</button></div></section></div> : null}
     </main>
   )
 }

@@ -10,7 +10,7 @@ import {
   type WantListenSongCandidate,
 } from '../lib/want-listen-questions'
 import { cleanLyrics, hasSufficientLyricContext, isValidLyricContext, lyricContextParts, selectLyricFragment, selectSafeLyricSnippet, type LyricFragment } from '../lib/want-listen-lyrics'
-import { difficultyForQuestion, scoreForWantListenAnswer, WANT_LISTEN_TOTAL_QUESTIONS } from '../lib/want-listen-config'
+import { difficultyForQuestion, scoreForWantListenAnswer } from '../lib/want-listen-config'
 import { compareWantListenScores } from '../lib/want-listen-period'
 import { normalizeWantListenTitle } from '../lib/want-listen-title'
 
@@ -76,10 +76,11 @@ test('想听的歌曲题有四个唯一真实歌名选项，并提供四层逐�
   assert.equal(hints[3].value, 'Eric Kwok')
   // 每一步线索提供全新信息，彼此不重复（专辑/作词/作曲与年份语言无重叠）
   assert.notEqual(hintTextFromHint(hints[2]), hintTextFromHint(hints[3]))
-  assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 1), 400)
-  assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 2), 300)
-  assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 3), 200)
-  assert.deepEqual(scoreForWantListenAnswer('WANT_LISTEN', 4), 100)
+  assert.deepEqual(scoreForWantListenAnswer(true, 1), 100)
+  assert.deepEqual(scoreForWantListenAnswer(true, 9), 100)
+  assert.deepEqual(scoreForWantListenAnswer(true, 10), 370)   // 基础 100 + 连击奖励 270
+  assert.deepEqual(scoreForWantListenAnswer(true, 20), 370)
+  assert.deepEqual(scoreForWantListenAnswer(false, 1), 0)      // 答错 0 分
 })
 
 test('想听线索在歌曲资料缺失时自动跳过，不产生空内容', () => {
@@ -368,20 +369,24 @@ test('假歌名标准化会识别全角、空格、大小写和常见标点冲�
   assert.equal(normalizeWantListenTitle('  ＡＢＣ・之歌  '), normalizeWantListenTitle('abc 之歌'))
 })
 
-test('防不胜防按题号安排难度，题库不足时服务端可按相邻难度回退', () => {
+test('防不胜防按题号安排难度，无尽模式难度循环（15 题一轮）', () => {
   assert.equal(difficultyForQuestion(1), 'EASY')
   assert.equal(difficultyForQuestion(5), 'EASY')
   assert.equal(difficultyForQuestion(6), 'NORMAL')
-  assert.equal(difficultyForQuestion(15), 'NORMAL')
-  assert.equal(difficultyForQuestion(16), 'HARD')
-  assert.equal(difficultyForQuestion(20), 'HARD')
+  assert.equal(difficultyForQuestion(10), 'NORMAL')
+  assert.equal(difficultyForQuestion(11), 'HARD')
+  assert.equal(difficultyForQuestion(15), 'HARD')
+  // 无尽：第 16 题回到 EASY 循环，不再固定 HARD
+  assert.equal(difficultyForQuestion(16), 'EASY')
+  assert.equal(difficultyForQuestion(50), 'EASY')
   assert.match(source('lib/want-listen.ts'), /fakeDifficultyOrder/)
 })
 
-test('排行榜比较遵循分数、答对数、完成时间顺序', () => {
-  const base = { score: 100, correctCount: 10, completionTimeMs: 1000, achievedAt: new Date('2026-01-01') }
+test('排行榜比较遵循分数、答对数、最高连击、完成时间顺序', () => {
+  const base = { score: 100, correctCount: 10, maxStreak: 5, completionTimeMs: 1000, achievedAt: new Date('2026-01-01') }
   assert.ok(compareWantListenScores({ ...base, score: 200 }, base) < 0)
   assert.ok(compareWantListenScores({ ...base, correctCount: 11 }, base) < 0)
+  assert.ok(compareWantListenScores({ ...base, maxStreak: 9 }, base) < 0)
   assert.ok(compareWantListenScores({ ...base, completionTimeMs: 900 }, base) < 0)
 })
 
@@ -391,7 +396,7 @@ test('想听协议由服务端保存提示等级、答案和最终结算，客�
   const sessionRoute = source('app/api/entertainment/want-listen/sessions/route.ts')
   assert.match(source('prisma/schema.prisma'), /hintLevel\s+Int\s+@default\(1\)/)
   assert.match(service, /current\.hintLevel/)
-  assert.match(service, /scoreForWantListenAnswer\(session\.mode, current\.hintLevel\)/)
+  assert.match(service, /scoreForWantListenAnswer\(isCorrect, nextStreak\)/)
   assert.match(service, /where: \{ id: current\.id, answeredAt: null \}/)
   assert.doesNotMatch(sessionRoute, /correctOptionKey|correctSongId|correctLyric/)
   assert.doesNotMatch(game, /new Audio\(|AudioContext|<audio\b|\.play\(/u)
@@ -417,15 +422,46 @@ test('四个想听成就接入现有 SPECIAL 成就同步，不创建第二套�
   assert.match(service, /syncUserAchievements\(input\.userId, \['SPECIAL'\]\)/)
 })
 
-test('粤语残片 Session 会二次过滤历史脏题并补齐完整 20 道题', () => {
+test('无尽模式：连续答题不结束、答错按生命规则、主动结束保存成绩', () => {
   const service = source('lib/want-listen.ts')
-  assert.equal(WANT_LISTEN_TOTAL_QUESTIONS, 20)
-  assert.match(service, /validateQuestion\(question\.data\)/)
+  const schema = source('prisma/schema.prisma')
+  const config = source('lib/want-listen-config.ts')
+  // 1) 不再有固定 20 题常量；questionCount 可空（null=无尽）
+  assert.doesNotMatch(config, /WANT_LISTEN_TOTAL_QUESTIONS/)
+  assert.match(schema, /questionCount\s+Int\?/)
+  // 创建会话写入 questionCount: null（无尽）
+  assert.match(service, /questionCount: null,/)
+  // 结束不再依赖 20 题：无尽按「答错耗尽生命」结束
+  assert.match(service, /nextWrongCount >= WANT_LISTEN_MAX_WRONG_COUNT/)
+  assert.match(service, /WANT_LISTEN_MAX_WRONG_COUNT/)
+  // 3) 主动结束：finishWantListenSession 保存成绩 + 更新统计/排行榜
+  assert.match(service, /export async function finishWantListenSession/)
+  assert.match(service, /updateWantListenStats\(database, updated, ''/)
+  assert.match(service, /recordWantListenLeaderboard\(active\.id, database\)/)
+  // 题目按需生成（无尽不预生成 20 题）
+  assert.match(service, /generateNextQuestion\(prisma, session, nextPosition\)/)
+  assert.match(service, /buildQuestionAtPosition/)
+  // 粤语残片仍保留脏题二次过滤
   assert.match(service, /repairCantoneseSessionQuestions/)
   assert.match(service, /positionsToReplace/)
-  assert.match(service, /questionCount/)
-  assert.match(service, /WANT_LISTEN_TOTAL_QUESTIONS/)
   assert.match(service, /loadSessionRaw\(userId, sessionId\)/)
+})
+
+test('无尽模式：三个模式统一生效，连击/生命/总答题数字段存在', () => {
+  const schema = source('prisma/schema.prisma')
+  const migration = source('prisma/migrations/20260819180000_want_listen_endless_mode/migration.sql')
+  const config = source('lib/want-listen-config.ts')
+  for (const field of ['totalQuestions', 'currentStreak', 'maxStreak', 'wrongCount', 'livesRemaining']) {
+    assert.match(schema, new RegExp(`${field}\\s+Int`))
+    assert.match(migration, new RegExp('ADD COLUMN `' + field + '`'))
+  }
+  assert.match(migration, /MODIFY COLUMN `questionCount` INT NULL/)
+  // 排行榜字段与排序（无尽最佳成绩）
+  assert.match(schema, /maxStreak\s+Int\s+@default\(0\)/)
+  assert.match(schema, /WantListenLeaderboard_endless_sort_idx/)
+  assert.match(migration, /UPDATE `WantListenLeaderboardEntry` SET `totalQuestions` = 20/)
+  // 三个模式常量统一
+  assert.match(config, /WANT_LISTEN_MODES = \['WANT_LISTEN', 'CANTONESE_FRAGMENT', 'FALSE_TITLE'\]/)
 })
 
 test('防不胜防进入新题会重置揭晓状态，未答题不泄露答案', () => {

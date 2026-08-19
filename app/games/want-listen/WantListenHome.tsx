@@ -18,6 +18,7 @@ type ModeStats = {
   totalCorrect: number
   accuracy: number
   perfectGames: number
+  maxStreak: number
   silentMaxStreak: number
 }
 
@@ -102,7 +103,7 @@ export function WantListenHome() {
               <h2>{WANT_LISTEN_MODE_LABELS[mode]}</h2>
               <p>{WANT_LISTEN_MODE_DESCRIPTIONS[mode]}</p>
               <div className="want-listen-mode-meta">
-                <span>每局 20 题</span>
+                <span>无尽模式 · 答错 3 次结束</span>
                 <span>最佳 {stats?.bestScore ?? '—'} 分</span>
               </div>
               <button type="button" onClick={() => void start(mode)} disabled={(!enabled && !active) || Boolean(starting)}>
@@ -128,7 +129,7 @@ export function WantListenHome() {
         <div className="want-listen-mode-stats">
           {WANT_LISTEN_MODES.map((mode) => {
             const stats = summary?.modes[mode]
-            return <div key={mode}><strong>{WANT_LISTEN_MODE_LABELS[mode]}</strong><span>{stats?.gamesPlayed || 0} 局 · {stats?.totalCorrect || 0}/{stats?.totalQuestions || 0} 题 · 正确率 {stats?.accuracy || 0}%</span></div>
+            return <div key={mode}><strong>{WANT_LISTEN_MODE_LABELS[mode]}</strong><span>{stats?.gamesPlayed || 0} 局 · 最高 {stats?.bestScore || 0} 分 · 最高连击 {stats?.maxStreak || 0} · 答对 {stats?.totalCorrect || 0}</span></div>
           })}
         </div>
       </section>

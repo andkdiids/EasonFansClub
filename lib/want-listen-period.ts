@@ -24,11 +24,12 @@ export function parseWantListenPeriod(value: unknown): WantListenPeriodType {
 }
 
 export function compareWantListenScores(
-  left: { score: number; correctCount: number; completionTimeMs: number; achievedAt: Date },
-  right: { score: number; correctCount: number; completionTimeMs: number; achievedAt: Date },
+  left: { score: number; correctCount: number; maxStreak: number; completionTimeMs: number; achievedAt: Date },
+  right: { score: number; correctCount: number; maxStreak: number; completionTimeMs: number; achievedAt: Date },
 ) {
   return right.score - left.score
     || right.correctCount - left.correctCount
+    || right.maxStreak - left.maxStreak
     || left.completionTimeMs - right.completionTimeMs
     || left.achievedAt.getTime() - right.achievedAt.getTime()
 }

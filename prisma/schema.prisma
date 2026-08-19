@@ -1113,7 +1113,12 @@ model WantListenSession {
   mode                       WantListenMode
   status                     WantListenSessionStatus      @default(IN_PROGRESS)
   currentQuestion            Int                          @default(1)
-  questionCount              Int                          @default(20)
+  questionCount              Int?                         // null = 无尽模式；历史固定 20 题为兼容保留
+  totalQuestions             Int                          @default(0) // 已答总题数（无尽模式累计）
+  currentStreak              Int                          @default(0)
+  maxStreak                  Int                          @default(0)
+  wrongCount                 Int                          @default(0)
+  livesRemaining             Int                          @default(3)
   score                      Int                          @default(0)
   correctCount               Int                          @default(0)
   startedAt                  DateTime                     @default(now())
@@ -1192,6 +1197,8 @@ model WantListenLeaderboardEntry {
   periodKey         String
   score             Int
   correctCount      Int
+  maxStreak         Int                  @default(0)   // 无尽模式最高连击
+  totalQuestions    Int                  @default(0)   // 无尽模式总答题数（历史 20 题回填 20）
   completionTimeMs  Int
   achievedAt        DateTime
   createdAt         DateTime             @default(now())
@@ -1201,6 +1208,7 @@ model WantListenLeaderboardEntry {
 
   @@unique([userId, mode, periodType, periodKey])
   @@index([mode, periodType, periodKey, score, correctCount, completionTimeMs], map: "WantListenLeaderboard_mode_period_score_time_idx")
+  @@index([mode, periodType, periodKey, score, correctCount, maxStreak, completionTimeMs], map: "WantListenLeaderboard_endless_sort_idx")
   @@index([userId, periodType, periodKey])
   @@index([sessionId])
 }

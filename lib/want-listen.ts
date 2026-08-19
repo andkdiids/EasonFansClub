@@ -16,8 +16,8 @@ import {
   DEFAULT_WANT_LISTEN_CONFIG,
   WANT_LISTEN_MODE_LABELS,
   WANT_LISTEN_MODES,
+  WANT_LISTEN_MAX_WRONG_COUNT,
   WANT_LISTEN_SESSION_TTL_MS,
-  WANT_LISTEN_TOTAL_QUESTIONS,
   difficultyForQuestion,
   isWantListenMode,
   isWantListenModeEnabled,
@@ -255,39 +255,55 @@ function selectFakeTitle(
   return null
 }
 
-async function prepareQuestionSet(mode: WantListenMode) {
+/**
+ * 无尽模式：按需生成单道题目（无限挑战，不预生成 20 题）。
+ * 排除上一题来源歌曲 / 假歌名，池耗尽时按现有回退逻辑复用（可无限循环）。
+ */
+async function buildQuestionAtPosition(mode: WantListenMode, position: number, excludedSongIds: ReadonlySet<string>, excludedFakeIds: ReadonlySet<string>): Promise<PreparedQuestion> {
   if (mode === 'FALSE_TITLE') {
     const realTitles = await loadRealTitles()
     if (realTitles.length < 5) throw new WantListenServiceError('当前真实曲库不足，暂时无法开始「防不胜防」。', 409, 'QUESTION_BANK_INSUFFICIENT')
     const fakes = await loadActiveFakeTitles(realTitles)
-    if (!fakes.length) throw new WantListenServiceError('当前假歌名库暂时不足，请管理员补充后再试。', 409, 'FAKE_TITLE_BANK_INSUFFICIENT')
-    const usedFakeIds = new Set<string>()
-    const questions: PreparedQuestion[] = []
-    for (let position = 1; position <= WANT_LISTEN_TOTAL_QUESTIONS; position += 1) {
-      const fake = selectFakeTitle(fakes, position, usedFakeIds)
-      if (!fake) throw new WantListenServiceError('当前假歌名库暂时不足，请管理员补充后再试。', 409, 'FAKE_TITLE_BANK_INSUFFICIENT')
-      const question = buildFalseTitleQuestion(realTitles, fake.title, fake.difficulty)
-      if (!question) throw new WantListenServiceError('当前真实曲库不足，暂时无法开始「防不胜防」。', 409, 'QUESTION_BANK_INSUFFICIENT')
-      question.data.fakeTitleId = fake.id
-      questions.push({ ...question, fakeTitleId: fake.id })
-      usedFakeIds.add(fake.id)
-    }
-    return questions
+    const fake = selectFakeTitle(fakes, position, excludedFakeIds)
+    if (!fake) throw new WantListenServiceError('当前假歌名库暂时不足，请管理员补充后再试。', 409, 'FAKE_TITLE_BANK_INSUFFICIENT')
+    const question = buildFalseTitleQuestion(realTitles, fake.title, fake.difficulty)
+    if (!question) throw new WantListenServiceError('当前真实曲库不足，暂时无法开始「防不胜防」。', 409, 'QUESTION_BANK_INSUFFICIENT')
+    question.data.fakeTitleId = fake.id
+    return { ...question, fakeTitleId: fake.id }
   }
 
   const pool = await loadSongPool(mode)
   if (pool.length < 4) throw new WantListenServiceError(mode === 'WANT_LISTEN' ? '当前曲库可用歌曲不足，暂时无法开始「想听」。' : '当前粤语歌词题库不足，暂时无法开始「粤语残片」。', 409, 'QUESTION_BANK_INSUFFICIENT')
-  const usedIds = new Set<string>()
-  const questions: PreparedQuestion[] = []
-  for (let position = 1; position <= WANT_LISTEN_TOTAL_QUESTIONS; position += 1) {
-    questions.push(mode === 'WANT_LISTEN'
-      ? buildQuestionForSongMode(pool, position, usedIds)
-      : buildQuestionForCantoneseMode(pool, position, usedIds))
-  }
-  if (mode === 'CANTONESE_FRAGMENT' && (questions.length !== WANT_LISTEN_TOTAL_QUESTIONS || questions.some((question) => !validateQuestion(question.data)))) {
-    throw new WantListenServiceError('当前粤语歌词题库不足，暂时无法组成完整的有效题目。', 409, 'QUESTION_BANK_INSUFFICIENT')
-  }
-  return questions
+  return mode === 'WANT_LISTEN'
+    ? buildQuestionForSongMode(pool, position, new Set(excludedSongIds))
+    : buildQuestionForCantoneseMode(pool, position, new Set(excludedSongIds))
+}
+
+/** 无尽模式：事务内追加下一题（记录服务端开始时间，供反作弊耗时校验） */
+async function generateNextQuestion(database: Prisma.TransactionClient | typeof prisma, session: { id: string; mode: WantListenMode }, position: number) {
+  const previous = await database.wantListenSessionQuestion.findFirst({
+    where: { sessionId: session.id },
+    orderBy: { position: 'desc' },
+    select: { questionData: true },
+  })
+  const prevData = previous ? (previous.questionData as unknown as WantListenStoredQuestion) : null
+  const prepared = await buildQuestionAtPosition(
+    session.mode,
+    position,
+    prevData?.songId ? new Set([prevData.songId]) : new Set(),
+    prevData?.fakeTitleId ? new Set([prevData.fakeTitleId]) : new Set(),
+  )
+  await database.wantListenSessionQuestion.create({
+    data: {
+      sessionId: session.id,
+      publicId: randomUUID(),
+      position,
+      questionData: prepared.data as unknown as Prisma.InputJsonValue,
+      correctOptionKey: prepared.correctOptionKey,
+      questionStartedAt: new Date(),
+    },
+  })
+  if (prepared.fakeTitleId) await database.wantListenFakeTitle.update({ where: { id: prepared.fakeTitleId }, data: { usageCount: { increment: 1 } } })
 }
 
 async function loadSessionRaw(userId: string, sessionId: string) {
@@ -313,7 +329,9 @@ async function repairCantoneseSessionQuestions(session: SessionWithQuestions): P
 
   const byPosition = new Map(session.WantListenSessionQuestion.map((question) => [question.position, question]))
   const positionsToReplace: Array<{ position: number; question?: SessionWithQuestions['WantListenSessionQuestion'][number] }> = []
-  for (let position = 1; position <= session.questionCount; position += 1) {
+  // 无尽模式（questionCount 为 null）时只检查已生成的题目
+  const total = session.questionCount ?? session.WantListenSessionQuestion.length
+  for (let position = 1; position <= total; position += 1) {
     const question = byPosition.get(position)
     if (!question || (!question.answeredAt && !validateQuestion(storedQuestion(question)))) {
       positionsToReplace.push({ position, question })
@@ -406,7 +424,13 @@ export type WantListenPublicState = {
   modeLabel: string
   status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'EXPIRED'
   currentQuestion: number
-  totalQuestions: number
+  totalQuestions: number | null          // null = 无尽模式
+  totalAnswered: number                  // 已答总题数（无尽累计）
+  currentStreak: number
+  maxStreak: number
+  wrongCount: number
+  livesRemaining: number
+  maxWrongCount: number
   score: number
   correctCount: number
   startedAt: string
@@ -425,6 +449,12 @@ function toPublicState(session: SessionWithQuestions): WantListenPublicState {
     status: session.status,
     currentQuestion: session.currentQuestion,
     totalQuestions: session.questionCount,
+    totalAnswered: session.totalQuestions,
+    currentStreak: session.currentStreak,
+    maxStreak: session.maxStreak,
+    wrongCount: session.wrongCount,
+    livesRemaining: session.livesRemaining,
+    maxWrongCount: WANT_LISTEN_MAX_WRONG_COUNT,
     score: session.score,
     correctCount: session.correctCount,
     startedAt: session.startedAt.toISOString(),
@@ -465,10 +495,8 @@ export async function createWantListenSession(userId: string, rawMode: unknown, 
   }
   await ensureModeAvailable(mode)
 
-  const prepared = await prepareQuestionSet(mode)
-  if (prepared.length !== WANT_LISTEN_TOTAL_QUESTIONS || (mode === 'CANTONESE_FRAGMENT' && prepared.some((question) => !validateQuestion(question.data)))) {
-    throw new WantListenServiceError('当前粤语歌词题库不足，暂时无法组成完整的有效题目。', 409, 'QUESTION_BANK_INSUFFICIENT')
-  }
+  // 无尽模式：仅生成第 1 题，后续题目在「下一题」时动态生成
+  const firstQuestion = await buildQuestionAtPosition(mode, 1, new Set(), new Set())
   try {
     const created = await transactionWithRetry(async (database) => {
       const sessionId = randomUUID()
@@ -479,26 +507,29 @@ export async function createWantListenSession(userId: string, rawMode: unknown, 
           userId,
           mode,
           currentQuestion: 1,
-          questionCount: WANT_LISTEN_TOTAL_QUESTIONS,
+          questionCount: null,
+          totalQuestions: 0,
+          currentStreak: 0,
+          maxStreak: 0,
+          wrongCount: 0,
+          livesRemaining: WANT_LISTEN_MAX_WRONG_COUNT,
           expiresAt: new Date(now.getTime() + WANT_LISTEN_SESSION_TTL_MS),
           ipAddress: meta.ip?.slice(0, 64) || null,
           userAgent: meta.userAgent?.slice(0, 500) || null,
           WantListenSessionQuestion: {
-            create: prepared.map((question, index) => ({
+            create: {
               publicId: randomUUID(),
-              position: index + 1,
-              questionData: question.data as unknown as Prisma.InputJsonValue,
-              correctOptionKey: question.correctOptionKey,
+              position: 1,
+              questionData: firstQuestion.data as unknown as Prisma.InputJsonValue,
+              correctOptionKey: firstQuestion.correctOptionKey,
               // 服务端记录第 1 题的开始时间，后续题目在 next 时记录
-              ...(index === 0 ? { questionStartedAt: now } : {}),
-            })),
+              questionStartedAt: now,
+            },
           },
         },
         select: { id: true },
       })
-      for (const question of prepared) {
-        if (question.fakeTitleId) await database.wantListenFakeTitle.update({ where: { id: question.fakeTitleId }, data: { usageCount: { increment: 1 } } })
-      }
+      if (firstQuestion.fakeTitleId) await database.wantListenFakeTitle.update({ where: { id: firstQuestion.fakeTitleId }, data: { usageCount: { increment: 1 } } })
       return session
     })
     const session = await loadSession(userId, created.id)
@@ -566,29 +597,29 @@ async function updateWantListenStats(database: Prisma.TransactionClient, session
       silentCurrentStreak = 0
     }
   }
+  // 无尽模式：本次对局答过的题数（questionCount=null 时用 totalQuestions）
+  const answeredCount = session.totalQuestions || session.questionCount || 0
   await database.wantListenStats.upsert({
     where: { userId_mode: { userId: session.userId, mode: session.mode } },
     create: {
       userId: session.userId,
       mode: session.mode,
       gamesPlayed: 1,
-      totalQuestions: session.questionCount,
+      totalQuestions: answeredCount,
       totalCorrect: finalCorrectCount,
       bestScore: finalScore,
       currentStreak,
       maxStreak,
-      perfectGames: session.mode === 'CANTONESE_FRAGMENT' && finalCorrectCount === session.questionCount ? 1 : 0,
       silentCurrentStreak,
       silentMaxStreak,
     },
     update: {
       gamesPlayed: { increment: 1 },
-      totalQuestions: { increment: session.questionCount },
+      totalQuestions: { increment: answeredCount },
       totalCorrect: { increment: finalCorrectCount },
       bestScore: Math.max(existing?.bestScore || 0, finalScore),
       currentStreak,
       maxStreak,
-      perfectGames: { increment: session.mode === 'CANTONESE_FRAGMENT' && finalCorrectCount === session.questionCount ? 1 : 0 },
       silentCurrentStreak,
       silentMaxStreak,
     },
@@ -625,7 +656,11 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
     const data = storedQuestion(current)
     if (!data.options?.some((option) => option.key === optionKey)) throw new WantListenServiceError('请选择当前题目中的一个选项。', 400, 'ANSWER_INVALID')
     const isCorrect = optionKey === current.correctOptionKey
-    const awardedScore = isCorrect ? scoreForWantListenAnswer(session.mode, current.hintLevel) : 0
+    // 无尽模式：连击 + 基础分（答对 100，每连续 10 题 +270）
+    const nextStreak = isCorrect ? session.currentStreak + 1 : 0
+    const nextWrongCount = session.wrongCount + (isCorrect ? 0 : 1)
+    const livesAfter = Math.max(0, session.livesRemaining - (isCorrect ? 0 : 1))
+    const awardedScore = scoreForWantListenAnswer(isCorrect, nextStreak)
     // 服务端计时：耗时 = answeredAt - questionStartedAt，不信任客户端时间
     const answeredAt = new Date()
     const latencyMs = computeServerElapsedMs(current.questionStartedAt, answeredAt)
@@ -636,13 +671,23 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
     if (updatedQuestionCount.count !== 1) return { duplicate: true, sessionId: session.id, questionId: current.id, finalized: session.status === 'COMPLETED' }
     const finalScore = session.score + awardedScore
     const finalCorrectCount = session.correctCount + (isCorrect ? 1 : 0)
-    const isFinal = session.currentQuestion >= session.questionCount
+    // 结束条件：
+    //  - 历史固定题数模式（questionCount 非空）：答完最后一题
+    //  - 无尽模式（questionCount 为 null）：答错耗尽生命
+    const isFinal = session.questionCount !== null
+      ? session.currentQuestion >= session.questionCount
+      : nextWrongCount >= WANT_LISTEN_MAX_WRONG_COUNT
     const completedAt = isFinal ? new Date() : null
     const updated = await database.wantListenSession.update({
       where: { id: session.id },
       data: {
         score: finalScore,
         correctCount: finalCorrectCount,
+        totalQuestions: { increment: 1 },
+        currentStreak: nextStreak,
+        maxStreak: Math.max(session.maxStreak, nextStreak),
+        wrongCount: nextWrongCount,
+        livesRemaining: livesAfter,
         ...(isFinal
           ? { status: 'COMPLETED', completedAt, completionTimeMs: Math.max(0, (completedAt?.getTime() || Date.now()) - session.startedAt.getTime()), activeKey: null }
           : {}),
@@ -662,7 +707,7 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
       userId: session.userId,
       gameType: wantListenGameType(session.mode),
       sessionId: session.id,
-      questionCount: updated.questionCount,
+      questionCount: updated.totalQuestions,
       fastestAnswerTime: fastest,
       averageAnswerTime: average,
       ip: input.ip,
@@ -715,19 +760,94 @@ export async function nextWantListenQuestion(userId: string, sessionId: string) 
   if (session.status === 'COMPLETED') return toPublicState(session)
   const current = session.WantListenSessionQuestion.find((question) => question.position === session.currentQuestion)
   if (!current?.answeredAt) throw new WantListenServiceError('请先提交当前题目。', 409, 'QUESTION_NOT_ANSWERED')
-  if (session.currentQuestion >= session.questionCount) return toPublicState(session)
+  // 历史固定题数模式：答完最后一题后不再推进
+  if (session.questionCount !== null && session.currentQuestion >= session.questionCount) return toPublicState(session)
   const updated = await prisma.wantListenSession.updateMany({ where: { id: session.id, userId, status: 'IN_PROGRESS', currentQuestion: session.currentQuestion }, data: { currentQuestion: { increment: 1 } } })
   if (updated.count !== 1) return getWantListenSessionState(userId, sessionId)
-  // 服务端记录下一题的开始时间（用于反作弊耗时校验）
-  await prisma.wantListenSessionQuestion.updateMany({
-    where: { sessionId: session.id, position: session.currentQuestion + 1, answeredAt: null },
-    data: { questionStartedAt: new Date() },
-  })
+  const nextPosition = session.currentQuestion + 1
+  if (session.questionCount === null) {
+    // 无尽模式：动态生成下一题（服务端记录开始时间，供反作弊耗时校验）
+    await generateNextQuestion(prisma, session, nextPosition)
+  } else {
+    await prisma.wantListenSessionQuestion.updateMany({
+      where: { sessionId: session.id, position: nextPosition, answeredAt: null },
+      data: { questionStartedAt: new Date() },
+    })
+  }
   return getWantListenSessionState(userId, sessionId)
 }
 
 export async function abandonWantListenSession(userId: string, sessionId: string) {
   await prisma.wantListenSession.updateMany({ where: { id: sessionId, userId, status: 'IN_PROGRESS' }, data: { status: 'ABANDONED', activeKey: null } })
+  return getWantListenSessionState(userId, sessionId)
+}
+
+/**
+ * 无尽模式：用户主动结束 → 保存本次成绩（COMPLETED）。
+ * 反作弊评估沿用服务端耗时判定；CLEAN 才写入统计与排行榜。
+ */
+export async function finishWantListenSession(userId: string, sessionId: string, meta: { ip?: string | null; userAgent?: string | null } = {}) {
+  await expireSessionIfNeeded(userId, sessionId)
+  const session = await loadSession(userId, sessionId)
+  if (!session) throw sessionNotFound()
+  if (session.status === 'COMPLETED') return toPublicState(session)
+  if (session.status === 'EXPIRED') throw new WantListenServiceError('本局游戏已结束，请重新开始。', 410, 'SESSION_EXPIRED')
+  if (session.status === 'ABANDONED') throw new WantListenServiceError('本局游戏已退出，请重新开始。', 409, 'SESSION_ABANDONED')
+
+  const result = await transactionWithRetry(async (database) => {
+    const active = await database.wantListenSession.findFirst({
+      where: { id: sessionId, userId },
+      include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } },
+    })
+    if (!active) throw sessionNotFound()
+    if (active.status !== 'IN_PROGRESS') return { duplicate: true, finalized: active.status === 'COMPLETED' }
+
+    const finishedAt = new Date()
+    const updated = await database.wantListenSession.update({
+      where: { id: active.id },
+      data: {
+        status: 'COMPLETED',
+        completedAt: finishedAt,
+        completionTimeMs: Math.max(0, finishedAt.getTime() - active.startedAt.getTime()),
+        activeKey: null,
+      },
+      include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } },
+    })
+
+    // 反作弊评估：基于服务端记录的全部已答耗时
+    const answeredLatencies = updated.WantListenSessionQuestion
+      .filter((question) => question.answeredAt && question.answerLatencyMs !== null && question.answerLatencyMs !== undefined)
+      .map((question) => question.answerLatencyMs as number)
+    const assessment = assessWantListenLatencies(answeredLatencies)
+    if (assessment.suspicious && active.antiCheatStatus !== 'SUSPICIOUS') {
+      await database.wantListenSession.update({
+        where: { id: active.id },
+        data: { antiCheatStatus: 'SUSPICIOUS', antiCheatReasons: assessment.reasons as unknown as Prisma.InputJsonValue },
+      })
+      await recordAntiCheatLog(database, {
+        userId: active.userId,
+        gameType: wantListenGameType(active.mode),
+        sessionId: active.id,
+        questionCount: active.totalQuestions,
+        fastestAnswerTime: fastestAnswerTime(answeredLatencies),
+        averageAnswerTime: averageAnswerTime(answeredLatencies),
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+        suspiciousType: 'FAST_ANSWER',
+        details: { reasons: assessment.reasons, mode: active.mode, score: active.score, correctCount: active.correctCount, latencies: answeredLatencies } as Prisma.InputJsonValue,
+      })
+    }
+
+    if (!assessment.suspicious) {
+      await updateWantListenStats(database, updated, '', false, 1, updated.score, updated.correctCount)
+      await recordWantListenLeaderboard(active.id, database)
+    }
+    return { duplicate: false, finalized: true }
+  })
+
+  if (result.finalized && !result.duplicate) {
+    await syncUserAchievements(userId, ['SPECIAL']).catch((error) => console.error('[want-listen.achievements]', error))
+  }
   return getWantListenSessionState(userId, sessionId)
 }
 

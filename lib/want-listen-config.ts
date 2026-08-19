@@ -1,5 +1,10 @@
-export const WANT_LISTEN_TOTAL_QUESTIONS = 20
 export const WANT_LISTEN_SESSION_TTL_MS = 2 * 60 * 60 * 1000
+
+// 无尽模式规则（参考听听 ENDLESS）
+export const WANT_LISTEN_BASE_SCORE = 100            // 答对基础分
+export const WANT_LISTEN_ENDLESS_COMBO_INTERVAL = 10 // 每连续 10 题触发连击奖励
+export const WANT_LISTEN_ENDLESS_COMBO_BONUS = 270   // 连击奖励分
+export const WANT_LISTEN_MAX_WRONG_COUNT = 3         // 答错 3 次结束（无尽生命值）
 
 export const WANT_LISTEN_MODES = ['WANT_LISTEN', 'CANTONESE_FRAGMENT', 'FALSE_TITLE'] as const
 export type WantListenMode = (typeof WANT_LISTEN_MODES)[number]
@@ -47,14 +52,23 @@ export function isWantListenModeEnabled(config: WantListenConfig, mode: WantList
   return config.falseTitleEnabled
 }
 
-export function scoreForWantListenAnswer(mode: WantListenMode, hintLevel: number) {
-  if (mode !== 'WANT_LISTEN') return 100
-  return ({ 1: 400, 2: 300, 3: 200, 4: 100 } as Record<number, number>)[hintLevel] || 100
+/**
+ * 无尽模式计分：答对基础分 + 每连续 10 题连击奖励。
+ * 最高分由「总答对数量 + 连续答题表现」决定，不再有 20 题满分上限。
+ */
+export function scoreForWantListenAnswer(correct: boolean, nextStreak: number) {
+  if (!correct) return 0
+  const comboBonus = nextStreak > 0 && nextStreak % WANT_LISTEN_ENDLESS_COMBO_INTERVAL === 0
+    ? WANT_LISTEN_ENDLESS_COMBO_BONUS
+    : 0
+  return WANT_LISTEN_BASE_SCORE + comboBonus
 }
 
+/** 无尽模式难度循环：每 15 题一轮 EASY→NORMAL→HARD */
 export function difficultyForQuestion(position: number) {
-  if (position <= 5) return 'EASY' as const
-  if (position <= 15) return 'NORMAL' as const
+  const cycle = (Math.max(1, position) - 1) % 15
+  if (cycle < 5) return 'EASY' as const
+  if (cycle < 10) return 'NORMAL' as const
   return 'HARD' as const
 }
 
