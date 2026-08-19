@@ -33,6 +33,8 @@ async function main() {
       where: {
         OR: [
           { nicknameModerationStatus: 'VIOLATION' },
+          // 昵称已合法（NORMAL）但仍残留违规展示状态：nicknameViolationDisplay 未清 或 Profile 标记未清
+          { nicknameModerationStatus: 'NORMAL', nicknameViolationDisplay: { not: null } },
           { Profile: { is: { displayNameModerationStatus: 'VIOLATION' } } },
         ],
       },
@@ -52,6 +54,8 @@ async function main() {
     if (!users.length) break
 
     for (const user of users) {
+      // 已正确修复：VIOLATION 且已有展示昵称 → 跳过，保持展示昵称稳定、不重复计数（幂等）
+      if (user.nicknameModerationStatus === 'VIOLATION' && user.nicknameViolationDisplay) continue
       const currentNickname = user.nickname || ''
       const blocked = (await checkBannedWords(currentNickname)).blocked
       const beforeDisplay = user.nicknameViolationDisplay || (user.nicknameModerationStatus === 'VIOLATION' ? '违规用户' : (user.Profile?.displayName || currentNickname))

@@ -28,11 +28,12 @@ type SerializedNameUser = {
  *  - 昵称违规（nicknameModerationStatus === 'VIOLATION'）：返回生成的唯一展示昵称
  *    nicknameViolationDisplay（如「违规昵称A82KD92L」）；若展示昵称缺失（历史遗留 /
  *    异常兜底）则遮罩为「违规用户」，绝不下发真实（违规）昵称。
- *  - 用户名违规（usernameModerationStatus === 'VIOLATION'）：遮罩为「违规用户」。
  *  - 正常：优先 Profile.displayName，其次 nickname，最后「已注销用户」。
  *
- * 注意：Profile.displayNameModerationStatus 是昵称违规的旧版镜像标记，不再参与判定——
- * 用户在昵称合法（NORMAL）时，即使 Profile 残留违规标记也应正常显示（问题 2 修复）。
+ * 重要：username 是登录句柄而非展示名。usernameModerationStatus=VIOLATION 只影响
+ * username 字段本身（经 publicModerationUserName 独立遮罩），**绝不**影响昵称展示——
+ * 否则用户改回合法昵称后仍会因残留的 username 标记被遮罩为「违规用户」（问题根因）。
+ * Profile.displayNameModerationStatus 是昵称违规的旧版镜像标记，同样不参与判定。
  */
 export function getPublicUserDisplayName(user: PublicNameUser | SerializedNameUser) {
   const profile = 'Profile' in user ? user.Profile : 'profile' in user ? user.profile : null
@@ -42,8 +43,6 @@ export function getPublicUserDisplayName(user: PublicNameUser | SerializedNameUs
     if (display) return display
     return VIOLATION_USER_TEXT
   }
-
-  if (user.usernameModerationStatus === 'VIOLATION') return VIOLATION_USER_TEXT
 
   return profile?.displayName?.trim() || user.nickname?.trim() || '已注销用户'
 }

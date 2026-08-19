@@ -131,13 +131,30 @@ test('七/所有展示接口一致：publicUserSelect 包含违规展示字段',
   assert.equal(sel.nicknameViolationDisplay, true)
 })
 
-test('七/所有展示接口一致：昵称违规优先返回展示昵称，用户名违规仍遮罩', () => {
+test('七/所有展示接口一致：昵称违规优先返回展示昵称，username 违规不遮罩昵称展示', () => {
   // 昵称违规优先返回生效展示昵称（源码确认分支存在）
   assert.match(friendRemarksSrc, /if \(user\.nicknameModerationStatus === 'VIOLATION'\)/)
-  // 用户名违规仍遮罩为「违规用户」
+  // username 是登录句柄而非展示名：其违规只遮罩 username 字段本身，不影响昵称展示
   assert.equal(
-    getPublicUserDisplayName({ username: 'x', usernameModerationStatus: 'VIOLATION' }),
-    '违规用户',
+    getPublicUserDisplayName({ username: 'x', usernameModerationStatus: 'VIOLATION', nickname: '正常昵称' }),
+    '正常昵称',
+  )
+  // 源码确认：展示函数不再因 username 残留标记返回「违规用户」
+  assert.doesNotMatch(friendRemarksSrc, /user\.usernameModerationStatus === 'VIOLATION'/)
+})
+
+test('三/违规后改合法昵称，即使 username 标记残留也显示新昵称（问题根因回归）', () => {
+  // 用户原 username 违规（残留），但已把昵称改为合法：
+  // nicknameModerationStatus=NORMAL + nicknameViolationDisplay=null
+  // → 必须显示新昵称，禁止返回「违规用户」
+  assert.equal(
+    getPublicUserDisplayName({
+      nickname: '我的新昵称',
+      nicknameModerationStatus: 'NORMAL',
+      nicknameViolationDisplay: '违规昵称OLD12345',
+      usernameModerationStatus: 'VIOLATION',
+    }),
+    '我的新昵称',
   )
 })
 
