@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma'
 import { cleanLyrics, selectLyricFragment, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
 import {
   DEFAULT_WANT_LISTEN_CONFIG,
+  WANT_LISTEN_EXPIRY_GRACE_MS,
   WANT_LISTEN_MODE_LABELS,
   WANT_LISTEN_MODES,
   WANT_LISTEN_MAX_WRONG_COUNT,
@@ -314,10 +315,56 @@ async function loadSessionRaw(userId: string, sessionId: string) {
 }
 
 async function expireSessionIfNeeded(userId: string, sessionId: string, now = new Date()) {
+  // 宽限窗口：仅当超过 expiresAt + GRACE 才判定 EXPIRED；
+  // 刚过期的会话保留 IN_PROGRESS，由下一次真实操作滑动续期恢复。
   await prisma.wantListenSession.updateMany({
-    where: { id: sessionId, userId, status: 'IN_PROGRESS', expiresAt: { lte: now } },
+    where: { id: sessionId, userId, status: 'IN_PROGRESS', expiresAt: { lte: new Date(now.getTime() - WANT_LISTEN_EXPIRY_GRACE_MS) } },
     data: { status: 'EXPIRED', activeKey: null },
   })
+}
+
+/**
+ * 滑动过期：真实用户行为（读状态 / 答题 / 提示 / 下一题 / 恢复）刷新不活动窗口。
+ * 只在 `expiresAt <= now + TTL` 时前移，并发/延迟的旧请求不会把有效期回拨。
+ */
+async function refreshWantListenExpiry(userId: string, sessionId: string, now = new Date()) {
+  const nextExpiry = new Date(now.getTime() + WANT_LISTEN_SESSION_TTL_MS)
+  await prisma.wantListenSession.updateMany({
+    where: { id: sessionId, userId, status: 'IN_PROGRESS', expiresAt: { lte: nextExpiry } },
+    data: { expiresAt: nextExpiry },
+  })
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+/**
+ * 当前题缺失自动恢复：Session 仍 IN_PROGRESS、有效期有效，但 currentQuestion
+ * 指向的题目记录不存在时，在不改变 score / correctCount / streak / currentQuestion
+ * 的前提下按当前题号重建题目（历史答题记录保持不变）。
+ */
+async function ensureCurrentQuestionExists(session: SessionWithQuestions, now = new Date()): Promise<SessionWithQuestions> {
+  if (session.status !== 'IN_PROGRESS') return session
+  // 超过宽限窗口的会话不再恢复（由 expireSessionIfNeeded 判定 EXPIRED）
+  if (session.expiresAt.getTime() <= now.getTime() - WANT_LISTEN_EXPIRY_GRACE_MS) return session
+  const hasCurrent = session.WantListenSessionQuestion.some((question) => question.position === session.currentQuestion)
+  if (hasCurrent) return session
+  // 历史固定题数模式：当前题号超出题目总数时视为正常结束，不重建
+  if (session.questionCount !== null && session.currentQuestion > session.questionCount) return session
+  try {
+    await generateNextQuestion(prisma, session, session.currentQuestion)
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      // 并发恢复：题目已由其他请求创建，重新加载即可
+      const reloaded = await loadSession(session.userId, session.id)
+      return reloaded ?? session
+    }
+    if (error instanceof WantListenServiceError) throw error
+    throw error
+  }
+  const reloaded = await loadSession(session.userId, session.id)
+  return reloaded ?? session
 }
 
 function storedQuestion(question: SessionWithQuestions['WantListenSessionQuestion'][number]) {
@@ -496,6 +543,8 @@ export async function createWantListenSession(userId: string, rawMode: unknown, 
   // 3) 已有唯一有效进行中会话 → 直接返回其 sessionId（继续游戏），不重复创建
   const existing = activeSessions[0]
   if (existing) {
+    // 恢复进行中会话也是真实活跃行为：刷新滑动过期窗口
+    await refreshWantListenExpiry(userId, existing.id, now)
     const restored = await loadSession(userId, existing.id)
     if (!restored) throw sessionNotFound()
     return { resumed: true, session: toPublicState(restored) }
@@ -556,20 +605,26 @@ export async function createWantListenSession(userId: string, rawMode: unknown, 
 
 export async function getWantListenSessionState(userId: string, sessionId: string) {
   await expireSessionIfNeeded(userId, sessionId)
-  const session = await loadSession(userId, sessionId)
+  let session = await loadSession(userId, sessionId)
   if (!session) throw sessionNotFound()
+  // 读取状态属于真实活跃行为：刷新滑动过期窗口
+  await refreshWantListenExpiry(userId, sessionId)
+  // 当前题缺失时自动重建（不改变分数/连击/题号），避免「当前题目不可用」中断整局
+  session = await ensureCurrentQuestionExists(session)
   return toPublicState(session)
 }
 
 export async function requestWantListenHint(userId: string, sessionId: string) {
   await expireSessionIfNeeded(userId, sessionId)
-  const session = await loadSession(userId, sessionId)
+  let session = await loadSession(userId, sessionId)
   if (!session) throw sessionNotFound()
   if (session.status !== 'IN_PROGRESS') {
     if (session.status === 'EXPIRED') throw new WantListenServiceError('本局游戏已结束，请重新开始。', 410, 'SESSION_EXPIRED')
     return toPublicState(session)
   }
   if (session.mode !== 'WANT_LISTEN') throw new WantListenServiceError('该模式没有逐层提示。', 400, 'HINT_NOT_AVAILABLE')
+  // 当前题缺失时先自动恢复，再取提示
+  session = await ensureCurrentQuestionExists(session)
   const current = session.WantListenSessionQuestion.find((item) => item.position === session.currentQuestion)
   if (!current) throw new WantListenServiceError('当前题目不存在，请重新开始。', 409, 'QUESTION_MISSING')
   if (current.answeredAt) return toPublicState(session)
@@ -637,7 +692,10 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
   const optionKey = input.optionKey.trim().slice(0, 100)
   if (!optionKey) throw new WantListenServiceError('请选择一个答案。', 400, 'ANSWER_INVALID')
   await expireSessionIfNeeded(input.userId, input.sessionId)
-  await loadSession(input.userId, input.sessionId)
+  let preSession = await loadSession(input.userId, input.sessionId)
+  if (!preSession) throw sessionNotFound()
+  // 当前题缺失时先自动恢复（若仍在有效期内），避免答题直接判「题目不可用」
+  preSession = await ensureCurrentQuestionExists(preSession)
   const result = await transactionWithRetry(async (database) => {
     const session = await database.wantListenSession.findFirst({ where: { id: input.sessionId, userId: input.userId }, include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } } })
     if (!session) throw sessionNotFound()
@@ -695,6 +753,8 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
         maxStreak: Math.max(session.maxStreak, nextStreak),
         wrongCount: nextWrongCount,
         livesRemaining: livesAfter,
+        // 滑动过期：每次有效答题都刷新不活动窗口
+        expiresAt: new Date(Date.now() + WANT_LISTEN_SESSION_TTL_MS),
         ...(isFinal
           ? { status: 'COMPLETED', completedAt, completionTimeMs: Math.max(0, (completedAt?.getTime() || Date.now()) - session.startedAt.getTime()), activeKey: null }
           : {}),
@@ -769,18 +829,31 @@ export async function nextWantListenQuestion(userId: string, sessionId: string) 
   if (!current?.answeredAt) throw new WantListenServiceError('请先提交当前题目。', 409, 'QUESTION_NOT_ANSWERED')
   // 历史固定题数模式：答完最后一题后不再推进
   if (session.questionCount !== null && session.currentQuestion >= session.questionCount) return toPublicState(session)
-  const updated = await prisma.wantListenSession.updateMany({ where: { id: session.id, userId, status: 'IN_PROGRESS', currentQuestion: session.currentQuestion }, data: { currentQuestion: { increment: 1 } } })
-  if (updated.count !== 1) return getWantListenSessionState(userId, sessionId)
   const nextPosition = session.currentQuestion + 1
-  if (session.questionCount === null) {
-    // 无尽模式：动态生成下一题（服务端记录开始时间，供反作弊耗时校验）
-    await generateNextQuestion(prisma, session, nextPosition)
-  } else {
-    await prisma.wantListenSessionQuestion.updateMany({
-      where: { sessionId: session.id, position: nextPosition, answeredAt: null },
-      data: { questionStartedAt: new Date() },
+  // 推进 + 生成下一题必须在同一事务：题目生成失败时 currentQuestion 不会提前推进，
+  // 避免出现「Session 已指向下一题但数据库没有该题」的半完成状态。
+  const advanced = await transactionWithRetry(async (database) => {
+    const updated = await database.wantListenSession.updateMany({
+      where: { id: session.id, userId, status: 'IN_PROGRESS', currentQuestion: session.currentQuestion },
+      data: {
+        currentQuestion: { increment: 1 },
+        // 滑动过期：下一题也是真实活跃行为
+        expiresAt: new Date(Date.now() + WANT_LISTEN_SESSION_TTL_MS),
+      },
     })
-  }
+    if (updated.count !== 1) return false
+    if (session.questionCount === null) {
+      // 无尽模式：事务内动态生成下一题（失败则整体回滚）
+      await generateNextQuestion(database, session, nextPosition)
+    } else {
+      await database.wantListenSessionQuestion.updateMany({
+        where: { sessionId: session.id, position: nextPosition, answeredAt: null },
+        data: { questionStartedAt: new Date() },
+      })
+    }
+    return true
+  })
+  if (!advanced) return getWantListenSessionState(userId, sessionId)
   return getWantListenSessionState(userId, sessionId)
 }
 

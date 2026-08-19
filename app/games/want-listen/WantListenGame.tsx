@@ -47,11 +47,49 @@ type SessionState = {
   question: SessionQuestion | null
 }
 
-async function request<T>(url: string, init?: RequestInit) {
-  const response = await fetch(url, init)
-  const payload = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null
-  if (!response.ok || !payload?.ok || payload.data === undefined) throw new Error(payload?.error || '请求失败，请稍后重试。')
-  return payload.data
+type ApiRequestError = Error & { code?: string; status?: number }
+
+// 指数退避：500ms → 1s → 2s（最多 3 次自动重试），用于网络波动与 5xx
+const RETRY_DELAYS = [500, 1000, 2000]
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function toApiError(error: unknown, message: string, code: string, status: number): ApiRequestError {
+  return Object.assign(new Error(error instanceof Error ? error.message : message), { code, status })
+}
+
+async function request<T>(url: string, init?: RequestInit, retries = 3): Promise<T> {
+  let lastError: ApiRequestError | null = null
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    let response: Response
+    try {
+      response = await fetch(url, init)
+    } catch (reason) {
+      // 网络层失败（fetch failed / AbortError 等）：自动重试，不当作「需要登录」
+      lastError = toApiError(reason, '暂时无法连接服务器，正在恢复…', 'NETWORK_ERROR', 0)
+      if (attempt < retries) { await delay(RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]); continue }
+      throw lastError
+    }
+    const payload = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string; code?: string } | null
+    const code = payload?.code
+    // 真实鉴权错误：服务端明确返回 401 / AUTH_REQUIRED / AUTH_SESSION_EXPIRED 才进入重新认证
+    if (response.status === 401 || code === 'AUTH_REQUIRED' || code === 'AUTH_SESSION_EXPIRED') {
+      throw toApiError(new Error(payload?.error || '登录状态已失效，请重新登录。'), '登录状态已失效，请重新登录。', 'AUTH_REQUIRED', response.status)
+    }
+    if (!response.ok || !payload?.ok || payload.data === undefined) {
+      // 5xx / 429 属于服务器临时波动：自动重试后仍失败才抛出
+      if ((response.status >= 500 || response.status === 429) && attempt < retries) {
+        lastError = toApiError(new Error(payload?.error || '服务暂时不可用'), payload?.error || '服务暂时不可用，正在恢复…', code || 'SERVER_ERROR', response.status)
+        await delay(RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)])
+        continue
+      }
+      throw toApiError(new Error(payload?.error || '请求失败，请稍后重试。'), payload?.error || '请求失败，请稍后重试。', code || 'REQUEST_FAILED', response.status)
+    }
+    return payload.data
+  }
+  throw lastError ?? new Error('请求失败，请稍后重试。')
 }
 
 function hintText(hint: Record<string, unknown>) {
@@ -78,17 +116,53 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [finishing, setFinishing] = useState(false)
   const [paused, setPaused] = useState(false)
   const [error, setError] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [recovering, setRecovering] = useState(false)
+  const [recoveryFailed, setRecoveryFailed] = useState(false)
   const [exitOpen, setExitOpen] = useState(false)
   // 答案揭晓守卫：进入新题（question.id 变化）时强制重置为 false，
   // 只有在当前题作答成功后才置为 true。这样上一题的作答/反馈/选项高亮
   // 绝不会残留到下一题（防不胜防模式下杜绝答案闪现）。
   const [revealed, setRevealed] = useState(false)
 
+  // 区分真实鉴权错误与普通接口/网络错误：
+  //  - 401/AUTH_REQUIRED/AUTH_SESSION_EXPIRED → 提示重新认证，但不清空游戏状态
+  //  - 500/网络错误 → 「网络波动，正在恢复…」，自动重试，不结束当前局
+  function handleRequestError(reason: unknown, fallback: string) {
+    const apiError = reason as ApiRequestError
+    if (apiError?.code === 'AUTH_REQUIRED') {
+      setAuthError(apiError.message || '登录状态已失效，请重新登录。')
+      return
+    }
+    if (apiError?.code === 'NETWORK_ERROR' || (apiError?.status && apiError.status >= 500)) {
+      setError(apiError.message || '网络波动，正在恢复…')
+      return
+    }
+    setError(reason instanceof Error ? reason.message : fallback)
+  }
+
+  async function recoverSession() {
+    if (recovering) return
+    setRecovering(true)
+    setRecoveryFailed(false)
+    try {
+      const data = await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(initialSessionId)}`, { cache: 'no-store' }, 5)
+      setSession(data)
+      setError('')
+      setAuthError('')
+    } catch (reason) {
+      handleRequestError(reason, '对局恢复失败，请稍后重试。')
+      setRecoveryFailed(true)
+    } finally {
+      setRecovering(false)
+    }
+  }
+
   useEffect(() => {
     let active = true
     request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(initialSessionId)}`, { cache: 'no-store' })
       .then((data) => { if (active) setSession(data) })
-      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : '对局加载失败，请稍后重试。') })
+      .catch((reason: unknown) => { if (active) handleRequestError(reason, '对局加载失败，请稍后重试。') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [initialSessionId])
@@ -97,21 +171,29 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     if (!session || session.status !== 'IN_PROGRESS') return
     const remaining = new Date(session.expiresAt).getTime() - Date.now()
     if (remaining <= 0) {
-      setSession((current) => current ? { ...current, status: 'EXPIRED', question: null } : current)
+      // 到期后先向服务端确认：滑动续期可能已刷新，不能本地直接判过期
+      void recoverSession()
       return
     }
     const timer = window.setTimeout(() => {
-      request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(initialSessionId)}`, { cache: 'no-store' })
-        .then(setSession)
-        .catch(() => setSession((current) => current ? { ...current, status: 'EXPIRED', question: null } : current))
+      void recoverSession()
     }, remaining + 300)
     return () => window.clearTimeout(timer)
   }, [initialSessionId, session])
+
+  // IN_PROGRESS 但当前题缺失（question 为 null）：自动向服务端恢复重建当前题，
+  // 不强制重新开始。恢复失败时显示可手动重试的恢复页。
+  useEffect(() => {
+    if (!session || loading || session.status !== 'IN_PROGRESS' || session.question || recovering || recoveryFailed) return
+    void recoverSession()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, loading, recovering, recoveryFailed])
 
   async function answer(optionKey: string) {
     if (!session?.question || session.question.result || answering || session.status !== 'IN_PROGRESS') return
     setAnswering(true)
     setError('')
+    setAuthError('')
     try {
       const data = await request<{ state: SessionState }>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/answer`, {
         method: 'POST',
@@ -121,7 +203,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
       setSession(data.state)
       setRevealed(true)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '答案提交失败，请稍后重试。')
+      handleRequestError(reason, '答案提交失败，请稍后重试。')
     } finally {
       setAnswering(false)
     }
@@ -131,10 +213,11 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     if (!session || session.mode !== 'WANT_LISTEN' || !session.question || session.question.result || hinting || session.question.hintLevel >= 4) return
     setHinting(true)
     setError('')
+    setAuthError('')
     try {
       setSession(await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/hint`, { method: 'POST' }))
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '提示请求失败，请稍后重试。')
+      handleRequestError(reason, '提示请求失败，请稍后重试。')
     } finally {
       setHinting(false)
     }
@@ -144,10 +227,11 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     if (!session || !session.question?.result || nexting || session.status !== 'IN_PROGRESS') return
     setNexting(true)
     setError('')
+    setAuthError('')
     try {
       setSession(await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/next`, { method: 'POST' }))
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '下一题加载失败，请稍后重试。')
+      handleRequestError(reason, '下一题加载失败，请稍后重试。')
     } finally {
       setNexting(false)
     }
@@ -159,10 +243,11 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     if (!window.confirm('结束本次无尽挑战并保存成绩？\n\n当前进度会以本次成绩进入排行榜与个人统计。')) return
     setFinishing(true)
     setError('')
+    setAuthError('')
     try {
       setSession(await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/finish`, { method: 'POST' }))
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '结束挑战失败，请稍后重试。')
+      handleRequestError(reason, '结束挑战失败，请稍后重试。')
     } finally {
       setFinishing(false)
     }
@@ -208,6 +293,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
       </header>
 
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
+      {authError ? <p className="want-listen-error" role="alert">{authError}<Link href={`/login?next=${encodeURIComponent(typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/games/want-listen')}`}>重新登录后继续本局 →</Link></p> : null}
       {isExpired ? (
         <section className="want-listen-ended"><h1>本局游戏已结束，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>
       ) : isSettlement ? (
@@ -217,6 +303,17 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
           <div><span>答对<strong>{session.correctCount}</strong></span><span>最高连击<strong>{session.maxStreak}</strong></span><span>完成用时<strong>{Math.max(1, Math.round((session.completionTimeMs || 0) / 1000))} 秒</strong></span></div>
           {result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>正确答案：{result.correctAnswer}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}</div> : null}
           <nav><Link href="/games/want-listen">返回想听</Link><Link href="/games/want-listen/leaderboard">查看排行榜</Link></nav>
+        </section>
+      ) : !question ? (
+        // 当前题缺失：先自动向服务端恢复（重建当前题），不强制重新开始
+        <section className="want-listen-ended">
+          {recovering ? <h1>正在恢复当前题目…</h1> : recoveryFailed ? (
+            <>
+              <h1>当前题目暂不可用</h1>
+              <p>你的对局进度已保存，可尝试重新恢复。</p>
+              <nav><button type="button" className="want-listen-primary-link" onClick={() => void recoverSession()}>重新恢复本局</button><Link href="/games/want-listen">返回想听</Link></nav>
+            </>
+          ) : <h1>正在恢复当前题目…</h1>}
         </section>
       ) : question ? (
         <section className="want-listen-question-panel">
@@ -234,7 +331,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
           {revealed && result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>你的答案：{question.options.find((option) => option.key === result.selectedOptionKey)?.label || '—'}</span><span>正确答案：{result.correctAnswer}</span><span>本题得分：{result.awardedScore}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}{result.songTitle ? <small>歌曲：{result.songTitle}</small> : null}{session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void nextQuestion()} disabled={nexting}>{nexting ? '加载中…' : '下一题 →'}</button> : null}</div> : null}
           {!result && session.mode === 'WANT_LISTEN' ? <button type="button" className="want-listen-hint-button" onClick={() => void requestHint()} disabled={hinting || question.hintLevel >= 4}>{question.hintLevel >= 4 ? '已显示全部提示' : hinting ? '正在准备提示…' : '再给点提示'}</button> : null}
         </section>
-      ) : <section className="want-listen-ended"><h1>当前题目不可用，请重新开始。</h1><Link href="/games/want-listen">返回想听</Link></section>}
+      ) : null}
 
       {paused ? (
         <div className="want-listen-pause-backdrop" role="presentation">

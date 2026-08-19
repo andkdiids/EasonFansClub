@@ -149,3 +149,67 @@ test('11/纯函数：今日/本周起点（周一为一周起点）', () => {
   assert.equal(week.getDay(), 1, '应为周一')
   assert.equal(week.getHours(), 0)
 })
+
+// ---------- 想听排行榜补分（复用听听补分布局 + 覆盖取最高） ----------
+
+import { getWantListenPeriod, isWantListenScoreBetter } from '@/lib/want-listen-period'
+
+test('12/补分路由：POST 支持 ADD_SCORE，且 requireAdmin 服务端校验权限（普通用户 403）', () => {
+  assert.match(route, /requireAdmin\('entertainment_manage'\)/)
+  assert.match(route, /addWantListenAdminScore/)
+  assert.match(route, /body\?\.action === 'ADD_SCORE'/)
+  assert.match(route, /readWantListenAdminSession/)
+  assert.match(route, /view'\) === 'rows'/)
+  // 想听沿用同一权限体系：entertainment_manage（与听听一致）
+  assert.match(permissions, /want-listen\/leaderboard[\s\S]*'entertainment_manage'/)
+})
+
+test('13/补分数据逻辑：覆盖取最高，不累加', () => {
+  // 补 28770 vs 原 12000 → 更好 → 覆盖
+  const base = { score: 12000, correctCount: 230, maxStreak: 89, completionTimeMs: 1800000, achievedAt: new Date('2026-08-18T23:30:00+08:00') }
+  const higher = { ...base, score: 28770 }
+  assert.equal(isWantListenScoreBetter(higher, base), true, '补 28770 应覆盖 12000')
+  // 已有 30000 补 28770 → 不更好 → 不覆盖（保持 30000）
+  const best = { ...base, score: 30000 }
+  assert.equal(isWantListenScoreBetter(higher, best), false, '已有 30000 补 28770 不应覆盖')
+  // 服务端实现用 isWantListenScoreBetter 决定是否写入（不直接 UPDATE entry）
+  assert.match(service, /isWantListenScoreBetter\(candidate, existing\)/)
+  assert.match(service, /recordWantListenLeaderboard\(resolvedSessionId, tx\)/)
+})
+
+test('14/补分周期按「成绩发生时间」计算：历史日期归属当日/本周/全部榜', () => {
+  const achievedAt = new Date('2026-08-18T23:30:00+08:00')
+  const day = getWantListenPeriod('DAY', achievedAt)
+  const week = getWantListenPeriod('WEEK', achievedAt)
+  assert.equal(day.periodKey, '2026-08-18', 'DAY 应归属 8 月 18 日')
+  assert.ok(week.periodKey.startsWith('2026-08-'), `WEEK 应归属 8 月所在周（实际 ${week.periodKey}）`)
+  assert.equal(getWantListenPeriod('ALL', achievedAt).periodKey, 'ALL')
+  // 服务端遍历 DAY/WEEK/ALL 三个周期，且用 getWantListenPeriod(periodType, achievedAt)
+  assert.match(service, /for \(const periodType of \['DAY', 'WEEK', 'ALL'\] as const\)/)
+  assert.match(service, /getWantListenPeriod\(periodType, achievedAt\)/)
+})
+
+test('15/补分支持成绩发生时间 + 从异常 Session 读取 + AdminActionLog 审计', () => {
+  assert.match(service, /achievedAt\?: unknown/)
+  assert.match(service, /sourceSessionId\?: unknown/)
+  assert.match(service, /readWantListenAdminSession/)
+  assert.match(service, /action: 'WANT_LISTEN_ADD_SCORE'/)
+  assert.match(service, /before,/)
+  assert.match(service, /after: affected,/)
+  assert.match(service, /achievedAt: achievedAt\.toISOString\(\)/)
+  // 从 Session 读取接口
+  assert.match(route, /view'\) === 'session'/)
+  assert.match(service, /readWantListenAdminSession\(rawSessionId/)
+})
+
+test('16/补分 UI 复用听听布局：同一 section / 表单 / 按钮结构，不新做视觉体系', () => {
+  const guessManager = source('app/admin/entertainment/guess-song/GuessSongLeaderboardManager.tsx')
+  // 想听补分使用与听听完全一致的容器与表单结构（Tailwind 类）
+  assert.match(manager, /rounded-2xl border border-sky-100 bg-white p-5 shadow-sm/)
+  assert.match(manager, /sm:grid-cols-\[auto_auto_1fr_auto\] sm:items-end/)
+  assert.match(manager, /rounded-lg border border-slate-200 px-2 py-2 text-sm/)
+  assert.match(manager, /bg-brand-700 px-3 py-2 text-xs font-black text-white/)
+  // 听听原有结构不被本次改动破坏
+  assert.match(guessManager, /rounded-2xl border border-sky-100 bg-white p-5 shadow-sm/)
+  assert.match(guessManager, /sm:grid-cols-\[auto_auto_1fr_auto\] sm:items-end/)
+})

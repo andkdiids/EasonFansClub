@@ -438,8 +438,9 @@ test('无尽模式：连续答题不结束、答错按生命规则、主动结�
   assert.match(service, /export async function finishWantListenSession/)
   assert.match(service, /updateWantListenStats\(database, updated, ''/)
   assert.match(service, /recordWantListenLeaderboard\(active\.id, database\)/)
-  // 题目按需生成（无尽不预生成 20 题）
-  assert.match(service, /generateNextQuestion\(prisma, session, nextPosition\)/)
+  // 题目按需生成（无尽不预生成 20 题）；推进与生成在同一事务（失败回滚，不提前推进题号）
+  assert.match(service, /generateNextQuestion\(database, session, nextPosition\)/)
+  assert.match(service, /currentQuestion: \{ increment: 1 \},/)
   assert.match(service, /buildQuestionAtPosition/)
   // 粤语残片仍保留脏题二次过滤
   assert.match(service, /repairCantoneseSessionQuestions/)
@@ -576,4 +577,105 @@ test('历史残留清理脚本：过期→EXPIRED、每用户每模式保留最�
   assert.match(script, /groupKey = `\$\{row\.userId\}:\$\{row\.mode\}`/)
   assert.match(script, /status: 'ABANDONED', activeKey: null/)
   assert.doesNotMatch(script, /deleteMany/)
+})
+
+// ---------- 长时间游戏：滑动过期 / 原子推进 / 缺失恢复 / 前端自动恢复 ----------
+
+test('滑动过期：真实活跃行为刷新 expiresAt，仅前移不回拨', () => {
+  const service = source('lib/want-listen.ts')
+  const config = source('lib/want-listen-config.ts')
+  // TTL 是「不活动窗口」而非固定总时长上限
+  assert.match(config, /滑动过期/)
+  assert.match(config, /WANT_LISTEN_SESSION_TTL_MS = 2 \* 60 \* 60 \* 1000/)
+  // refreshWantListenExpiry：只对 expiresAt <= now+TTL 的进行中会话前移
+  assert.match(service, /async function refreshWantListenExpiry\(userId: string, sessionId: string, now = new Date\(\)\)/)
+  assert.match(service, /expiresAt: \{ lte: nextExpiry \}/)
+  // 各活跃行为刷新：读状态 / 答题 / 下一题 / 恢复会话
+  assert.match(service, /await refreshWantListenExpiry\(userId, sessionId\)/)
+  assert.match(service, /await refreshWantListenExpiry\(userId, existing\.id, now\)/)
+  assert.match(service, /expiresAt: new Date\(Date\.now\(\) \+ WANT_LISTEN_SESSION_TTL_MS\)/)
+  assert.match(service, /currentQuestion: \{ increment: 1 \},[\s\S]{0,80}expiresAt: new Date\(Date\.now\(\) \+ WANT_LISTEN_SESSION_TTL_MS\)/)
+})
+
+test('下一题原子推进：题目生成失败时 currentQuestion 不会提前推进', () => {
+  const service = source('lib/want-listen.ts')
+  // 推进 + 生成在同一事务（transactionWithRetry）
+  assert.match(service, /const advanced = await transactionWithRetry\(async \(database\) => \{/)
+  assert.match(service, /if \(updated\.count !== 1\) return false/)
+  assert.match(service, /await generateNextQuestion\(database, session, nextPosition\)/)
+  assert.match(service, /if \(!advanced\) return getWantListenSessionState/)
+})
+
+test('当前题缺失自动恢复：IN_PROGRESS 且题目缺失时重建，不改变分数/连击/题号', () => {
+  const service = source('lib/want-listen.ts')
+  assert.match(service, /async function ensureCurrentQuestionExists\(session: SessionWithQuestions/)
+  assert.match(service, /const hasCurrent = session\.WantListenSessionQuestion\.some\(\(question\) => question\.position === session\.currentQuestion\)/)
+  assert.match(service, /await generateNextQuestion\(prisma, session, session\.currentQuestion\)/)
+  // 读状态 / 提示前自动恢复
+  assert.match(service, /session = await ensureCurrentQuestionExists\(session\)/)
+  // 不改变分数/连击：重建逻辑只写题目记录
+  assert.doesNotMatch(service, /ensureCurrentQuestionExists[\s\S]{0,200}score: \{ increment/)
+})
+
+test('前端错误区分：401 才提示重新认证，500/网络自动重试恢复，不结束对局', () => {
+  const game = source('app/games/want-listen/WantListenGame.tsx')
+  // 指数退避重试
+  assert.match(game, /const RETRY_DELAYS = \[500, 1000, 2000\]/)
+  assert.match(game, /NETWORK_ERROR/)
+  // 401 / AUTH_REQUIRED / AUTH_SESSION_EXPIRED → 重新认证（保留游戏状态）
+  assert.match(game, /response\.status === 401 \|\| code === 'AUTH_REQUIRED' \|\| code === 'AUTH_SESSION_EXPIRED'/)
+  assert.match(game, /'AUTH_REQUIRED', response\.status\)/)
+  // 5xx / 429 自动重试
+  assert.match(game, /response\.status >= 500 \|\| response\.status === 429/)
+  // 恢复函数：重新获取 Session，不清空对局
+  assert.match(game, /async function recoverSession\(\)/)
+  assert.match(game, /setSession\(data\)/)
+  // 当前题缺失 → 自动恢复页（不强制重新开始）
+  assert.match(game, /正在恢复当前题目…/)
+  assert.doesNotMatch(game, /当前题目不可用，请重新开始。/)
+  // 到期后先向服务端确认，不本地直接判过期
+  assert.match(game, /滑动续期可能已刷新，不能本地直接判过期/)
+})
+
+test('API-only 活跃：middleware matcher 覆盖想听 API，rolling session 在 API 请求上生效', () => {
+  const middleware = source('middleware.ts')
+  // matcher 覆盖所有非静态路径（含 /api/...）
+  assert.match(middleware, /matcher: \['\/\(\(\?!_next\/static\|_next\/image\|favicon\.ico\|robots\.txt\|manifest\.webmanifest\).*\)'\]/)
+  // 想听 API 路径不在此 public 前缀列表（/api/auth/ 等）→ 会走验证 + 滚动续期
+  assert.match(middleware, /'\/api\/auth\/',/)
+  assert.doesNotMatch(middleware, /\/api\/entertainment\//)
+  // 滚动续期逻辑：剩余 < 15 天时重签（对页面与 API 请求统一生效）
+  assert.match(middleware, /needsRollingRenew/)
+  assert.match(middleware, /renewSessionCookie/)
+  assert.match(middleware, /response\.cookies\.set\(authCookieName, cookie\.token, cookie\.options\)/)
+})
+
+test('过期宽限窗口：expiresAt 刚过在宽限内仍可恢复，超过宽限才 EXPIRED', () => {
+  const service = source('lib/want-listen.ts')
+  const config = source('lib/want-listen-config.ts')
+  assert.match(config, /WANT_LISTEN_EXPIRY_GRACE_MS = 10 \* 60 \* 1000/)
+  // expireSessionIfNeeded：仅 expiresAt <= now - GRACE 判定 EXPIRED
+  assert.match(service, /expiresAt: \{ lte: new Date\(now\.getTime\(\) - WANT_LISTEN_EXPIRY_GRACE_MS\) \}/)
+  // ensureCurrentQuestionExists：超过宽限才不恢复（刚过期仍可重建当前题）
+  assert.match(service, /session\.expiresAt\.getTime\(\) <= now\.getTime\(\) - WANT_LISTEN_EXPIRY_GRACE_MS/)
+  // 场景 A：expiresAt 未来 10 分钟且题目缺失 → 恢复（hasCurrent 判断后重建）
+  assert.match(service, /const hasCurrent = session\.WantListenSessionQuestion\.some/)
+  // 场景 B：刚过 TTL（宽限内）→ 仍 IN_PROGRESS，下次操作 refreshWantListenExpiry 续期
+  assert.match(service, /expiresAt: \{ lte: nextExpiry \}/)
+})
+
+test('长局恢复：200 题 / 27000 分 / 连击 80 场景下 score/streak/correctCount 不变化、不重建对局', () => {
+  const service = source('lib/want-listen.ts')
+  // ensureCurrentQuestionExists 重建题目时不触碰会话成绩字段
+  const recoveryBlock = service.match(/async function ensureCurrentQuestionExists[\s\S]*?^\}/m)?.[0] || ''
+  assert.ok(recoveryBlock, 'ensureCurrentQuestionExists 应存在')
+  assert.doesNotMatch(recoveryBlock, /score:/, '恢复逻辑不应改写 score')
+  assert.doesNotMatch(recoveryBlock, /correctCount:/, '恢复逻辑不应改写 correctCount')
+  assert.doesNotMatch(recoveryBlock, /currentStreak:/, '恢复逻辑不应改写 streak')
+  assert.doesNotMatch(recoveryBlock, /currentQuestion: \{ increment/, '恢复逻辑不应推进题号')
+  assert.doesNotMatch(recoveryBlock, /status: 'COMPLETED'/, '恢复逻辑不应结束对局')
+  // 长局持续活跃：answer/next 刷新 expiresAt（滑动续期），不要求重新登录
+  assert.match(service, /expiresAt: new Date\(Date\.now\(\) \+ WANT_LISTEN_SESSION_TTL_MS\)/)
+  // 连续答题不重建对局：createWantListenSession resume 分支
+  assert.match(service, /await refreshWantListenExpiry\(userId, existing\.id, now\)/)
 })

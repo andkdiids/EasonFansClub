@@ -12,7 +12,7 @@ export default async function AdminWantListenLeaderboardPage() {
         <div>
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">娱乐天空后台</p>
           <h1 className="mt-2 text-3xl font-black text-brand-950">想听排行榜管理</h1>
-          <p className="mt-2 text-sm text-brand-600">查看想听 / 粤语残片 / 防不胜防排行榜，可清除全部、按模式或按用户清除成绩。</p>
+          <p className="mt-2 text-sm text-brand-600">查看想听 / 粤语残片 / 防不胜防排行榜，可补录异常成绩，或清除全部、按模式、按用户清除成绩。</p>
         </div>
         <Link
           href="/admin/entertainment/want-listen"

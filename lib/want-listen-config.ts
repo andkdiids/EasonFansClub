@@ -1,4 +1,10 @@
+// 游戏 Session 滑动过期窗口：不是固定总时长上限，而是「不活动窗口」。
+// 用户每次真实答题/提示/下一题/状态读取都会把 expiresAt 刷新为 now + TTL。
 export const WANT_LISTEN_SESSION_TTL_MS = 2 * 60 * 60 * 1000
+
+// 过期宽限窗口：expiresAt 刚过但在宽限内的会话仍视为可恢复，
+// 用户下一次真实操作会将其滑动续期，避免「差几秒丢整局」。
+export const WANT_LISTEN_EXPIRY_GRACE_MS = 10 * 60 * 1000
 
 // 无尽模式规则（参考听听 ENDLESS）
 export const WANT_LISTEN_BASE_SCORE = 100            // 答对基础分
