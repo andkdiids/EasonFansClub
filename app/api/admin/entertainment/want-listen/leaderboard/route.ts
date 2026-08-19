@@ -1,10 +1,11 @@
 import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import {
-  addWantListenAdminScore,
   clearWantListenAdminLeaderboard,
   findWantListenLeaderboardUser,
   getWantListenAdminOverview,
+  listRecoverableWantListenSessions,
   listWantListenAdminLeaderboard,
+  previewOrApplyWantListenBackfill,
   readWantListenAdminSession,
   WantListenAdminLeaderboardError,
 } from '@/lib/want-listen-admin-leaderboard'
@@ -22,7 +23,7 @@ function handleAdminLeaderboardError(error: unknown, operation: string) {
   return wantListenError('想听排行榜管理暂时不可用，请稍后再试', 500, 'SERVICE_UNAVAILABLE')
 }
 
-/** GET：总览（默认）| 按 UID/昵称查用户（view=user）| 补分榜单行（view=rows）| 读取游戏记录（view=session） */
+/** GET：总览（默认）| 按 UID/昵称查用户（view=user）| 补录榜单行（view=rows）| 读取游戏记录（view=session）| 可恢复记录（view=recoverable） */
 export async function GET(request: Request) {
   const guard = await requireAdmin('entertainment_manage')
   if (!guard.user) return wantListenError('当前管理员无此权限', guard.response.status)
@@ -41,33 +42,35 @@ export async function GET(request: Request) {
     if (params.get('view') === 'session') {
       return wantListenOk(await readWantListenAdminSession(params.get('sessionId') || ''))
     }
+    if (params.get('view') === 'recoverable') {
+      return wantListenOk(await listRecoverableWantListenSessions(params.get('userId') || '', params.get('mode')))
+    }
     return wantListenOk(await getWantListenAdminOverview())
   } catch (error) {
     return handleAdminLeaderboardError(error, 'get')
   }
 }
 
-/** POST：清除排行榜（CLEAR_ALL / CLEAR_MODE / CLEAR_USER）或补分（ADD_SCORE） */
+/** POST：清除排行榜（CLEAR_ALL / CLEAR_MODE / CLEAR_USER）或补录成绩（PREVIEW_BACKFILL 预览 / BACKFILL 确认） */
 export async function POST(request: Request) {
   if (rejectInvalidRequestOrigin(request)) return wantListenError('请求来源校验失败，请刷新后重试', 403)
   const guard = await requireAdmin('entertainment_manage')
   if (!guard.user) return wantListenError('当前管理员无此权限', guard.response.status)
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   try {
-    if (body?.action === 'ADD_SCORE') {
-      const result = await addWantListenAdminScore({
+    if (body?.action === 'PREVIEW_BACKFILL' || body?.action === 'BACKFILL') {
+      const result = await previewOrApplyWantListenBackfill({
         adminId: guard.user.id,
         userId: sanitizeText(body.userId, 100),
         mode: body.mode,
-        period: body.period,
-        score: body.score,
-        correctCount: body.correctCount,
-        maxStreak: body.maxStreak,
-        totalQuestions: body.totalQuestions,
-        completionTimeMs: body.completionTimeMs,
-        achievedAt: body.achievedAt,
-        sourceSessionId: sanitizeText(body.sourceSessionId, 100),
+        type: body.type,
+        sessionId: sanitizeText(body.sessionId, 100),
+        correctDelta: body.correctDelta,
+        wrongDelta: body.wrongDelta,
+        startingStreak: body.startingStreak,
+        playedAt: body.playedAt,
         reason: sanitizeText(body.reason, 200),
+        dryRun: body.action === 'PREVIEW_BACKFILL',
       })
       return wantListenOk({
         ...result,

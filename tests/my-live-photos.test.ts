@@ -147,7 +147,9 @@ test('水印支持中文英文特殊字符、完整UID和长用户名收缩', ()
 
 test('水印字体使用服务器字体回退而不是前端CSS overlay或提交大字体', () => {
   const service = read('lib/my-live-photos.ts')
-  assert.match(service, /font-family="Arial, Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif"/)
+  // 字体由服务器端解析中文字体候选（CJK 优先），SVG 使用解析后的 font-family，而非前端 CSS overlay
+  assert.match(service, /resolveCjkWatermarkFontFamily\(\)/)
+  assert.match(service, /font-family="\$\{fontFamily\}"/)
   assert.match(service, /composite\(\[\{ input: Buffer\.from\(overlay\.svg\)/)
   assert.doesNotMatch(service, /watermarkUsername|watermarkUid/)
 })

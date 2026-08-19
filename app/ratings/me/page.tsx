@@ -16,7 +16,9 @@ function firstParam(value: string | string[] | undefined) {
 export const dynamic = 'force-dynamic'
 
 export default async function MyRatingsPage({ searchParams }: { searchParams: SearchParams }) {
-  const user = await getCurrentUser().catch(() => null)
+  // 不 catch：getCurrentUser 对 DB 异常抛 AuthServiceUnavailableError（→500 页），
+  // 仅对「用户不存在/已禁用」返回 null → 跳登录。绝不能把服务异常当成未登录。
+  const user = await getCurrentUser()
   if (!user) redirect(`/login?next=${encodeURIComponent('/ratings/me')}`)
   const params = await searchParams
   const rawTarget = firstParam(params.target)

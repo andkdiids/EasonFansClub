@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { WANT_LISTEN_MAX_WRONG_COUNT } from '@/lib/want-listen-config'
 import { recordWantListenLeaderboard } from '@/lib/want-listen-leaderboard'
 import { getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod } from '@/lib/want-listen-period'
+import { computeWantListenManualBackfill, validateWantListenScoreConsistency } from '@/lib/want-listen-score'
 
 export class WantListenAdminLeaderboardError extends Error {
   constructor(readonly message: string, readonly status = 400, readonly code = 'ADMIN_LEADERBOARD_ERROR') {
@@ -192,6 +193,7 @@ export async function findWantListenLeaderboardUser(rawQuery: string) {
     },
     totalEntries: await prisma.wantListenLeaderboardEntry.count({ where: { userId: user.id } }),
     scores,
+    recoverableSessions: (await listRecoverableWantListenSessions(user.id)).sessions,
   }
 }
 
@@ -355,12 +357,6 @@ export async function listWantListenAdminLeaderboard(input: { mode: unknown; per
   return { mode, periodType, periodKey: period.periodKey, rows: serialized }
 }
 
-function toInteger(value: unknown, fallback = 0) {
-  if (value === undefined || value === null || value === '') return fallback
-  const parsed = Number(value)
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
-}
-
 function parseAchievedAt(value: unknown) {
   if (value === undefined || value === null || value === '') return new Date()
   const date = new Date(String(value))
@@ -381,6 +377,9 @@ export async function readWantListenAdminSession(rawSessionId: unknown) {
       score: true,
       correctCount: true,
       maxStreak: true,
+      currentStreak: true,
+      wrongCount: true,
+      livesRemaining: true,
       totalQuestions: true,
       completionTimeMs: true,
       startedAt: true,
@@ -400,6 +399,9 @@ export async function readWantListenAdminSession(rawSessionId: unknown) {
     score: session.score,
     correctCount: session.correctCount,
     maxStreak: session.maxStreak,
+    currentStreak: session.currentStreak,
+    wrongCount: session.wrongCount,
+    livesRemaining: session.livesRemaining,
     totalQuestions: session.totalQuestions,
     completionTimeMs: session.completionTimeMs,
     startedAt: session.startedAt.toISOString(),
@@ -416,141 +418,404 @@ export async function readWantListenAdminSession(rawSessionId: unknown) {
   }
 }
 
+// ---------- 想听排行榜补录（统一计分，禁止直接填写分数） ----------
+
+export const WANT_LISTEN_ADMIN_MAX_CORRECT_DELTA = 1000
+export const WANT_LISTEN_ADMIN_MAX_WRONG_DELTA = 1000
+export const WANT_LISTEN_ADMIN_MAX_STARTING_STREAK = 10_000
+
+export type WantListenBackfillType = 'SESSION_RECOVERY' | 'MANUAL_QUESTION_ADJUSTMENT'
+
+function assertBackfillType(value: unknown): WantListenBackfillType {
+  if (value === 'SESSION_RECOVERY') return 'SESSION_RECOVERY'
+  if (value === 'MANUAL_QUESTION_ADJUSTMENT') return 'MANUAL_QUESTION_ADJUSTMENT'
+  throw new WantListenAdminLeaderboardError('请选择补录方式（异常游戏恢复或人工补题）')
+}
+
+function toBackfillInteger(value: unknown, label: string, max: number, min = 1) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new WantListenAdminLeaderboardError(`${label}必须是 ${min}-${max} 的整数`)
+  }
+  return parsed
+}
+
+function affectedPeriodsOf(achievedAt: Date) {
+  return (['DAY', 'WEEK', 'ALL'] as const).map((periodType) => {
+    const period = getWantListenPeriod(periodType, achievedAt)
+    return { periodType, periodKey: period.periodKey }
+  })
+}
+
+type BackfillTx = Prisma.TransactionClient
+
+/** 该用户异常中断（IN_PROGRESS / EXPIRED）的可恢复游戏记录 */
+export async function listRecoverableWantListenSessions(userId: unknown, mode?: unknown) {
+  const targetUserId = String(userId || '').trim()
+  if (!targetUserId) throw new WantListenAdminLeaderboardError('请提供用户 ID')
+  const sessions = await prisma.wantListenSession.findMany({
+    where: {
+      userId: targetUserId,
+      ...(isWantListenAdminMode(mode) ? { mode } : {}),
+      status: { in: ['IN_PROGRESS', 'EXPIRED'] },
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      mode: true,
+      status: true,
+      score: true,
+      correctCount: true,
+      maxStreak: true,
+      totalQuestions: true,
+      currentStreak: true,
+      wrongCount: true,
+      startedAt: true,
+      updatedAt: true,
+      antiCheatStatus: true,
+    },
+  })
+  return {
+    sessions: sessions.map((session) => ({
+      id: session.id,
+      mode: session.mode,
+      status: session.status,
+      score: session.score,
+      correctCount: session.correctCount,
+      maxStreak: session.maxStreak,
+      totalQuestions: session.totalQuestions,
+      currentStreak: session.currentStreak,
+      wrongCount: session.wrongCount,
+      startedAt: session.startedAt.toISOString(),
+      lastActiveAt: session.updatedAt.toISOString(),
+      antiCheatStatus: session.antiCheatStatus,
+    })),
+  }
+}
+
 /**
- * 想听排行榜补分（复用听听补分机制：新增成绩记录 → recordWantListenLeaderboard 聚合）。
+ * 想听排行榜补录统一入口（异常 Session 恢复 / 人工补题）。
  *
- * 数据逻辑为「覆盖取最高」：
- *  - 补录成绩高于该用户当前周期成绩 → 覆盖（补 28770 覆盖原 12000 → 28770）
- *  - 补录成绩不高于现有更高成绩 → 不覆盖（已有 30000 补 28770 → 保持 30000）
- * 周期按「成绩发生时间 achievedAt」计算归属（DAY / WEEK / ALL）。
+ *  - dryRun=true  ：仅计算预览（PREVIEW_BACKFILL），不落库、不写审计日志
+ *  - dryRun=false ：确认补录（BACKFILL）
+ *
+ * 服务端不再接受「直接填写 score」，分数一律由 calculateWantListenBackfillScore
+ * 计算（与前台 scoreForWantListenAnswer 同一套公式），并做一致性校验
+ * （correctCount <= totalQuestions、score 必须能被游戏规则推导）。
  */
-export async function addWantListenAdminScore(input: {
+export async function previewOrApplyWantListenBackfill(input: {
   adminId: string
   userId: string
   mode: unknown
-  period?: unknown
-  score: unknown
-  correctCount?: unknown
-  maxStreak?: unknown
-  totalQuestions?: unknown
-  completionTimeMs?: unknown
-  achievedAt?: unknown
-  sourceSessionId?: unknown
-  reason: unknown
+  type: unknown
+  sessionId?: unknown
+  correctDelta?: unknown
+  wrongDelta?: unknown
+  startingStreak?: unknown
+  playedAt?: unknown
+  reason?: unknown
+  dryRun?: boolean
 }) {
   if (!isWantListenAdminMode(input.mode)) throw new WantListenAdminLeaderboardError('请选择有效的游戏模式')
   const mode = input.mode
-  const score = Number(input.score)
-  if (!Number.isInteger(score) || score <= 0 || score > 10_000_000) throw new WantListenAdminLeaderboardError('请输入有效的补分成绩')
+  const type = assertBackfillType(input.type)
   const reason = String(input.reason || '').trim().slice(0, 200)
-  if (reason.length < 2) throw new WantListenAdminLeaderboardError('请填写补分原因')
-  const achievedAt = parseAchievedAt(input.achievedAt)
-  if (!achievedAt) throw new WantListenAdminLeaderboardError('成绩发生时间无效')
-  const correctCount = toInteger(input.correctCount)
-  const maxStreak = toInteger(input.maxStreak)
-  const totalQuestions = toInteger(input.totalQuestions)
-  const completionTimeMs = input.completionTimeMs === undefined || input.completionTimeMs === null || input.completionTimeMs === ''
-    ? null
-    : toInteger(input.completionTimeMs, 0)
-  const sourceSessionId = String(input.sourceSessionId || '').trim().slice(0, 64) || null
+  const dryRun = input.dryRun === true
+  if (!dryRun && reason.length < 2) throw new WantListenAdminLeaderboardError('请填写补录原因')
 
   return prisma.$transaction(async (tx) => {
     const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
     if (!target) throw new WantListenAdminLeaderboardError('用户不存在', 404, 'USER_NOT_FOUND')
 
-    const candidate = { score, correctCount, maxStreak, totalQuestions, completionTimeMs: completionTimeMs ?? 0, achievedAt }
-    const before: Array<{ periodType: WantListenPeriodType; periodKey: string; score: number }> = []
-    const affected: Array<{ periodType: WantListenPeriodType; periodKey: string; score: number }> = []
-
-    // 按成绩发生时间计算各周期归属，且只覆盖「更高成绩」
-    for (const periodType of ['DAY', 'WEEK', 'ALL'] as const) {
-      const period = getWantListenPeriod(periodType, achievedAt)
-      const existing = await tx.wantListenLeaderboardEntry.findUnique({
-        where: { userId_mode_periodType_periodKey: { userId: input.userId, mode, periodType, periodKey: period.periodKey } },
-        select: { score: true, correctCount: true, maxStreak: true, totalQuestions: true, completionTimeMs: true, achievedAt: true },
-      })
-      if (existing) before.push({ periodType, periodKey: period.periodKey, score: existing.score })
-      if (!existing || isWantListenScoreBetter(candidate, existing)) {
-        affected.push({ periodType, periodKey: period.periodKey, score })
-      }
+    if (type === 'SESSION_RECOVERY') {
+      return recoverWantListenSession(tx, { adminId: input.adminId, userId: input.userId, mode, sessionId: input.sessionId, reason, dryRun })
     }
+    return adjustWantListenManual(tx, {
+      adminId: input.adminId,
+      userId: input.userId,
+      mode,
+      sessionId: input.sessionId,
+      correctDelta: input.correctDelta,
+      wrongDelta: input.wrongDelta,
+      startingStreak: input.startingStreak,
+      playedAt: input.playedAt,
+      reason,
+      dryRun,
+    })
+  })
+}
 
-    if (!affected.length) {
-      // 已有更高或相同成绩：不覆盖（符合「补分不覆盖更高分」）
-      return { mode, before, after: [], applied: false, sourceSessionId: null, reason }
+/** 异常 Session 恢复：直接采用该 Session 权威成绩，不重新计算、不人工输入分数 */
+async function recoverWantListenSession(
+  tx: BackfillTx,
+  input: { adminId: string; userId: string; mode: WantListenMode; sessionId?: unknown; reason: string; dryRun: boolean },
+) {
+  const sessionId = String(input.sessionId || '').trim().slice(0, 64)
+  if (!sessionId) throw new WantListenAdminLeaderboardError('请提供要恢复的游戏记录 Session ID')
+  const session = await tx.wantListenSession.findFirst({ where: { id: sessionId, userId: input.userId, mode: input.mode } })
+  if (!session) throw new WantListenAdminLeaderboardError('未找到该游戏记录', 404, 'SESSION_NOT_FOUND')
+  if (!['IN_PROGRESS', 'EXPIRED', 'COMPLETED'].includes(session.status)) {
+    throw new WantListenAdminLeaderboardError('该游戏记录状态不可恢复', 400, 'SESSION_NOT_RECOVERABLE')
+  }
+
+  const authoritative = {
+    score: session.score,
+    correctCount: session.correctCount,
+    maxStreak: session.maxStreak,
+    totalQuestions: session.totalQuestions,
+  }
+  const validation = validateWantListenScoreConsistency(authoritative, input.mode)
+  if (!validation.ok) {
+    throw new WantListenAdminLeaderboardError(
+      `该游戏记录成绩与计分规则不一致（${validation.reason}），请改用手工补题或先运行 pnpm leaderboard:audit / leaderboard:repair`,
+      400,
+      'INVALID_SCORE_ADJUSTMENT',
+    )
+  }
+
+  // 成绩发生时间以最后活跃时间（updatedAt）为准；恢复不人工指定分数
+  const playedAt = session.updatedAt
+  const affectedPeriods = affectedPeriodsOf(playedAt)
+  const existingEntry = await tx.wantListenLeaderboardEntry.findFirst({
+    where: { userId: input.userId, mode: input.mode },
+    orderBy: [{ score: 'desc' }, { correctCount: 'desc' }, { maxStreak: 'desc' }, { achievedAt: 'asc' }],
+    select: { score: true, correctCount: true, maxStreak: true, totalQuestions: true, completionTimeMs: true, achievedAt: true },
+  })
+  const leaderboardUpdated = !existingEntry
+    || isWantListenScoreBetter(
+      { ...authoritative, completionTimeMs: session.completionTimeMs ?? 0, achievedAt: playedAt },
+      existingEntry,
+    )
+
+  if (input.dryRun) {
+    return {
+      type: 'SESSION_RECOVERY' as const,
+      dryRun: true,
+      applied: true,
+      sessionId: session.id,
+      mode: input.mode,
+      status: session.status,
+      playedAt: playedAt.toISOString(),
+      before: authoritative,
+      after: authoritative,
+      affectedPeriods,
+      leaderboardUpdated,
+      reason: input.reason,
     }
+  }
 
-    // 新增成绩记录（复用/创建补分 session）→ recordWantListenLeaderboard 聚合，不直接改 entry 表
-    let resolvedSessionId = sourceSessionId
-    if (resolvedSessionId) {
-      const source = await tx.wantListenSession.findFirst({
-        where: { id: resolvedSessionId, userId: input.userId },
-        select: { id: true, completionTimeMs: true },
-      })
-      if (!source) throw new WantListenAdminLeaderboardError('未找到该游戏记录', 404, 'SESSION_NOT_FOUND')
-      await tx.wantListenSession.update({
-        where: { id: source.id },
-        data: {
-          score,
-          correctCount,
-          maxStreak,
-          totalQuestions,
-          completionTimeMs: completionTimeMs ?? source.completionTimeMs,
-          completedAt: achievedAt,
-          status: 'COMPLETED',
-          activeKey: null,
-        },
-      })
-    } else {
-      const created = await tx.wantListenSession.create({
-        data: {
-          userId: input.userId,
-          mode,
-          status: 'COMPLETED',
-          currentQuestion: 1,
-          questionCount: null,
-          score,
-          correctCount,
-          maxStreak,
-          totalQuestions,
-          wrongCount: 0,
-          livesRemaining: WANT_LISTEN_MAX_WRONG_COUNT,
-          startedAt: achievedAt,
-          completedAt: achievedAt,
-          completionTimeMs: completionTimeMs ?? null,
-          expiresAt: achievedAt,
-          antiCheatStatus: 'CLEAN', // 管理员补分成绩视为 CLEAN，可进排行榜
-          ipAddress: 'admin-bonus',
-          userAgent: 'admin-bonus',
-        },
-        select: { id: true },
-      })
-      resolvedSessionId = created.id
-    }
-    // recordWantListenLeaderboard 一次处理 DAY / WEEK / ALL 全部周期
-    await recordWantListenLeaderboard(resolvedSessionId, tx)
-
-    await tx.adminActionLog.create({
+  if (session.status !== 'COMPLETED') {
+    await tx.wantListenSession.update({
+      where: { id: session.id },
       data: {
-        adminId: input.adminId,
-        targetUserId: input.userId,
-        action: 'WANT_LISTEN_ADD_SCORE',
-        detail: {
-          mode,
-          before,
-          after: affected,
-          score,
-          correctCount,
-          maxStreak,
-          totalQuestions,
-          completionTimeMs,
-          achievedAt: achievedAt.toISOString(),
-          sourceSessionId: resolvedSessionId,
-          reason,
-        },
+        status: 'COMPLETED',
+        completedAt: playedAt,
+        completionTimeMs: Math.max(0, playedAt.getTime() - session.startedAt.getTime()),
+        activeKey: null,
       },
     })
+  }
+  // 以该 Session 权威数据重新聚合当日 / 本周 / 全部榜
+  await recordWantListenLeaderboard(session.id, tx)
 
-    return { mode, before, after: affected, applied: true, sourceSessionId: resolvedSessionId, reason }
+  await tx.adminActionLog.create({
+    data: {
+      adminId: input.adminId,
+      targetUserId: input.userId,
+      action: 'WANT_LISTEN_SESSION_RECOVERY',
+      detail: {
+        type: 'SESSION_RECOVERY',
+        gameMode: input.mode,
+        sourceSessionId: session.id,
+        operatorId: input.adminId,
+        targetUserId: input.userId,
+        beforeScore: session.score,
+        afterScore: session.score,
+        beforeCorrectCount: session.correctCount,
+        afterCorrectCount: session.correctCount,
+        beforeCompletedCount: session.totalQuestions,
+        afterCompletedCount: session.totalQuestions,
+        beforeMaxStreak: session.maxStreak,
+        afterMaxStreak: session.maxStreak,
+        playedAt: playedAt.toISOString(),
+        affectedPeriods,
+        leaderboardUpdated,
+        reason: input.reason,
+      },
+    },
   })
+
+  return {
+    type: 'SESSION_RECOVERY' as const,
+    dryRun: false,
+    applied: true,
+    sessionId: session.id,
+    mode: input.mode,
+    status: 'COMPLETED',
+    playedAt: playedAt.toISOString(),
+    before: authoritative,
+    after: authoritative,
+    affectedPeriods,
+    leaderboardUpdated,
+    reason: input.reason,
+  }
+}
+
+/** 人工补题：补回答对 / 答错题数，系统按统一计分规则自动计算分数（不得手填分数） */
+async function adjustWantListenManual(
+  tx: BackfillTx,
+  input: {
+    adminId: string
+    userId: string
+    mode: WantListenMode
+    sessionId?: unknown
+    correctDelta?: unknown
+    wrongDelta?: unknown
+    startingStreak?: unknown
+    playedAt?: unknown
+    reason: string
+    dryRun: boolean
+  },
+) {
+  const correctDelta = toBackfillInteger(input.correctDelta, '补回答对题数', WANT_LISTEN_ADMIN_MAX_CORRECT_DELTA)
+  const wrongDelta = toBackfillInteger(input.wrongDelta, '补回答错题数', WANT_LISTEN_ADMIN_MAX_WRONG_DELTA, 0)
+  const playedAt = parseAchievedAt(input.playedAt)
+  if (!playedAt) throw new WantListenAdminLeaderboardError('成绩发生时间无效')
+
+  const sessionId = String(input.sessionId || '').trim().slice(0, 64) || null
+  let baseSession: Awaited<ReturnType<BackfillTx['wantListenSession']['findFirst']>> | null = null
+  if (sessionId) {
+    baseSession = await tx.wantListenSession.findFirst({ where: { id: sessionId, userId: input.userId, mode: input.mode } })
+    if (!baseSession) throw new WantListenAdminLeaderboardError('未找到该游戏记录', 404, 'SESSION_NOT_FOUND')
+  } else {
+    // 未指定 Session：以该用户当前最高成绩对应的 Session（或最近一次有效成绩）为基数
+    const baseEntry = await tx.wantListenLeaderboardEntry.findFirst({
+      where: { userId: input.userId, mode: input.mode },
+      orderBy: [{ score: 'desc' }, { correctCount: 'desc' }, { maxStreak: 'desc' }, { achievedAt: 'asc' }],
+    })
+    if (baseEntry) baseSession = await tx.wantListenSession.findUnique({ where: { id: baseEntry.sessionId } })
+    if (!baseSession) {
+      baseSession = await tx.wantListenSession.findFirst({
+        where: { userId: input.userId, mode: input.mode, status: { in: ['COMPLETED', 'EXPIRED'] } },
+        orderBy: [{ updatedAt: 'desc' }],
+      })
+    }
+  }
+
+  const before = baseSession
+    ? { score: baseSession.score, correctCount: baseSession.correctCount, maxStreak: baseSession.maxStreak, totalQuestions: baseSession.totalQuestions }
+    : { score: 0, correctCount: 0, maxStreak: 0, totalQuestions: 0 }
+  // 已有 Session 时优先自动读取当前连击（不让管理员手填）；无 Session 时才使用输入值（默认 0）
+  const startingStreak = baseSession
+    ? baseSession.currentStreak
+    : toBackfillInteger(input.startingStreak, '补分开始前连击', WANT_LISTEN_ADMIN_MAX_STARTING_STREAK, 0)
+
+  const computed = computeWantListenManualBackfill({ base: before, correctDelta, wrongDelta, startingStreak })
+  if (!computed.validation.ok) {
+    throw new WantListenAdminLeaderboardError(
+      `补录后的成绩与游戏计分规则不一致（${computed.validation.reason}）`,
+      400,
+      'INVALID_SCORE_ADJUSTMENT',
+    )
+  }
+
+  const affectedPeriods = affectedPeriodsOf(playedAt)
+  const summary = {
+    type: 'MANUAL_QUESTION_ADJUSTMENT' as const,
+    mode: input.mode,
+    correctDelta,
+    wrongDelta,
+    startingStreak,
+    before,
+    after: computed.after,
+    afterScore: computed.afterScore,
+    afterCorrect: computed.afterCorrect,
+    afterTotal: computed.afterTotal,
+    afterMaxStreak: computed.afterMaxStreak,
+    compensation: computed.compensation,
+    affectedPeriods,
+    playedAt: playedAt.toISOString(),
+    reason: input.reason,
+  }
+  if (input.dryRun) return { ...summary, dryRun: true, sessionId: baseSession?.id ?? null }
+
+  let sourceSessionId: string
+  if (baseSession) {
+    await tx.wantListenSession.update({
+      where: { id: baseSession.id },
+      data: {
+        score: computed.afterScore,
+        correctCount: computed.afterCorrect,
+        maxStreak: computed.afterMaxStreak,
+        totalQuestions: computed.afterTotal,
+        wrongCount: baseSession.wrongCount + wrongDelta,
+        currentStreak: computed.compensation.endStreak,
+        status: 'COMPLETED',
+        completedAt: playedAt,
+        completionTimeMs: baseSession.completionTimeMs ?? Math.max(0, playedAt.getTime() - baseSession.startedAt.getTime()),
+        activeKey: null,
+      },
+    })
+    sourceSessionId = baseSession.id
+  } else {
+    const created = await tx.wantListenSession.create({
+      data: {
+        userId: input.userId,
+        mode: input.mode,
+        status: 'COMPLETED',
+        currentQuestion: 1,
+        questionCount: null,
+        totalQuestions: computed.afterTotal,
+        currentStreak: computed.compensation.endStreak,
+        maxStreak: computed.afterMaxStreak,
+        wrongCount: wrongDelta,
+        livesRemaining: WANT_LISTEN_MAX_WRONG_COUNT,
+        score: computed.afterScore,
+        correctCount: computed.afterCorrect,
+        startedAt: playedAt,
+        completedAt: playedAt,
+        completionTimeMs: 0,
+        expiresAt: playedAt,
+        antiCheatStatus: 'CLEAN',
+        ipAddress: 'admin-backfill',
+        userAgent: 'admin-backfill',
+      },
+      select: { id: true },
+    })
+    sourceSessionId = created.id
+  }
+  await recordWantListenLeaderboard(sourceSessionId, tx)
+
+  await tx.adminActionLog.create({
+    data: {
+      adminId: input.adminId,
+      targetUserId: input.userId,
+      action: 'WANT_LISTEN_MANUAL_ADJUSTMENT',
+      detail: {
+        type: 'MANUAL_QUESTION_ADJUSTMENT',
+        gameMode: input.mode,
+        sourceSessionId,
+        operatorId: input.adminId,
+        targetUserId: input.userId,
+        beforeScore: before.score,
+        afterScore: computed.afterScore,
+        beforeCorrectCount: before.correctCount,
+        afterCorrectCount: computed.afterCorrect,
+        beforeCompletedCount: before.totalQuestions,
+        afterCompletedCount: computed.afterTotal,
+        beforeMaxStreak: before.maxStreak,
+        afterMaxStreak: computed.afterMaxStreak,
+        correctDelta,
+        wrongDelta,
+        startingStreak,
+        compensation: computed.compensation,
+        playedAt: playedAt.toISOString(),
+        affectedPeriods,
+        reason: input.reason,
+      },
+    },
+  })
+
+  return { ...summary, dryRun: false, sessionId: sourceSessionId }
 }

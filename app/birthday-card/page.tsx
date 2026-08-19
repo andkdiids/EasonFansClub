@@ -11,6 +11,7 @@ export default async function BirthdayCardPage() {
   if (!user) redirect('/login?next=/birthday-card')
 
   // 生日卡片仅本人可看，且仅在生日当天开启；生日公开开关只控制是否展示生日日期，不影响卡片打开。
+  // 生日资料查询不 catch：数据库异常应返回 500，绝不能当「未登录」跳登录页
   const fresh = await prisma.user
     .findUnique({
       where: { id: user.id },
@@ -23,7 +24,6 @@ export default async function BirthdayCardPage() {
         birthdayPublic: true,
       },
     })
-    .catch(() => null)
   if (!fresh) redirect('/login?next=/birthday-card')
 
   const { month, day } = getTodayMonthDay()

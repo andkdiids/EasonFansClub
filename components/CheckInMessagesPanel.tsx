@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { isSessionDefinitivelyInvalid, recordForceLogout } from '@/lib/client-auth'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DailyMessageActions } from '@/components/DailyMessageActions'
 import { FriendFollowButton } from '@/components/FriendFollowButton'
@@ -244,6 +245,13 @@ export function CheckInMessagesPanel({
       const data = await response.json().catch(() => ({}))
 
       if (response.status === 401) {
+        // 二次确认：仅当权威 Session 接口确认失效才登出
+        const invalid = await isSessionDefinitivelyInvalid()
+        if (!invalid) {
+          setError('请求失败，请稍后重试。')
+          return
+        }
+        recordForceLogout('SESSION_INVALID', '/api/checkin/messages', 401)
         window.location.href = '/login'
         return
       }
