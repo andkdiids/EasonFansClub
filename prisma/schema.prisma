@@ -3246,6 +3246,8 @@ model User {
   WantListenStats                                        WantListenStats[]
   WantListenLeaderboardEntry                             WantListenLeaderboardEntry[]
   GameAntiCheatLog                                       GameAntiCheatLog[]
+  LeaderboardAdminLog_LeaderboardAdminLogAdminToUser     LeaderboardAdminLog[]          @relation("LeaderboardAdminLogAdmin")
+  LeaderboardAdminLog_LeaderboardAdminLogTargetToUser    LeaderboardAdminLog[]          @relation("LeaderboardAdminLogTarget")
   UndercoverRoom_UndercoverRoomHost                      UndercoverRoom[]               @relation("UndercoverRoomHost")
   UndercoverRoomPlayer                                   UndercoverRoomPlayer[]
   UndercoverMatchPlayer                                  UndercoverMatchPlayer[]
@@ -4002,4 +4004,23 @@ model NicknameViolationLog {
   createdAt            DateTime  @default(now())
 
   @@index([userId])
+}
+
+model LeaderboardAdminLog {
+  id            String   @id @default(cuid())
+  adminId       String?  // 管理员被删除后置空，审计信息由下方快照字段保留
+  action        String   // CLEAR_ALL / CLEAR_MODE / CLEAR_USER
+  targetUserId  String?
+  gameType      String?  // WANT_LISTEN / CANTONESE_FRAGMENT / FALSE_TITLE / ALL
+  deletedCount  Int      @default(0)
+  reason        String?
+  adminUid      Int?     // 操作管理员快照
+  adminNickname String?  @db.VarChar(64)
+  adminUsername String?  @db.VarChar(64)
+  createdAt     DateTime @default(now())
+  Admin         User?    @relation("LeaderboardAdminLogAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+  TargetUser    User?    @relation("LeaderboardAdminLogTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([adminId, createdAt])
+  @@index([action, createdAt])
 }

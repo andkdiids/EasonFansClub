@@ -67,6 +67,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/entertainment/guess-song/leaderboard': 'entertainment_manage',
   '/admin/entertainment/guess-song/duel': 'entertainment_manage',
   '/admin/entertainment/want-listen': 'entertainment_manage',
+  '/admin/entertainment/want-listen/leaderboard': 'entertainment_manage',
   '/admin/entertainment/undercover-star': 'entertainment_manage',
   '/admin/feedback': 'feedback_manage',
   '/admin/changelog': 'changelog_manage',

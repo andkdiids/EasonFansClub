@@ -94,6 +94,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/entertainment/guess-song/duel', title: '听听·对决管理', desc: '查看实时 1v1 对决、结算、断线与风控审计。' },
       { href: '/admin/entertainment/guess-song#game-config', title: '游戏相关配置', desc: '沿用听听管理页中的游戏配置入口。' },
       { href: '/admin/entertainment/want-listen', title: '想听', desc: '管理想听开关、三种模式、假歌名库与基础数据概览。' },
+      { href: '/admin/entertainment/want-listen/leaderboard', title: '想听排行榜', desc: '管理想听、粤语残片、防不胜防排行榜成绩。' },
       { href: '/admin/entertainment/undercover-star', title: '卧底巨星', desc: '管理房间制多人游戏开关、词组难度、分类与使用统计。' },
       { href: '/admin/music/songs', title: '曲库管理', desc: '从 EasMusic 歌曲库维护游戏可用曲目。' },
     ],
