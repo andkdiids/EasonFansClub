@@ -19,11 +19,12 @@ type WantListenScore = {
 export async function recordWantListenLeaderboard(sessionId: string, database: Database = prisma) {
   const session = await database.wantListenSession.findUnique({
     where: { id: sessionId },
-    select: { id: true, userId: true, mode: true, status: true, score: true, correctCount: true, maxStreak: true, totalQuestions: true, completionTimeMs: true, completedAt: true, antiCheatStatus: true },
+    select: { id: true, userId: true, mode: true, status: true, score: true, correctCount: true, maxStreak: true, totalQuestions: true, completionTimeMs: true, completedAt: true, antiCheatStatus: true, excludedFromLeaderboard: true },
   })
   if (!session || session.status !== 'COMPLETED' || !session.completedAt || session.completionTimeMs === null) return
-  // 只有 antiCheatStatus = CLEAN 的成绩才进入排行榜（反作弊过滤）
+  // 只有 antiCheatStatus = CLEAN 且未被管理员排除的成绩才进入排行榜
   if (session.antiCheatStatus !== 'CLEAN') return
+  if (session.excludedFromLeaderboard) return
 
   const score: WantListenScore = {
     score: session.score,
@@ -114,8 +115,8 @@ export async function getWantListenLeaderboard(input: {
     mode: input.mode,
     periodType,
     periodKey: period.periodKey,
-    // 只有 antiCheatStatus = CLEAN 的场次才进入排行榜
-    WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const } },
+    // 只有 antiCheatStatus = CLEAN 且未被管理员排除的场次才进入排行榜
+    WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const, excludedFromLeaderboard: false } },
   }
   const rows = await prisma.wantListenLeaderboardEntry.findMany({
     where,
@@ -152,7 +153,7 @@ export async function getWantListenLeaderboard(input: {
         mode: input.mode,
         periodType,
         periodKey: period.periodKey,
-        WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const } },
+        WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const, excludedFromLeaderboard: false } },
       },
       include: {
         User: {
@@ -184,3 +185,30 @@ export async function getWantListenLeaderboard(input: {
 }
 
 export { compareWantListenScores }
+
+/**
+ * 重新聚合某用户在某模式下的全部排行榜成绩（DAY / WEEK / ALL 各自按时间范围取剩余合法 Session 的最高记录）。
+ * 用于「精确删除某条成绩」后，让该用户的其他合法 Session 自动补位，而不影响其他用户 / 其他模式。
+ *
+ * 做法：先删除该 (userId, mode) 的全部 entry，再对每一条「仍符合条件」的 Session 重新聚合；
+ * 某周期若无剩余合法 Session，则该周期的 entry 自然消失。
+ */
+export async function recomputeUserWantListenLeaderboard(userId: string, mode: WantListenMode, database: Database = prisma) {
+  const eligibleSessions = await database.wantListenSession.findMany({
+    where: {
+      userId,
+      mode,
+      status: 'COMPLETED',
+      completedAt: { not: null },
+      completionTimeMs: { not: null },
+      antiCheatStatus: 'CLEAN',
+      excludedFromLeaderboard: false,
+    },
+    select: { id: true },
+  })
+  // 先清掉该用户该模式所有周期的成绩，再按剩余合法 Session 重新聚合（保证被排除 Session 不会残留）
+  await database.wantListenLeaderboardEntry.deleteMany({ where: { userId, mode } })
+  for (const session of eligibleSessions) {
+    await recordWantListenLeaderboard(session.id, database)
+  }
+}

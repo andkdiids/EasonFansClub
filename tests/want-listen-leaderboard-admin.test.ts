@@ -77,8 +77,15 @@ test('5/删除只影响排行榜：服务不触碰会话/统计/用户/反作弊
   assert.match(service, /仅 WantListenLeaderboardEntry/)
 })
 
-test('6/不提供直接 DELETE API，统一走 POST action', () => {
-  assert.doesNotMatch(route, /export async function DELETE/)
+test('6/DELETE 精确删除成绩接口存在且受管理员鉴权保护，POST 仍统一走 action', () => {
+  // DELETE 方法已合法提供，用于精确删除单条成绩
+  assert.match(route, /export async function DELETE\(request: Request\)/)
+  // DELETE 必须做来源校验 + 管理员权限校验
+  assert.match(route, /export async function DELETE[\s\S]*?rejectInvalidRequestOrigin\(request\)/)
+  assert.match(route, /export async function DELETE[\s\S]*?requireAdmin\('entertainment_manage'\)/)
+  // 精确删除的查询参数入口
+  assert.match(route, /deleteWantListenUserScore/)
+  // POST 仍统一通过 body?.action 分发（清除/补录/删除成绩）
   assert.match(route, /CLEAR_ALL \/ CLEAR_MODE \/ CLEAR_USER/)
   assert.match(route, /body\?\.action/)
 })

@@ -61,14 +61,30 @@ export function isWantListenModeEnabled(config: WantListenConfig, mode: WantList
 /**
  * 无尽模式计分：答对基础分 + 每连续 10 题连击奖励。
  * 最高分由「总答对数量 + 连续答题表现」决定，不再有 20 题满分上限。
+ *
+ * @param hintsUsed 本题已使用的提示数量（0-4）。提示会降低本题基础得分：
+ *   0 提示 → 100，1 → 75，2 → 50，3 → 25，4 → 0。
+ *   连击奖励（+270）仅在「未使用任何提示」时生效，防止用提示低成本维持连击后继续吃奖励。
+ *   前台真实结算、后台补题、audit / repair 一致性校验统一复用此函数，禁止另写一套公式。
  */
-export function scoreForWantListenAnswer(correct: boolean, nextStreak: number) {
+export function scoreForWantListenAnswer(correct: boolean, nextStreak: number, hintsUsed = 0) {
   if (!correct) return 0
-  const comboBonus = nextStreak > 0 && nextStreak % WANT_LISTEN_ENDLESS_COMBO_INTERVAL === 0
+  const used = Math.max(0, Math.floor(hintsUsed || 0))
+  const base = Math.max(0, WANT_LISTEN_BASE_SCORE - used * 25)
+  const comboBonus = used === 0 && nextStreak > 0 && nextStreak % WANT_LISTEN_ENDLESS_COMBO_INTERVAL === 0
     ? WANT_LISTEN_ENDLESS_COMBO_BONUS
     : 0
-  return WANT_LISTEN_BASE_SCORE + comboBonus
+  return base + comboBonus
 }
+
+/** 提示后的本题基础得分（不含连击奖励）：0/1/2/3/4 提示 → 100/75/50/25/0 */
+export function wantListenHintReducedBaseScore(hintsUsed: number) {
+  const used = Math.max(0, Math.floor(hintsUsed || 0))
+  return Math.max(0, WANT_LISTEN_BASE_SCORE - used * 25)
+}
+
+/** 想听模式单题最多提示次数 */
+export const WANT_LISTEN_MAX_HINTS = 4
 
 /** 无尽模式难度循环：每 15 题一轮 EASY→NORMAL→HARD */
 export function difficultyForQuestion(position: number) {

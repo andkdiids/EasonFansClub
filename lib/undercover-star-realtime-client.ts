@@ -65,6 +65,11 @@ export class UndercoverStarRealtimeClient {
     return true
   }
 
+  /** 请求一次服务端快照；客户端永远不直接改写 phase。 */
+  syncMatchState() {
+    this.resync(this.generation)
+  }
+
   private connect(generation: number) {
     if (generation !== this.generation || typeof window === 'undefined') return
     this.options.onStatus?.('connecting')

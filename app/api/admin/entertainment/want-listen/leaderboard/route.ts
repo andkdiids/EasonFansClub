@@ -1,6 +1,7 @@
 import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import {
   clearWantListenAdminLeaderboard,
+  deleteWantListenUserScore,
   findWantListenLeaderboardUser,
   getWantListenAdminOverview,
   listRecoverableWantListenSessions,
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
   }
 }
 
-/** POST：清除排行榜（CLEAR_ALL / CLEAR_MODE / CLEAR_USER）或补录成绩（PREVIEW_BACKFILL 预览 / BACKFILL 确认） */
+/** POST：清除排行榜（CLEAR_ALL / CLEAR_MODE / CLEAR_USER）、删除单条成绩（DELETE_SCORE）或补录成绩（PREVIEW_BACKFILL 预览 / BACKFILL 确认） */
 export async function POST(request: Request) {
   if (rejectInvalidRequestOrigin(request)) return wantListenError('请求来源校验失败，请刷新后重试', 403)
   const guard = await requireAdmin('entertainment_manage')
@@ -78,6 +79,20 @@ export async function POST(request: Request) {
         admin: { uid: guard.user.uid, nickname: guard.user.nickname },
       })
     }
+    if (body?.action === 'DELETE_SCORE') {
+      const result = await deleteWantListenUserScore({
+        adminId: guard.user.id,
+        userId: sanitizeText(body.userId, 100),
+        mode: body.mode,
+        sessionId: sanitizeText(body.sessionId, 100),
+        reason: sanitizeText(body.reason, 200),
+      })
+      return wantListenOk({
+        ...result,
+        operatedAt: new Date().toISOString(),
+        admin: { uid: guard.user.uid, nickname: guard.user.nickname },
+      })
+    }
     const result = await clearWantListenAdminLeaderboard({
       adminId: guard.user.id,
       adminUid: guard.user.uid,
@@ -95,5 +110,29 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     return handleAdminLeaderboardError(error, 'post')
+  }
+}
+
+/** DELETE：精确删除某用户的单条排行榜成绩（复用 POST 的 DELETE_SCORE 鉴权与逻辑） */
+export async function DELETE(request: Request) {
+  if (rejectInvalidRequestOrigin(request)) return wantListenError('请求来源校验失败，请刷新后重试', 403)
+  const guard = await requireAdmin('entertainment_manage')
+  if (!guard.user) return wantListenError('当前管理员无此权限', guard.response.status)
+  const params = new URL(request.url).searchParams
+  try {
+    const result = await deleteWantListenUserScore({
+      adminId: guard.user.id,
+      userId: sanitizeText(params.get('userId') || '', 100),
+      mode: params.get('mode'),
+      sessionId: sanitizeText(params.get('sessionId') || '', 100),
+      reason: sanitizeText(params.get('reason') || '', 200),
+    })
+    return wantListenOk({
+      ...result,
+      operatedAt: new Date().toISOString(),
+      admin: { uid: guard.user.uid, nickname: guard.user.nickname },
+    })
+  } catch (error) {
+    return handleAdminLeaderboardError(error, 'delete')
   }
 }

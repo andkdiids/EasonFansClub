@@ -115,6 +115,18 @@ type SessionRead = {
   user: { id: string; uid: number; nickname: string; avatarUrl: string }
 }
 
+type DeleteResult = {
+  deletedSessionId: string
+  mode: Mode
+  before: ScoreState
+  periodsAffected: Array<{ periodType: 'DAY' | 'WEEK' | 'ALL'; periodKey: string }>
+  after: Array<{ periodType: string; periodKey: string; score: number | null }>
+  targetUserId: string
+  uid: number
+  nickname: string
+  reason: string
+}
+
 const MODE_LABELS: Record<Mode, string> = {
   WANT_LISTEN: '想听',
   CANTONESE_FRAGMENT: '粤语残片',
@@ -184,6 +196,10 @@ export function WantListenLeaderboardManager() {
   const [sessionIdInput, setSessionIdInput] = useState('')
   const [sessionRead, setSessionRead] = useState<SessionRead | null>(null)
   const [sessionReading, setSessionReading] = useState(false)
+  // 精确删除某用户的单条排行榜成绩（标记 source Session 排除，而不是清空整个排行榜）
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -500,6 +516,67 @@ export function WantListenLeaderboardManager() {
     )
   }
 
+  function renderDeleteConfirm(row: BonusRow) {
+    return (
+      <div className="mt-3 rounded-lg border border-red-200 bg-red-50/60 p-3 text-xs text-slate-700">
+        <p className="font-black text-red-700">确认删除该用户的这条排行榜成绩？</p>
+        <div className="mt-2 grid gap-1 rounded-lg border border-slate-200 bg-white p-3 leading-5">
+          <p><span className="text-slate-500">用户昵称：</span><b>{row.displayName}</b></p>
+          <p><span className="text-slate-500">UID / E院 ID：</span><b>{row.uid}</b></p>
+          <p><span className="text-slate-500">模式：</span><b>{MODE_LABELS[row.mode]}</b></p>
+          <p><span className="text-slate-500">当前分数：</span><b>{row.score} 分</b></p>
+          <p><span className="text-slate-500">成绩时间：</span><b>{new Date(row.achievedAt).toLocaleString()}</b></p>
+        </div>
+        <p className="mt-2 text-slate-500">删除后仅重新计算该用户受影响的排行榜，不影响其他用户、其他模式，也不会清除游戏历史与答题记录。</p>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="font-bold text-slate-600">删除原因
+            <input value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} maxLength={200} placeholder="成绩异常需剔除" className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" />
+          </label>
+          <button type="button" onClick={() => void submitDelete(row)} disabled={deleteBusy} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{deleteBusy ? '处理中…' : '确认删除该成绩'}</button>
+          <button type="button" onClick={() => { setDeletingId(null); setDeleteReason('') }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">取消</button>
+        </div>
+      </div>
+    )
+  }
+
+  function submitDelete(row: BonusRow) {
+    if (deleteReason.trim().length < 2) {
+      setError('请填写删除原因')
+      return
+    }
+    if (!row.sessionId) {
+      setError('该成绩缺少对应的游戏记录，无法精确删除')
+      return
+    }
+    setDeleteBusy(true)
+    setError('')
+    setMessage('')
+    void (async () => {
+      try {
+        const result = await request<DeleteResult>('/api/admin/entertainment/want-listen/leaderboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'DELETE_SCORE',
+            userId: row.userId,
+            mode: bonusMode,
+            sessionId: row.sessionId,
+            reason: deleteReason.trim(),
+          }),
+        })
+        setMessage(`已删除 ${result.nickname}（UID ${result.uid}）的该条成绩（原 ${result.before.score} 分）；该用户受影响榜单已按剩余合法成绩重新计算。`)
+        setDeletingId(null)
+        setDeleteReason('')
+        await loadBonus()
+        if (userResult) void searchUser({ preventDefault: () => undefined } as FormEvent)
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : '删除失败')
+      } finally {
+        setDeleteBusy(false)
+      }
+    })()
+  }
+
   return (
     <div className="mt-6 space-y-6">
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div> : null}
@@ -672,9 +749,13 @@ export function WantListenLeaderboardManager() {
                       <p className="text-xs text-slate-500">{row.score} 分 · 答对 {row.correctCount} · 最高连击 {row.maxStreak} · 完成 {row.totalQuestions} 题 · {row.sessionStatus || '—'}</p>
                     </div>
                   </div>
-                  <button type="button" onClick={() => adjusting ? setAdjustingId(null) : openBonus(row)} disabled={busy} className="rounded-lg bg-brand-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{adjusting ? '取消补录' : '补录成绩'}</button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => adjusting ? setAdjustingId(null) : openBonus(row)} disabled={busy || deletingId === row.id} className="rounded-lg bg-brand-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{adjusting ? '取消补录' : '补录成绩'}</button>
+                    <button type="button" onClick={() => { setDeletingId(deletingId === row.id ? null : row.id); setDeleteReason('') }} disabled={busy || adjusting} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-black text-red-600 hover:bg-red-50 disabled:opacity-50">{deletingId === row.id ? '取消删除' : '删除成绩'}</button>
+                  </div>
                 </div>
                 {adjusting ? renderBackfillForm(row) : null}
+                {deletingId === row.id ? renderDeleteConfirm(row) : null}
               </article>
             )
           })}

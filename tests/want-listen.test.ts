@@ -396,7 +396,8 @@ test('想听协议由服务端保存提示等级、答案和最终结算，客�
   const sessionRoute = source('app/api/entertainment/want-listen/sessions/route.ts')
   assert.match(source('prisma/schema.prisma'), /hintLevel\s+Int\s+@default\(1\)/)
   assert.match(service, /current\.hintLevel/)
-  assert.match(service, /scoreForWantListenAnswer\(isCorrect, nextStreak\)/)
+  // 最终结算使用服务端权威提示数（hintsUsed = current.hintLevel - 1），不信任客户端
+  assert.match(service, /scoreForWantListenAnswer\(isCorrect, nextStreak, current\.hintLevel - 1\)/)
   assert.match(service, /where: \{ id: current\.id, answeredAt: null \}/)
   assert.doesNotMatch(sessionRoute, /correctOptionKey|correctSongId|correctLyric/)
   assert.doesNotMatch(game, /new Audio\(|AudioContext|<audio\b|\.play\(/u)

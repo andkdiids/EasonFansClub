@@ -15,12 +15,13 @@ import {
   UNDERCOVER_MIN_PLAYERS,
   UNDERCOVER_ROLE_REVEAL_MS,
   UNDERCOVER_VOTING_MS,
+  THINKING_DURATION_MS,
   isUndercoverCategory,
   isUndercoverDifficulty,
 } from '../lib/undercover-star-config'
 import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '../lib/undercover-star-client-state'
 import { matchSnapshot, privateState, type MatchRow } from '../lib/undercover-star'
-import type { UndercoverFinalPlayer, UndercoverFinalResult, UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomState } from '../lib/undercover-star-protocol'
+import type { UndercoverFinalResult, UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomState } from '../lib/undercover-star-protocol'
 
 const root = join(process.cwd())
 
@@ -82,6 +83,7 @@ test('undercover configuration enforces the first-version player, category, diff
   assert.equal(UNDERCOVER_MAX_PLAYERS, 4)
   assert.equal(UNDERCOVER_ROLE_REVEAL_MS, 45_000)
   assert.equal(UNDERCOVER_DESCRIPTION_MS, 60_000)
+  assert.equal(THINKING_DURATION_MS, 15_000)
   assert.equal(UNDERCOVER_VOTING_MS, 45_000)
   assert.equal(UNDERCOVER_GUESS_MS, 30_000)
   assert.equal(isUndercoverCategory('SONG'), true)
@@ -397,6 +399,15 @@ test('PLAYING + DESCRIPTION: privateState 不包含 role', () => {
   assert.equal(state.word, '苹果')
 })
 
+test('PLAYING + THINKING: 保留本轮思考状态且禁止描述/投票', () => {
+  const match = makeMatch({ phase: 'THINKING', phaseDeadline: new Date('2026-08-20T10:00:15.000Z') })
+  const state = privateState(match, 'u1')
+  assert.equal(state.phase, 'THINKING')
+  assert.equal(state.canDescribe, false)
+  assert.equal(state.canVote, false)
+  assert.equal(state.phaseDeadline, '2026-08-20T10:00:15.000Z')
+})
+
 test('PLAYING + VOTE: privateState 不包含 role', () => {
   const match = makeMatch({ phase: 'VOTING' })
   const state = privateState(match, 'u1')
@@ -405,7 +416,7 @@ test('PLAYING + VOTE: privateState 不包含 role', () => {
 })
 
 test('PLAYING reconnect（任何阶段）: privateState 不包含 role', () => {
-  for (const phase of ['ROLE_REVEAL', 'DESCRIBING', 'VOTING', 'TIE_VOTING', 'UNDERCOVER_GUESS']) {
+  for (const phase of ['ROLE_REVEAL', 'DESCRIBING', 'THINKING', 'VOTING', 'TIE_VOTING', 'UNDERCOVER_GUESS']) {
     const match = makeMatch({ phase })
     const reconnected = privateState(match, 'u2')
     assert.equal(reconnected.role, undefined, `reconnect during PLAYING/${phase} must not leak role`)

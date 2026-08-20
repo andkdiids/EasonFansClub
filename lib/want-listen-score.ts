@@ -128,23 +128,45 @@ export function validateWantListenScoreConsistency(
   }
   if (maxStreak < 1) return { ok: false, reason: '有答对题数时最高连击至少为 1' }
 
-  const baseScore = correctCount * WANT_LISTEN_BASE_SCORE
-  if (score < baseScore) return { ok: false, reason: '分数低于答对题数对应的基础分' }
-  const remainder = score - baseScore
-  if (remainder % WANT_LISTEN_ENDLESS_COMBO_BONUS !== 0) {
-    return { ok: false, reason: `分数与连击奖励规则不符（应为每题 ${WANT_LISTEN_BASE_SCORE} 分 + 每连续 ${WANT_LISTEN_ENDLESS_COMBO_INTERVAL} 题 +${WANT_LISTEN_ENDLESS_COMBO_BONUS} 分）` }
-  }
-  const milestones = remainder / WANT_LISTEN_ENDLESS_COMBO_BONUS
-  const minMilestones = maxStreak >= WANT_LISTEN_ENDLESS_COMBO_INTERVAL
-    ? Math.floor(maxStreak / WANT_LISTEN_ENDLESS_COMBO_INTERVAL)
-    : 0
-  const maxMilestones = maxStreak >= WANT_LISTEN_ENDLESS_COMBO_INTERVAL
-    ? Math.floor(maxStreak / WANT_LISTEN_ENDLESS_COMBO_INTERVAL) + Math.floor((correctCount - maxStreak) / WANT_LISTEN_ENDLESS_COMBO_INTERVAL)
-    : 0
-  if (milestones < minMilestones || milestones > maxMilestones) {
-    return { ok: false, reason: `连击奖励次数 ${milestones} 超出可行区间 [${minMilestones}, ${maxMilestones}]` }
+  // 分数上限校验：提示会降低本题得分，因此不再要求 score === correctCount*100 + 连击奖励；
+  // 只需保证不超过「答对题数对应的理论最高分（含连击奖励）」，足以拦截凭空捏造的高分（如 28770/64 题）。
+  const maxMilestones = Math.floor(correctCount / WANT_LISTEN_ENDLESS_COMBO_INTERVAL)
+  const maxPossibleScore = correctCount * WANT_LISTEN_BASE_SCORE + maxMilestones * WANT_LISTEN_ENDLESS_COMBO_BONUS
+  if (score > maxPossibleScore) {
+    return { ok: false, reason: `分数超出该答对题数可能达到的最高分（${maxPossibleScore}），可能存在异常` }
   }
   return { ok: true }
+}
+
+/**
+ * 根据历史答题记录（每题 awardedScore / isCorrect）重算单局成绩。
+ * 由于 awardedScore 已包含提示扣分与连击奖励，sum 即可还原 Session.score，
+ * 与「是否使用过提示」无关，适合 audit / repair 对账。
+ */
+export function sumWantListenSessionQuestions(questions: Array<{
+  answeredAt: Date | null
+  isCorrect: boolean | null
+  awardedScore: number
+  hintLevel?: number
+}>): WantListenScoreState {
+  let score = 0
+  let correctCount = 0
+  let totalQuestions = 0
+  let maxStreak = 0
+  let streak = 0
+  for (const question of questions) {
+    if (!question.answeredAt) continue
+    totalQuestions += 1
+    if (question.isCorrect) {
+      correctCount += 1
+      streak += 1
+      if (streak > maxStreak) maxStreak = streak
+      score += question.awardedScore
+    } else {
+      streak = 0
+    }
+  }
+  return { score, correctCount, maxStreak, totalQuestions }
 }
 
 /**

@@ -2,9 +2,9 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { getTodayEventDateKey, isTodayEventSource, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
-import { storedImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { parseTodayImageInput } from '@/lib/today-image-url'
 
 type RouteContext = { params: Promise<{ eventId: string }> }
 
@@ -37,6 +37,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (body?.source !== undefined && isTodayEventSource(body.source) === false && body?.reference === undefined && typeof body.source !== 'string') {
     return NextResponse.json({ message: '来源格式无效' }, { status: 400 })
   }
+  const imageInput = parseTodayImageInput(body?.imageUrl, guard.user.id)
+  if (!imageInput.valid) return NextResponse.json({ message: '图片无效，请重新选择图片' }, { status: 400 })
   const updated = await prisma.todayEvent.update({
     where: { id: eventId },
     data: {
@@ -44,7 +46,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       ...(body?.type !== undefined ? { type: body.type } : {}),
       ...(body?.title !== undefined ? { title: nextTitle } : {}),
       ...(body?.content !== undefined ? { content: nextContent } : {}),
-      ...(body?.imageUrl !== undefined ? { imageUrl: storedImageUrl(sanitizeText(body.imageUrl, 1000)) } : {}),
+      ...(imageInput.provided ? { imageUrl: imageInput.value } : {}),
       ...(sourceReference !== undefined ? { reference: sanitizeText(sourceReference, 500) || null } : {}),
       ...(isTodayEventSource(body?.source) ? { source: body.source } : {}),
       ...(status !== undefined ? { status } : {}),

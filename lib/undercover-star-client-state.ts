@@ -9,6 +9,7 @@ export function canApplyUndercoverSnapshot(
   if (current.phase === 'FINISHED' && next.phase !== 'FINISHED') return false
   if (next.round < current.round) return false
   if (next.revision < current.revision) return false
+  if (next.revision === current.revision && next.phase !== current.phase) return false
   return true
 }
 
@@ -20,6 +21,7 @@ export function canApplyUndercoverPrivateState(
   if (current && current.phase === 'FINISHED' && next.phase !== 'FINISHED') return false
   if (current && next.round < current.round) return false
   if (current && next.revision < current.revision) return false
+  if (current && next.revision === current.revision && next.phase !== current.phase) return false
   return true
 }
 

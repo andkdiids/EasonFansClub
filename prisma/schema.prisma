@@ -1127,6 +1127,7 @@ model WantListenSession {
   expiresAt                  DateTime
   antiCheatStatus            GameAntiCheatStatus          @default(CLEAN)
   antiCheatReasons           Json?
+  excludedFromLeaderboard    Boolean                      @default(false) // 管理员精确删除某条成绩后标记：保留游戏历史，但不再参与排行榜聚合
   ipAddress                  String?
   userAgent                  String?
   createdAt                  DateTime                     @default(now())
@@ -1141,6 +1142,7 @@ model WantListenSession {
   @@index([userId, completedAt])
   @@index([createdAt, userId])
   @@index([antiCheatStatus, status, completedAt])
+  @@index([excludedFromLeaderboard, status, completedAt])
 }
 
 model WantListenSessionQuestion {
@@ -3636,6 +3638,7 @@ enum UndercoverMatchStatus {
 enum UndercoverMatchPhase {
   ROLE_REVEAL
   DESCRIBING
+  THINKING
   VOTING
   TIE_VOTING
   UNDERCOVER_GUESS
@@ -3675,6 +3678,7 @@ enum UndercoverFinishReason {
   UNDERCOVER_GUESS_CORRECT
   UNDERCOVER_GUESS_WRONG
   UNDERCOVER_GUESS_TIMEOUT
+  UNDERCOVER_EXIT
 }
 
 enum MediaType {

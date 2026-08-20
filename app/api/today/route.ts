@@ -3,9 +3,9 @@ import { getCurrentUser } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { storedImageUrl } from '@/lib/images'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { getTodayMonthDay, isTodayEventType, parseTodayDate } from '@/lib/today'
+import { parseTodayImageInput } from '@/lib/today-image-url'
 import { getTodayEventRecords } from '@/lib/today-events'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
@@ -31,7 +31,9 @@ export async function POST(request: Request) {
   const type = body?.type
   const title = sanitizeText(body?.title, 160)
   const content = sanitizeText(body?.content, 10_000)
-  const imageUrl = storedImageUrl(sanitizeText(body?.imageUrl, 1000))
+  const imageInput = parseTodayImageInput(body?.imageUrl, guard.user.id)
+  if (!imageInput.valid) return NextResponse.json({ message: '图片无效，请重新选择图片' }, { status: 400 })
+  const imageUrl = imageInput.value
   const reference = sanitizeText(body?.reference ?? body?.source, 500)
   if ((await checkBannedWords(`${title}\n${content}`)).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })

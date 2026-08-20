@@ -24,6 +24,7 @@ import {
   UNDERCOVER_ONLINE_WINDOW_MS,
   UNDERCOVER_ROLE_REVEAL_MS,
   UNDERCOVER_SETTING_KEYS,
+  THINKING_DURATION_MS,
   UNDERCOVER_VOTING_MS,
   UNDERCOVER_WAITING_TTL_MS,
   undercoverCategoryLabels,
@@ -624,38 +625,63 @@ export async function setUndercoverReady(userId: string, roomId: string, ready: 
 }
 
 export async function leaveUndercoverRoom(userId: string, roomId: string, now = new Date()) {
+  // 若思考/投票 deadline 已经到达，先让服务端状态机收敛，再处理退出事件，
+  // 避免一个恰好在截止时刻发出的退出请求把过期阶段重新当成当前阶段处理。
+  const pointer = await prisma.undercoverRoom.findUnique({ where: { id: roomId }, select: { status: true, currentMatchId: true } })
+  if (pointer?.status === 'PLAYING' && pointer.currentMatchId) await advanceExpiredUndercoverMatch(pointer.currentMatchId, now)
+
   const result = await undercoverTransaction(async (tx) => {
     await lockUser(tx, userId)
+    // 与投票/阶段推进保持 match -> room 的锁顺序，避免退出和结算并发时互相等待。
+    const transactionPointer = await tx.undercoverRoom.findUnique({ where: { id: roomId }, select: { status: true, currentMatchId: true } })
+    if (transactionPointer?.status === 'PLAYING' && transactionPointer.currentMatchId) await lockMatch(tx, transactionPointer.currentMatchId)
     await lockRoom(tx, roomId)
     const room = await tx.undercoverRoom.findUnique({ where: { id: roomId }, include: roomInclude })
     if (!room) throw new UndercoverStarServiceError('房间不存在。', 404, 'ROOM_NOT_FOUND')
+    const player = room.UndercoverRoomPlayer.find((item) => item.User.id === userId)
+    if (!player) return { affectedRoomIds: [] as string[], matchId: null as string | null, finish: null as FinishResult | null }
+
+    let activeMatchId: string | null = null
+    let finish: FinishResult | null = null
     if (room.status === 'PLAYING') {
       const currentMatchId = room.currentMatchId
       const currentMatch = currentMatchId
         ? await tx.undercoverMatch.findUnique({ where: { id: currentMatchId }, select: { id: true, status: true } })
         : null
       if (currentMatch && currentMatch.status === 'PLAYING') {
-        throw new UndercoverStarServiceError('对局进行中，请关闭页面后通过重连继续。', 409, 'MATCH_IN_PROGRESS')
+        if (transactionPointer?.currentMatchId !== currentMatch.id) await lockMatch(tx, currentMatch.id)
+        activeMatchId = currentMatch.id
+        finish = await handleUndercoverPlayerExitTx(tx, currentMatch.id, userId, now)
       }
-      // 陈旧 PLAYING 房间（currentMatch 不存在或已结束）：收敛为 WAITING 后再离开。
-      await tx.undercoverRoom.updateMany({
-        where: { id: roomId, status: 'PLAYING' },
-        data: { status: 'WAITING', currentMatchId: null, lastActivityAt: now, updatedAt: now },
-      })
+      if (!activeMatchId) {
+        // 陈旧 PLAYING 房间（currentMatch 不存在或已结束）：收敛为 WAITING 后再离开。
+        await tx.undercoverRoom.updateMany({
+          where: { id: roomId, status: 'PLAYING' },
+          data: { status: 'WAITING', currentMatchId: null, lastActivityAt: now, updatedAt: now },
+        })
+      }
     }
-    const player = room.UndercoverRoomPlayer.find((item) => item.User.id === userId)
-    if (!player) return { affectedRoomIds: [] as string[] }
-    if (room.hostId === userId) await closeWaitingRoomTx(tx, roomId, now)
-    else {
-      await tx.undercoverRoomPlayer.update({ where: { id: player.id }, data: { leftAt: now, isReady: false, updatedAt: now } })
-      const remaining = await tx.undercoverRoomPlayer.count({ where: { roomId, leftAt: null } })
-      if (!remaining) await closeWaitingRoomTx(tx, roomId, now)
-      else await tx.undercoverRoom.update({ where: { id: roomId }, data: { lastActivityAt: now, updatedAt: now } })
+    await tx.undercoverRoomPlayer.update({ where: { id: player.id }, data: { leftAt: now, isReady: false, updatedAt: now } })
+    const remainingPlayers = await tx.undercoverRoomPlayer.findMany({ where: { roomId, leftAt: null }, orderBy: { joinedAt: 'asc' }, select: { userId: true } })
+    if (room.hostId === userId) {
+      if (!remainingPlayers.length) await closeWaitingRoomTx(tx, roomId, now)
+      else await tx.undercoverRoom.update({ where: { id: roomId }, data: { hostId: remainingPlayers[0].userId, lastActivityAt: now, updatedAt: now } })
+    } else if (!remainingPlayers.length) {
+      await closeWaitingRoomTx(tx, roomId, now)
+    } else {
+      await tx.undercoverRoom.update({ where: { id: roomId }, data: { lastActivityAt: now, updatedAt: now } })
     }
-    return { affectedRoomIds: [roomId] }
+    return { affectedRoomIds: [roomId], matchId: activeMatchId, finish }
   })
+  if (result.finish?.changed) await syncUndercoverAchievements(result.finish.userIds)
   const rooms = await Promise.all(result.affectedRoomIds.map((id) => loadRoom(prisma, id).catch(() => null)))
-  return { affectedRooms: rooms.filter((room): room is RoomRow => Boolean(room)).map((room) => roomState(room, undefined, now)) }
+  const match = result.matchId
+    ? await prisma.undercoverMatch.findUnique({ where: { id: result.matchId }, select: { id: true, status: true, phaseDeadline: true } })
+    : null
+  return {
+    affectedRooms: rooms.filter((room): room is RoomRow => Boolean(room)).map((room) => roomState(room, undefined, now)),
+    match: match ? { matchId: match.id, status: match.status, phaseDeadline: match.phaseDeadline } : null,
+  }
 }
 
 export async function kickUndercoverPlayer(hostId: string, roomId: string, targetUserId: string, now = new Date()) {
@@ -709,6 +735,16 @@ function matchPlayerForUser(match: MatchRow, userId: string) {
 
 function activeMatchPlayers(match: MatchRow) {
   return match.UndercoverMatchPlayer.filter((player) => player.isAlive)
+}
+
+function activeSpeakingPlayers(match: MatchRow) {
+  const alive = activeMatchPlayers(match)
+  const aliveById = new Map(alive.map((player) => [player.id, player]))
+  const ordered = readStringArray(match.speakingOrder)
+    .map((playerId) => aliveById.get(playerId))
+    .filter((player): player is typeof alive[number] => Boolean(player))
+  for (const player of alive) if (!ordered.some((item) => item.id === player.id)) ordered.push(player)
+  return ordered
 }
 
 function playerById(match: MatchRow, playerId: string | null | undefined) {
@@ -879,12 +915,9 @@ function randomSpeakingOrder(match: MatchRow) {
 }
 
 function nextSpeakingOrder(match: MatchRow) {
-  const alive = activeMatchPlayers(match)
-  const oldOrder = readStringArray(match.speakingOrder)
-  const ordered = oldOrder.map((id) => alive.find((player) => player.id === id)).filter((player): player is typeof alive[number] => Boolean(player))
-  for (const player of alive) if (!ordered.some((item) => item.id === player.id)) ordered.push(player)
+  const ordered = activeSpeakingPlayers(match)
   if (!ordered.length) return []
-  const anchorId = match.currentSpeakerId || oldOrder[0]
+  const anchorId = match.currentSpeakerId || readStringArray(match.speakingOrder)[0]
   const previousIndex = anchorId ? ordered.findIndex((player) => player.id === anchorId) : -1
   const start = previousIndex < 0 ? 0 : (previousIndex + 1) % ordered.length
   return [...ordered.slice(start), ...ordered.slice(0, start)].map((player) => player.id)
@@ -905,6 +938,28 @@ async function transitionToDescribingTx(tx: Prisma.TransactionClient, match: Mat
       phaseDeadline: new Date(now.getTime() + UNDERCOVER_DESCRIPTION_MS),
     },
   })
+}
+
+async function transitionToVotingTx(tx: Prisma.TransactionClient, match: MatchRow, now: Date) {
+  if (match.status !== 'PLAYING' || match.phase !== 'THINKING' || !match.phaseDeadline || match.phaseDeadline.getTime() > now.getTime()) return false
+  const changed = await tx.undercoverMatch.updateMany({
+    where: {
+      id: match.id,
+      status: 'PLAYING',
+      phase: 'THINKING',
+      phaseDeadline: { lte: now },
+    },
+    data: {
+      phase: 'VOTING',
+      revision: { increment: 1 },
+      currentSpeakerId: null,
+      currentSpeakerIndex: null,
+      tieCandidateIds: Prisma.JsonNull,
+      phaseDeadline: new Date(now.getTime() + UNDERCOVER_VOTING_MS),
+      updatedAt: now,
+    },
+  })
+  return changed.count > 0
 }
 
 async function startNextRoundTx(tx: Prisma.TransactionClient, match: MatchRow, roundResult: StoredRoundResult, now: Date) {
@@ -928,7 +983,7 @@ async function startNextRoundTx(tx: Prisma.TransactionClient, match: MatchRow, r
 }
 
 async function setRoleRevealConfirmedTx(tx: Prisma.TransactionClient, match: MatchRow, now: Date) {
-  await tx.undercoverMatchPlayer.updateMany({ where: { matchId: match.id, roleConfirmedAt: null }, data: { roleConfirmedAt: now } })
+  await tx.undercoverMatchPlayer.updateMany({ where: { matchId: match.id, isAlive: true, roleConfirmedAt: null }, data: { roleConfirmedAt: now } })
   const refreshed = await tx.undercoverMatch.findUnique({ where: { id: match.id }, include: matchInclude })
   if (!refreshed) throw new UndercoverStarServiceError('对局不存在。', 404, 'MATCH_NOT_FOUND')
   const existingOrder = readStringArray(refreshed.speakingOrder)
@@ -1019,7 +1074,7 @@ async function finishMatchTx(
   tx: Prisma.TransactionClient,
   match: MatchRow,
   winner: UndercoverWinnerSide,
-  reason: 'UNDERCOVER_SURVIVAL' | 'UNDERCOVER_GUESS_CORRECT' | 'UNDERCOVER_GUESS_WRONG' | 'UNDERCOVER_GUESS_TIMEOUT',
+  reason: 'UNDERCOVER_SURVIVAL' | 'UNDERCOVER_GUESS_CORRECT' | 'UNDERCOVER_GUESS_WRONG' | 'UNDERCOVER_GUESS_TIMEOUT' | 'UNDERCOVER_EXIT',
   history: StoredRoundResult[],
   now: Date,
   guess?: string | null,
@@ -1176,31 +1231,77 @@ async function syncUndercoverAchievements(userIds: string[]) {
   })))
 }
 
+/**
+ * 将「主动退出」作为状态机事件处理，而不是把它当作断线。
+ * 退出的玩家不再是本局有效玩家；当前轮的描述/投票会按剩余玩家重新收敛。
+ */
+async function handleUndercoverPlayerExitTx(tx: Prisma.TransactionClient, matchId: string, userId: string, now: Date) {
+  await lockMatch(tx, matchId)
+  const match = await tx.undercoverMatch.findUnique({ where: { id: matchId }, include: matchInclude })
+  if (!match || match.status !== 'PLAYING') return null
+  const player = match.UndercoverMatchPlayer.find((item) => item.User.id === userId)
+  if (!player || !player.isAlive) return null
+
+  await tx.undercoverMatchPlayer.update({
+    where: { id: player.id },
+    data: { isAlive: false, eliminatedAt: now, eliminatedRound: match.round, isOnline: false, updatedAt: now },
+  })
+  // 退出玩家本轮的票不再计入完成数；历史轮次票保留，避免破坏结算历史。
+  await tx.undercoverVote.deleteMany({ where: { matchId, round: match.round, voterId: player.id } })
+
+  const refreshed = await tx.undercoverMatch.findUnique({ where: { id: matchId }, include: matchInclude })
+  if (!refreshed) throw new UndercoverStarServiceError('对局不存在。', 404, 'MATCH_NOT_FOUND')
+  if (player.role === 'UNDERCOVER') {
+    return finishMatchTx(tx, refreshed, 'CIVILIAN', 'UNDERCOVER_EXIT', readHistory(refreshed.roundHistory), now)
+  }
+
+  const alive = activeMatchPlayers(refreshed)
+  const undercoverAlive = alive.some((item) => item.role === 'UNDERCOVER')
+  if (alive.length <= 2 && undercoverAlive) {
+    return finishMatchTx(tx, refreshed, 'UNDERCOVER', 'UNDERCOVER_SURVIVAL', readHistory(refreshed.roundHistory), now)
+  }
+
+  if (refreshed.phase === 'DESCRIBING') {
+    await moveAfterDescriptionTx(tx, refreshed, now)
+    return null
+  }
+  if (refreshed.phase === 'VOTING' || refreshed.phase === 'TIE_VOTING') {
+    const stage: UndercoverVoteStage = refreshed.phase === 'VOTING' ? 'MAIN' : 'TIE'
+    const total = alive.length
+    const submitted = refreshed.UndercoverVote.filter((vote) => vote.round === refreshed.round && vote.stage === stage).length
+    if (submitted >= total) {
+      return settleVoteStageTx(tx, refreshed, stage, now)
+    }
+  }
+
+  await tx.undercoverMatch.update({ where: { id: refreshed.id }, data: { revision: { increment: 1 }, updatedAt: now } })
+  return null
+}
+
 async function moveAfterDescriptionTx(tx: Prisma.TransactionClient, match: MatchRow, now: Date) {
   const refreshed = await tx.undercoverMatch.findUnique({ where: { id: match.id }, include: matchInclude })
   if (!refreshed || refreshed.status !== 'PLAYING' || refreshed.phase !== 'DESCRIBING') return
-  const alive = activeMatchPlayers(refreshed)
+  const orderedPlayers = activeSpeakingPlayers(refreshed)
   const submitted = new Set(refreshed.UndercoverDescription.filter((item) => item.round === refreshed.round).map((item) => item.matchPlayerId))
-  if (alive.every((player) => submitted.has(player.id))) {
-    await tx.undercoverMatch.update({
-      where: { id: refreshed.id },
+  if (orderedPlayers.length > 0 && orderedPlayers.every((player) => submitted.has(player.id))) {
+    await tx.undercoverMatch.updateMany({
+      where: { id: refreshed.id, status: 'PLAYING', phase: 'DESCRIBING' },
       data: {
-        phase: 'VOTING',
+        phase: 'THINKING',
         revision: { increment: 1 },
         currentSpeakerId: null,
         currentSpeakerIndex: null,
         tieCandidateIds: Prisma.JsonNull,
-        phaseDeadline: new Date(now.getTime() + UNDERCOVER_VOTING_MS),
+        phaseDeadline: new Date(now.getTime() + THINKING_DURATION_MS),
+        updatedAt: now,
       },
     })
     return
   }
-  const order = readStringArray(refreshed.speakingOrder)
-  const currentIndex = Math.max(0, order.indexOf(refreshed.currentSpeakerId || ''))
-  const next = [...order.slice(currentIndex + 1), ...order.slice(0, currentIndex + 1)].find((id) => {
-    const player = alive.find((item) => item.id === id)
-    return player && !submitted.has(id)
-  })
+  const order = orderedPlayers.map((player) => player.id)
+  const currentIndex = order.indexOf(refreshed.currentSpeakerId || '')
+  const start = currentIndex < 0 ? 0 : currentIndex + 1
+  const next = [...order.slice(start), ...order.slice(0, start)].find((id) => !submitted.has(id))
   if (!next) return
   await tx.undercoverMatch.update({
     where: { id: refreshed.id },
@@ -1237,7 +1338,7 @@ export async function confirmUndercoverRole(userId: string, matchId: string, exp
     if (player.roleConfirmedAt) return
     assertExpectedState(match, expectedRevision)
     await tx.undercoverMatchPlayer.update({ where: { id: player.id }, data: { roleConfirmedAt: now, lastSeenAt: now, isOnline: true, updatedAt: now } })
-    const remaining = await tx.undercoverMatchPlayer.count({ where: { matchId, roleConfirmedAt: null } })
+     const remaining = await tx.undercoverMatchPlayer.count({ where: { matchId, isAlive: true, roleConfirmedAt: null } })
     if (!remaining) {
       const refreshed = await tx.undercoverMatch.findUnique({ where: { id: matchId }, include: matchInclude })
       if (!refreshed) throw new UndercoverStarServiceError('对局不存在。', 404, 'MATCH_NOT_FOUND')
@@ -1495,6 +1596,10 @@ export async function advanceExpiredUndercoverMatch(matchId: string, now = new D
       } else {
         await moveAfterDescriptionTx(tx, match, now)
       }
+      return null
+    }
+    if (match.phase === 'THINKING') {
+      await transitionToVotingTx(tx, match, now)
       return null
     }
     if (match.phase === 'VOTING' || match.phase === 'TIE_VOTING') {

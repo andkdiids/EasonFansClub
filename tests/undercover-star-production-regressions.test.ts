@@ -117,8 +117,9 @@ function buildMatch(overrides: Record<string, unknown> = {}): MatchRow {
   return { ...base, ...overrides } as unknown as MatchRow
 }
 
-test('Bug2：3 人房——最后一人（C）提交后进入 VOTING 的 snapshot 同时包含 A/B/C', () => {
+test('Bug2：3 人房——最后一人（C）提交后进入 THINKING 的 snapshot 同时包含 A/B/C', () => {
   const match = buildMatch({
+    phase: 'THINKING',
     UndercoverDescription: [
       fixtureDescription('p1', '内容A', 1),
       fixtureDescription('p2', '内容B', 1),
@@ -131,8 +132,9 @@ test('Bug2：3 人房——最后一人（C）提交后进入 VOTING 的 snapsho
   assert.ok(round1.some((item) => item.playerId === 'p3' && item.content === '内容C'), '最后一人 C 的描述不得丢失')
 })
 
-test('Bug2：4 人房——最后一人（D）提交后进入 VOTING 的 snapshot 同时包含 A/B/C/D', () => {
+test('Bug2：4 人房——最后一人（D）提交后进入 THINKING 的 snapshot 同时包含 A/B/C/D', () => {
   const match = buildMatch({
+    phase: 'THINKING',
     UndercoverMatchPlayer: [
       fixturePlayer('p1', 'CIVILIAN', 'u1', 'A'),
       fixturePlayer('p2', 'CIVILIAN', 'u2', 'B'),
@@ -213,7 +215,8 @@ test('Bug3：结算文案由服务端 authoritative finalResult 决定，不使�
 // ===========================================================================
 
 test('Bug4：倒计时以服务端 phaseDeadline 为唯一权威（非本地 setSeconds(30)）', () => {
-  assert.match(client, /Math\.max\(0, Math\.ceil\(\(new Date\(deadline\)\.getTime\(\) - now\)/)
+  assert.match(client, /Math\.ceil\(\(new Date\(deadline\)\.getTime\(\) - \(now \+ serverOffset\)\) \/ 1000\)/)
+  assert.match(client, /serverNow/)
   // 不得出现“每个客户端从 30 秒本地重新开始”的写法。
   assert.doesNotMatch(client, /setSeconds\(30\)/)
   assert.doesNotMatch(client, /\+ 30 \* 1000|\+ 30000/)

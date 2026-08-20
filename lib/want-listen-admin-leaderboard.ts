@@ -3,7 +3,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { WANT_LISTEN_MAX_WRONG_COUNT } from '@/lib/want-listen-config'
-import { recordWantListenLeaderboard } from '@/lib/want-listen-leaderboard'
+import { recordWantListenLeaderboard, recomputeUserWantListenLeaderboard } from '@/lib/want-listen-leaderboard'
 import { getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod } from '@/lib/want-listen-period'
 import { computeWantListenManualBackfill, validateWantListenScoreConsistency } from '@/lib/want-listen-score'
 
@@ -818,4 +818,125 @@ async function adjustWantListenManual(
   })
 
   return { ...summary, dryRun: false, sessionId: sourceSessionId }
+}
+
+// ---------- 想听排行榜：精确删除某用户的单条成绩 ----------
+
+/**
+ * 精确删除某用户在某个模式下的某条排行榜成绩。
+ *
+ * 关键：排行榜数据来源于 WantListenSession → recordWantListenLeaderboard → WantListenLeaderboardEntry，
+ * 因此删除不能只 DELETE LeaderboardEntry（否则后续聚合 / 补分 / repair 会再次生成）。
+ * 正确做法：
+ *   1) 标记该 source Session 的 excludedFromLeaderboard = true（保留游戏历史 / 答题记录 / 审计记录）
+ *   2) 删除该 Session 产生的全部 LeaderboardEntry（跨 DAY / WEEK / ALL）
+ *   3) 从该用户剩余「合法」Session 重新聚合（被排除 Session 因 excludedFromLeaderboard 被过滤）
+ *   4) 写 AdminActionLog（WANT_LISTEN_DELETE_SCORE）
+ * 仅影响 目标 userId + 目标 mode + 该 Session；不影响其他用户 / 其他模式 / 该用户其他合法成绩。
+ */
+export async function deleteWantListenUserScore(input: {
+  adminId: string
+  userId: string
+  mode: unknown
+  sessionId: unknown
+  reason?: unknown
+}) {
+  if (!isWantListenAdminMode(input.mode)) throw new WantListenAdminLeaderboardError('请选择有效的游戏模式')
+  const mode = input.mode
+  const reason = String(input.reason || '').trim().slice(0, 200)
+  if (reason.length < 2) throw new WantListenAdminLeaderboardError('请填写删除原因')
+  const sessionId = String(input.sessionId || '').trim().slice(0, 64)
+  if (!sessionId) throw new WantListenAdminLeaderboardError('请提供要删除的成绩对应的 Session ID')
+
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
+    if (!target) throw new WantListenAdminLeaderboardError('用户不存在', 404, 'USER_NOT_FOUND')
+
+    const session = await tx.wantListenSession.findFirst({
+      where: { id: sessionId, userId: input.userId, mode },
+      select: {
+        id: true,
+        score: true,
+        correctCount: true,
+        maxStreak: true,
+        totalQuestions: true,
+        completedAt: true,
+        excludedFromLeaderboard: true,
+        User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
+      },
+    })
+    if (!session) throw new WantListenAdminLeaderboardError('未找到该游戏记录', 404, 'SESSION_NOT_FOUND')
+    if (session.excludedFromLeaderboard) {
+      throw new WantListenAdminLeaderboardError('该成绩已被排除出排行榜', 400, 'ALREADY_EXCLUDED')
+    }
+
+    // 1) 记录被删除前该 Session 在各周期贡献的成绩（用于 periodsAffected / 前后对比）
+    const beforeEntries = await tx.wantListenLeaderboardEntry.findMany({
+      where: { sessionId: session.id },
+      select: { periodType: true, periodKey: true, score: true, correctCount: true, maxStreak: true, totalQuestions: true },
+    })
+    const periodsAffected = beforeEntries.map((entry) => ({ periodType: entry.periodType, periodKey: entry.periodKey }))
+    const before = {
+      score: session.score,
+      correctCount: session.correctCount,
+      maxStreak: session.maxStreak,
+      totalQuestions: session.totalQuestions,
+    }
+
+    // 2) 标记 source Session 不再参与排行榜（保留历史）
+    await tx.wantListenSession.update({ where: { id: session.id }, data: { excludedFromLeaderboard: true } })
+    // 3) 删除该 Session 产生的全部 LeaderboardEntry（跨周期）
+    await tx.wantListenLeaderboardEntry.deleteMany({ where: { sessionId: session.id } })
+    // 4) 从剩余合法 Session 重新聚合 DAY / WEEK / ALL（被排除 Session 因 excludedFromLeaderboard 被过滤，不会重现）
+    await recomputeUserWantListenLeaderboard(input.userId, mode, tx)
+
+    // 重新读取受影响周期的新最高成绩（供前端展示「删除后自动补位」）
+    const after: Array<{ periodType: string; periodKey: string; score: number | null }> = []
+    for (const period of periodsAffected) {
+      const entry = await tx.wantListenLeaderboardEntry.findFirst({
+        where: { userId: input.userId, mode, periodType: period.periodType, periodKey: period.periodKey },
+        select: { score: true },
+      })
+      after.push({ periodType: period.periodType, periodKey: period.periodKey, score: entry?.score ?? null })
+    }
+
+    await tx.adminActionLog.create({
+      data: {
+        adminId: input.adminId,
+        targetUserId: input.userId,
+        action: 'WANT_LISTEN_DELETE_SCORE',
+        detail: {
+          gameMode: mode,
+          targetUserId: input.userId,
+          operatorId: input.adminId,
+          userId: input.userId,
+          uid: session.User.uid,
+          nickname: getPublicUserDisplayName(session.User),
+          mode,
+          score: before.score,
+          correctCount: before.correctCount,
+          completedCount: before.totalQuestions,
+          maxStreak: before.maxStreak,
+          sessionId: session.id,
+          achievedAt: session.completedAt?.toISOString() ?? null,
+          periodsAffected,
+          after,
+          reason,
+          deletedAt: new Date().toISOString(),
+        },
+      },
+    })
+
+    return {
+      deletedSessionId: session.id,
+      mode,
+      before,
+      periodsAffected,
+      after,
+      targetUserId: input.userId,
+      uid: session.User.uid,
+      nickname: getPublicUserDisplayName(session.User),
+      reason,
+    }
+  })
 }

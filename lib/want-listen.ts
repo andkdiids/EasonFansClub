@@ -18,6 +18,7 @@ import {
   WANT_LISTEN_MODE_LABELS,
   WANT_LISTEN_MODES,
   WANT_LISTEN_MAX_WRONG_COUNT,
+  WANT_LISTEN_MAX_HINTS,
   WANT_LISTEN_SESSION_TTL_MS,
   difficultyForQuestion,
   isWantListenMode,
@@ -628,9 +629,9 @@ export async function requestWantListenHint(userId: string, sessionId: string) {
   const current = session.WantListenSessionQuestion.find((item) => item.position === session.currentQuestion)
   if (!current) throw new WantListenServiceError('当前题目不存在，请重新开始。', 409, 'QUESTION_MISSING')
   if (current.answeredAt) return toPublicState(session)
-  if (current.hintLevel >= 4) return toPublicState(session)
+  if (current.hintLevel >= WANT_LISTEN_MAX_HINTS + 1) return toPublicState(session)
   await prisma.wantListenSessionQuestion.updateMany({
-    where: { id: current.id, answeredAt: null, hintLevel: { lt: 4 } },
+    where: { id: current.id, answeredAt: null, hintLevel: { lt: WANT_LISTEN_MAX_HINTS + 1 } },
     data: { hintLevel: { increment: 1 } },
   })
   return getWantListenSessionState(userId, sessionId)
@@ -652,7 +653,7 @@ async function updateWantListenStats(database: Prisma.TransactionClient, session
     } else {
       currentStreak = 0
     }
-    if (session.mode === 'WANT_LISTEN' && question.isCorrect && question.hintLevel < 4) {
+    if (session.mode === 'WANT_LISTEN' && question.isCorrect && question.hintLevel <= WANT_LISTEN_MAX_HINTS) {
       silentCurrentStreak += 1
       silentMaxStreak = Math.max(silentMaxStreak, silentCurrentStreak)
     } else if (session.mode === 'WANT_LISTEN') {
@@ -725,7 +726,8 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
     const nextStreak = isCorrect ? session.currentStreak + 1 : 0
     const nextWrongCount = session.wrongCount + (isCorrect ? 0 : 1)
     const livesAfter = Math.max(0, session.livesRemaining - (isCorrect ? 0 : 1))
-    const awardedScore = scoreForWantListenAnswer(isCorrect, nextStreak)
+    // 本题得分必须由服务端权威的提示次数计算：hintsUsed = hintLevel - 1（绝不信客户端传入）
+    const awardedScore = scoreForWantListenAnswer(isCorrect, nextStreak, current.hintLevel - 1)
     // 服务端计时：耗时 = answeredAt - questionStartedAt，不信任客户端时间
     const answeredAt = new Date()
     const latencyMs = computeServerElapsedMs(current.questionStartedAt, answeredAt)

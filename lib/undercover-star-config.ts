@@ -11,6 +11,8 @@ export const UNDERCOVER_WAITING_TTL_MS = 15 * 60 * 1000
 export const UNDERCOVER_PRESENCE_HEARTBEAT_MS = 30_000
 export const UNDERCOVER_ROLE_REVEAL_MS = 45 * 1000
 export const UNDERCOVER_DESCRIPTION_MS = 60 * 1000
+export const THINKING_DURATION_MS = 15_000
+export const UNDERCOVER_THINKING_MS = THINKING_DURATION_MS
 export const UNDERCOVER_VOTING_MS = 45 * 1000
 export const UNDERCOVER_GUESS_MS = 30 * 1000
 export const UNDERCOVER_ONLINE_WINDOW_MS = 75 * 1000
@@ -42,6 +44,7 @@ export const undercoverRoleLabels: Record<UndercoverRole, string> = {
 export const undercoverPhaseLabels: Record<UndercoverMatchPhase, string> = {
   ROLE_REVEAL: '查看身份',
   DESCRIBING: '描述阶段',
+  THINKING: '思考阶段',
   VOTING: '投票阶段',
   TIE_VOTING: '平票加赛',
   UNDERCOVER_GUESS: '最后一搏',
@@ -94,5 +97,5 @@ export function isUndercoverCategory(value: unknown): value is UndercoverWordCat
 }
 
 export function isUndercoverPhase(value: unknown): value is UndercoverMatchPhase {
-  return value === 'ROLE_REVEAL' || value === 'DESCRIBING' || value === 'VOTING' || value === 'TIE_VOTING' || value === 'UNDERCOVER_GUESS' || value === 'FINISHED'
+  return value === 'ROLE_REVEAL' || value === 'DESCRIBING' || value === 'THINKING' || value === 'VOTING' || value === 'TIE_VOTING' || value === 'UNDERCOVER_GUESS' || value === 'FINISHED'
 }

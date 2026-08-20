@@ -130,9 +130,12 @@ test('8/两个 Result：A 分数高、B 连击高，排行榜必须完整采用 
 test('9/历史错误数据 audit 可识别（截图案例：28770 分 / 答对 64 / 最高连击 35 / 完成 67）', () => {
   const screenshotCase = validateWantListenScoreConsistency({ score: 28770, correctCount: 64, maxStreak: 35, totalQuestions: 67 })
   assert.equal(screenshotCase.ok, false)
-  assert.match(screenshotCase.reason || '', /连击奖励规则不符|可行区间/)
-  // audit 脚本输出异常原因字段
+  // 提示会降低本题得分，因此校验放宽为「不超过该答对题数理论最高分」；28770 远超 64 题上限 8020 → 仍被拒绝
+  assert.match(screenshotCase.reason || '', /最高分|异常|可能/)
+  // audit 脚本输出异常原因字段（含新增的提示扣分与对账）
   assert.match(auditScript, /SCORE_NOT_MATCH_RULES/)
+  assert.match(auditScript, /SCORE_SUM_MISMATCH/)
+  assert.match(auditScript, /HINT_SCORE_MISMATCH/)
   assert.match(auditScript, /CORRECT_GREATER_THAN_COMPLETED/)
   assert.match(auditScript, /FIELD_MISMATCH_WITH_SESSION/)
   assert.match(auditScript, /SESSION_MISSING/)

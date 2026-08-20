@@ -210,7 +210,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   }
 
   async function requestHint() {
-    if (!session || session.mode !== 'WANT_LISTEN' || !session.question || session.question.result || hinting || session.question.hintLevel >= 4) return
+    if (!session || session.mode !== 'WANT_LISTEN' || !session.question || session.question.result || hinting || session.question.hintLevel >= 5) return
     setHinting(true)
     setError('')
     setAuthError('')
@@ -329,7 +329,20 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
             })}
           </div>
           {revealed && result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>你的答案：{question.options.find((option) => option.key === result.selectedOptionKey)?.label || '—'}</span><span>正确答案：{result.correctAnswer}</span><span>本题得分：{result.awardedScore}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}{result.songTitle ? <small>歌曲：{result.songTitle}</small> : null}{session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void nextQuestion()} disabled={nexting}>{nexting ? '加载中…' : '下一题 →'}</button> : null}</div> : null}
-          {!result && session.mode === 'WANT_LISTEN' ? <button type="button" className="want-listen-hint-button" onClick={() => void requestHint()} disabled={hinting || question.hintLevel >= 4}>{question.hintLevel >= 4 ? '已显示全部提示' : hinting ? '正在准备提示…' : '再给点提示'}</button> : null}
+          {!result && session.mode === 'WANT_LISTEN' ? (
+            <>
+              <p className="want-listen-hint-score-note" style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 8px' }}>
+                {(() => {
+                  const hintsUsed = question.hintLevel - 1
+                  if (hintsUsed <= 0) return '未提示：本题答对可得 100 分（连击节点额外 +270）'
+                  if (hintsUsed >= 4) return '已使用 4 个提示：本题答对不再获得基础分'
+                  const base = Math.max(0, 100 - hintsUsed * 25)
+                  return `已使用 ${hintsUsed} 个提示：本题答对可得 ${base} 分（使用提示不参与连击奖励）`
+                })()}
+              </p>
+              <button type="button" className="want-listen-hint-button" onClick={() => void requestHint()} disabled={hinting || question.hintLevel >= 5}>{question.hintLevel >= 5 ? '已显示全部提示' : hinting ? '正在准备提示…' : '再给点提示'}</button>
+            </>
+          ) : null}
         </section>
       ) : null}
 

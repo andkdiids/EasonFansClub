@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { UndercoverPrivateState, UndercoverPublicMatchSnapshot, UndercoverRoomMessagePublic, UndercoverRoomState } from '@/lib/undercover-star-protocol'
 import type { UndercoverDifficulty } from '@prisma/client'
-import { undercoverDifficultyLabels } from '@/lib/undercover-star-config'
+import { THINKING_DURATION_MS, undercoverDifficultyLabels } from '@/lib/undercover-star-config'
 import { canApplyUndercoverPrivateState, canApplyUndercoverRoomState, canApplyUndercoverSnapshot } from '@/lib/undercover-star-client-state'
 import { UndercoverStarRealtimeClient } from '@/lib/undercover-star-realtime-client'
 import { UndercoverStarChatClient } from '@/lib/undercover-star-chat-realtime-client'
@@ -27,22 +27,34 @@ async function request<T>(url: string, init?: RequestInit) {
 }
 
 function phaseTitle(phase: UndercoverPublicMatchSnapshot['phase']) {
-  return ({ ROLE_REVEAL: '查看你的词', DESCRIBING: '描述阶段', VOTING: '投票阶段', TIE_VOTING: '平票加赛', UNDERCOVER_GUESS: '最后一搏', FINISHED: '本局结果' } as const)[phase]
+  return ({ ROLE_REVEAL: '查看你的词', DESCRIBING: '描述阶段', THINKING: '思考阶段', VOTING: '投票阶段', TIE_VOTING: '平票加赛', UNDERCOVER_GUESS: '最后一搏', FINISHED: '本局结果' } as const)[phase]
 }
 
 function roleTitle(role: UndercoverPrivateState['role']) {
   return role === 'UNDERCOVER' ? '卧底' : '平民'
 }
 
-function useCountdown(deadline: string | null) {
+function useCountdown(deadline: string | null, serverNow: string | null, resetKey: string | null, maxSeconds?: number) {
   const [now, setNow] = useState(() => Date.now())
+  const [serverOffset, setServerOffset] = useState(0)
+  useEffect(() => {
+    if (!serverNow) {
+      setServerOffset(0)
+      return
+    }
+    const parsed = new Date(serverNow).getTime()
+    setServerOffset(Number.isFinite(parsed) ? parsed - Date.now() : 0)
+  }, [serverNow])
   useEffect(() => {
     if (!deadline) return
-    const timer = window.setInterval(() => setNow(Date.now()), 500)
+    const tick = () => setNow(Date.now())
+    tick()
+    const timer = window.setInterval(tick, 250)
     return () => window.clearInterval(timer)
-  }, [deadline])
+  }, [deadline, resetKey])
   if (!deadline) return null
-  return Math.max(0, Math.ceil((new Date(deadline).getTime() - now) / 1000))
+  const remaining = Math.ceil((new Date(deadline).getTime() - (now + serverOffset)) / 1000)
+  return Math.min(maxSeconds ?? Number.MAX_SAFE_INTEGER, Math.max(0, remaining))
 }
 
 export function UndercoverStarClient() {
@@ -250,6 +262,23 @@ export function UndercoverStarClient() {
     realtimeRef.current?.stop(); roomRef.current = null; setRoom(null); setActiveRoom(null); setActiveMatch(null); setRoomId(null); setMatchId(null); setView('LOBBY'); await loadLobby()
   }
 
+  async function leaveCurrentMatch() {
+    if (busy || !roomId) return
+    setBusy(true); setError('')
+    try {
+      await request<{ left: boolean }>(`/api/entertainment/undercover-star/rooms/${roomId}/leave`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      realtimeRef.current?.stop()
+      snapshotRef.current = null
+      roomRef.current = null
+      setSnapshot(null); setPrivateState(null); setRoom(null); setActiveRoom(null); setActiveMatch(null); setRoomId(null); setMatchId(null); setView('LOBBY')
+      await loadLobby(false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '退出本局失败，请稍后重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function kickPlayer(targetUserId: string) {
     if (!roomId) return
     await roomAction(`/api/entertainment/undercover-star/rooms/${roomId}/kick`, { userId: targetUserId })
@@ -269,7 +298,17 @@ export function UndercoverStarClient() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : '提交暂未成功，请稍候重试。'); return false } finally { setBusy(false) }
   }
 
-  const countdown = useCountdown(snapshot?.phaseDeadline || null)
+  const countdown = useCountdown(
+    snapshot?.phaseDeadline || null,
+    snapshot?.serverNow || null,
+    snapshot ? `${snapshot.phase}:${snapshot.round}:${snapshot.revision}` : null,
+    snapshot?.phase === 'THINKING' ? THINKING_DURATION_MS / 1000 : undefined,
+  )
+  useEffect(() => {
+    if (snapshot?.phase !== 'THINKING' || countdown !== 0) return
+    // 仅请求权威快照；阶段推进仍由服务端 advanceExpiredUndercoverMatch 决定。
+    realtimeRef.current?.syncMatchState()
+  }, [countdown, snapshot?.phase, snapshot?.revision])
   const currentRoundDescriptions = useMemo(() => snapshot?.descriptions.filter((item) => item.round === snapshot.round) || [], [snapshot])
   const aliveOthers = snapshot?.players.filter((player) => player.isAlive && player.playerId !== privateState?.playerId) || []
   const voteOptions = snapshot?.phase === 'TIE_VOTING' ? aliveOthers.filter((player) => snapshot.tieCandidates.includes(player.playerId)) : aliveOthers
@@ -329,7 +368,7 @@ export function UndercoverStarClient() {
           <RoomChat roomId={room.roomId} viewerUserId={room.viewerUserId} />
         </div>
       ) : null}
-      {view === 'MATCH' && snapshot && privateState ? <Match snapshot={snapshot} privateState={privateState} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} voteOptions={voteOptions} countdown={countdown} showPrivate={showPrivate} description={description} guess={guess} voteTarget={voteTarget} voteAbstain={voteAbstain} busy={busy} onShowPrivate={setShowPrivate} onVoteAbstain={setVoteAbstain} onDescription={setDescription} onGuess={setGuess} onVoteTarget={setVoteTarget} onConfirmRole={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/role-confirm`, { expectedRevision: snapshot.revision })} onDescriptionSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/descriptions`, { content: description, expectedRevision: snapshot.revision, expectedRound: snapshot.round }).then((success) => { if (success) setDescription('') })} onVoteSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/votes`, voteAbstain ? { abstain: true, expectedRevision: snapshot.revision, expectedRound: snapshot.round } : { targetId: voteTarget, expectedRevision: snapshot.revision, expectedRound: snapshot.round })} onGuessSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/guess`, { guess, expectedRevision: snapshot.revision }).then((success) => { if (success) setGuess('') })} onBack={resetToLobby} /> : view === 'MATCH' ? <div className="border border-sky-100 bg-white p-6 text-sm font-bold text-slate-500">正在恢复对局…</div> : null}
+      {view === 'MATCH' && snapshot && privateState ? <Match snapshot={snapshot} privateState={privateState} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} voteOptions={voteOptions} countdown={countdown} showPrivate={showPrivate} description={description} guess={guess} voteTarget={voteTarget} voteAbstain={voteAbstain} busy={busy} onShowPrivate={setShowPrivate} onVoteAbstain={setVoteAbstain} onDescription={setDescription} onGuess={setGuess} onVoteTarget={setVoteTarget} onConfirmRole={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/role-confirm`, { expectedRevision: snapshot.revision })} onDescriptionSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/descriptions`, { content: description, expectedRevision: snapshot.revision, expectedRound: snapshot.round }).then((success) => { if (success) setDescription('') })} onVoteSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/votes`, voteAbstain ? { abstain: true, expectedRevision: snapshot.revision, expectedRound: snapshot.round } : { targetId: voteTarget, expectedRevision: snapshot.revision, expectedRound: snapshot.round })} onGuessSubmit={() => void matchAction(`/api/entertainment/undercover-star/matches/${snapshot.matchId}/guess`, { guess, expectedRevision: snapshot.revision }).then((success) => { if (success) setGuess('') })} onBack={resetToLobby} onLeave={leaveCurrentMatch} /> : view === 'MATCH' ? <div className="border border-sky-100 bg-white p-6 text-sm font-bold text-slate-500">正在恢复对局…</div> : null}
       </div>
     </main>
   )
@@ -469,7 +508,7 @@ function Room({ room, busy, onReady, onStart, onLeave, onKick, onDifficulty }: {
   return <section className="space-y-5"><div className="border border-sky-100 bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className=" text-2xl font-black text-brand-950">房间 {room.roomCode}</h2><p className="mt-2 text-sm font-bold text-slate-500">{room.hasPassword ? '私密房间' : '公开房间'} · {room.currentCount} / {room.maxPlayers} 人 · 难度 {undercoverDifficultyLabels[difficulty]}</p></div><div className="text-right text-xs font-bold text-slate-500">{room.players.length < 3 ? '至少需要 3 名玩家才能开始。' : allReady ? '所有玩家已准备。' : '等待所有玩家准备。'}</div></div><div className="mt-7 space-y-2"><p className="text-xs font-black text-slate-500">房间玩家 {room.currentCount} / {room.maxPlayers}</p>{room.players.map((player) => <div key={player.playerId} className={`flex items-center gap-3 border p-3 ${player.isHost ? 'bg-sky-50/40' : 'border-sky-100'}`}><Avatar user={player} small /><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="min-w-0 truncate text-sm font-black text-brand-950">{player.name}</span><span className="shrink-0 text-xs font-bold text-slate-400">Lv.{player.level}</span></div><div className={`mt-0.5 text-xs font-black ${player.isHost ? 'text-brand-700' : player.isReady ? 'text-emerald-700' : 'text-slate-400'}`}>{player.isHost ? '房主' : player.isReady ? '已准备' : '未准备'}</div></div>{isHost && !player.isHost ? <button type="button" disabled={busy} onClick={() => onKick(player.userId)} className="shrink-0 border border-red-200 px-3 py-1.5 text-xs font-black text-red-700">踢出</button> : null}</div>)}</div><div className="mt-6 border border-sky-100 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs font-black text-slate-500">房间难度</span>{isHost ? <select value={difficulty} disabled={busy} onChange={(event) => void changeDifficulty(event.target.value as UndercoverDifficulty)} className="border border-sky-100 px-3 py-2 text-sm font-bold">{['EASY','NORMAL','HARD'].map((value) => <option key={value} value={value}>{undercoverDifficultyLabels[value as UndercoverDifficulty]}</option>)}</select> : <span className="text-sm font-bold text-slate-700">{undercoverDifficultyLabels[difficulty]}</span>}</div></div><div className="mt-6 flex flex-wrap gap-3"><button type="button" disabled={busy || !me} onClick={() => onReady(!(me?.isReady || false))} className="bg-sky-700 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{me?.isReady ? '取消准备' : '准备'}</button>{isHost ? <button type="button" disabled={busy || !allReady} onClick={onStart} className="bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">开始游戏</button> : null}<button type="button" disabled={busy} onClick={onLeave} className="border border-red-200 px-5 py-3 text-sm font-black text-red-700">退出房间</button></div></div><p className="border-l-2 border-amber-400 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">房主退出后，等待房会立即关闭；对局开始后可以通过刷新页面恢复观看。</p></section>
 }
 
-function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeaker, voteOptions, countdown, showPrivate, description, guess, voteTarget, voteAbstain, busy, onShowPrivate, onDescription, onGuess, onVoteTarget, onVoteAbstain, onConfirmRole, onDescriptionSubmit, onVoteSubmit, onGuessSubmit, onBack }: { snapshot: UndercoverPublicMatchSnapshot; privateState: UndercoverPrivateState; currentRoundDescriptions: UndercoverPublicMatchSnapshot['descriptions']; currentSpeaker?: UndercoverPublicMatchSnapshot['players'][number]; voteOptions: UndercoverPublicMatchSnapshot['players']; countdown: number | null; showPrivate: boolean; description: string; guess: string; voteTarget: string | null; voteAbstain: boolean; busy: boolean; onShowPrivate: (value: boolean) => void; onDescription: (value: string) => void; onGuess: (value: string) => void; onVoteTarget: (value: string | null) => void; onVoteAbstain: (value: boolean) => void; onConfirmRole: () => void; onDescriptionSubmit: () => void; onVoteSubmit: () => void; onGuessSubmit: () => void; onBack: () => void }) {
+function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeaker, voteOptions, countdown, showPrivate, description, guess, voteTarget, voteAbstain, busy, onShowPrivate, onDescription, onGuess, onVoteTarget, onVoteAbstain, onConfirmRole, onDescriptionSubmit, onVoteSubmit, onGuessSubmit, onBack, onLeave }: { snapshot: UndercoverPublicMatchSnapshot; privateState: UndercoverPrivateState; currentRoundDescriptions: UndercoverPublicMatchSnapshot['descriptions']; currentSpeaker?: UndercoverPublicMatchSnapshot['players'][number]; voteOptions: UndercoverPublicMatchSnapshot['players']; countdown: number | null; showPrivate: boolean; description: string; guess: string; voteTarget: string | null; voteAbstain: boolean; busy: boolean; onShowPrivate: (value: boolean) => void; onDescription: (value: string) => void; onGuess: (value: string) => void; onVoteTarget: (value: string | null) => void; onVoteAbstain: (value: boolean) => void; onConfirmRole: () => void; onDescriptionSubmit: () => void; onVoteSubmit: () => void; onGuessSubmit: () => void; onBack: () => void; onLeave: () => void }) {
   const isFinished = snapshot.status === 'FINISHED' || snapshot.phase === 'FINISHED'
   useEffect(() => {
     if (privateState.roleConfirmed) onShowPrivate(false)
@@ -482,9 +521,10 @@ function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeake
             <p className="text-xs font-black tracking-[0.16em] text-brand-700">第 {snapshot.round} 轮 · {phaseTitle(snapshot.phase)}</p>
             <h2 className="mt-1 text-xl font-black text-brand-950">卧底巨星</h2>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <span className="text-sm font-black text-brand-700">{countdown === null ? '—' : `${countdown}s`}</span>
             <button type="button" onClick={() => onShowPrivate(!showPrivate)} className="border border-sky-200 px-3 py-2 text-xs font-black text-brand-700">{showPrivate ? '隐藏我的词' : '查看我的词'}</button>
+            {!isFinished ? <button type="button" disabled={busy} onClick={onLeave} className="border border-red-200 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50">退出本局</button> : null}
           </div>
         </div>
         {(snapshot.phase === 'ROLE_REVEAL' || showPrivate) && !isFinished ? (
@@ -516,6 +556,13 @@ function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeake
                 <h3 className="text-lg font-black text-brand-950">轮到谁描述？</h3>
                 <p className="mt-2 text-sm font-bold text-slate-500">{currentSpeaker ? `当前：${currentSpeaker.name}` : '等待服务端推进。'} · 不能直接说出自己的词语。</p>
                 <p className="mt-5 bg-sky-50 p-3 text-sm font-bold text-brand-700">请在右侧发言区写下你的描述。</p>
+              </section>
+            ) : null}
+            {snapshot.phase === 'THINKING' ? (
+              <section className="border border-amber-200 bg-amber-50 p-5 shadow-sm">
+                <h3 className="text-lg font-black text-amber-950">本轮描述结束</h3>
+                <p className="mt-2 text-sm font-bold text-amber-900">想想谁最可疑……</p>
+                <p className="mt-4 text-sm font-black text-amber-900">{countdown === null ? '—' : `${countdown} 秒后开始投票`}</p>
               </section>
             ) : null}
             {snapshot.phase === 'VOTING' || snapshot.phase === 'TIE_VOTING' ? (
@@ -557,16 +604,18 @@ function Match({ snapshot, privateState, currentRoundDescriptions, currentSpeake
         ) : null}
         {isFinished && snapshot.finalResult ? <Finished snapshot={snapshot} onBack={onBack} /> : null}
       </section>
-      <SpeechRoom snapshot={snapshot} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} description={description} onDescription={onDescription} onDescriptionSubmit={onDescriptionSubmit} busy={busy} privateState={privateState} />
+      <SpeechRoom snapshot={snapshot} currentRoundDescriptions={currentRoundDescriptions} currentSpeaker={currentSpeaker} countdown={countdown} description={description} onDescription={onDescription} onDescriptionSubmit={onDescriptionSubmit} busy={busy} privateState={privateState} />
     </div>
   )
 
 }
 
-function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, description, onDescription, onDescriptionSubmit, busy, privateState }: { snapshot: UndercoverPublicMatchSnapshot; currentRoundDescriptions: UndercoverPublicMatchSnapshot['descriptions']; currentSpeaker?: UndercoverPublicMatchSnapshot['players'][number]; description: string; onDescription: (value: string) => void; onDescriptionSubmit: () => void; busy: boolean; privateState: UndercoverPrivateState }) {
+function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, countdown, description, onDescription, onDescriptionSubmit, busy, privateState }: { snapshot: UndercoverPublicMatchSnapshot; currentRoundDescriptions: UndercoverPublicMatchSnapshot['descriptions']; currentSpeaker?: UndercoverPublicMatchSnapshot['players'][number]; countdown: number | null; description: string; onDescription: (value: string) => void; onDescriptionSubmit: () => void; busy: boolean; privateState: UndercoverPrivateState }) {
   const isFinished = snapshot.status === 'FINISHED' || snapshot.phase === 'FINISHED'
   const pastRounds = snapshot.descriptionHistory.filter((entry) => entry.round < snapshot.round)
   const isDescribing = snapshot.phase === 'DESCRIBING'
+  const isThinking = snapshot.phase === 'THINKING'
+  const canViewCurrentRound = isDescribing || isThinking || snapshot.phase === 'VOTING' || snapshot.phase === 'TIE_VOTING'
   const [expanded, setExpanded] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
   const nearBottomRef = useRef(true)
@@ -581,6 +630,9 @@ function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, descri
     const el = listRef.current
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
   }, [pastRounds, currentRoundDescriptions])
+  useEffect(() => {
+    if (isThinking) setExpanded(true)
+  }, [isThinking])
   function onScroll() {
     const el = listRef.current
     if (!el) return
@@ -593,7 +645,7 @@ function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, descri
         <h3 className="text-base font-black text-brand-950">发言区</h3>
         <button type="button" onClick={() => setExpanded((value) => !value)} className="text-xs font-black text-brand-700 lg:hidden">{expanded ? '收起 ▲' : '展开全部发言 ▼'}</button>
       </div>
-      <div ref={listRef} onScroll={onScroll} className={`${expanded ? 'block' : 'hidden'} lg:block max-h-[60vh] space-y-4 overflow-y-auto p-4`}>
+      <div ref={listRef} onScroll={onScroll} className={`${expanded || isThinking ? 'block' : 'hidden'} lg:block max-h-[60vh] space-y-4 overflow-y-auto p-4`}>
         {pastRounds.length === 0 && currentRoundDescriptions.length === 0 ? (
           <p className="py-6 text-center text-sm font-bold text-slate-400">还没有人发言。</p>
         ) : null}
@@ -612,9 +664,9 @@ function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, descri
             </div>
           </div>
         ))}
-        {isDescribing ? (
+        {canViewCurrentRound ? (
           <div>
-            <p className="text-xs font-black tracking-wide text-emerald-700">第 {snapshot.round} 轮（进行中）</p>
+            <p className={`text-xs font-black tracking-wide ${isThinking ? 'text-amber-700' : 'text-emerald-700'}`}>第 {snapshot.round} 轮（{isThinking ? '描述结束' : snapshot.phase === 'DESCRIBING' ? '进行中' : '本轮记录'}）</p>
             <div className="mt-2 space-y-2">
               {currentRoundDescriptions.length === 0 ? (
                 <p className="text-xs font-bold text-slate-400">等待发言…</p>
@@ -642,6 +694,12 @@ function SpeechRoom({ snapshot, currentRoundDescriptions, currentSpeaker, descri
           </div>
         ) : isDescribing ? (
           <p className="text-xs font-bold text-slate-400">等待其他玩家描述，提交后不能修改。</p>
+        ) : isThinking ? (
+          <div className="border border-amber-200 bg-amber-50 p-3 text-sm font-black text-amber-900">
+            <p>本轮描述结束</p>
+            <p className="mt-1">想想谁最可疑……</p>
+            <p className="mt-2">{countdown === null ? '—' : `${countdown} 秒后开始投票`}</p>
+          </div>
         ) : null}
       </div>
     </section>
@@ -652,5 +710,5 @@ function Finished({ snapshot, onBack }: { snapshot: UndercoverPublicMatchSnapsho
   const result = snapshot.finalResult
   if (!result) return null
   const nameById = new Map(snapshot.players.map((player) => [player.playerId, player.name]))
-  return <section className="border border-sky-100 bg-white p-5 shadow-sm sm:p-7"><h2 className=" text-3xl font-black text-brand-950">{result.winner === 'UNDERCOVER' ? '卧底胜利' : '平民胜利'}</h2><p className="mt-2 text-sm font-bold text-slate-500">{result.reason === 'UNDERCOVER_GUESS_CORRECT' ? '卧底猜中了平民词，成功翻盘。' : result.reason === 'UNDERCOVER_SURVIVAL' ? '卧底存活到最后两人。' : result.reason === 'UNDERCOVER_GUESS_TIMEOUT' ? '卧底超时未能猜词。' : '卧底没有猜中平民词。'}</p><div className="mt-6 grid gap-3 sm:grid-cols-2"><div className="border border-sky-100 p-4"><span className="text-xs font-black text-slate-500">平民词</span><strong className="mt-2 block break-words text-xl font-black text-brand-950">{result.civilianWord}</strong></div><div className="border border-red-100 bg-red-50/50 p-4"><span className="text-xs font-black text-red-700">卧底词</span><strong className="mt-2 block break-words text-xl font-black text-red-900">{result.undercoverWord}</strong></div></div><div className="mt-5 space-y-2">{result.players.map((player) => <div key={player.playerId} className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-50 py-3"><span className="text-sm font-black text-brand-950">{nameById.get(player.playerId) || '玩家'}</span><span className={`text-xs font-black ${player.role === 'UNDERCOVER' ? 'text-red-700' : 'text-slate-600'}`}>{roleTitle(player.role)} · {player.isAlive ? '存活到最后' : '已淘汰'} · 获得 {player.totalVotesReceived} 票</span></div>)}</div><div className="mt-6"><button type="button" onClick={onBack} className="bg-brand-950 px-5 py-3 text-sm font-black text-white">返回大厅</button></div></section>
+  return <section className="border border-sky-100 bg-white p-5 shadow-sm sm:p-7"><h2 className=" text-3xl font-black text-brand-950">{result.winner === 'UNDERCOVER' ? '卧底胜利' : '平民胜利'}</h2><p className="mt-2 text-sm font-bold text-slate-500">{result.reason === 'UNDERCOVER_GUESS_CORRECT' ? '卧底猜中了平民词，成功翻盘。' : result.reason === 'UNDERCOVER_SURVIVAL' ? '卧底存活到最后两人。' : result.reason === 'UNDERCOVER_GUESS_TIMEOUT' ? '卧底超时未能猜词。' : result.reason === 'UNDERCOVER_EXIT' ? '卧底主动退出，平民直接获胜。' : '卧底没有猜中平民词。'}</p><div className="mt-6 grid gap-3 sm:grid-cols-2"><div className="border border-sky-100 p-4"><span className="text-xs font-black text-slate-500">平民词</span><strong className="mt-2 block break-words text-xl font-black text-brand-950">{result.civilianWord}</strong></div><div className="border border-red-100 bg-red-50/50 p-4"><span className="text-xs font-black text-red-700">卧底词</span><strong className="mt-2 block break-words text-xl font-black text-red-900">{result.undercoverWord}</strong></div></div><div className="mt-5 space-y-2">{result.players.map((player) => <div key={player.playerId} className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-50 py-3"><span className="text-sm font-black text-brand-950">{nameById.get(player.playerId) || '玩家'}</span><span className={`text-xs font-black ${player.role === 'UNDERCOVER' ? 'text-red-700' : 'text-slate-600'}`}>{roleTitle(player.role)} · {player.isAlive ? '存活到最后' : '已淘汰'} · 获得 {player.totalVotesReceived} 票</span></div>)}</div><div className="mt-6"><button type="button" onClick={onBack} className="bg-brand-950 px-5 py-3 text-sm font-black text-white">返回大厅</button></div></section>
 }

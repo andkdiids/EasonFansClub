@@ -7,9 +7,11 @@
  *
  * 检测项：
  *  - CORRECT_GREATER_THAN_COMPLETED ：答对题数 > 完成题数
- *  - SCORE_NOT_MATCH_RULES          ：分数无法由游戏规则推导（如 28770 分/答对 64 题）
+ *  - SCORE_NOT_MATCH_RULES          ：分数超过该答对题数可能达到的最高分（含连击奖励），疑似凭空捏造
+ *  - SCORE_SUM_MISMATCH             ：Session.score 与历史每题 awardedScore 之和不一致（Hint 扣分 / 连击奖励后仍能对账）
  *  - FIELD_MISMATCH_WITH_SESSION    ：排行榜字段与 Session 不一致（字段疑似来自不同记录）
  *  - SESSION_MISSING                ：排行榜引用的 Session 不存在
+ *  - HINT_SCORE_MISMATCH            ：使用了提示（hintLevel>1）但 awardedScore 仍按完整基础分（或仍吃到连击奖励），与提示扣分规则不符
  *
  * 运行（只读，不落库）：
  *   pnpm leaderboard:audit
@@ -65,6 +67,18 @@ async function main() {
   if (args.periodKey) where.periodKey = args.periodKey
 
   const issues: AuditIssue[] = []
+  const hintMismatches: Array<{
+    userId: string
+    uid: number
+    nickname: string
+    mode: string
+    sessionId: string
+    questionId: string
+    hintCount: number
+    awardedScore: number
+    expectedScore: number
+    createdAt: string
+  }> = []
   let scanned = 0
 
   for (let skip = 0; ; skip += BATCH_SIZE) {
@@ -75,7 +89,18 @@ async function main() {
       take: BATCH_SIZE,
       include: {
         User: { select: { uid: true, nickname: true } },
-        WantListenSession: { select: { id: true, score: true, correctCount: true, maxStreak: true, totalQuestions: true } },
+        WantListenSession: {
+          select: {
+            id: true,
+            score: true,
+            correctCount: true,
+            maxStreak: true,
+            totalQuestions: true,
+            WantListenSessionQuestion: {
+              select: { id: true, answeredAt: true, isCorrect: true, awardedScore: true, hintLevel: true },
+            },
+          },
+        },
       },
     })
     if (!entries.length) break
@@ -95,6 +120,46 @@ async function main() {
         ]
         for (const [field, entryValue, sessionValue] of fieldPairs) {
           if (entryValue !== sessionValue) reasons.push(`FIELD_MISMATCH_WITH_SESSION:${field}`)
+        }
+        // 按历史每题 awardedScore 重算，与 Session.score 对账（Hint 扣分后依然可对账）
+        const questions = session.WantListenSessionQuestion
+        if (questions.length) {
+          let sumScore = 0
+          let sumCorrect = 0
+          let sumTotal = 0
+          for (const question of questions) {
+            if (!question.answeredAt) continue
+            sumTotal += 1
+            if (question.isCorrect) {
+              sumCorrect += 1
+              sumScore += question.awardedScore
+            }
+          }
+          if (session.score !== sumScore || session.correctCount !== sumCorrect || session.totalQuestions !== sumTotal) {
+            reasons.push(`SCORE_SUM_MISMATCH:session=${session.score}/sum=${sumScore}`)
+          }
+          // 提示扣分规则检查：使用过提示（hintLevel>1）但题目 awardedScore 仍超过「提示后基础分」
+          for (const question of questions) {
+            if (!question.answeredAt || !question.isCorrect) continue
+            const hintsUsed = Math.max(0, question.hintLevel - 1)
+            if (hintsUsed <= 0) continue
+            const expectedBase = Math.max(0, 100 - hintsUsed * 25)
+            if (question.awardedScore > expectedBase) {
+              reasons.push('HINT_SCORE_MISMATCH')
+              hintMismatches.push({
+                userId: entry.userId,
+                uid: entry.User.uid,
+                nickname: entry.User.nickname,
+                mode: entry.mode,
+                sessionId: session.id,
+                questionId: question.id,
+                hintCount: hintsUsed,
+                awardedScore: question.awardedScore,
+                expectedScore: expectedBase,
+                createdAt: question.answeredAt.toISOString(),
+              })
+            }
+          }
         }
       }
       const validation = validateWantListenScoreConsistency({
@@ -134,6 +199,16 @@ async function main() {
       `score=${item.score}\tcorrect=${item.correctCount}\tcompleted=${item.completedCount}\tmaxStreak=${item.maxStreak}\t` +
       `resultId=${item.resultId ?? '—'}\t原因=${item.reasons.join(';')}`,
     )
+  }
+  if (hintMismatches.length) {
+    console.info('')
+    console.info(`--- 提示扣分异常（HINT_SCORE_MISMATCH）${hintMismatches.length} 条 ---`)
+    for (const item of hintMismatches) {
+      console.info(
+        `${item.mode}\tuid=${item.uid}\t${item.nickname}\tsession=${item.sessionId}\tquestion=${item.questionId}\t` +
+        `hintCount=${item.hintCount}\tawardedScore=${item.awardedScore}\texpectedScore=${item.expectedScore}\tcreatedAt=${item.createdAt}`,
+      )
+    }
   }
   if (issues.length) {
     console.info('检测到异常成绩。修复前请先确认根因；可用 pnpm leaderboard:repair（默认 dry-run）生成修复计划。')

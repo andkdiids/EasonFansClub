@@ -1,0 +1,9 @@
+-- 卧底巨星：描述结束后进入持久化思考阶段。
+-- 复用 UndercoverMatch.phaseDeadline 保存服务端权威截止时间，不新增字段。
+
+ALTER TABLE `UndercoverMatch`
+  MODIFY COLUMN `phase` ENUM('ROLE_REVEAL', 'DESCRIBING', 'THINKING', 'VOTING', 'TIE_VOTING', 'UNDERCOVER_GUESS', 'FINISHED') NOT NULL DEFAULT 'ROLE_REVEAL';
+
+-- 卧底主动退出时使用独立结算原因，避免把退出误记为猜词失败。
+ALTER TABLE `UndercoverMatch`
+  MODIFY COLUMN `finishReason` ENUM('UNDERCOVER_SURVIVAL', 'UNDERCOVER_GUESS_CORRECT', 'UNDERCOVER_GUESS_WRONG', 'UNDERCOVER_GUESS_TIMEOUT', 'UNDERCOVER_EXIT') NULL;
