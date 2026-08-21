@@ -12,7 +12,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 export const dynamic = 'force-dynamic'
 
 export default async function MusicConcertsPage() {
-  const sessionUser = await getCurrentUser().catch(() => null)
+  const sessionUser = await getCurrentUser()
   const isAdmin = Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
   const [tours, config, categories] = await Promise.all([
     prisma.musicTour.findMany({

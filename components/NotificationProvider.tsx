@@ -46,6 +46,7 @@ const tabPresenceTimeoutMs = 15_000
 
 type NotificationContextValue = {
   summary: UnreadSummary
+  updateSummary: (updater: (current: UnreadSummary) => UnreadSummary) => void
   refresh: () => Promise<void>
   realtimeStatus: RealtimeClientStatus
 }
@@ -248,7 +249,11 @@ export function NotificationProvider({
     }
   }, [userId])
 
-  const value = useMemo(() => ({ summary, refresh, realtimeStatus }), [realtimeStatus, refresh, summary])
+  const updateSummary = useCallback((updater: (current: UnreadSummary) => UnreadSummary) => {
+    setSummary((current) => updater(current))
+  }, [])
+
+  const value = useMemo(() => ({ summary, updateSummary, refresh, realtimeStatus }), [realtimeStatus, refresh, summary, updateSummary])
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>
 }
 

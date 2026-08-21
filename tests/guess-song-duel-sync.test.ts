@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { canApplyDuelMatchSnapshot, canApplyDuelQuestionResponse } from '../lib/guess-song-duel-client-state'
-import type { DuelMatchState, DuelQuestionState } from '../lib/guess-song-duel-protocol'
+import { canApplyDuelAnswerAccepted, canApplyDuelMatchSnapshot, canApplyDuelQuestionResponse, getDuelQuestionIdentity } from '../lib/guess-song-duel-client-state'
+import type { DuelMatchState, DuelQuestionState, DuelRealtimeEvent } from '../lib/guess-song-duel-protocol'
 
 function source(path: string) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
@@ -59,6 +59,22 @@ function question(overrides: Partial<DuelQuestionState> = {}): DuelQuestionState
   }
 }
 
+function answerAccepted(overrides: Partial<Extract<DuelRealtimeEvent, { type: 'ANSWER_ACCEPTED' }>> = {}): Extract<DuelRealtimeEvent, { type: 'ANSWER_ACCEPTED' }> {
+  return {
+    type: 'ANSWER_ACCEPTED',
+    matchId: 'match-1',
+    questionIndex: 7,
+    userId: 'user-1',
+    correct: true,
+    correctOptionKey: 'A',
+    selectedOptionKey: 'A',
+    roundId: 'question-7',
+    questionId: 'token-7',
+    questionToken: 'token-7',
+    ...overrides,
+  }
+}
+
 test('旧 revision 的第 7 题快照不能覆盖已经应用的第 8 题', () => {
   const current = snapshot({ revision: 81, currentQuestionIndex: 8, roundId: 'question-8', questionId: 'token-8', questionToken: 'token-8' })
   const delayed = snapshot({ revision: 72 })
@@ -70,6 +86,23 @@ test('同一 Match 的新 round 快照可以推进，且不同 Match 会被丢�
   const next = snapshot({ revision: 81, currentQuestionIndex: 8, roundId: 'question-8', questionId: 'token-8', questionToken: 'token-8' })
   assert.equal(canApplyDuelMatchSnapshot('match-1', current, next), true)
   assert.equal(canApplyDuelMatchSnapshot('match-2', current, next), false)
+})
+
+test('相同 revision 但题目身份不同的快照不能覆盖当前题', () => {
+  const current = snapshot({ revision: 81, question: question(), roundId: 'question-7', questionId: 'token-7', questionToken: 'token-7' })
+  const differentQuestion = snapshot({ revision: 81, currentQuestionIndex: 8, question: question({ id: 'question-8', roundId: 'question-8', publicToken: 'token-8', questionId: 'token-8', questionIndex: 8 }), roundId: 'question-8', questionId: 'token-8', questionToken: 'token-8' })
+  assert.equal(canApplyDuelMatchSnapshot('match-1', current, differentQuestion), false)
+})
+
+test('ANSWER_ACCEPTED 必须绑定当前题 token，迟到的旧题反馈不能污染新题', () => {
+  const current = snapshot({ question: question() })
+  assert.equal(canApplyDuelAnswerAccepted(current, answerAccepted()), true)
+  assert.equal(canApplyDuelAnswerAccepted(current, answerAccepted({ questionToken: 'late-token', questionId: 'late-token' })), false)
+  assert.equal(canApplyDuelAnswerAccepted(current, answerAccepted({ questionIndex: 8, roundId: 'question-8', questionId: 'token-8', questionToken: 'token-8' })), false)
+  assert.equal(canApplyDuelAnswerAccepted(current, answerAccepted({ matchId: 'other-match' })), false)
+  assert.deepEqual(getDuelQuestionIdentity(current), {
+    matchId: 'match-1', questionIndex: 7, roundId: 'question-7', questionId: 'token-7', questionToken: 'token-7',
+  })
 })
 
 test('FINISHED 是吸收态，旧 PLAYING 快照不能把结算页切回题目页', () => {
@@ -117,6 +150,26 @@ test('SCORE 与 BUZZER 的对方选择来自持久化 Answer，且 BUZZER 错误
   assert.match(client, /对方错误抢答/)
   assert.match(client, /is-opponent-choice/)
   assert.match(client, /lastRoundSummary/)
+})
+
+test('答案反馈和题目交互 DOM 都按题目身份隔离，音频只创建一个 Match 级实例', () => {
+  const client = source('components/games/GuessSongDuel.tsx')
+  assert.match(client, /canApplyDuelAnswerAccepted\(currentMatch, event\)/)
+  assert.match(client, /clearQuestionLocalState\(\)/)
+  assert.match(client, /const visibleAnswerFeedback = currentQuestionIdentity && answerFeedback && sameDuelQuestionIdentity/)
+  assert.match(client, /key=\{questionInteractionKey\}/)
+  assert.match(client, /const audio = new Audio\(\)/)
+  assert.doesNotMatch(client, /new Audio\(question\.audioUrl\)/)
+  assert.doesNotMatch(client, /new Audio\(question\.preloadAudioUrl\)/)
+  assert.doesNotMatch(client, /AudioContext/)
+  assert.match(client, /playPromise = audio\.play\(\)/)
+  assert.match(client, /audioUnlockingRef/)
+  assert.match(client, /audioUnlockedRef\.current = true/)
+  assert.match(client, /audio\.pause\(\)[\s\S]*audio\.currentTime = 0[\s\S]*audioAttemptedTokenRef\.current = null/)
+  assert.match(client, /if \(!audio \|\| !question \|\| question\.matchId !== matchId \|\| audioUnlockingRef\.current\) return/)
+  assert.match(client, /setAudioBlocked\(true\)/)
+  assert.match(client, /音频资源加载失败，请稍后重试/)
+  assert.match(client, /audio\.removeAttribute\('src'\)/)
 })
 
 test('FINISHED 会使 generation 失效、abort 请求并停止 playing fallback', () => {

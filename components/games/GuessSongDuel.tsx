@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DUEL_HEARTBEAT_INTERVAL_MS, DUEL_MODE_RULES, DUEL_ROOM_POLL_INTERVAL_MS, getDuelModeLabel, type DuelMode } from '@/lib/guess-song-duel-config'
-import { canApplyDuelMatchSnapshot } from '@/lib/guess-song-duel-client-state'
+import { canApplyDuelAnswerAccepted, canApplyDuelMatchSnapshot, duelQuestionIdentityKey, getDuelQuestionIdentity, sameDuelQuestionIdentity, type DuelQuestionIdentity } from '@/lib/guess-song-duel-client-state'
 import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelOption, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
 
 type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null }
@@ -43,16 +43,22 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
 }
 
-function unlockAudio() {
-  if (typeof window === 'undefined') return
-  const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!AudioContextClass) return
-  try {
-    const context = new AudioContextClass()
-    void context.resume().then(() => context.close()).catch(() => undefined)
-  } catch {
-    // The actual game audio will show a retry affordance if the browser blocks it.
-  }
+function mediaErrorName(error: unknown) {
+  return error && typeof error === 'object' && 'name' in error && typeof error.name === 'string' ? error.name : 'UnknownError'
+}
+
+function isAudioResourceFailure(audio: HTMLAudioElement, error: unknown) {
+  return Boolean(audio.error) || mediaErrorName(error) === 'NotSupportedError' || audio.networkState === 3
+}
+
+function logAudioFailure(error: unknown, audio: HTMLAudioElement) {
+  if (process.env.NODE_ENV === 'production') return
+  console.warn('[guess-song-duel.audio]', {
+    name: mediaErrorName(error),
+    message: error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message : '',
+    readyState: audio.readyState,
+    networkState: audio.networkState,
+  })
 }
 
 export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId: string; initialInviteToken: string | null }>) {
@@ -78,12 +84,16 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const [inviteOpen, setInviteOpen] = useState(false)
   const [selectedFriendId, setSelectedFriendId] = useState('')
   const [audioBlocked, setAudioBlocked] = useState(false)
+  const [audioUnlocked, setAudioUnlocked] = useState(false)
+  const [audioUnlocking, setAudioUnlocking] = useState(false)
+  const [audioError, setAudioError] = useState('')
   const [clockTick, setClockTick] = useState(Date.now())
+  const [answerPending, setAnswerPending] = useState(false)
   // SCORE per-user answer feedback. Captured from the ANSWER_ACCEPTED event so
   // only the answering player ever sees their own correct/incorrect result.
   // The opponent's socket never receives this event, keeping SCORE isolated.
   const [answerFeedback, setAnswerFeedback] = useState<{
-    questionIndex: number
+    identity: DuelQuestionIdentity
     options: DuelOption[]
     selectedOptionKey: string
     correct: boolean
@@ -101,8 +111,15 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const matchIdRef = useRef<string | null>(null)
   const viewRef = useRef<'lobby' | 'room' | 'match' | 'result'>('lobby')
   const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audioQuestionRef = useRef<DuelMatchState['question']>(null)
+  const audioSourceRef = useRef<string | null>(null)
+  const audioOperationRef = useRef(0)
+  const audioUnlockingRef = useRef(false)
+  const audioUnlockedRef = useRef(false)
+  const audioAttemptedTokenRef = useRef<string | null>(null)
   // 记录已播放音频的题目 token，保证每道题只播放一次，且不会在题目切换残留。
   const playedAudioTokenRef = useRef<string | null>(null)
+  const answerPendingRef = useRef<string | null>(null)
   const syncSequenceRef = useRef(0)
   const requestGenerationRef = useRef(0)
   const latestMatchRef = useRef<DuelMatchState | null>(null)
@@ -112,6 +129,19 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   // Keep the Audio element stable while score/presence updates replace the match object.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const audioQuestion = useMemo(() => match?.question || null, [match?.question?.publicToken, match?.question?.audioStartAt, match?.question?.audioUrl, match?.question?.preloadAudioUrl])
+
+  const clearQuestionLocalState = useCallback(() => {
+    if (answerFeedbackTimerRef.current !== null) window.clearTimeout(answerFeedbackTimerRef.current)
+    answerFeedbackTimerRef.current = null
+    setAnswerFeedback(null)
+    answerPendingRef.current = null
+    setAnswerPending(false)
+    audioOperationRef.current += 1
+    currentAudioRef.current?.pause()
+    if (currentAudioRef.current) currentAudioRef.current.currentTime = 0
+    audioAttemptedTokenRef.current = null
+    playedAudioTokenRef.current = null
+  }, [])
 
   const setDuelError = useCallback((reason: unknown) => {
     setError(reason instanceof Error ? reason.message : '对决请求失败')
@@ -126,6 +156,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     matchIdRef.current = null
     latestMatchRef.current = null
     finishedHandledMatchIdRef.current = null
+    clearQuestionLocalState()
     if (reason) setDuelError(reason)
     setRoom(null)
     setRoomId(null)
@@ -135,7 +166,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     setQuestionResult(null)
     setView('lobby')
     router.replace('/games/guess-song/duel')
-  }, [router, setDuelError])
+  }, [clearQuestionLocalState, router, setDuelError])
 
   const loadLobby = useCallback(async () => {
     try {
@@ -161,9 +192,32 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const applyMatchSnapshot = useCallback((next: DuelMatchState) => {
     if (!canApplyDuelMatchSnapshot(matchIdRef.current, latestMatchRef.current, next)) return false
     const previous = latestMatchRef.current
+    const questionChanged = !previous || !sameDuelQuestionIdentity(getDuelQuestionIdentity(previous), getDuelQuestionIdentity(next))
     latestMatchRef.current = next
     setMatch(next)
     setQuestionResult(next.questionResult)
+    const mySnapshotPlayer = next.players.find((player) => player.userId === userId)
+    if (process.env.NODE_ENV !== 'production' && mySnapshotPlayer?.selectedOptionKey) {
+      const identity = getDuelQuestionIdentity(next)
+      console.debug('[guess-song-duel.snapshot-selection]', {
+        currentQuestionToken: identity.questionToken,
+        selectedQuestionToken: identity.questionToken,
+        selectedAnswer: mySnapshotPlayer.selectedOptionKey,
+        revision: next.revision,
+      })
+    }
+    if (!questionChanged && answerPendingRef.current && next.players.some((player) => player.userId === userId && player.submitted)) {
+      answerPendingRef.current = null
+      setAnswerPending(false)
+    }
+    if (questionChanged) {
+      // A new authoritative question is an atomic boundary for every local
+      // answer/feedback state. The old state must never render against the
+      // new question, even if a previous request finishes afterward.
+      clearQuestionLocalState()
+      setAudioBlocked(false)
+      setAudioError('')
+    }
     if (next.status === 'FINISHED' || next.status === 'INVALID' || next.status === 'CLOSED') {
       requestGenerationRef.current += 1
       syncRequestRef.current?.controller.abort()
@@ -174,14 +228,10 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         void loadLobby()
       }
     } else {
-      if (previous && previous.currentQuestionIndex !== next.currentQuestionIndex) {
-        setAudioBlocked(false)
-        setQuestionResult(null)
-      }
       setView('match')
     }
     return true
-  }, [loadLobby])
+  }, [clearQuestionLocalState, loadLobby, userId])
 
   const openRoom = useCallback((nextRoom: DuelRoomState) => {
     requestGenerationRef.current += 1
@@ -350,19 +400,36 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       return
     }
     if (event.type === 'QUESTION_START' || event.type === 'PLAYER_ANSWERED' || event.type === 'QUESTION_RESULT' || event.type === 'MATCH_FINISHED' || event.type === 'ANSWER_ACCEPTED') {
-      if (event.type === 'ANSWER_ACCEPTED' && event.userId === userId && activeMode === 'SCORE' && currentQuestion) {
+      const currentMatch = latestMatchRef.current
+      if (event.type === 'ANSWER_ACCEPTED' && event.userId === userId && currentMatch?.mode === 'SCORE' && canApplyDuelAnswerAccepted(currentMatch, event)) {
         // Per-user feedback only: capture the just-answered question so the
         // answerer sees their own correct/incorrect result. The opponent never
         // receives this event, so their options stay untouched.
-        setAnswerFeedback({
-          questionIndex: event.questionIndex,
-          options: currentQuestion.options,
-          selectedOptionKey: event.selectedOptionKey,
-          correct: event.correct,
-          correctOptionKey: event.correctOptionKey,
-        })
-        if (answerFeedbackTimerRef.current) window.clearTimeout(answerFeedbackTimerRef.current)
-        answerFeedbackTimerRef.current = window.setTimeout(() => setAnswerFeedback(null), 1600)
+        const identity = getDuelQuestionIdentity(currentMatch)
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[guess-song-duel.answer-feedback]', {
+            currentQuestionToken: identity.questionToken,
+            selectedQuestionToken: event.questionToken,
+            selectedAnswer: event.selectedOptionKey,
+            revision: currentMatch.revision,
+          })
+        }
+        const feedbackQuestion = currentMatch.question
+        if (feedbackQuestion) {
+          setAnswerFeedback({
+            identity,
+            options: feedbackQuestion.options,
+            selectedOptionKey: event.selectedOptionKey,
+            correct: event.correct,
+            correctOptionKey: event.correctOptionKey,
+          })
+          answerPendingRef.current = null
+          setAnswerPending(false)
+          if (answerFeedbackTimerRef.current) window.clearTimeout(answerFeedbackTimerRef.current)
+          answerFeedbackTimerRef.current = window.setTimeout(() => {
+            setAnswerFeedback((current) => current && sameDuelQuestionIdentity(current.identity, identity) ? null : current)
+          }, 1600)
+        }
       }
       void syncDuelState(true)
       return
@@ -372,10 +439,12 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       return
     }
     if (event.type === 'ERROR') {
+      answerPendingRef.current = null
+      setAnswerPending(false)
       if (event.code === 'STALE_ROUND' || event.code === 'MATCH_FINISHED') void syncDuelState()
       else setError(event.message)
     }
-  }, [applyMatchSnapshot, resetToLobby, syncDuelState])
+  }, [applyMatchSnapshot, resetToLobby, syncDuelState, userId])
 
   useEffect(() => {
     if (!roomId && !matchId) return
@@ -462,37 +531,170 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   }, [roomId, matchId, match?.status, handleRealtimeEvent, syncDuelState])
 
   useEffect(() => {
-    if (!audioQuestion || view !== 'match') return
-    const question = audioQuestion
-    const audio = new Audio(question.audioUrl)
+    const audio = new Audio()
     audio.preload = 'auto'
     audio.controls = false
-    currentAudioRef.current?.pause()
     currentAudioRef.current = audio
-    if (question.preloadAudioUrl) {
-      const nextAudio = new Audio(question.preloadAudioUrl)
-      nextAudio.preload = 'auto'
-      nextAudio.controls = false
+    const handleAudioError = () => {
+      const question = audioQuestionRef.current
+      if (!question || audioSourceRef.current !== question.audioUrl) return
+      logAudioFailure(audio.error, audio)
+      setAudioBlocked(true)
+      setAudioError('音频资源加载失败，请稍后重试')
     }
-    // 新题就绪：清空“已播放”标记，真正的播放交给下方时钟门控，绝不立即出声。
-    playedAudioTokenRef.current = null
+    audio.addEventListener('error', handleAudioError)
     return () => {
+      audio.removeEventListener('error', handleAudioError)
       audio.pause()
-      audio.src = ''
+      audio.removeAttribute('src')
+      audio.load()
+      currentAudioRef.current = null
     }
-  }, [audioQuestion, view])
+  }, [])
+
+  useEffect(() => {
+    audioQuestionRef.current = audioQuestion
+    const audio = currentAudioRef.current
+    if (!audio) return
+    if (!audioQuestion || view !== 'match' || audioQuestion.matchId !== matchId) {
+      audio.pause()
+      return
+    }
+    audioOperationRef.current += 1
+    audioUnlockingRef.current = false
+    setAudioUnlocking(false)
+    audio.pause()
+    audio.currentTime = 0
+    audioSourceRef.current = audioQuestion.audioUrl
+    audio.src = audioQuestion.audioUrl
+    audio.load()
+    // 新题只重置该题的播放尝试；整个 Match 的 audioUnlocked 保持不变。
+    audioAttemptedTokenRef.current = null
+    playedAudioTokenRef.current = null
+  }, [audioQuestion, matchId, view])
+
+  useEffect(() => {
+    if (view === 'match') return
+    audioOperationRef.current += 1
+    audioUnlockingRef.current = false
+    audioQuestionRef.current = null
+    const audio = currentAudioRef.current
+    audio?.pause()
+    if (audio) {
+      audio.removeAttribute('src')
+      audio.load()
+    }
+    audioSourceRef.current = null
+  }, [view])
 
   // 时钟驱动播放门控：只有本地时间（含服务器时钟偏移）到达服务端下发的
   // audioStartAt 才播放，且每道题只播放一次。这保证双方在同一服务器时刻同步
   // 出声——先收到题目的客户端也只会等待，不会提前播放；收到晚也不会错过同步点。
   useEffect(() => {
-    if (!audioQuestion || view !== 'match') return
-    if (playedAudioTokenRef.current === audioQuestion.publicToken) return
+    if (!audioQuestion || view !== 'match' || audioQuestion.matchId !== matchId) return
+    if (playedAudioTokenRef.current === audioQuestion.publicToken || audioAttemptedTokenRef.current === audioQuestion.publicToken) return
     const startAt = new Date(audioQuestion.audioStartAt).getTime()
     if (clockTick + offsetRef.current < startAt) return
-    playedAudioTokenRef.current = audioQuestion.publicToken
-    void currentAudioRef.current?.play().catch(() => setAudioBlocked(true))
-  }, [audioQuestion, view, clockTick])
+    const audio = currentAudioRef.current
+    if (!audio) return
+    const operation = audioOperationRef.current
+    const questionToken = audioQuestion.publicToken
+    audioAttemptedTokenRef.current = questionToken
+    let playPromise: Promise<void>
+    try {
+      playPromise = audio.play()
+    } catch (reason) {
+      if (operation !== audioOperationRef.current || audioQuestionRef.current?.publicToken !== questionToken) return
+      logAudioFailure(reason, audio)
+      setAudioBlocked(true)
+      setAudioError(isAudioResourceFailure(audio, reason) ? '音频资源加载失败，请稍后重试' : '声音开启失败，请点击按钮重试')
+      return
+    }
+    void playPromise.then(() => {
+      if (operation !== audioOperationRef.current || audioQuestionRef.current?.publicToken !== questionToken) return
+      playedAudioTokenRef.current = questionToken
+      audioUnlockedRef.current = true
+      setAudioUnlocked(true)
+      setAudioBlocked(false)
+      setAudioError('')
+    }).catch((reason: unknown) => {
+      if (operation !== audioOperationRef.current || audioQuestionRef.current?.publicToken !== questionToken) return
+      logAudioFailure(reason, audio)
+      const resourceFailure = isAudioResourceFailure(audio, reason)
+      setAudioBlocked(true)
+      setAudioError(resourceFailure ? '音频资源加载失败，请稍后重试' : '声音开启失败，请点击按钮重试')
+    })
+  }, [audioQuestion, clockTick, matchId, view])
+
+  const unlockAudioForCurrentQuestion = useCallback(() => {
+    const audio = currentAudioRef.current
+    const question = audioQuestionRef.current
+    if (!audio || !question || question.matchId !== matchId || audioUnlockingRef.current) return
+    const operation = audioOperationRef.current
+    const questionToken = question.publicToken
+    audioUnlockingRef.current = true
+    setAudioUnlocking(true)
+    setAudioError('')
+    audioAttemptedTokenRef.current = questionToken
+    // This play() call deliberately stays in the click handler's synchronous
+    // call chain so mobile autoplay policies can recognize the real gesture.
+    let playPromise: Promise<void>
+    try {
+      playPromise = audio.play()
+    } catch (reason) {
+      logAudioFailure(reason, audio)
+      audioUnlockingRef.current = false
+      setAudioUnlocking(false)
+      const resourceFailure = isAudioResourceFailure(audio, reason)
+      setAudioBlocked(true)
+      setAudioError(resourceFailure ? '音频资源加载失败，请稍后重试' : '声音开启失败，请再试一次')
+      return
+    }
+    void playPromise.then(() => {
+      if (operation !== audioOperationRef.current || audioQuestionRef.current?.publicToken !== questionToken) return
+      audioUnlockingRef.current = false
+      audioUnlockedRef.current = true
+      setAudioUnlocking(false)
+      setAudioUnlocked(true)
+      setAudioBlocked(false)
+      setAudioError('')
+      // The click only unlocks this stable element. Let the normal server-clock
+      // playback path start the actual preview, so unlocking never consumes a
+      // play attempt or changes the question's scheduled start.
+      audio.pause()
+      audio.currentTime = 0
+      audioAttemptedTokenRef.current = null
+      playedAudioTokenRef.current = null
+    }).catch((reason: unknown) => {
+      if (operation !== audioOperationRef.current || audioQuestionRef.current?.publicToken !== questionToken) return
+      logAudioFailure(reason, audio)
+      audioUnlockingRef.current = false
+      setAudioUnlocking(false)
+      const resourceFailure = isAudioResourceFailure(audio, reason)
+      setAudioBlocked(true)
+      setAudioError(resourceFailure ? '音频资源加载失败，请稍后重试' : '声音开启失败，请再试一次')
+    })
+  }, [matchId])
+
+  useEffect(() => {
+    audioOperationRef.current += 1
+    audioUnlockedRef.current = false
+    audioUnlockingRef.current = false
+    audioQuestionRef.current = null
+    audioSourceRef.current = null
+    setAudioUnlocked(false)
+    setAudioUnlocking(false)
+    setAudioBlocked(false)
+    setAudioError('')
+    audioAttemptedTokenRef.current = null
+    playedAudioTokenRef.current = null
+    const audio = currentAudioRef.current
+    audio?.pause()
+    if (audio) {
+      audio.removeAttribute('src')
+      audio.load()
+    }
+  }, [matchId])
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockTick(Date.now()), 200)
@@ -506,6 +708,9 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
   const currentQuestion = match?.question
   const activeMode = match?.mode || room?.mode || selectedMode
+  const currentQuestionIdentity = match && currentQuestion ? getDuelQuestionIdentity(match) : null
+  const visibleAnswerFeedback = currentQuestionIdentity && answerFeedback && sameDuelQuestionIdentity(answerFeedback.identity, currentQuestionIdentity) ? answerFeedback : null
+  const questionInteractionKey = currentQuestionIdentity ? duelQuestionIdentityKey(currentQuestionIdentity) : match ? `${match.matchId}:${match.currentQuestionIndex}:waiting` : 'no-question'
   const audioStarted = Boolean(currentQuestion && clockTick + offsetRef.current >= new Date(currentQuestion.audioStartAt).getTime())
   const deadlinePassed = Boolean(currentQuestion && (activeMode === 'BUZZER' || currentQuestion.isOvertime) && clockTick + offsetRef.current > new Date(currentQuestion.answerDeadlineAt).getTime())
   const me = match?.players.find((player) => player.userId === userId) || null
@@ -521,7 +726,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     createRoomInFlightRef.current = true
     setBusy(true)
     setError('')
-    unlockAudio()
     try {
       const data = await api<{ room: DuelRoomState }>('/api/entertainment/guess-song/duel/rooms', {
         method: 'POST',
@@ -557,7 +761,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   async function joinRoom(target: DuelRoomState, password?: string) {
     setBusy(true)
     setError('')
-    unlockAudio()
     try {
       const data = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(target.id)}/join`, {
         method: 'POST',
@@ -576,7 +779,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   async function updateReady(ready: boolean) {
     if (!room) return
     setBusy(true)
-    unlockAudio()
     try {
       const data = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(room.id)}/ready`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ready }),
@@ -592,7 +794,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   async function startMatch() {
     if (!room) return
     setBusy(true)
-    unlockAudio()
     try {
       const data = await api<{ room: DuelRoomState; matchId: string; serverStartAt: string; match: DuelMatchState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(room.id)}/start`, { method: 'POST' })
       setRoom(data.room)
@@ -636,7 +837,11 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
   async function submitAnswer(optionKey: string) {
     if (!matchId || !currentQuestion || !audioStarted || deadlinePassed || me?.submitted || questionResult) return
-    unlockAudio()
+    const questionIdentity = getDuelQuestionIdentity(match as DuelMatchState)
+    const questionKey = duelQuestionIdentityKey(questionIdentity)
+    if (answerPendingRef.current === questionKey) return
+    answerPendingRef.current = questionKey
+    setAnswerPending(true)
     const clientElapsedMs = Math.max(0, Math.round(Date.now() + offsetRef.current - new Date(currentQuestion.audioStartAt).getTime()))
     const command: DuelClientCommand = {
       type: 'ANSWER',
@@ -650,7 +855,13 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       clientElapsedMs,
     }
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(command))
+      try {
+        socketRef.current.send(JSON.stringify(command))
+      } catch (reason) {
+        answerPendingRef.current = null
+        setAnswerPending(false)
+        setDuelError(reason)
+      }
       return
     }
     try {
@@ -659,6 +870,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       })
       void syncDuelState()
     } catch (reason) {
+      answerPendingRef.current = null
+      setAnswerPending(false)
       const code = (reason as DuelApiError)?.code
       if (code === 'STALE_ROUND' || code === 'MATCH_FINISHED' || code === 'ANSWER_ALREADY_SUBMITTED') void syncDuelState()
       else setDuelError(reason)
@@ -817,21 +1030,22 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
                 <p>你已完成答题，等待对方交卷</p>
                 <span>对方进度：{opponent?.answeredCount || 0} / {match.totalQuestions}</span>
               </div>
-            ) : <>
+            ) : <div key={questionInteractionKey} className="duel-question-interaction">
             {match.phase === 'STARTING' && countdown > 0 ? <div className="duel-countdown"><span>准备</span><strong>{countdown}</strong></div> : null}
             <div className="duel-question-heading"><span>{currentQuestion?.isOvertime ? `加赛 ${currentQuestion.overtimeIndex || 1}` : `${activeModeLabel} · 第 ${String(match.currentQuestionIndex).padStart(2, '0')} / ${match.totalQuestions} 题`}</span><span>{audioStarted && !deadlinePassed ? activeMode === 'BUZZER' ? '抢答进行中' : '双方独立作答' : deadlinePassed ? '等待揭晓' : '即将开始'}</span></div>
             <p className="duel-audio-hint">试听将在题目开始后 2 秒同步播放 · {activeMode === 'BUZZER' ? '本题最多 1 个得分者' : '双方各有一次独立答题机会'}</p>
-            {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={() => { unlockAudio(); setAudioBlocked(false); playedAudioTokenRef.current = audioQuestion?.publicToken ?? null; void currentAudioRef.current?.play().catch(() => setAudioBlocked(true)) }}>点击开启声音</button> : null}
-            {answerFeedback && activeMode === 'SCORE' ? (
+            {audioBlocked ? <button type="button" className="duel-audio-unlock" onClick={unlockAudioForCurrentQuestion} disabled={audioUnlocking}>{audioUnlocking ? '正在开启声音…' : audioUnlocked ? '重新开启声音' : '点击开启声音'}</button> : null}
+            {audioError ? <p className="duel-audio-error" role="alert">{audioError}</p> : null}
+            {visibleAnswerFeedback && activeMode === 'SCORE' ? (
               <>
-                <div className="duel-options">{answerFeedback.options.map((option) => {
-                  const mineRight = answerFeedback.correct && answerFeedback.selectedOptionKey === option.key
-                  const mineWrong = !answerFeedback.correct && answerFeedback.selectedOptionKey === option.key
-                  const isCorrect = answerFeedback.correctOptionKey === option.key
+                <div className="duel-options">{visibleAnswerFeedback.options.map((option) => {
+                  const mineRight = visibleAnswerFeedback.correct && visibleAnswerFeedback.selectedOptionKey === option.key
+                  const mineWrong = !visibleAnswerFeedback.correct && visibleAnswerFeedback.selectedOptionKey === option.key
+                  const isCorrect = visibleAnswerFeedback.correctOptionKey === option.key
                   const label = mineRight ? '我答对了' : mineWrong ? '我的错误选择' : isCorrect ? '正确答案' : ''
-                  return <button key={option.key} type="button" className={[mineRight ? 'is-correct-choice' : '', mineWrong ? 'is-wrong-choice' : '', isCorrect ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} disabled aria-label={`${option.label}${label ? `，${label}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{label ? <small>{label}</small> : null}</button>
+                  return <button key={`${questionInteractionKey}:${option.key}`} type="button" className={[mineRight ? 'is-correct-choice' : '', mineWrong ? 'is-wrong-choice' : '', isCorrect ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} disabled aria-label={`${option.label}${label ? `，${label}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{label ? <small>{label}</small> : null}</button>
                 })}</div>
-                <div className="duel-answer-status">{answerFeedback.correct ? '✅ 回答正确！' : `❌ 回答错误，正确答案：${answerFeedback.correctOptionKey}`}</div>
+                <div className="duel-answer-status">{visibleAnswerFeedback.correct ? '✅ 回答正确！' : `❌ 回答错误，正确答案：${visibleAnswerFeedback.correctOptionKey}`}</div>
               </>
             ) : (
               <>
@@ -841,14 +1055,14 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
                   const correct = activeMode === 'BUZZER' && questionResult?.correctOptionKey === option.key
                   const mineLabel = activeMode === 'BUZZER' && me?.answerCorrect === false ? '我的错误抢答' : questionResult && me?.answerCorrect !== null ? me?.answerCorrect ? '我答对了' : '我答错了' : '我的选择'
                   const theirsLabel = activeMode === 'BUZZER' && opponent?.answerCorrect === false ? '对方错误抢答' : questionResult && opponent?.answerCorrect !== null ? opponent?.answerCorrect ? '对方答对了' : '对方答错了' : '对方选择'
-                  return <button key={option.key} type="button" className={[me?.submitted || Boolean(questionResult) ? 'is-submitted' : '', mine ? 'is-my-choice' : '', theirs ? 'is-opponent-choice' : '', correct ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} onClick={() => void submitAnswer(option.key)} disabled={!audioStarted || deadlinePassed || Boolean(me?.submitted) || Boolean(questionResult)} aria-label={`${option.label}${mine ? `，${mineLabel}` : ''}${theirs ? `，${theirsLabel}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{mine ? <small>{mineLabel}</small> : null}{theirs ? <small>{theirsLabel}</small> : null}</button>
+                  return <button key={`${questionInteractionKey}:${option.key}`} type="button" className={[me?.submitted || Boolean(questionResult) ? 'is-submitted' : '', mine ? 'is-my-choice' : '', theirs ? 'is-opponent-choice' : '', correct ? 'is-correct-choice' : ''].filter(Boolean).join(' ')} onClick={() => void submitAnswer(option.key)} disabled={!audioStarted || deadlinePassed || Boolean(me?.submitted) || Boolean(questionResult) || answerPending} aria-label={`${option.label}${mine ? `，${mineLabel}` : ''}${theirs ? `，${theirsLabel}` : ''}`}><b>{option.key}</b><span>{option.label}</span>{mine ? <small>{mineLabel}</small> : null}{theirs ? <small>{theirsLabel}</small> : null}</button>
                 })}</div>
-                 <div className="duel-answer-status">{me?.submitted ? activeMode === 'BUZZER' ? '✓ 已作答，本题资格已锁定' : '✓ 已作答，等待对手' : audioStarted && !deadlinePassed ? '选择一个答案，提交后不可修改' : '请等待题目开始'}{opponent?.submitted ? <span> · 对手已作答</span> : null}</div>
+                 <div className="duel-answer-status">{answerPending ? '正在提交答案…' : me?.submitted ? activeMode === 'BUZZER' ? '✓ 已作答，本题资格已锁定' : '✓ 已作答，等待对手' : audioStarted && !deadlinePassed ? '选择一个答案，提交后不可修改' : '请等待题目开始'}{opponent?.submitted ? <span> · 对手已作答</span> : null}</div>
               </>
             )}
              {lastRoundSummary ? <div className="duel-question-result">上一题：{lastRoundSummary}</div> : null}
              {questionResult ? <div className="duel-question-result"><b>本题答案：{questionResult.correctLabel}</b><span>{activeMode === 'BUZZER' ? questionResult.answers.some((answer) => answer.correct) ? '本题已分出胜负' : '本题无人得分' : `${questionResult.answers.filter((answer) => answer.correct).length} 人答对`}</span></div> : null}
-            </>}
+            </div>}
           </div>
           <button type="button" className="duel-exit-link" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出比赛</button>
         </section>

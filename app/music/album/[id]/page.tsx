@@ -15,10 +15,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function MusicAlbumPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const currentUser = await getCurrentUser().catch((error) => {
-    console.warn('[music-album.auth]', error)
-    return null
-  })
+  const currentUser = await getCurrentUser()
   const [album, config] = await Promise.all([
     prisma.musicAlbum.findFirst({ where: { id, status: 'PUBLISHED' }, include: { MusicSong: { orderBy: [{ trackNumber: 'asc' }, { createdAt: 'asc' }] } } }),
     getSiteAppearance(),

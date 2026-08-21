@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { canPlayFullMusic } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { streamProtectedGuessSongAudio } from '@/lib/protected-audio'
@@ -10,10 +10,15 @@ export const dynamic = 'force-dynamic'
 type RouteContext = { params: Promise<{ songId: string }> }
 
 async function handle(request: Request, context: RouteContext) {
-  const user = await getCurrentUser().catch((error) => {
-    console.warn('[music-playback-stream.auth]', error)
-    return null
-  })
+  let user: Awaited<ReturnType<typeof getCurrentUser>>
+  try {
+    user = await getCurrentUser()
+  } catch (error) {
+    if (isAuthServiceUnavailableError(error)) {
+      return NextResponse.json({ ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后重试' }, { status: 503 })
+    }
+    throw error
+  }
   if (!user) {
     return NextResponse.json({ ok: false, code: 'AUTH_REQUIRED', message: '请先登录' }, { status: 401 })
   }

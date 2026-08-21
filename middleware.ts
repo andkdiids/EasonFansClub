@@ -64,7 +64,18 @@ async function renewSessionCookie(request: NextRequest, currentToken: string) {
       .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
       .sign(jwtSecret)
     return { token, options: getSessionCookieOptions(request) }
-  } catch {
+  } catch (error) {
+    // Refresh is best-effort. Never clear the old cookie here: a concurrent
+    // request may still be using it, and a refresh failure is not proof that
+    // the existing session is invalid.
+    console.warn('[AUTH_SESSION_RENEWAL]', JSON.stringify({
+      reason: 'RENEWAL_FAILED',
+      path: request.nextUrl.pathname,
+      method: request.method,
+      hostname: request.nextUrl.hostname,
+      errorName: error instanceof Error ? error.name : 'unknown',
+      at: new Date().toISOString(),
+    }))
     return null
   }
 }
@@ -103,7 +114,13 @@ function isApiPath(pathname: string) {
   return pathname === '/api' || pathname.startsWith('/api/')
 }
 
-async function verifyRequestSession(request: NextRequest): Promise<VerifiedSession | null> {
+type SessionVerification = {
+  session: VerifiedSession | null
+  internalError: boolean
+  reason?: 'NO_SESSION' | 'TOKEN_EXPIRED' | 'TOKEN_INVALID' | 'VERIFY_FAILED'
+}
+
+async function verifyRequestSession(request: NextRequest): Promise<SessionVerification> {
   // 可能同时存在 Domain=.ecfc.fans 与 host-only 两个同名 cookie
   // （多 host 访问 + 滚动续期种下）。逐个验证，只要一个有效即视为已登录，
   // 避免取到旧/失效 cookie 被误判未登录。
@@ -120,39 +137,63 @@ async function verifyRequestSession(request: NextRequest): Promise<VerifiedSessi
         userAgent: request.headers.get('user-agent')?.slice(0, 200) || undefined,
       }))
     }
-    return null
+    return { session: null, internalError: false, reason: 'NO_SESSION' }
   }
 
+  let internalError = false
+  const reasons: Array<NonNullable<SessionVerification['reason']>> = []
   for (const token of tokens) {
-    const verified = await tryVerifyToken(token, request)
-    if (verified) return verified
+    const result = await tryVerifyToken(token, request)
+    if (result.session) return { session: result.session, internalError: false }
+    internalError = internalError || result.internalError
+    if (result.reason) reasons.push(result.reason)
   }
-  return null
+  const reason = internalError
+    ? 'VERIFY_FAILED'
+    : reasons.includes('TOKEN_EXPIRED')
+      ? 'TOKEN_EXPIRED'
+      : 'TOKEN_INVALID'
+  return { session: null, internalError, reason }
 }
 
-type TokenVerifyResult = VerifiedSession | null
+type TokenVerifyResult = {
+  session: VerifiedSession | null
+  internalError: boolean
+  reason?: 'TOKEN_EXPIRED' | 'TOKEN_INVALID' | 'VERIFY_FAILED'
+}
 
 async function tryVerifyToken(token: string, request: NextRequest): Promise<TokenVerifyResult> {
   try {
     const { payload } = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] })
     if (typeof payload.id !== 'string' || !payload.id.trim()) {
       logSessionInvalid('PAYLOAD_INVALID', request, token)
-      return null
+      return { session: null, internalError: false, reason: 'TOKEN_INVALID' }
     }
     const exp = typeof payload.exp === 'number' ? payload.exp : 0
     const remainingMs = exp * 1000 - Date.now()
     return {
-      id: payload.id,
-      role: typeof payload.role === 'string' ? payload.role : null,
-      token,
-      // 剩余有效期不足阈值且尚未过期 → 需要滚动续期
-      needsRollingRenew: remainingMs > 0 && remainingMs < ROLLING_RENEW_BEFORE_MS,
+      session: {
+        id: payload.id,
+        role: typeof payload.role === 'string' ? payload.role : null,
+        token,
+        // 剩余有效期不足阈值且尚未过期 → 需要滚动续期
+        needsRollingRenew: remainingMs > 0 && remainingMs < ROLLING_RENEW_BEFORE_MS,
+      },
+      internalError: false,
     }
   } catch (error) {
-    // 明确区分「已过期」与「签名/格式错误」，并记录诊断（不记录完整 token）
-    const reason = error instanceof joseErrors.JWTExpired ? 'SESSION_EXPIRED' : 'INVALID_SIGNATURE'
-    logSessionInvalid(reason, request, token)
-    return null
+    // 明确区分「已过期」与「签名/格式错误」。JOSE 自身的错误属于用户
+    // Cookie 无效；非 JOSE 的未知异常属于认证服务内部故障，不能返回 401。
+    if (error instanceof joseErrors.JWTExpired) {
+      logSessionInvalid('SESSION_EXPIRED', request, token)
+      return { session: null, internalError: false, reason: 'TOKEN_EXPIRED' }
+    }
+    if (error instanceof joseErrors.JOSEError) {
+      logSessionInvalid('INVALID_SIGNATURE', request, token)
+      return { session: null, internalError: false, reason: 'TOKEN_INVALID' }
+    }
+    logSessionInvalid('VERIFICATION_ERROR', request, token)
+    return { session: null, internalError: true, reason: 'VERIFY_FAILED' }
   }
 }
 
@@ -180,6 +221,27 @@ function unauthorizedApiResponse() {
   ))
 }
 
+function authVerificationUnavailableResponse(request: NextRequest) {
+  console.error('[AUTH_SESSION_CHECK_FAILED]', JSON.stringify({
+    reason: 'VERIFICATION_ERROR',
+    path: request.nextUrl.pathname,
+    method: request.method,
+    hostname: request.nextUrl.hostname,
+    requestId: request.headers.get('x-request-id')?.slice(0, 120) || undefined,
+    at: new Date().toISOString(),
+  }))
+  if (isApiPath(request.nextUrl.pathname)) {
+    return withNoStoreHeaders(NextResponse.json(
+      { ok: false, code: 'AUTH_SESSION_CHECK_FAILED', message: '登录服务暂时不可用，请稍后重试' },
+      { status: 503 },
+    ))
+  }
+  return withNoStoreHeaders(new NextResponse('登录服务暂时不可用，请稍后重试', {
+    status: 503,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  }))
+}
+
 function forbiddenAdminApiResponse() {
   return withNoStoreHeaders(NextResponse.json(
     { ok: false, code: 'FORBIDDEN', message: '无权限访问' },
@@ -187,13 +249,21 @@ function forbiddenAdminApiResponse() {
   ))
 }
 
-function loginRedirect(request: NextRequest) {
+function loginRedirect(request: NextRequest, reason: NonNullable<SessionVerification['reason']> = 'NO_SESSION') {
   const nextPath = safeInternalPath(`${request.nextUrl.pathname}${request.nextUrl.search}` || '/', '/')
   const target = `/login?next=${encodeURIComponent(nextPath)}`
   const resolvedOrigin = getPublicOrigin(request)
   const location = buildPublicAbsoluteUrl(target, request)
   console.warn('[auth.redirect]', {
+    event: 'AUTH_REDIRECT_LOGIN',
+    source: 'middleware',
     path: request.nextUrl.pathname,
+    pathname: request.nextUrl.pathname,
+    reason,
+    hasSessionCookie: request.cookies.getAll(authCookieName).length > 0,
+    tokenStatus: reason,
+    userId: undefined,
+    requestId: request.headers.get('x-request-id')?.slice(0, 120) || undefined,
     host: request.headers.get('host') || '',
     xfHost: request.headers.get('x-forwarded-host') || '',
     xfProto: request.headers.get('x-forwarded-proto') || '',
@@ -238,8 +308,10 @@ export async function middleware(request: NextRequest) {
       : withNoStoreHeaders(response)
   }
 
-  const session = await verifyRequestSession(request)
-  if (!session) return isApiPath(pathname) ? unauthorizedApiResponse() : loginRedirect(request)
+  const verification = await verifyRequestSession(request)
+  if (verification.internalError) return authVerificationUnavailableResponse(request)
+  const session = verification.session
+  if (!session) return isApiPath(pathname) ? unauthorizedApiResponse() : loginRedirect(request, verification.reason || 'TOKEN_INVALID')
 
   // 滚动续期：JWT 剩余有效期不足阈值时重签同 claims 的 cookie（沿用 30 天有效期）。
   // 持续活跃用户不会因固定过期在长时间游戏中突然掉登录。

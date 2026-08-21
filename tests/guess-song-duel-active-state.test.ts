@@ -205,7 +205,7 @@ test('the banner is server-state-only and its close action rechecks the server',
 test('returning to the lobby awaits leave and then reloads unified active state', () => {
   const client = source('components/games/GuessSongDuel.tsx')
   assert.match(client, /await api\(`\/api\/entertainment\/guess-song\/duel\/rooms\/\$\{encodeURIComponent\(currentRoomId\)\}\/leave`/)
-  assert.match(client, /resetToLobby\(\)\n    await loadLobby\(\)/)
+  assert.match(client, /resetToLobby\(\)\r?\n    await loadLobby\(\)/)
   assert.match(source('lib/guess-song-duel-service.ts'), /export async function leaveDuelRoom[\s\S]*?const normalized = await resolveDuelActiveStateTx\(tx, userId, now\)/)
 })
 

@@ -9,7 +9,7 @@ test('通知卡片、乐观计数和返回页面使用同一已读状态', () =>
 
   assert.match(client, /function isNotificationRead\(item: UnifiedNotification\)/)
   assert.match(client, /isNotificationRead\(item\) \? 'is-read' : 'is-unread'/)
-  assert.match(client, /setSummaryOverride\(decrementUnreadSummary\(unreadSummary, \[item\]\)\)/)
+  assert.match(client, /updateSummary\(\(current\) => decrementUnreadSummary\(current, \[item\]\)\)/)
   assert.match(client, /persistOptimisticRead\(itemKey, optimisticReadAt\)/)
   assert.match(client, /window\.addEventListener\('pageshow', sync\)/)
   assert.doesNotMatch(client, /window\.addEventListener\('unread-summary:refresh', sync\)/)

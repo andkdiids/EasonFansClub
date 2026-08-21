@@ -33,7 +33,7 @@ export default async function RatingsPage({ searchParams }: { searchParams: Sear
   const page = Number.isSafeInteger(requestedPage) && requestedPage >= 1 ? requestedPage : 1
   const [ranking, user] = await Promise.all([
     getRatingRanking({ target, language, query, page }),
-    getCurrentUser().catch(() => null),
+    getCurrentUser(),
   ])
   if (ranking.page !== page) redirect(ratingsHref({ target, language, query, page: ranking.page }))
 

@@ -8,7 +8,7 @@ import { PerformanceAudit } from '@/components/PerformanceAudit'
 import { MusicPlayerProvider } from '@/components/music/MusicPlayerProvider'
 import { VirtualKeyboardManager } from '@/components/VirtualKeyboardManager'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { getCurrentUser, getSessionUserFromCookie } from '@/lib/auth'
+import { getCurrentUser, getSessionUserFromCookie, isAuthServiceUnavailableError } from '@/lib/auth'
 import { calculateGrowthSummary, defaultGrowthLevels, getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
 import { getUnreadSummary } from '@/lib/notifications'
@@ -25,7 +25,14 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const cookieUser = await getSessionUserFromCookie()
-  const sessionUser = cookieUser ? await getCurrentUser().catch(() => cookieUser) : null
+  const sessionUser = cookieUser ? await getCurrentUser().catch((error) => {
+    if (!isAuthServiceUnavailableError(error)) throw error
+    // Keep the JWT-backed shell during a temporary user lookup outage. This is
+    // deliberate degraded UI, never an anonymous/null fallback that can cause
+    // a later click to redirect a valid session to /login.
+    logNotificationError('layout.auth-degraded', { userId: cookieUser.id }, error)
+    return cookieUser
+  }) : null
   const fallbackGrowth = calculateGrowthSummary(sessionUser?.experience || 0, [...defaultGrowthLevels])
   const emptyUnreadSummary = { notifications: 0, system: 0, replies: 0, likes: 0, wall: 0, feedbackReplies: 0, feedback: 0, friendRequests: 0, directMessages: 0, messages: 0, total: 0 }
   const [appearance, unreadSummary, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([

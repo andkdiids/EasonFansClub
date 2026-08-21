@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isAuthServiceUnavailableError } from '@/lib/auth'
 import { ClinicServiceError } from '@/lib/clinic-service'
 
 export const clinicPublicHeaders = {
@@ -22,6 +23,9 @@ function getPrismaCode(error: unknown) {
 }
 
 export function clinicErrorResponse(error: unknown, context: ClinicErrorContext = {}) {
+  if (isAuthServiceUnavailableError(error)) {
+    return NextResponse.json({ ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后再试。' }, { status: 503, headers: clinicPublicHeaders })
+  }
   if (error instanceof ClinicServiceError) {
     return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: clinicPublicHeaders })
   }

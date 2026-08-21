@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { DeleteReplyButton, type DeleteCommentResult } from '@/components/DeleteCommentButton'
-import { isSessionDefinitivelyInvalid, recordForceLogout } from '@/lib/client-auth'
+import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ImageViewer } from '@/components/ImageViewer'
 import { LikeAvatars, type LikeAvatarUser } from '@/components/LikeAvatars'
@@ -164,14 +164,7 @@ export function PostRepliesSection({
 
   async function toggleLike(replyId: string) {
     const response = await fetch(`/api/replies/${replyId}/like`, { method: 'POST' })
-    if (response.status === 401) {
-      // 二次确认：仅当权威 Session 接口确认失效才跳登录
-      const invalid = await isSessionDefinitivelyInvalid()
-      if (!invalid) return
-      recordForceLogout('SESSION_INVALID', `/api/replies/${replyId}/like`, 401)
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
-      return
-    }
+    if (await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/replies/${replyId}/like`)) return
     const data = await response.json().catch(() => ({}))
     if (!response.ok) return
     setReplies((current) => current.map((reply) => reply.id === replyId
@@ -189,15 +182,11 @@ export function PostRepliesSection({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pinned }),
     })
+    if (await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/replies/${reply.id}/pin`)) {
+      setPinningReplyId(null)
+      return
+    }
     if (response.status === 401) {
-      // 二次确认：仅当权威 Session 接口确认失效才跳登录
-      const invalid = await isSessionDefinitivelyInvalid()
-      if (!invalid) {
-        setPinningReplyId(null)
-        return
-      }
-      recordForceLogout('SESSION_INVALID', `/api/replies/${reply.id}/pin`, 401)
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
       setPinningReplyId(null)
       return
     }

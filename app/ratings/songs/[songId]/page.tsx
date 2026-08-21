@@ -21,7 +21,7 @@ export default async function RatingSongPage({ params, searchParams }: { params:
   const { songId } = await params
   const query = await searchParams
   const sort = parseRatingReviewSort(firstParam(query.sort)) as RatingReviewSort
-  const user = await getCurrentUser().catch(() => null)
+  const user = await getCurrentUser()
   const detail = await getSongRatingDetail(songId, user?.id || null, sort)
   if (!detail) notFound()
 

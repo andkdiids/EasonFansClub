@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import {
   createRatingWithOptionalReview,
   getSongRatingDetail,
@@ -13,6 +13,7 @@ import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } f
 type Context = { params: Promise<{ songId: string }> }
 
 function errorResponse(error: unknown) {
+  if (isAuthServiceUnavailableError(error)) return NextResponse.json({ code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后重试' }, { status: 503 })
   if (error instanceof RatingServiceError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status })
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ code: 'ALREADY_RATED', message: '你已经评价过这首歌曲' }, { status: 409 })
   console.error('[ratings.song]', error)
@@ -20,9 +21,9 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(request: Request, { params }: Context) {
-  const { songId } = await params
-  const viewer = await getCurrentUser().catch(() => null)
   try {
+    const { songId } = await params
+    const viewer = await getCurrentUser()
     const detail = await getSongRatingDetail(songId, viewer?.id || null, parseRatingReviewSort(new URL(request.url).searchParams.get('sort')))
     if (!detail) return NextResponse.json({ message: '歌曲不存在或暂未公开' }, { status: 404 })
     return NextResponse.json(detail, { headers: { 'Cache-Control': viewer ? 'private, no-store' : 'public, max-age=15, s-maxage=30, stale-while-revalidate=60', Vary: 'Cookie' } })

@@ -34,6 +34,17 @@ test('SCORE: A 的进度计算不读取或修改 B 的答案', () => {
   assert.equal(progress.questionIndex, 3)
 })
 
+test('用户完全不操作时不会生成默认答案或自动推进进度', () => {
+  assert.deepEqual(calculateDuelScoreProgress([], 30), {
+    questionIndex: 1, answeredCount: 0, submitted: false, lastAnsweredAt: null,
+  })
+  const service = source('lib/guess-song-duel-service.ts')
+  const client = source('components/games/GuessSongDuel.tsx')
+  assert.doesNotMatch(service, /selectedOptionKey:\s*options\[0\]/)
+  assert.doesNotMatch(service, /selectedOptionKey:\s*['"]A['"]/)
+  assert.doesNotMatch(client, /submitAnswer\(options\[0\]/)
+})
+
 test('SCORE: 固定题集中的加赛题不计入基础进度', () => {
   const progress = calculateDuelScoreProgress([
     { questionIndex: 1, isOvertime: false },
@@ -159,7 +170,7 @@ test('SCORE: 作答正误只通过 ANSWER_ACCEPTED 推送给本人，携带自�
   assert.match(realtime, /correctOptionKey: outcome\.correctOptionKey,/)
   assert.match(realtime, /selectedOptionKey: outcome\.selectedOptionKey,/)
   const protocol = source('lib/guess-song-duel-protocol.ts')
-  assert.match(protocol, /type: 'ANSWER_ACCEPTED'; matchId: string; questionIndex: number; userId: string; correct: boolean; correctOptionKey: string; selectedOptionKey: string \}/)
+  assert.match(protocol, /type: 'ANSWER_ACCEPTED'; matchId: string; questionIndex: number; userId: string; correct: boolean; correctOptionKey: string; selectedOptionKey: string; roundId: string; questionId: string; questionToken: string \}/)
   const service = source('lib/guess-song-duel-service.ts')
   assert.match(service, /selectedOptionKey: optionKey, correct, correctOptionKey: question\.correctOptionKey, questionCompletion \}/)
 })

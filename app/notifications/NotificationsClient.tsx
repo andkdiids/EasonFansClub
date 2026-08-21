@@ -122,7 +122,7 @@ type NotificationReadResponse = {
   }
 }
 
-// 本地即时递减未读数（分类角标同步），随后由 Provider 触发的服务端汇总校正为权威值。
+// 通过 NotificationProvider 即时递减共享未读数，随后用服务端汇总校正为权威值。
 const NOTIFICATION_LIST_PAGE_SIZE = 20
 const OPTIMISTIC_READ_STORAGE_KEY = 'notifications:optimistic-read'
 const DISMISSED_SYSTEM_STORAGE_KEY = 'notifications:dismissed-system'
@@ -244,11 +244,10 @@ export function NotificationsClient({
   const searchParamsString = searchParams.toString()
   const searchParamsStringRef = useRef(searchParamsString)
   searchParamsStringRef.current = searchParamsString
-  const { summary: sharedSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
+  const { summary: sharedSummary, updateSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
   const [notifications, setNotifications] = useState(initialNotifications)
   const [pagination, setPagination] = useState(initialPagination)
-  const [summaryOverride, setSummaryOverride] = useState<UnreadSummary | null>(null)
-  const unreadSummary = summaryOverride || sharedSummary
+  const unreadSummary = sharedSummary
   const unreadCount = unreadSummary.total
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>(initialCategory)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -400,10 +399,6 @@ export function NotificationsClient({
   }, [])
 
   useEffect(() => {
-    setSummaryOverride(null)
-  }, [sharedSummary])
-
-  useEffect(() => {
     const saved = window.sessionStorage.getItem('notifications:return-state')
     if (!saved) return
     window.sessionStorage.removeItem('notifications:return-state')
@@ -422,11 +417,11 @@ export function NotificationsClient({
     const hiddenUnread = notifications.filter((item) => item.source === 'system' && dismissed.has(item.id) && !isNotificationRead(item))
     setNotifications((current) => current.filter((item) => item.source !== 'system' || !dismissed.has(item.id)))
     if (!hiddenUnread.length) return
-    setSummaryOverride((current) => ({
-      ...(current || sharedSummary),
-      notifications: Math.max(0, (current || sharedSummary).notifications - hiddenUnread.length),
-      system: Math.max(0, (current || sharedSummary).system - hiddenUnread.length),
-      total: Math.max(0, (current || sharedSummary).total - hiddenUnread.length),
+    updateSummary((current) => ({
+      ...current,
+      notifications: Math.max(0, current.notifications - hiddenUnread.length),
+      system: Math.max(0, current.system - hiddenUnread.length),
+      total: Math.max(0, current.total - hiddenUnread.length),
     }))
     void fetch('/api/notifications', {
       method: 'PATCH',
@@ -483,7 +478,7 @@ export function NotificationsClient({
     const optimisticReadAt = new Date()
     optimisticReadRef.current.set(itemKey, optimisticReadAt)
     persistOptimisticRead(itemKey, optimisticReadAt)
-    setSummaryOverride(decrementUnreadSummary(unreadSummary, [item]))
+    updateSummary((current) => decrementUnreadSummary(current, [item]))
     // Update the card before waiting for the network. If the request fails,
     // the exact optimistic row is restored below.
     setNotifications((current) => current.map((row) => matchesItem(row)
@@ -506,7 +501,8 @@ export function NotificationsClient({
         setNotifications((current) => current.map((row) => matchesItem(row) && row.readAt === optimisticReadAt
           ? { ...row, isRead: item.isRead, read: item.read, readAt: item.readAt }
           : row))
-        setSummaryOverride((current) => incrementUnreadSummary(current || sharedSummary, [item]))
+        updateSummary((current) => incrementUnreadSummary(current, [item]))
+        void refreshUnreadSummary()
         return false
       }
 
@@ -519,9 +515,9 @@ export function NotificationsClient({
       setNotifications((current) => current.map((row) => matchesItem(row)
         ? { ...row, isRead: true, read: true, readAt: safeReadAt }
         : row))
-      // The list and badge are already updated locally. Refresh only the
-      // shared summary; do not reload the list or trigger a router refresh.
-      await refreshUnreadSummary()
+      // The list and badge are already updated locally. Reconcile the shared
+      // summary in the background; do not delay navigation or trigger a router refresh.
+      void refreshUnreadSummary()
       return true
     } catch (reason) {
       optimisticReadRef.current.delete(itemKey)
@@ -529,7 +525,8 @@ export function NotificationsClient({
       setNotifications((current) => current.map((row) => matchesItem(row) && row.readAt === optimisticReadAt
         ? { ...row, isRead: item.isRead, read: item.read, readAt: item.readAt }
         : row))
-      setSummaryOverride((current) => incrementUnreadSummary(current || sharedSummary, [item]))
+      updateSummary((current) => incrementUnreadSummary(current, [item]))
+      void refreshUnreadSummary()
       if (process.env.NODE_ENV === 'development') console.error('[notification:mark-read]', reason)
       return false
     } finally {
@@ -636,7 +633,7 @@ export function NotificationsClient({
       read: true,
       readAt: row.readAt || optimisticReadAt,
     })))
-    setSummaryOverride(zeroSummary)
+    updateSummary(() => zeroSummary)
     setIsMarkingAllRead(true)
     setAllReadError('')
     try {
@@ -653,12 +650,12 @@ export function NotificationsClient({
           removePersistedOptimisticRead(key)
         })
         setNotifications(previousNotifications)
-        setSummaryOverride(previousSummary)
+        updateSummary(() => previousSummary)
+        void refreshUnreadSummary()
         setAllReadError('操作失败，请重试')
         return
       }
       await refreshUnreadSummary()
-      setSummaryOverride(null)
     } catch {
       optimisticItems.forEach((item) => {
         const key = notificationKey(item)
@@ -666,7 +663,8 @@ export function NotificationsClient({
         removePersistedOptimisticRead(key)
       })
       setNotifications(previousNotifications)
-      setSummaryOverride(previousSummary)
+      updateSummary(() => previousSummary)
+      void refreshUnreadSummary()
       setAllReadError('操作失败，请重试')
     } finally {
       setIsMarkingAllRead(false)
@@ -696,9 +694,8 @@ export function NotificationsClient({
       rememberDismissedSystemIds(systemIds)
       setNotifications([])
       setPagination((current) => ({ ...current, page: 1, total: 0, totalPages: 1 }))
-      const currentSummary = summaryOverride || sharedSummary
-      setSummaryOverride({
-        ...currentSummary,
+      updateSummary((current) => ({
+        ...current,
         notifications: 0,
         system: 0,
         replies: 0,
@@ -707,8 +704,8 @@ export function NotificationsClient({
         feedbackReplies: 0,
         feedback: 0,
         friendRequests: 0,
-        total: currentSummary.directMessages,
-      })
+        total: current.directMessages,
+      }))
       if (currentPage !== 1) router.replace(buildNotificationHref(1), { scroll: false })
       await refreshUnreadSummary()
       return true
@@ -736,7 +733,7 @@ export function NotificationsClient({
     const keys = new Set(items.map((item) => `${item.source}:${item.id}`))
     setNotifications((current) => current.filter((item) => !keys.has(`${item.source}:${item.id}`)))
     // 删除未读通知时未读数同步减少（删除已读通知不影响），随后由服务端汇总校正。
-    setSummaryOverride((current) => decrementUnreadSummary(current || sharedSummary, items))
+    updateSummary((current) => decrementUnreadSummary(current, items))
     await refreshUnreadSummary()
     return true
   }

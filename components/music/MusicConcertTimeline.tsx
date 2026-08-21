@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import { ConcertCover } from '@/components/music/ConcertCover'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
+import { isSessionDefinitivelyInvalid } from '@/lib/client-auth'
 import { generateArchiveSlug } from '@/lib/music-slug'
 import type { ConcertCategoryConfig } from '@/lib/music-concert-category'
 import { CONCERT_CATEGORY_ENUM_TO_SLUG } from '@/lib/music-concert-category'
@@ -347,9 +348,16 @@ export function MusicConcertTimeline({ tours, compact = false, myLive, isAdmin =
         signal: controller.signal,
       })
       if (response.status === 401) {
-        myLiveDataRef.current = null
-        setMyLiveData(null)
-        setMyLiveStatus('anonymous')
+        const sessionInvalid = await isSessionDefinitivelyInvalid()
+        if (sessionInvalid) {
+          myLiveDataRef.current = null
+          setMyLiveData(null)
+          setMyLiveStatus('anonymous')
+        } else {
+          // 权威 Session 仍有效时保留已有个人数据；没有旧数据则显示可重试的错误，
+          // 不能因为一次普通 401 把用户伪装成匿名状态。
+          setMyLiveStatus(myLiveDataRef.current ? 'ready' : 'error')
+        }
         return
       }
       if (!response.ok) throw new Error(`My Live summary failed: ${response.status}`)

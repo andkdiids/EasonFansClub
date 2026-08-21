@@ -30,7 +30,7 @@ test('聚合通知人数来自 Like/ReplyLike 数据，并在分页前合并旧�
 test('点击通知先等待已读，再跳转；聚合项按一条通知更新未读状态', () => {
   assert.match(client, /await markRead\(item\)/)
   assert.match(client, /await navigateToNotification\(item\)/)
-  assert.match(client, /setSummaryOverride\(decrementUnreadSummary\(unreadSummary, \[item\]\)\)/)
+  assert.match(client, /updateSummary\(\(current\) => decrementUnreadSummary\(current, \[item\]\)\)/)
 })
 
 test('清除全部由服务端按当前用户全量删除，不依赖当前页 ids', () => {

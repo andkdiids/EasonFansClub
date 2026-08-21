@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers'
-import { SignJWT, jwtVerify } from 'jose'
+import { SignJWT, jwtVerify, errors as joseErrors } from 'jose'
 import type { UserRole } from '@prisma/client'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -61,15 +61,35 @@ export async function verifySessionToken(token?: string) {
     const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] })
     if (typeof payload.id !== 'string' || !payload.id.trim()) return null
     return payload as SessionUser
-  } catch {
-    return null
+  } catch (error) {
+    // Expired/malformed/signature-invalid JWTs are ordinary unauthenticated
+    // states. An unexpected non-JOSE failure is an auth-service failure and
+    // must not be collapsed into null, otherwise RSC guards can redirect a
+    // valid user to /login during an internal verification outage.
+    if (error instanceof joseErrors.JOSEError) return null
+    console.error('[auth.session.verify]', {
+      errorName: error instanceof Error ? error.name : 'unknown',
+    })
+    throw new AuthServiceUnavailableError('Authentication token verification failed', { cause: error })
   }
 }
 
-export async function getSessionUserFromCookie() {
+async function getSessionUsersFromCookie() {
   const cookieStore = await cookies()
-  const token = cookieStore.get(authCookieName)?.value
-  return verifySessionToken(token)
+  // Domain=.ecfc.fans and historical host-only cookies can coexist after a
+  // host migration or an interrupted rolling refresh. Match middleware: test
+  // every same-name cookie instead of trusting whichever one get() returns.
+  const tokens = cookieStore.getAll(authCookieName).map((cookie) => cookie.value)
+  const users: SessionUser[] = []
+  for (const token of tokens) {
+    const user = await verifySessionToken(token)
+    if (user) users.push(user)
+  }
+  return users
+}
+
+export async function getSessionUserFromCookie() {
+  return (await getSessionUsersFromCookie())[0] || null
 }
 
 async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
@@ -153,7 +173,25 @@ export async function getCurrentUserFromSessionToken(token?: string) {
 }
 
 export async function getCurrentUser() {
-  return getCurrentUserForSessionUser(await getSessionUserFromCookie())
+  const sessionUsers = await getSessionUsersFromCookie()
+  for (const sessionUser of sessionUsers) {
+    const user = await getCurrentUserForSessionUser(sessionUser)
+    if (user) return user
+  }
+  if (sessionUsers.length) {
+    // A cryptographically valid JWT whose account is missing/inactive is a
+    // real session invalidation, distinct from a database outage (which has
+    // already thrown AuthServiceUnavailableError above).
+    console.warn('[AUTH_SESSION_INVALID]', JSON.stringify({
+      reason: 'SESSION_USER_NOT_FOUND',
+      source: 'server-auth',
+      hasSessionCookie: true,
+      tokenStatus: 'VALID',
+      userId: sessionUsers[0]?.id,
+      at: new Date().toISOString(),
+    }))
+  }
+  return null
 }
 
 export { getSessionCookieOptions, getSessionCookieDeletionOptions } from '@/lib/auth-cookie'

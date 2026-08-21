@@ -27,7 +27,7 @@ const FALLBACK_CATEGORY_META: Record<string, { name: string }> = {
 
 export default async function ConcertCategoryDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
-  const sessionUser = await getCurrentUser().catch(() => null)
+  const sessionUser = await getCurrentUser()
   const isAdmin = Boolean(sessionUser) && (sessionUser?.role === 'ADMIN' || sessionUser?.role === 'SUPER_ADMIN')
   const [config, enabledCategories] = await Promise.all([
     getSiteAppearance(),

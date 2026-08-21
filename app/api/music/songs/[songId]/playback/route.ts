@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { canAnalyzeMusicPlaybackUrl, canPlayFullMusic, probeAudioUrl, type MusicPlaybackResponse } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
@@ -27,10 +27,15 @@ export async function GET(request: Request, context: RouteContext) {
 
   // Authentication failure must fail closed for the private source. Public
   // visitors still receive the existing 60-second preview when available.
-  const user = await getCurrentUser().catch((error) => {
-    console.warn('[music-playback.auth]', error)
-    return null
-  })
+  let user: Awaited<ReturnType<typeof getCurrentUser>>
+  try {
+    user = await getCurrentUser()
+  } catch (error) {
+    if (isAuthServiceUnavailableError(error)) {
+      return NextResponse.json({ ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后重试' }, { status: 503 })
+    }
+    throw error
+  }
 
   const previewOnly = new URL(request.url).searchParams.get('preview') === '1'
   let location = song.previewUrl

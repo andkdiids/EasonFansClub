@@ -19,10 +19,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 export const dynamic = 'force-dynamic'
 
 export default async function MusicPage() {
-  const currentUser = await getCurrentUser().catch((error) => {
-    console.warn('[music-page.auth]', error)
-    return null
-  })
+  const currentUser = await getCurrentUser()
   const [albums, tours, cassetteSourceSongs, layoutConfig, config, categories] = await Promise.all([
     prisma.musicAlbum.findMany({ where: { status: 'PUBLISHED' }, orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }], include: { _count: { select: { MusicSong: true } } } }),
     prisma.musicTour.findMany({

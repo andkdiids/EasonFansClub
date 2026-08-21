@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { isSessionDefinitivelyInvalid, recordForceLogout } from '@/lib/client-auth'
+import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import {
@@ -100,14 +100,9 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
       const response = await fetch(`/api/checkin/history?year=${year}&month=${month}`, { cache: 'no-store' })
       const data = await response.json().catch(() => null) as MonthResponse | { message?: string } | null
       if (response.status === 401) {
-        // 二次确认：仅当权威 Session 接口确认失效才登出；服务异常/网络波动保持登录
-        const invalid = await isSessionDefinitivelyInvalid()
-        if (!invalid) {
+        if (!(await redirectToLoginAfterConfirmedSessionInvalid(response, '/api/checkin/history'))) {
           if (requestId === requestIdRef.current) setLoadError('请求失败，请稍后重试。')
-          return
         }
-        recordForceLogout('SESSION_INVALID', '/api/checkin/history', 401)
-        window.location.href = '/login'
         return
       }
       if (!response.ok || !data || !('records' in data)) throw new Error(data && 'message' in data ? data.message : '挂号记录暂时无法加载')
@@ -193,15 +188,10 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
       const response = await fetch(`/api/checkin/history/${record.dateKey}`, { cache: 'no-store' })
       const data = await response.json().catch(() => null) as DetailResponse | { message?: string } | null
       if (response.status === 401) {
-        // 二次确认：仅当权威 Session 接口确认失效才登出
-        const invalid = await isSessionDefinitivelyInvalid()
-        if (!invalid) {
+        if (!(await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/checkin/history/${record.dateKey}`))) {
           if (requestId !== detailRequestIdRef.current) return
           setDetailError('请求失败，请稍后重试。')
-          return
         }
-        recordForceLogout('SESSION_INVALID', `/api/checkin/history/${record.dateKey}`, 401)
-        window.location.href = '/login'
         return
       }
       if (!response.ok || !data || !('record' in data)) throw new Error(data && 'message' in data ? data.message : '当天记录暂时无法加载')

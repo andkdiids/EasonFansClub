@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { isSessionDefinitivelyInvalid } from '@/lib/client-auth'
 import { WANT_LISTEN_MODE_LABELS, type WantListenMode } from '@/lib/want-listen-config'
 
 type QuestionResult = {
@@ -74,9 +75,14 @@ async function request<T>(url: string, init?: RequestInit, retries = 3): Promise
     }
     const payload = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string; code?: string } | null
     const code = payload?.code
-    // 真实鉴权错误：服务端明确返回 401 / AUTH_REQUIRED / AUTH_SESSION_EXPIRED 才进入重新认证
+    // 业务接口的 401/鉴权码仍需由权威 Session 接口确认，避免普通接口异常
+    // 把当前对局误判为登录失效。
     if (response.status === 401 || code === 'AUTH_REQUIRED' || code === 'AUTH_SESSION_EXPIRED') {
-      throw toApiError(new Error(payload?.error || '登录状态已失效，请重新登录。'), '登录状态已失效，请重新登录。', 'AUTH_REQUIRED', response.status)
+      const sessionInvalid = await isSessionDefinitivelyInvalid()
+      if (sessionInvalid) {
+        throw toApiError(new Error(payload?.error || '登录状态已失效，请重新登录。'), '登录状态已失效，请重新登录。', 'AUTH_REQUIRED', response.status)
+      }
+      throw toApiError(new Error(payload?.error || '请求暂时无法完成，请稍后重试。'), '请求暂时无法完成，请稍后重试。', 'AUTH_UNCERTAIN', response.status)
     }
     if (!response.ok || !payload?.ok || payload.data === undefined) {
       // 5xx / 429 属于服务器临时波动：自动重试后仍失败才抛出
@@ -126,7 +132,8 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [revealed, setRevealed] = useState(false)
 
   // 区分真实鉴权错误与普通接口/网络错误：
-  //  - 401/AUTH_REQUIRED/AUTH_SESSION_EXPIRED → 提示重新认证，但不清空游戏状态
+  //  - 权威 Session 确认失效 → 提示重新认证，但不清空游戏状态
+  //  - 普通接口 401 且权威 Session 仍有效 → 按请求失败处理
   //  - 500/网络错误 → 「网络波动，正在恢复…」，自动重试，不结束当前局
   function handleRequestError(reason: unknown, fallback: string) {
     const apiError = reason as ApiRequestError

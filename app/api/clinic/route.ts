@@ -11,7 +11,7 @@ export const revalidate = 0
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const viewer = await getCurrentUser().catch(() => null)
+    const viewer = await getCurrentUser()
     const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
     const pageSize = Math.min(50, Math.max(1, Number.parseInt(searchParams.get('pageSize') || '20', 10) || 20))
     const result = await listPublicClinicRecords({

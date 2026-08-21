@@ -8,7 +8,9 @@ export const revalidate = 0
 
 export default async function ClinicPage({ searchParams }: { searchParams: Promise<{ page?: string; category?: string; sort?: string }> }) {
   const params = await searchParams
-  const user = await getCurrentUser().catch(() => null)
+  // AuthServiceUnavailableError must surface as a server error, not as an
+  // anonymous page that later sends a valid user to /login on click.
+  const user = await getCurrentUser()
   const category = parseClinicCategory(params.category)
   const sort = parseClinicSort(params.sort)
   const initialData = await listPublicClinicRecords({

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { classifySessionAuthority } from '../lib/client-auth'
 
 // 全站登录失效审计回归测试（需求 17：Case 1~10）。
 // 源码结构校验 + 纯函数，不连真实数据库。
@@ -30,10 +31,17 @@ test('Case 1/有效 Session + 正常数据库 → authenticated', () => {
   // DB 查询失败走 AuthServiceUnavailableError（throw），不返回 null
   assert.match(auth, /throw new AuthServiceUnavailableError/)
   assert.match(auth, /isAuthServiceUnavailableError\(/)
+  assert.match(auth, /error instanceof joseErrors\.JOSEError/)
+  assert.match(auth, /Authentication token verification failed/)
+  assert.match(auth, /SESSION_USER_NOT_FOUND/)
+  // Server RSC auth must inspect every same-name cookie. This covers the
+  // shared domain cookie plus a stale historical host-only cookie.
+  assert.match(auth, /cookieStore\.getAll\(authCookieName\)/)
+  assert.match(auth, /for \(const sessionUser of sessionUsers\)/)
 })
 
 test('Case 2/Session 已过期 → 401（明确区分 SESSION_EXPIRED）', () => {
-  assert.match(middleware, /joseErrors\.JWTExpired \? 'SESSION_EXPIRED' : 'INVALID_SIGNATURE'/)
+  assert.match(middleware, /error instanceof joseErrors\.JWTExpired/)
   assert.match(middleware, /SESSION_EXPIRED/)
 })
 
@@ -41,7 +49,11 @@ test('Case 3/Session 不存在 → 401（NO_COOKIE，仅 API 记录诊断）', (
   assert.match(middleware, /reason: 'NO_COOKIE'/)
   assert.match(middleware, /isApiPath\(request\.nextUrl\.pathname\)/)
   // 无 cookie → unauthorizedApiResponse 401（API）/ loginRedirect 302（页面）
-  assert.match(middleware, /if \(!session\) return isApiPath\(pathname\) \? unauthorizedApiResponse\(\) : loginRedirect\(request\)/)
+  assert.match(middleware, /if \(!session\) return isApiPath\(pathname\) \? unauthorizedApiResponse\(\) : loginRedirect\(request, verification\.reason \|\| 'TOKEN_INVALID'\)/)
+  assert.match(middleware, /event: 'AUTH_REDIRECT_LOGIN'/)
+  assert.match(middleware, /hasSessionCookie:/)
+  assert.match(middleware, /tokenStatus:/)
+  assert.match(middleware, /requestId:/)
 })
 
 test('Case 4/数据库异常 → 500/503，绝不 401', () => {
@@ -59,7 +71,7 @@ test('Case 4/数据库异常 → 500/503，绝不 401', () => {
 })
 
 test('Case 5/普通 API 返回 500/503 → 前端保持登录（不 logout）', () => {
-  assert.match(clientAuth, /response\.status === 503 \|\| response\.status === 500 \|\| response\.status >= 502\) return false/)
+  assert.match(clientAuth, /response\.status === 503 \|\| response\.status === 500 \|\| response\.status >= 502\) \{\s*return \{ state: 'unknown'/)
   assert.match(clientAuth, /fetch 网络错误/)
   assert.match(clientAuth, /保持登录/)
   // AuthSessionRestore：!response.ok 忽略（不 refresh、不登出）
@@ -67,25 +79,28 @@ test('Case 5/普通 API 返回 500/503 → 前端保持登录（不 logout）', 
 })
 
 test('Case 6/普通 API 返回 401 但权威 Session 仍有效 → 不 logout（二次确认）', () => {
-  // 401 组件改为先向权威接口二次确认
+  // 401 组件统一先向权威接口二次确认
   assert.match(clientAuth, /export async function isSessionDefinitivelyInvalid\(\)/)
-  assert.match(clientAuth, /typeof body\.user\?\.id === 'string'\) return false/)
-  assert.match(clientAuth, /body\.user === null\) return true/)
-  const checkin = source('components/CheckInHistoryDialog.tsx')
-  assert.match(checkin, /isSessionDefinitivelyInvalid\(\)/)
-  assert.match(checkin, /if \(!invalid\) \{/)
-  assert.match(checkin, /请求失败，请稍后重试。/)
+  assert.match(clientAuth, /classifySessionAuthority/)
+  for (const component of ['components/CheckInHistoryDialog.tsx', 'components/CheckInMessagesPanel.tsx', 'components/PostRepliesSection.tsx']) {
+    assert.match(source(component), /redirectToLoginAfterConfirmedSessionInvalid\(/, component)
+  }
+  assert.equal(classifySessionAuthority(500, { user: null }), 'unknown')
+  assert.equal(classifySessionAuthority(503, { user: null }), 'unknown')
+  assert.equal(classifySessionAuthority(401, { user: { id: 'still-valid' } }), 'invalid')
+  assert.equal(classifySessionAuthority(200, { user: { id: 'still-valid' } }), 'valid')
 })
 
 test('Case 7/权威 Session 确认失效 → 明确 logout（AUTH_FORCE_LOGOUT 诊断）', () => {
-  assert.match(clientAuth, /recordForceLogout\(/)
+  assert.match(clientAuth, /redirectToLoginAfterConfirmedSessionInvalid/)
+  assert.match(clientAuth, /recordForceLogout\('SESSION_INVALID'/)
   assert.match(clientAuth, /AUTH_FORCE_LOGOUT/)
+  assert.match(clientAuth, /console\.error\('\[auth\] redirect to login'/)
   assert.match(clientAuth, /reason,\s*\n\s*source,/)
   assert.match(clientAuth, /pathname/)
-  // 组件确认失效后才跳登录
-  const checkin = source('components/CheckInHistoryDialog.tsx')
-  assert.match(checkin, /recordForceLogout\('SESSION_INVALID'/)
-  assert.match(checkin, /window\.location\.href = '\/login'/)
+  // Only the central helper can start the final redirect.
+  assert.match(clientAuth, /window\.location\.replace\(`\/login\?next=/)
+  assert.doesNotMatch(source('components/CheckInHistoryDialog.tsx'), /window\.location\.(href|replace|assign).*\/login/)
 })
 
 test('Case 8/Node 进程重启 → 登录态仍可恢复（JWT 无状态，无内存权威 Session）', () => {
@@ -105,6 +120,36 @@ test('Case 9/两个 Tab，其中一个普通请求失败 → 不退出另一个'
   assert.match(notificationProvider, /\.type === 'logout'/)
   // 普通请求 401 的二次确认是本组件内 fetch 权威接口，不广播
   assert.match(clientAuth, /fetch\('\/api\/auth\/me'/)
+})
+
+test('RSC/公共页面认证数据库异常不能被降级成匿名用户', () => {
+  const authSensitiveSources = [
+    'app/clinic/page.tsx',
+    'app/clinic/[recordId]/page.tsx',
+    'app/clinic/new/page.tsx',
+    'app/ratings/page.tsx',
+    'app/ratings/songs/[songId]/page.tsx',
+    'app/ratings/albums/[albumId]/page.tsx',
+    'app/music/page.tsx',
+    'app/music/album/[id]/page.tsx',
+    'app/music/song/[id]/page.tsx',
+    'app/music/live/page.tsx',
+    'app/music/live/[slug]/page.tsx',
+    'app/music/concerts/page.tsx',
+  ]
+  for (const relativePath of authSensitiveSources) {
+    assert.doesNotMatch(source(relativePath), /getCurrentUser\(\)\.catch\(\(\) => null\)/, relativePath)
+  }
+  assert.match(source('app/api/music/songs/[songId]/playback/audio/route.ts'), /AUTH_SERVICE_UNAVAILABLE/)
+  assert.match(source('app/api/music/songs/[songId]/playback/route.ts'), /AUTH_SERVICE_UNAVAILABLE/)
+})
+
+test('middleware distinguishes JWT invalidation from an internal verification error', () => {
+  assert.match(middleware, /joseErrors\.JOSEError/)
+  assert.match(middleware, /VERIFICATION_ERROR/)
+  assert.match(middleware, /AUTH_SESSION_CHECK_FAILED/)
+  assert.match(middleware, /RENEWAL_FAILED/)
+  assert.match(middleware, /Never clear the old cookie here/)
 })
 
 test('Case 10/多设备登录：一个设备重新登录不撤销其他设备', () => {

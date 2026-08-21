@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
-import { getCurrentUser, getSessionUserFromCookie } from '@/lib/auth'
+import { getCurrentUser, getSessionUserFromCookie, isAuthServiceUnavailableError } from '@/lib/auth'
 import { listUnifiedNotificationsPage, parseNotificationCategory } from '@/lib/notifications'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { getDefaultPageLayoutConfig } from '@/lib/page-layout/registry'
@@ -16,6 +16,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   const cookieUser = await getSessionUserFromCookie()
   const user = cookieUser
     ? await getCurrentUser().catch((error) => {
+        if (!isAuthServiceUnavailableError(error)) throw error
         logNotificationError('page.auth', { userId: cookieUser.id }, error)
         return cookieUser
       })

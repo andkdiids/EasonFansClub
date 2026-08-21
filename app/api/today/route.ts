@@ -14,7 +14,9 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const { month, day } = getTodayMonthDay()
   const events = await getTodayEventRecords()
-  const user = await getCurrentUser().catch(() => null)
+  // A database/auth service outage must not become canSubmit:false. That
+  // false value makes a still-authenticated user look anonymous in the client.
+  const user = await getCurrentUser()
   return NextResponse.json({
     date: { month, day },
     events,

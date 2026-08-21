@@ -7,9 +7,9 @@ const read = (path: string) => readFileSync(path, 'utf8')
 test('全部已读：前端乐观更新 + keepalive 保证请求可靠', () => {
   const client = read('app/notifications/NotificationsClient.tsx')
 
-  // 1) 点击后立即乐观更新（不等服务端返回）：先 setNotifications / setSummaryOverride 再发起请求。
+  // 1) 点击后立即乐观更新（不等服务端返回）：先更新列表和 Provider 再发起请求。
   assert.match(client, /async function markAllRead\(\) \{/)
-  assert.match(client, /setSummaryOverride\(zeroSummary\)/)
+  assert.match(client, /updateSummary\(\(\) => zeroSummary\)/)
   assert.match(client, /setNotifications\(\(current\) => current\.map\(\(row\) => \(\{[\s\S]*?isRead: true/)
 
   // 2) 防重复点击：isMarkingAllRead 守卫，提前返回。
@@ -55,7 +55,8 @@ test('全部已读：顶部角标（AppShell）与未读汇总同源，成功后
   assert.match(provider, /export function useNotificationSummary\(\)/)
   assert.match(appShell, /const \{ summary: currentUnreadSummary \} = useNotificationSummary\(\)/)
 
-  // 全部已读成功后：刷新权威汇总 + 清除本地覆盖，使顶部角标归零。
+  // 全部已读成功后：刷新 Provider 中的权威汇总，使顶部角标归零。
   assert.match(client, /await refreshUnreadSummary\(\)/)
-  assert.match(client, /setSummaryOverride\(null\)/)
+  assert.match(client, /updateSummary\(\(\) => previousSummary\)/)
+  assert.doesNotMatch(client, /setSummaryOverride/)
 })

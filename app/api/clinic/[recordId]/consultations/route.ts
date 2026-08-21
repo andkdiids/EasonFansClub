@@ -14,7 +14,7 @@ export async function GET(_request: Request, context: RouteContext) {
   let recordId = ''
   try {
     ({ recordId } = await context.params)
-    const viewer = await getCurrentUser().catch(() => null)
+    const viewer = await getCurrentUser()
     const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null)
     if (!record) return NextResponse.json({ ok: false, code: 'RECORD_NOT_FOUND', message: '这份病历不存在。' }, { status: 404, headers: clinicPublicHeaders })
     if ('unavailable' in record) return clinicOk({ consultations: [] })

@@ -11,7 +11,8 @@ export const revalidate = 0
 
 export default async function ClinicRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ focus?: string; from?: string }> }) {
   const [{ recordId }, query] = await Promise.all([params, searchParams])
-  const user = await getCurrentUser().catch(() => null)
+  // Do not turn an auth database outage into an anonymous viewer.
+  const user = await getCurrentUser()
   const record = await getPublicClinicRecordDetail(recordId, user?.id || null)
   if (!record) notFound()
   if (user) {

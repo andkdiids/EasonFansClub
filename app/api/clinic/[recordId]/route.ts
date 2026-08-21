@@ -13,7 +13,7 @@ export const revalidate = 0
 export async function GET(_request: Request, context: RouteContext) {
   try {
     const { recordId } = await context.params
-    const viewer = await getCurrentUser().catch(() => null)
+    const viewer = await getCurrentUser()
     const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null)
     if (!record) return NextResponse.json({ ok: false, code: 'RECORD_NOT_FOUND', message: '这份病历不存在。' }, { status: 404, headers: clinicPublicHeaders })
     return clinicOk({ record })

@@ -4,6 +4,6 @@ import { ClinicComposer } from '@/components/clinic/ClinicComposer'
 export const dynamic = 'force-dynamic'
 
 export default async function NewClinicPage() {
-  const user = await getCurrentUser().catch(() => null)
+  const user = await getCurrentUser()
   return <ClinicComposer isAuthenticated={Boolean(user)} />
 }

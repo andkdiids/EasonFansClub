@@ -35,9 +35,10 @@ async function createToken({
     .sign(new TextEncoder().encode(secret))
 }
 
-function makeRequest(path: string, token?: string, host = 'ecfc.fans') {
-  return new NextRequest(`https://${host}${path}`, token
-    ? { headers: { cookie: `${authCookieName}=${token}` } }
+function makeRequest(path: string, token?: string | string[], host = 'ecfc.fans') {
+  const tokens = Array.isArray(token) ? token : token ? [token] : []
+  return new NextRequest(`https://${host}${path}`, tokens.length
+    ? { headers: { cookie: tokens.map((value) => `${authCookieName}=${value}`).join('; ') } }
     : undefined)
 }
 
@@ -96,6 +97,14 @@ test('ecfc.fans 与 www.ecfc.fans 都读取同一个共享会话 Cookie', async 
   }
 })
 
+test('同名旧 Cookie 无效但共享域 Cookie 有效时，不误判为未登录', async () => {
+  const valid = await createToken()
+  const expired = await createToken({ expiresAt: Math.floor(Date.now() / 1000) - 1 })
+  const response = await middleware(makeRequest('/music', [expired, valid]))
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('location'), null)
+})
+
 test('过期、伪造和错误签名 JWT 都按未登录处理', async () => {
   const expired = await createToken({ expiresAt: Math.floor(Date.now() / 1000) - 1 })
   const forged = await createToken({ secret: 'wrong-secret' })
@@ -116,23 +125,16 @@ test('认证页面和认证 API 保持公开，静态资源与上传资源保持
   }
 })
 
-test('普通用户不能访问 admin 页面和 API，no-access 页面可显示拒绝结果', async () => {
+test('middleware只确认登录，后台细粒度权限交给服务端 guard', async () => {
   const userToken = await createToken({ role: 'USER' })
   const pageResponse = await middleware(makeRequest('/admin', userToken))
-  const pageLocation = getRedirect(pageResponse)
-  assert.equal(pageLocation.pathname, '/admin/no-access')
-  assert.equal(pageLocation.searchParams.get('from'), '/admin')
-
-  const noAccessResponse = await middleware(makeRequest('/admin/no-access', userToken))
-  assert.equal(noAccessResponse.status, 200)
+  assert.equal(pageResponse.status, 200)
+  assert.equal(pageResponse.headers.get('location'), null)
 
   const apiResponse = await middleware(makeRequest('/api/admin/users', userToken))
-  assert.equal(apiResponse.status, 403)
-  assert.deepEqual(await apiResponse.json(), {
-    ok: false,
-    code: 'FORBIDDEN',
-    message: '无权限访问',
-  })
+  assert.equal(apiResponse.status, 200)
+  assert.equal(apiResponse.headers.get('location'), null)
+  assert.match(readFileSync('components/AdminAccess.tsx', 'utf8'), /hasAdminPermission/)
 })
 
 test('管理员 JWT 可以通过 middleware 进入 admin 路由，登录 next 不允许外站或反斜杠', async () => {
