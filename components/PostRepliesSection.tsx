@@ -20,6 +20,8 @@ import { formatUid } from '@/lib/uid'
 import { splitContentImages } from '@/lib/content-images'
 import { canPinPostReply, type PostReplySort } from '@/lib/post-replies'
 import { Pagination } from '@/components/ui/Pagination'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type ReplyItem = {
   id: string
@@ -41,6 +43,7 @@ type ReplyItem = {
     level: number
     avatarUrl?: string | null
     profile?: { displayName: string | null; avatarUrl: string | null } | null
+    equippedBadge?: EquippedBadgeView | null
   }
 }
 
@@ -344,7 +347,7 @@ export function PostRepliesSection({
           </Link>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-              <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950">{name}</Link>
+              <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /></Link>
               <span className="font-bold text-slate-400">UID {formatUid(reply.author.uid)}</span>
               <span className="font-bold text-slate-400">Lv.{reply.author.level}</span>
               <span className="font-bold text-slate-400">{formatDate(new Date(reply.createdAt))}</span>
@@ -415,7 +418,7 @@ export function PostRepliesSection({
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                 <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
               </span>
-              <span>{name} · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
+              <span><UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /> · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
             </Link>
             {reply.isPinned ? <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
             <span>#{index + 1} · {formatDate(new Date(reply.createdAt))}</span>
@@ -544,7 +547,7 @@ export function PostRepliesSection({
               const reply = replyMap.get(id)
               if (!reply) return null
               const name = reply.author.profile?.displayName || reply.author.nickname
-              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · {name} · {reply.likeCount} 赞</a>
+              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · <UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /> · {reply.likeCount} 赞</a>
             })}
           </div>
         </div>

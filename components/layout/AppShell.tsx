@@ -7,7 +7,7 @@ import { BackToTopButton } from '@/components/BackToTopButton'
 import { FriendDock } from '@/components/FriendDock'
 import { IcpRecord } from '@/components/IcpRecord'
 import { useNotificationSummary } from '@/components/NotificationProvider'
-import type { SessionUser } from '@/lib/auth'
+import type { SessionShellUser } from '@/lib/auth'
 import type { AppShellGrowth } from '@/components/UserProfileSummary'
 import { DesktopImmersiveToggle } from './DesktopImmersiveToggle'
 import { MobileNavigation } from './MobileNavigation'
@@ -22,7 +22,7 @@ function isImmersiveRoute(pathname: string) {
   return immersiveRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
-export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean }>) {
+export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionShellUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
   const isMusicRoute = pathname === '/music' || pathname.startsWith('/music/')
   const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname) || pathname === '/games/guess-song/duel' || pathname.startsWith('/games/guess-song/duel/')

@@ -4,6 +4,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
 export async function GET(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
@@ -42,6 +43,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
     },
   })
   const remarkMap = await loadFriendRemarkMap(user.id, likes.map((like) => like.userId))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.userId))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
@@ -53,6 +55,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
         remarkMap,
       }),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
+      equippedBadge: equippedBadgeMap.get(like.userId) || null,
     })),
   })
 }

@@ -12,7 +12,10 @@ export function undercoverOk<T>(data: T, init: ResponseInit = {}) {
 
 export function undercoverError(error: unknown, fallback = '卧底巨星请求失败') {
   if (error instanceof UndercoverStarServiceError) {
-    return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.status, headers: undercoverPrivateHeaders })
+    return NextResponse.json({ ok: false, code: error.code, error: error.message }, {
+      status: error.status,
+      headers: error.status === 429 ? { ...undercoverPrivateHeaders, 'Retry-After': '1' } : undercoverPrivateHeaders,
+    })
   }
   console.error('[undercover-star.api]', error)
   return NextResponse.json({ ok: false, code: 'UNDERCOVER_REQUEST_FAILED', error: fallback }, { status: 500, headers: undercoverPrivateHeaders })

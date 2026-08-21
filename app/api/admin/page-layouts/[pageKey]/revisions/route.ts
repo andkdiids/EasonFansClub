@@ -16,7 +16,8 @@ export async function GET(request: Request, { params }: Params) {
   try {
     const { pageKey } = await params
     const url = new URL(request.url)
-    const limit = Number(url.searchParams.get('limit') || 20)
+    const rawLimit = Number(url.searchParams.get('limit'))
+    const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 20))
     const revisions = await measureBootstrap('api.revisions.data', listPageLayoutRevisions(assertPageLayoutPageKey(pageKey), limit))
     return NextResponse.json({ revisions })
   } catch (error) {

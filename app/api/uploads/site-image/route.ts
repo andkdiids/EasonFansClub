@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import sharp from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
-import { requireAdmin } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin } from '@/lib/security'
 import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 
@@ -30,6 +30,12 @@ async function requireSiteImageAdmin() {
 export async function POST(request: Request) {
   const guard = await requireSiteImageAdmin()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/uploads/site-image',
+    ip: { limit: 40, windowSeconds: 60 * 60 },
+    user: { limit: 20, windowSeconds: 60 * 60 },
+  }, '图片上传过于频繁，请稍后再试')
+  if (limited) return limited
 
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
@@ -62,7 +68,7 @@ export async function POST(request: Request) {
         variants: ['thumb-sm', 'thumb-md', 'card', 'large'],
       })
   } catch (error) {
-    console.error('[site-image.sharp]', error)
+    console.error('[site-image.sharp]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
     return NextResponse.json({ message: '图片转换为 WebP 失败，请检查图片后重试' }, { status: 422 })
   }
 
@@ -80,7 +86,9 @@ export async function POST(request: Request) {
     if (!url) return NextResponse.json({ message: '图片地址无效' }, { status: 500 })
     return NextResponse.json({ url, mimeType: 'image/webp', format: 'webp', originalSize: input.byteLength, size: generated.source.byteLength })
   } catch (error) {
-    if (!(error instanceof SiteMediaStorageError)) console.error('[site-image.upload]', error)
+    if (!(error instanceof SiteMediaStorageError)) {
+      console.error('[site-image.upload]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
+    }
     return NextResponse.json({ message: error instanceof Error ? error.message : '图片上传失败，请稍后重试' }, { status: 502 })
   }
 }

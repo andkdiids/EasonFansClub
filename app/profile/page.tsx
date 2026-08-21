@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { getEquippedBadgeForUser } from '@/lib/badge-service'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -67,10 +68,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
-  const [growth, recentMessagesPage, defaultAvatarOptions] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
+    getEquippedBadgeForUser(profile.id),
   ])
 
   const profileEditorInitialProfile = {
@@ -110,6 +112,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           createdAt: profile.createdAt,
           wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
           publicLiveCount: 0,
+          equippedBadge,
         }}
         growth={growth}
         relationship={{

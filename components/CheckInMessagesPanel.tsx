@@ -20,6 +20,7 @@ import { getMoodDisplay } from '@/lib/checkin-mood'
 import { profileImageUrl } from '@/lib/images'
 import { scrollToSectionTop } from '@/lib/pagination'
 import { formatUid } from '@/lib/uid'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 type DailyComment = CheckInDisplayMessageItem['comments'][number]
 type FlattenedDailyComment = {
@@ -123,6 +124,10 @@ function flattenCommentThread(
 
 function getCommentAuthorName(author: DailyComment['author']) {
   return 'uid' in author ? author.profile?.displayName || author.nickname : author.name
+}
+
+function getCommentAuthorBadge(author: DailyComment['author']) {
+  return 'uid' in author ? author.equippedBadge || null : null
 }
 
 export function CheckInMessagesPanel({
@@ -575,7 +580,7 @@ export function CheckInMessagesPanel({
                     {anonymous ? (
                       <span className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>E院病友</span>
                     ) : (
-                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'min-w-0 max-w-[9rem] truncate text-xs font-black text-brand-950' : 'min-w-0 max-w-[12rem] truncate font-black text-brand-950 sm:max-w-[16rem]'}>{name}</a> : null
+                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'min-w-0 max-w-[9rem] truncate text-xs font-black text-brand-950' : 'min-w-0 max-w-[12rem] truncate font-black text-brand-950 sm:max-w-[16rem]'}><UserDisplayName name={name} uid={fullIdentity.uid} badge={fullIdentity.equippedBadge} compact /></a> : null
                     )}
                     {scope === 'friends' && !previewMode && !anonymous && fullIdentity && fullIdentity.id !== sessionUserId && !followedUserIds.has(fullIdentity.id) ? (
                       <FriendFollowButton
@@ -626,7 +631,7 @@ export function CheckInMessagesPanel({
                               {anonymous || !commentIdentity ? <span className={`${isRoot ? 'h-8 w-8 text-xs' : 'h-6 w-6 text-[10px]'} grid shrink-0 place-items-center rounded-full bg-sky-100`}>E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className={`${isRoot ? 'h-8 w-8 text-xs' : 'h-6 w-6 text-[10px]'} grid shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 font-black text-white`}><SafeAvatar src={commentAvatar} name={commentName} uid={commentIdentity.uid} className="h-full w-full" textClassName={isRoot ? 'text-xs' : 'text-[10px]'} /></a>}
                               <div className="min-w-0 flex-1">
                                 <div className={`${isRoot ? 'flex flex-wrap items-center gap-2' : 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs'}`}>
-                                  {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950">{commentName}</a>}
+                                  {anonymous || !commentIdentity ? <span className="font-black text-brand-950">匿名E友</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className="font-black text-brand-950"><UserDisplayName name={commentName} uid={commentIdentity.uid} badge={getCommentAuthorBadge(comment.author)} compact /></a>}
                                   {!isRoot && !anonymous && commentIdentity ? <span className="font-bold text-slate-400">Lv.{commentIdentity.level}</span> : null}
                                   <span className="text-xs font-bold text-slate-400">{beijingDateTime(comment.createdAt)}</span>
                                   <IpRegionLabel ipRegion={comment.ipRegion} />

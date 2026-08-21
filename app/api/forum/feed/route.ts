@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,6 +78,7 @@ export async function GET(request: Request) {
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
   const remarkMap = await loadFriendRemarkMap(user?.id, rows.map((row) => row.User.id))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.User.id))
   return NextResponse.json({
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
@@ -86,6 +88,7 @@ export async function GET(request: Request) {
       author: {
         ...User,
         nickname: getPublicUserDisplayName(User),
+        equippedBadge: equippedBadgeMap.get(User.id) || null,
         avatarUrl: publicImageUrl(User.avatarUrl),
         profile: User.Profile ? {
           ...User.Profile,

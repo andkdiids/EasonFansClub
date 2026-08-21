@@ -13,7 +13,10 @@ const eslintConfig = [
   {
     ignores: [
       '.next/**',
+      '.next_bak/**',
+      '.next_old_*/**',
       'node_modules/**',
+      '.prisma-local/**',
       'coverage/**',
       'dist/**',
       'scripts/database-migration/.generated/**',

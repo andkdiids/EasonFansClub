@@ -12,6 +12,7 @@ import { withDbTimeout } from '@/lib/db-timeout'
 import { locationFromProfile } from '@/lib/user-location'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgeForUser } from '@/lib/badge-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -128,9 +129,10 @@ export default async function PublicUserPage({ params }: PageProps) {
   const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
   const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const bio = publicModerationText(user.Profile.bio || user.bio || '', user.Profile.bioModerationStatus === 'VIOLATION' || user.bioModerationStatus === 'VIOLATION' ? 'VIOLATION' : 'NORMAL')
-  const [growth, recentMessagesPage] = await Promise.all([
+  const [growth, recentMessagesPage, equippedBadge] = await Promise.all([
     getGrowthSummarySafe(user.experience),
     loadProfileRecentMessagesPage(user.id, viewer?.id),
+    getEquippedBadgeForUser(user.id),
   ])
   const friendStatus: 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED' = isFriend
     ? 'FRIEND'
@@ -158,6 +160,7 @@ export default async function PublicUserPage({ params }: PageProps) {
         createdAt: user.createdAt,
         wallVisibility: user.Profile.wallVisibility || 'PUBLIC',
         publicLiveCount: user._count.UserMusicConcert,
+        equippedBadge,
       }}
       growth={growth}
       relationship={{

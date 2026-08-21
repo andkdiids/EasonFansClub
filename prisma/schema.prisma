@@ -197,25 +197,78 @@ enum BadgeCategory {
   CONCERT
 }
 
+enum BadgeVisibility {
+  PUBLIC
+  HIDDEN
+  SECRET
+}
+
+enum BadgeRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+  LIMITED
+}
+
+enum BadgeGrantType {
+  AUTO
+  MANUAL
+  EVENT
+}
+
+enum BadgeEffectType {
+  NONE
+  SHINE
+  GLOW
+  SPARKLE
+}
+
+enum BadgeNicknameEffect {
+  NONE
+  COLOR
+  GOLD
+  GRADIENT
+  GLOW
+}
+
 model Badge {
-  id          String        @id @default(cuid())
-  name        String        @unique
-  slug        String        @unique
-  description String?
-  iconUrl     String?
-  pointsCost  Int?
-  category    BadgeCategory @default(SYSTEM)
-  musicTourId String?
-  musicTour   MusicTour?    @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
-  isAutoGrant Boolean       @default(false)
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  UserBadge   UserBadge[]
+  id                     String                @id @default(cuid())
+  name                   String                @unique
+  slug                   String                @unique
+  code                   String                @unique
+  description            String?               @db.VarChar(500)
+  acquisitionDescription String?               @db.VarChar(500)
+  iconUrl                String?
+  pointsCost             Int?
+  category               BadgeCategory         @default(SYSTEM)
+  visibility             BadgeVisibility       @default(PUBLIC)
+  rarity                 BadgeRarity           @default(COMMON)
+  grantType              BadgeGrantType        @default(MANUAL)
+  isWearable             Boolean               @default(true)
+  isEnabled              Boolean               @default(true)
+  effectType             BadgeEffectType       @default(NONE)
+  nicknameEffect         BadgeNicknameEffect   @default(NONE)
+  nicknameColor          String?               @db.VarChar(20)
+  nicknameGradientStart  String?               @db.VarChar(20)
+  nicknameGradientEnd    String?               @db.VarChar(20)
+  sortOrder              Int                   @default(0)
+  musicTourId            String?
+  musicTour              MusicTour?            @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
+  isAutoGrant            Boolean               @default(false)
+  isActive               Boolean               @default(true)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  UserBadge              UserBadge[]
+  EquippedByUsers        User[]                @relation("UserEquippedBadge")
 
   @@index([isActive])
+  @@index([isEnabled])
   @@index([category])
   @@index([musicTourId])
+  @@index([visibility, isEnabled, sortOrder])
+  @@index([grantType])
+  @@index([rarity])
 }
 
 model Banner {
@@ -3193,6 +3246,7 @@ model User {
   mustSetupSecurity                                      Boolean                        @default(false)
   usernameNormalized                                     String                         @unique
   usernameChangedAt                                      DateTime?
+  equippedBadgeId                                        String?
   checkinMoodEnabled                                     Boolean                        @default(true)
   ipRegion                                               String?
   ipRegionUpdatedAt                                      DateTime?
@@ -3313,6 +3367,8 @@ model User {
   UserAchievement                                        UserAchievement[]
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
+  EquippedBadge                                          Badge?                         @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
+  UserBadgeGrantedBy                                     UserBadge[]                     @relation("UserBadgeGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
   MyLivePhoto                                            MyLivePhoto[]
@@ -3340,6 +3396,7 @@ model User {
   @@index([username])
   @@index([birthMonth, birthDay])
   @@index([nicknameViolationDisplay])
+  @@index([equippedBadgeId])
 }
 
 model UserAchievement {
@@ -3379,13 +3436,23 @@ model UserBadge {
   isHidden     Boolean  @default(false)
   displayOrder Int      @default(0)
   grantedAt    DateTime @default(now())
+  obtainedAt   DateTime @default(now())
+  sourceType   String?  @db.VarChar(32)
+  sourceId     String?  @db.VarChar(191)
+  grantReason  String?  @db.VarChar(500)
+  grantedBy    String?
+  createdAt    DateTime @default(now())
   userId       String
   badgeId      String
   Badge        Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
   User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  GrantedBy    User?    @relation("UserBadgeGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
 
   @@unique([userId, badgeId])
   @@index([userId, displayOrder])
+  @@index([userId, obtainedAt])
+  @@index([badgeId])
+  @@index([grantedBy, createdAt])
 }
 
 model UserSecurityQuestion {

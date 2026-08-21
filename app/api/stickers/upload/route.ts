@@ -7,7 +7,7 @@ import {
   getStickerFormDataErrorResponse,
   getStickerUploadErrorResponse,
 } from '@/lib/sticker-upload'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const runtime = 'nodejs'
@@ -23,13 +23,19 @@ export async function POST(request: Request) {
   try {
     const guard = await requireUser()
     if (!guard.user) return guard.response
+    const limited = await enforceApiRateLimit(request, guard.user.id, {
+      endpoint: '/api/stickers/upload',
+      ip: { limit: 40, windowSeconds: 60 * 60 },
+      user: { limit: 20, windowSeconds: 60 * 60 },
+    }, '表情上传过于频繁，请稍后再试')
+    if (limited) return limited
 
     let formData: FormData | null = null
     let formDataError: unknown = null
     try {
       formData = await request.formData()
     } catch (error) {
-      console.error('[sticker.upload.form-data]', error)
+      console.error('[sticker.upload.form-data]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
       formDataError = error
     }
     if (!formData) {
@@ -85,7 +91,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, code: failure.code, message: failure.message }, { status: failure.status })
     }
   } catch (error) {
-    console.error('[sticker-upload.unhandled]', error)
+    console.error('[sticker-upload.unhandled]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
     const failure = getStickerUploadErrorResponse(error)
     return NextResponse.json({ success: false, code: failure.code, message: failure.message }, { status: failure.status })
   }

@@ -11,6 +11,9 @@ import { scrollToSectionTop } from '@/lib/pagination'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { PersonalPostPinMenu } from '@/components/PostActions'
+import { BadgeCollectionPanel } from '@/components/BadgeCollectionPanel'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
 type PostItem = {
@@ -36,7 +39,7 @@ type FavoriteItem = {
     id: string
     title: string
     content: string
-    author: { uid: number; nickname: string; profile?: { displayName: string | null } | null }
+    author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null }
   }
 }
 type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
@@ -163,6 +166,7 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
         {state && !state.loading && !state.failed ? (
           <ModuleContent
             moduleKey={active}
+            uid={uid}
             items={state.items}
             isSelf={isSelf}
             pagination={state.pagination}
@@ -180,6 +184,7 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
 
 function ModuleContent({
   moduleKey,
+  uid,
   items,
   isSelf,
   pagination,
@@ -190,6 +195,7 @@ function ModuleContent({
   onToggleRecentMessage,
 }: {
   moduleKey: ModuleKey
+  uid: string
   items: ModuleItem[]
   isSelf: boolean
   pagination?: ProfileRecordPagination
@@ -199,7 +205,7 @@ function ModuleContent({
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
 }) {
-  if (!items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
+  if (moduleKey !== 'badges' && !items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
 
   const pageNavigation = isPaginatedModule(moduleKey) && pagination && pagination.totalPages > 1 ? (
     <Pagination
@@ -331,17 +337,7 @@ function ModuleContent({
   }
 
   if (moduleKey === 'badges') {
-    const badges = items as BadgeItem[]
-    return (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {badges.map((item) => (
-          <div key={item.id} className="rounded-2xl bg-sky-50/80 p-4">
-            <p className="font-black text-brand-950">🏅 {item.badge.name}</p>
-            <p className="mt-2 text-xs font-bold text-slate-500">{item.badge.description || '暂无介绍'}</p>
-          </div>
-        ))}
-      </div>
-    )
+    return <BadgeCollectionPanel uid={uid} isSelf={isSelf} />
   }
 
   if (moduleKey === 'albums') {
@@ -371,7 +367,7 @@ function ModuleContent({
   className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
 >            <h3 className="text-lg font-black text-brand-950">{item.post.title}</h3>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{item.post.content}</p>
-            <p className="mt-2 text-xs font-bold text-slate-500">作者 {authorName} · UID {formatUid(author.uid)}</p>
+            <p className="mt-2 text-xs font-bold text-slate-500">作者 <UserDisplayName name={authorName} uid={author.uid} badge={author.equippedBadge} compact /> · UID {formatUid(author.uid)}</p>
           </Link>
         )
       })}

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { Prisma, type GuessSongDuelFinishReason } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { getShanghaiDayRange } from '@/lib/checkin'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { syncUserAchievements } from '@/lib/achievements'
@@ -39,6 +40,7 @@ import type {
   DuelRoomState,
 } from '@/lib/guess-song-duel-protocol'
 import type { DuelMode } from '@/lib/guess-song-duel-config'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 import { normalizeGuessSongAnswer } from '@/lib/guess-song-config'
 import { getGuessSongQuizConfigOrDefault, GUESS_SONG_QUESTION_TYPE_AUTO, GUESS_SONG_QUESTION_TYPE_MANUAL } from '@/lib/guess-song-quiz-config'
 import { createUUID } from '@/lib/utils/uuid'
@@ -53,6 +55,7 @@ const publicUserSelect = {
   avatarUrl: true,
   isOnline: true,
   Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+  EquippedBadge: { select: { id: true, code: true, name: true, iconUrl: true, isEnabled: true, isActive: true, effectType: true, nicknameEffect: true, nicknameColor: true, nicknameGradientStart: true, nicknameGradientEnd: true, rarity: true } },
 } as const
 
 const roomMemberInclude = {
@@ -187,12 +190,27 @@ function hashToken(value: string) {
 }
 
 function publicUser(user: PublicUserRow, isOnline = user.isOnline): DuelPublicUser {
+  const badge = user.EquippedBadge && user.EquippedBadge.isEnabled && user.EquippedBadge.isActive
+    ? {
+        id: user.EquippedBadge.id,
+        code: user.EquippedBadge.code,
+        name: user.EquippedBadge.name,
+        imageUrl: toPublicMediaUrl(user.EquippedBadge.iconUrl),
+        effectType: user.EquippedBadge.effectType,
+        nicknameEffect: user.EquippedBadge.nicknameEffect,
+        nicknameColor: user.EquippedBadge.nicknameColor,
+        nicknameGradientStart: user.EquippedBadge.nicknameGradientStart,
+        nicknameGradientEnd: user.EquippedBadge.nicknameGradientEnd,
+        rarity: user.EquippedBadge.rarity,
+      } satisfies EquippedBadgeView
+    : null
   return {
     id: user.id,
     uid: user.uid,
     name: getPublicUserDisplayName(user),
     avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
     isOnline,
+    equippedBadge: badge,
   }
 }
 

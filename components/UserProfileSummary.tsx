@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { UserAvatar, getUserDisplayName } from '@/components/UserAvatar'
-import type { SessionUser } from '@/lib/auth'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { SessionShellUser } from '@/lib/auth'
 import { formatUid } from '@/lib/uid'
 import { resolveGrowthLevelName } from '@/lib/growth-display'
 
@@ -14,7 +15,7 @@ export type AppShellGrowth = {
   progressPercent: number
 }
 
-export function UserProfileSummary({ user, growth, onActivate }: Readonly<{ user: SessionUser; growth: AppShellGrowth; onActivate?: () => void }>) {
+export function UserProfileSummary({ user, growth, onActivate }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; onActivate?: () => void }>) {
   const name = getUserDisplayName(user)
   const targetExperience = growth.nextRequiredExp ?? growth.experience
   const format = new Intl.NumberFormat('zh-CN')
@@ -22,7 +23,7 @@ export function UserProfileSummary({ user, growth, onActivate }: Readonly<{ user
   const summary = <>
       <span className="sidebar-avatar"><UserAvatar user={user} /></span>
       <span>
-  <strong>{name}</strong>
+  <strong><UserDisplayName name={name} uid={user.uid} badge={user.equippedBadge} compact /></strong>
   <small>{resolveGrowthLevelName(growth.level, growth.levelName)}</small>
 </span>
     </>

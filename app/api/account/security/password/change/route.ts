@@ -14,7 +14,10 @@ export async function POST(request: Request) {
   if (!guard.user) return guard.response
   const ip = getClientIp(request)
   const limit = await consumeRateLimit(`ip:${ip}`, 'account-password-change', 10, 15 * 60)
-  if (limit.limited) return NextResponse.json({ message: '操作过于频繁，请稍后再试' }, { status: 429 })
+  if (limit.limited) return NextResponse.json({ message: '操作过于频繁，请稍后再试' }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(limit.retryAfter || 1) },
+  })
 
   const body = await request.json().catch(() => null)
   const currentPassword = typeof body?.currentPassword === 'string' ? body.currentPassword : ''

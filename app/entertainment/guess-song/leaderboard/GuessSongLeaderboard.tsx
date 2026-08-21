@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type Period = 'WEEK' | 'MONTH' | 'YEAR'
 type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT'
@@ -17,6 +19,7 @@ type Row = {
   maxStreak: number
   totalPlayCount: number
   achievedAt: string
+  equippedBadge?: EquippedBadgeView | null
 }
 type Data = {
   periodType: Period
@@ -112,7 +115,7 @@ export function GuessSongLeaderboard({ initialPeriod, initialMode, initialData }
     <article key={key} className={className}>
       <strong className="guess-song-rank">{row.rank}</strong>
       <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
-      <div className="guess-song-rank-user"><strong>{row.nickname}</strong></div>
+      <div className="guess-song-rank-user"><strong><UserDisplayName name={row.nickname} uid={row.uid} badge={row.equippedBadge} compact /></strong></div>
       <span className="guess-song-stat">{row.score}</span>
       <span className="guess-song-stat is-desktop-only">{row.correctCount}</span>
       <span className="guess-song-stat is-desktop-only">{row.maxStreak}</span>

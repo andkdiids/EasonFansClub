@@ -1,4 +1,5 @@
 import type { DuelMode } from '@/lib/guess-song-duel-config'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 export type DuelOption = { key: string; label: string }
 
@@ -8,6 +9,7 @@ export type DuelPublicUser = {
   name: string
   avatarUrl: string | null
   isOnline: boolean
+  equippedBadge: EquippedBadgeView | null
 }
 
 export type DuelRoomState = {

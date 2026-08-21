@@ -9,6 +9,8 @@ import { emitRealtime } from '@/lib/realtime'
 import { sanitizeText } from '@/lib/security'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -61,12 +63,13 @@ type SerializedWallMessage = {
   canDelete: boolean
   liked: boolean
   likeCount: number
-  likers: Array<{ uid: number; nickname: string; displayName: string; avatarUrl: string | null }>
+  likers: Array<{ uid: number; nickname: string; displayName: string; avatarUrl: string | null; equippedBadge: EquippedBadgeView | null }>
   commentCount: number
   sender: {
     uid: number
     nickname: string
     avatarUrl: string | null
+    equippedBadge: EquippedBadgeView | null
     profile: { displayName: string | null; avatarUrl: string | null } | null
   }
   children: SerializedWallMessage[]
@@ -122,7 +125,7 @@ function buildWallTree(rows: WallRow[]) {
     .map((row) => buildNode(row, new Set()))
 }
 
-function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remarkMap: ReadonlyMap<string, string>) {
+function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remarkMap: ReadonlyMap<string, string>, equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>) {
   return likes.map((like) => ({
     uid: like.User.uid,
     nickname: getPublicUserDisplayName(like.User),
@@ -133,6 +136,7 @@ function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remark
       remarkMap,
     }),
     avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
+    equippedBadge: equippedBadgeMap.get(like.userId) || null,
   }))
 }
 
@@ -143,6 +147,7 @@ function serializeWallNode(
   isOwner: boolean,
   viewerLikedIds: ReadonlySet<string>,
   remarkMap: ReadonlyMap<string, string>,
+  equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>,
 ): SerializedWallMessage {
   const sender = node.row.User_ProfileWallMessage_senderIdToUser
   const displayName = resolveFriendDisplayName({
@@ -162,15 +167,16 @@ function serializeWallNode(
     canDelete: canManageWallMessage(viewer, node.row.senderId, receiverId),
     liked: viewerLikedIds.has(node.row.id),
     likeCount: node.row.likeCount,
-    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, viewer?.id || null, remarkMap) : [],
+    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, viewer?.id || null, remarkMap, equippedBadgeMap) : [],
     commentCount: node.commentCount,
     sender: {
       uid: sender.uid,
       nickname: getPublicUserDisplayName(sender),
       avatarUrl: publicImageUrl(sender.avatarUrl),
+      equippedBadge: equippedBadgeMap.get(node.row.senderId) || null,
       profile: sender.Profile ? { ...sender.Profile, avatarUrl: publicImageUrl(sender.Profile.avatarUrl), displayName } : null,
     },
-    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, remarkMap)),
+    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, remarkMap, equippedBadgeMap)),
   }
 }
 
@@ -271,12 +277,13 @@ export async function GET(request: Request) {
     ...rows.flatMap((row) => row.ProfileWallLike.map((like) => like.userId)),
   ]
   const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
+  const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
   const tree = buildWallTree(rows)
 
   return NextResponse.json({
     visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
     canPost: Boolean(viewer && receiver.Profile?.wallVisibility !== 'CLOSED'),
-    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, remarkMap)),
+    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, remarkMap, equippedBadgeMap)),
     pagination: {
       page,
       pageSize: PROFILE_WALL_PAGE_SIZE,
@@ -369,6 +376,10 @@ export async function POST(request: Request) {
   const createdRow = await loadWallMessage(message.id)
   if (!createdRow) return NextResponse.json({ message: '留言已保存，但读取新留言失败' }, { status: 500 })
   const remarkMap = await loadFriendRemarkMap(viewer.id, [createdRow.senderId])
+  const equippedBadgeMap = await getEquippedBadgesForUsers([
+    createdRow.senderId,
+    ...createdRow.ProfileWallLike.map((like) => like.userId),
+  ])
   const wallMessage = serializeWallNode(
     { row: createdRow, children: [], commentCount: 0 },
     viewer,
@@ -376,6 +387,7 @@ export async function POST(request: Request) {
     viewer.id === receiver.id,
     new Set<string>(),
     remarkMap,
+    equippedBadgeMap,
   )
 
   return NextResponse.json({ message: '留言已发布', id: message.id, wallMessage }, { status: 201 })

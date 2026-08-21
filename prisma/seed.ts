@@ -51,11 +51,11 @@ async function main() {
   }
 
   const badges = [
-    { name: '创始会员', slug: 'founding-member', description: '早期加入私家E院的成员' },
-    { name: '连续签到', slug: 'checkin-streak', description: '保持连续签到的成员' },
-    { name: '发帖达人', slug: 'post-master', description: '高质量发帖成员' },
-    { name: '回复达人', slug: 'reply-master', description: '积极参与回复互动' },
-    { name: '管理员', slug: 'admin', description: '社区管理团队成员' },
+    { name: '创始会员', slug: 'founding-member', code: 'founding-member', description: '早期加入私家E院的成员' },
+    { name: '连续签到', slug: 'checkin-streak', code: 'checkin-streak', description: '保持连续签到的成员' },
+    { name: '发帖达人', slug: 'post-master', code: 'post-master', description: '高质量发帖成员' },
+    { name: '回复达人', slug: 'reply-master', code: 'reply-master', description: '积极参与回复互动' },
+    { name: '管理员', slug: 'admin', code: 'admin', description: '社区管理团队成员' },
   ]
 
   for (const badge of badges) {
@@ -69,8 +69,8 @@ async function main() {
   // 生日纪念徽章：用户生日当天由 lib/birthday.ts 自动授予，不绑定年份、永久保留。
   await prisma.badge.upsert({
     where: { slug: 'birthday-commemorative' },
-    update: { name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, category: 'BIRTHDAY' },
-    create: { slug: 'birthday-commemorative', name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, category: 'BIRTHDAY' },
+    update: { name: '生日纪念', code: 'birthday-commemorative', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, grantType: 'AUTO', category: 'BIRTHDAY' },
+    create: { slug: 'birthday-commemorative', code: 'birthday-commemorative', name: '生日纪念', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, grantType: 'AUTO', category: 'BIRTHDAY' },
   })
 
   const settings = [

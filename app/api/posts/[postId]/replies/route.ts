@@ -5,7 +5,7 @@ import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { appendContentImages, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
@@ -46,6 +46,12 @@ function parseMentions(value: unknown, content: string, currentUserId: string) {
 export async function POST(request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再回复' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/posts/replies',
+    ip: { limit: 120, windowSeconds: 10 * 60 },
+    user: { limit: 20, windowSeconds: 10 * 60 },
+  }, '评论过于频繁，请稍后再试')
+  if (limited) return limited
 
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null

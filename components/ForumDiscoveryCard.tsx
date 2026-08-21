@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { LikeButton } from '@/components/PostActions'
 import { getForumDiscoveryCoverFit, type ForumDiscoveryPost } from '@/lib/forum-discovery'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
   const [fit, setFit] = useState<'cover' | 'contain'>(getForumDiscoveryCoverFit(post.cover?.width, post.cover?.height))
@@ -62,7 +63,7 @@ export function ForumDiscoveryCard({ post, priority = false, onOpen }: Readonly<
               <img src={post.author.avatarUrl} alt="" loading="lazy" />
             ) : post.author.displayName.slice(0, 1)}
           </span>
-          <span title={post.author.displayName}>{post.author.displayName}</span>
+          <span title={post.author.displayName}><UserDisplayName name={post.author.displayName} uid={post.author.uid} badge={post.author.equippedBadge} compact /></span>
         </div>
         <LikeButton
           postId={post.id}

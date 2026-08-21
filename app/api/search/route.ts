@@ -3,18 +3,28 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const keyword = sanitizeText(searchParams.get('q'), 60)
   const numericUid = /^\d+$/.test(keyword) ? Number(keyword) : null
+  const user = await getCurrentUser()
+
+  const limited = await enforceApiRateLimit(request, user?.id, {
+    endpoint: '/api/search',
+    ip: { limit: 60, windowSeconds: 60 },
+    user: { limit: 30, windowSeconds: 60 },
+  }, '搜索请求过于频繁，请稍后再试')
+  if (limited) return limited
 
   if (!keyword) {
     const hotKeywords = await prisma.searchKeyword.findMany({
       orderBy: [{ count: 'desc' }, { lastUsedAt: 'desc' }],
       take: 10,
+      select: { keyword: true, count: true },
     })
     return NextResponse.json({
       users: [],
@@ -27,7 +37,13 @@ export async function GET(request: Request) {
     })
   }
 
-  const user = await getCurrentUser()
+  if (keyword.length < 2) {
+    return NextResponse.json(
+      { ok: false, code: 'SEARCH_KEYWORD_TOO_SHORT', message: '搜索关键词至少需要 2 个字符' },
+      { status: 400 },
+    )
+  }
+
   await prisma.searchKeyword.upsert({
     where: { keyword },
     update: { count: { increment: 1 }, lastUsedAt: new Date() },
@@ -52,7 +68,7 @@ export async function GET(request: Request) {
         ],
       },
       select: {
-        id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, experience: true, createdAt: true, lastActiveAt: true,
+        id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true,
         Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
         _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } } } },
         Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, moderationStatus: true, createdAt: true } },
@@ -69,8 +85,27 @@ export async function GET(request: Request) {
           { content: { contains: keyword } },
         ],
       },
-      include: {
-        User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        ipRegion: true,
+        viewCount: true,
+        likeCount: true,
+        replyCount: true,
+        isPinned: true,
+        isFeatured: true,
+        createdAt: true,
+        updatedAt: true,
+        contentType: true,
+        favoriteCount: true,
+        isLocked: true,
+        isRecommended: true,
+        publishedAt: true,
+        shareCount: true,
+        moderationStatus: true,
+        summary: true,
+        User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         Board: { select: { name: true, slug: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -85,11 +120,13 @@ export async function GET(request: Request) {
         ],
       },
       take: 10,
+      select: { name: true, slug: true, description: true, postCount: true, coverUrl: true, followerCount: true, isHot: true, isRecommended: true },
     }),
     prisma.tag.findMany({
       where: { name: { contains: keyword } },
       orderBy: { usageCount: 'desc' },
       take: 10,
+      select: { name: true, slug: true, usageCount: true },
     }),
     prisma.musicAlbum.findMany({
       where: {
@@ -139,41 +176,62 @@ export async function GET(request: Request) {
     ...users.map((item) => item.id),
     ...posts.map((item) => item.User.id),
   ])
+  const equippedBadgeMap = await getEquippedBadgesForUsers([
+    ...users.map((item) => item.id),
+    ...posts.map((item) => item.User.id),
+  ])
 
   return NextResponse.json({
     users: users.map(({ Profile, Post, _count, ...item }) => ({
-      ...item,
+      uid: item.uid,
       nickname: getPublicUserDisplayName({ ...item, Profile }),
+      equippedBadge: equippedBadgeMap.get(item.id) || null,
       avatarUrl: toPublicMediaUrl(item.avatarUrl),
       profile: Profile ? {
-        ...Profile,
-        avatarUrl: toPublicMediaUrl(Profile.avatarUrl),
         displayName: resolveFriendDisplayName({
           viewerId: user?.id,
           targetUserId: item.id,
           fallbackName: getPublicUserDisplayName({ ...item, Profile }),
           remarkMap,
         }),
+        avatarUrl: toPublicMediaUrl(Profile.avatarUrl),
+        bio: publicModerationText(Profile.bio, Profile.bioModerationStatus),
       } : Profile,
       posts: Post.map((post) => ({ ...post, title: publicModerationText(post.title, post.moderationStatus) })),
       _count: { posts: _count.Post },
     })),
     posts: posts.map(({ User, Board, ...post }) => ({
-      ...post,
+      id: post.id,
       title: publicModerationText(post.title, post.moderationStatus),
+      content: post.content,
+      ipRegion: post.ipRegion,
+      viewCount: post.viewCount,
+      likeCount: post.likeCount,
+      replyCount: post.replyCount,
+      isPinned: post.isPinned,
+      isFeatured: post.isFeatured,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+      contentType: post.contentType,
+      favoriteCount: post.favoriteCount,
+      isLocked: post.isLocked,
+      isRecommended: post.isRecommended,
+      publishedAt: post.publishedAt,
+      shareCount: post.shareCount,
+      summary: post.summary,
       author: {
-        ...User,
+        uid: User.uid,
         nickname: getPublicUserDisplayName(User),
+        equippedBadge: equippedBadgeMap.get(User.id) || null,
         avatarUrl: toPublicMediaUrl(User.avatarUrl),
         Profile: User.Profile ? {
-          ...User.Profile,
-          avatarUrl: toPublicMediaUrl(User.Profile.avatarUrl),
           displayName: resolveFriendDisplayName({
             viewerId: user?.id,
             targetUserId: User.id,
             fallbackName: getPublicUserDisplayName(User),
             remarkMap,
           }),
+          avatarUrl: toPublicMediaUrl(User.Profile.avatarUrl),
         } : User.Profile,
       },
       board: Board,

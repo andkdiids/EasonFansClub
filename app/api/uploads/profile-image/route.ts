@@ -4,7 +4,7 @@ import { publicImageUrl } from '@/lib/images'
 import { toStoredMediaUrl } from '@/lib/media-url'
 import { uploadToCos, deleteFromCos } from '@/lib/tencent-cos'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { isDefaultAvatarUrl } from '@/lib/default-avatars'
 import { createAnimatedImageVariants, createImageVariants, ImageNormalizeError, isAnimatedImageInput } from '@/lib/image-webp'
@@ -49,6 +49,12 @@ export async function POST(request: Request) {
   if (!guard.user) {
     return guard.response
   }
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/uploads/profile-image',
+    ip: { limit: 40, windowSeconds: 60 * 60 },
+    user: { limit: 20, windowSeconds: 60 * 60 },
+  }, '图片上传过于频繁，请稍后再试')
+  if (limited) return limited
 
 
   const formData = await request.formData().catch(() => null)
@@ -137,7 +143,7 @@ export async function POST(request: Request) {
     if (error instanceof ImageNormalizeError) {
       return NextResponse.json({ message: error.message }, { status: 400 })
     }
-    console.error('[profile-image] COS upload failed', error)
+    console.error('[profile-image] COS upload failed', { errorName: error instanceof Error ? error.name : 'UnknownError' })
 
     return NextResponse.json(
       {
@@ -249,7 +255,7 @@ export async function POST(request: Request) {
 
   } catch(error){
 
-    console.error('[profile-image] database update failed',error)
+    console.error('[profile-image] database update failed', { errorName: error instanceof Error ? error.name : 'UnknownError' })
 
 
     await deleteFromCos(objectPath).catch(()=>{})

@@ -11,14 +11,19 @@ import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience 
 import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/checkin',
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey()
@@ -77,6 +82,12 @@ export async function GET() {
 export async function POST(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再挂号' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/checkin',
+    ip: { limit: 30, windowSeconds: 60 },
+    user: { limit: 5, windowSeconds: 60 },
+  }, '挂号请求过于频繁，请稍后再试')
+  if (limited) return limited
 
   const body = await request.json().catch(() => null)
   const requestedMoodType = body?.moodType === CUSTOM_MOOD_TYPE ? CUSTOM_MOOD_TYPE : PRESET_MOOD_TYPE

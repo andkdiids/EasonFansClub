@@ -4,12 +4,12 @@ import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { validateLoginAccountValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
 
@@ -169,13 +169,16 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
 export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
-  const ipLocation = await resolveIpLocation(request)
-  const resolvedIpRegion = await updateUserIpRegion(guard.user.id, ipLocation)
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    ip: { limit: 240, windowSeconds: 60 },
+    user: { limit: 120, windowSeconds: 60 },
+    endpoint: '/api/users/me',
+  })
+  if (limited) return limited
 
   const profile = await prisma.user.findUnique({
     where: { id: guard.user.id },
     select: {
-      id: true,
       username: true,
       email: true,
       phone: true,
@@ -184,29 +187,47 @@ export async function GET(request: Request) {
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
-      role: true,
-      status: true,
-      verificationStatus: true,
-      level: true,
-      exp: true,
-      points: true,
-      consecutiveDays: true,
-      lastLoginAt: true,
-      lastActiveAt: true,
+      emailVerifiedAt: true,
+      phoneVerifiedAt: true,
       birthMonth: true,
       birthDay: true,
       birthdaySetAt: true,
-      usernameChangedAt: true,
-      nicknameChangedAt: true,
+      birthdayPublic: true,
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
+      bioModerationStatus: true,
+      usernameChangedAt: true,
+      nicknameChangedAt: true,
       nicknameViolationCount: true,
-      ipRegion: true,
-      Profile: true,
+      Profile: {
+        select: {
+          displayName: true,
+          avatarUrl: true,
+          backgroundUrl: true,
+          bio: true,
+          displayNameModerationStatus: true,
+          bioModerationStatus: true,
+          locationCountryCode: true,
+          locationCountry: true,
+          locationRegionCode: true,
+          locationRegion: true,
+          wallVisibility: true,
+        },
+      },
       UserBadge: {
         where: { isHidden: false },
         orderBy: { displayOrder: 'asc' },
-        include: { Badge: true },
+        select: {
+          grantedAt: true,
+          displayOrder: true,
+          Badge: {
+            select: {
+              name: true,
+              description: true,
+              iconUrl: true,
+            },
+          },
+        },
       },
       _count: {
         select: {
@@ -220,20 +241,49 @@ export async function GET(request: Request) {
   })
 
   if (!profile) return NextResponse.json({ profile: null })
-  const { Profile, UserBadge, _count, usernameChangedAt, nicknameChangedAt, nicknameViolationCount, ...user } = profile
+  const { Profile, UserBadge, _count, usernameChangedAt, nicknameChangedAt, nicknameViolationCount } = profile
   return NextResponse.json({
     profile: {
-      ...user,
-      ipRegion: resolvedIpRegion,
-      avatarUrl: publicImageUrl(user.avatarUrl),
-      backgroundUrl: publicImageUrl(user.backgroundUrl),
+      username: profile.username,
+      email: profile.email,
+      phone: profile.phone,
+      emailVerifiedAt: profile.emailVerifiedAt,
+      phoneVerifiedAt: profile.phoneVerifiedAt,
+      nickname: profile.nickname,
+      nicknameModerationStatus: profile.nicknameModerationStatus,
+      nicknameViolationDisplay: profile.nicknameViolationDisplay,
+      bioModerationStatus: profile.bioModerationStatus,
+      uid: profile.uid,
+      avatarUrl: publicImageUrl(profile.avatarUrl),
+      backgroundUrl: publicImageUrl(profile.backgroundUrl),
+      bio: profile.bio,
+      birthMonth: profile.birthMonth,
+      birthDay: profile.birthDay,
+      birthdaySetAt: profile.birthdaySetAt,
+      birthdayPublic: profile.birthdayPublic,
       profile: Profile ? {
-        ...Profile,
-        location: locationFromProfile(Profile),
+        displayName: Profile.displayName,
         avatarUrl: publicImageUrl(Profile.avatarUrl),
         backgroundUrl: publicImageUrl(Profile.backgroundUrl),
+        bio: Profile.bio,
+        displayNameModerationStatus: Profile.displayNameModerationStatus,
+        bioModerationStatus: Profile.bioModerationStatus,
+        wallVisibility: Profile.wallVisibility,
+        location: locationFromProfile(Profile),
       } : Profile,
-      badges: UserBadge.map(({ Badge, ...item }) => ({ ...item, badge: Badge })),
+      badges: UserBadge.map(({ Badge, grantedAt, displayOrder }) => {
+        const imageUrl = publicImageUrl(Badge.iconUrl)
+        return {
+          grantedAt,
+          displayOrder,
+          badge: {
+            name: Badge.name,
+            description: Badge.description,
+            iconUrl: imageUrl,
+            imageUrl,
+          },
+        }
+      }),
       _count: {
         posts: _count.Post,
         replies: _count.Reply,
@@ -249,6 +299,12 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    ip: { limit: 60, windowSeconds: 60 },
+    user: { limit: 30, windowSeconds: 60 },
+    endpoint: '/api/users/me',
+  }, '资料修改过于频繁，请稍后再试')
+  if (limited) return limited
 
   const body = await request.json().catch(() => null)
   if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'newUsername')) {
@@ -415,7 +471,7 @@ export async function PATCH(request: Request) {
       code: 'NICKNAME_CHANGE_COOLDOWN',
       message: `昵称每 ${currentCooldownDays} 天只能修改一次，距离下次修改还有 ${daysRemaining} 天`,
       nextAllowedAt: nextAllowedAt.toISOString(),
-    }, { status: 429 })
+    }, { status: 429, headers: { 'Retry-After': String(daysRemaining * 24 * 60 * 60) } })
   }
 
   const profile = await prisma.$transaction(async (tx) => {
@@ -446,7 +502,6 @@ export async function PATCH(request: Request) {
         ...nicknameUpdate,
       },
       select: {
-        id: true,
         uid: true,
         nickname: true,
         email: true,
@@ -456,7 +511,6 @@ export async function PATCH(request: Request) {
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
-        ipRegion: true,
         nicknameModerationStatus: true,
         nicknameViolationDisplay: true,
         nicknameViolationCount: true,
@@ -530,7 +584,17 @@ export async function PATCH(request: Request) {
     })
 
     return {
-      ...updated,
+      uid: updated.uid,
+      nickname: updated.nickname,
+      email: updated.email,
+      phone: updated.phone,
+      emailVerifiedAt: updated.emailVerifiedAt,
+      phoneVerifiedAt: updated.phoneVerifiedAt,
+      avatarUrl: updated.avatarUrl,
+      backgroundUrl: updated.backgroundUrl,
+      bio: updated.bio,
+      nicknameModerationStatus: updated.nicknameModerationStatus,
+      nicknameViolationDisplay: updated.nicknameViolationDisplay,
       wallVisibility: profileRecord.wallVisibility,
       location: profileRecord.locationCountryCode ? {
         countryCode: profileRecord.locationCountryCode,

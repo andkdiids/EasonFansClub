@@ -25,6 +25,7 @@ export type FriendDockUser = {
   createdAt: string
   level: number
   levelName: string
+  equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
   groupId?: string | null
   profile: {
     displayName: string | null

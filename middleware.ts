@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify, errors as joseErrors, type JWTPayload } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 import { authCookieName, getSessionCookieOptions, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 import { buildPublicAbsoluteUrl, getPublicOrigin, isLocalHostname, safeInternalPath } from '@/lib/url-safety'
+import { isCrossSiteRequest, isStateChangingMethod } from '@/lib/csrf'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
 const immutableCacheValue = 'public, max-age=31536000, immutable'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
@@ -295,6 +296,17 @@ export async function middleware(request: NextRequest) {
   if (!isSecure && !isLocalHost) {
     const securePath = `${request.nextUrl.pathname}${request.nextUrl.search}` || '/'
     return withNoStoreHeaders(NextResponse.redirect(buildPublicAbsoluteUrl(securePath, request), 308))
+  }
+
+  // SameSite cookies are a useful baseline, but they do not cover every
+  // browser/navigation edge case. Reject an explicitly cross-site browser
+  // write while keeping Origin-less native clients and CLI integrations valid.
+  if (isApiPath(pathname) && isStateChangingMethod(request.method) && isCrossSiteRequest(request)) {
+    const response = NextResponse.json(
+      { ok: false, code: 'CSRF_BLOCKED', message: '请求来源校验失败，请刷新页面后重试' },
+      { status: 403, headers: { Vary: 'Origin, Referer, Sec-Fetch-Site' } },
+    )
+    return withNoStoreHeaders(response)
   }
 
   if (guessSongMediaGatewayPaths.has(pathname)) {

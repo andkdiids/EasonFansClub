@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { emitRealtime } from '@/lib/realtime'
 import { invalidateCurrentUserCache } from '@/lib/auth'
-import { requireAdmin } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin } from '@/lib/security'
 import {
   grantUserReward,
   listUserRewards,
@@ -30,15 +30,23 @@ function rewardErrorResponse(error: unknown) {
 export async function GET(request: Request) {
   const guard = await requireAdmin(USER_REWARD_PERMISSION)
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/user-rewards:GET',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { searchParams } = new URL(request.url)
+  const rawPage = Number(searchParams.get('page') || 1)
+  const rawPageSize = Number(searchParams.get('pageSize') || USER_REWARD_PAGE_SIZE)
   const result = await listUserRewards({
     q: searchParams.get('q') || undefined,
     operatorId: searchParams.get('operatorId') || undefined,
     from: searchParams.get('from') || undefined,
     to: searchParams.get('to') || undefined,
-    page: Number(searchParams.get('page') || 1),
-    pageSize: Math.min(Number(searchParams.get('pageSize') || USER_REWARD_PAGE_SIZE), 50),
+    page: Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(rawPage, 1)) : 1,
+    pageSize: Number.isSafeInteger(rawPageSize) ? Math.min(Math.max(rawPageSize, 1), 50) : USER_REWARD_PAGE_SIZE,
   })
   return NextResponse.json(result, { headers: privateNoStoreHeaders })
 }
@@ -46,6 +54,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const guard = await requireAdmin(USER_REWARD_PERMISSION)
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/user-rewards:POST',
+    ip: { limit: 30, windowSeconds: 60 },
+    user: { limit: 15, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const body = await request.json().catch(() => null)
   try {

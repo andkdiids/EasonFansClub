@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import sharp, { type Metadata } from 'sharp'
 import { publicImageUrl } from '@/lib/images'
-import { requireAdmin, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin, requireUser } from '@/lib/security'
 import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage'
 import { createAnimatedImageVariants, createImageVariants, ImageNormalizeError, isAnimatedImageInput } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
@@ -21,6 +21,12 @@ export async function POST(request: Request) {
   const scope = new URL(request.url).searchParams.get('scope')
   const guard = scope === 'admin' ? await requireAdmin('today_manage') : await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/uploads/today-image',
+    ip: { limit: 40, windowSeconds: 60 * 60 },
+    user: { limit: 20, windowSeconds: 60 * 60 },
+  }, '图片上传过于频繁，请稍后再试')
+  if (limited) return limited
 
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
@@ -43,7 +49,9 @@ export async function POST(request: Request) {
       ? await createAnimatedImageVariants(input, { sourceMaxWidth: 2000, variants: ['thumb-md', 'card', 'large'] })
       : await createImageVariants(input, { sourceMaxWidth: 2000, sourceMaxHeight: 1400, sourceQuality: 84, variants: ['thumb-md', 'card', 'large'] })
   } catch (error) {
-    if (!(error instanceof ImageNormalizeError)) console.error('[today-image.normalize]', error)
+    if (!(error instanceof ImageNormalizeError)) {
+      console.error('[today-image.normalize]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
+    }
     return NextResponse.json({ message: '图片处理失败，请换一张试试' }, { status: 400 })
   }
 
@@ -59,7 +67,9 @@ export async function POST(request: Request) {
     if (!url) return NextResponse.json({ message: '图片上传结果无效，请重试' }, { status: 502 })
     return NextResponse.json({ url, mimeType: 'image/webp', format: 'webp' })
   } catch (error) {
-    if (!(error instanceof SiteMediaStorageError)) console.error('[today-image.upload]', error)
+    if (!(error instanceof SiteMediaStorageError)) {
+      console.error('[today-image.upload]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
+    }
     return NextResponse.json({ message: '图片上传失败，请稍后重试' }, { status: 502 })
   }
 }

@@ -6,6 +6,7 @@
 
 - `POST /api/auth/register`：注册账号，支持用户名、邮箱、手机号字段。
 - `POST /api/auth/login`：登录。
+- `GET /api/auth/me`：检查当前会话是否有效，返回最小会话身份信息。
 - `POST /api/auth/logout`：退出登录。
 - `POST /api/auth/demo`：免注册体验登录。
 - `POST /api/auth/forgot-password`：创建重置密码记录，邮件/短信发送接口已预留。
@@ -14,7 +15,7 @@
 
 ## 用户
 
-- `GET /api/users/me`：获取当前用户资料、等级、积分、勋章、关注数。
+- `GET /api/users/me`：获取当前用户资料、验证状态、勋章和帖子/回复/关注统计；不返回内部角色、等级、经验、积分或 IP 区域。
 - `PATCH /api/users/me`：修改昵称、头像、背景图、简介。
 - `POST /api/users/:userId/follow`：关注用户。
 - `DELETE /api/users/:userId/follow`：取消关注。

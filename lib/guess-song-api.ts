@@ -9,9 +9,11 @@ export function guessSongOk<T>(data: T, status = 200) {
 }
 
 export function guessSongError(error: string, status: number, code?: string) {
+  const headers: Record<string, string> = { 'Cache-Control': 'private, no-store' }
+  if (status === 429) headers['Retry-After'] = '1'
   return NextResponse.json(
     { ok: false, data: null, error, code },
-    { status, headers: { 'Cache-Control': 'private, no-store' } },
+    { status, headers },
   )
 }
 

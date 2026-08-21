@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
 export async function POST(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(_request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/favorite:POST',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { messageId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
@@ -38,6 +44,12 @@ export async function POST(_request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(_request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/favorite:DELETE',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { messageId } = await context.params
   const result = await prisma.$transaction(async (tx) => {

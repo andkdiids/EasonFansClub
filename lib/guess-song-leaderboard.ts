@@ -7,6 +7,8 @@ import { publicModerationText, publicModerationUserName } from '@/lib/content-mo
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 export async function getGuessSongDeletedYearSessionIds(periodKey?: string) {
   const logs = await prisma.adminActionLog.findMany({
@@ -53,6 +55,7 @@ export type GuessSongModeHighScore = {
     nickname: string
     name: string
     avatarUrl: string | null
+    equippedBadge?: EquippedBadgeView | null
   }
 }
 
@@ -124,6 +127,7 @@ function serializeModeHighScore(
   publicMode: GuessSongPublicMode,
   viewerId: string | undefined,
   remarkMap: ReadonlyMap<string, string>,
+  equippedBadge: EquippedBadgeView | null,
 ): GuessSongModeHighScore | null {
   if (!row.completedAt) return null
   const safeName = getPublicUserDisplayName(row.User)
@@ -155,6 +159,7 @@ function serializeModeHighScore(
       nickname: safeName,
       name: safeName,
       avatarUrl,
+      equippedBadge,
     },
   }
 }
@@ -218,8 +223,9 @@ export async function getGuessSongModeHighScores(viewerId?: string): Promise<Gue
 
     const availableRows = rows.filter((item): item is NonNullable<typeof item> => item !== null && item.row.completedAt !== null)
     const remarkMap = await loadFriendRemarkMap(viewerId, availableRows.map(({ row }) => row.User.id))
+    const equippedBadgeMap = await getEquippedBadgesForUsers(availableRows.map(({ row }) => row.User.id))
     const serializedRows = availableRows
-      .map(({ publicMode, row }) => serializeModeHighScore(row, publicMode, viewerId, remarkMap))
+      .map(({ publicMode, row }) => serializeModeHighScore(row, publicMode, viewerId, remarkMap, equippedBadgeMap.get(row.User.id) || null))
       .filter((row): row is GuessSongModeHighScore => row !== null)
     return buildGuessSongModeHighScores(serializedRows)
   } catch (error) {
@@ -308,7 +314,7 @@ type LeaderboardRow = ScoreRecord & {
   }
 }
 
-function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remarkMap: ReadonlyMap<string, string>) {
+function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remarkMap: ReadonlyMap<string, string>, equippedBadge?: EquippedBadgeView | null) {
   return {
     rank,
     userId: row.userId,
@@ -320,6 +326,7 @@ function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remar
       remarkMap,
     }),
     avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
+    equippedBadge: equippedBadge || null,
     mode: row.mode ? toPublicGuessSongMode(row.mode) : undefined,
     score: row.score,
     correctCount: row.correctCount,
@@ -377,6 +384,7 @@ export async function getGuessSongPersonalBest(input: {
   if (!session?.completedAt) return null
 
   const remarkMap = await loadFriendRemarkMap(input.userId, [session.User.id])
+  const equippedBadgeMap = await getEquippedBadgesForUsers([session.User.id])
   return serializeRow({
     userId: session.userId,
     mode: session.mode,
@@ -386,7 +394,7 @@ export async function getGuessSongPersonalBest(input: {
     totalPlayCount: session.totalPlayCount,
     achievedAt: session.completedAt,
     User: session.User,
-  }, 1, input.userId, remarkMap)
+  }, 1, input.userId, remarkMap, equippedBadgeMap.get(session.User.id) || null)
 }
 
 type YearLeaderboardQueryRow = {
@@ -551,14 +559,15 @@ async function getYearGuessSongLeaderboard(input: {
   const ownRow = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
   const remarkTargets = [...topRows, ...(ownRow && ownRow.rank > 10 ? [ownRow] : [])]
   const remarkMap = await loadFriendRemarkMap(input.userId, remarkTargets.map((item) => item.row.userId))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(remarkTargets.map((item) => item.row.userId))
 
   return {
     periodType: 'YEAR' as const,
     periodKey: input.periodKey,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
-    rows: topRows.map((item) => serializeRow(item.row, item.rank, input.userId, remarkMap)),
-    currentUser: ownRow ? serializeRow(ownRow.row, ownRow.rank, input.userId, remarkMap) : null,
+    rows: topRows.map((item) => serializeRow(item.row, item.rank, input.userId, remarkMap, equippedBadgeMap.get(item.row.userId) || null)),
+    currentUser: ownRow ? serializeRow(ownRow.row, ownRow.rank, input.userId, remarkMap, equippedBadgeMap.get(ownRow.row.userId) || null) : null,
   }
 }
 
@@ -624,14 +633,15 @@ export async function getGuessSongLeaderboard(input: {
 
   rows.sort(compareGuessSongScores)
   const remarkMap = await loadFriendRemarkMap(input.userId, rows.map((row) => row.userId))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.userId))
   const ownIndex = rows.findIndex((row) => row.userId === input.userId)
   return {
     periodType: input.periodType,
     periodKey,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
-    rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1, input.userId, remarkMap)),
-    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1), input.userId, remarkMap) : null,
+    rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1, input.userId, remarkMap, equippedBadgeMap.get(row.userId) || null)),
+    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1), input.userId, remarkMap, equippedBadgeMap.get(rows[ownIndex].userId) || null) : null,
   }
 }
 

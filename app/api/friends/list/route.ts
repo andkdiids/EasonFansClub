@@ -7,8 +7,10 @@ import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 import { belongsToFriendGroup, buildFriendGroupIndex, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -16,10 +18,21 @@ const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/friends/list',
+    ip: { limit: 240, windowSeconds: 60 },
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const params = new URL(request.url).searchParams
   const q = sanitizeText(params.get('q'), 50)
-  const page = Math.max(1, Number(params.get('page')) || 1)
-  const pageSize = Math.min(50, Math.max(10, Number(params.get('pageSize')) || 30))
+  if (q && q.length < 2) {
+    return NextResponse.json({ results: [] }, { headers: privateHeaders })
+  }
+  const rawPage = Number(params.get('page'))
+  const rawPageSize = Number(params.get('pageSize'))
+  const page = Math.min(10_000, Math.max(1, Number.isFinite(rawPage) ? rawPage : 1))
+  const pageSize = Math.min(50, Math.max(10, Number.isFinite(rawPageSize) ? rawPageSize : 30))
   const requestedGroupId = params.get('groupId')?.trim() || null
 
   if (q) return searchUsers(user.id, q)
@@ -132,10 +145,11 @@ export async function GET(request: Request) {
   const visibleRows = orderedFriendRows.slice(pageStart, pageStart + pageSize)
   const visibleFriendIds = visibleRows.map(({ friend }) => friend.id)
   const visibleConversationIds = visibleRows.flatMap(({ conversation }) => conversation ? [conversation.id] : [])
-  const [unreadByConversation, remarkMap, presenceByFriend] = await Promise.all([
+  const [unreadByConversation, remarkMap, presenceByFriend, equippedBadgeMap] = await Promise.all([
     getUnreadCounts(user.id, visibleConversationIds),
     loadFriendRemarkMap(user.id, visibleFriendIds),
     getUndercoverPresenceForUsers(visibleFriendIds),
+    getEquippedBadgesForUsers(visibleFriendIds),
   ])
 
   const friends = visibleRows.map(({ friend, conversation }) => {
@@ -147,7 +161,7 @@ export async function GET(request: Request) {
       remarkMap,
     })
     return {
-      ...serializePublicUser(friend, growth.level, growth.levelName, displayName),
+      ...serializePublicUser(friend, growth.level, growth.levelName, displayName, equippedBadgeMap.get(friend.id) || null),
       groupId: groupByFriend.get(friend.id) || null,
       conversationId: conversation?.id || null,
       lastMessage: conversation?.DirectMessage[0] || null,
@@ -220,7 +234,7 @@ async function searchUsers(currentUserId: string, q: string) {
   ]) : [[], [], []]
   const friendIds = new Set(friendships.flatMap((item) => [item.userAId, item.userBId]).filter((id) => id !== currentUserId))
   const blockedIds = new Set(blocks.flatMap((item) => [item.blockerId, item.blockedId]).filter((id) => id !== currentUserId))
-  const [remarkMap, groupMembers] = await Promise.all([
+  const [remarkMap, groupMembers, equippedBadgeMap] = await Promise.all([
     loadFriendRemarkMap(currentUserId, friendIds),
     friendIds.size
       ? prisma.friendGroupMember.findMany({
@@ -228,6 +242,7 @@ async function searchUsers(currentUserId: string, q: string) {
           select: { friendId: true, groupId: true },
         })
       : Promise.resolve([]),
+    getEquippedBadgesForUsers(users.map((item) => item.id)),
   ])
   const { groupByFriend } = buildFriendGroupIndex(friendIds, groupMembers)
 
@@ -249,7 +264,7 @@ async function searchUsers(currentUserId: string, q: string) {
         remarkMap,
       })
       return {
-        ...serializePublicUser(item, growth.level, growth.levelName, displayName),
+        ...serializePublicUser(item, growth.level, growth.levelName, displayName, equippedBadgeMap.get(item.id) || null),
         groupId: groupByFriend.get(item.id) || null,
         relationshipStatus,
         requestId: relationshipStatus === 'INCOMING_PENDING' ? request?.id : null,
@@ -334,6 +349,7 @@ function serializePublicUser(
   level: number,
   levelName: string,
   displayName = getPublicUserDisplayName(friend),
+  equippedBadge: EquippedBadgeView | null = null,
 ) {
   return {
     id: friend.id,
@@ -346,6 +362,7 @@ function serializePublicUser(
     createdAt: friend.createdAt,
     level,
     levelName,
+    equippedBadge,
     profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl), displayName } : friend.Profile,
   }
 }

@@ -9,6 +9,8 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +21,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
       where: { id: reviewId, status: 'PUBLISHED' },
       include: {
         MusicAlbum: { select: { id: true, name: true, releaseYear: true, language: true, coverUrl: true, _count: { select: { MusicSong: true } } } },
-        User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
+        User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
       },
     }),
     getCurrentUser(),
@@ -31,6 +33,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
     prisma.albumReviewFavorite.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
   ]) : [null, null]
   const remarkMap = await loadFriendRemarkMap(user?.id, [review.User.id])
+  const equippedBadgeMap = await getEquippedBadgesForUsers([review.User.id])
   const reviewAuthorName = resolveFriendDisplayName({
     viewerId: user?.id,
     targetUserId: review.User.id,
@@ -48,7 +51,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
       <div className="p-6 sm:p-10">
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ALBUM REVIEW · {review.MusicAlbum.releaseYear}</p>
         <h1 className="mt-3 text-4xl font-black leading-tight text-white sm:text-6xl">{review.title}</h1>
-        <p className="mt-5 text-sm font-bold text-slate-300/60">所属专辑：<Link href={`/music/album/${review.MusicAlbum.id}`} className="text-sky-200 hover:text-white">《{review.MusicAlbum.name}》</Link> · {reviewAuthorName} · {new Intl.DateTimeFormat('zh-CN').format(review.publishedAt || review.createdAt)}</p>
+        <p className="mt-5 text-sm font-bold text-slate-300/60">所属专辑：<Link href={`/music/album/${review.MusicAlbum.id}`} className="text-sky-200 hover:text-white">《{review.MusicAlbum.name}》</Link> · <UserDisplayName name={reviewAuthorName} uid={review.User.uid} badge={equippedBadgeMap.get(review.User.id) || null} compact /> · {new Intl.DateTimeFormat('zh-CN').format(review.publishedAt || review.createdAt)}</p>
         <div className="mt-8"><AlbumReviewActions reviewId={review.id} initialLiked={Boolean(liked)} initialFavorited={Boolean(favorited)} initialLikeCount={review.likeCount} initialFavoriteCount={review.favoriteCount} /></div>
         <div className="mt-10 whitespace-pre-wrap text-[15px] font-medium leading-8 text-slate-200/85 sm:text-base">{review.content}</div>
         {images.length ? <div className="mt-10 grid gap-5">{images.map((url, index) => <figure key={url} className="relative aspect-[16/10] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b2038]"><Image src={url} alt={`${review.title} 资料图片 ${index + 1}`} fill sizes="(max-width: 767px) 100vw, 900px" loading="lazy" className="object-contain" /></figure>)}</div> : null}

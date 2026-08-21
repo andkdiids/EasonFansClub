@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
 export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+    endpoint: '/api/posts/favorite',
+  }, '收藏操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { postId } = await context.params
   const body = await request.json().catch(() => null) as { isFavorited?: unknown } | null
@@ -46,9 +52,15 @@ export async function POST(request: Request, context: RouteContext) {
   return NextResponse.json(result)
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+    endpoint: '/api/posts/favorite',
+  }, '收藏操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { postId } = await context.params
   const result = await prisma.$transaction(async (tx) => {

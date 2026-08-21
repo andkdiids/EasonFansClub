@@ -22,6 +22,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { mergeUniqueFriendPage, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
 type Message = {
@@ -1044,7 +1045,7 @@ export function FriendDock({
               <button type="button" onClick={leaveChat} aria-label="返回好友列表">←</button>
               <button type="button" className="friend-dock-chat-person" onClick={() => setProfileFriend(chatFriend)}>
                 <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.profile?.displayName || chatFriend.nickname} className="h-8 w-8" />
-                <span><strong>{chatFriend.profile?.displayName || chatFriend.nickname}</strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
+                <span><strong><UserDisplayName name={chatFriend.profile?.displayName || chatFriend.nickname} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
@@ -1381,7 +1382,7 @@ function FriendRow({
       </button>
       <div className="friend-dock-row-main">
         <button type="button" className="friend-dock-row-name" onClick={status === 'FRIEND' ? onChat : undefined} disabled={status !== 'FRIEND'}>
-          <strong>{name}</strong>
+          <strong><UserDisplayName name={name} uid={friend.uid} badge={friend.equippedBadge} compact /></strong>
           <small>UID {formatUid(friend.uid)} · {friend.levelName || '初入E院'}</small>
         </button>
         {!searching ? (

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAccountSecuritySettings, getSecurityQuestionRecoveryAvailability, verifySecurityAnswers } from '@/lib/account-security'
 import { prisma } from '@/lib/prisma'
-import { checkRateLimit, consumeRateLimit, getClientIp, recordRateLimitHit, rejectInvalidRequestOrigin } from '@/lib/security'
+import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
 
@@ -10,7 +10,10 @@ export async function POST(request: Request) {
   if (originError) return originError
   const ip = getClientIp(request)
   const requestLimit = await consumeRateLimit(`ip:${ip}`, 'password-reset:answer-attempt', 20, 15 * 60)
-  if (requestLimit.limited) return NextResponse.json({ message: '验证请求过于频繁，请稍后再试' }, { status: 429 })
+  if (requestLimit.limited) return NextResponse.json({ message: '验证请求过于频繁，请稍后再试' }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(requestLimit.retryAfter || 1) },
+  })
   const body = await request.json().catch(() => null)
   const challenge = normalizeText(body?.challenge)
   if (!challenge) return NextResponse.json({ message: '验证请求无效或已过期' }, { status: 400 })
@@ -31,12 +34,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '当前账号未启用密保问题找回，请联系管理员或使用其他可用方式。' }, { status: 403 })
   }
   const accountKey = `account:${hashToken(record.userId)}`
-  const lock = await checkRateLimit(accountKey, 'password-reset:wrong-answer', 5)
-  if (lock.limited) return NextResponse.json({ message: '验证失败次数过多，请稍后再试', retryAfter: lock.retryAfter }, { status: 429 })
+  const lock = await consumeRateLimit(accountKey, 'password-reset:wrong-answer', 5, 30 * 60)
+  if (lock.limited) return NextResponse.json({ message: '验证失败次数过多，请稍后再试', retryAfter: lock.retryAfter }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(lock.retryAfter || 1) },
+  })
   const valid = await verifySecurityAnswers(record.User.UserSecurityQuestion ? [record.User.UserSecurityQuestion] : [], body?.answers)
   if (!valid) {
     await Promise.all([
-      recordRateLimitHit(accountKey, 'password-reset:wrong-answer', 30 * 60),
       prisma.passwordResetToken.update({ where: { id: record.id }, data: { attemptCount: { increment: 1 } } }),
     ])
     return NextResponse.json({ message: '密保答案验证失败' }, { status: 400 })

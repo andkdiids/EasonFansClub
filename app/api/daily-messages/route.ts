@@ -5,14 +5,24 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
+import { enforceApiRateLimit } from '@/lib/security'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 export async function GET(request: Request) {
   const viewer = await getCurrentUser()
+  const limited = await enforceApiRateLimit(request, viewer?.id, {
+    endpoint: '/api/daily-messages',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const { searchParams } = new URL(request.url)
   const day = searchParams.get('day') === 'yesterday' ? 'yesterday' : 'today'
   const sort = searchParams.get('sort') === 'hot' ? 'hot' : 'latest'
-  const page = Math.max(Number(searchParams.get('page') || 1), 1)
-  const take = Math.min(Number(searchParams.get('take') || 20), 50)
+  const rawPage = Number(searchParams.get('page') || 1)
+  const rawTake = Number(searchParams.get('take') || 20)
+  const page = Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(rawPage, 1)) : 1
+  const take = Number.isSafeInteger(rawTake) ? Math.min(50, Math.max(rawTake, 1)) : 20
   const date = day === 'yesterday' ? startOfYesterday() : startOfLocalDay()
   const nextDate = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
   const skip = (page - 1) * take
@@ -93,6 +103,7 @@ export async function GET(request: Request) {
       ...visibleRows.flatMap((row) => row.DailyMessageComment.map((comment) => comment.User.id)),
     ]
     const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
+    const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
     const messages = visibleRows.map(({ User, DailyMessageComment, ...message }) => ({
       ...message,
       content: publicModerationText(message.content, message.moderationStatus),
@@ -100,6 +111,7 @@ export async function GET(request: Request) {
         ...User,
         nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
+        equippedBadge: equippedBadgeMap.get(User.id) || null,
         Profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
@@ -121,6 +133,7 @@ export async function GET(request: Request) {
         user: {
           ...commentUser,
           nickname: getPublicUserDisplayName(commentUser),
+          equippedBadge: equippedBadgeMap.get(commentUser.id) || null,
           Profile: commentUser.Profile ? {
             ...commentUser.Profile,
             avatarUrl: publicImageUrl(commentUser.Profile.avatarUrl),

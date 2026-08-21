@@ -10,6 +10,8 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +33,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             ],
           },
           include: {
-            User: { select: { id: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
+            User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             Board: { select: { name: true, slug: true } },
           },
           take: 20,
@@ -117,6 +119,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     ...friendIds,
     ...posts.map((post) => post.User.id),
   ])
+  const equippedBadgeMap = await getEquippedBadgesForUsers([
+    ...users.map((item) => item.id),
+    ...posts.map((post) => post.User.id),
+  ])
 
   return (
     <>
@@ -152,12 +158,12 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                 <p className="font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
                 <p className="mt-2 text-sm text-slate-500">
-                  {post.Board.name} · {resolveFriendDisplayName({
+                  {post.Board.name} · <UserDisplayName name={resolveFriendDisplayName({
                     viewerId: viewer?.id,
                     targetUserId: post.User.id,
                     fallbackName: getPublicUserDisplayName(post.User),
                     remarkMap,
-                  })} · 回复 {post.replyCount}
+                  })} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · 回复 {post.replyCount}
                 </p>
               </Link>
             ))}
@@ -179,7 +185,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt={name} className="h-full w-full object-cover" loading="lazy" /> : formatUid(item.uid).slice(0, 1)}
                     </span>
                     <span>
-                      <strong className="block text-brand-950">{name}</strong>
+                      <strong className="block text-brand-950"><UserDisplayName name={name} uid={item.uid} badge={equippedBadgeMap.get(item.id) || null} compact /></strong>
                       <small>UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.Post} 帖</small>
                     </span>
                   </Link>

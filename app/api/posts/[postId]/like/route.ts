@@ -6,13 +6,20 @@ import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { syncLikeNotification } from '@/lib/like-notifications'
+import { enforceApiRateLimit } from '@/lib/security'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type Params = { params: Promise<{ postId: string }> }
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
-export async function GET(_request: Request, { params }: Params) {
+export async function GET(request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/posts/like',
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { postId } = await params
   const likes = await prisma.like.findMany({
@@ -35,6 +42,7 @@ export async function GET(_request: Request, { params }: Params) {
     },
   })
   const remarkMap = await loadFriendRemarkMap(user.id, likes.map((like) => like.User.id))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
@@ -46,13 +54,20 @@ export async function GET(_request: Request, { params }: Params) {
         remarkMap,
       }),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
+      equippedBadge: equippedBadgeMap.get(like.User.id) || null,
     })),
   })
 }
 
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录后再点赞' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+    endpoint: '/api/posts/like',
+  }, '点赞操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {
@@ -94,9 +109,15 @@ export async function POST(_request: Request, { params }: Params) {
   return NextResponse.json(result)
 }
 
-export async function DELETE(_request: Request, { params }: Params) {
+export async function DELETE(request: Request, { params }: Params) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+    endpoint: '/api/posts/like',
+  }, '点赞操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { postId } = await params
   const result = await prisma.$transaction(async (tx) => {

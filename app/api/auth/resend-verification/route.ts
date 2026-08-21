@@ -32,7 +32,10 @@ export async function POST(request: Request) {
   }
 
   if (!(await canSendEmailVerification(email))) {
-    return NextResponse.json({ message: '验证邮件发送过于频繁，请 60 秒后再试' }, { status: 429, headers: noStoreHeaders })
+    return NextResponse.json({ message: '验证邮件发送过于频繁，请 60 秒后再试' }, {
+      status: 429,
+      headers: { ...noStoreHeaders, 'Retry-After': '60' },
+    })
   }
 
   const verification = await createVerificationForUser(user.id, email)

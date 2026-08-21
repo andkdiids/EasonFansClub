@@ -5,6 +5,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 export function FriendProfileCard({
   friend,
@@ -41,7 +42,7 @@ export function FriendProfileCard({
         <div className="friend-profile-card-avatar">
           <SafeAvatar src={avatar} name={name} uid={friend.uid} className="h-full w-full" />
         </div>
-        <h2 id="friend-profile-card-name">{name}</h2>
+        <h2 id="friend-profile-card-name"><UserDisplayName name={name} uid={friend.uid} badge={friend.equippedBadge} showBadgeName /></h2>
         <p className="friend-profile-card-meta">
           <span>UID {formatUid(friend.uid)}</span>
           <span>{friend.levelName || '初入E院'}</span>

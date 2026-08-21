@@ -1,0 +1,22 @@
+import { NextResponse } from 'next/server'
+import { listBadgeOwners } from '@/lib/badge-service'
+import { requireAdmin } from '@/lib/security'
+
+export const dynamic = 'force-dynamic'
+
+type RouteContext = { params: Promise<{ badgeId: string }> }
+
+export async function GET(_request: Request, context: RouteContext) {
+  const guard = await requireAdmin('achievement_manage')
+  if (!guard.user) return guard.response
+  const { badgeId } = await context.params
+  const owners = await listBadgeOwners(badgeId)
+  return NextResponse.json({ owners: owners.map((owner) => ({
+    ...owner,
+    obtainedAt: owner.obtainedAt.toISOString(),
+    user: {
+      ...owner.User,
+      displayName: owner.User.Profile?.displayName || owner.User.nickname || owner.User.username,
+    },
+  })) }, { headers: { 'Cache-Control': 'no-store' } })
+}

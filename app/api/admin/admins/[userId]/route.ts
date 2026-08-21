@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
-import { hasAdminPermission, invalidateAdminPermissionCache } from '@/lib/admin-permissions'
+import { invalidateAdminPermissionCache } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
+import { enforceApiRateLimit, requireAdmin } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
-export async function DELETE(_request: Request, context: RouteContext) {
-  const currentUser = await getCurrentUser()
-  if (!currentUser) return NextResponse.json({ message: '请先登录' }, { status: 401 })
-  if (!(await hasAdminPermission(currentUser, 'admin_manage'))) {
-    return NextResponse.json({ message: '无权限访问' }, { status: 403 })
-  }
+export async function DELETE(request: Request, context: RouteContext) {
+  const guard = await requireAdmin('admin_manage')
+  if (!guard.user) return guard.response
+  const currentUser = guard.user
+  const limited = await enforceApiRateLimit(request, currentUser.id, {
+    ip: { limit: 60, windowSeconds: 60 * 60 },
+    user: { limit: 30, windowSeconds: 60 * 60 },
+    endpoint: '/api/admin/admins',
+  }, '管理员权限操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { userId } = await context.params
   const target = await prisma.user.findFirst({

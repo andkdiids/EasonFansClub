@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin, sanitizeText } from '@/lib/security'
 
 const DEFAULT_PAGE_SIZE = 100
 const MAX_PAGE_SIZE = 100
@@ -11,8 +11,16 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
 
   const { searchParams } = new URL(request.url)
-  const page = Math.max(Number(searchParams.get('page') || 1), 1)
-  const limit = Math.min(Math.max(Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE)
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/boards:GET',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
+  const rawPage = Number(searchParams.get('page') || 1)
+  const rawLimit = Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE)
+  const page = Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(rawPage, 1)) : 1
+  const limit = Number.isSafeInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE
   const skip = (page - 1) * limit
 
   const boards = await prisma.board.findMany({
@@ -48,6 +56,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const guard = await requireAdmin('board_manage')
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/boards:POST',
+    ip: { limit: 30, windowSeconds: 60 },
+    user: { limit: 15, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const body = await request.json().catch(() => null)
   const name = sanitizeText(body?.name, 40)

@@ -26,6 +26,8 @@ import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMoun
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { emitRealtime } from '@/lib/realtime'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { UserDisplayName } from '@/components/UserDisplayName'
 import {
   clampPostReplyPage,
   getPostReplyOffset,
@@ -538,6 +540,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     ]),
   ]
   const remarkMap = await loadFriendRemarkMap(user?.id, displayNameUserIds)
+  const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
 
   // 当前用户的点赞状态：两次恒定数量的批量查询（避免 N+1）；点赞用户头像列表由 Like / ReplyLike include 提供。
   let viewerPostLiked = false
@@ -581,7 +584,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     stickerId: reply.stickerId ?? null,
     stickerUrl: publicImageUrl(reply.sticker?.url),
     author: User.status === 'ACTIVE' && !User.isDeleted
-      ? { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile ? {
+      ? { ...User, nickname: getPublicUserDisplayName(User), equippedBadge: equippedBadgeMap.get(User.id) || null, profile: User.Profile ? {
           ...User.Profile,
           displayName: resolveFriendDisplayName({
             viewerId: user?.id,
@@ -603,6 +606,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             remarkMap,
           }),
           avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
+          equippedBadge: equippedBadgeMap.get(like.User.id) || null,
         }))
       : [],
     mentions: ReplyMention.map(({ User_ReplyMention_mentionedUserIdToUser: mentionedUser, ...mention }) => ({
@@ -655,6 +659,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           authorName={authorName}
           authorAvatar={authorAvatar}
           authorUid={post.User.uid}
+          authorBadge={equippedBadgeMap.get(post.User.id) || null}
           postActions={canManagePost || canDeletePost || canEditPost ? (
             <PostManagementMenu
               postId={post.id}
@@ -688,7 +693,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                   {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : formatUid(post.User.uid).slice(0, 1)}
                 </span>
-                <span>{authorName} · Lv.{post.User.level}</span>
+                <span><UserDisplayName name={authorName} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · Lv.{post.User.level}</span>
               </Link>
             )}
             <span>{formatDate(post.createdAt)}</span>
@@ -736,6 +741,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               nickname: getPublicUserDisplayName(like.User),
               displayName: getPublicUserDisplayName(like.User),
               avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
+              equippedBadge: equippedBadgeMap.get(like.User.id) || null,
             }))}
             totalCount={post.likeCount}
             listUrl={`/api/posts/${post.id}/like`}

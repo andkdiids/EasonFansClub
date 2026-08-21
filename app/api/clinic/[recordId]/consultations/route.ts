@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { clinicErrorResponse, clinicOk, clinicPublicHeaders } from '@/lib/clinic-api'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
 import { createClinicConsultation, getPublicClinicRecordDetail } from '@/lib/clinic-service'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ recordId: string }> }
 
@@ -15,6 +15,12 @@ export async function GET(_request: Request, context: RouteContext) {
   try {
     ({ recordId } = await context.params)
     const viewer = await getCurrentUser()
+    const limited = await enforceApiRateLimit(_request, viewer?.id, {
+      endpoint: '/api/clinic/[recordId]/consultations:GET',
+      ip: { limit: 240, windowSeconds: 60 },
+      user: { limit: 120, windowSeconds: 60 },
+    })
+    if (limited) return limited
     const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null)
     if (!record) return NextResponse.json({ ok: false, code: 'RECORD_NOT_FOUND', message: '这份病历不存在。' }, { status: 404, headers: clinicPublicHeaders })
     if ('unavailable' in record) return clinicOk({ consultations: [] })
@@ -27,6 +33,12 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/clinic/[recordId]/consultations:POST',
+    ip: { limit: 60, windowSeconds: 60 },
+    user: { limit: 20, windowSeconds: 60 },
+  })
+  if (limited) return limited
   let recordId = ''
   let body: { content?: unknown; identityMode?: unknown; parentId?: unknown } | null = null
   try {

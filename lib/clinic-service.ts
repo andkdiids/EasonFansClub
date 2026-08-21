@@ -6,6 +6,8 @@ import { getClinicCategoryOption, getClinicNeedLabel, clinicAnonymousName, CLINI
 import { checkClinicModeration, clinicModerationStorageValue, maskClinicTextWithWords } from '@/lib/clinic-moderation'
 import { getEnabledBannedWords, type ModerationWord } from '@/lib/content-moderation'
 import { publicImageUrl, profileImageUrl } from '@/lib/images'
+import { toPublicMediaUrl } from '@/lib/media-url'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, sanitizeText } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
@@ -26,6 +28,7 @@ const clinicAuthorSelect = {
       avatarUrl: true,
     },
   },
+  EquippedBadge: { select: { id: true, code: true, name: true, iconUrl: true, isEnabled: true, isActive: true, effectType: true, nicknameEffect: true, nicknameColor: true, nicknameGradientStart: true, nicknameGradientEnd: true, rarity: true } },
 } as const
 
 type ClinicAuthorRow = {
@@ -40,6 +43,20 @@ type ClinicAuthorRow = {
     displayName: string | null
     displayNameModerationStatus: string
     avatarUrl: string | null
+  } | null
+  EquippedBadge: {
+    id: string
+    code: string
+    name: string
+    iconUrl: string | null
+    isEnabled: boolean
+    isActive: boolean
+    effectType: EquippedBadgeView['effectType']
+    nicknameEffect: EquippedBadgeView['nicknameEffect']
+    nicknameColor: string | null
+    nicknameGradientStart: string | null
+    nicknameGradientEnd: string | null
+    rarity: EquippedBadgeView['rarity']
   } | null
 }
 
@@ -66,6 +83,7 @@ export type ClinicPublicIdentity =
       displayName: string
       uid: number
       avatarUrl: string | null
+      equippedBadge: EquippedBadgeView | null
       profileUrl: string
       canOpenProfile: true
     }
@@ -121,11 +139,26 @@ function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anony
 
   const displayName = getPublicUserDisplayName(author)
   const avatarUrl = profileImageUrl(author.Profile?.avatarUrl || author.avatarUrl) || publicImageUrl(author.Profile?.avatarUrl || author.avatarUrl)
+  const equippedBadge = author.EquippedBadge && author.EquippedBadge.isEnabled && author.EquippedBadge.isActive
+    ? {
+        id: author.EquippedBadge.id,
+        code: author.EquippedBadge.code,
+        name: author.EquippedBadge.name,
+        imageUrl: toPublicMediaUrl(author.EquippedBadge.iconUrl),
+        effectType: author.EquippedBadge.effectType,
+        nicknameEffect: author.EquippedBadge.nicknameEffect,
+        nicknameColor: author.EquippedBadge.nicknameColor,
+        nicknameGradientStart: author.EquippedBadge.nicknameGradientStart,
+        nicknameGradientEnd: author.EquippedBadge.nicknameGradientEnd,
+        rarity: author.EquippedBadge.rarity,
+      } satisfies EquippedBadgeView
+    : null
   return {
     type: 'public',
     displayName,
     uid: author.uid,
     avatarUrl,
+    equippedBadge,
     profileUrl: `/user/${author.uid}`,
     canOpenProfile: true,
   }

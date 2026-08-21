@@ -13,9 +13,25 @@ import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationUserName } from '@/lib/content-moderation'
+import { consumeApiRateLimits, getClientIp, logSecurityAbuse, rateLimitResponse } from '@/lib/security'
+import { hashToken } from '@/lib/tokens'
 
 const loginUserQueryTimeoutMs = 4500
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
+
+async function recordLoginSecurityEvent(userId: string, request: Request, reason: string) {
+  await prisma.accountSecurityLog.create({
+    data: {
+      userId,
+      action: 'LOGIN_FAILED',
+      ipAddress: getClientIp(request),
+      userAgent: request.headers.get('user-agent')?.slice(0, 255) || null,
+      metadata: { reason },
+    },
+  }).catch((error) => {
+    console.warn('[auth.login.audit]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
+  })
+}
 
 function isDatabaseTimeout(error: unknown) {
   if (error instanceof DbTimeoutError) return true
@@ -59,6 +75,16 @@ export async function POST(request: Request) {
       identifier = phone.e164
     }
 
+    const loginLimit = await consumeApiRateLimits(request, null, {
+      endpoint: '/api/auth/login',
+      ip: { limit: 20, windowSeconds: 10 * 60 },
+      account: { key: `${identifierType}:${hashToken(identifier)}`, limit: 8, windowSeconds: 10 * 60 },
+    })
+    if (loginLimit.limited) {
+      await logSecurityAbuse(request, { endpoint: '/api/auth/login', reason: 'login_rate_limit_exceeded' })
+      return rateLimitResponse(loginLimit, '登录尝试过于频繁，请稍后再试')
+    }
+
     const user = await withDbTimeout(
       'login.user-query',
       findCompleteUserByLoginIdentifier(identifierType, identifier, requestedPhoneCountry),
@@ -74,6 +100,7 @@ export async function POST(request: Request) {
     }
 
     if (user.status !== 'ACTIVE') {
+      await recordLoginSecurityEvent(user.id, request, 'ACCOUNT_DISABLED')
       return NextResponse.json(
         { message: '账号已禁用', errors: { form: '账号已禁用' } },
         { status: 403, headers: noStoreHeaders },
@@ -81,6 +108,7 @@ export async function POST(request: Request) {
     }
 
     if (identifierType === 'email' && !user.emailVerifiedAt) {
+      await recordLoginSecurityEvent(user.id, request, 'EMAIL_UNVERIFIED')
       return NextResponse.json(
         { message: '邮箱尚未验证，请先查收邮件完成验证', errors: { identifier: '邮箱尚未验证' } },
         { status: 403, headers: noStoreHeaders },
@@ -89,6 +117,7 @@ export async function POST(request: Request) {
 
     const passwordResult = await verifyPassword(password, user.passwordHash)
     if (!passwordResult.valid) {
+      await recordLoginSecurityEvent(user.id, request, 'INVALID_PASSWORD')
       return NextResponse.json(
         { message: '密码错误', errors: { password: '密码错误' } },
         { status: 401, headers: noStoreHeaders },
@@ -103,6 +132,12 @@ export async function POST(request: Request) {
       username: publicModerationUserName(user.username, [user.usernameModerationStatus]),
       nickname: getPublicUserDisplayName(user),
       role: user.role,
+    }
+    const responseUser = {
+      id: sessionUser.id,
+      uid: sessionUser.uid,
+      username: sessionUser.username,
+      nickname: sessionUser.nickname,
     }
 
     if (passwordResult.needsRehash) {
@@ -129,7 +164,7 @@ export async function POST(request: Request) {
     })
 
     const token = await createSessionToken(sessionUser)
-    const response = NextResponse.json({ user: sessionUser }, { headers: noStoreHeaders })
+    const response = NextResponse.json({ user: responseUser }, { headers: noStoreHeaders })
     const cookieOptions = getSessionCookieOptions(request)
     response.cookies.set(authCookieName, token, cookieOptions)
     if (cookieOptions.domain) appendLegacyHostCookieDeletion(response, request)

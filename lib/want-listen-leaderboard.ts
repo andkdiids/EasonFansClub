@@ -4,6 +4,8 @@ import { publicImageUrl } from '@/lib/images'
 import { publicModerationText, publicModerationUserName } from '@/lib/content-moderation'
 import { prisma } from '@/lib/prisma'
 import { compareWantListenScores, getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod } from '@/lib/want-listen-period'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type Database = Prisma.TransactionClient | typeof prisma
 
@@ -78,7 +80,7 @@ function serializeLeaderboardRow(row: {
   completionTimeMs: number
   achievedAt: Date
   User: LeaderboardUser
-}, rank: number) {
+}, rank: number, equippedBadge?: EquippedBadgeView | null) {
   const safeName = getPublicUserDisplayName(row.User)
   return {
     rank,
@@ -98,6 +100,7 @@ function serializeLeaderboardRow(row: {
       nickname: safeName,
       displayName: publicModerationText(row.User.Profile?.displayName, row.User.Profile?.displayNameModerationStatus),
       avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
+      equippedBadge: equippedBadge || null,
     },
   }
 }
@@ -173,14 +176,18 @@ export async function getWantListenLeaderboard(input: {
     })
     : null
 
-  const serialized = rows.map((row, index) => serializeLeaderboardRow(row, index + 1))
+  const equippedBadgeMap = await getEquippedBadgesForUsers([
+    ...rows.map((row) => row.userId),
+    ...(self ? [self.userId] : []),
+  ])
+  const serialized = rows.map((row, index) => serializeLeaderboardRow(row, index + 1, equippedBadgeMap.get(row.userId) || null))
   const selfVisible = self ? serialized.find((row) => row.userId === self.userId) : null
   return {
     mode: input.mode,
     period: periodType,
     periodKey: period.periodKey,
     rows: serialized,
-    self: self && !selfVisible ? serializeLeaderboardRow(self, 0) : null,
+    self: self && !selfVisible ? serializeLeaderboardRow(self, 0, equippedBadgeMap.get(self.userId) || null) : null,
   }
 }
 

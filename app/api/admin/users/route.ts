@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin, sanitizeText } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { publicImageUrl } from '@/lib/images'
 
@@ -13,11 +13,19 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
 
   const { searchParams } = new URL(request.url)
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/users',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const keyword = sanitizeText(searchParams.get('q'), 60)
   const uidKeyword = Number(keyword)
   const sort = searchParams.get('sort') === 'uid_desc' ? 'desc' : 'asc'
-  const page = Math.max(Number(searchParams.get('page') || 1), 1)
-  const limit = Math.min(Math.max(Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE)
+  const rawPage = Number(searchParams.get('page') || 1)
+  const rawLimit = Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE)
+  const page = Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(rawPage, 1)) : 1
+  const limit = Number.isSafeInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE
   const skip = (page - 1) * limit
   const searchFilters: Prisma.UserWhereInput[] = keyword
     ? [

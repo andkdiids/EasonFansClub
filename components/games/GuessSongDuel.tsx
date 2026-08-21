@@ -6,8 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DUEL_HEARTBEAT_INTERVAL_MS, DUEL_MODE_RULES, DUEL_ROOM_POLL_INTERVAL_MS, getDuelModeLabel, type DuelMode } from '@/lib/guess-song-duel-config'
 import { canApplyDuelAnswerAccepted, canApplyDuelMatchSnapshot, duelQuestionIdentityKey, getDuelQuestionIdentity, sameDuelQuestionIdentity, type DuelQuestionIdentity } from '@/lib/guess-song-duel-client-state'
 import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelOption, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
-type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null }
+type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null; equippedBadge?: EquippedBadgeView | null }
 type DuelStats = { wins: number; participations: number; winRate: number }
 type DuelHistoryItem = { result: DuelMatchResult; roomCode: string }
 type ApiPayload = { ok?: boolean; message?: string; code?: string; [key: string]: unknown }
@@ -986,12 +988,12 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
             <section className="duel-panel">
               <h2>加入房间</h2>
               <div className="duel-search-row"><input value={searchCode} onChange={(event) => setSearchCode(event.target.value)} placeholder="输入房间号" maxLength={12} /><button type="button" onClick={() => void searchRoom()} disabled={busy}>搜索</button></div>
-              {pendingJoinRoom ? <div className="duel-join-card"><div><b>房间 {pendingJoinRoom.roomCode}</b><span>{getDuelModeLabel(pendingJoinRoom.mode)} · {pendingJoinRoom.host.name} · {pendingJoinRoom.currentCount}/2 {pendingJoinRoom.hasPassword ? '· 🔒 需要密码' : ''}</span></div>{pendingJoinRoom.hasPassword ? <input value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="请输入房间密码" maxLength={12} /> : null}<button type="button" className="duel-primary-button" onClick={() => void joinRoom(pendingJoinRoom, joinPassword)} disabled={busy}>加入</button></div> : null}
+              {pendingJoinRoom ? <div className="duel-join-card"><div><b>房间 {pendingJoinRoom.roomCode}</b><span>{getDuelModeLabel(pendingJoinRoom.mode)} · <UserDisplayName name={pendingJoinRoom.host.name} uid={pendingJoinRoom.host.uid} badge={pendingJoinRoom.host.equippedBadge} compact /> · {pendingJoinRoom.currentCount}/2 {pendingJoinRoom.hasPassword ? '· 🔒 需要密码' : ''}</span></div>{pendingJoinRoom.hasPassword ? <input value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="请输入房间密码" maxLength={12} /> : null}<button type="button" className="duel-primary-button" onClick={() => void joinRoom(pendingJoinRoom, joinPassword)} disabled={busy}>加入</button></div> : null}
             </section>
           </div>
           <section className="duel-panel duel-room-list-panel">
             <div className="duel-panel-heading"><div><h2>公开房间</h2><p className="duel-muted">这里只显示未设置密码、等待挑战者的房间。</p></div><button type="button" onClick={() => void loadLobby()}>刷新</button></div>
-            {rooms.length ? <div className="duel-room-list">{rooms.map((item) => <div key={item.id} className="duel-room-row"><div className="duel-room-code">{item.roomCode}</div><div className="duel-room-owner"><span className="duel-mini-avatar">{avatar(item.host)}</span><span>{item.host.name}</span></div><span className="duel-room-mode">{getDuelModeLabel(item.mode)}</span><span className="duel-room-count">{item.currentCount}/2</span><button type="button" onClick={() => void joinRoom(item)} disabled={busy}>加入</button></div>)}</div> : <p className="duel-empty">暂时没有等待中的公开房间，创建一个开始挑战吧。</p>}
+            {rooms.length ? <div className="duel-room-list">{rooms.map((item) => <div key={item.id} className="duel-room-row"><div className="duel-room-code">{item.roomCode}</div><div className="duel-room-owner"><span className="duel-mini-avatar">{avatar(item.host)}</span><span><UserDisplayName name={item.host.name} uid={item.host.uid} badge={item.host.equippedBadge} compact /></span></div><span className="duel-room-mode">{getDuelModeLabel(item.mode)}</span><span className="duel-room-count">{item.currentCount}/2</span><button type="button" onClick={() => void joinRoom(item)} disabled={busy}>加入</button></div>)}</div> : <p className="duel-empty">暂时没有等待中的公开房间，创建一个开始挑战吧。</p>}
           </section>
           {history.length ? <section className="duel-panel"><div className="duel-panel-heading"><h2>我的对决记录</h2><span className="duel-muted">最近 {history.length} 场</span></div><div className="duel-history-list">{history.slice(0, 6).map((item) => <div key={item.result.matchId}><span>{formatDate(item.result.finishedAt || item.result.startedAt)}</span><b>{item.result.players.map((player) => item.result.mode === 'SCORE' ? player.baseCorrectCount : player.correctCount).join(' : ')}</b><em>{item.result.isDraw ? '平局' : item.result.winnerId === userId ? '胜利' : '失败'}</em></div>)}</div></section> : null}
         </section>
@@ -1001,9 +1003,9 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         <section className="duel-room-hall">
           <div className="duel-hall-title"><div><h1>听听 · 对决</h1><p className="duel-mode-badge">{getDuelModeLabel(room.mode)}</p><p className="duel-muted">两位玩家都准备后，房主才能开始。</p></div><button type="button" className="duel-ghost-button" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出房间</button></div>
           <div className="duel-players-card">
-            <div className="duel-room-player"><div className="duel-large-avatar">{avatar(room.host)}</div><span className="duel-player-role">房主</span><h2>{room.host.name}</h2><p className={room.hostReady ? 'is-ready' : ''}>{room.hostReady ? '✓ 已准备' : '○ 未准备'}</p></div>
+            <div className="duel-room-player"><div className="duel-large-avatar">{avatar(room.host)}</div><span className="duel-player-role">房主</span><h2><UserDisplayName name={room.host.name} uid={room.host.uid} badge={room.host.equippedBadge} showBadgeName /></h2><p className={room.hostReady ? 'is-ready' : ''}>{room.hostReady ? '✓ 已准备' : '○ 未准备'}</p></div>
             <div className="duel-versus">VS</div>
-            <div className="duel-room-player">{room.challenger ? <><div className="duel-large-avatar">{avatar(room.challenger)}</div><span className="duel-player-role">挑战者</span><h2>{room.challenger.name}</h2><p className={room.challengerReady ? 'is-ready' : ''}>{room.challengerReady ? '✓ 已准备' : '○ 未准备'}</p></> : <><div className="duel-large-avatar duel-empty-avatar">+</div><span className="duel-player-role">等待加入</span><h2>等待挑战者</h2><p>分享房间号或邀请好友</p></>}</div>
+            <div className="duel-room-player">{room.challenger ? <><div className="duel-large-avatar">{avatar(room.challenger)}</div><span className="duel-player-role">挑战者</span><h2><UserDisplayName name={room.challenger.name} uid={room.challenger.uid} badge={room.challenger.equippedBadge} showBadgeName /></h2><p className={room.challengerReady ? 'is-ready' : ''}>{room.challengerReady ? '✓ 已准备' : '○ 未准备'}</p></> : <><div className="duel-large-avatar duel-empty-avatar">+</div><span className="duel-player-role">等待加入</span><h2>等待挑战者</h2><p>分享房间号或邀请好友</p></>}</div>
           </div>
           <div className="duel-hall-actions"><button type="button" className="duel-primary-button" onClick={() => void updateReady(!myReady)} disabled={busy || !room.challenger}>{myReady ? '取消准备' : '准备'}</button>{room.host.id === userId ? <button type="button" className="duel-start-button" onClick={() => void startMatch()} disabled={!canStart || busy}>{canStart ? '开始游戏' : '等待双方准备'}</button> : null}<button type="button" className="duel-ghost-button" onClick={() => void openInvites()} disabled={busy || Boolean(room.challenger)}>邀请好友</button></div>
           <p className="duel-rule-note">{DUEL_MODE_RULES[room.mode]} 题目与规则由服务端锁定，重新进入房间也不会改变模式。</p>
@@ -1022,7 +1024,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
       {view === 'match' && match ? (
         <section className="duel-match-screen">
-          <div className="duel-scoreboard"><div className="duel-score-player"><span className="duel-score-avatar">{me ? avatar(me) : null}</span><span>{me?.name || '我'}</span><strong>{me?.correctCount || 0}</strong><small>{me?.isOnline ? '在线' : '重连中'}</small></div><div className="duel-score-center"><b>{me?.correctCount || 0} <i>:</i> {opponent?.correctCount || 0}</b><span>{activeModeLabel} · {questionProgress}</span></div><div className="duel-score-player is-opponent"><span className="duel-score-avatar">{opponent ? avatar(opponent) : null}</span><span>{opponent?.name || '对手'}</span><strong>{opponent?.correctCount || 0}</strong><small>{opponent?.isOnline ? '在线' : '等待重连'}</small></div></div>
+          <div className="duel-scoreboard"><div className="duel-score-player"><span className="duel-score-avatar">{me ? avatar(me) : null}</span><span>{me ? <UserDisplayName name={me.name} uid={me.uid} badge={me.equippedBadge} compact /> : '我'}</span><strong>{me?.correctCount || 0}</strong><small>{me?.isOnline ? '在线' : '重连中'}</small></div><div className="duel-score-center"><b>{me?.correctCount || 0} <i>:</i> {opponent?.correctCount || 0}</b><span>{activeModeLabel} · {questionProgress}</span></div><div className="duel-score-player is-opponent"><span className="duel-score-avatar">{opponent ? avatar(opponent) : null}</span><span>{opponent ? <UserDisplayName name={opponent.name} uid={opponent.uid} badge={opponent.equippedBadge} compact /> : '对手'}</span><strong>{opponent?.correctCount || 0}</strong><small>{opponent?.isOnline ? '在线' : '等待重连'}</small></div></div>
           <div className="duel-question-card">
             {activeMode === 'SCORE' && match.status === 'PLAYING' && me?.submitted && !currentQuestion ? (
               <div className="duel-score-waiting" role="status" aria-live="polite">
@@ -1074,7 +1076,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
           <div className="duel-result-score">
             {result.players.map((player) => (
               <div key={player.userId} className={player.userId === result.winnerId ? 'is-winner' : ''}>
-                <span>{player.name}</span>
+                <span><UserDisplayName name={player.name} uid={player.userId === userId ? me?.uid : opponent?.uid} badge={player.userId === userId ? me?.equippedBadge : opponent?.equippedBadge} compact /></span>
                 <strong>{result.mode === 'SCORE' ? player.baseCorrectCount : player.correctCount}</strong>
                 <small>{result.mode === 'SCORE' ? `基础正确题数 ${player.baseCorrectCount} / ${result.baseTotalQuestions}` : '最终比分'}</small>
               </div>

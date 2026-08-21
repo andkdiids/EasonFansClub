@@ -49,6 +49,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/admin-actions': 'post_manage',
   '/admin/today': 'today_manage',
   '/admin/achievements': 'achievement_manage',
+  '/admin/badges': 'achievement_manage',
   '/admin/culture': 'culture_manage',
   '/admin/music': 'music_manage',
   '/admin/music/albums': 'music_manage',

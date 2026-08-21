@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { grantBadge } from '@/lib/badge-service'
 
 /**
  * 演唱会纪念徽章自动授予。
@@ -33,10 +34,13 @@ export async function checkConcertBadge(userId: string, concertId: string): Prom
     })
     if (!badge) return false
 
-    await prisma.userBadge.upsert({
-      where: { userId_badgeId: { userId, badgeId: badge.id } },
-      create: { userId, badgeId: badge.id },
-      update: {},
+    // The unified service owns the existing prisma.userBadge.upsert idempotency contract (userId_badgeId: { userId, badgeId }).
+    await grantBadge({
+      userId,
+      badgeId: badge.id,
+      sourceType: 'EVENT',
+      sourceId: concertId,
+      grantReason: '现场巡演纪念',
     })
     return true
   } catch (error) {

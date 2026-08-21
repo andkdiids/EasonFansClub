@@ -4,7 +4,7 @@ import { activeUserWhere } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -13,6 +13,12 @@ const MENTION_HISTORY_DAYS = 90
 export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/friends/mentions',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const q = sanitizeText(new URL(request.url).searchParams.get('q'), 50).toLocaleLowerCase('zh-CN')
 
   const friendships = await prisma.friendship.findMany({

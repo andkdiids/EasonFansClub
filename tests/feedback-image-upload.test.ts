@@ -16,8 +16,9 @@ test('反馈图片接口复用当前 COS 存储链路并返回公开 URL', () =>
   assert.match(route, /original: input/)
   assert.match(route, /variants: \['thumb-md', 'card', 'large'\]/)
   assert.doesNotMatch(route, /SUPABASE_URL|storage\/v1\/object|supabasePublicObjectUrl/)
-  assert.match(route, /const uploadMeta = \{ filename: file\.name, size: file\.size, type: file\.type \}/)
-  assert.match(route, /console\.log\('\[feedback-image\.upload\]'[\s\S]*uploadResult/)
+  assert.match(route, /const uploadMeta = \{ size: file\.size, type: file\.type \}/)
+  assert.doesNotMatch(route, /filename: file\.name|uploadResult/)
+  assert.match(route, /console\.log\('\[feedback-image\.upload\]'[\s\S]*uploaded: true/)
 })
 
 test('反馈图片前端使用 file 字段并保留开发环境错误原因', () => {

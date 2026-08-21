@@ -4,52 +4,114 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 import { formatBeijingDate } from '@/lib/checkin'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
 const COMMENT_PAGE_SIZE = 80
+const commentUserSelect = {
+  id: true,
+  uid: true,
+  nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
+  avatarUrl: true,
+  level: true,
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+} as const
 
-export async function GET(_request: Request, context: RouteContext) {
+function serializeComment(comment: {
+  id: string
+  parentId: string | null
+  content: string
+  moderationStatus: string
+  ipRegion: string | null
+  createdAt: Date
+  updatedAt: Date
+  User: {
+    id: string
+    uid: number
+    nickname: string
+    usernameModerationStatus: string
+    nicknameModerationStatus: string
+    nicknameViolationDisplay: string | null
+    avatarUrl: string | null
+    level: number
+    Profile: { displayName: string | null; displayNameModerationStatus: string; avatarUrl: string | null } | null
+  }
+}, viewerId: string, remarkMap: ReadonlyMap<string, string>, equippedBadge?: EquippedBadgeView | null) {
+  const { User, ...row } = comment
+  const publicName = getPublicUserDisplayName(User)
+  return {
+    ...row,
+    content: publicModerationText(comment.content, comment.moderationStatus),
+    User: {
+      uid: User.uid,
+      nickname: publicName,
+      usernameModerationStatus: User.usernameModerationStatus,
+      nicknameModerationStatus: User.nicknameModerationStatus,
+      nicknameViolationDisplay: User.nicknameViolationDisplay,
+      avatarUrl: publicImageUrl(User.avatarUrl),
+      level: User.level,
+      equippedBadge: equippedBadge || null,
+      Profile: User.Profile ? {
+        displayName: resolveFriendDisplayName({
+          viewerId,
+          targetUserId: User.id,
+          fallbackName: publicName,
+          remarkMap,
+        }),
+        avatarUrl: publicImageUrl(User.Profile.avatarUrl),
+      } : null,
+    },
+  }
+}
+
+export async function GET(request: Request, context: RouteContext) {
   const viewer = await getCurrentUser()
+  const limited = await enforceApiRateLimit(request, viewer?.id, {
+    endpoint: '/api/daily-messages/[messageId]/comments:GET',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const { messageId } = await context.params
   const comments = await prisma.dailyMessageComment.findMany({
     where: { messageId, isDeleted: false },
     orderBy: { createdAt: 'asc' },
     take: COMMENT_PAGE_SIZE,
-    include: {
-      User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
+    select: {
+      id: true,
+      parentId: true,
+      content: true,
+      moderationStatus: true,
+      ipRegion: true,
+      createdAt: true,
+      updatedAt: true,
+      User: { select: commentUserSelect },
     },
   })
 
   const remarkMap = await loadFriendRemarkMap(viewer?.id, comments.map((comment) => comment.User.id))
-  return NextResponse.json({ comments: comments.map((comment) => ({
-    ...comment,
-    content: publicModerationText(comment.content, comment.moderationStatus),
-    User: comment.User.Profile ? {
-      ...comment.User,
-      nickname: getPublicUserDisplayName(comment.User),
-      avatarUrl: publicImageUrl(comment.User.avatarUrl),
-      Profile: {
-        ...comment.User.Profile,
-        avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl),
-        displayName: resolveFriendDisplayName({
-          viewerId: viewer?.id,
-          targetUserId: comment.User.id,
-          fallbackName: getPublicUserDisplayName(comment.User),
-          remarkMap,
-        }),
-      },
-    } : comment.User,
-  })) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
+  const equippedBadgeMap = await getEquippedBadgesForUsers(comments.map((comment) => comment.User.id))
+  return NextResponse.json({ comments: comments.map((comment) => serializeComment(comment, viewer?.id || '', remarkMap, equippedBadgeMap.get(comment.User.id) || null)) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
 export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/comments:POST',
+    ip: { limit: 60, windowSeconds: 60 },
+    user: { limit: 20, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null
@@ -93,7 +155,7 @@ export async function POST(request: Request, context: RouteContext) {
         ipRegion,
         parentId: parentId || null,
       },
-      include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } } },
+      include: { User: { select: commentUserSelect } },
     })
 
     await tx.dailyMessage.update({
@@ -122,16 +184,8 @@ export async function POST(request: Request, context: RouteContext) {
   })
 
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
+  const equippedBadge = await getEquippedBadgesForUsers([guard.user.id])
   return NextResponse.json({
-    comment: {
-      ...comment,
-      content: publicModerationText(comment.content, comment.moderationStatus),
-      User: comment.User.Profile ? {
-        ...comment.User,
-        nickname: getPublicUserDisplayName(comment.User),
-        avatarUrl: publicImageUrl(comment.User.avatarUrl),
-        Profile: { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) },
-      } : { ...comment.User, nickname: getPublicUserDisplayName(comment.User), avatarUrl: publicImageUrl(comment.User.avatarUrl) },
-    },
+    comment: serializeComment(comment, guard.user.id, new Map(), equippedBadge.get(guard.user.id) || null),
   }, { status: 201 })
 }

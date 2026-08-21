@@ -8,6 +8,7 @@ import type { GrowthSummary } from '@/lib/growth'
 import { formatUid } from '@/lib/uid'
 import type { ProfileRecentMessage, ProfileRecordPagination, ProfileWallVisibility } from '@/lib/profile-page'
 import { formatUserLocation, type UserLocation } from '@/lib/user-location'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -24,6 +25,7 @@ export type ProfilePageSurfaceProfile = {
   createdAt: Date
   wallVisibility: ProfileWallVisibility
   publicLiveCount: number
+  equippedBadge: EquippedBadgeView | null
 }
 
 export type ProfilePageSurfaceRelationship = {
@@ -86,6 +88,7 @@ export function ProfilePageSurface({
         createdAt={profile.createdAt}
         avatarUrl={profile.avatarUrl}
         backgroundUrl={profile.backgroundUrl}
+        equippedBadge={profile.equippedBadge}
         showGrowth
       />
 

@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 
@@ -14,6 +16,7 @@ export type LikeAvatarUser = {
   nickname: string
   displayName?: string | null
   avatarUrl?: string | null
+  equippedBadge?: EquippedBadgeView | null
 }
 
 const MAX_INLINE_AVATARS = 10
@@ -118,7 +121,7 @@ export function LikeAvatars({
                         textClassName="text-[9px]"
                       />
                     </span>
-                    {liker.displayName || liker.nickname}
+                    <UserDisplayName name={liker.displayName || liker.nickname} uid={liker.uid} badge={liker.equippedBadge} compact />
                   </a>
                 </li>
               ))}

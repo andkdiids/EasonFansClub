@@ -1,0 +1,64 @@
+import { NextResponse } from 'next/server'
+import { toPublicMediaUrl } from '@/lib/media-url'
+import { requireAdmin } from '@/lib/security'
+import { badgeAdminSelect, listBadgesForAdmin, writeBadgeAdminAction } from '@/lib/badge-service'
+import { parseBadgeDefinition } from '@/lib/badge-admin'
+import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
+
+export const dynamic = 'force-dynamic'
+
+function serializeBadge(badge: Record<string, unknown>) {
+  const count = badge._count && typeof badge._count === 'object' ? (badge._count as { UserBadge?: number }).UserBadge || 0 : 0
+  return {
+    ...badge,
+    iconUrl: toPublicMediaUrl(typeof badge.iconUrl === 'string' ? badge.iconUrl : null),
+    ownerCount: count,
+  }
+}
+
+export async function GET(request: Request) {
+  const guard = await requireAdmin('achievement_manage')
+  if (!guard.user) return guard.response
+  const { searchParams } = new URL(request.url)
+  const enabledParam = searchParams.get('enabled')
+  const badges = await listBadgesForAdmin({
+    query: searchParams.get('q') || undefined,
+    enabled: enabledParam === 'true' ? true : enabledParam === 'false' ? false : undefined,
+    visibility: searchParams.get('visibility') || undefined,
+    grantType: searchParams.get('grantType') || undefined,
+  })
+  return NextResponse.json({ badges: badges.map((badge) => serializeBadge(badge as unknown as Record<string, unknown>)) }, { headers: { 'Cache-Control': 'no-store' } })
+}
+
+export async function POST(request: Request) {
+  const guard = await requireAdmin('achievement_manage')
+  if (!guard.user) return guard.response
+  const body = await request.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ message: '请求无效' }, { status: 400 })
+
+  const parsed = parseBadgeDefinition(body as Record<string, unknown>)
+  if (parsed.error || !parsed.data) return NextResponse.json({ message: parsed.error || '勋章参数无效' }, { status: 400 })
+  const data = parsed.data as Prisma.BadgeUncheckedCreateInput
+  if (data.musicTourId) {
+    const tour = await prisma.musicTour.findUnique({ where: { id: data.musicTourId }, select: { id: true } })
+    if (!tour) return NextResponse.json({ message: '关联的巡演不存在' }, { status: 400 })
+  }
+
+  try {
+    const badge = await prisma.$transaction(async (tx) => {
+      const created = await tx.badge.create({ data, select: badgeAdminSelect })
+      await writeBadgeAdminAction(tx, {
+        actorId: guard.user.id,
+        action: 'BADGE_CREATE',
+        badgeId: created.id,
+        detail: { badgeName: created.name, code: created.code },
+      })
+      return created
+    })
+    return NextResponse.json({ badge: serializeBadge(badge as unknown as Record<string, unknown>) }, { status: 201 })
+  } catch (error) {
+    const duplicated = error instanceof Error && /P2002|Unique constraint/i.test(error.message)
+    return NextResponse.json({ message: duplicated ? '创建失败：名称、code 或标识已经存在' : '创建失败，请稍后重试' }, { status: duplicated ? 409 : 500 })
+  }
+}

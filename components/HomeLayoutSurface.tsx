@@ -6,12 +6,14 @@ import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { LikeButton } from '@/components/PostActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { getPageLayoutModules } from '@/components/page-layout/PageLayoutRenderer'
 import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMode } from '@/lib/guess-song-config'
 import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
@@ -73,7 +75,7 @@ const todayTypeLabels: Record<string, string> = {
 }
 
 type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
-type Post = { id: string; title: string; content: string; likeCount: number; likedByMe: boolean; replyCount: number; viewCount: number; isPinned: boolean; isFeatured: boolean; createdAt: string; board: { name: string }; author: { uid: number; nickname: string; profile?: { displayName: string | null } | null } }
+type Post = { id: string; title: string; content: string; likeCount: number; likedByMe: boolean; replyCount: number; viewCount: number; isPinned: boolean; isFeatured: boolean; createdAt: string; board: { name: string }; author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null } }
 type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null }
 type Stats = { consecutiveDays: number; checkIns: { id: string }[]; _count: { checkIns: number } }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
@@ -137,7 +139,7 @@ function EntertainmentScoreUser({ score }: { score: GuessSongModeHighScore }) {
   return (
     <div className="home-entertainment-score-user" title={score.user.name}>
       <span className="home-entertainment-score-avatar"><SafeAvatar src={score.user.avatarUrl} name={score.user.name} uid={score.user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
-      <span className="home-entertainment-score-username">{score.user.name}</span>
+      <Link href={`/user/${formatUid(score.user.uid)}`} className="home-entertainment-score-username"><UserDisplayName name={score.user.name} uid={score.user.uid} badge={score.user.equippedBadge} compact /></Link>
     </div>
   )
 }
@@ -476,7 +478,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   {post.isPinned ? <b>{homeText.pinned}</b> : post.isFeatured ? <b>{homeText.featured}</b> : null}
   <span className="post-board-name">[{post.board.name}]</span>
   {post.title}
-</h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]">{post.author.profile?.displayName || post.author.nickname}</Link> · {new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]"><span>Reply {post.replyCount}</span><span>Views {fmt(post.viewCount)}</span><div data-post-like-control className="pointer-events-auto relative z-[3]"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /></div></div></article>)}{!data.posts.length && !failed ? <p className="community-empty">{siteConfig.text.emptyText}</p> : null}</div></section> : null}
+</h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]"><UserDisplayName name={post.author.profile?.displayName || post.author.nickname} uid={post.author.uid} badge={post.author.equippedBadge} compact /></Link> · {new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]"><span>Reply {post.replyCount}</span><span>Views {fmt(post.viewCount)}</span><div data-post-like-control className="pointer-events-auto relative z-[3]"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /></div></div></article>)}{!data.posts.length && !failed ? <p className="community-empty">{siteConfig.text.emptyText}</p> : null}</div></section> : null}
 
         <section className="community-panel concert-panel home-full-panel home-concerts-section" aria-label="Hot concerts">
           <header><h2>{homeText.hotConcerts}</h2><Link href="/music/concerts" className="home-module-entry">{homeText.concertsMore} {'>>'}</Link></header>

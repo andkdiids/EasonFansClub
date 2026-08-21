@@ -22,7 +22,10 @@ export async function POST(request: Request) {
   if (originError) return originError
 
   const ipLimit = await consumeRateLimit(`ip:${getClientIp(request)}`, 'password-reset:link-request', 8, 60 * 60)
-  if (ipLimit.limited) return NextResponse.json({ message: '发送过于频繁，请稍后再试', retryAfter: ipLimit.retryAfter }, { status: 429, headers: noStoreHeaders })
+  if (ipLimit.limited) return NextResponse.json({ message: '发送过于频繁，请稍后再试', retryAfter: ipLimit.retryAfter }, {
+    status: 429,
+    headers: { ...noStoreHeaders, 'Retry-After': String(ipLimit.retryAfter || 1) },
+  })
 
   const body = await request.json().catch(() => null)
   const email = normalizePasswordResetEmail(body?.email)

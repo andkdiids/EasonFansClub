@@ -6,6 +6,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -84,6 +85,7 @@ export async function GET(request: Request) {
   ])
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const remarkMap = await loadFriendRemarkMap(viewer.id, activities.map((item) => item.actorId))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(activities.map((item) => item.actorId))
 
   return NextResponse.json({
     activities: activities.map((item) => ({
@@ -99,6 +101,7 @@ export async function GET(request: Request) {
       actor: {
         ...item.User,
         nickname: getPublicUserDisplayName(item.User),
+        equippedBadge: equippedBadgeMap.get(item.actorId) || null,
         avatarUrl: publicImageUrl(item.User.avatarUrl),
         profile: item.User.Profile ? {
           ...item.User.Profile,

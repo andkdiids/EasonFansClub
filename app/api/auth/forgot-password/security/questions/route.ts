@@ -13,7 +13,10 @@ export async function POST(request: Request) {
   if (originError) return originError
   const ip = getClientIp(request)
   const limit = await consumeRateLimit(`ip:${ip}`, 'password-reset:questions', 12, 15 * 60)
-  if (limit.limited) return NextResponse.json({ message: '请求过于频繁，请稍后再试', retryAfter: limit.retryAfter }, { status: 429 })
+  if (limit.limited) return NextResponse.json({ message: '请求过于频繁，请稍后再试', retryAfter: limit.retryAfter }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(limit.retryAfter || 1) },
+  })
   const body = await request.json().catch(() => null)
   const identifier = normalizeText(body?.identifier)
   if (!identifier) return NextResponse.json({ message: '请输入账号标识' }, { status: 400 })

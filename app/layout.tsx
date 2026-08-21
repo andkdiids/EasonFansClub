@@ -46,6 +46,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
   ]) : [null, emptyUnreadSummary, false, false, fallbackGrowth]
   const logoUrl = publicImageUrl(appearance?.images.navLogoUrl || appearance?.images.logoUrl)
+  const shellUser = sessionUser ? {
+    id: sessionUser.id,
+    uid: sessionUser.uid,
+    username: sessionUser.username,
+    nickname: sessionUser.nickname,
+    avatarUrl: sessionUser.avatarUrl,
+    equippedBadge: sessionUser.equippedBadge,
+  } : null
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
@@ -58,7 +66,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <VirtualKeyboardManager />
         <NotificationProvider userId={sessionUser?.id || null} initialSummary={unreadSummary}>
           <MusicPlayerProvider>
-            <AppShell user={sessionUser} growth={growth} logoUrl={logoUrl} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
+            <AppShell user={shellUser} growth={growth} logoUrl={logoUrl} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
               {children}
             </AppShell>
           </MusicPlayerProvider>

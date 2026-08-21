@@ -1,4 +1,4 @@
-import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import { createUndercoverWordPair, listUndercoverWordPairs } from '@/lib/undercover-star'
 import { undercoverError, undercoverOk } from '@/lib/undercover-star-api'
 
@@ -8,11 +8,19 @@ export const runtime = 'nodejs'
 export async function GET(request: Request) {
   const guard = await requireAdmin('entertainment_manage')
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/entertainment/undercover-star/word-pairs:GET',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const params = new URL(request.url).searchParams
+  const rawPage = Number(params.get('page') || 1)
+  const rawPageSize = Number(params.get('pageSize') || 20)
   try {
     return undercoverOk(await listUndercoverWordPairs({
-      page: Number(params.get('page') || 1),
-      pageSize: Number(params.get('pageSize') || 20),
+      page: Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(rawPage, 1)) : 1,
+      pageSize: Number.isSafeInteger(rawPageSize) ? Math.min(Math.max(rawPageSize, 1), 50) : 20,
       query: sanitizeText(params.get('q'), 100),
       category: params.get('category') || undefined,
       difficulty: params.get('difficulty') || undefined,
@@ -27,6 +35,12 @@ export async function POST(request: Request) {
   if (originError) return originError
   const guard = await requireAdmin('entertainment_manage')
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/entertainment/undercover-star/word-pairs:POST',
+    ip: { limit: 30, windowSeconds: 60 },
+    user: { limit: 15, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   try {
     const created = await createUndercoverWordPair({

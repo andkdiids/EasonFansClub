@@ -9,6 +9,8 @@ import { prisma } from '@/lib/prisma'
 import { isCompleteActiveUser } from '@/lib/users'
 import { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 import { publicModerationUserName } from '@/lib/content-moderation'
+import { getEquippedBadgeForUser } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 export { authCookieName, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 
@@ -22,7 +24,10 @@ export type SessionUser = {
   experience?: number
   role: UserRole
   canPlayFullMusic?: boolean
+  equippedBadge?: EquippedBadgeView | null
 }
+
+export type SessionShellUser = Pick<SessionUser, 'id' | 'uid' | 'username' | 'nickname' | 'avatarUrl' | 'equippedBadge'>
 
 export class AuthServiceUnavailableError extends Error {
   constructor(message = 'Authentication service is temporarily unavailable', options?: ErrorOptions) {
@@ -134,8 +139,9 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
         }),
         8000,
       ),
-    ).then((user) => {
+    ).then(async (user) => {
       if (!user || !isCompleteActiveUser(user)) return null
+      const equippedBadge = await getEquippedBadgeForUser(user.id).catch(() => null)
 
       return {
         id: user.id,
@@ -147,6 +153,7 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
         experience: user.experience,
         role: user.role,
         canPlayFullMusic: user.canPlayFullMusic,
+        equippedBadge,
       }
     })
 

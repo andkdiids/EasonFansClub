@@ -61,8 +61,14 @@ async function authenticatedResponse(
     nickname: user.nickname,
     role: user.role,
   }
+  const responseUser = {
+    id: sessionUser.id,
+    uid: sessionUser.uid,
+    username: sessionUser.username,
+    nickname: sessionUser.nickname,
+  }
   const token = await createSessionToken(sessionUser)
-  const response = NextResponse.json({ user: sessionUser, registrationType: 'EMAIL', ...extra }, { status, headers: noStoreHeaders })
+  const response = NextResponse.json({ user: responseUser, registrationType: 'EMAIL', ...extra }, { status, headers: noStoreHeaders })
   const cookieOptions = getSessionCookieOptions(request)
   response.cookies.set(authCookieName, token, cookieOptions)
   if (cookieOptions.domain) appendLegacyHostCookieDeletion(response, request)

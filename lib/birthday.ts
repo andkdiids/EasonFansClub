@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { grantBadge } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
 import { getShanghaiDateKey } from '@/lib/checkin'
@@ -79,14 +80,17 @@ export async function ensureBirthdayBadge(userId: string): Promise<void> {
 
     const badge = await prisma.badge.findUnique({
       where: { slug: BIRTHDAY_BADGE_SLUG },
-      select: { id: true },
+      select: { id: true, isActive: true, isEnabled: true },
     })
-    if (!badge) return
+    if (!badge || !badge.isActive || !badge.isEnabled) return
 
-    await prisma.userBadge.upsert({
-      where: { userId_badgeId: { userId, badgeId: badge.id } },
-      create: { userId, badgeId: badge.id },
-      update: {},
+    // The unified service owns the existing prisma.userBadge.upsert idempotency contract (userId_badgeId).
+    await grantBadge({
+      userId,
+      badgeId: badge.id,
+      sourceType: 'AUTO',
+      sourceId: BIRTHDAY_BADGE_SLUG,
+      grantReason: '生日自动获得',
     })
   } catch (error) {
     console.error('[birthday.ensureBadge]', error)

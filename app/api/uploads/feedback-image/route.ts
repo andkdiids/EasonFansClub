@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import sharp from 'sharp'
 import { publicImageUrl } from '@/lib/images'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
 import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
@@ -28,6 +28,12 @@ function imageContentType(format?: string | null) {
 export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/uploads/feedback-image',
+    ip: { limit: 40, windowSeconds: 60 * 60 },
+    user: { limit: 20, windowSeconds: 60 * 60 },
+  }, '图片上传过于频繁，请稍后再试')
+  if (limited) return limited
 
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
@@ -42,7 +48,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: '单张图片不能超过 10MB' }, { status: 400 })
   }
 
-  const uploadMeta = { filename: file.name, size: file.size, type: file.type }
+  const uploadMeta = { size: file.size, type: file.type }
 
   let input: Buffer
   let generated: Awaited<ReturnType<typeof createImageVariants>>
@@ -75,14 +81,18 @@ export async function POST(request: Request) {
       upload: ({ key, body, contentType }) => uploadSiteImage({ key, body, contentType }),
     })
     const url = publicImageUrl(family.sourceUrl)
-    console.log('[feedback-image.upload]', { ...uploadMeta, uploadResult: family.sourceUrl })
+    console.log('[feedback-image.upload]', { ...uploadMeta, uploaded: true })
     if (!url) {
       return NextResponse.json({ message: '图片 URL 无效' }, { status: 500 })
     }
     return NextResponse.json({ url, mimeType: 'image/webp' })
   } catch (error) {
     const detail = error instanceof SiteMediaStorageError ? error.detail || error.message : errorDetail(error)
-    console.error('[feedback-image.upload]', { ...uploadMeta, uploadResult: 'failed', error: detail })
+    console.error('[feedback-image.upload]', {
+      ...uploadMeta,
+      uploaded: false,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    })
     return NextResponse.json({
       message: developmentUploadMessage(detail),
       ...(process.env.NODE_ENV === 'development' ? { detail } : {}),

@@ -11,6 +11,8 @@ import { clampPaginationPage } from '@/lib/pagination'
 import { formatLikeNotificationText, loadLikeNotificationStats, parseLikeNotificationTarget, reconcileLikeNotifications, type LikeNotificationTargetKind } from '@/lib/like-notifications'
 import { normalizeActionUrl, normalizeStoredInternalPath } from '@/lib/url-safety'
 import { logNotificationError } from '@/lib/notification-errors'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
@@ -204,6 +206,7 @@ export type UnifiedNotification = {
   actorName: string | null
   actorUid: number | null
   actorAvatarUrl: string | null
+  actorBadge: EquippedBadgeView | null
   likeCount?: number | null
   likeTargetKind?: LikeNotificationTargetKind | null
   popup: boolean
@@ -717,9 +720,10 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     const target = parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
     return target ? [target] : []
   })
-  const [remarkResult, likeCountResult] = await Promise.allSettled([
+  const [remarkResult, likeCountResult, actorBadgeResult] = await Promise.allSettled([
     loadFriendRemarkMap(userId, actorIds),
     loadLikeNotificationStats(likeTargets),
+    getEquippedBadgesForUsers(actorIds),
   ])
   // 好友备注与点赞统计属于「增强数据」：即使查询失败，通知条目本身仍可正常渲染
   // （好友名回退到展示名、点赞通知回退到存储时生成的标题）。这类失败不应把整页
@@ -735,6 +739,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     : (() => {
         logNotificationError('list.like-stats', { userId, page, pageSize, category }, likeCountResult.reason)
         return new Map<string, number>()
+      })()
+  const actorBadgeMap = actorBadgeResult.status === 'fulfilled'
+    ? actorBadgeResult.value
+    : (() => {
+        logNotificationError('list.actor-badge', { userId, page, pageSize, category }, actorBadgeResult.reason)
+        return new Map<string, EquippedBadgeView>()
       })()
   const personalById = new Map(personal.map((item) => [item.id, item]))
   const systemById = new Map(system.map((item) => [item.id, item]))
@@ -772,6 +782,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         actorName,
         actorUid: actor?.uid || null,
         actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
+        actorBadge: actor ? actorBadgeMap.get(actor.id) || null : null,
         likeCount,
         likeTargetKind: likeTarget?.kind || null,
         popup: false,
@@ -808,6 +819,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       actorName: null,
       actorUid: null,
       actorAvatarUrl: null,
+      actorBadge: null,
       popup: item.popup,
       sticky: item.sticky,
       isRead,
@@ -1045,6 +1057,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       actorName: null,
       actorUid: null,
       actorAvatarUrl: null,
+      actorBadge: null,
       popup: item.popup,
       sticky: item.sticky,
       isRead: false,

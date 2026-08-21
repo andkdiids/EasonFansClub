@@ -4,7 +4,7 @@ import sharp, { type Metadata } from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
 import { heroMediaTypes, normalizeHeroMediaType, type HeroMediaType } from '@/lib/hero-visuals'
-import { requireAdmin } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin } from '@/lib/security'
 import { createAnimatedImageVariants, createImageVariants, type CreatedImageVariants } from '@/lib/image-webp'
 
 export const runtime = 'nodejs'
@@ -117,6 +117,12 @@ async function requireHeroMediaAdmin() {
 export async function POST(request: Request) {
   const guard = await requireHeroMediaAdmin()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/uploads/hero-media',
+    ip: { limit: 20, windowSeconds: 60 * 60 },
+    user: { limit: 20, windowSeconds: 60 * 60 },
+  }, '媒体上传过于频繁，请稍后再试')
+  if (limited) return limited
 
   const formData = await request.formData().catch(() => null)
   const file = formData?.get('file')
@@ -235,7 +241,9 @@ export async function POST(request: Request) {
       animated: kind === 'media' && detectedType === 'ANIMATED_IMAGE',
     })
   } catch (error) {
-    if (!(error instanceof SiteMediaStorageError)) console.error('[hero-media.upload]', error)
+    if (!(error instanceof SiteMediaStorageError)) {
+      console.error('[hero-media.upload]', { errorName: error instanceof Error ? error.name : 'UnknownError' })
+    }
     return NextResponse.json({ message: error instanceof Error ? error.message : 'Hero 媒体上传失败，请稍后重试' }, { status: 502 })
   }
 }

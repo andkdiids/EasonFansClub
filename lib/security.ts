@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import type { UserRole } from '@prisma/client'
 import { type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
+import { getClientIp } from '@/lib/client-ip'
 import { containsBannedWord, getEnabledBannedWords } from '@/lib/content-moderation'
 import { prisma } from '@/lib/prisma'
 
@@ -96,34 +98,75 @@ export type RateLimitResult = {
   retryAfter?: number
 }
 
+type RateLimitDimension = {
+  limit: number
+  windowSeconds: number
+}
+
+export type ApiRateLimitPolicy = {
+  endpoint: string
+  ip?: RateLimitDimension
+  user?: RateLimitDimension
+  account?: { key: string; limit: number; windowSeconds: number }
+}
+
+let lastRateLimitPruneAt = 0
+
+function normalizedWindowSeconds(windowSeconds: number) {
+  return Math.max(1, Math.floor(Number.isFinite(windowSeconds) ? windowSeconds : 60))
+}
+
+export function getRateLimitBucketId(key: string, action: string, windowSeconds: number, now = new Date()) {
+  const window = normalizedWindowSeconds(windowSeconds)
+  const windowStart = Math.floor(now.getTime() / 1000 / window) * window
+  return createHash('sha256')
+    .update(`${key}\u0000${action}\u0000${windowStart}`)
+    .digest('hex')
+}
+
+function getRateLimitBucketExpiry(windowSeconds: number, now = new Date()) {
+  const window = normalizedWindowSeconds(windowSeconds)
+  const windowStart = Math.floor(now.getTime() / 1000 / window) * window
+  return new Date((windowStart + window) * 1000)
+}
+
 async function pruneExpiredRateLimits(now: Date) {
+  if (now.getTime() - lastRateLimitPruneAt < 60_000) return
+  lastRateLimitPruneAt = now.getTime()
   await prisma.rateLimitLog.deleteMany({
     where: { expiresAt: { lt: now } },
   })
 }
 
-async function getRetryAfterSeconds(key: string, action: string, now: Date) {
-  const oldestActive = await prisma.rateLimitLog.aggregate({
-    where: { key, action, expiresAt: { gt: now } },
-    _min: { expiresAt: true },
+async function getRateLimitBucket(key: string, action: string, windowSeconds: number, now: Date) {
+  return prisma.rateLimitLog.findUnique({
+    where: { id: getRateLimitBucketId(key, action, windowSeconds, now) },
+    select: { count: true, expiresAt: true },
   })
-  const resetAt = oldestActive._min.expiresAt
-  if (!resetAt) return undefined
-  return Math.max(1, Math.ceil((resetAt.getTime() - now.getTime()) / 1000))
 }
 
-export async function checkRateLimit(key: string, action: string, limit = 30): Promise<RateLimitResult> {
+async function getRetryAfterSeconds(key: string, action: string, windowSeconds: number, now: Date) {
+  const bucket = await getRateLimitBucket(key, action, windowSeconds, now)
+  if (!bucket || bucket.expiresAt <= now) return undefined
+  return Math.max(1, Math.ceil((bucket.expiresAt.getTime() - now.getTime()) / 1000))
+}
+
+export async function checkRateLimit(
+  key: string,
+  action: string,
+  limit = 30,
+  windowSeconds = 30 * 60,
+): Promise<RateLimitResult> {
   const now = new Date()
 
   try {
-    await pruneExpiredRateLimits(now)
-
-    const count = await prisma.rateLimitLog.count({
-      where: { key, action, expiresAt: { gt: now } },
-    })
-
-    if (count >= limit) {
-      return { limited: true, retryAfter: await getRetryAfterSeconds(key, action, now) }
+    void pruneExpiredRateLimits(now).catch(() => undefined)
+    const bucket = await getRateLimitBucket(key, action, windowSeconds, now)
+    if (bucket && bucket.expiresAt > now && bucket.count >= limit) {
+      return {
+        limited: true,
+        retryAfter: await getRetryAfterSeconds(key, action, windowSeconds, now),
+      }
     }
   } catch {
     return { limited: false }
@@ -134,11 +177,17 @@ export async function checkRateLimit(key: string, action: string, limit = 30): P
 
 export async function recordRateLimitHit(key: string, action: string, windowSeconds = 60) {
   const now = new Date()
-  const expiresAt = new Date(now.getTime() + windowSeconds * 1000)
+  const window = normalizedWindowSeconds(windowSeconds)
+  const id = getRateLimitBucketId(key, action, window, now)
+  const expiresAt = getRateLimitBucketExpiry(window, now)
 
   try {
-    await pruneExpiredRateLimits(now)
-    await prisma.rateLimitLog.create({ data: { key, action, expiresAt } })
+    void pruneExpiredRateLimits(now).catch(() => undefined)
+    await prisma.rateLimitLog.upsert({
+      where: { id },
+      update: { count: { increment: 1 } },
+      create: { id, key, action, count: 1, expiresAt },
+    })
   } catch {
     return null
   }
@@ -147,10 +196,30 @@ export async function recordRateLimitHit(key: string, action: string, windowSeco
 }
 
 export async function consumeRateLimit(key: string, action: string, limit = 30, windowSeconds = 60): Promise<RateLimitResult> {
-  const status = await checkRateLimit(key, action, limit)
-  if (status.limited) return status
+  const now = new Date()
+  const window = normalizedWindowSeconds(windowSeconds)
+  const id = getRateLimitBucketId(key, action, window, now)
+  const expiresAt = getRateLimitBucketExpiry(window, now)
 
-  await recordRateLimitHit(key, action, windowSeconds)
+  try {
+    void pruneExpiredRateLimits(now).catch(() => undefined)
+    const bucket = await prisma.rateLimitLog.upsert({
+      where: { id },
+      update: { count: { increment: 1 } },
+      create: { id, key, action, count: 1, expiresAt },
+      select: { count: true, expiresAt: true },
+    })
+    if (bucket.count > limit) {
+      return {
+        limited: true,
+        retryAfter: Math.max(1, Math.ceil((bucket.expiresAt.getTime() - now.getTime()) / 1000)),
+      }
+    }
+  } catch {
+    // Rate limiting must not turn a database incident into a site-wide outage.
+    return { limited: false }
+  }
+
   return { limited: false }
 }
 
@@ -160,8 +229,84 @@ export async function rateLimit(key: string, action: string, limit = 30, windowS
 
   return NextResponse.json(
     { message: '操作过于频繁，请稍后再试', retryAfter: status.retryAfter },
-    { status: 429 },
+    {
+      status: 429,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Retry-After': String(status.retryAfter || 1),
+      },
+    },
   )
+}
+
+export async function consumeApiRateLimits(
+  request: Request,
+  userId: string | null | undefined,
+  policy: ApiRateLimitPolicy,
+) {
+  const action = `api:${request.method.toUpperCase()}:${policy.endpoint}`
+  const dimensions: Array<{ key: string; limit: number; windowSeconds: number }> = []
+  if (policy.ip) dimensions.push({ key: `ip:${getClientIp(request)}`, ...policy.ip })
+  if (policy.user && userId) dimensions.push({ key: `user:${userId}`, ...policy.user })
+  if (policy.account) {
+    dimensions.push({
+      key: `account:${policy.account.key}`,
+      limit: policy.account.limit,
+      windowSeconds: policy.account.windowSeconds,
+    })
+  }
+
+  for (const dimension of dimensions) {
+    const result = await consumeRateLimit(dimension.key, action, dimension.limit, dimension.windowSeconds)
+    if (result.limited) return result
+  }
+  return { limited: false } satisfies RateLimitResult
+}
+
+export function rateLimitResponse(result: RateLimitResult, message = '操作过于频繁，请稍后再试') {
+  return NextResponse.json(
+    { ok: false, code: 'RATE_LIMITED', message, retryAfter: result.retryAfter },
+    {
+      status: 429,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Retry-After': String(result.retryAfter || 1),
+      },
+    },
+  )
+}
+
+export async function logSecurityAbuse(
+  request: Request,
+  input: { endpoint: string; userId?: string | null; reason: string },
+) {
+  const ipAddress = getClientIp(request)
+  const userAgent = request.headers.get('user-agent')?.slice(0, 255) || null
+  const metadata = {
+    endpoint: input.endpoint.slice(0, 120),
+    method: request.method.toUpperCase(),
+    reason: input.reason.slice(0, 120),
+  }
+
+  if (input.userId) {
+    await prisma.accountSecurityLog.create({
+      data: { userId: input.userId, action: 'API_ABUSE_RATE_LIMIT', ipAddress, userAgent, metadata },
+    }).catch(() => undefined)
+  }
+
+  console.warn('[security.rate-limit]', JSON.stringify({ ...metadata, userId: input.userId || undefined, ipAddress }))
+}
+
+export async function enforceApiRateLimit(
+  request: Request,
+  userId: string | null | undefined,
+  policy: ApiRateLimitPolicy,
+  message = '操作过于频繁，请稍后再试',
+) {
+  const result = await consumeApiRateLimits(request, userId, policy)
+  if (!result.limited) return null
+  await logSecurityAbuse(request, { endpoint: policy.endpoint, userId, reason: 'rate_limit_exceeded' })
+  return rateLimitResponse(result, message)
 }
 
 export async function containsSensitiveContent(content: string) {
@@ -186,20 +331,23 @@ export function hasValidRequestOrigin(request: Request) {
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'same-site' && fetchSite !== 'none') return false
   if (fetchSite === 'same-origin') return true
   const source = request.headers.get('origin') || request.headers.get('referer')
-  if (!source) return process.env.NODE_ENV !== 'production'
+  // Origin is a CSRF signal, never an authentication factor. Native clients
+  // and WebSocket libraries commonly omit it; explicit cross-site browser
+  // requests are still rejected by the middleware/Fetch Metadata checks.
+  if (!source) return true
   try {
     const sourceOrigin = new URL(source).origin
-const requestOrigin = new URL(request.url).origin
-const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
-const forwardedProtocol = request.headers.get('x-forwarded-proto')
+    const requestOrigin = new URL(request.url).origin
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
+    const forwardedProtocol = request.headers.get('x-forwarded-proto')
 
-return (
-  allowedOrigins.includes(sourceOrigin) ||
-  sourceOrigin === requestOrigin ||
-  Boolean(host && forwardedProtocol && sourceOrigin === `${forwardedProtocol}://${host}`) ||
-  sourceOrigin === `http://${host}` ||
-  sourceOrigin === `https://${host}`
-)
+    return (
+      allowedOrigins.includes(sourceOrigin) ||
+      sourceOrigin === requestOrigin ||
+      Boolean(host && forwardedProtocol && sourceOrigin === `${forwardedProtocol}://${host}`) ||
+      sourceOrigin === `http://${host}` ||
+      sourceOrigin === `https://${host}`
+    )
   } catch {
     return false
   }

@@ -4,7 +4,8 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -29,7 +30,7 @@ type LikerRow = {
   }
 }
 
-function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<string, string>) {
+function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<string, string>, equippedBadgeMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView>) {
   return {
     uid: row.User.uid,
     nickname: getPublicUserDisplayName(row.User),
@@ -40,6 +41,7 @@ function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<
       remarkMap,
     }),
     avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
+    equippedBadge: equippedBadgeMap.get(row.User.id) || null,
   }
 }
 
@@ -47,6 +49,11 @@ function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<
 export async function GET(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(_request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/like:GET',
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { messageId } = await context.params
   const likes = await prisma.dailyMessageLike.findMany({
@@ -56,12 +63,19 @@ export async function GET(_request: Request, context: RouteContext) {
     select: { User: { select: likerUserSelect } },
   })
   const remarkMap = await loadFriendRemarkMap(guard.user.id, likes.map((like) => like.User.id))
-  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, guard.user.id, remarkMap)) })
+  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
+  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, guard.user.id, remarkMap, equippedBadgeMap)) })
 }
 
 export async function POST(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(_request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/like:POST',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { messageId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
@@ -107,6 +121,12 @@ export async function POST(_request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(_request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/like:DELETE',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { messageId } = await context.params
   const result = await prisma.$transaction(async (tx) => {

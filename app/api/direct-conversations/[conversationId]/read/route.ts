@@ -2,12 +2,18 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
+import { enforceApiRateLimit } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/direct-conversations/read',
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const { conversationId } = await params
   const messageId = String((await request.json().catch(() => null))?.messageId || '').trim()
   if (!messageId) return NextResponse.json({ message: '缺少已读消息位置' }, { status: 400, headers: privateHeaders })

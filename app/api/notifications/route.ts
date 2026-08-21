@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { listUnifiedNotificationsPage, markAllUnifiedNotificationsRead, markUnifiedNotificationRead, parseNotificationCategory } from '@/lib/notifications'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { effectiveSystemNotificationWhere } from '@/lib/system-notifications'
@@ -19,11 +19,19 @@ type NotificationReadInput = { id: string; source?: string }
 export async function GET(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/notifications',
+    ip: { limit: 240, windowSeconds: 60 },
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { searchParams } = new URL(request.url)
   const unreadOnly = searchParams.get('unread') === '1'
-  const pageSize = Math.min(Math.max(Number(searchParams.get('pageSize') || NOTIFICATION_PAGE_SIZE), 1), MAX_NOTIFICATION_PAGE_SIZE)
-  const requestedPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const rawPageSize = Number(searchParams.get('pageSize'))
+  const rawPage = Number.parseInt(searchParams.get('page') || '1', 10)
+  const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? rawPageSize : NOTIFICATION_PAGE_SIZE, 1), MAX_NOTIFICATION_PAGE_SIZE)
+  const requestedPage = Math.min(10_000, Math.max(1, Number.isFinite(rawPage) ? rawPage : 1))
   const category = parseNotificationCategory(searchParams.get('category'))
   try {
     const result = await listUnifiedNotificationsPage(guard.user.id, { unreadOnly, page: requestedPage, pageSize, category })
@@ -72,6 +80,12 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/notifications',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  }, '通知操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   try {
     const body = await request.json().catch(() => null)
@@ -102,6 +116,12 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/notifications',
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+  }, '通知操作过于频繁，请稍后再试')
+  if (limited) return limited
   try {
     const body = await request.json().catch(() => null)
     const clearAll = body?.all === true || !Array.isArray(body?.ids)

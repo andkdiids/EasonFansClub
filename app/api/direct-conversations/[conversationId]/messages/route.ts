@@ -5,7 +5,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -35,6 +35,12 @@ async function getConversation(userId: string, conversationId: string) {
 export async function GET(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const rateLimited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/direct-conversations/messages',
+    ip: { limit: 240, windowSeconds: 60 },
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (rateLimited) return rateLimited
   const { conversationId } = await params
   const conversation = await getConversation(user.id, conversationId)
   if (!conversation) return NextResponse.json({ message: '会话不存在或无权查看' }, { status: 404, headers: privateHeaders })
@@ -68,8 +74,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
     select: messageSelect,
   })
   const hasMore = rows.length > (cursor ? 100 : 50)
-  const limited = rows.slice(0, cursor ? 100 : 50)
-  const ordered = cursor ? limited : limited.reverse()
+  const limitedRows = rows.slice(0, cursor ? 100 : 50)
+  const ordered = cursor ? limitedRows : limitedRows.reverse()
   const peer = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)
 
   return NextResponse.json({
@@ -90,6 +96,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const user = await getCurrentUser()
     if (!user) return messageFailure(401, 'UNAUTHORIZED', '请先登录')
     senderId = user.id
+    const limited = await enforceApiRateLimit(request, user.id, {
+      endpoint: '/api/direct-conversations/messages',
+      ip: { limit: 60, windowSeconds: 60 },
+      user: { limit: 30, windowSeconds: 60 },
+    }, '私信发送过于频繁，请稍后再试')
+    if (limited) return limited
     const { conversationId } = await params
     const body = await request.json().catch(() => null)
     const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''

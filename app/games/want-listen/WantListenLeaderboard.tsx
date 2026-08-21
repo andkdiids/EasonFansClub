@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { WANT_LISTEN_MODE_LABELS, WANT_LISTEN_MODES, type WantListenMode } from '@/lib/want-listen-config'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type Row = {
   rank: number
@@ -12,7 +14,7 @@ type Row = {
   maxStreak: number
   totalQuestions: number
   completionTimeMs: number
-  user: { nickname: string; uid: number; avatarUrl: string | null }
+  user: { nickname: string; uid: number; avatarUrl: string | null; equippedBadge?: EquippedBadgeView | null }
 }
 
 type Board = { rows: Row[]; self: Row | null; period: string; periodKey: string }
@@ -53,7 +55,7 @@ export function WantListenLeaderboard() {
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
       <section className={`want-listen-board${loading ? ' is-loading' : ''}`} aria-label={`${WANT_LISTEN_MODE_LABELS[mode]}排行榜`}>
         <div className="want-listen-board-head"><span>排名</span><span>用户</span><span>分数</span><span>答对</span><span>连击</span><span>用时</span></div>
-        {board?.rows.map((row) => <article key={row.userId}><span>{row.rank}</span><span className="want-listen-board-user">{row.user.avatarUrl ? <img src={row.user.avatarUrl} alt="" /> : <i>{String(row.user.uid).slice(-1)}</i>}<b>{row.user.nickname}</b></span><strong>{row.score}</strong><span>{row.correctCount}</span><span>{row.maxStreak}</span><span>{Math.max(1, Math.round(row.completionTimeMs / 1000))}s</span></article>)}
+        {board?.rows.map((row) => <article key={row.userId}><span>{row.rank}</span><span className="want-listen-board-user">{row.user.avatarUrl ? <img src={row.user.avatarUrl} alt="" /> : <i>{String(row.user.uid).slice(-1)}</i>}<b><UserDisplayName name={row.user.nickname} uid={row.user.uid} badge={row.user.equippedBadge} compact /></b></span><strong>{row.score}</strong><span>{row.correctCount}</span><span>{row.maxStreak}</span><span>{Math.max(1, Math.round(row.completionTimeMs / 1000))}s</span></article>)}
         {!loading && !board?.rows.length ? <p className="want-listen-board-empty">当前周期还没有完成成绩。</p> : null}
       </section>
         {board?.self ? <p className="want-listen-board-self">我的最佳：{board.self.score} 分 · 答对 {board.self.correctCount} · 最高连击 {board.self.maxStreak} · {Math.max(1, Math.round(board.self.completionTimeMs / 1000))} 秒</p> : null}

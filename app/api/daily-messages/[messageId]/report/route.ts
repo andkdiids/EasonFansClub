@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
 export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/daily-messages/[messageId]/report',
+    ip: { limit: 30, windowSeconds: 60 * 60 },
+    user: { limit: 10, windowSeconds: 60 * 60 },
+  })
+  if (limited) return limited
 
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)

@@ -6,7 +6,7 @@ import { invalidateCurrentUserCache } from '@/lib/auth'
 import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { checkRateLimit, consumeRateLimit, getClientIp, recordRateLimitHit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 
 const wrongAnswerAction = 'account-password:wrong-security-answer'
@@ -18,7 +18,10 @@ export async function POST(request: Request) {
   if (!guard.user) return guard.response
   const ip = getClientIp(request)
   const requestLimit = await consumeRateLimit(`ip:${ip}`, 'account-password-security-reset', 20, 15 * 60)
-  if (requestLimit.limited) return NextResponse.json({ message: '密保答案错误或请求暂时受限。' }, { status: 429 })
+  if (requestLimit.limited) return NextResponse.json({ message: '密保答案错误或请求暂时受限。' }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(requestLimit.retryAfter || 1) },
+  })
 
   const body = await request.json().catch(() => null)
   const validationError = validateNewPassword(body?.password, body?.confirmPassword)
@@ -38,11 +41,13 @@ export async function POST(request: Request) {
   if (user.mustSetupSecurity || !availability.available) return NextResponse.json({ message: '当前账号不能使用密保重置，请先完成密保设置。' }, { status: 403 })
 
   const accountKey = `account:${hashToken(user.id)}`
-  const lock = await checkRateLimit(accountKey, wrongAnswerAction, 5)
-  if (lock.limited) return NextResponse.json({ message: '密保答案错误或请求暂时受限。', retryAfter: lock.retryAfter }, { status: 429 })
+  const lock = await consumeRateLimit(accountKey, wrongAnswerAction, 5, 30 * 60)
+  if (lock.limited) return NextResponse.json({ message: '密保答案错误或请求暂时受限。', retryAfter: lock.retryAfter }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(lock.retryAfter || 1) },
+  })
   const valid = await verifySecurityAnswers(user.UserSecurityQuestion ? [user.UserSecurityQuestion] : [], [{ answer }])
   if (!valid) {
-    await recordRateLimitHit(accountKey, wrongAnswerAction, 30 * 60)
     return NextResponse.json({ message: '密保答案错误或请求暂时受限。' }, { status: 400 })
   }
   const samePassword = await verifyPassword(body.password, user.passwordHash)

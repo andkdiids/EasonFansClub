@@ -4,6 +4,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { planFriendCheckInMessagePage } from '@/lib/checkin-message-order'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
@@ -515,12 +516,14 @@ async function getCheckInMessagesUncached({
     ...rowsWithFocus.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
   ]
   const remarkMap = await loadFriendRemarkMap(viewerId, displayNameUserIds)
+  const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
 
   return rowsWithFocus.map((item) => {
     const publicUser = {
       ...item.User,
       nickname: getPublicUserDisplayName(item.User),
       avatarUrl: publicImageUrl(item.User.avatarUrl),
+      equippedBadge: equippedBadgeMap.get(item.User.id) || null,
       Profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl) } : item.User.Profile,
     }
     const publicLikes = item.DailyMessageLike.map((like) => ({
@@ -529,6 +532,7 @@ async function getCheckInMessagesUncached({
         ...like.User,
         nickname: getPublicUserDisplayName(like.User),
         avatarUrl: publicImageUrl(like.User.avatarUrl),
+        equippedBadge: equippedBadgeMap.get(like.User.id) || null,
         Profile: like.User.Profile ? { ...like.User.Profile, avatarUrl: publicImageUrl(like.User.Profile.avatarUrl) } : like.User.Profile,
       },
     }))
@@ -539,6 +543,7 @@ async function getCheckInMessagesUncached({
         ...comment.User,
         nickname: getPublicUserDisplayName(comment.User),
         avatarUrl: publicImageUrl(comment.User.avatarUrl),
+        equippedBadge: equippedBadgeMap.get(comment.User.id) || null,
         Profile: comment.User.Profile ? { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) } : comment.User.Profile,
       },
     }))
@@ -569,6 +574,7 @@ async function getCheckInMessagesUncached({
           remarkMap,
         }),
         avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl || null),
+        equippedBadge: equippedBadgeMap.get(like.User.id) || null,
       })),
       favorites: item.DailyMessageFavorite,
       canDelete: viewerCanModerate || item.userId === viewerId,

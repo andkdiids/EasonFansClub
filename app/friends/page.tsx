@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { FriendRequestCancel, FriendRequestDecision } from '@/components/FriendRequestActions'
 import { FriendActivityPanel } from '@/components/FriendActivityPanel'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { UserDisplayName } from '@/components/UserDisplayName'
 import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { formatDate } from '@/lib/format'
@@ -11,6 +12,7 @@ import { profileImageUrl } from '@/lib/images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +49,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
     }),
     [],
   )
+  const requestUserIds = requests.map((request) => request.receiverId === user.id ? request.senderId : request.receiverId)
+  const equippedBadgeMap = await getEquippedBadgesForUsers(requestUserIds)
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-6xl space-y-6 px-5 py-8">
@@ -80,6 +84,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
               createdAt={request.createdAt}
               updatedAt={request.updatedAt}
               direction={incoming ? 'received' : 'sent'}
+              equippedBadge={equippedBadgeMap.get(requestUser.id) || null}
               action={incoming
                   ? <FriendRequestDecision requestId={request.id} />
                   : <FriendRequestCancel requestId={request.id} />}
@@ -123,12 +128,14 @@ function RequestCard({
   createdAt,
   updatedAt,
   direction,
+  equippedBadge,
   action,
 }: {
   user: FriendUser
   createdAt: Date
   updatedAt: Date
   direction: 'received' | 'sent'
+  equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
   action?: ReactNode
 }) {
   const name = getPublicUserDisplayName(user)
@@ -141,7 +148,7 @@ function RequestCard({
             <SafeAvatar src={avatar} name={name} uid={user.uid} className="h-full w-full" />
           </span>
           <span className="min-w-0">
-            <span className="block truncate font-black text-brand-950">{name}</span>
+            <span className="block truncate font-black text-brand-950"><UserDisplayName name={name} uid={user.uid} badge={equippedBadge} compact /></span>
             <span className="block text-xs font-bold text-slate-500">UID {formatUid(user.uid)}</span>
           </span>
         </Link>

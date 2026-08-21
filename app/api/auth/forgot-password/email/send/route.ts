@@ -15,7 +15,10 @@ export async function POST(request: Request) {
   if (!settings.enableEmailPasswordReset) return NextResponse.json({ message: '邮箱重置功能暂未开放' }, { status: 403 })
   const ip = getClientIp(request)
   const ipLimit = await consumeRateLimit(`ip:${ip}`, 'password-reset:email-send', 8, 60 * 60)
-  if (ipLimit.limited) return NextResponse.json({ message: '发送过于频繁，请稍后再试' }, { status: 429 })
+  if (ipLimit.limited) return NextResponse.json({ message: '发送过于频繁，请稍后再试' }, {
+    status: 429,
+    headers: { 'Cache-Control': 'no-store', 'Retry-After': String(ipLimit.retryAfter || 1) },
+  })
   const body = await request.json().catch(() => null)
   const identifier = normalizeText(body?.identifier)
   if (!identifier) return NextResponse.json({ message: '请输入账号标识' }, { status: 400 })

@@ -12,6 +12,7 @@ import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING', 'USER_REWARD'])
@@ -827,10 +828,10 @@ export function NotificationsClient({
               {hasDisplayLabel ? <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span> : null}
               {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">未读</span> : null}
             </div>
-            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
+            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.actorBadge ? <UserDisplayName name="" uid={item.actorUid} badge={item.actorBadge} compact /> : null}{item.title}</h2>
             {isReplyNotification && displayReplyPreview ? (
               <p className="notification-reply-preview mt-0.5 break-words text-xs font-bold leading-4 text-slate-600">
-                {replyPreview && item.actorName ? <span className="font-black text-slate-700">{item.actorName}：</span> : null}
+                {replyPreview && item.actorName ? <span className="font-black text-slate-700"><UserDisplayName name={item.actorName} uid={item.actorUid} badge={item.actorBadge} compact />：</span> : null}
                 {displayReplyPreview}
               </p>
             ) : !isReplyNotification && fallbackContent ? (

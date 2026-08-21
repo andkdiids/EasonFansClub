@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
 import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
@@ -36,6 +36,12 @@ function isMultipartFile(value: FormDataEntryValue | null): value is File {
 export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/uploads/content-image',
+    ip: { limit: 60, windowSeconds: 60 * 60 },
+    user: { limit: 30, windowSeconds: 60 * 60 },
+  }, '图片上传过于频繁，请稍后再试')
+  if (limited) return limited
 
   let form: FormData | null = null
   try {

@@ -4,12 +4,19 @@ import { decideFriendRequest } from '@/lib/friends'
 import { getFriendRequestNotificationKey } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
+import { enforceApiRateLimit } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
 export async function PATCH(request: Request, context: RouteContext) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/friends/requests/decision',
+    ip: { limit: 60, windowSeconds: 60 * 60 },
+    user: { limit: 30, windowSeconds: 60 * 60 },
+  }, '好友申请操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { requestId } = await context.params
   const body = await request.json().catch(() => null)

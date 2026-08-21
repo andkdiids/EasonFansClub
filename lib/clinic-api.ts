@@ -27,7 +27,10 @@ export function clinicErrorResponse(error: unknown, context: ClinicErrorContext 
     return NextResponse.json({ ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后再试。' }, { status: 503, headers: clinicPublicHeaders })
   }
   if (error instanceof ClinicServiceError) {
-    return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: clinicPublicHeaders })
+    return NextResponse.json({ ok: false, code: error.code, message: error.message }, {
+      status: error.status,
+      headers: error.status === 429 ? { ...clinicPublicHeaders, 'Retry-After': '60' } : clinicPublicHeaders,
+    })
   }
   console.error(`[${context.action || 'clinic.api'}]`, {
     ...(context.recordId ? { recordId: context.recordId } : {}),

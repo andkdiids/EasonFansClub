@@ -11,7 +11,12 @@ const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 export async function GET() {
   try {
     const user = await getCurrentUser()
-    return NextResponse.json({ user }, { headers: noStoreHeaders })
+    // This endpoint is a session-authority probe, not a profile/admin data
+    // endpoint. Keep the response to the fields needed by the client shell.
+    const session = user
+      ? { id: user.id, uid: user.uid, nickname: user.nickname, avatarUrl: user.avatarUrl }
+      : null
+    return NextResponse.json({ user: session }, { headers: noStoreHeaders })
   } catch (error) {
     if (isAuthServiceUnavailableError(error)) {
       return NextResponse.json({ user: null, code: 'AUTH_SERVICE_UNAVAILABLE' }, { status: 503, headers: noStoreHeaders })

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { resolveGrowthLevelName } from '@/lib/growth-display'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type ProfileHeaderProps = {
   displayName: string
@@ -13,6 +15,7 @@ type ProfileHeaderProps = {
   createdAt: Date
   avatarUrl?: string | null
   backgroundUrl?: string | null
+  equippedBadge?: EquippedBadgeView | null
   showGrowth?: boolean
 }
 
@@ -82,6 +85,7 @@ export function ProfileHeader({
   createdAt,
   avatarUrl,
   backgroundUrl,
+  equippedBadge = null,
   showGrowth = true,
 }: ProfileHeaderProps) {
   const initial = formatUid(uid).slice(0, 1)
@@ -112,7 +116,7 @@ export function ProfileHeader({
               </div>
             )}
             <div className="min-w-0 max-w-[250px] flex-1">
-              <h1 className="truncate text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]">{displayName}</h1>
+              <h1 className="truncate text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} showBadgeName /></h1>
             </div>
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center justify-start gap-1.5 text-xs font-bold leading-none text-white/90">

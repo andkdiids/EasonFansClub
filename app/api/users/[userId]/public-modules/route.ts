@@ -9,6 +9,7 @@ import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -126,7 +127,10 @@ export async function GET(request: Request, context: RouteContext) {
       }),
       [],
     )
-    return NextResponse.json({ items: badges.map(({ Badge, ...item }) => ({ ...item, badge: { ...Badge, iconUrl: toPublicMediaUrl(Badge.iconUrl) } })) })
+    return NextResponse.json({ items: badges.map(({ Badge, ...item }) => {
+      const imageUrl = toPublicMediaUrl(Badge.iconUrl)
+      return { ...item, badge: { ...Badge, iconUrl: imageUrl, imageUrl } }
+    }) })
   }
 
   if (moduleKey === 'albums') {
@@ -169,7 +173,11 @@ export async function GET(request: Request, context: RouteContext) {
       }),
       [],
     )
-    const remarkMap = await loadFriendRemarkMap(viewer.id, favorites.map((item) => item.Post.User.id))
+    const authorIds = favorites.map((item) => item.Post.User.id)
+    const [remarkMap, equippedBadgeMap] = await Promise.all([
+      loadFriendRemarkMap(viewer.id, authorIds),
+      getEquippedBadgesForUsers(authorIds),
+    ])
     return NextResponse.json({
       items: favorites.map(({ Post, ...favorite }) => ({
         ...favorite,
@@ -180,6 +188,7 @@ export async function GET(request: Request, context: RouteContext) {
           author: {
             ...Post.User,
             nickname: getPublicUserDisplayName(Post.User),
+            equippedBadge: equippedBadgeMap.get(Post.User.id) || null,
             profile: Post.User.Profile ? {
               ...Post.User.Profile,
               displayName: resolveFriendDisplayName({

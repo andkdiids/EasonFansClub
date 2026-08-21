@@ -5995,3 +5995,55 @@ body:has(.duel-page) .app-page-content {
   .clinic-category-nav { max-width:100%; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }.clinic-category-nav::-webkit-scrollbar { display:none; }.clinic-category-nav button { padding-inline:11px; }.clinic-category-nav button:first-child { padding-left:0; }
   .clinic-record-card-header > .clinic-record-time { font-size:9px; }.clinic-record-card-footer { width:100%; flex-wrap:nowrap; }.clinic-record-card-footer .clinic-action-button { flex:1; min-width:0; min-height:44px; }.clinic-record-card-footer .clinic-action-button span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.clinic-detail-record { max-width:100%; padding:15px; }.clinic-detail-header { align-items:flex-start; }.clinic-detail-header-actions { align-items:flex-end; flex-direction:column; gap:7px; }.clinic-detail-content { font-size:15px; }.clinic-detail-actions .clinic-action-button { flex:1; justify-content:center; min-width:0; min-height:44px; padding-inline:6px; }.clinic-detail-actions .clinic-action-button span { white-space:nowrap; }.clinic-section-heading h2,.clinic-composer-heading h2 { font-size:18px; }.clinic-composer-section { max-width:100%; padding:14px; }.clinic-identity-switch button,.clinic-composer-section .clinic-primary-button { min-height:44px; }.clinic-composer-section textarea { width:100%; height:112px; min-height:96px; max-height:180px; overflow-y:auto; resize:none; }.clinic-composer-footer { align-items:flex-start; flex-direction:column; }.clinic-composer-footer .clinic-primary-button { width:100%; }.clinic-option-grid,.clinic-need-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.clinic-identity-options { grid-template-columns:1fr; }.clinic-option-fieldset { padding:14px; }.clinic-form-actions { display:grid; grid-template-columns:1fr; }.clinic-form-actions > * { width:100%; }.clinic-report-panel { padding:14px; }.clinic-report-stats { grid-template-columns:1fr; }.clinic-report-stats > div { border-right:0; border-bottom:1px solid var(--border); }.clinic-report-stats > div:last-child { border-bottom:0; }.clinic-me-row { flex-direction:column; gap:9px; }.clinic-me-row a { align-self:flex-start; }.clinic-dialog { padding:16px; }
 }
+/* E院勋章：统一昵称旁的受控视觉效果；动画均为低频且可由 reduced-motion 关闭。 */
+.user-display-name-link { color: inherit; text-decoration: none; }
+.user-display-name { display:inline-flex; min-width:0; align-items:center; gap:5px; vertical-align:middle; }
+.user-display-name-text { min-width:0; overflow-wrap:anywhere; }
+.user-display-name-text-gradient { color:var(--badge-name-fallback,#0f5f78); }
+@supports ((-webkit-background-clip:text) or (background-clip:text)) {
+  .user-display-name-text-gradient { color:transparent; -webkit-background-clip:text; background-clip:text; }
+}
+.user-display-name-compact { gap:3px; }
+.user-display-badge { position:relative; display:inline-flex; min-width:0; align-items:center; gap:3px; cursor:pointer; border-radius:999px; outline:none; }
+.user-display-badge:focus-visible { outline:2px solid var(--primary,#0e7490); outline-offset:2px; }
+.user-display-badge-name { max-width:12rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.82em; font-weight:800; color:var(--foreground-muted,#64748b); }
+.user-display-badge-tooltip { position:absolute; z-index:90; left:50%; bottom:calc(100% + 9px); display:flex; min-width:180px; align-items:center; gap:9px; border:1px solid var(--border,#cbd5e1); border-radius:12px; padding:9px 11px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 12px 34px rgba(15,23,42,.18); opacity:0; pointer-events:none; transform:translate(-50%,4px); transition:opacity .16s ease,transform .16s ease; text-align:left; }
+.user-display-badge-tooltip::after { position:absolute; left:50%; bottom:-5px; width:9px; height:9px; border-right:1px solid var(--border,#cbd5e1); border-bottom:1px solid var(--border,#cbd5e1); background:var(--surface,#fff); content:""; transform:translateX(-50%) rotate(45deg); }
+.user-display-badge-tooltip > span:last-child { display:grid; min-width:0; gap:2px; }
+.user-display-badge-tooltip strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:900; }
+.user-display-badge-tooltip small { color:var(--foreground-muted,#64748b); font-size:10px; font-weight:800; white-space:nowrap; }
+.user-display-badge:hover .user-display-badge-tooltip,.user-display-badge:focus-visible .user-display-badge-tooltip { opacity:1; pointer-events:auto; transform:translate(-50%,0); }
+.user-badge-image,.user-badge-placeholder { display:inline-flex; flex:none; aspect-ratio:1; width:18px; height:18px; align-items:center; justify-content:center; object-fit:contain; }
+.badge-image-wall { width:52px; height:52px; }
+.badge-image-detail { width:108px; height:108px; }
+.user-badge-placeholder { border:1px solid var(--border,#cbd5e1); border-radius:50%; color:var(--foreground-muted,#64748b); background:var(--surface-subtle,#f8fafc); font-size:12px; font-weight:900; }
+.badge-effect-shine { animation: eason-badge-shine 6.5s ease-in-out infinite; }
+.badge-effect-glow { animation: eason-badge-glow 4.8s ease-in-out infinite; }
+.badge-effect-sparkle { animation: eason-badge-sparkle 7s ease-in-out infinite; }
+@keyframes eason-badge-shine { 0%,72%,100% { filter:brightness(1); } 78% { filter:brightness(1.22) drop-shadow(0 0 3px rgba(245,211,117,.5)); } 84% { filter:brightness(1); } }
+@keyframes eason-badge-glow { 0%,100% { filter:drop-shadow(0 0 0 rgba(245,211,117,0)); } 50% { filter:drop-shadow(0 0 4px rgba(245,211,117,.45)); } }
+@keyframes eason-badge-sparkle { 0%,76%,100% { filter:brightness(1); } 80% { filter:brightness(1.18) drop-shadow(0 0 4px rgba(255,255,255,.65)); } 86% { filter:brightness(1); } }
+.badge-detail-backdrop { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.48); }
+.badge-detail-dialog { position:relative; display:flex; min-width:min(320px,100%); flex-direction:column; align-items:center; gap:10px; border:1px solid var(--border,#cbd5e1); border-radius:20px; padding:28px 32px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 18px 60px rgba(15,23,42,.2); text-align:center; }
+.badge-detail-dialog h3 { margin:3px 0 0; font-size:20px; font-weight:900; }
+.badge-detail-rarity,.badge-detail-obtained { margin:0; color:var(--foreground-muted,#64748b); font-size:12px; font-weight:800; }
+.badge-detail-close { position:absolute; top:8px; right:10px; border:0; color:var(--foreground-muted,#64748b); background:transparent; font-size:26px; line-height:1; cursor:pointer; }
+@media (prefers-reduced-motion: reduce) {
+  .badge-effect-shine,.badge-effect-glow,.badge-effect-sparkle { animation:none; }
+}
+@media (max-width: 767px) {
+  .duel-room-player .user-display-badge-name { display:none; }
+  .duel-room-player .user-display-name { max-width:100%; }
+}
+.badge-collection-card { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; border:1px solid var(--border,#cbd5e1); border-radius:14px; padding:10px; background:var(--surface-subtle,#f8fafc); }
+.badge-collection-card-hidden { opacity:.78; }
+.badge-collection-card-main { display:flex; min-width:0; flex:1; align-items:center; gap:10px; border:0; padding:0; background:transparent; cursor:pointer; }
+.badge-collection-card-main:focus-visible { outline:2px solid var(--primary,#0e7490); outline-offset:3px; border-radius:10px; }
+.badge-collection-action { flex:none; border:1px solid #bae6fd; border-radius:999px; padding:7px 10px; color:#075985; background:#f0f9ff; font-size:11px; font-weight:900; cursor:pointer; }
+.badge-collection-action.is-equipped { color:#475569; background:#f8fafc; }
+.badge-collection-action:disabled { cursor:wait; opacity:.6; }
+.admin-badge-input { display:block; box-sizing:border-box; width:100%; margin-top:4px; min-height:40px; border:1px solid #bae6fd; border-radius:12px; padding:8px 11px; color:var(--foreground,#0f172a); background:var(--surface-subtle,#f8fafc); font:inherit; font-size:13px; font-weight:700; }
+.admin-badge-input:focus { border-color:#0e7490; outline:2px solid rgba(14,116,144,.16); outline-offset:1px; }
+.admin-badge-list-button { min-height:36px; border:1px solid #bae6fd; border-radius:10px; padding:6px 10px; color:#075985; background:#f0f9ff; font-size:11px; font-weight:900; cursor:pointer; }
+.admin-badge-list-button.danger { border-color:#fecaca; color:#b91c1c; background:#fff1f2; }
+.badge-admin-dialog { width:min(620px,100%); max-height:min(80vh,720px); overflow:auto; border:1px solid var(--border,#cbd5e1); border-radius:20px; padding:22px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 18px 60px rgba(15,23,42,.2); }

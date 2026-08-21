@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { readFile } from 'node:fs/promises'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import {
   uploadStickerImage,
   uploadStickerPackCover,
@@ -38,12 +38,12 @@ function describeUploadPackError(error: unknown) {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: error.message,
-      stack: error.stack,
-      cause: error.cause,
+      code: typeof (error as { code?: unknown }).code === 'string'
+        ? (error as unknown as { code: string }).code
+        : undefined,
     }
   }
-  return error
+  return { name: 'UnknownError' }
 }
 
 /**
@@ -62,12 +62,6 @@ function describeUploadPackError(error: unknown) {
 export async function POST(request: Request) {
   let stage = 'request_received'
   let stickerIndex: number | null = null
-  console.info('[sticker.uploadPack]', {
-    stage,
-    method: request.method,
-    contentType: request.headers.get('content-type'),
-    contentLength: request.headers.get('content-length'),
-  })
 
   stage = 'authentication'
   const guard = await requireUser()
@@ -75,6 +69,12 @@ export async function POST(request: Request) {
     console.warn('[sticker.uploadPack]', { stage, status: guard.response.status })
     return guard.response
   }
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/stickers/upload-pack',
+    ip: { limit: 10, windowSeconds: 60 * 60 },
+    user: { limit: 5, windowSeconds: 60 * 60 },
+  }, '表情包上传过于频繁，请稍后再试')
+  if (limited) return limited
 
   let tempDirectory: string | null = null
   try {
@@ -115,11 +115,9 @@ export async function POST(request: Request) {
     console.info('[sticker.uploadPack]', {
       stage,
       fileCount: stickerFiles.length,
-      files: stickerFiles.map((file) => ({ name: file.filename, size: file.size, type: file.mimeType })),
       stickerTotalSize,
       coverSize,
       totalFileSize: stickerTotalSize + coverSize,
-      contentLength: request.headers.get('content-length'),
     })
 
     stage = 'parameter_validation'
@@ -158,7 +156,6 @@ export async function POST(request: Request) {
       console.info('[sticker.uploadPack]', {
         stage: 'cos_upload_success',
         kind: 'cover',
-        url: coverUrl,
         size: buf.byteLength,
       })
     }
@@ -172,7 +169,6 @@ export async function POST(request: Request) {
       console.info('[sticker.uploadPack]', {
         stage: 'sticker_processing_started',
         index: i,
-        name: file.filename,
         size: file.size,
         type: file.mimeType,
       })
@@ -193,7 +189,6 @@ export async function POST(request: Request) {
         stage: 'cos_upload_success',
         kind: 'sticker',
         index: i,
-        url: result.url,
         size: buf.byteLength,
         outputFormat: result.format,
         isAnimated: result.isAnimated,
@@ -220,7 +215,7 @@ export async function POST(request: Request) {
       stickers: uploadedStickers,
     })
     stage = 'prisma_create_succeeded'
-    console.info('[sticker.uploadPack]', { stage, packId })
+    console.info('[sticker.uploadPack]', { stage, created: true })
 
     revalidatePath('/profile/stickers')
     return NextResponse.json({
@@ -250,7 +245,6 @@ export async function POST(request: Request) {
       stage,
       stickerIndex,
       error: describeUploadPackError(error),
-      fullError: error,
     })
     return NextResponse.json(
       {
@@ -281,7 +275,6 @@ export async function POST(request: Request) {
       } catch (cleanupError) {
         console.warn('[sticker.uploadPack]', {
           stage: 'multipart_temp_cleanup',
-          tempDirectory,
           error: describeUploadPackError(cleanupError),
         })
       }

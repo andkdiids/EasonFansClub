@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       data: {
         name,
         slug,
+        code: slug,
         description: description || null,
         iconUrl,
         category: 'CONCERT',

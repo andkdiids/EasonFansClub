@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { clinicErrorResponse, clinicOk, clinicPublicHeaders } from '@/lib/clinic-api'
 import { getPublicClinicRecordDetail, removeClinicRecord } from '@/lib/clinic-service'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ recordId: string }> }
 
@@ -14,6 +14,12 @@ export async function GET(_request: Request, context: RouteContext) {
   try {
     const { recordId } = await context.params
     const viewer = await getCurrentUser()
+    const limited = await enforceApiRateLimit(_request, viewer?.id, {
+      endpoint: '/api/clinic/[recordId]:GET',
+      ip: { limit: 240, windowSeconds: 60 },
+      user: { limit: 120, windowSeconds: 60 },
+    })
+    if (limited) return limited
     const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null)
     if (!record) return NextResponse.json({ ok: false, code: 'RECORD_NOT_FOUND', message: '这份病历不存在。' }, { status: 404, headers: clinicPublicHeaders })
     return clinicOk({ record })
@@ -25,6 +31,12 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(_request, guard.user.id, {
+    endpoint: '/api/clinic/[recordId]:DELETE',
+    ip: { limit: 30, windowSeconds: 60 },
+    user: { limit: 15, windowSeconds: 60 },
+  })
+  if (limited) return limited
   try {
     const { recordId } = await context.params
     const canManage = await hasAdminPermission(guard.user, 'clinic_manage')

@@ -6,12 +6,19 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
+import { enforceApiRateLimit } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/direct-conversations',
+    ip: { limit: 240, windowSeconds: 60 },
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const conversationRows = await prisma.conversation.findMany({
     where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
     include: {
@@ -82,23 +89,26 @@ export async function GET() {
     const other = row.ConversationParticipant.find((participant) => participant.userId !== user.id)
     const otherUser = other?.User
       ? {
-          ...other.User,
+          uid: other.User.uid,
           nickname: getPublicUserDisplayName(other.User),
           avatarUrl: publicImageUrl(other.User.avatarUrl),
           Profile: other.User.Profile ? {
-            ...other.User.Profile,
-            avatarUrl: publicImageUrl(other.User.Profile.avatarUrl),
             displayName: resolveFriendDisplayName({
               viewerId: user.id,
               targetUserId: other.User.id,
               fallbackName: getPublicUserDisplayName(other.User),
               remarkMap,
             }),
+            avatarUrl: publicImageUrl(other.User.Profile.avatarUrl),
           } : other.User.Profile,
         }
       : null
     const latestMessage = row.DirectMessage[0]
-      ? { ...row.DirectMessage[0], content: publicModerationText(row.DirectMessage[0].content, row.DirectMessage[0].moderationStatus) }
+      ? {
+          id: row.DirectMessage[0].id,
+          content: publicModerationText(row.DirectMessage[0].content, row.DirectMessage[0].moderationStatus),
+          createdAt: row.DirectMessage[0].createdAt,
+        }
       : null
     return {
       id: row.id,
@@ -113,6 +123,12 @@ export async function GET() {
 export async function POST(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/direct-conversations',
+    ip: { limit: 60, windowSeconds: 60 },
+    user: { limit: 30, windowSeconds: 60 },
+  }, '私信会话创建过于频繁，请稍后再试')
+  if (limited) return limited
   const body = await request.json().catch(() => null)
   const targetUid = Number(body?.targetUid)
   const target = await prisma.user.findFirst({ where: { uid: targetUid, status: 'ACTIVE', isDeleted: false }, select: { id: true } })

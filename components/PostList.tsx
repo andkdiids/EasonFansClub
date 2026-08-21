@@ -7,6 +7,8 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatDate } from '@/lib/format'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type PostItem = {
   id: string
@@ -27,6 +29,7 @@ type PostItem = {
     nickname: string
     avatarUrl?: string | null
     level: number
+    equippedBadge?: EquippedBadgeView | null
     profile?: { displayName: string | null; avatarUrl: string | null } | null
   }
   board: { name: string; slug: string }
@@ -82,14 +85,14 @@ export function PostList({
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                     <SafeAvatar src={authorAvatar} name={authorName} uid={post.author.uid} />
                   </span>
-                  <span>{authorName} · UID {formatUid(post.author.uid)} · Lv.{post.author.level}</span>
+                  <span><UserDisplayName name={authorName} uid={post.author.uid} badge={post.author.equippedBadge} compact /> · UID {formatUid(post.author.uid)} · Lv.{post.author.level}</span>
                 </Link>
               ) : post.author.uid !== undefined ? (
                 <span className="flex items-center gap-2 text-brand-950">
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">
                     {post.author.uid === 0 ? 'E' : formatUid(post.author.uid).slice(0, 1)}
                   </span>
-                  <span>{authorName}</span>
+                  <UserDisplayName name={authorName} uid={post.author.uid} badge={post.author.equippedBadge} compact />
                 </span>
               ) : null}
               <span>{formatDate(post.createdAt instanceof Date ? post.createdAt : new Date(post.createdAt))}</span>

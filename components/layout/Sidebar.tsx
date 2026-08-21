@@ -7,7 +7,7 @@ import { BrandMark } from '@/components/BrandMark'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
-import type { SessionUser } from '@/lib/auth'
+import type { SessionShellUser } from '@/lib/auth'
 import { isAppNavigationActive, primaryNavigation, quickNavigation, type AppNavigationItem } from './navigation'
 
 type NavLeafProps = { item: AppNavigationItem; pathname: string; unreadCount: number }
@@ -21,7 +21,7 @@ function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
   </Link>
 }
 
-export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: Readonly<{ user: SessionUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean }>) {
+export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRootRef = useRef<HTMLDivElement>(null)

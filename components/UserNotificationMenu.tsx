@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
 function Badge({ count }: { count: number }) {
   if (count <= 0) return null
@@ -16,12 +18,14 @@ export function UserNotificationMenu({
   avatarUrl,
   isAdmin,
   currentUserId,
+  equippedBadge,
 }: {
   displayName: string
   uid: number
   avatarUrl?: string | null
   isAdmin: boolean
   currentUserId: string
+  equippedBadge?: EquippedBadgeView | null
 }) {
   const { summary } = useNotificationSummary()
   const [loggingOut, setLoggingOut] = useState(false)
@@ -61,7 +65,7 @@ export function UserNotificationMenu({
         </span>
         {summary.total > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
       </span>
-      <span className="site-user-menu-name hidden max-w-28 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block">{displayName}</span>
+      <span className="site-user-menu-name hidden max-w-40 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} compact /></span>
     </summary>
     <div data-user-menu-panel className="pointer-events-auto absolute right-0 z-[var(--layer-popover)] mt-2 w-60 rounded-sm border border-sky-100 bg-white p-2 shadow-sm">
       <Link href="/profile" className={itemClass}>个人病历</Link>

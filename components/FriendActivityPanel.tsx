@@ -8,6 +8,7 @@ import { getMoodDisplay } from '@/lib/checkin-mood'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
+import { UserDisplayName } from '@/components/UserDisplayName'
 
 type ActivityType = '' | 'CHECKIN' | 'POST'
 type TimeFilter = 'today' | 'yesterday' | '7days' | 'custom'
@@ -24,6 +25,7 @@ type FriendActivity = {
   actor: {
     uid: number
     nickname: string
+    equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
     avatarUrl: string | null
     profile: { displayName: string | null; avatarUrl: string | null } | null
   }
@@ -155,7 +157,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
                 </a>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <a href={`/user/${formatUid(item.actor.uid)}`} className="font-black text-brand-950">{name}</a>
+                    <a href={`/user/${formatUid(item.actor.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={item.actor.uid} badge={item.actor.equippedBadge} compact /></a>
                     <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(item.actor.uid)}</span>
                     <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">{item.type === 'CHECKIN' ? `${mood?.icon || '✚'} ${mood?.label || typeLabel}` : `✎ ${typeLabel}`}</span>
                   </div>

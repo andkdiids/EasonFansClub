@@ -8,7 +8,8 @@ export const runtime = 'nodejs'
 export async function GET(request: Request) {
   const guard = await requireAdmin('entertainment_manage')
   if (!guard.user) return guard.response
-  const limit = Number(new URL(request.url).searchParams.get('limit') || 100)
+  const rawLimit = Number(new URL(request.url).searchParams.get('limit'))
+  const limit = Math.min(100, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 100))
   try {
     return duelOk({ matches: await getDuelAdminMatches(limit) })
   } catch (error) {

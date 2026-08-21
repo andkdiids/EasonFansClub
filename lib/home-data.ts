@@ -12,6 +12,7 @@ import { getTodayMonthDay } from '@/lib/today'
 import { countTodayBirthdays, grantTodayBirthdayRewards } from '@/lib/birthday'
 import { getTodayEventRecords } from '@/lib/today-events'
 import { publicModerationText } from '@/lib/content-moderation'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -47,10 +48,12 @@ const publicPostModerationStatuses: Array<'APPROVED' | 'VIOLATION'> = ['APPROVED
 export async function getHomePosts(userId?: string) {
   const posts = await getHomePostsUncached()
   const remarkMap = await loadFriendRemarkMap(userId, posts.map((post) => post.author.id))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(posts.map((post) => post.author.id))
   const displayPosts = posts.map((post) => ({
     ...post,
     author: {
       ...post.author,
+      equippedBadge: equippedBadgeMap.get(post.author.id) || null,
       profile: post.author.profile ? {
         ...post.author.profile,
         displayName: resolveFriendDisplayName({
@@ -142,8 +145,10 @@ async function getHomePostsUncached() {
 export async function getHomeDailyMessages(userId?: string) {
   const messages = await cachedHomeData('home.dailyMessages', getHomeDailyMessagesUncached)
   const remarkMap = await loadFriendRemarkMap(userId, messages.map((message) => message.user.id))
-  if (!userId || messages.length === 0) return messages
-  return messages.map((message) => ({
+  const equippedBadgeMap = await getEquippedBadgesForUsers(messages.map((message) => message.user.id))
+  const withBadges = messages.map((message) => ({ ...message, user: { ...message.user, equippedBadge: equippedBadgeMap.get(message.user.id) || null } }))
+  if (!userId || messages.length === 0) return withBadges
+  return withBadges.map((message) => ({
     ...message,
     user: message.user.profile ? {
       ...message.user,

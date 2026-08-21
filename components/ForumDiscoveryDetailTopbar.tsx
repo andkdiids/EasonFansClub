@@ -2,11 +2,14 @@
 
 import { useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
+import { UserDisplayName } from '@/components/UserDisplayName'
+import type { EquippedBadgeView } from '@/lib/badge-types'
 
-export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, postActions }: Readonly<{
+export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, authorBadge, postActions }: Readonly<{
   authorName: string
   authorAvatar: string | null
   authorUid: number
+  authorBadge?: EquippedBadgeView | null
   postActions?: ReactNode
 }>) {
   const router = useRouter()
@@ -41,7 +44,7 @@ export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid
             <img src={authorAvatar} alt="" />
           ) : String(authorUid).slice(0, 1)}
         </span>
-        <span>{authorName}</span>
+        <UserDisplayName name={authorName} uid={authorUid} badge={authorBadge} compact />
       </div>
       {postActions ? <span className="forum-discovery-detail-post-actions">{postActions}</span> : null}
       <button type="button" onClick={() => void sharePost()} className="forum-discovery-detail-share" aria-label="分享帖子">↗</button>

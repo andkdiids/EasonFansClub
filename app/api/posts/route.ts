@@ -3,10 +3,11 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
-import { sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
@@ -97,10 +98,18 @@ async function runPostCreateSideEffect(
 
 export async function GET(request: Request) {
   const viewer = await getCurrentUser()
+  const limited = await enforceApiRateLimit(request, viewer?.id, {
+    endpoint: '/api/posts',
+    ip: { limit: 180, windowSeconds: 60 },
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
   const { searchParams } = new URL(request.url)
   const boardSlug = searchParams.get('board')
-  const page = Math.max(Number(searchParams.get('page') || 1), 1)
-  const take = Math.min(Number(searchParams.get('take') || 20), 50)
+  const rawPage = Number(searchParams.get('page'))
+  const rawTake = Number(searchParams.get('take'))
+  const page = Math.min(10_000, Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1))
+  const take = Math.min(50, Math.max(Number.isFinite(rawTake) ? rawTake : 20, 1))
   const skip = (page - 1) * take
 
   try {
@@ -147,6 +156,7 @@ export async function GET(request: Request) {
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
     const remarkMap = await loadFriendRemarkMap(viewer?.id, pageRows.map((row) => row.User.id))
+    const equippedBadgeMap = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id))
     const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, ...post }) => ({
       ...post,
       title: publicModerationText(post.title, moderationStatus),
@@ -154,6 +164,7 @@ export async function GET(request: Request) {
         ...User,
         nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
+        equippedBadge: equippedBadgeMap.get(User.id) || null,
         profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
@@ -199,6 +210,13 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ message: '\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55' }, { status: 401 })
   }
+
+  const limited = await enforceApiRateLimit(request, user.id, {
+    endpoint: '/api/posts',
+    ip: { limit: 50, windowSeconds: 10 * 60 },
+    user: { limit: 8, windowSeconds: 10 * 60 },
+  }, '发帖过于频繁，请稍后再试')
+  if (limited) return limited
 
   phase = 'parse-request'
   let body: Record<string, unknown>

@@ -3,15 +3,21 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { syncLikeNotification } from '@/lib/like-notifications'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/replies/like',
+    user: { limit: 120, windowSeconds: 60 },
+  })
+  if (limited) return limited
 
   const { replyId } = await context.params
   const likes = await prisma.replyLike.findMany({
@@ -34,6 +40,7 @@ export async function GET(_request: Request, context: RouteContext) {
     },
   })
   const remarkMap = await loadFriendRemarkMap(guard.user.id, likes.map((like) => like.User.id))
+  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
@@ -45,13 +52,20 @@ export async function GET(_request: Request, context: RouteContext) {
         remarkMap,
       }),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
+      equippedBadge: equippedBadgeMap.get(like.User.id) || null,
     })),
   })
 }
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+    endpoint: '/api/replies/like',
+  }, '点赞操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { replyId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
@@ -93,9 +107,15 @@ export async function POST(_request: Request, context: RouteContext) {
   return NextResponse.json(result)
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    ip: { limit: 120, windowSeconds: 60 },
+    user: { limit: 60, windowSeconds: 60 },
+    endpoint: '/api/replies/like',
+  }, '点赞操作过于频繁，请稍后再试')
+  if (limited) return limited
 
   const { replyId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
