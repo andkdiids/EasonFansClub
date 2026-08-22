@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { publicImageUrl } from '@/lib/images'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
@@ -117,7 +118,7 @@ export function serializeRewardUser(user: RewardUser) {
     uid: user.uid,
     username: user.username,
     nickname: user.nickname,
-    displayName: user.Profile?.displayName || user.nickname || user.username,
+    displayName: getPublicUserDisplayName(user),
     email: user.email,
     phone: user.phone,
     avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
@@ -162,12 +163,13 @@ export function serializeUserReward(row: UserRewardHistoryRow) {
     transactionId: row.transactionId,
     userId: row.recipient.id,
     userUid: row.recipient.uid,
+    nickname: getPublicUserDisplayName(row.recipient),
     username: row.usernameSnapshot || row.recipient.username,
     experienceAmount: row.experienceAmount,
     registrationFeeAmount: row.registrationFeeAmount,
     reason: row.reason,
     operatorId: row.operatorId,
-    operatorName: row.operator.Profile?.displayName || row.operator.nickname || row.operator.username,
+    operatorName: getPublicUserDisplayName(row.operator),
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -273,7 +275,7 @@ export async function listUserRewardOperators() {
   return users.map((user) => ({
     id: user.id,
     uid: user.uid,
-    name: user.Profile?.displayName || user.nickname || user.username,
+    name: getPublicUserDisplayName(user),
   }))
 }
 

@@ -90,7 +90,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function fitWatermarkText(username: string, uid: number, width: number, height: number) {
+function fitWatermarkText(nickname: string, uid: number, width: number, height: number) {
   const minDimension = Math.max(1, Math.min(width, height))
   const safeMargin = Math.max(2, Math.round(minDimension * 0.025))
   let fontSize = clamp(Math.round(minDimension * 0.032), 10, 88)
@@ -101,22 +101,22 @@ function fitWatermarkText(username: string, uid: number, width: number, height: 
   const preferredContentWidth = () => Math.min(maxContentWidth(), Math.max(80, Math.round(width * 0.46)))
   const uidText = `UID:${uid}`
   const separator = '  '
-  const cleanUsername = username.trim() || '用户'
-  let displayUsername = cleanUsername
-  let text = `${displayUsername}${separator}${uidText}`
+  const cleanNickname = nickname.trim() || 'E院用户'
+  let displayNickname = cleanNickname
+  let text = `${displayNickname}${separator}${uidText}`
 
   while (fontSize > minFontSize && estimatedTextWidth(text, fontSize) > preferredContentWidth()) fontSize -= 1
 
   if (estimatedTextWidth(text, fontSize) > maxContentWidth()) {
-    const usernameCharacters = Array.from(cleanUsername)
-    while (usernameCharacters.length > 1) {
-      const candidate = `${usernameCharacters.join('')}…${separator}${uidText}`
+    const nicknameCharacters = Array.from(cleanNickname)
+    while (nicknameCharacters.length > 1) {
+      const candidate = `${nicknameCharacters.join('')}…${separator}${uidText}`
       if (estimatedTextWidth(candidate, fontSize) <= maxContentWidth()) {
-        displayUsername = `${usernameCharacters.join('')}…`
+        displayNickname = `${nicknameCharacters.join('')}…`
         text = candidate
         break
       }
-      usernameCharacters.pop()
+      nicknameCharacters.pop()
     }
   }
 
@@ -134,7 +134,7 @@ function fitWatermarkText(username: string, uid: number, width: number, height: 
 
   return {
     text,
-    displayUsername,
+    displayNickname,
     fontSize,
     padding,
     safeMargin,
@@ -286,8 +286,8 @@ export function resolveCjkWatermarkFontFamily(): string {
   return cachedWatermarkFontFamily
 }
 
-export function buildMyLivePhotoWatermarkSvg({ username, uid, width, height }: { username: string; uid: number; width: number; height: number }) {
-  const fitted = fitWatermarkText(username, uid, width, height)
+export function buildMyLivePhotoWatermarkSvg({ nickname, uid, width, height }: { nickname: string; uid: number; width: number; height: number }) {
+  const fitted = fitWatermarkText(nickname, uid, width, height)
   const escapedText = escapeXml(fitted.text)
   const baseline = Math.min(fitted.overlayHeight - fitted.padding, fitted.padding + fitted.fontSize)
   const radius = Math.max(2, Math.round(fitted.fontSize * 0.24))
@@ -315,7 +315,7 @@ function invalidImage(message: string): never {
  * Sharp rotates before resizing, then composites the optional identity watermark
  * into raw pixels before the final WebP encode.
  */
-export async function processMyLivePhoto(input: Buffer, declaredMimeType: string, watermark: boolean, identity?: { username: string; uid: number }): Promise<ProcessedMyLivePhoto> {
+export async function processMyLivePhoto(input: Buffer, declaredMimeType: string, watermark: boolean, identity?: { nickname: string; uid: number }): Promise<ProcessedMyLivePhoto> {
   if (!Buffer.isBuffer(input) || input.byteLength === 0) invalidImage('图片内容为空')
   if (input.byteLength > MY_LIVE_PHOTO_MAX_FILE_SIZE) invalidImage('图片不能超过 12MB')
 
@@ -354,7 +354,7 @@ export async function processMyLivePhoto(input: Buffer, declaredMimeType: string
 
   let output = sharp(normalized.data, { raw: { width, height, channels } })
   if (watermark && identity) {
-    const overlay = buildMyLivePhotoWatermarkSvg({ username: identity.username, uid: identity.uid, width, height })
+    const overlay = buildMyLivePhotoWatermarkSvg({ nickname: identity.nickname, uid: identity.uid, width, height })
     output = output.composite([{ input: Buffer.from(overlay.svg), left: overlay.left, top: overlay.top }])
   }
 
@@ -371,7 +371,7 @@ export async function processMyLivePhoto(input: Buffer, declaredMimeType: string
 }
 
 export async function getMyLiveWatermarkIdentity(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { username: true, uid: true } })
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { nickname: true, uid: true } })
   if (!user) throw new MyLivePhotoRequestError(401, '当前登录用户不存在或已失效')
   return user
 }

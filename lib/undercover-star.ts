@@ -61,9 +61,7 @@ type PublicUserRow = Prisma.UserGetPayload<{ select: typeof publicUserSelect }>
 const publicUserSelect = {
   id: true,
   uid: true,
-  username: true,
   nickname: true,
-  usernameModerationStatus: true,
   nicknameModerationStatus: true,
   nicknameViolationDisplay: true,
   avatarUrl: true,

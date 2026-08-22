@@ -5,7 +5,6 @@ export const postModerationHistorySelect = {
   id: true,
   postId: true,
   actorName: true,
-  actorUsername: true,
   actorUid: true,
   action: true,
   status: true,

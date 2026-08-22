@@ -7,6 +7,7 @@ import {
   RatingServiceError,
 } from '@/lib/rating-service'
 import { parseRatingReviewSort, parseRatingScore } from '@/lib/rating-types'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
@@ -45,6 +46,7 @@ export async function POST(request: Request, { params }: Context) {
   if (content && (await checkBannedWords(content)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   try {
     const result = await createRatingWithOptionalReview({ target: 'album', targetId: albumId, userId: guard.user.id, score, content })
+    triggerBadgeEvaluation(guard.user.id, 'RATING_CREATED')
     return NextResponse.json({ ...result, rating: { ...result.rating, createdAt: result.rating.createdAt.toISOString() }, review: result.review ? { ...result.review, createdAt: result.review.createdAt.toISOString() } : null }, { status: 201 })
   } catch (error) {
     return errorResponse(error)

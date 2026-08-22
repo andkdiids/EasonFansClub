@@ -108,7 +108,7 @@ export async function getUserDeletionPreview(userId: string): Promise<UserDeleti
     user: {
       id: user.id,
       uid: user.uid,
-      nickname: user.Profile?.displayName || user.nickname,
+      nickname: user.nickname || 'E院用户',
       avatarUrl: user.Profile?.avatarUrl || user.avatarUrl,
       phone: user.phone,
       email: user.email,

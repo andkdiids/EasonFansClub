@@ -75,12 +75,12 @@ test('MySQL事务中的attendance行锁使并发计数后创建不会超限', ()
   assert.match(service, /deleteFromCos\(storageKey\)/)
 })
 
-test('客户端不能提交或决定水印用户名和UID', () => {
+test('客户端不能提交或决定水印昵称和UID', () => {
   const route = read('app/api/music/live/attendance/[attendanceId]/photos/route.ts')
   const panel = read('components/music/live/MyLivePhotoPanel.tsx')
   assert.match(route, /getMyLiveWatermarkIdentity\(guard\.user\.id\)/)
-  assert.match(read('lib/my-live-photos.ts'), /select: \{ username: true, uid: true \}/)
-  assert.match(read('lib/my-live-photos.ts'), /username: identity\.username, uid: identity\.uid/)
+  assert.match(read('lib/my-live-photos.ts'), /select: \{ nickname: true, uid: true \}/)
+  assert.match(read('lib/my-live-photos.ts'), /nickname: identity\.nickname, uid: identity\.uid/)
   assert.doesNotMatch(route, /form\.get\(['"]username|form\.get\(['"]uid/)
   assert.doesNotMatch(panel, /form\.append\(['"]username|form\.append\(['"]uid/)
 })
@@ -124,22 +124,22 @@ test('真实格式和Sharp解码共同校验，伪造MIME、非法图片和动�
 test('水印false不改图，true写入最终WebP像素并动态计算字号', async () => {
   const input = await makeImage('jpeg', 600, 400)
   const plain = await processMyLivePhoto(input, 'image/jpeg', false)
-  const marked = await processMyLivePhoto(input, 'image/jpeg', true, { username: '小鹿', uid: 72727 })
+  const marked = await processMyLivePhoto(input, 'image/jpeg', true, { nickname: '小鹿', uid: 72727 })
   assert.equal((await sharp(marked.buffer).metadata()).format, 'webp')
   assert.notDeepEqual(marked.buffer, plain.buffer)
   assert.equal(marked.watermarked, true)
-  const overlay = buildMyLivePhotoWatermarkSvg({ username: '小鹿', uid: 72727, width: marked.width, height: marked.height })
+  const overlay = buildMyLivePhotoWatermarkSvg({ nickname: '小鹿', uid: 72727, width: marked.width, height: marked.height })
   assert.match(overlay.text, /小鹿  UID:72727/)
   assert.ok(overlay.fontSize > 0)
 })
 
 test('水印支持中文英文特殊字符、完整UID和长用户名收缩', () => {
-  const username = `陈奕迅&EF<hello>"test"'emoji😀`
-  assert.equal(escapeXml(username), '陈奕迅&amp;EF&lt;hello&gt;&quot;test&quot;&apos;emoji😀')
-  const overlay = buildMyLivePhotoWatermarkSvg({ username, uid: 72727, width: 900, height: 600 })
+  const nickname = `陈奕迅&EF<hello>"test"'emoji😀`
+  assert.equal(escapeXml(nickname), '陈奕迅&amp;EF&lt;hello&gt;&quot;test&quot;&apos;emoji😀')
+  const overlay = buildMyLivePhotoWatermarkSvg({ nickname, uid: 72727, width: 900, height: 600 })
   assert.match(overlay.svg, /&amp;EF&lt;hello&gt;&quot;test&quot;&apos;/)
   assert.doesNotMatch(overlay.svg, /<hello>/)
-  const long = buildMyLivePhotoWatermarkSvg({ username: '特别特别特别特别特别特别特别特别特别特别长的用户名', uid: 72727, width: 500, height: 500 })
+  const long = buildMyLivePhotoWatermarkSvg({ nickname: '特别特别特别特别特别特别特别特别特别特别长的昵称', uid: 72727, width: 500, height: 500 })
   assert.match(long.text, /UID:72727/)
   assert.ok(long.left >= 0 && long.left + long.width <= 500)
   assert.ok(long.top >= 0 && long.top + long.height <= 500)

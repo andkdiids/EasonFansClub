@@ -53,7 +53,7 @@ export async function getAuditUserSnapshot(tx: AuditDatabaseClient, userId: stri
 }
 
 export function userSnapshotName(user: Pick<UserSnapshot, 'nickname' | 'Profile'>) {
-  return user.Profile?.displayName?.trim() || user.nickname
+  return user.nickname?.trim() || 'E院用户'
 }
 
 export async function createAdminActionAudit(

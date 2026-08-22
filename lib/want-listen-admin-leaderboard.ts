@@ -56,10 +56,8 @@ type OverviewUser = {
   id: string
   uid: number
   nickname: string
-  username: string
   avatarUrl: string | null
   nicknameModerationStatus: string
-  usernameModerationStatus: string
   Profile: { displayName: string | null; avatarUrl: string | null; displayNameModerationStatus: string } | null
 }
 
@@ -103,11 +101,9 @@ export async function getWantListenAdminOverview() {
               id: true,
               uid: true,
               nickname: true,
-              username: true,
               avatarUrl: true,
               nicknameModerationStatus: true,
               nicknameViolationDisplay: true,
-              usernameModerationStatus: true,
               Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } },
             },
           },
@@ -151,11 +147,9 @@ export async function findWantListenLeaderboardUser(rawQuery: string) {
       id: true,
       uid: true,
       nickname: true,
-      username: true,
       avatarUrl: true,
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
-      usernameModerationStatus: true,
       Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } },
     },
   })
@@ -325,10 +319,8 @@ export async function listWantListenAdminLeaderboard(input: { mode: unknown; per
           id: true,
           uid: true,
           nickname: true,
-          username: true,
           avatarUrl: true,
           nicknameModerationStatus: true,
-          usernameModerationStatus: true,
           Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } },
         },
       },
@@ -387,7 +379,7 @@ export async function readWantListenAdminSession(rawSessionId: unknown) {
       updatedAt: true,
       expiresAt: true,
       antiCheatStatus: true,
-      User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, nicknameModerationStatus: true, usernameModerationStatus: true, Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } } } },
+      User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, nicknameModerationStatus: true, Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } } } },
     },
   })
   if (!session) throw new WantListenAdminLeaderboardError('未找到该游戏记录', 404, 'SESSION_NOT_FOUND')

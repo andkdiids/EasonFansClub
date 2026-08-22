@@ -24,9 +24,9 @@ async function normalizeTourConcerts(tx: Prisma.TransactionClient, tourId: strin
 
 const concertInclude = {
   MusicTour: { select: { id: true, name: true, posterUrl: true } },
-  contributorUser: { select: { uid: true, username: true } },
-  setlistContributorUser: { select: { uid: true, username: true } },
-  encoreContributorUser: { select: { uid: true, username: true } },
+  contributorUser: { select: { uid: true, nickname: true } },
+  setlistContributorUser: { select: { uid: true, nickname: true } },
+  encoreContributorUser: { select: { uid: true, nickname: true } },
   MusicConcertSetlistItem: {
     orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
     include: { MusicSong: { select: { id: true, title: true, releaseYear: true, MusicAlbum: { select: { name: true } } } } },

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { listBadgeOwners } from '@/lib/badge-service'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
     obtainedAt: owner.obtainedAt.toISOString(),
     user: {
       ...owner.User,
-      displayName: owner.User.Profile?.displayName || owner.User.nickname || owner.User.username,
+      displayName: getPublicUserDisplayName(owner.User),
     },
   })) }, { headers: { 'Cache-Control': 'no-store' } })
 }

@@ -18,7 +18,7 @@ export function FriendProfileCard({
   onMessage: () => void
   onNavigate: () => void
 }>) {
-  const name = friend.profile?.displayName || friend.nickname
+  const name = friend.nickname || 'E院用户'
   const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const bio = friend.profile?.bio || friend.bio || '这个成员还没有填写个人简介。'
 

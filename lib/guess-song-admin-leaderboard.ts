@@ -10,6 +10,7 @@ import {
 } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod } from '@/lib/guess-song-period'
 import { getGuessSongDeletedYearSessionIds, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -122,7 +123,6 @@ type AdminEntry = {
     id: string
     uid: number
     nickname: string
-    username: string
     avatarUrl: string | null
     Profile: { displayName: string | null; avatarUrl: string | null } | null
   }
@@ -184,8 +184,7 @@ function serializeEntry(entry: AdminEntry, entryIds: string[]) {
     userId: entry.userId,
     uid: entry.User.uid,
     nickname: entry.User.nickname,
-    username: entry.User.username,
-    displayName: entry.User.Profile?.displayName || entry.User.nickname,
+    displayName: getPublicUserDisplayName(entry.User),
     avatarUrl: publicImageUrl(entry.User.Profile?.avatarUrl || entry.User.avatarUrl),
     mode: toPublicGuessSongMode(entry.mode),
     databaseMode: entry.mode,
@@ -208,8 +207,7 @@ function serializeYearSession(session: YearSession, periodKey: string) {
     userId: session.userId,
     uid: session.User.uid,
     nickname: session.User.nickname,
-    username: session.User.username,
-    displayName: session.User.Profile?.displayName || session.User.nickname,
+    displayName: getPublicUserDisplayName(session.User),
     avatarUrl: publicImageUrl(session.User.Profile?.avatarUrl || session.User.avatarUrl),
     mode: toPublicGuessSongMode(session.mode),
     databaseMode: session.mode,
@@ -263,7 +261,6 @@ export async function listGuessSongAdminLeaderboard(input: {
             id: true,
             uid: true,
             nickname: true,
-            username: true,
             avatarUrl: true,
             Profile: { select: { displayName: true, avatarUrl: true } },
           },
@@ -311,7 +308,6 @@ export async function listGuessSongAdminLeaderboard(input: {
           id: true,
           uid: true,
           nickname: true,
-          username: true,
           avatarUrl: true,
           Profile: { select: { displayName: true, avatarUrl: true } },
         },

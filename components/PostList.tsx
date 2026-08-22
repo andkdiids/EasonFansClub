@@ -64,7 +64,7 @@ export function PostList({
         共 {total ?? visiblePosts.length} 篇帖子
       </p>
       {visiblePosts.map((post) => {
-        const authorName = post.author.profile?.displayName || post.author.nickname
+        const authorName = post.author.nickname || 'E院用户'
         const authorAvatar = profileImageUrl(post.author.profile?.avatarUrl || post.author.avatarUrl)
         const isArchivedAuthor = post.author.uid === 0
         const canDelete = canManage || Boolean(currentUserId && post.author.id === currentUserId)

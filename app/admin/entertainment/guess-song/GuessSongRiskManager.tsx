@@ -70,7 +70,7 @@ export function GuessSongRiskManager() {
             <tbody>
               {logs.map((log) => (
                 <tr key={log.id}>
-                  <td><strong>{log.nickname}</strong><small>{log.username} · {log.uid}</small></td>
+                  <td><strong>{log.nickname}</strong><small>内部账号：{log.username} · UID {log.uid}</small></td>
                   <td>{new Date(log.createdAt).toLocaleString('zh-CN')}</td>
                   <td>{log.mode}</td>
                   <td>{log.score}</td>

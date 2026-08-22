@@ -359,7 +359,7 @@ function ModuleContent({
     <div className="space-y-3">
       {favorites.map((item) => {
         const author = item.post.author
-        const authorName = author.profile?.displayName || author.nickname
+        const authorName = author.nickname || 'E院用户'
         return (
 <Link
   key={item.id}

@@ -12,7 +12,6 @@ function score(mode: GuessSongPublicMode, value: number, userId = `${mode.toLowe
   const user = {
     id: userId,
     uid: 10001,
-    username: `${mode.toLowerCase()}-username`,
     displayName: `${mode} display name`,
     nickname: `${mode} nickname`,
     name: `${mode} display name`,
@@ -27,7 +26,6 @@ function score(mode: GuessSongPublicMode, value: number, userId = `${mode.toLowe
     achievedAt: '2026-08-12T00:00:00.000Z',
     userId,
     uid: user.uid,
-    username: user.username,
     displayName: user.displayName,
     nickname: user.name,
     avatarUrl: user.avatarUrl,

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { CUSTOM_MOOD_BANNED_WORD_MESSAGE, CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_TYPE, PRESET_MOOD_TYPE, normalizeCustomMoodText, validateCustomMoodInput } from '@/lib/checkin-mood'
@@ -435,6 +436,8 @@ postCheckinResults.forEach((item, index) => {
       )
     }
   })
+
+triggerBadgeEvaluation(user.id, 'CHECKIN_CREATED')
 
 return NextResponse.json({
     message: '今日挂号成功',

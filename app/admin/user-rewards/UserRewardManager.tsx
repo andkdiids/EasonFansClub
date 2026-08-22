@@ -25,6 +25,7 @@ type RewardHistoryItem = {
   transactionId: string
   userId: string
   userUid: number
+  nickname: string
   username: string
   experienceAmount: number
   registrationFeeAmount: number
@@ -231,7 +232,7 @@ export function UserRewardManager({ initialHistory, operators }: { initialHistor
   const confirmationText = confirmDraft
     ? [
         `用户：${confirmDraft.user.displayName}`,
-        `用户名：${confirmDraft.user.username}`,
+        `内部账号：${confirmDraft.user.username}`,
         `用户 ID：${confirmDraft.user.id}`,
         `UID：${formatUid(confirmDraft.user.uid)}`,
         '',
@@ -281,7 +282,7 @@ export function UserRewardManager({ initialHistory, operators }: { initialHistor
                 <Avatar user={user} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-black text-brand-950">{user.displayName}</span>
-                  <span className="mt-1 block truncate text-xs font-bold text-slate-500">用户名：{user.username} · UID {formatUid(user.uid)}</span>
+                  <span className="mt-1 block truncate text-xs font-bold text-slate-500">内部账号：{user.username} · UID {formatUid(user.uid)}</span>
                   <span className="mt-1 block truncate text-xs font-bold text-slate-400">{user.phone || '未绑定手机'} · {user.email || '未绑定邮箱'}</span>
                 </span>
                 <span className="hidden shrink-0 text-right text-xs font-black text-slate-500 sm:block">经验 {user.experience}<br />挂号费 {user.points}</span>
@@ -296,7 +297,7 @@ export function UserRewardManager({ initialHistory, operators }: { initialHistor
               <Avatar user={selectedUser} size="size-16" />
               <div className="min-w-0 flex-1">
                 <p className="text-xl font-black text-brand-950">{selectedUser.displayName}</p>
-                <p className="mt-1 text-xs font-bold text-slate-500">用户名：{selectedUser.username} · 用户 ID：{selectedUser.id} · UID {formatUid(selectedUser.uid)}</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">内部账号：{selectedUser.username} · 用户 ID：{selectedUser.id} · UID {formatUid(selectedUser.uid)}</p>
                 <p className="mt-1 text-xs font-bold text-slate-500">{selectedUser.phone || '未绑定手机'} · {selectedUser.email || '未绑定邮箱'}</p>
               </div>
               <button type="button" onClick={() => setSelectedUser(null)} className="min-h-10 rounded-full border border-sky-200 bg-white px-4 text-sm font-black text-brand-700">重新选择</button>
@@ -356,7 +357,7 @@ export function UserRewardManager({ initialHistory, operators }: { initialHistor
             <thead className="text-xs font-black text-slate-400"><tr><th className="px-3 py-2">用户</th><th className="px-3 py-2">经验值</th><th className="px-3 py-2">挂号费</th><th className="px-3 py-2">奖励说明</th><th className="px-3 py-2">操作人</th><th className="px-3 py-2">发放时间</th></tr></thead>
             <tbody>
               {historyLoading ? <tr><td colSpan={6} className="rounded-xl bg-sky-50 px-4 py-8 text-center font-bold text-slate-500">加载中...</td></tr> : history.length ? history.map((item) => (
-                <tr key={item.rewardId} className="bg-white shadow-sm"><td className="rounded-l-xl px-3 py-3"><p className="font-black text-brand-950">{item.username}</p><p className="mt-1 text-xs font-bold text-slate-500">UID {formatUid(item.userUid)}</p></td><td className="px-3 py-3 font-black text-emerald-700">{item.experienceAmount > 0 ? `+${item.experienceAmount}` : '—'}</td><td className="px-3 py-3 font-black text-emerald-700">{item.registrationFeeAmount > 0 ? `+${item.registrationFeeAmount}` : '—'}</td><td className="max-w-xs whitespace-pre-wrap px-3 py-3 font-bold text-slate-600">{item.reason}</td><td className="px-3 py-3 font-bold text-slate-600">{item.operatorName}</td><td className="rounded-r-xl px-3 py-3 font-bold text-slate-500">{formatTime(item.createdAt)}</td></tr>
+                <tr key={item.rewardId} className="bg-white shadow-sm"><td className="rounded-l-xl px-3 py-3"><p className="font-black text-brand-950">{item.nickname}</p><p className="mt-1 text-xs font-bold text-slate-500">UID {formatUid(item.userUid)}</p><p className="mt-1 text-[11px] font-bold text-slate-400">内部账号：{item.username}</p></td><td className="px-3 py-3 font-black text-emerald-700">{item.experienceAmount > 0 ? `+${item.experienceAmount}` : '—'}</td><td className="px-3 py-3 font-black text-emerald-700">{item.registrationFeeAmount > 0 ? `+${item.registrationFeeAmount}` : '—'}</td><td className="max-w-xs whitespace-pre-wrap px-3 py-3 font-bold text-slate-600">{item.reason}</td><td className="px-3 py-3 font-bold text-slate-600">{item.operatorName}</td><td className="rounded-r-xl px-3 py-3 font-bold text-slate-500">{formatTime(item.createdAt)}</td></tr>
               )) : <tr><td colSpan={6} className="rounded-xl bg-sky-50 px-4 py-8 text-center font-bold text-slate-500">暂无匹配的奖励记录。</td></tr>}
             </tbody>
           </table>

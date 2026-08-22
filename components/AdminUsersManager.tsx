@@ -8,7 +8,6 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 type AdminUser = {
   id: string
   uid: number
-  username: string
   nickname: string
   email: string | null
   phone: string | null

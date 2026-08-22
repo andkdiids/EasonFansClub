@@ -945,7 +945,7 @@ export function FriendDock({
     setError('')
     let password = ''
     if (presence.requiresPassword) {
-      const prompted = window.prompt(`输入「${friend.profile?.displayName || friend.nickname}」的房间密码以加入`) as string | null
+      const prompted = window.prompt(`输入「${friend.nickname || 'E院用户'}」的房间密码以加入`) as string | null
       if (prompted === null) return
       password = prompted
     }
@@ -1044,8 +1044,8 @@ export function FriendDock({
             <>
               <button type="button" onClick={leaveChat} aria-label="返回好友列表">←</button>
               <button type="button" className="friend-dock-chat-person" onClick={() => setProfileFriend(chatFriend)}>
-                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.profile?.displayName || chatFriend.nickname} className="h-8 w-8" />
-                <span><strong><UserDisplayName name={chatFriend.profile?.displayName || chatFriend.nickname} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
+                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.nickname || 'E院用户'} className="h-8 w-8" />
+                <span><strong><UserDisplayName name={chatFriend.nickname || 'E院用户'} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
@@ -1370,7 +1370,7 @@ function FriendRow({
   onFollow: () => void
 }) {
   const [actionsOpen, setActionsOpen] = useState(false)
-  const name = friend.profile?.displayName || friend.nickname
+  const name = friend.nickname || 'E院用户'
   const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const status = friend.relationshipStatus || 'FRIEND'
   const canOpenProfile = status === 'FRIEND'

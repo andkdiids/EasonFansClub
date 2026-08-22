@@ -109,7 +109,7 @@ function displayUser(user: {
   return {
     id: user.id,
     uid: user.uid,
-    nickname: user.forAdmin ? (user.Profile?.displayName || user.nickname) : getPublicUserDisplayName(user),
+    nickname: user.forAdmin ? (user.nickname || 'E院用户') : getPublicUserDisplayName(user),
     avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl || null),
     role: user.role,
   }

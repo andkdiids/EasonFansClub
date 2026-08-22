@@ -211,7 +211,11 @@ export async function decideFriendRequest(userId: string, requestId: string, act
     }
   })
 
-  if (!result) return { status: 404 as const, body: { message: '好友申请不存在或已处理' } }
+  if (!result) return { status: 404 as const, body: { message: '好友申请不存在或已处理' }, badgeEvaluationUserIds: [] as string[] }
   emitRealtimeMany([result.senderId, result.receiverId], 'friend-request', { requestId })
-  return { status: 200 as const, body: { request: result.request } }
+  return {
+    status: 200 as const,
+    body: { request: result.request },
+    badgeEvaluationUserIds: action === 'accept' ? [result.senderId, result.receiverId] : [],
+  }
 }

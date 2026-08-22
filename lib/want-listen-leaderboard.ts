@@ -1,7 +1,6 @@
 import { Prisma, type WantListenMode } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
-import { publicModerationText, publicModerationUserName } from '@/lib/content-moderation'
 import { prisma } from '@/lib/prisma'
 import { compareWantListenScores, getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod } from '@/lib/want-listen-period'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
@@ -61,10 +60,8 @@ export async function recordWantListenLeaderboard(sessionId: string, database: D
 type LeaderboardUser = {
   id: string
   uid: number
-  username: string
   nickname: string
   avatarUrl: string | null
-  usernameModerationStatus: string
   nicknameModerationStatus: string
   Profile: { displayName: string | null; displayNameModerationStatus: string; avatarUrl: string | null } | null
 }
@@ -96,9 +93,8 @@ function serializeLeaderboardRow(row: {
     user: {
       id: row.User.id,
       uid: row.User.uid,
-      username: publicModerationUserName(row.User.username, [row.User.usernameModerationStatus]),
       nickname: safeName,
-      displayName: publicModerationText(row.User.Profile?.displayName, row.User.Profile?.displayNameModerationStatus),
+      displayName: safeName,
       avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
       equippedBadge: equippedBadge || null,
     },
@@ -137,10 +133,8 @@ export async function getWantListenLeaderboard(input: {
         select: {
           id: true,
           uid: true,
-          username: true,
           nickname: true,
           avatarUrl: true,
-          usernameModerationStatus: true,
           nicknameModerationStatus: true,
           nicknameViolationDisplay: true,
           Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
@@ -163,10 +157,8 @@ export async function getWantListenLeaderboard(input: {
           select: {
             id: true,
             uid: true,
-            username: true,
             nickname: true,
             avatarUrl: true,
-            usernameModerationStatus: true,
             nicknameModerationStatus: true,
             nicknameViolationDisplay: true,
             Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },

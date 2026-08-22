@@ -6,7 +6,7 @@ type AdminTab = 'records' | 'reports' | 'consultations'
 type ContentStatus = 'ACTIVE' | 'HIDDEN' | 'DELETED' | 'REMOVED'
 type ReportStatus = 'PENDING' | 'RESOLVED' | 'REJECTED'
 
-type AdminUser = { id?: string; uid: string; username: string; nickname: string | null }
+type AdminUser = { id?: string; uid: string; nickname: string | null }
 type AdminRecord = {
   id: string
   content: string
@@ -69,7 +69,7 @@ const tabs: readonly { id: AdminTab; label: string }[] = [
 
 function userLabel(user: AdminUser | null | undefined) {
   if (!user) return '未知用户'
-  return user.nickname || user.username || user.uid
+  return user.nickname?.trim() || 'E院用户'
 }
 
 function actualUser(user: AdminUser | null | undefined) {

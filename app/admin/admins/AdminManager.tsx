@@ -115,7 +115,7 @@ export function AdminManager({
                 user={{
                   id: user.id,
                   uid: user.uid,
-                  nickname: user.profile?.displayName || user.nickname,
+                  nickname: user.nickname || 'E院用户',
                   email: user.email,
                   phone: user.phone,
                   role: user.role,

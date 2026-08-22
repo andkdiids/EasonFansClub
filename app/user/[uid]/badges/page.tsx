@@ -25,7 +25,7 @@ export default async function UserBadgesPage({ params }: PageProps) {
     <main className="site-page-main flat-page mx-auto max-w-5xl space-y-4 px-4 py-5 sm:px-5 sm:py-7">
       <header className="rounded-2xl border border-sky-100 bg-white/85 p-5 shadow-sm">
         <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">E院荣誉档案</p>
-        <h1 className="mt-2 text-2xl font-black text-brand-950"><UserDisplayName name={target.Profile?.displayName || target.nickname} uid={target.uid} badge={equippedBadge} showBadgeName /> 的勋章</h1>
+        <h1 className="mt-2 text-2xl font-black text-brand-950"><UserDisplayName name={target.nickname || 'E院用户'} uid={target.uid} badge={equippedBadge} showBadgeName /> 的勋章</h1>
         <p className="mt-2 text-sm font-bold leading-6 text-slate-500">记录每一段值得纪念的 E院足迹。</p>
       </header>
       <BadgeCollectionPanel uid={String(target.uid).padStart(5, '0')} isSelf={viewer?.id === target.id} previewOnly={false} />

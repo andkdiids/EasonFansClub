@@ -9,6 +9,7 @@ import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds,
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +25,7 @@ const reviewSelect = {
   isPinned: true,
   isFeatured: true,
   User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
-  ReviewedBy: { select: { id: true, uid: true, username: true, nickname: true, Profile: { select: { displayName: true } } } },
+  ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
   Board: { select: { name: true, slug: true } },
   PostMedia: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
 } as const
@@ -210,7 +211,7 @@ function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[])
     reviewedAt: post.reviewedAt?.toISOString() || null,
     User: { ...post.User, Profile: post.User.Profile ? { ...post.User.Profile, avatarUrl: profileImageUrl(post.User.Profile.avatarUrl) } : null },
     ReviewedBy: post.ReviewedBy
-      ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, username: post.ReviewedBy.username, name: userSnapshotName(post.ReviewedBy) }
+      ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, name: userSnapshotName(post.ReviewedBy) }
       : null,
     PostModerationHistory: history.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
     PostMedia: post.PostMedia.map((media) => ({ ...media, url: publicImageUrl(media.url), thumbnail: publicImageUrl(media.thumbnail) })),
@@ -312,7 +313,7 @@ export async function PATCH(request: Request) {
       status: reviewStatus,
       title: current.title,
       authorId: current.authorId,
-      authorName: current.User.Profile?.displayName || current.User.nickname,
+      authorName: current.User.nickname || 'E院用户',
       authorUid: current.User.uid,
       rejectionReason: result.post.rejectionReason,
     })
@@ -337,6 +338,7 @@ export async function PATCH(request: Request) {
     await refreshReviewBoardCount(current.boardId, postId, action)
     if (reviewStatus === 'APPROVED') {
       await writeApprovalFriendActivity({ postId, authorId: current.authorId, title: current.title, action })
+      triggerBadgeEvaluation(current.authorId, 'POST_APPROVED')
     }
 
     try {

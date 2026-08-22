@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cityGroupSlug, effectiveCityGroup, CITY_GROUP_TYPE_LABEL } from '@/lib/music-slug'
 import { checkConcertBadge } from '@/lib/concert-badge'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { parseBulkAttendanceRequest } from '@/lib/music-live-bulk'
 import { PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
 import { prisma } from '@/lib/prisma'
@@ -174,6 +175,7 @@ export async function POST(request: Request) {
     .map((addedTourId) => scopeConcerts.find((concert) => concert.tourId === addedTourId)?.id)
     .filter((concertId): concertId is string => Boolean(concertId))
   await Promise.all(badgeSources.map((concertId) => checkConcertBadge(guard.user!.id, concertId)))
+  if (result.addedCount > 0) triggerBadgeEvaluation(guard.user.id, 'CONCERT_ATTENDANCE_CREATED')
 
   return NextResponse.json({
     ok: true,

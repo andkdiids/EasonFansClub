@@ -64,7 +64,6 @@ async function authenticatedResponse(
   const responseUser = {
     id: sessionUser.id,
     uid: sessionUser.uid,
-    username: sessionUser.username,
     nickname: sessionUser.nickname,
   }
   const token = await createSessionToken(sessionUser)

@@ -485,11 +485,25 @@ export async function deleteBadgeSafely(badgeId: string, actorId?: string | null
 
 export const badgeAdminSelect = {
   ...BADGE_SELECT,
+  acquisitionDescriptionCustomized: true,
   category: true,
   musicTourId: true,
   isAutoGrant: true,
   createdAt: true,
   updatedAt: true,
+  BadgeRule: {
+    select: {
+      id: true,
+      ruleType: true,
+      operator: true,
+      threshold: true,
+      secondaryThreshold: true,
+      configJson: true,
+      isEnabled: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
   _count: { select: { UserBadge: true } },
 } as const
 
@@ -518,7 +532,7 @@ export async function listBadgeOwners(badgeId: string) {
       grantReason: true,
       sourceType: true,
       sourceId: true,
-      User: { select: { id: true, uid: true, nickname: true, username: true, Profile: { select: { displayName: true } } } },
+      User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
     },
   })
 }
@@ -540,6 +554,6 @@ export async function findUsersForBadgeGrant(query: string) {
     },
     orderBy: [{ uid: 'asc' }],
     take: 20,
-    select: { id: true, uid: true, nickname: true, username: true, Profile: { select: { displayName: true } } },
+    select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } },
   })
 }

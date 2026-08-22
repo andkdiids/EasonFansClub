@@ -7,6 +7,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { getShanghaiDayRange } from '@/lib/checkin'
 import { awardRegistrationFee } from '@/lib/registration-fee'
 import { syncUserAchievements } from '@/lib/achievements'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { prisma } from '@/lib/prisma'
 import {
   DUEL_ANSWER_SECONDS,
@@ -1987,9 +1988,12 @@ async function completeQuestionTx(tx: Prisma.TransactionClient, matchId: string,
 }
 
 async function syncDuelUsers(userIds: readonly string[]) {
-  await Promise.all([...new Set(userIds)].map((userId) => syncUserAchievements(userId, ['DUEL']).catch((error) => {
+  await Promise.all([...new Set(userIds)].map((userId) => {
+    triggerBadgeEvaluation(userId, 'DUEL_FINISHED')
+    return syncUserAchievements(userId, ['DUEL']).catch((error) => {
     console.error('[guess-song-duel.achievements]', { userId, error })
-  })))
+    })
+  }))
 }
 
 export async function submitDuelAnswer(input: {

@@ -8,7 +8,6 @@ export function publicUserSelect() {
   return {
     id: true,
     uid: true,
-    username: true,
     nickname: true,
     avatarUrl: true,
     backgroundUrl: true,

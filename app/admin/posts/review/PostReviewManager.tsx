@@ -14,8 +14,8 @@ export type ReviewPost = {
   isPinned: boolean
   isFeatured: boolean
   User: { uid: number; nickname: string; Profile: { displayName: string | null } | null }
-  ReviewedBy: { id: string; uid: number; username: string; name: string } | null
-  PostModerationHistory: { id: string; actorName: string | null; actorUsername: string | null; actorUid: number | null; action: string; status: PostModerationStatus; titleSnapshot: string | null; rejectionReason: string | null; createdAt: string }[]
+  ReviewedBy: { id: string; uid: number; name: string } | null
+  PostModerationHistory: { id: string; actorName: string | null; actorUid: number | null; action: string; status: PostModerationStatus; titleSnapshot: string | null; rejectionReason: string | null; createdAt: string }[]
   Board: { name: string }
   PostMedia: { id: string; url: string | null; thumbnail: string | null }[]
 }
@@ -146,7 +146,7 @@ export function PostReviewManager({ initialPosts, initialHasMore }: { initialPos
         const isReviewing = reviewingId === post.id
         return <article key={post.id} className="grid gap-5 py-6 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500"><span className="rounded-full bg-sky-50 px-3 py-1 text-brand-700">[{post.Board.name}]</span><span>{post.User.Profile?.displayName || post.User.nickname}</span><span>UID {post.User.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time>{post.reviewedAt ? <time>审核时间：{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.reviewedAt))}</time> : null}{post.reviewedAt ? <span>审核人：{post.ReviewedBy ? `${post.ReviewedBy.name} · UID ${post.ReviewedBy.uid}` : '原管理员账号已不存在'}</span> : null}</div>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500"><span className="rounded-full bg-sky-50 px-3 py-1 text-brand-700">[{post.Board.name}]</span><span>{post.User.nickname || 'E院用户'}</span><span>UID {post.User.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time>{post.reviewedAt ? <time>审核时间：{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.reviewedAt))}</time> : null}{post.reviewedAt ? <span>审核人：{post.ReviewedBy ? `${post.ReviewedBy.name} · UID ${post.ReviewedBy.uid}` : '原管理员账号已不存在'}</span> : null}</div>
             <h3 className="mt-3 text-xl font-black text-brand-950">{post.title}</h3>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{post.content}</p>
             {queueStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">拒绝原因：{post.rejectionReason}</p> : null}

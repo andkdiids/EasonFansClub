@@ -80,7 +80,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
         {!posts.loading && !posts.failed ? (
           <div className="grid gap-3">
             {posts.data.map((post) => {
-              const authorName = post.author.profile?.displayName || post.author.nickname
+              const authorName = post.author.nickname || 'E院用户'
               return (
                 <article key={post.id} className="rounded-xl border border-sky-100 bg-white/82 p-5 shadow-sm">
                   <div className="mb-3 flex flex-wrap gap-2">
@@ -111,7 +111,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
             {messages.loading ? <ModuleFallback title="正在加载留言..." /> : null}
             {!messages.loading && !messages.failed && messages.data.map((item) => {
               const mood = getMoodDisplay(item)
-              const name = item.user.profile?.displayName || item.user.nickname
+              const name = item.user.nickname || 'E院用户'
               return (
                 <article key={item.id} className="rounded-3xl bg-sky-50/80 p-5">
               <p className="font-black text-brand-950">{mood.formatted ? `${mood.formatted} · ` : ''}<UserDisplayName name={name} uid={item.user.uid} badge={item.user.equippedBadge} compact /> · Lv.{item.user.level}</p>

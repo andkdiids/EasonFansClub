@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { decideFriendRequest } from '@/lib/friends'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
@@ -10,6 +11,7 @@ export async function POST(_request: Request, context: RouteContext) {
 
   const { requestId } = await context.params
   const result = await decideFriendRequest(user.id, requestId, 'accept')
+  for (const userId of result.badgeEvaluationUserIds) triggerBadgeEvaluation(userId, 'FRIENDSHIP_CREATED')
   return NextResponse.json(result.body, {
     status: result.status,
     headers: { 'Cache-Control': 'private, no-store, max-age=0' },

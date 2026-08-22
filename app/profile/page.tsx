@@ -64,7 +64,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     console.error('[profile.ensureBirthdayBadge]', error)
   })
 
-  const displayName = profile.Profile.displayName || profile.nickname
+  const displayName = profile.nickname || 'E院用户'
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
@@ -76,7 +76,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   ])
 
   const profileEditorInitialProfile = {
-    nickname: displayName,
+    nickname: profile.nickname,
     nicknameViolation: profile.nicknameModerationStatus === 'VIOLATION' || profile.Profile.displayNameModerationStatus === 'VIOLATION',
     avatarUrl: avatar || '',
     defaultAvatarOptions,

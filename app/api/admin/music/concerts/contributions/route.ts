@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { type Prisma } from '@prisma/client'
 import { contributionStatusLabel, contributionTypeLabel } from '@/lib/music-contributions'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -16,8 +17,8 @@ function validStatus(value: string | null) {
 }
 
 const include = {
-  submitter: { select: { id: true, uid: true, username: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
-  reviewer: { select: { id: true, uid: true, username: true, nickname: true } },
+  submitter: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+  reviewer: { select: { id: true, uid: true, nickname: true } },
   targetShow: { select: { id: true, city: true, concertDate: true, venue: true, title: true, MusicTour: { select: { id: true, name: true } } } },
 } as const
 
@@ -32,7 +33,7 @@ function serialize(item: Prisma.ConcertContributionGetPayload<{ include: typeof 
     submitter: {
       ...item.submitter,
       avatarUrl: publicImageUrl(item.submitter.Profile?.avatarUrl || item.submitter.avatarUrl),
-      displayName: item.submitter.Profile?.displayName || item.submitter.nickname || item.submitter.username,
+      displayName: getPublicUserDisplayName(item.submitter),
     },
     targetShow: item.targetShow ? { ...item.targetShow, concertDate: item.targetShow.concertDate.toISOString() } : null,
   }

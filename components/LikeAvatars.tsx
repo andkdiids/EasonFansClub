@@ -89,7 +89,7 @@ export function LikeAvatars({
           <span key={liker.uid} className="grid h-6 w-6 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
             <SafeAvatar
               src={profileImageUrl(liker.avatarUrl)}
-              name={liker.displayName || liker.nickname}
+              name={liker.nickname || 'E院用户'}
               uid={liker.uid}
               className="h-full w-full"
               textClassName="text-[10px]"
@@ -115,13 +115,13 @@ export function LikeAvatars({
                     <span className="grid h-5 w-5 place-items-center overflow-hidden rounded-full bg-brand-950 text-[9px] font-black text-white">
                       <SafeAvatar
                         src={profileImageUrl(liker.avatarUrl)}
-                        name={liker.displayName || liker.nickname}
+                        name={liker.nickname || 'E院用户'}
                         uid={liker.uid}
                         className="h-full w-full"
                         textClassName="text-[9px]"
                       />
                     </span>
-                    <UserDisplayName name={liker.displayName || liker.nickname} uid={liker.uid} badge={liker.equippedBadge} compact />
+                    <UserDisplayName name={liker.nickname || 'E院用户'} uid={liker.uid} badge={liker.equippedBadge} compact />
                   </a>
                 </li>
               ))}

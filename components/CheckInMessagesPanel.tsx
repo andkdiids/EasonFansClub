@@ -123,7 +123,7 @@ function flattenCommentThread(
 }
 
 function getCommentAuthorName(author: DailyComment['author']) {
-  return 'uid' in author ? author.profile?.displayName || author.nickname : author.name
+  return 'uid' in author ? author.nickname || 'E院用户' : author.name
 }
 
 function getCommentAuthorBadge(author: DailyComment['author']) {
@@ -550,7 +550,7 @@ export function CheckInMessagesPanel({
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMoodDisplay(item)
           const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null
-          const name = fullIdentity?.profile?.displayName || fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : '')
+          const name = fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : 'E院用户')
           const avatar = profileImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
           const rootComments = commentTree.get(null) || []

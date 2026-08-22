@@ -33,8 +33,8 @@ test('显示名解析按 viewer 读取备注，profile context 保留公开昵�
 
   assert.match(resolver, /context === 'profile'/)
   assert.match(resolver, /loadFriendRemarkMap/)
-  assert.match(resolver, /profile\?\.displayName\?\.trim\(\) \|\| user\.nickname\?\.trim\(\)/)
-  assert.match(profilePage, /const name = user\.Profile\.displayName \|\| user\.nickname/)
+  assert.match(resolver, /user\.nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
+  assert.match(profilePage, /const name = getPublicUserDisplayName\(user\)/)
   assert.match(profilePage, /FriendRemarkEditor targetUserId=\{user\.id\}/)
 })
 

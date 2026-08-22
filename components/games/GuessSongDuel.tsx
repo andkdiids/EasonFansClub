@@ -32,7 +32,7 @@ function avatar(user: { name: string; avatarUrl: string | null }) {
 }
 
 function friendName(friend: Friend) {
-  return friend.profile?.displayName || friend.name || friend.nickname || '好友'
+  return friend.nickname || friend.name || '好友'
 }
 
 function formatDuration(startedAt: string, finishedAt: string | null) {

@@ -49,7 +49,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const shellUser = sessionUser ? {
     id: sessionUser.id,
     uid: sessionUser.uid,
-    username: sessionUser.username,
     nickname: sessionUser.nickname,
     avatarUrl: sessionUser.avatarUrl,
     equippedBadge: sessionUser.equippedBadge,

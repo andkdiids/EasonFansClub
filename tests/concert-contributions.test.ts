@@ -69,10 +69,10 @@ test('审核通知使用正式资料链接，投稿功能不接入任何奖励�
   }
 })
 
-test('前台来源组件只在存在 contributor 时显示，并实时使用 username 与 UID', () => {
+test('前台来源组件只在存在 contributor 时显示，并实时使用 nickname 与 UID', () => {
   const source = read('components/music/ConcertContributorAttribution.tsx')
-  assert.match(source, /if \(!contributor \|\| !contributor\.uid \|\| !contributor\.username\) return null/)
-  assert.match(source, /contributor\.username/)
+  assert.match(source, /if \(!contributor \|\| !contributor\.uid \|\| !contributor\.nickname\) return null/)
+  assert.match(source, /contributor\.nickname/)
   assert.match(source, /contributor\.uid/)
   assert.match(source, /\/user\//)
 })

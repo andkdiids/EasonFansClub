@@ -92,7 +92,7 @@ test('真实活动只展示已发布数据并可进入详情', () => {
   assert.match(read('app/activities/[activityId]/page.tsx'), /status: 'PUBLISHED'/)
 })
 
-test('@ 浮层仅显示好友头像和用户名并支持小型滚动列表', () => {
+test('@ 浮层仅显示好友头像和昵称并支持小型滚动列表', () => {
   assert.match(mentionInput, /\/api\/friends\/mentions/)
   assert.match(mentionInput, /SafeAvatar/)
   assert.match(mentionInput, /friend\.name/)
@@ -100,8 +100,8 @@ test('@ 浮层仅显示好友头像和用户名并支持小型滚动列表', () 
   assert.doesNotMatch(mentionInput, /UID \{|level|挂号费|手机号|邮箱|在线状态/)
 })
 
-test('好友提及搜索支持用户名、昵称、展示名和 UID 精确优先', () => {
-  assert.match(mentionApi, /friend\.username/)
+test('好友提及搜索以昵称、展示名和 UID 为主并保持精确优先', () => {
+  assert.doesNotMatch(mentionApi, /friend\.username/)
   assert.match(mentionApi, /friend\.nickname/)
   assert.match(mentionApi, /friend\.Profile\?\.displayName/)
   assert.match(mentionApi, /normalized\.uid === q \|\| normalized\.rawUid === q \? 1/)
@@ -120,7 +120,7 @@ test('UID 搜索选择后只插入 @用户名并提交稳定 userId', () => {
   assert.match(mentionInput, /displayText = `@\$\{friend\.name\}`/)
   assert.match(mentionInput, /userId: friend\.id/)
   assert.doesNotMatch(mentionInput, /displayText = `@\$\{friend\.uid\}`/)
-  assert.match(replyForm, /JSON\.stringify\(\{ content, parentId: replyTo\?\.id, imageUrls, mentions \}\)/)
+  assert.match(replyForm, /JSON\.stringify\(\{[\s\S]*content,[\s\S]*parentId: replyTo\?\.id,[\s\S]*imageUrls,[\s\S]*mentions,[\s\S]*stickerId:/)
 })
 
 test('服务端限制五名好友并阻止伪造陌生人、拉黑用户和锁帖提及', () => {

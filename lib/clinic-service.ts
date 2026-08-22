@@ -15,9 +15,7 @@ import { prisma } from '@/lib/prisma'
 const clinicAuthorSelect = {
   id: true,
   uid: true,
-  username: true,
   nickname: true,
-  usernameModerationStatus: true,
   nicknameModerationStatus: true,
   nicknameViolationDisplay: true,
   avatarUrl: true,
@@ -34,9 +32,7 @@ const clinicAuthorSelect = {
 type ClinicAuthorRow = {
   id: string
   uid: number
-  username: string
   nickname: string
-  usernameModerationStatus: string
   nicknameModerationStatus: string
   avatarUrl: string | null
   Profile: {
@@ -827,10 +823,10 @@ export async function listClinicAdminData(tab: ClinicAdminTab, page = 1, pageSiz
           status: true,
           createdAt: true,
           handledAt: true,
-          reporter: { select: { uid: true, username: true, nickname: true } },
-          record: { select: { id: true, content: true, status: true, identityMode: true, anonymousNumber: true, author: { select: { uid: true, username: true, nickname: true } } } },
-          consultation: { select: { id: true, recordId: true, content: true, status: true, identityMode: true, anonymousNumber: true, author: { select: { uid: true, username: true, nickname: true } } } },
-          handledBy: { select: { uid: true, username: true, nickname: true } },
+          reporter: { select: { uid: true, nickname: true } },
+          record: { select: { id: true, content: true, status: true, identityMode: true, anonymousNumber: true, author: { select: { uid: true, nickname: true } } } },
+          consultation: { select: { id: true, recordId: true, content: true, status: true, identityMode: true, anonymousNumber: true, author: { select: { uid: true, nickname: true } } } },
+          handledBy: { select: { uid: true, nickname: true } },
         },
       }),
     ])
@@ -855,8 +851,8 @@ export async function listClinicAdminData(tab: ClinicAdminTab, page = 1, pageSiz
           aspirinCount: true,
           mouthpieceCount: true,
           createdAt: true,
-          author: { select: { id: true, uid: true, username: true, nickname: true } },
-          record: { select: { category: true, status: true, author: { select: { uid: true, username: true, nickname: true } } } },
+          author: { select: { id: true, uid: true, nickname: true } },
+          record: { select: { category: true, status: true, author: { select: { uid: true, nickname: true } } } },
         },
       }),
     ])
@@ -881,7 +877,7 @@ export async function listClinicAdminData(tab: ClinicAdminTab, page = 1, pageSiz
         consultationCount: true,
         mouthpieceCount: true,
         createdAt: true,
-        author: { select: { id: true, uid: true, username: true, nickname: true } },
+        author: { select: { id: true, uid: true, nickname: true } },
         _count: { select: { reports: true } },
       },
     }),

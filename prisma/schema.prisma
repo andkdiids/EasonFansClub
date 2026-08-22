@@ -217,6 +217,27 @@ enum BadgeGrantType {
   EVENT
 }
 
+enum BadgeRuleType {
+  POST_COUNT
+  FEATURED_POST_COUNT
+  CHECKIN_TOTAL_DAYS
+  CHECKIN_STREAK
+  ACCOUNT_AGE_DAYS
+  FRIEND_COUNT
+  FOLLOWER_COUNT
+  GUESS_SONG_MAX_STREAK
+  DUEL_WIN_COUNT
+  WANT_LISTEN_MAX_STREAK
+  CONCERT_ATTENDANCE_COUNT
+  RATING_COUNT
+}
+
+enum BadgeRuleOperator {
+  GTE
+  LTE
+  EQ
+}
+
 enum BadgeEffectType {
   NONE
   SHINE
@@ -239,6 +260,7 @@ model Badge {
   code                   String                @unique
   description            String?               @db.VarChar(500)
   acquisitionDescription String?               @db.VarChar(500)
+  acquisitionDescriptionCustomized Boolean     @default(false)
   iconUrl                String?
   pointsCost             Int?
   category               BadgeCategory         @default(SYSTEM)
@@ -260,6 +282,7 @@ model Badge {
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
   UserBadge              UserBadge[]
+  BadgeRule              BadgeRule?
   EquippedByUsers        User[]                @relation("UserEquippedBadge")
 
   @@index([isActive])
@@ -269,6 +292,22 @@ model Badge {
   @@index([visibility, isEnabled, sortOrder])
   @@index([grantType])
   @@index([rarity])
+}
+
+model BadgeRule {
+  id                 String            @id @default(cuid())
+  badgeId            String            @unique
+  ruleType           BadgeRuleType
+  operator           BadgeRuleOperator @default(GTE)
+  threshold          Int
+  secondaryThreshold Int?
+  configJson         Json?
+  isEnabled           Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  Badge               Badge             @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@index([ruleType, isEnabled])
 }
 
 model Banner {

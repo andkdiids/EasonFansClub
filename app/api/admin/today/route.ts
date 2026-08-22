@@ -37,7 +37,7 @@ function serializeEvent(event: TodayEventRow) {
     ...data,
     date: getTodayEventDateKey(event.date, event.month, event.day),
     imageUrl: publicImageUrl(event.imageUrl),
-    submittedBy: SubmittedBy ? { uid: SubmittedBy.uid, name: SubmittedBy.Profile?.displayName || SubmittedBy.nickname } : null,
+    submittedBy: SubmittedBy ? { uid: SubmittedBy.uid, name: SubmittedBy.nickname || 'E院用户' } : null,
   }
 }
 

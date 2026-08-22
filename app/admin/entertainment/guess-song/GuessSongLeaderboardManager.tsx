@@ -11,7 +11,6 @@ type Row = {
   userId: string
   uid: number
   displayName: string
-  username: string
   mode: Mode
   periodType: Period
   periodKey: string
@@ -129,7 +128,7 @@ export function GuessSongLeaderboardManager() {
   }
 
   async function deleteScore(row: Row) {
-    const confirmed = window.confirm(`确定删除：\n用户名 ${row.displayName}\n${modeLabels[mode]}模式\n当前成绩 ${row.score} 分？\n\n删除后只影响本周期该模式榜单。`)
+    const confirmed = window.confirm(`确定删除：\n昵称 ${row.displayName}\n${modeLabels[mode]}模式\n当前成绩 ${row.score} 分？\n\n删除后只影响本周期该模式榜单。`)
     if (!confirmed) return
     const reasonText = window.prompt('请输入删除原因（必填）', '错误成绩删除')
     if (!reasonText?.trim()) return
@@ -169,7 +168,7 @@ export function GuessSongLeaderboardManager() {
           <select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
             {periods.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索用户名 / UID" className="w-48 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索昵称 / UID（兼容登录账号）" className="w-56 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
       </div>
 

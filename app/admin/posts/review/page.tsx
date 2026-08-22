@@ -28,7 +28,7 @@ export default async function AdminPostReviewPage() {
         isPinned: true,
         isFeatured: true,
         User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
-        ReviewedBy: { select: { id: true, uid: true, username: true, nickname: true, Profile: { select: { displayName: true } } } },
+        ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         Board: { select: { name: true } },
         PostMedia: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
       },
@@ -45,7 +45,7 @@ export default async function AdminPostReviewPage() {
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
     ReviewedBy: post.ReviewedBy
-      ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, username: post.ReviewedBy.username, name: post.ReviewedBy.Profile?.displayName || post.ReviewedBy.nickname }
+      ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, name: post.ReviewedBy.nickname?.trim() || 'E院用户' }
       : null,
     PostModerationHistory: (historyByPostId.get(post.id) || []).map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
     User: post.User,

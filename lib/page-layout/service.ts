@@ -57,7 +57,6 @@ function serializeRevision(pageKey: PageLayoutPageKey, revision: {
   publishedById?: string | null
   publishedBy?: {
     nickname: string
-    username: string
     profile?: { displayName: string | null } | null
   } | null
 }): SerializedPageLayoutRevision {
@@ -71,7 +70,7 @@ function serializeRevision(pageKey: PageLayoutPageKey, revision: {
     source: revision.source,
     createdAt: revision.createdAt.toISOString(),
     publishedById: revision.publishedById || null,
-    publishedByName: revision.publishedBy?.profile?.displayName || revision.publishedBy?.nickname || revision.publishedBy?.username || null,
+    publishedByName: revision.publishedBy?.nickname?.trim() || null,
   }
 }
 
@@ -147,7 +146,6 @@ export async function listPageLayoutRevisions(pageKey: PageLayoutPageKey, limit 
       User: {
         select: {
           nickname: true,
-          username: true,
           Profile: { select: { displayName: true } },
         },
       },
@@ -170,7 +168,6 @@ export async function getPageLayoutRevision(pageKey: PageLayoutPageKey, revision
       User: {
         select: {
           nickname: true,
-          username: true,
           Profile: { select: { displayName: true } },
         },
       },

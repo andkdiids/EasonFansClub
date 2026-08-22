@@ -119,7 +119,7 @@ function insertWallMessage(messages: WallMessage[], created: WallMessage) {
 function flattenReplies(children: WallMessage[], parentName: string) {
   const flattened: Array<{ message: WallMessage; replyToName: string }> = []
   for (const child of children) {
-    const childName = child.sender.profile?.displayName || child.sender.nickname
+    const childName = child.sender.nickname || 'E院用户'
     flattened.push({ message: child, replyToName: parentName })
     flattened.push(...flattenReplies(child.children || [], childName))
   }
@@ -383,7 +383,7 @@ function WallInlineReplyComposer({ target, value, submitting, textareaRef, onCha
 }
 
 function WallMessageCard({ message, expanded, isOwner = false, canReply, replyTarget, replyContent, replySubmitting, replyComposerRef, onToggleComments, onLike, onReply, onReplyChange, onReplySubmit, onReplyCancel, onDelete }: { message: WallMessage; expanded: Record<string, boolean>; isOwner?: boolean; canReply: boolean; replyTarget: WallReplyTarget | null; replyContent: string; replySubmitting: boolean; replyComposerRef: RefObject<HTMLTextAreaElement | null>; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: WallReplyTarget) => void; onReplyChange: (value: string) => void; onReplySubmit: () => void; onReplyCancel: () => void; onDelete: (id: string) => void }) {
-  const name = message.sender.profile?.displayName || message.sender.nickname
+  const name = message.sender.nickname || 'E院用户'
   const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   const children = message.children || []
   const replyCount = message.commentCount || children.length
@@ -423,7 +423,7 @@ function WallMessageHeader({ message, name }: { message: WallMessage; name: stri
 }
 
 function WallMessageActions({ message, replyCount, expanded, onToggleComments, onLike, onReply, onDelete }: { message: WallMessage; replyCount: number; expanded: boolean; onToggleComments: (id: string) => void; onLike: (id: string) => void; onReply: (target: WallReplyTarget) => void; onDelete: (id: string) => void }) {
-  const name = message.sender.profile?.displayName || message.sender.nickname
+  const name = message.sender.nickname || 'E院用户'
   return (
     <div className="mt-2 flex flex-wrap gap-3">
       <button onClick={() => void onLike(message.id)} className="text-xs font-black text-brand-700" type="button">{message.liked ? '取消点赞' : '点赞'} {message.likeCount}</button>
@@ -435,7 +435,7 @@ function WallMessageActions({ message, replyCount, expanded, onToggleComments, o
 }
 
 function WallReplyCard({ message, replyToName, isOwner, canReply, replyTarget, replyContent, replySubmitting, replyComposerRef, onLike, onReply, onReplyChange, onReplySubmit, onReplyCancel, onDelete }: { message: WallMessage; replyToName: string; isOwner: boolean; canReply: boolean; replyTarget: WallReplyTarget | null; replyContent: string; replySubmitting: boolean; replyComposerRef: RefObject<HTMLTextAreaElement | null>; onLike: (id: string) => void; onReply: (target: WallReplyTarget) => void; onReplyChange: (value: string) => void; onReplySubmit: () => void; onReplyCancel: () => void; onDelete: (id: string) => void }) {
-  const name = message.sender.profile?.displayName || message.sender.nickname
+  const name = message.sender.nickname || 'E院用户'
   const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   return (
     <article id={`wall-message-${message.id}`} className="rounded-xl bg-sky-50/60 p-2.5">

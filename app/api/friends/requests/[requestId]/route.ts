@@ -5,6 +5,7 @@ import { getFriendRequestNotificationKey } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { enforceApiRateLimit } from '@/lib/security'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
@@ -69,6 +70,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   const action = body?.action === 'accept' ? 'accept' : 'reject'
   const result = await decideFriendRequest(user.id, requestId, action)
+  for (const userId of result.badgeEvaluationUserIds) triggerBadgeEvaluation(userId, 'FRIENDSHIP_CREATED')
 
   return NextResponse.json(result.body, { status: result.status })
 }

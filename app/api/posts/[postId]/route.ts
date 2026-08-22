@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory } from '@/lib/admin-audit'
 import { awardFeaturedPostRewards } from '@/lib/community-rewards'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
@@ -166,7 +167,7 @@ async function executePostDelete(postId: string, user: SessionUser, canManagePos
         targetId: postId,
         targetTitle: lockedExisting.title,
         targetUserId: lockedExisting.authorId,
-        targetUserName: lockedExisting.User.Profile?.displayName || lockedExisting.User.nickname,
+        targetUserName: lockedExisting.User.nickname || 'E院用户',
         targetUserUid: lockedExisting.User.uid,
         metadata: { isDeleted: true },
       },
@@ -387,6 +388,7 @@ export async function PATCH(request: Request, { params }: Params) {
         boardId: true,
         isDeleted: true,
         status: true,
+        isFeatured: true,
         title: true,
         content: true,
         stickerId: true,
@@ -512,7 +514,7 @@ export async function PATCH(request: Request, { params }: Params) {
       targetId: postId,
       targetTitle: lockedExisting.title,
       targetUserId: lockedExisting.authorId,
-      targetUserName: lockedExisting.User.Profile?.displayName || lockedExisting.User.nickname,
+      targetUserName: lockedExisting.User.nickname || 'E院用户',
       targetUserUid: lockedExisting.User.uid,
       metadata: {
         isPinned: data.isPinned ?? null,
@@ -560,7 +562,9 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     return updated
-  })
+    })
+
+    if (data.isFeatured === true && !existing.isFeatured) triggerBadgeEvaluation(existing.authorId, 'POST_FEATURED')
 
     phase = `${mutationKind}-cache`
     revalidatePath('/forum')
@@ -775,7 +779,7 @@ async function handleEditPost(
         targetId: postId,
         targetTitle: rawTitle,
         targetUserId: lockedExisting.authorId,
-        targetUserName: lockedExisting.User.Profile?.displayName || lockedExisting.User.nickname,
+      targetUserName: lockedExisting.User.nickname || 'E院用户',
         targetUserUid: lockedExisting.User.uid,
         metadata: { changedFields: ['title', 'content', 'boardId', ...(mediaChanged ? ['media'] : [])] },
       },

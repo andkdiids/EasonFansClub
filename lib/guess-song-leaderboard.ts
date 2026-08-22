@@ -3,7 +3,6 @@ import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
-import { publicModerationText, publicModerationUserName } from '@/lib/content-moderation'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -43,14 +42,12 @@ export type GuessSongModeHighScore = {
   achievedAt: string
   userId: string
   uid: number
-  username: string
   displayName: string | null
   nickname: string
   avatarUrl: string | null
   user: {
     id: string
     uid: number
-    username: string
     displayName: string | null
     nickname: string
     name: string
@@ -117,8 +114,6 @@ function serializeModeHighScore(
       id: string
       uid: number
       nickname: string
-      username: string
-      usernameModerationStatus?: string | null
       nicknameModerationStatus?: string | null
       avatarUrl: string | null
       Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null } | null
@@ -147,15 +142,13 @@ function serializeModeHighScore(
     achievedAt: row.completedAt.toISOString(),
     userId: row.User.id,
     uid: row.User.uid,
-    username: publicModerationUserName(row.User.username, [row.User.usernameModerationStatus]),
-    displayName: publicModerationText(row.User.Profile?.displayName, row.User.Profile?.displayNameModerationStatus),
+    displayName: safeName,
     nickname: name,
     avatarUrl,
     user: {
       id: row.User.id,
       uid: row.User.uid,
-      username: publicModerationUserName(row.User.username, [row.User.usernameModerationStatus]),
-      displayName: publicModerationText(row.User.Profile?.displayName, row.User.Profile?.displayNameModerationStatus),
+      displayName: safeName,
       nickname: safeName,
       name: safeName,
       avatarUrl,
@@ -208,8 +201,6 @@ export async function getGuessSongModeHighScores(viewerId?: string): Promise<Gue
               id: true,
               uid: true,
               nickname: true,
-              username: true,
-              usernameModerationStatus: true,
               nicknameModerationStatus: true,
               nicknameViolationDisplay: true,
               avatarUrl: true,
@@ -306,8 +297,6 @@ type LeaderboardRow = ScoreRecord & {
     id: string
     uid: number
     nickname: string
-    username: string
-    usernameModerationStatus?: string | null
     nicknameModerationStatus?: string | null
     avatarUrl: string | null
     Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null } | null
@@ -371,8 +360,6 @@ export async function getGuessSongPersonalBest(input: {
           id: true,
           uid: true,
           nickname: true,
-          username: true,
-          usernameModerationStatus: true,
           nicknameModerationStatus: true,
           nicknameViolationDisplay: true,
           avatarUrl: true,
@@ -409,8 +396,6 @@ type YearLeaderboardQueryRow = {
   leaderboard_rank: number | bigint
   uid: number
   nickname: string
-  username: string
-  usernameModerationStatus: string | null
   nicknameModerationStatus: string | null
   avatar_url: string | null
   profile_display_name: string | null
@@ -431,8 +416,6 @@ function toYearLeaderboardRow(row: YearLeaderboardQueryRow) {
       id: row.user_id,
       uid: row.uid,
       nickname: row.nickname,
-      username: row.username,
-      usernameModerationStatus: row.usernameModerationStatus,
       nicknameModerationStatus: row.nicknameModerationStatus,
       avatarUrl: row.avatar_url,
       Profile: row.profile_display_name === null && row.profile_avatar_url === null
@@ -539,8 +522,6 @@ async function getYearGuessSongLeaderboard(input: {
       ranked.leaderboard_rank,
       u.uid,
       u.nickname,
-      u.username,
-      u.usernameModerationStatus,
       u.nicknameModerationStatus,
       u.avatarUrl AS avatar_url,
       p.displayName AS profile_display_name,
@@ -611,8 +592,6 @@ export async function getGuessSongLeaderboard(input: {
           id: true,
           uid: true,
           nickname: true,
-          username: true,
-          usernameModerationStatus: true,
           nicknameModerationStatus: true,
           nicknameViolationDisplay: true,
           avatarUrl: true,

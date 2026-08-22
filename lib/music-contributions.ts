@@ -275,7 +275,7 @@ export async function approveConcertContribution({ contributionId, reviewerId, a
     await tx.$queryRaw`SELECT \`id\` FROM \`ConcertContribution\` WHERE \`id\` = ${contributionId} FOR UPDATE`
     const current = await tx.concertContribution.findUnique({
       where: { id: contributionId },
-      include: { submitter: { select: { id: true, uid: true, username: true, nickname: true } } },
+      include: { submitter: { select: { id: true, uid: true, nickname: true } } },
     })
     if (!current || current.status !== 'PENDING') throw new ContributionAlreadyProcessedError()
 

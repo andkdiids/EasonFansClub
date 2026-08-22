@@ -4,6 +4,7 @@ import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
@@ -380,6 +381,8 @@ export async function POST(request: Request) {
         : Promise.resolve(),
       runPostCreateSideEffect('achievement-sync', () => syncUserAchievements(user.id, ['POST']), user.id, input.boardId),
     ])
+
+    if (moderationStatus === 'APPROVED') triggerBadgeEvaluation(user.id, 'POST_CREATED')
 
     return NextResponse.json({
       post: { ...result.post, detailUrl },

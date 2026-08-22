@@ -2,6 +2,7 @@ import type { BadgeCategory, BadgeEffectType, BadgeGrantType, BadgeNicknameEffec
 import { sanitizeText } from '@/lib/security'
 import { normalizeBadgeColor } from '@/lib/badge-types'
 import { toStoredMediaUrl } from '@/lib/media-url'
+import { parseBadgeRuleInput, type ParsedBadgeRule } from '@/lib/badge-rules'
 
 const CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/
 const CATEGORIES = new Set(['SYSTEM', 'BIRTHDAY', 'CONCERT'])
@@ -21,6 +22,7 @@ function optionalText(body: BadgeInput, key: string, maxLength: number) {
 
 export function parseBadgeDefinition(body: BadgeInput, partial = false) {
   const data: Partial<Prisma.BadgeUncheckedCreateInput> = {}
+  let rule: ParsedBadgeRule | null | undefined
 
   if (!partial || 'name' in body) {
     const name = sanitizeText(body.name, 80)
@@ -43,9 +45,19 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
 
   if (!partial || 'description' in body) data.description = optionalText(body, 'description', 500) ?? null
   if (!partial || 'acquisitionDescription' in body) data.acquisitionDescription = optionalText(body, 'acquisitionDescription', 500) ?? null
+  if ('acquisitionDescriptionCustomized' in body) {
+    if (typeof body.acquisitionDescriptionCustomized !== 'boolean') return { error: '自定义获取文案标记无效' }
+    data.acquisitionDescriptionCustomized = body.acquisitionDescriptionCustomized
+  }
+
+  if ('rule' in body) {
+    const parsedRule = parseBadgeRuleInput(body.rule)
+    if (parsedRule.error) return { error: parsedRule.error }
+    rule = parsedRule.rule
+  }
 
   const imageInput = 'imageUrl' in body ? body.imageUrl : body.iconUrl
-  if (!partial || imageInput !== undefined) {
+  if (imageInput !== undefined) {
     if (imageInput === null || imageInput === '') data.iconUrl = null
     else if (typeof imageInput !== 'string' || imageInput.trim().length > 1000) return { error: '图片地址无效，请先完成 PNG 上传' }
     else data.iconUrl = toStoredMediaUrl(imageInput.trim()) || null
@@ -129,5 +141,8 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
     data.musicTourId = typeof body.musicTourId === 'string' && body.musicTourId.trim() ? body.musicTourId.trim() : null
   }
 
-  return { data }
+  if (rule && data.grantType && data.grantType !== 'AUTO') return { error: '手动或事件勋章不能配置自动获取规则' }
+  if (!partial && data.grantType === 'AUTO' && !rule) return { error: '自动发放必须配置自动获取规则' }
+
+  return { data, rule }
 }

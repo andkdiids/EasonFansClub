@@ -230,7 +230,7 @@ async function drawPrescriptionCanvas(data: PrescriptionImageData, palette: Pres
   context.textAlign = 'left'
   context.fillStyle = palette.foreground
   context.font = `700 20px ${FONT_SANS}`
-  context.fillText(truncateCanvasText(context, data.user.username, 230), userAvatarX + userAvatarSize + 16, 100)
+  context.fillText(truncateCanvasText(context, data.user.nickname, 230), userAvatarX + userAvatarSize + 16, 100)
   context.fillStyle = palette.foregroundMuted
   context.font = `500 16px ${FONT_SANS}`
   context.fillText(`UID: ${formatUid(data.user.uid)}`, userAvatarX + userAvatarSize + 16, 127)

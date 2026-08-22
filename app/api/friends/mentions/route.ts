@@ -128,7 +128,6 @@ export async function GET(request: Request) {
 const mentionFriendSelect = {
   id: true,
   uid: true,
-  username: true,
   nickname: true,
   usernameModerationStatus: true,
   nicknameModerationStatus: true,

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute, getBeijingDateKey, shiftBeijingDateKey } from '@/lib/beijing-time'
 import { drawDailyPrescriptionReward } from '@/lib/entertainment-rewards'
 import type { DailyPrescriptionUser } from '@/lib/daily-prescription-types'
-import { publicModerationUserName } from '@/lib/content-moderation'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
@@ -15,10 +15,11 @@ const dailyDrawInclude = {
   User: {
     select: {
       uid: true,
-      username: true,
-      usernameModerationStatus: true,
+      nickname: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
       avatarUrl: true,
-      Profile: { select: { avatarUrl: true } },
+      Profile: { select: { avatarUrl: true, displayName: true, displayNameModerationStatus: true } },
     },
   },
   LyricPrescription: {
@@ -39,10 +40,11 @@ const dailyDrawHistoryInclude = {
   User: {
     select: {
       uid: true,
-      username: true,
-      usernameModerationStatus: true,
+      nickname: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
       avatarUrl: true,
-      Profile: { select: { avatarUrl: true } },
+      Profile: { select: { avatarUrl: true, displayName: true, displayNameModerationStatus: true } },
     },
   },
   PointLog: {
@@ -119,10 +121,10 @@ function serializeDailyDraw(draw: DailyDrawWithLyric, totalPoints: number) {
 
 export function serializePrescriptionUser(user: DailyDrawWithLyric['User']): DailyPrescriptionUser {
   return {
-    // The prescription displays the mutable account username, not a snapshot
-    // from the draw. The relation is reloaded on every read, so old draws
-    // follow the current profile while the permanent UID stays unchanged.
-    username: publicModerationUserName(user.username, [user.usernameModerationStatus]),
+    // The relation is reloaded on every read, so old draws follow the current
+    // public nickname while the permanent UID stays unchanged. No username
+    // snapshot is stored or exposed by the prescription payload.
+    nickname: getPublicUserDisplayName(user),
     uid: user.uid,
     avatarUrl: profileImageUrl(user.Profile?.avatarUrl) || profileImageUrl(user.avatarUrl),
   }

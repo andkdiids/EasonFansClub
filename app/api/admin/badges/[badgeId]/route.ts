@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { deleteFromCos } from '@/lib/tencent-cos'
 import { PUBLIC_COS_HOST, toPublicMediaUrl, toStoredMediaUrl } from '@/lib/media-url'
 import { parseBadgeDefinition } from '@/lib/badge-admin'
+import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
 import { BadgeServiceError, badgeAdminSelect, deleteBadgeSafely, writeBadgeAdminAction } from '@/lib/badge-service'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { requireAdmin } from '@/lib/security'
@@ -16,7 +17,8 @@ type RouteContext = { params: Promise<{ badgeId: string }> }
 
 function serializeBadge(badge: Record<string, unknown>) {
   const count = badge._count && typeof badge._count === 'object' ? (badge._count as { UserBadge?: number }).UserBadge || 0 : 0
-  return { ...badge, iconUrl: toPublicMediaUrl(typeof badge.iconUrl === 'string' ? badge.iconUrl : null), ownerCount: count }
+  const { BadgeRule, ...rest } = badge
+  return { ...rest, rule: BadgeRule || null, iconUrl: toPublicMediaUrl(typeof badge.iconUrl === 'string' ? badge.iconUrl : null), ownerCount: count }
 }
 
 function badgeStorageKey(value: unknown) {
@@ -51,17 +53,86 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ message: '请求无效' }, { status: 400 })
 
   const parsed = parseBadgeDefinition(body as Record<string, unknown>, true)
-  if (parsed.error || !parsed.data || !Object.keys(parsed.data).length) return NextResponse.json({ message: parsed.error || '没有可更新的字段' }, { status: 400 })
-  const data = parsed.data as Prisma.BadgeUncheckedUpdateInput
+  if (parsed.error || !parsed.data || (!Object.keys(parsed.data).length && parsed.rule === undefined)) return NextResponse.json({ message: parsed.error || '没有可更新的字段' }, { status: 400 })
+  const data = { ...parsed.data } as Prisma.BadgeUncheckedUpdateInput
   if (data.musicTourId && typeof data.musicTourId === 'string') {
     const tour = await prisma.musicTour.findUnique({ where: { id: data.musicTourId }, select: { id: true } })
     if (!tour) return NextResponse.json({ message: '关联的巡演不存在' }, { status: 400 })
   }
 
   try {
-    const previous = await prisma.badge.findUnique({ where: { id: badgeId }, select: { iconUrl: true } })
+    const previous = await prisma.badge.findUnique({
+      where: { id: badgeId },
+      select: {
+        iconUrl: true,
+        grantType: true,
+        acquisitionDescription: true,
+        acquisitionDescriptionCustomized: true,
+        BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true } },
+      },
+    })
+    if (!previous) return NextResponse.json({ message: '更新失败，勋章不存在' }, { status: 404 })
+
+    const nextGrantType = typeof data.grantType === 'string' ? data.grantType : previous.grantType
+    const currentRule = previous.BadgeRule
+      ? {
+          ruleType: previous.BadgeRule.ruleType,
+          operator: previous.BadgeRule.operator,
+          threshold: previous.BadgeRule.threshold,
+          secondaryThreshold: previous.BadgeRule.secondaryThreshold,
+          configJson: previous.BadgeRule.configJson,
+          isEnabled: previous.BadgeRule.isEnabled,
+        }
+      : null
+    const effectiveRule = nextGrantType === 'AUTO'
+      ? parsed.rule !== undefined
+        ? parsed.rule
+        : currentRule
+      : currentRule
+    const keepsLegacyAutoFlow = nextGrantType === 'AUTO'
+      && previous.grantType === 'AUTO'
+      && !previous.BadgeRule
+      && (parsed.rule === undefined || parsed.rule === null)
+    if (nextGrantType === 'AUTO' && !effectiveRule && !keepsLegacyAutoFlow) return NextResponse.json({ message: '自动发放必须配置自动获取规则' }, { status: 400 })
+
+    const hasDescription = 'acquisitionDescription' in body
+    const requestedDescription = typeof data.acquisitionDescription === 'string' ? data.acquisitionDescription.trim() : ''
+    if (nextGrantType === 'AUTO' && effectiveRule) {
+      const generatedDescription = generateBadgeAcquisitionDescription(effectiveRule.ruleType, effectiveRule.threshold)
+      const explicitlyCustomized = body.acquisitionDescriptionCustomized === true
+      if (explicitlyCustomized && hasDescription && requestedDescription) {
+        data.acquisitionDescription = requestedDescription
+        data.acquisitionDescriptionCustomized = true
+      } else if (previous.acquisitionDescriptionCustomized && !hasDescription) {
+        data.acquisitionDescription = previous.acquisitionDescription
+        data.acquisitionDescriptionCustomized = true
+      } else {
+        const customized = Boolean(requestedDescription) && requestedDescription !== generatedDescription
+        data.acquisitionDescription = customized ? requestedDescription : generatedDescription
+        data.acquisitionDescriptionCustomized = customized
+      }
+    } else if (!hasDescription && previous.acquisitionDescriptionCustomized) {
+      data.acquisitionDescription = previous.acquisitionDescription
+      data.acquisitionDescriptionCustomized = true
+    }
+
     const result = await prisma.$transaction(async (tx) => {
-      const updated = await tx.badge.update({ where: { id: badgeId }, data, select: badgeAdminSelect })
+      await tx.badge.update({ where: { id: badgeId }, data, select: { id: true } })
+      if (effectiveRule) {
+        const ruleData = {
+          ruleType: effectiveRule.ruleType,
+          operator: effectiveRule.operator,
+          threshold: effectiveRule.threshold,
+          secondaryThreshold: effectiveRule.secondaryThreshold,
+          isEnabled: nextGrantType === 'AUTO' ? effectiveRule.isEnabled : false,
+        }
+        await tx.badgeRule.upsert({
+          where: { badgeId },
+          create: { badgeId, ...ruleData },
+          update: ruleData,
+        })
+      }
+      const updated = await tx.badge.findUniqueOrThrow({ where: { id: badgeId }, select: badgeAdminSelect })
       const affectedUsers = await tx.user.findMany({ where: { equippedBadgeId: badgeId }, select: { id: true, uid: true } })
       const shouldClearEquipped = data.isEnabled === false || data.isActive === false || data.isWearable === false
       if (shouldClearEquipped) await tx.user.updateMany({ where: { equippedBadgeId: badgeId }, data: { equippedBadgeId: null } })
@@ -76,6 +147,21 @@ export async function PATCH(request: Request, context: RouteContext) {
         badgeId,
         detail: { changedFields: Object.keys(data) },
       })
+      if (previous.BadgeRule && nextGrantType !== 'AUTO') {
+        await writeBadgeAdminAction(tx, {
+          actorId: guard.user.id,
+          action: 'BADGE_AUTO_RULE_DISABLE',
+          badgeId,
+          detail: { reason: 'grantType changed', ruleId: previous.BadgeRule.id },
+        })
+      } else if (effectiveRule && (parsed.rule !== undefined || !previous.BadgeRule)) {
+        await writeBadgeAdminAction(tx, {
+          actorId: guard.user.id,
+          action: previous.BadgeRule ? 'BADGE_AUTO_RULE_UPDATE' : 'BADGE_AUTO_RULE_CREATE',
+          badgeId,
+          detail: { ruleType: effectiveRule.ruleType, operator: effectiveRule.operator, threshold: effectiveRule.threshold, isEnabled: nextGrantType === 'AUTO' && effectiveRule.isEnabled },
+        })
+      }
       return { updated, affectedUsers }
     })
     const badge = result.updated

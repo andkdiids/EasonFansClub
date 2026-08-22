@@ -90,7 +90,7 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
           admins={admins.map((user) => ({
             id: user.id,
             uid: user.uid,
-            nickname: user.Profile?.displayName || user.nickname,
+            nickname: user.nickname || 'E院用户',
             email: user.email,
             phone: user.phone,
             role: user.role,
@@ -115,14 +115,15 @@ export default async function AdminAdminsPage({ searchParams }: { searchParams: 
             reason: log.reason,
             createdAt: log.createdAt,
             adminName:
-  log.User_AdminAction_adminIdToUser?.Profile?.displayName ||
+  log.User_AdminAction_adminIdToUser?.nickname ||
   log.User_AdminAction_adminIdToUser?.nickname ||
   '原管理员账号已不存在',
 
 targetName:
   log.User_AdminAction_targetUserIdToUser
-    ? log.User_AdminAction_targetUserIdToUser.Profile?.displayName ||
-      log.User_AdminAction_targetUserIdToUser.nickname
+    ? log.User_AdminAction_targetUserIdToUser.nickname ||
+      log.User_AdminAction_targetUserIdToUser.nickname ||
+      'E院用户'
     : null,
           }))}
           canManageUserRewardPermission={currentUser.role === 'SUPER_ADMIN'}

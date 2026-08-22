@@ -3,13 +3,14 @@ import { Prisma } from '@prisma/client'
 import { findPotentialDuplicateConcerts, parseContributionPayload, type ConcertContributionTypeValue, type SetlistContributionPayload, type ShowContributionPayload } from '@/lib/music-contributions'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
 type Context = { params: Promise<{ id: string }> }
 
 const include = {
-  submitter: { select: { id: true, uid: true, username: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
-  reviewer: { select: { id: true, uid: true, username: true, nickname: true } },
+  submitter: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+  reviewer: { select: { id: true, uid: true, nickname: true } },
   targetShow: {
     select: {
       id: true, title: true, city: true, countryOrRegion: true, venue: true, concertDate: true, startTime: true, endTime: true, stageType: true, posterUrl: true, description: true, status: true,
@@ -29,7 +30,7 @@ function serialize(item: Prisma.ConcertContributionGetPayload<{ include: typeof 
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
     reviewedAt: item.reviewedAt?.toISOString() || null,
-    submitter: { ...item.submitter, avatarUrl: publicImageUrl(item.submitter.Profile?.avatarUrl || item.submitter.avatarUrl), displayName: item.submitter.Profile?.displayName || item.submitter.nickname || item.submitter.username },
+    submitter: { ...item.submitter, avatarUrl: publicImageUrl(item.submitter.Profile?.avatarUrl || item.submitter.avatarUrl), displayName: getPublicUserDisplayName(item.submitter) },
     targetShow: item.targetShow ? { ...item.targetShow, concertDate: item.targetShow.concertDate.toISOString(), startTime: item.targetShow.startTime?.toISOString() || null, endTime: item.targetShow.endTime?.toISOString() || null, posterUrl: publicImageUrl(item.targetShow.posterUrl) } : null,
     ...extra,
   }

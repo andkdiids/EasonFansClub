@@ -27,7 +27,7 @@ export type SessionUser = {
   equippedBadge?: EquippedBadgeView | null
 }
 
-export type SessionShellUser = Pick<SessionUser, 'id' | 'uid' | 'username' | 'nickname' | 'avatarUrl' | 'equippedBadge'>
+export type SessionShellUser = Pick<SessionUser, 'id' | 'uid' | 'nickname' | 'avatarUrl' | 'equippedBadge'>
 
 export class AuthServiceUnavailableError extends Error {
   constructor(message = 'Authentication service is temporarily unavailable', options?: ErrorOptions) {

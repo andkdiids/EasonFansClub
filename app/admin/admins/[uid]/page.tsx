@@ -54,7 +54,7 @@ export default async function AdminDetailPage({ params }: PageProps) {
             </div>
             <div className="rounded-2xl bg-sky-50 p-4">
               <p className="text-xs font-black text-slate-500">昵称</p>
-              <p className="mt-2 text-xl font-black text-brand-950">{admin.Profile?.displayName || admin.nickname}</p>
+              <p className="mt-2 text-xl font-black text-brand-950">{admin.nickname || 'E院用户'}</p>
             </div>
             <div className="rounded-2xl bg-sky-50 p-4">
               <p className="text-xs font-black text-slate-500">角色</p>

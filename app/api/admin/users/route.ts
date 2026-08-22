@@ -54,7 +54,6 @@ export async function GET(request: Request) {
     select: {
       id: true,
       uid: true,
-      username: true,
       nickname: true,
       email: true,
       phone: true,
@@ -110,7 +109,7 @@ export async function GET(request: Request) {
       const failures = failureState.get(`account:${hashToken(user.id)}`)
       return {
         ...user,
-        nickname: Profile?.displayName || user.nickname,
+        nickname: user.nickname || 'E院用户',
         avatarUrl: publicImageUrl(Profile?.avatarUrl || user.avatarUrl),
         securityQuestionsSet: Boolean(UserSecurityQuestion),
         lastPasswordResetAt: AccountSecurityLog[0]?.createdAt || null,

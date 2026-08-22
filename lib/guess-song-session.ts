@@ -32,6 +32,7 @@ import {
   getGuessSongMediaConfig,
 } from '@/lib/guess-song-media-ticket'
 import { prisma } from '@/lib/prisma'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createUUID } from '@/lib/utils/uuid'
 
 type OptionSnapshot = { key: string; label: string }
@@ -1141,9 +1142,10 @@ export async function answerGuessSongQuestion(input: {
     }
   }
   let ranks: { weekRank: number | null; monthRank: number | null } | null = null
-  if (session.status === 'COMPLETED') {
+  if (!outcome.duplicate && session.status === 'COMPLETED') {
     await recordGuessSongLeaderboard(input.sessionId)
     ranks = await getGuessSongRanks(input.userId, session.mode, now)
+    triggerBadgeEvaluation(input.userId, 'GUESS_SONG_SESSION_FINISHED')
   }
   return { ...outcome, session, ranks }
 }

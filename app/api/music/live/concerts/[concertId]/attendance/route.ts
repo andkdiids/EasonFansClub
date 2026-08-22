@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { parseAttendanceInput, parseAttendanceVersion, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
 import { prisma } from '@/lib/prisma'
 import { checkConcertBadge } from '@/lib/concert-badge'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { deleteFromCos, describeCosError } from '@/lib/tencent-cos'
 
@@ -50,6 +51,7 @@ export async function POST(request: Request, { params }: Context) {
     } catch (error) {
       console.error('[attendance.concertBadge]', error)
     }
+    triggerBadgeEvaluation(guard.user.id, 'CONCERT_ATTENDANCE_CREATED')
     return NextResponse.json({ attendance, message: '已加入我的现场' }, { status: 201, headers: PERSONAL_LIVE_NO_STORE_HEADERS })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

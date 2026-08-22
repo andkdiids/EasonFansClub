@@ -322,7 +322,7 @@ export function PostRepliesSection({
       if (visited.has(parentId)) return
       visited.add(parentId)
       const parent = replyMap.get(parentId)
-      const parentName = parent ? parent.author.profile?.displayName || parent.author.nickname : ''
+      const parentName = parent ? parent.author.nickname || 'E院用户' : ''
       ;(tree.get(parentId) || []).forEach((child) => {
         result.push({ reply: child, replyToName: parentName })
         visit(child.id)
@@ -334,7 +334,7 @@ export function PostRepliesSection({
 
   function renderCompactReply(item: { reply: ReplyItem; replyToName: string }) {
     const { reply, replyToName } = item
-    const name = reply.author.profile?.displayName || reply.author.nickname
+      const name = reply.author.nickname || 'E院用户'
     const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const canDelete = currentUserId === reply.author.id || canManageReplies
     const replyBody = splitContentImages(reply.content)
@@ -402,7 +402,7 @@ export function PostRepliesSection({
   }
 
   function renderReply(reply: ReplyItem, index: number) {
-    const name = reply.author.profile?.displayName || reply.author.nickname
+      const name = reply.author.nickname || 'E院用户'
     const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const children = collectThreadReplies(reply.id)
     const showAll = Boolean(expandedReplies[reply.id])
@@ -546,7 +546,7 @@ export function PostRepliesSection({
             {hotReplyIds.map((id, index) => {
               const reply = replyMap.get(id)
               if (!reply) return null
-              const name = reply.author.profile?.displayName || reply.author.nickname
+              const name = reply.author.nickname || 'E院用户'
               return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · <UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /> · {reply.likeCount} 赞</a>
             })}
           </div>

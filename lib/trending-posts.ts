@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client'
 import { unstable_cache } from 'next/cache'
 import { publicContentImageMarkers } from '@/lib/content-images'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { publicModerationText, VIOLATION_USER_TEXT } from '@/lib/content-moderation'
+import { publicModerationText } from '@/lib/content-moderation'
 
 export const TRENDING_PAGE_SIZE = 15
 export type TrendingRange = 7 | 30
@@ -27,14 +28,14 @@ export type TrendingPost = {
   boardSlug: string
   imageUrl: string | null
   moderationStatus: string
-  usernameModerationStatus: string
-  nicknameModerationStatus: string
-  nicknameViolationDisplay: string | null
-  displayNameModerationStatus: string | null
 }
 
-type TrendingPostRow = Omit<TrendingPost, 'hotScore'> & {
+type TrendingPostRow = Omit<TrendingPost, 'hotScore' | 'authorName'> & {
   hotScore: number | string | Prisma.Decimal
+  authorName: string | null
+  nicknameModerationStatus: string | null
+  nicknameViolationDisplay: string | null
+  profileDisplayName: string | null
 }
 
 function normalizeRange(value: number): TrendingRange {
@@ -66,11 +67,10 @@ export const getTrendingPosts = unstable_cache(
         (p.viewCount * 0.08 + p.likeCount * 3 + p.replyCount * 5 + p.favoriteCount * 4) AS hotScore,
         u.id AS authorId,
         u.uid AS authorUid,
-        u.usernameModerationStatus,
         u.nicknameModerationStatus,
         u.nicknameViolationDisplay,
-        pr.displayNameModerationStatus,
-        COALESCE(NULLIF(pr.displayName, ''), u.nickname) AS authorName,
+        u.nickname AS authorName,
+        pr.displayName AS profileDisplayName,
         COALESCE(NULLIF(pr.avatarUrl, ''), u.avatarUrl) AS authorAvatarUrl,
         b.name AS boardName,
         b.slug AS boardSlug,
@@ -105,20 +105,23 @@ export const getTrendingPosts = unstable_cache(
       range,
       page,
       hasMore: rows.length > TRENDING_PAGE_SIZE,
-      posts: rows.slice(0, TRENDING_PAGE_SIZE).map((row) => ({
-        ...row,
+      posts: rows.slice(0, TRENDING_PAGE_SIZE).map((row) => {
+        const { nicknameModerationStatus, nicknameViolationDisplay, profileDisplayName, ...publicRow } = row
+        return {
+        ...publicRow,
         title: publicModerationText(row.title, row.moderationStatus),
         summary: publicModerationText(publicContentImageMarkers(row.summary), row.moderationStatus),
-        // 昵称违规优先展示唯一违规展示昵称，与 getPublicUserDisplayName 保持一致
-        authorName: row.nicknameModerationStatus === 'VIOLATION'
-          ? (row.nicknameViolationDisplay || VIOLATION_USER_TEXT)
-          : row.usernameModerationStatus === 'VIOLATION' || row.displayNameModerationStatus === 'VIOLATION'
-            ? VIOLATION_USER_TEXT
-            : row.authorName,
+        authorName: getPublicUserDisplayName({
+          nickname: row.authorName,
+          nicknameModerationStatus,
+          nicknameViolationDisplay,
+          Profile: { displayName: profileDisplayName },
+        }),
         hotScore: Number(row.hotScore),
         authorAvatarUrl: publicImageUrl(row.authorAvatarUrl),
         imageUrl: publicImageUrl(row.imageUrl),
-      })),
+        }
+      }),
     }
   },
   ['trending-posts-v1'],

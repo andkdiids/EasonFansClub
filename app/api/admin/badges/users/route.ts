@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { findUsersForBadgeGrant } from '@/lib/badge-service'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +13,6 @@ export async function GET(request: Request) {
   return NextResponse.json({ users: users.map((user) => ({
     id: user.id,
     uid: user.uid,
-    displayName: user.Profile?.displayName || user.nickname || user.username,
-    username: user.username,
+    displayName: getPublicUserDisplayName(user),
   })) }, { headers: { 'Cache-Control': 'no-store' } })
 }

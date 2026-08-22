@@ -119,7 +119,7 @@ export async function GET(request: Request) {
         reason: row.reason,
         createdAt: row.createdAt.toISOString(),
         operatorId: row.adminId,
-        operatorName: row.operatorName || operator?.Profile?.displayName || operator?.nickname || '原管理员账号已不存在',
+        operatorName: row.operatorName || operator?.nickname || '原管理员账号已不存在',
         operatorUsername: row.operatorUsername || operator?.username || null,
         operatorUid: row.operatorUid ?? operator?.uid ?? null,
         targetType: row.targetType || (row.postId ? 'POST' : 'UNKNOWN'),

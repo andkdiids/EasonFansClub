@@ -10,6 +10,7 @@ import { DEFAULT_PHONE_COUNTRY, getPhoneValidationMessage, isSupportedPhoneCount
 import { normalizeText } from '@/lib/validators'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationUserName } from '@/lib/content-moderation'
@@ -136,7 +137,6 @@ export async function POST(request: Request) {
     const responseUser = {
       id: sessionUser.id,
       uid: sessionUser.uid,
-      username: sessionUser.username,
       nickname: sessionUser.nickname,
     }
 
@@ -162,6 +162,7 @@ export async function POST(request: Request) {
     await sendBirthdayGreeting(user.id).catch((greetingError) => {
       console.error('[auth.login.birthday-greeting]', greetingError)
     })
+    triggerBadgeEvaluation(user.id, 'USER_LOGIN')
 
     const token = await createSessionToken(sessionUser)
     const response = NextResponse.json({ user: responseUser }, { headers: noStoreHeaders })

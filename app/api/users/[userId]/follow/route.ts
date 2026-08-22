@@ -1,7 +1,9 @@
+import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -14,31 +16,33 @@ export async function POST(_request: Request, context: RouteContext) {
     return NextResponse.json({ message: '不能关注自己' }, { status: 400 })
   }
 
-  await prisma.follow.upsert({
-    where: {
-      followerId_followingId: {
+  let created = false
+  try {
+    await prisma.follow.create({
+      data: {
         followerId: guard.user.id,
         followingId: userId,
       },
-    },
-    update: {},
-    create: {
-      followerId: guard.user.id,
-      followingId: userId,
-    },
-  })
+    })
+    created = true
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error
+  }
 
-  await prisma.notification.create({
-    data: {
-      recipientId: userId,
-      actorId: guard.user.id,
-      type: 'FOLLOW',
-      title: '你有新的关注者',
-      content: `${guard.user.nickname} 关注了你`,
-      link: `/users/${guard.user.id}`,
-    },
-  })
-  emitRealtime(userId, 'notification')
+  if (created) {
+    await prisma.notification.create({
+      data: {
+        recipientId: userId,
+        actorId: guard.user.id,
+        type: 'FOLLOW',
+        title: '你有新的关注者',
+        content: `${guard.user.nickname} 关注了你`,
+        link: `/users/${guard.user.id}`,
+      },
+    })
+    triggerBadgeEvaluation(userId, 'FOLLOW_CREATED')
+    emitRealtime(userId, 'notification')
+  }
 
   return NextResponse.json({ followed: true })
 }

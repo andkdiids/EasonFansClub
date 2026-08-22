@@ -1,5 +1,5 @@
 export type DailyPrescriptionUser = Readonly<{
-  username: string
+  nickname: string
   uid: number
   avatarUrl: string | null
 }>
