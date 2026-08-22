@@ -55,9 +55,11 @@ export async function POST(request: Request) {
   if (parsed.rule) {
     const generatedDescription = generateBadgeAcquisitionDescription(parsed.rule.ruleType, parsed.rule.threshold)
     const requestedDescription = typeof body.acquisitionDescription === 'string' ? body.acquisitionDescription.trim() : ''
-    const customized = Boolean(requestedDescription) && (
-      body.acquisitionDescriptionCustomized === true || requestedDescription !== generatedDescription
-    )
+    const customized = body.acquisitionDescriptionCustomized === false
+      ? false
+      : Boolean(requestedDescription) && (
+        body.acquisitionDescriptionCustomized === true || requestedDescription !== generatedDescription
+      )
     data.acquisitionDescription = customized ? requestedDescription : generatedDescription
     data.acquisitionDescriptionCustomized = customized
   } else {

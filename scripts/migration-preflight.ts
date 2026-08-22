@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,6 +15,7 @@ import {
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCHEMA_PATH = path.resolve(PROJECT_ROOT, 'prisma/schema.prisma')
+const RATE_LIMIT_MIGRATION_PATH = path.resolve(PROJECT_ROOT, 'prisma/migrations/20260821120000_add_rate_limit_log/migration.sql')
 const HONOR_MIGRATION_PATH = path.resolve(PROJECT_ROOT, 'prisma/migrations/20260821153000_add_honor_badge_system/migration.sql')
 const BADGE_RULE_MIGRATION_PATH = path.resolve(PROJECT_ROOT, 'prisma/migrations/20260822100000_add_badge_auto_rules/migration.sql')
 const MYSQL_RAW_CLIENT_PATH = path.resolve(PROJECT_ROOT, 'scripts/database-migration/.generated/mysql/index.js')
@@ -60,14 +62,43 @@ type ForeignKeyInfo = {
   updateRule: string | null
 }
 
-type MigrationStatus = {
+export type MigrationStatus = {
+  id: string
   migrationName: string
+  checksum: string
+  startedAt: unknown
   finishedAt: unknown
   rolledBackAt: unknown
   appliedStepsCount: number
+  logs: string | null
+}
+
+export type MigrationHistoryStatus =
+  | 'ABSENT'
+  | 'ROLLED_BACK_ONLY'
+  | 'FAILED_THEN_APPLIED'
+  | 'CHECKSUM_DRIFT'
+  | 'HISTORY_INCONSISTENT'
+  | 'APPLIED'
+
+export type MigrationHistoryAssessment = {
+  status: MigrationHistoryStatus
+  records: MigrationStatus[]
+  successfulRecords: MigrationStatus[]
+  rolledBackRecords: MigrationStatus[]
+  repositoryChecksum: string | null
+  repositoryChecksumMatchesProduction: boolean | null
+  severity: 'NONE' | 'WARN' | 'HIGH'
+  blocking: boolean
+  details: string[]
 }
 
 export type RateLimitEquivalenceReport = {
+  history: MigrationHistoryStatus
+  historySeverity: MigrationHistoryAssessment['severity']
+  repositoryChecksum: string
+  repositoryChecksumMatchesProduction: boolean | null
+  blocking: boolean
   tableExists: boolean
   migrationTableReadable: boolean
   migrationRecordExists: boolean
@@ -96,6 +127,7 @@ export type HonorBadgePreflightReport = {
     distinctSlug: number | null
     nonNullCode: number | null
     distinctCode: number | null
+    codeMismatchCount: number | null
     duplicateSlugCount: number | null
     blankSlugCount: number | null
     untrimmedSlugCount: number | null
@@ -230,18 +262,25 @@ async function getMigrationStatuses(db: ReadonlyDatabase, names: string[]): Prom
     if (!table) return { readable: false, statuses: [] }
     const values = names.map(sqlIdentifierLiteral).join(', ')
     const rows = await queryRows<RawRow>(db, `
-      SELECT migration_name AS migrationName, finished_at AS finishedAt,
-             rolled_back_at AS rolledBackAt, applied_steps_count AS appliedStepsCount
+      SELECT id, migration_name AS migrationName, checksum,
+             started_at AS startedAt, finished_at AS finishedAt,
+             rolled_back_at AS rolledBackAt, applied_steps_count AS appliedStepsCount,
+             logs
       FROM _prisma_migrations
       WHERE migration_name IN (${values})
+      ORDER BY migration_name, started_at, id
     `)
     return {
       readable: true,
       statuses: rows.map((row) => ({
+        id: String(row.id),
         migrationName: String(row.migrationName),
+        checksum: String(row.checksum),
+        startedAt: row.startedAt,
         finishedAt: row.finishedAt,
         rolledBackAt: row.rolledBackAt,
         appliedStepsCount: Number(row.appliedStepsCount),
+        logs: row.logs == null ? null : String(row.logs),
       })),
     }
   } catch {
@@ -301,18 +340,92 @@ function indexesEquivalent(actual: IndexInfo[], expected: IndexInfo[]): boolean 
   })
 }
 
+function isSuccessfulMigrationRecord(record: MigrationStatus): boolean {
+  return Boolean(record.finishedAt && !record.rolledBackAt)
+}
+
+function isRolledBackMigrationRecord(record: MigrationStatus): boolean {
+  return Boolean(record.rolledBackAt && !record.finishedAt)
+}
+
+export function classifyMigrationHistory(
+  statuses: MigrationStatus[],
+  migrationName: string,
+  repositoryChecksum: string | null,
+): MigrationHistoryAssessment {
+  const records = statuses.filter((record) => record.migrationName === migrationName)
+  const successfulRecords = records.filter(isSuccessfulMigrationRecord)
+  const rolledBackRecords = records.filter(isRolledBackMigrationRecord)
+  const abnormalRecords = records.filter((record) => !isSuccessfulMigrationRecord(record) && !isRolledBackMigrationRecord(record))
+  const details: string[] = []
+
+  let status: MigrationHistoryStatus
+  let severity: MigrationHistoryAssessment['severity'] = 'NONE'
+  if (records.length === 0) {
+    status = 'ABSENT'
+  } else if (successfulRecords.length > 1 || abnormalRecords.length > 0) {
+    status = 'HISTORY_INCONSISTENT'
+    severity = 'HIGH'
+    if (successfulRecords.length > 1) details.push(`${migrationName} has multiple successful records`)
+    if (abnormalRecords.length > 0) details.push(`${migrationName} has non-terminal migration records`)
+  } else if (successfulRecords.length === 1) {
+    const successfulRecord = successfulRecords[0]
+    const repositoryChecksumMatchesProduction = repositoryChecksum !== null && successfulRecord.checksum === repositoryChecksum
+    if (!repositoryChecksumMatchesProduction) {
+      status = 'CHECKSUM_DRIFT'
+      severity = 'HIGH'
+      details.push(`${migrationName} successful record checksum differs from the repository migration checksum`)
+    } else if (rolledBackRecords.length > 0) {
+      status = 'FAILED_THEN_APPLIED'
+      details.push(`${migrationName} has rolled-back history followed by one successful record; resolve is not required`)
+    } else {
+      status = 'APPLIED'
+    }
+  } else {
+    status = 'ROLLED_BACK_ONLY'
+    severity = 'HIGH'
+    details.push(`${migrationName} has rolled-back records but no successful record`)
+  }
+
+  const repositoryChecksumMatchesProduction = successfulRecords.length === 1 && repositoryChecksum !== null
+    ? successfulRecords[0].checksum === repositoryChecksum
+    : null
+
+  return {
+    status,
+    records,
+    successfulRecords,
+    rolledBackRecords,
+    repositoryChecksum,
+    repositoryChecksumMatchesProduction,
+    severity,
+    blocking: status === 'ROLLED_BACK_ONLY' || status === 'CHECKSUM_DRIFT' || status === 'HISTORY_INCONSISTENT',
+    details,
+  }
+}
+
+function migrationChecksum(filePath: string): string {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex')
+}
+
 export async function auditRateLimitLog(db: ReadonlyDatabase): Promise<RateLimitEquivalenceReport> {
   const details: string[] = []
   const migrationState = await getMigrationStatuses(db, [RATE_LIMIT_MIGRATION])
-  const migrationRecordExists = hasMigrationRecord(migrationState.statuses, RATE_LIMIT_MIGRATION)
-  const migrationRecordState = describeMigrationRecord(migrationState.statuses, RATE_LIMIT_MIGRATION)
-  const migrationRegistered = migrationStatusIsApplied(migrationState.statuses, RATE_LIMIT_MIGRATION)
+  const repositoryChecksum = migrationChecksum(RATE_LIMIT_MIGRATION_PATH)
+  const history = classifyMigrationHistory(migrationState.statuses, RATE_LIMIT_MIGRATION, repositoryChecksum)
+  const migrationRecordExists = history.records.length > 0
+  const migrationRecordState = history.status === 'ABSENT' ? 'ABSENT' : `${history.status} (records=${history.records.length})`
+  const migrationRegistered = history.successfulRecords.length > 0
   if (!migrationState.readable) details.push('_prisma_migrations could not be read')
-  if (migrationRegistered) details.push(`${RATE_LIMIT_MIGRATION} is already marked applied`)
-  if (migrationRecordExists && !migrationRegistered) details.push(`${RATE_LIMIT_MIGRATION} has a non-applied _prisma_migrations row`)
+  details.push(...history.details)
   const table = await getTableInfo(db, 'RateLimitLog')
   if (!table) {
     return {
+      history: history.status,
+      historySeverity: history.severity,
+      repositoryChecksum,
+      repositoryChecksumMatchesProduction: history.repositoryChecksumMatchesProduction,
+      blocking: !migrationState.readable || history.blocking || migrationRegistered,
       tableExists: false,
       migrationTableReadable: migrationState.readable,
       migrationRecordExists,
@@ -323,7 +436,7 @@ export async function auditRateLimitLog(db: ReadonlyDatabase): Promise<RateLimit
       engineEquivalent: false,
       collationCompatible: false,
       safeToResolve: false,
-      details: ['RateLimitLog table is missing'],
+      details: [...details, 'RateLimitLog table is missing'],
     }
   }
 
@@ -342,7 +455,15 @@ export async function auditRateLimitLog(db: ReadonlyDatabase): Promise<RateLimit
   if (!engineEquivalent) details.push(`RateLimitLog engine is ${table.engine ?? 'NULL'}, expected InnoDB`)
   if (!collationCompatible) details.push(`RateLimitLog table collation is ${table.tableCollation ?? 'NULL'}, expected utf8mb4_unicode_ci`)
 
+  const structureEquivalent = actualColumns && actualIndexes && engineEquivalent && collationCompatible
+  const blocking = !migrationState.readable || history.blocking || !structureEquivalent
+
   return {
+    history: history.status,
+    historySeverity: history.severity,
+    repositoryChecksum,
+    repositoryChecksumMatchesProduction: history.repositoryChecksumMatchesProduction,
+    blocking,
     tableExists: true,
     migrationTableReadable: migrationState.readable,
     migrationRecordExists,
@@ -352,14 +473,13 @@ export async function auditRateLimitLog(db: ReadonlyDatabase): Promise<RateLimit
     indexesEquivalent: actualIndexes,
     engineEquivalent,
     collationCompatible,
-    safeToResolve: migrationState.readable && !migrationRecordExists && actualColumns && actualIndexes && engineEquivalent && collationCompatible,
+    safeToResolve: migrationState.readable && history.status === 'ABSENT' && structureEquivalent,
     details,
   }
 }
 
 function migrationStatusIsApplied(statuses: MigrationStatus[], migrationName: string): boolean {
-  const status = statuses.find((item) => item.migrationName === migrationName)
-  return Boolean(status?.finishedAt && !status.rolledBackAt && status.appliedStepsCount > 0)
+  return statuses.some((item) => item.migrationName === migrationName && isSuccessfulMigrationRecord(item))
 }
 
 function hasMigrationRecord(statuses: MigrationStatus[], migrationName: string): boolean {
@@ -367,10 +487,13 @@ function hasMigrationRecord(statuses: MigrationStatus[], migrationName: string):
 }
 
 function describeMigrationRecord(statuses: MigrationStatus[], migrationName: string): string {
-  const status = statuses.find((item) => item.migrationName === migrationName)
-  if (!status) return 'ABSENT'
-  if (migrationStatusIsApplied(statuses, migrationName)) return `APPLIED (steps=${status.appliedStepsCount})`
-  return `PRESENT_NOT_APPLIED (finishedAt=${status.finishedAt ? 'YES' : 'NO'}, rolledBackAt=${status.rolledBackAt ? 'YES' : 'NO'}, steps=${status.appliedStepsCount})`
+  const records = statuses.filter((item) => item.migrationName === migrationName)
+  if (records.length === 0) return 'ABSENT'
+  const successful = records.filter(isSuccessfulMigrationRecord)
+  if (successful.length > 1) return `HISTORY_INCONSISTENT (records=${records.length})`
+  if (successful.length === 1) return `APPLIED (steps=${successful[0].appliedStepsCount})`
+  if (records.every(isRolledBackMigrationRecord)) return `ROLLED_BACK_ONLY (records=${records.length})`
+  return `PRESENT_NOT_APPLIED (records=${records.length})`
 }
 
 function hasColumn(columns: ColumnInfo[], columnName: string): boolean {
@@ -472,6 +595,7 @@ export async function auditHonorBadge(db: ReadonlyDatabase): Promise<HonorBadgeP
     distinctSlug: null,
     nonNullCode: null,
     distinctCode: null,
+    codeMismatchCount: null,
     duplicateSlugCount: null,
     blankSlugCount: null,
     untrimmedSlugCount: null,
@@ -492,6 +616,9 @@ export async function auditHonorBadge(db: ReadonlyDatabase): Promise<HonorBadgeP
     badgeData.distinctSlug = asNumber(stats[0]?.distinctSlug)
     badgeData.nonNullCode = asNumber(stats[0]?.nonNullCode)
     badgeData.distinctCode = asNumber(stats[0]?.distinctCode)
+    if (hasColumn(badgeColumns, 'code')) {
+      badgeData.codeMismatchCount = await countQuery(db, 'SELECT COUNT(*) AS mismatchCount FROM `Badge` WHERE NOT (`code` <=> `slug`)')
+    }
     badgeData.duplicateSlugCount = await countQuery(db, 'SELECT COUNT(*) AS duplicateGroups FROM (SELECT `slug` FROM `Badge` WHERE `slug` IS NOT NULL GROUP BY `slug` HAVING COUNT(*) > 1) duplicates')
     badgeData.blankSlugCount = await countQuery(db, 'SELECT COUNT(*) AS blankCount FROM `Badge` WHERE `slug` IS NULL OR TRIM(`slug`) = \'\'')
     badgeData.untrimmedSlugCount = await countQuery(db, 'SELECT COUNT(*) AS untrimmedCount FROM `Badge` WHERE `slug` IS NOT NULL AND `slug` <> TRIM(`slug`)')
@@ -514,12 +641,12 @@ export async function auditHonorBadge(db: ReadonlyDatabase): Promise<HonorBadgeP
     && badgeData.untrimmedSlugCount === 0
     && badgeData.caseInsensitiveDuplicateCount === 0
     && Boolean(badgeData.slugCollation)
-  const codeDataSafe = !migrationRegistered || (badgeData.nonNullCode === badgeData.total && badgeData.distinctCode === badgeData.total)
+  const codeDataSafe = !migrationRegistered || (badgeData.nonNullCode === badgeData.total && badgeData.distinctCode === badgeData.total && badgeData.codeMismatchCount === 0)
   const userBadgeDataSafe = userBadgeData.total !== null
     && userBadgeData.grantedAtNonNull === userBadgeData.total
     && (!migrationRegistered || (userBadgeData.obtainedAtNonNull === userBadgeData.total && userBadgeData.createdAtNonNull === userBadgeData.total))
   if (!badgeDataSafe) details.push('Badge.slug is not safe for code backfill and UNIQUE(code) under the current MySQL collation')
-  if (!codeDataSafe) details.push('Badge.code contains NULL or duplicate values after the Honor Badge migration')
+  if (!codeDataSafe) details.push('Badge.code contains NULL, duplicate, or slug-mismatched values after the Honor Badge migration')
   if (!userBadgeDataSafe) details.push('UserBadge.grantedAt contains NULL values or could not be checked')
 
   const userForeignKeys = baseTablesPresent ? await getForeignKeys(db, 'User') : []
@@ -666,6 +793,10 @@ function runFormatCheck(): { ok: boolean; output: string } {
 
 function printRateLimitReport(report: RateLimitEquivalenceReport) {
   console.log('RateLimitLog production equivalence')
+  console.log(`History: ${report.history}`)
+  console.log(`History severity: ${report.historySeverity}`)
+  console.log(`Repository checksum: ${report.repositoryChecksum}`)
+  console.log(`Repository checksum match: ${report.repositoryChecksumMatchesProduction === null ? 'UNKNOWN' : report.repositoryChecksumMatchesProduction ? 'YES' : 'NO'}`)
   console.log(`Table exists: ${report.tableExists ? 'YES' : 'NO'}`)
   console.log(`Migration record: ${report.migrationRecordState}`)
   console.log(`Migration registered: ${report.migrationRegistered ? 'YES' : 'NO'}`)
@@ -673,6 +804,8 @@ function printRateLimitReport(report: RateLimitEquivalenceReport) {
   console.log(`Indexes equivalent: ${report.indexesEquivalent ? 'YES' : 'NO'}`)
   console.log(`Engine equivalent: ${report.engineEquivalent ? 'YES' : 'NO'}`)
   console.log(`Collation compatible: ${report.collationCompatible ? 'YES' : 'NO'}`)
+  console.log(`Production structure equivalent: ${report.columnsEquivalent && report.indexesEquivalent && report.engineEquivalent && report.collationCompatible ? 'YES' : 'NO'}`)
+  console.log(`Blocking: ${report.blocking ? 'YES' : 'NO'}`)
   console.log(`Safe candidate for resolve --applied: ${report.safeToResolve ? 'YES' : 'NO'}`)
   for (const detail of report.details) console.log(`  - ${detail}`)
 }
@@ -689,6 +822,7 @@ function printHonorReport(report: HonorBadgePreflightReport) {
   console.log(`Badge slug distinct: ${report.badgeData.distinctSlug ?? 'UNKNOWN'}`)
   console.log(`Badge code non-null: ${report.badgeData.nonNullCode ?? 'NOT_APPLICABLE'}`)
   console.log(`Badge code distinct: ${report.badgeData.distinctCode ?? 'NOT_APPLICABLE'}`)
+  console.log(`Badge code/slug mismatches: ${report.badgeData.codeMismatchCount ?? 'NOT_APPLICABLE'}`)
   console.log(`Duplicate slug groups: ${report.badgeData.duplicateSlugCount ?? 'UNKNOWN'}`)
   console.log(`Blank slug rows: ${report.badgeData.blankSlugCount ?? 'UNKNOWN'}`)
   console.log(`Untrimmed slug rows: ${report.badgeData.untrimmedSlugCount ?? 'UNKNOWN'}`)
@@ -759,8 +893,8 @@ async function main() {
 
   if (!productionReadonly) {
     console.log('Production readonly audit: SKIPPED (pass --production-readonly explicitly to enable database reads)')
-    console.log('RATE_LIMIT_LOG_STATUS = NOT_SAFE_TO_RESOLVE')
-    console.log('HONOR_BADGE_STATUS = NOT_SAFE_TO_DEPLOY')
+    console.log('RATE_LIMIT_LOG_STATUS = SKIPPED')
+    console.log('HONOR_BADGE_STATUS = SKIPPED')
     process.exitCode = staticResult.passed && validate.ok && format.ok && baselineStatic ? 0 : 1
     return
   }
@@ -773,7 +907,7 @@ async function main() {
 
   try {
     const production = await runProductionReadonly(databaseUrl)
-    process.exitCode = staticResult.passed && validate.ok && format.ok && baselineStatic && migrationStatusReadable && production.rateLimit.safeToResolve && production.honor.status === 'SAFE_TO_DEPLOY' ? 0 : 1
+    process.exitCode = staticResult.passed && validate.ok && format.ok && baselineStatic && migrationStatusReadable && !production.rateLimit.blocking && production.honor.status === 'SAFE_TO_DEPLOY' ? 0 : 1
   } catch (error) {
     console.error(redact(error instanceof Error ? error.message : String(error), databaseUrl))
     console.log('RATE_LIMIT_LOG_STATUS = NOT_SAFE_TO_RESOLVE')

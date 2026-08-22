@@ -337,12 +337,17 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
     where: { id: badgeId },
     select: {
       id: true,
+      grantType: true,
+      isEnabled: true,
+      isActive: true,
       availableFrom: true,
       availableUntil: true,
       BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
     },
   })
   if (!badge?.BadgeRule) throw new Error('勋章或自动规则不存在')
+  if (badge.grantType !== 'AUTO') throw new Error('只有系统自动授予勋章可以预览规则')
+  if (!badge.isEnabled || !badge.isActive) throw new Error('勋章当前未启用')
   if (!badge.BadgeRule.isEnabled) throw new Error('自动规则当前未启用')
   const availability = getBadgeAvailability(badge)
   const ownedCount = await prisma.userBadge.count({ where: { badgeId, User: ACTIVE_RELATION_USER_WHERE } })

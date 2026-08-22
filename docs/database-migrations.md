@@ -39,7 +39,15 @@ prisma migrate resolve --applied <migration-name>
 
 应用和脚本都不得自动执行 `resolve --applied`。
 
-`20260821120000_add_rate_limit_log` 的 RateLimitLog 表来源目前只能在仓库中找到 `prisma/manual_ehospital.sql` 这一候选线索，不能证明生产实际来源，因此 manifest 中登记为 `origin: unknown`。只读核验还发现该 migration 在 `_prisma_migrations` 中有 `rolled_back_at` 记录且 `applied_steps_count=0`；即使表结构等价，也不能直接视为可 resolve，必须先由 DBA 查明这条历史记录。
+`20260821120000_add_rate_limit_log` 的 RateLimitLog 表来源仍然是 `UNKNOWN`。仓库中的 `prisma/manual_ehospital.sql` 只是候选线索，不能证明生产实际来源。
+
+生产历史已经确认是 `FAILED_THEN_APPLIED`：第一次记录因 MySQL 1050（RateLimitLog 已存在）rolled back，随后存在 `finished_at` 非空、`rolled_back_at` 为空的成功记录；成功记录 checksum 与仓库 migration checksum 一致，生产结构也等价。因此当前不需要任何额外 migration 操作，且：
+
+- DO NOT run `resolve --applied` again。
+- DO NOT create reconciliation migration。
+- DO NOT modify the applied migration。
+
+该历史问题属于来源溯源记录，不再阻塞应用发布。只有未来生产表结构或 migration history 再次发生变化时，才重新进行审计。
 
 ## Baseline
 

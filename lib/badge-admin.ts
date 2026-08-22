@@ -176,7 +176,7 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
   }
 
   if (rule && data.grantType && data.grantType !== 'AUTO') return { error: '手动或事件勋章不能配置自动获取规则' }
-  if (!partial && data.grantType === 'AUTO' && !rule) return { error: '自动发放必须配置自动获取规则' }
+  if (!partial && data.grantType === 'AUTO' && !rule) return { error: '自动授予勋章必须配置获取条件' }
 
   if ((data.tierGroupCode === null) !== (data.tierLevel === null)) return { error: 'Tier 系列编码与等级必须同时填写或同时留空' }
 

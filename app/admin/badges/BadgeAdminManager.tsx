@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeVisibility } from '@/lib/badge-types'
 import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_EFFECT_LABELS, BADGE_RARITY_LABELS, BADGE_VISIBILITY_LABELS } from '@/lib/badge-types'
-import { BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, parseBadgeRuleInput, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 
 export type AdminBadge = {
   id: string
@@ -39,28 +39,46 @@ export type AdminBadge = {
   createdAt: string
 }
 
-type BadgeDraft = Omit<AdminBadge, 'id' | 'ownerCount' | 'createdAt' | 'isEnabled'> & { id?: string; isEnabled: boolean; imageUrl?: string | null; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number; ruleEnabled: boolean; legacyAuto: boolean }
+type BadgeDraft = Omit<AdminBadge, 'id' | 'ownerCount' | 'createdAt' | 'isEnabled'> & { id?: string; isEnabled: boolean; imageUrl?: string | null; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number; ruleEnabled: boolean; legacyAuto: boolean; tierEnabled: boolean; limitedEnabled: boolean }
 type AdminSeries = { id: string; code: string; name: string; description: string | null; sortOrder: number; isEnabled: boolean; _count?: { Badges: number } }
 type SeriesDraft = { id?: string; code: string; name: string; description: string; sortOrder: number; isEnabled: boolean }
 
 const emptyDraft: BadgeDraft = {
-  name: '', code: '', slug: '', description: '', acquisitionDescription: '', acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, ruleEnabled: true, legacyAuto: false,
+  name: '', code: '', slug: '', description: '', acquisitionDescription: '', acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, ruleEnabled: true, legacyAuto: false, tierEnabled: false, limitedEnabled: false,
 }
 
 function toDraft(badge: AdminBadge): BadgeDraft {
+  const rule = badge.rule
+  const followsGeneratedDescription = badge.grantType === 'AUTO' && Boolean(rule) && !badge.acquisitionDescriptionCustomized
+  const acquisitionDescription = followsGeneratedDescription
+    ? generateBadgeAcquisitionDescription(rule!.ruleType, rule!.threshold)
+    : badge.acquisitionDescription
   return {
     ...badge,
     imageUrl: badge.iconUrl,
-    ruleType: badge.rule?.ruleType || 'POST_COUNT',
-    operator: badge.rule?.operator || 'GTE',
-    threshold: badge.rule?.threshold || 1,
-    ruleEnabled: badge.rule?.isEnabled ?? true,
+    acquisitionDescription,
+    ruleType: rule?.ruleType || 'POST_COUNT',
+    operator: rule?.operator || 'GTE',
+    threshold: rule?.threshold || 1,
+    ruleEnabled: rule?.isEnabled ?? true,
     legacyAuto: badge.grantType === 'AUTO' && !badge.rule,
+    tierEnabled: badge.tierGroupCode !== null || badge.tierLevel !== null,
+    limitedEnabled: badge.availableFrom !== null || badge.availableUntil !== null,
   }
 }
 
 function defaultAcquisitionDescription(draft: Pick<BadgeDraft, 'grantType' | 'ruleType' | 'threshold'> & { legacyAuto?: boolean }) {
   return draft.grantType === 'AUTO' && !draft.legacyAuto ? generateBadgeAcquisitionDescription(draft.ruleType, draft.threshold) : ''
+}
+
+function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | 'ruleType' | 'operator' | 'threshold' | 'ruleEnabled'>) {
+  if (draft.grantType !== 'AUTO' || draft.legacyAuto) return null
+  return parseBadgeRuleInput({
+    ruleType: draft.ruleType,
+    operator: draft.operator,
+    threshold: draft.threshold,
+    isEnabled: draft.ruleEnabled,
+  }).error || null
 }
 
 function formatDate(value: string) { return new Date(value).toLocaleDateString('zh-CN') }
@@ -99,6 +117,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
   const [seriesDraft, setSeriesDraft] = useState<SeriesDraft | null>(null)
   const [preview, setPreview] = useState<AdminBadge | null>(null)
   const [previewData, setPreviewData] = useState<{ eligibleCount: number; ownedCount: number; pendingCount: number; availability: string } | null>(null)
+  const [formSections, setFormSections] = useState({ basic: true, rules: true, display: false })
 
   const visibleBadges = useMemo(() => badges.filter((badge) => {
     const matchesQuery = !query.trim() || `${badge.name} ${badge.code}`.toLowerCase().includes(query.trim().toLowerCase())
@@ -182,6 +201,11 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
   async function saveDraft(event: React.FormEvent) {
     event.preventDefault()
     if (!draft) return
+    const ruleError = getAutoRuleError(draft)
+    if (ruleError) {
+      setFormSections((current) => ({ ...current, rules: true }))
+      return fail(ruleError)
+    }
     const ruleChanged = Boolean(
       draft.id && draft.rule && draft.grantType === 'AUTO' && !draft.legacyAuto && (
         draft.rule.ruleType !== draft.ruleType ||
@@ -209,11 +233,17 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
       setDraft(null)
       notify(draft.id ? '勋章已更新' : '勋章已创建')
       await reload()
-    } catch (saveError) { fail(saveError instanceof Error ? saveError.message : '保存失败') } finally { setBusy(false) }
+    } catch (saveError) {
+      setFormSections({ basic: true, rules: true, display: true })
+      fail(saveError instanceof Error ? saveError.message : '保存失败')
+    } finally { setBusy(false) }
   }
 
   async function backfillBadge(badge: AdminBadge) {
     if (badge.grantType !== 'AUTO' || !badge.rule) return
+    if (!badge.rule.isEnabled) return fail('自动规则当前未启用，不能补发')
+    if (badge.availabilityStatus !== 'PERMANENT') return fail('限定勋章没有可靠的历史达标时间，不能使用自动历史补发')
+    if (!window.confirm(`将为当前符合「${badge.name}」规则但尚未拥有的用户补发勋章。该操作不会撤销任何历史勋章。确认继续吗？`)) return
     setBusy(true)
     try {
       let cursor: string | undefined
@@ -245,6 +275,20 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
     const data = await response.json().catch(() => null) as { preview?: { eligibleCount: number; ownedCount: number; pendingCount: number; availability: string }; message?: string } | null
     if (!response.ok || !data?.preview) return fail(data?.message || '规则预览失败')
     setPreviewData(data.preview)
+  }
+
+  function previewSavedDraft() {
+    if (!draft?.id) return fail('请先保存勋章，再预览已保存的自动规则')
+    const savedBadge = badges.find((badge) => badge.id === draft.id)
+    if (!savedBadge) return fail('勋章列表已更新，请关闭编辑后重新打开')
+    void previewBadgeRule(savedBadge)
+  }
+
+  function backfillSavedDraft() {
+    if (!draft?.id) return fail('请先保存勋章，再执行自动补发')
+    const savedBadge = badges.find((badge) => badge.id === draft.id)
+    if (!savedBadge) return fail('勋章列表已更新，请关闭编辑后重新打开')
+    void backfillBadge(savedBadge)
   }
 
   async function uploadPng(file: File) {
@@ -346,29 +390,37 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           <label className="text-xs font-black text-slate-500">Tier 组<input value={filterTierGroup} onChange={(event) => setFilterTierGroup(event.target.value.toUpperCase())} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void reload() } }} placeholder="POST_MASTER" className="mt-1 min-h-10 w-36 rounded-xl border border-sky-200 px-3 text-sm font-bold text-brand-950" /></label>
           <label className="text-xs font-black text-slate-500">限定<select value={filterAvailability} onChange={(event) => { const value = event.target.value; setFilterAvailability(value); void reload({ filterAvailability: value }) }} className="mt-1 min-h-10 rounded-xl border border-sky-200 px-3 text-sm font-bold text-brand-950"><option value="">全部状态</option><option value="PERMANENT">永久</option><option value="UPCOMING">即将开放</option><option value="AVAILABLE">可获得</option><option value="ENDED">已绝版</option></select></label>
           <label className="text-xs font-black text-slate-500">排序<select value={filterOrder} onChange={(event) => { const value = event.target.value; setFilterOrder(value); void reload({ filterOrder: value }) }} className="mt-1 min-h-10 rounded-xl border border-sky-200 px-3 text-sm font-bold text-brand-950"><option value="sortOrder">展示顺序</option><option value="ownerCount">获得人数</option><option value="rate">获得率</option><option value="createdAt">创建时间</option></select></label>
-          <button type="button" onClick={() => setDraft({ ...emptyDraft })} className="min-h-10 rounded-xl bg-brand-950 px-4 text-sm font-black text-white">新增勋章</button>
+          <button type="button" onClick={() => { setFormSections({ basic: true, rules: true, display: false }); setDraft({ ...emptyDraft }) }} className="min-h-10 rounded-xl bg-brand-950 px-4 text-sm font-black text-white">新增勋章</button>
         </div>
       </section>
 
       {draft ? <form onSubmit={saveDraft} className="rounded-[24px] border border-sky-200 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-black text-brand-950">{draft.id ? '编辑勋章' : '新增勋章'}</h2><button type="button" onClick={() => setDraft(null)} className="text-sm font-black text-slate-500">取消</button></div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <details open={formSections.basic} onToggle={(event) => setFormSections((current) => ({ ...current, basic: event.currentTarget.open }))} className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/60 p-3"><summary className="cursor-pointer list-none text-sm font-black text-brand-950">基础信息与收藏设置</summary><p className="mt-1 text-[11px] font-bold text-slate-500">Series、Tier、限定时间和获取说明决定这枚勋章如何被收藏与展示。</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="text-xs font-black text-slate-500">勋章名称<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="admin-badge-input" /></label>
           <label className="text-xs font-black text-slate-500">唯一 code<input required pattern="[a-z0-9][a-z0-9_-]{1,63}" value={draft.code} onChange={(event) => setDraft({ ...draft, code: event.target.value })} className="admin-badge-input" /></label>
           {!draft.id ? <label className="text-xs font-black text-slate-500">slug（可留空，默认使用 code）<input value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} className="admin-badge-input" /></label> : null}
           <label className="text-xs font-black text-slate-500">排序<input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value) })} className="admin-badge-input" /></label>
           <label className="text-xs font-black text-slate-500">勋章系列<select value={draft.seriesId || ''} onChange={(event) => setDraft({ ...draft, seriesId: event.target.value || null, series: null })} className="admin-badge-input"><option value="">未分类</option>{series.map((item) => <option key={item.id} value={item.id}>{item.name}{item.isEnabled ? '' : '（停用）'}</option>)}</select></label>
-          <label className="text-xs font-black text-slate-500">Tier 系列编码<input placeholder="例如 POST_MASTER" value={draft.tierGroupCode || ''} onChange={(event) => setDraft({ ...draft, tierGroupCode: event.target.value.toUpperCase() || null })} className="admin-badge-input" /></label>
-          <label className="text-xs font-black text-slate-500">Tier 等级<input type="number" min="1" max="100" value={draft.tierLevel || ''} onChange={(event) => setDraft({ ...draft, tierLevel: event.target.value ? Number(event.target.value) : null })} className="admin-badge-input" /></label>
-          <label className="text-xs font-black text-slate-500">限定开始（上海时间）<input type="datetime-local" value={formatDateTimeInput(draft.availableFrom)} onChange={(event) => setDraft({ ...draft, availableFrom: event.target.value || null })} className="admin-badge-input" /></label>
-          <label className="text-xs font-black text-slate-500">限定结束（上海时间）<input type="datetime-local" value={formatDateTimeInput(draft.availableUntil)} onChange={(event) => setDraft({ ...draft, availableUntil: event.target.value || null })} className="admin-badge-input" /></label>
+          <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.tierEnabled} onChange={(event) => setDraft({ ...draft, tierEnabled: event.target.checked, tierGroupCode: event.target.checked ? (draft.tierGroupCode || 'BADGE_TIER') : null, tierLevel: event.target.checked ? (draft.tierLevel || 1) : null })} />这是分级勋章</label>
+          {draft.tierEnabled ? <><label className="text-xs font-black text-slate-500">Tier 系列编码<input placeholder="例如 POST_MASTER" value={draft.tierGroupCode || ''} onChange={(event) => setDraft({ ...draft, tierGroupCode: event.target.value.toUpperCase() || null })} className="admin-badge-input" /></label><label className="text-xs font-black text-slate-500">Tier 等级<input type="number" min="1" max="100" value={draft.tierLevel || ''} onChange={(event) => setDraft({ ...draft, tierLevel: event.target.value ? Number(event.target.value) : null })} className="admin-badge-input" /></label></> : null}
+          <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.limitedEnabled} onChange={(event) => setDraft({ ...draft, limitedEnabled: event.target.checked, availableFrom: event.target.checked ? draft.availableFrom : null, availableUntil: event.target.checked ? draft.availableUntil : null })} />限定时间（上海时间）</label>
+          {draft.limitedEnabled ? <><label className="text-xs font-black text-slate-500">限定开始（上海时间）<input type="datetime-local" value={formatDateTimeInput(draft.availableFrom)} onChange={(event) => setDraft({ ...draft, availableFrom: event.target.value || null })} className="admin-badge-input" /></label><label className="text-xs font-black text-slate-500">限定结束（上海时间）<input type="datetime-local" value={formatDateTimeInput(draft.availableUntil)} onChange={(event) => setDraft({ ...draft, availableFrom: draft.availableFrom, availableUntil: event.target.value || null })} className="admin-badge-input" /></label></> : null}
           <label className="text-xs font-black text-slate-500 md:col-span-2">勋章简介<textarea value={draft.description || ''} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className="admin-badge-input min-h-20" /></label>
-          <label className="text-xs font-black text-slate-500 md:col-span-2">获取方式<textarea value={draft.acquisitionDescription || ''} onChange={(event) => { const value = event.target.value; const generated = defaultAcquisitionDescription(draft); setDraft({ ...draft, acquisitionDescription: value, acquisitionDescriptionCustomized: draft.grantType === 'AUTO' && !draft.legacyAuto ? value.trim() !== generated : Boolean(value.trim()) }) }} className="admin-badge-input min-h-20" /><span className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-400"><span>{draft.legacyAuto ? '旧业务事件徽章沿用现有获取逻辑' : draft.grantType === 'AUTO' ? (draft.acquisitionDescriptionCustomized ? '当前为自定义文案，修改规则时保留' : '自动规则文案由系统生成') : '手动/事件勋章沿用原有文案'}</span>{draft.grantType === 'AUTO' && !draft.legacyAuto && draft.acquisitionDescriptionCustomized ? <button type="button" onClick={() => setDraft({ ...draft, acquisitionDescription: defaultAcquisitionDescription(draft), acquisitionDescriptionCustomized: false })} className="font-black text-brand-700">恢复默认文案</button> : null}</span></label>
+          <label className="text-xs font-black text-slate-500 md:col-span-2">获取方式说明<textarea value={draft.acquisitionDescription || ''} onChange={(event) => { const value = event.target.value; const generated = defaultAcquisitionDescription(draft); setDraft({ ...draft, acquisitionDescription: value, acquisitionDescriptionCustomized: draft.grantType === 'AUTO' && !draft.legacyAuto ? value.trim() !== generated : false }) }} className="admin-badge-input min-h-20" /><span className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-400"><span>{draft.legacyAuto ? '旧业务事件徽章沿用现有获取逻辑' : draft.grantType === 'AUTO' ? (draft.acquisitionDescriptionCustomized ? '当前为自定义文案，修改规则时保留' : '规则变化时自动跟随默认文案') : '仅用于前台展示，不参与自动授予判断'}</span>{draft.grantType === 'AUTO' && !draft.legacyAuto && draft.acquisitionDescriptionCustomized ? <button type="button" onClick={() => setDraft({ ...draft, acquisitionDescription: defaultAcquisitionDescription(draft), acquisitionDescriptionCustomized: false })} className="font-black text-brand-700">恢复默认文案</button> : null}</span></label>
+        </div></details>
+        <details open={formSections.rules} onToggle={(event) => setFormSections((current) => ({ ...current, rules: event.currentTarget.open }))} className="mt-4 rounded-2xl border border-violet-100 bg-violet-50/60 p-3"><summary className="cursor-pointer list-none text-sm font-black text-brand-950">获取规则</summary><p className="mt-1 text-[11px] font-bold text-slate-500">MANUAL 只保留说明；EVENT 由生日、演唱会等业务事件处理；AUTO 才会显示结构化规则。</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="text-xs font-black text-slate-500">可见性<select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as BadgeVisibility })} className="admin-badge-input">{Object.entries(BADGE_VISIBILITY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="text-xs font-black text-slate-500">稀有度<select value={draft.rarity} onChange={(event) => setDraft({ ...draft, rarity: event.target.value as BadgeRarity })} className="admin-badge-input">{Object.entries(BADGE_RARITY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label className="text-xs font-black text-slate-500">发放类型<select value={draft.grantType} onChange={(event) => { const grantType = event.target.value as BadgeGrantType; setDraft((current) => { if (!current) return current; const next = { ...current, grantType, legacyAuto: grantType === 'AUTO' ? current.legacyAuto : false }; return !next.acquisitionDescriptionCustomized && grantType === 'AUTO' && !next.legacyAuto ? { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } : next }) }} className="admin-badge-input">{Object.entries(BADGE_GRANT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className="text-xs font-black text-slate-500">发放类型<select value={draft.grantType} onChange={(event) => { const grantType = event.target.value as BadgeGrantType; setDraft((current) => { if (!current) return current; const next = { ...current, grantType, legacyAuto: grantType === 'AUTO' ? current.legacyAuto : false }; return grantType === 'AUTO' && !next.legacyAuto ? { ...next, acquisitionDescription: next.acquisitionDescriptionCustomized ? next.acquisitionDescription : defaultAcquisitionDescription(next), acquisitionDescriptionCustomized: next.acquisitionDescriptionCustomized && current.grantType === 'AUTO' } : next }) }} className="admin-badge-input">{Object.entries(BADGE_GRANT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           {draft.grantType === 'AUTO' && draft.legacyAuto ? <div className="rounded-2xl border border-amber-100 bg-amber-50/80 p-4 md:col-span-2"><p className="text-sm font-black text-amber-900">这是旧业务自动徽章，当前没有结构化规则，生日等现有事件服务仍会继续管理它。</p><p className="mt-1 text-xs font-bold text-amber-800">如需改成按统计条件自动授予，请显式启用结构化规则；这不会撤销历史 UserBadge。</p><button type="button" onClick={() => setDraft({ ...draft, legacyAuto: false, acquisitionDescription: draft.acquisitionDescriptionCustomized ? draft.acquisitionDescription : defaultAcquisitionDescription({ ...draft, legacyAuto: false }) })} className="mt-3 rounded-xl bg-amber-900 px-3 py-2 text-xs font-black text-white">启用结构化规则</button></div> : null}
           {draft.grantType === 'AUTO' && !draft.legacyAuto ? <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4 md:col-span-2"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.12em] text-violet-700">Structured auto rule</p><p className="mt-1 text-sm font-black text-brand-950">用户达成条件后由系统自动授予，重复事件不会重复获得。</p></div><label className="flex items-center gap-2 text-xs font-black text-brand-950"><input type="checkbox" checked={draft.ruleEnabled} onChange={(event) => setDraft({ ...draft, ruleEnabled: event.target.checked })} />启用规则</label></div><div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px_130px]"><label className="text-xs font-black text-slate-500">规则指标<select value={draft.ruleType} onChange={(event) => { const ruleType = event.target.value as SupportedBadgeRuleType; setDraft((current) => { if (!current) return current; const next = { ...current, ruleType }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input">{Object.entries(BADGE_RULE_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="text-xs font-black text-slate-500">比较方式<span className="mt-1 flex min-h-10 items-center rounded-xl border border-sky-200 bg-slate-50 px-3 text-sm font-bold text-brand-950">{draft.operator === 'LTE' ? '不超过（≤）' : draft.operator === 'EQ' ? '等于（＝）' : '达到（≥）'}</span><small className="mt-1 block text-[10px] font-bold text-slate-400">首版后台仅开放大于等于，其他操作符保留给后续版本。</small></div><label className="text-xs font-black text-slate-500">阈值<input type="number" min="1" max="1000000000" value={draft.threshold} onChange={(event) => { const threshold = Number(event.target.value); setDraft((current) => { if (!current) return current; const next = { ...current, threshold: Number.isFinite(threshold) ? threshold : 1 }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input" /></label></div><p className="mt-2 text-xs font-bold text-violet-700">数据口径：{BADGE_RULE_TYPE_DESCRIPTIONS[draft.ruleType]}</p></div> : null}
+          {draft.grantType === 'AUTO' && !draft.legacyAuto ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-100 bg-white p-3 md:col-span-2"><div><p className="text-xs font-black text-violet-800">规则操作</p><p className="mt-1 text-[11px] font-bold text-slate-500">预览只读；补发只处理当前达标且尚未拥有的用户，且需要先保存。</p>{getAutoRuleError(draft) ? <p className="mt-1 text-xs font-black text-red-600">{getAutoRuleError(draft)}</p> : null}</div><div className="flex flex-wrap gap-2"><button type="button" disabled={busy || !draft.id || Boolean(getAutoRuleError(draft))} onClick={previewSavedDraft} className="admin-badge-list-button disabled:opacity-50">{draft.id ? '预览已保存规则' : '保存后预览'}</button><button type="button" disabled={busy || !draft.id || !draft.ruleEnabled || Boolean(getAutoRuleError(draft)) || draft.limitedEnabled} onClick={backfillSavedDraft} className="admin-badge-list-button disabled:opacity-50">{draft.limitedEnabled ? '限定勋章不可自动补发' : draft.id ? '扫描并补发' : '保存后补发'}</button></div></div> : null}
+        </div></details>
+        <details open={formSections.display} onToggle={(event) => setFormSections((current) => ({ ...current, display: event.currentTarget.open }))} className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3"><summary className="cursor-pointer list-none text-sm font-black text-brand-950">展示设置与状态</summary><p className="mt-1 text-[11px] font-bold text-slate-500">动画、昵称效果、PNG、可佩戴和启用状态只影响展示与可用性，不改变历史获得记录。</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="text-xs font-black text-slate-500">动画效果<select value={draft.effectType} onChange={(event) => setDraft({ ...draft, effectType: event.target.value as BadgeEffectType })} className="admin-badge-input">{Object.entries(BADGE_EFFECT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="text-xs font-black text-slate-500">昵称效果<select value={draft.nicknameEffect} onChange={(event) => setDraft({ ...draft, nicknameEffect: event.target.value as BadgeNicknameEffect })} className="admin-badge-input">{Object.entries(BADGE_NICKNAME_EFFECT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           {draft.nicknameEffect === 'COLOR' ? <label className="text-xs font-black text-slate-500">昵称颜色<input type="color" value={draft.nicknameColor || '#0f5f78'} onChange={(event) => setDraft({ ...draft, nicknameColor: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-sky-200 p-1" /></label> : null}
@@ -376,8 +428,8 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           <label className="text-xs font-black text-slate-500 md:col-span-2">PNG 图片<input type="file" accept="image/png" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadPng(file) }} className="mt-1 block w-full text-sm font-bold" />{uploading ? <span className="mt-1 block text-xs text-slate-500">上传中…</span> : null}{draft.imageUrl || draft.iconUrl ? <span className="mt-1 block text-xs font-bold text-emerald-700">已关联 PNG</span> : <span className="mt-1 block text-xs font-bold text-slate-400">建议 256×256 或 512×512，最大 2MB</span>}</label>
           <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.isWearable} onChange={(event) => setDraft({ ...draft, isWearable: event.target.checked })} />允许用户佩戴</label>
           <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.isEnabled} onChange={(event) => setDraft({ ...draft, isEnabled: event.target.checked })} />启用勋章</label>
-        </div>
-        <button type="submit" disabled={busy || uploading} className="mt-5 min-h-11 rounded-xl bg-brand-950 px-5 text-sm font-black text-white disabled:opacity-50">{busy ? '保存中…' : '保存勋章'}</button>
+        </div></details>
+        <button type="submit" disabled={busy || uploading || Boolean(getAutoRuleError(draft))} className="mt-5 min-h-11 rounded-xl bg-brand-950 px-5 text-sm font-black text-white disabled:opacity-50">{busy ? '保存中…' : '保存勋章'}</button>
       </form> : null}
 
       <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/85 shadow-sm"><div className="divide-y divide-sky-100">{visibleBadges.map((badge) => <article key={badge.id} className="flex flex-wrap items-center gap-4 px-4 py-4 sm:px-5"><div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-sky-50">{badge.iconUrl ? <img src={badge.iconUrl} alt={badge.name} className="h-12 w-12 object-contain" /> : <span className="text-2xl">🏅</span>}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="font-black text-brand-950">{badge.name}</h2><span className="rounded-full bg-sky-50 px-2 py-1 text-[10px] font-black text-brand-700">{badge.code}</span><span className={`rounded-full px-2 py-1 text-[10px] font-black ${badge.isEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{badge.isEnabled ? '启用' : '停用'}</span></div><p className="mt-1 text-xs font-bold text-slate-500">{badge.series?.name || '未分类'} · {BADGE_VISIBILITY_LABELS[badge.visibility]} · {BADGE_RARITY_LABELS[badge.rarity]} · {BADGE_GRANT_TYPE_LABELS[badge.grantType]} · 已获得 {badge.ownerCount} 人（{badge.ownershipStats?.display || '0%'}） · {badge.availabilityStatus === 'PERMANENT' ? '永久' : badge.availabilityStatus === 'UPCOMING' ? '即将开放' : badge.availabilityStatus === 'ENDED' ? '已绝版' : '可获得'}</p><p className="mt-1 line-clamp-2 text-xs font-bold text-slate-500">{badge.description || '暂无简介'}</p>{badge.tierGroupCode ? <p className="mt-1 text-xs font-bold text-amber-700">Tier：{badge.tierGroupCode} · 第 {badge.tierLevel} 级</p> : null}{badge.rule ? <p className="mt-1 text-xs font-bold text-violet-700">自动规则：{BADGE_RULE_TYPE_LABELS[badge.rule.ruleType]} {badge.rule.operator === 'GTE' ? '≥' : badge.rule.operator === 'LTE' ? '≤' : '='} {badge.rule.threshold}{badge.rule.isEnabled ? '' : ' · 已停用'}{badge.acquisitionDescriptionCustomized ? ' · 自定义文案' : ''}</p> : badge.grantType === 'AUTO' ? <p className="mt-1 text-xs font-bold text-amber-700">旧业务自动：由生日/演唱会等现有事件服务管理</p> : null}</div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setDraft(toDraft(badge))} className="admin-badge-list-button">编辑</button><button type="button" onClick={() => void toggleBadge(badge)} className="admin-badge-list-button">{badge.isEnabled ? '停用' : '启用'}</button>{badge.grantType === 'AUTO' && badge.rule ? <><button type="button" disabled={busy} onClick={() => void previewBadgeRule(badge)} className="admin-badge-list-button disabled:opacity-50">预览达标</button><button type="button" disabled={busy || !badge.rule.isEnabled || badge.availabilityStatus !== 'PERMANENT'} onClick={() => void backfillBadge(badge)} className="admin-badge-list-button disabled:opacity-50">扫描并补发</button></> : null}<button type="button" onClick={() => { setGrantBadgeTarget(badge); setGrantUsers([]); setGrantUserId('') }} className="admin-badge-list-button">发放</button><button type="button" onClick={() => void loadOwners(badge)} className="admin-badge-list-button">获得用户</button><button type="button" onClick={() => void deleteBadge(badge)} className="admin-badge-list-button danger">删除</button></div></article>)}</div>{!visibleBadges.length ? <p className="p-8 text-center text-sm font-bold text-slate-500">没有符合条件的勋章。</p> : null}</section>

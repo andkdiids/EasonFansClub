@@ -31,14 +31,22 @@
       "note": "Production successful checksum differs from the current repository file after MySQL syntax repair; preserve as historical fact."
     },
     "20260821120000_add_rate_limit_log": {
-      "status": "production_structure_exists_with_rolled_back_migration_record",
+      "status": "FAILED_THEN_APPLIED",
+      "repositoryChecksumMatchesProduction": true,
+      "initialFailure": {
+        "mysqlErrorCode": 1050,
+        "reason": "RateLimitLog table already existed"
+      },
+      "productionStructureEquivalent": true,
       "origin": "unknown",
-      "action": "do_not_resolve; investigate_rolled_back_record_before_manual_history_decision",
-      "note": "Read-only preflight found a rolled_back_at row with applied_steps_count=0; the table is structurally equivalent, but this is not a safe resolve candidate."
+      "migrationActionRequired": false,
+      "dbaReview": "Historical provenance only",
+      "note": "The first record rolled back with MySQL 1050, followed by a successful record with matching checksum. Do not resolve again, create a reconciliation migration, or modify the applied migration."
     },
     "20260821153000_add_honor_badge_system": {
-      "status": "pending_production_preflight",
-      "action": "run_data_and_ddl_preflight_before_deploy"
+      "status": "applied_and_verified_readonly",
+      "action": "no_deploy_required_for_this_migration",
+      "note": "Read-only preflight verified the applied migration, Badge code backfill, UserBadge backfill, nullable SET NULL foreign keys, BadgeRule schema, and birthday AUTO compatibility."
     }
   }
 }

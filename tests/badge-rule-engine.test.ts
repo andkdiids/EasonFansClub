@@ -54,7 +54,7 @@ test('规则注册表统一提供指标、文案、阈值、操作符和事件�
 
 test('legacy AUTO、EVENT、MANUAL 兼容，新建结构化 AUTO 必须有规则', () => {
   const base = { name: '测试勋章', code: 'test1' }
-  assert.match(parseBadgeDefinition({ ...base, grantType: 'AUTO' }).error || '', /必须配置自动获取规则/)
+  assert.match(parseBadgeDefinition({ ...base, grantType: 'AUTO' }).error || '', /必须配置获取条件/)
   assert.equal(parseBadgeDefinition({ grantType: 'MANUAL', rule: { ruleType: 'POST_COUNT', threshold: 1 } }, true).error, '手动或事件勋章不能配置自动获取规则')
   assert.equal(parseBadgeDefinition({ ...base, grantType: 'EVENT' }).error, undefined)
   assert.equal(parseBadgeDefinition({ ...base, grantType: 'MANUAL' }).error, undefined)

@@ -99,6 +99,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (availabilityError) return NextResponse.json({ message: availabilityError }, { status: 400 })
 
     const nextGrantType = typeof data.grantType === 'string' ? data.grantType : previous.grantType
+    if (parsed.rule && nextGrantType !== 'AUTO') return NextResponse.json({ message: '手动或事件勋章不能配置自动获取规则' }, { status: 400 })
     const currentRule = previous.BadgeRule
       ? {
           ruleType: previous.BadgeRule.ruleType,
@@ -113,19 +114,23 @@ export async function PATCH(request: Request, context: RouteContext) {
       ? parsed.rule !== undefined
         ? parsed.rule
         : currentRule
-      : currentRule
+      : null
     const keepsLegacyAutoFlow = nextGrantType === 'AUTO'
       && previous.grantType === 'AUTO'
       && !previous.BadgeRule
       && (parsed.rule === undefined || parsed.rule === null)
-    if (nextGrantType === 'AUTO' && !effectiveRule && !keepsLegacyAutoFlow) return NextResponse.json({ message: '自动发放必须配置自动获取规则' }, { status: 400 })
+    if (nextGrantType === 'AUTO' && !effectiveRule && !keepsLegacyAutoFlow) return NextResponse.json({ message: '自动授予勋章必须配置获取条件' }, { status: 400 })
 
     const hasDescription = 'acquisitionDescription' in body
     const requestedDescription = typeof data.acquisitionDescription === 'string' ? data.acquisitionDescription.trim() : ''
     if (nextGrantType === 'AUTO' && effectiveRule) {
       const generatedDescription = generateBadgeAcquisitionDescription(effectiveRule.ruleType, effectiveRule.threshold)
+      const explicitlyResetToDefault = body.acquisitionDescriptionCustomized === false
       const explicitlyCustomized = body.acquisitionDescriptionCustomized === true
-      if (explicitlyCustomized && hasDescription && requestedDescription) {
+      if (explicitlyResetToDefault) {
+        data.acquisitionDescription = generatedDescription
+        data.acquisitionDescriptionCustomized = false
+      } else if (explicitlyCustomized && hasDescription && requestedDescription) {
         data.acquisitionDescription = requestedDescription
         data.acquisitionDescriptionCustomized = true
       } else if (previous.acquisitionDescriptionCustomized && !hasDescription) {
@@ -140,10 +145,11 @@ export async function PATCH(request: Request, context: RouteContext) {
       data.acquisitionDescription = previous.acquisitionDescription
       data.acquisitionDescriptionCustomized = true
     }
+    if (nextGrantType !== 'AUTO') data.acquisitionDescriptionCustomized = false
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.badge.update({ where: { id: badgeId }, data, select: { id: true } })
-      if (effectiveRule) {
+      if (nextGrantType === 'AUTO' && effectiveRule) {
         const ruleData = {
           ruleType: effectiveRule.ruleType,
           operator: effectiveRule.operator,
@@ -156,6 +162,8 @@ export async function PATCH(request: Request, context: RouteContext) {
           create: { badgeId, ...ruleData },
           update: ruleData,
         })
+      } else if (nextGrantType !== 'AUTO' && previous.BadgeRule) {
+        await tx.badgeRule.delete({ where: { badgeId } })
       }
       const updated = await tx.badge.findUniqueOrThrow({ where: { id: badgeId }, select: badgeAdminSelect })
       const affectedUsers = await tx.user.findMany({ where: { equippedBadgeId: badgeId }, select: { id: true, uid: true } })
