@@ -3,6 +3,31 @@ export type BadgeRarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'LIMITED'
 export type BadgeGrantType = 'AUTO' | 'MANUAL' | 'EVENT'
 export type BadgeEffectType = 'NONE' | 'SHINE' | 'GLOW' | 'SPARKLE'
 export type BadgeNicknameEffect = 'NONE' | 'COLOR' | 'GOLD' | 'GRADIENT' | 'GLOW'
+export type BadgeAvailabilityStatus = 'PERMANENT' | 'UPCOMING' | 'AVAILABLE' | 'ENDED'
+
+export type BadgeSeriesView = {
+  id: string
+  code: string
+  name: string
+  description?: string | null
+  sortOrder: number
+  isEnabled?: boolean
+}
+
+export type BadgeProgressView = {
+  current: number
+  target: number
+  percentage: number
+  operator: 'GTE' | 'LTE' | 'EQ'
+  progressUnsupported?: boolean
+}
+
+export type BadgeOwnershipStatsView = {
+  ownerCount: number
+  totalUsers: number
+  rate: number
+  display: string
+}
 
 export type EquippedBadgeView = {
   id: string
@@ -20,6 +45,10 @@ export type EquippedBadgeView = {
   acquisitionDescription?: string | null
   isWearable?: boolean
   isEnabled?: boolean
+  series?: BadgeSeriesView | null
+  tierGroupCode?: string | null
+  tierLevel?: number | null
+  isHighestTier?: boolean
 }
 
 export type BadgeView = Omit<EquippedBadgeView, 'rarity' | 'obtainedAt'> & {
@@ -34,6 +63,15 @@ export type BadgeView = Omit<EquippedBadgeView, 'rarity' | 'obtainedAt'> & {
   status: 'OBTAINED' | 'NOT_OBTAINED' | 'HIDDEN'
   obtainedAt: string | null
   isEquipped: boolean
+  series?: BadgeSeriesView | null
+  tierGroupCode?: string | null
+  tierLevel?: number | null
+  isHighestTier?: boolean
+  availabilityStatus?: BadgeAvailabilityStatus
+  availableFrom?: string | null
+  availableUntil?: string | null
+  progress?: BadgeProgressView | null
+  ownershipStats?: BadgeOwnershipStatsView | null
 }
 
 export type BadgeCollectionView = {
@@ -42,6 +80,11 @@ export type BadgeCollectionView = {
   equippedBadgeId: string | null
   obtainedCount: number
   visibleTotal: number
+  publicObtainedCount?: number
+  publicTotal?: number
+  hiddenObtainedCount?: number
+  hiddenTotal?: number
+  completionPercentage?: number
   items: BadgeView[]
 }
 

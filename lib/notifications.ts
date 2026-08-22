@@ -161,12 +161,16 @@ const dynamicActorSuffixes = [
 ]
 
 function resolveNotificationActorText(value: string | null, actorName: string | null) {
-  if (!value || !actorName) return value
+  if (!value) return value
   for (const suffix of dynamicActorSuffixes) {
     const index = value.indexOf(suffix)
     if (index <= 0) continue
     const hasSpace = /\s/.test(value[index - 1] || '')
-    return `${actorName}${hasSpace ? ' ' : ''}${value.slice(index)}`
+    // Rebuild the actor prefix even when the related user was deleted or an
+    // old notification has no actorId. This prevents a historical username
+    // snapshot from being rendered as a public name.
+    const displayActorName = actorName || '有人'
+    return `${displayActorName}${hasSpace ? ' ' : ''}${value.slice(index)}`
   }
   return value
 }

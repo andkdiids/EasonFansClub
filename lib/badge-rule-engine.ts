@@ -1,7 +1,9 @@
-import { calculateCheckinStreaks, getShanghaiDateKey, parseBeijingDate } from '@/lib/checkin'
-import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
+import { calculateCheckinStreaks } from '@/lib/checkin'
+import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 import { prisma } from '@/lib/prisma'
 import { grantBadge } from '@/lib/badge-service'
+import { badgeAvailabilityWhere, getBadgeAvailability } from '@/lib/badge-phase2'
+import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMetric, VALID_POST_WHERE } from '@/lib/badge-metrics'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -24,17 +26,6 @@ const EVENT_RULE_TYPES = Object.fromEntries(
     BADGE_RULE_TYPES.filter((ruleType) => supportsEvent(ruleType, eventType)),
   ]),
 ) as unknown as Record<BadgeEvaluationEvent, readonly SupportedBadgeRuleType[]>
-
-const VALID_POST_WHERE = {
-  status: 'PUBLISHED' as const,
-  isDeleted: false,
-  moderationStatus: 'APPROVED' as const,
-}
-
-const ACTIVE_RELATION_USER_WHERE = {
-  status: 'ACTIVE' as const,
-  isDeleted: false,
-}
 
 export type BadgeEvaluationSummary = {
   userId: string
@@ -70,89 +61,19 @@ export function evaluateBadgeMetric(value: number, operator: BadgeRuleOperatorVa
   return value >= threshold
 }
 
-function safeMetric(value: number | null | undefined) {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
-}
-
-function accountAgeDays(createdAt: Date, now = new Date()) {
-  const created = parseBeijingDate(getShanghaiDateKey(createdAt))
-  const today = parseBeijingDate(getShanghaiDateKey(now))
-  if (!created || !today) return Math.max(0, Math.floor((now.getTime() - createdAt.getTime()) / 86_400_000))
-  return Math.max(0, Math.floor((today.getTime() - created.getTime()) / 86_400_000))
-}
-
-type BadgeMetricLoader = (userId: string) => Promise<number>
-
-const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoader> = {
-  POST_COUNT: (userId) => prisma.post.count({ where: { authorId: userId, ...VALID_POST_WHERE } }),
-  FEATURED_POST_COUNT: (userId) => prisma.post.count({ where: { authorId: userId, isFeatured: true, ...VALID_POST_WHERE } }),
-  CHECKIN_TOTAL_DAYS: (userId) => prisma.checkIn.count({ where: { userId } }),
-  CHECKIN_STREAK: async (userId) => {
-    const rows = await prisma.checkIn.findMany({ where: { userId }, select: { checkinDateKey: true } })
-    return calculateCheckinStreaks(rows.map((row) => row.checkinDateKey)).currentStreak
-  },
-  ACCOUNT_AGE_DAYS: async (userId) => {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { createdAt: true } })
-    return user ? accountAgeDays(user.createdAt) : 0
-  },
-  FRIEND_COUNT: (userId) => prisma.friendship.count({
-    where: {
-      OR: [{ userAId: userId }, { userBId: userId }],
-      User_Friendship_userAIdToUser: ACTIVE_RELATION_USER_WHERE,
-      User_Friendship_userBIdToUser: ACTIVE_RELATION_USER_WHERE,
-    },
-  }),
-  FOLLOWER_COUNT: (userId) => prisma.follow.count({
-    where: {
-      followingId: userId,
-      User_Follow_followerIdToUser: ACTIVE_RELATION_USER_WHERE,
-      User_Follow_followingIdToUser: ACTIVE_RELATION_USER_WHERE,
-    },
-  }),
-  GUESS_SONG_MAX_STREAK: async (userId) => {
-    const result = await prisma.guessSongSession.aggregate({
-      where: {
-        userId,
-        status: 'COMPLETED',
-        completedAt: { not: null },
-        isValid: true,
-        riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
-      },
-      _max: { maxStreak: true },
-    })
-    return safeMetric(result._max.maxStreak)
-  },
-  DUEL_WIN_COUNT: async (userId) => {
-    const result = await prisma.guessSongDuelStats.findUnique({ where: { userId }, select: { wins: true } })
-    return safeMetric(result?.wins)
-  },
-  WANT_LISTEN_MAX_STREAK: async (userId) => {
-    const result = await prisma.wantListenStats.aggregate({ where: { userId }, _max: { maxStreak: true } })
-    return safeMetric(result._max.maxStreak)
-  },
-  CONCERT_ATTENDANCE_COUNT: (userId) => prisma.userMusicConcert.count({ where: { userId } }),
-  RATING_COUNT: (userId) => prisma.rating.count({ where: { userId } }),
-}
-
-export function getBadgeMetricLoader(ruleType: SupportedBadgeRuleType) {
-  const loaderKey = BADGE_RULE_REGISTRY[ruleType].metricLoader as SupportedBadgeRuleType
-  return BADGE_RULE_METRIC_LOADERS[loaderKey]
-}
-
-export async function getUserBadgeMetric(userId: string, ruleType: SupportedBadgeRuleType): Promise<number> {
-  return getBadgeMetricLoader(ruleType)(userId)
-}
+export { getBadgeMetricLoader, getUserBadgeMetric } from '@/lib/badge-metrics'
 
 function ruleDescription(rule: Pick<ParsedBadgeRule, 'ruleType' | 'threshold'>) {
   return generateBadgeAcquisitionDescription(rule.ruleType, rule.threshold)
 }
 
 async function loadEnabledRules(ruleTypes?: readonly SupportedBadgeRuleType[]) {
+  const now = new Date()
   return prisma.badgeRule.findMany({
     where: {
       isEnabled: true,
       ...(ruleTypes ? { ruleType: { in: [...new Set(ruleTypes)] } } : {}),
-      Badge: { isEnabled: true, isActive: true, grantType: 'AUTO' },
+      Badge: { isEnabled: true, isActive: true, grantType: 'AUTO', ...badgeAvailabilityWhere(now) },
     },
     select: {
       id: true,
@@ -212,13 +133,13 @@ export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluatio
   })
 }
 
-type BackfillUser = { id: string; createdAt: Date }
+export type BadgeMetricUser = { id: string; createdAt: Date }
 
-function createMetricMap(rows: BackfillUser[]) {
+function createMetricMap(rows: BadgeMetricUser[]) {
   return new Map(rows.map((row) => [row.id, 0]))
 }
 
-async function getBatchMetrics(users: BackfillUser[], ruleType: SupportedBadgeRuleType) {
+export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: SupportedBadgeRuleType) {
   const userIds = users.map((user) => user.id)
   const metrics = createMetricMap(users)
   if (!userIds.length) return metrics
@@ -235,8 +156,14 @@ async function getBatchMetrics(users: BackfillUser[], ruleType: SupportedBadgeRu
       return metrics
     }
     case 'CHECKIN_TOTAL_DAYS': {
-      const rows = await prisma.checkIn.groupBy({ by: ['userId'], where: { userId: { in: userIds } }, _count: { _all: true } })
-      rows.forEach((row) => metrics.set(row.userId, row._count._all))
+      const rows = await prisma.checkIn.findMany({ where: { userId: { in: userIds } }, select: { userId: true, checkinDateKey: true } })
+      const dates = new Map<string, Set<string>>()
+      rows.forEach((row) => {
+        const userDates = dates.get(row.userId) || new Set<string>()
+        userDates.add(row.checkinDateKey)
+        dates.set(row.userId, userDates)
+      })
+      dates.forEach((dateKeys, userId) => metrics.set(userId, dateKeys.size))
       return metrics
     }
     case 'CHECKIN_STREAK': {
@@ -333,11 +260,14 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
       isEnabled: true,
       isActive: true,
       grantType: true,
+      availableFrom: true,
+      availableUntil: true,
       BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
     },
   })
   if (!badge || !badge.BadgeRule) throw new Error('勋章或自动规则不存在')
   if (!badge.isEnabled || !badge.isActive || badge.grantType !== 'AUTO' || !badge.BadgeRule.isEnabled) throw new Error('勋章或自动规则当前未启用')
+  if (badge.availableFrom || badge.availableUntil) throw new Error('限定勋章没有可靠的历史达标时间，不能使用自动历史补发')
 
   const users = await prisma.user.findMany({
     where: { status: 'ACTIVE', isDeleted: false, ...(normalizedCursor ? { id: { gt: normalizedCursor } } : {}) },
@@ -348,7 +278,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
   const hasMore = users.length > boundedBatchSize
   const rows = hasMore ? users.slice(0, boundedBatchSize) : users
   const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
-  const metrics = await getBatchMetrics(rows, type)
+  const metrics = await getBatchBadgeMetrics(rows, type)
   const summary: BadgeBackfillSummary = {
     badgeId,
     ruleId: badge.BadgeRule.id,
@@ -384,6 +314,90 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
     }
   }
   return summary
+}
+
+export type BadgeRulePreview = {
+  badgeId: string
+  ruleId: string
+  ruleType: SupportedBadgeRuleType
+  operator: BadgeRuleOperatorValue
+  threshold: number
+  availability: ReturnType<typeof getBadgeAvailability>
+  eligibleCount: number
+  ownedCount: number
+  pendingCount: number
+}
+
+/**
+ * Preview walks bounded user pages and uses the batch metric loader. It never
+ * materializes the whole user table or grants a badge.
+ */
+export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePreview> {
+  const badge = await prisma.badge.findUnique({
+    where: { id: badgeId },
+    select: {
+      id: true,
+      availableFrom: true,
+      availableUntil: true,
+      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
+    },
+  })
+  if (!badge?.BadgeRule) throw new Error('勋章或自动规则不存在')
+  if (!badge.BadgeRule.isEnabled) throw new Error('自动规则当前未启用')
+  const availability = getBadgeAvailability(badge)
+  const ownedCount = await prisma.userBadge.count({ where: { badgeId, User: ACTIVE_RELATION_USER_WHERE } })
+  if (availability === 'UPCOMING' || availability === 'ENDED') {
+    return {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: badge.BadgeRule.ruleType as SupportedBadgeRuleType,
+      operator: badge.BadgeRule.operator as BadgeRuleOperatorValue,
+      threshold: badge.BadgeRule.threshold,
+      availability,
+      eligibleCount: 0,
+      ownedCount,
+      pendingCount: 0,
+    }
+  }
+
+  const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
+  const operator = badge.BadgeRule.operator as BadgeRuleOperatorValue
+  let cursor: string | undefined
+  let eligibleCount = 0
+  let pendingCount = 0
+  while (true) {
+    const users = await prisma.user.findMany({
+      where: { status: 'ACTIVE', isDeleted: false, ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: BACKFILL_BATCH_MAX,
+      select: { id: true, createdAt: true },
+    })
+    if (!users.length) break
+    const metrics = await getBatchBadgeMetrics(users, type)
+    const eligibleIds = users
+      .filter((user) => evaluateBadgeMetric(metrics.get(user.id) || 0, operator, badge.BadgeRule!.threshold))
+      .map((user) => user.id)
+    eligibleCount += eligibleIds.length
+    if (eligibleIds.length) {
+      const ownedEligibleCount = await prisma.userBadge.count({
+        where: { badgeId, userId: { in: eligibleIds } },
+      })
+      pendingCount += Math.max(0, eligibleIds.length - ownedEligibleCount)
+    }
+    cursor = users.at(-1)?.id
+    if (users.length < BACKFILL_BATCH_MAX) break
+  }
+  return {
+    badgeId,
+    ruleId: badge.BadgeRule.id,
+    ruleType: type,
+    operator,
+    threshold: badge.BadgeRule.threshold,
+    availability,
+    eligibleCount,
+    ownedCount,
+    pendingCount,
+  }
 }
 
 const BACKFILL_BATCH_MIN = 100

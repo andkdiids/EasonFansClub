@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { requireAdmin } from '@/lib/security'
 import { badgeAdminSelect, listBadgesForAdmin, writeBadgeAdminAction } from '@/lib/badge-service'
+import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
 import { parseBadgeDefinition } from '@/lib/badge-admin'
 import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
 import { prisma } from '@/lib/prisma'
@@ -9,14 +10,16 @@ import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-function serializeBadge(badge: Record<string, unknown>) {
+function serializeBadge(badge: Record<string, unknown>, stats?: { ownerCount: number; totalUsers: number; rate: number; display: string }) {
   const count = badge._count && typeof badge._count === 'object' ? (badge._count as { UserBadge?: number }).UserBadge || 0 : 0
   const { BadgeRule, ...rest } = badge
   return {
     ...rest,
     rule: BadgeRule || null,
     iconUrl: toPublicMediaUrl(typeof badge.iconUrl === 'string' ? badge.iconUrl : null),
-    ownerCount: count,
+    ownerCount: stats?.ownerCount ?? count,
+    ownershipStats: stats || null,
+    availabilityStatus: getBadgeAvailability({ availableFrom: badge.availableFrom instanceof Date ? badge.availableFrom : badge.availableFrom ? new Date(String(badge.availableFrom)) : null, availableUntil: badge.availableUntil instanceof Date ? badge.availableUntil : badge.availableUntil ? new Date(String(badge.availableUntil)) : null }),
   }
 }
 
@@ -30,8 +33,14 @@ export async function GET(request: Request) {
     enabled: enabledParam === 'true' ? true : enabledParam === 'false' ? false : undefined,
     visibility: searchParams.get('visibility') || undefined,
     grantType: searchParams.get('grantType') || undefined,
+    rarity: searchParams.get('rarity') || undefined,
+    seriesId: searchParams.get('seriesId') || undefined,
+    tierGroupCode: searchParams.get('tierGroupCode') || undefined,
+    availability: searchParams.get('availability') || undefined,
+    order: ['sortOrder', 'ownerCount', 'rate', 'createdAt'].includes(searchParams.get('order') || '') ? searchParams.get('order') as 'sortOrder' | 'ownerCount' | 'rate' | 'createdAt' : undefined,
   })
-  return NextResponse.json({ badges: badges.map((badge) => serializeBadge(badge as unknown as Record<string, unknown>)) }, { headers: { 'Cache-Control': 'no-store' } })
+  const stats = await getBadgeOwnershipStats(badges.map((badge) => badge.id))
+  return NextResponse.json({ badges: badges.map((badge) => serializeBadge(badge as unknown as Record<string, unknown>, stats.get(badge.id))) }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST(request: Request) {
@@ -57,6 +66,10 @@ export async function POST(request: Request) {
   if (data.musicTourId) {
     const tour = await prisma.musicTour.findUnique({ where: { id: data.musicTourId }, select: { id: true } })
     if (!tour) return NextResponse.json({ message: '关联的巡演不存在' }, { status: 400 })
+  }
+  if (data.seriesId) {
+    const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId }, select: { id: true } })
+    if (!series) return NextResponse.json({ message: '关联的勋章系列不存在' }, { status: 400 })
   }
 
   try {

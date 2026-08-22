@@ -10,10 +10,10 @@ import { getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { verifyTurnstileToken } from '@/lib/turnstile'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { createPlainToken, hashToken } from '@/lib/tokens'
-import { getLoginAccountDisplay, validateLoginAccountValue } from '@/lib/login-account'
+import { getLoginAccountDisplay, validateNicknameValue } from '@/lib/login-account'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { normalizeText } from '@/lib/validators'
-import { USERNAME_BANNED_WORD_MESSAGE, checkBannedWords } from '@/lib/content-moderation'
+import { NICKNAME_BANNED_WORD_MESSAGE, checkBannedWords } from '@/lib/content-moderation'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
   const rawNickname = body?.nickname || body?.username
   const suppliedRegistrationToken = normalizeText(body?.registrationToken)
   const nickname = getLoginAccountDisplay(rawNickname)
-  const accountValidation = validateLoginAccountValue(rawNickname)
+  const accountValidation = validateNicknameValue(rawNickname)
   const usernameNormalized = accountValidation.usernameNormalized
   const email = normalizeText(body?.email).toLowerCase()
   const rawPhone = normalizeText(body?.phone)
@@ -93,9 +93,9 @@ export async function POST(request: Request) {
   const securityQuestions = parseSecurityQuestions(body?.securityQuestions)
   const errors: Record<string, string> = {}
 
-  if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) errors.nickname = '用户名格式不正确'
+  if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) errors.nickname = '昵称格式不正确'
   else if (accountValidation.error) errors.nickname = accountValidation.error
-  else if ((await checkBannedWords(nickname)).blocked) errors.nickname = USERNAME_BANNED_WORD_MESSAGE
+  else if ((await checkBannedWords(nickname)).blocked) errors.nickname = NICKNAME_BANNED_WORD_MESSAGE
   if (!rawPhone) errors.phone = '手机号格式错误'
   else if (!normalizedPhone) errors.phone = '手机号格式错误'
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = '邮箱格式错误'

@@ -1,0 +1,44 @@
+{
+  "legacyMigrationCutoff": "20260727220000",
+  "mysqlNativeMigrationStart": "20260729010000",
+  "legacyPolicy": "LEGACY_MIGRATION",
+  "legacyMigrationDirectories": [
+    "20260709000000_add_user_delete_state",
+    "20260712043000_add_home_performance_indexes",
+    "20260714090000_add_verified_email_and_system_notifications",
+    "20260714103000_add_feedback_center_and_changelog",
+    "20260714140000_harden_system_notifications",
+    "20260714170000_add_page_layouts",
+    "20260714190000_add_page_layout_revisions",
+    "20260715163000_add_profile_wall_and_friend_activity",
+    "20260715190000_add_growth_system_foundation",
+    "20260717090000_add_account_recovery_security",
+    "20260717113000_add_registration_idempotency",
+    "20260717170000_fix_forum_feedback_checkin_consistency",
+    "20260718090000_single_security_question",
+    "20260718170000_add_easmusic_catalog",
+    "20260718190000_add_easmusic_import_fields",
+    "20260718210000_easmusic_cms",
+    "20260719090000_add_super_admin_user_actions",
+    "20260719120000_add_login_account_and_checkin_preferences",
+    "20260727090000_add_entertainment_center",
+    "20260727160000_add_guess_song_game",
+    "20260727220000_community_interactions_messages_rewards"
+  ],
+  "entries": {
+    "20260820140000_add_want_listen_session_exclusion": {
+      "status": "applied",
+      "note": "Production successful checksum differs from the current repository file after MySQL syntax repair; preserve as historical fact."
+    },
+    "20260821120000_add_rate_limit_log": {
+      "status": "production_structure_exists_with_rolled_back_migration_record",
+      "origin": "unknown",
+      "action": "do_not_resolve; investigate_rolled_back_record_before_manual_history_decision",
+      "note": "Read-only preflight found a rolled_back_at row with applied_steps_count=0; the table is structurally equivalent, but this is not a safe resolve candidate."
+    },
+    "20260821153000_add_honor_badge_system": {
+      "status": "pending_production_preflight",
+      "action": "run_data_and_ddl_preflight_before_deploy"
+    }
+  }
+}

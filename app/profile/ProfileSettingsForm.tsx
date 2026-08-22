@@ -6,7 +6,7 @@ import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserLocationPicker } from '@/components/UserLocationPicker'
 import { profileImageUrl } from '@/lib/images'
-import { validateLoginAccountValue } from '@/lib/login-account'
+import { validateNicknameValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import type { UserLocation } from '@/lib/user-location'
 
@@ -558,7 +558,7 @@ export function ProfileSettingsForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nicknameValidation = form.nickname !== initialProfile.nickname
-      ? validateLoginAccountValue(form.nickname)
+      ? validateNicknameValue(form.nickname)
       : null
     if (nicknameValidation?.error) {
       setError(nicknameValidation.error)
@@ -768,7 +768,7 @@ export function ProfileSettingsForm({
               value={form.nickname}
               onChange={(event) => {
                 update('nickname', event.target.value)
-                setError(event.target.value === initialProfile.nickname ? '' : validateLoginAccountValue(event.target.value).error || '')
+                setError(event.target.value === initialProfile.nickname ? '' : validateNicknameValue(event.target.value).error || '')
               }}
               minLength={2}
               maxLength={16}

@@ -261,13 +261,13 @@ export function UserRewardManager({ initialHistory, operators }: { initialHistor
         <div>
           <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Step 1</p>
           <h2 className="mt-1 text-2xl font-black text-brand-950">搜索并确认用户</h2>
-          <p className="mt-2 text-sm font-bold text-slate-500">支持用户名、用户 ID、UID、手机号和邮箱。</p>
+          <p className="mt-2 text-sm font-bold text-slate-500">支持昵称、登录账号、用户 ID、UID、手机号和邮箱。</p>
         </div>
         <form onSubmit={searchUsers} className="mt-4 flex flex-col gap-2 sm:flex-row">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="用户名 / 用户 ID / UID / 手机号 / 邮箱"
+            placeholder="昵称 / 登录账号 / 用户 ID / UID / 手机号 / 邮箱"
             className="min-h-11 min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-4 text-sm font-bold outline-none focus:border-brand-300"
           />
           <button type="submit" disabled={searching || !query.trim()} className="min-h-11 rounded-xl bg-brand-700 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">

@@ -35,11 +35,10 @@ test('username change is server-enforced with a serializable transaction and ded
   assert.match(migration, /ADD COLUMN `usernameChangedAt` DATETIME\(3\) NULL/)
 })
 
-test('profile UI keeps the current username read-only and confirms before sending a change', () => {
+test('profile UI exposes nickname only and keeps the internal login account out of public profile editing', () => {
   const form = readFileSync('app/profile/ProfileSettingsForm.tsx', 'utf8')
-  assert.match(form, /aria-readonly="true"/)
-  assert.match(form, /更改用户名/)
-  assert.match(form, /确认更改用户名/)
-  assert.match(form, /JSON\.stringify\(\{ newUsername: validation\.account \}\)/)
-  assert.match(form, /nextAllowedAt/)
+  assert.doesNotMatch(form, /更改用户名/)
+  assert.doesNotMatch(form, /确认更改用户名/)
+  assert.doesNotMatch(form, /newUsername/)
+  assert.match(form, /nickname: form\.nickname/)
 })

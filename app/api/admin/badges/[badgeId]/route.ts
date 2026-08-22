@@ -10,15 +10,23 @@ import { requireAdmin } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import type { Prisma } from '@prisma/client'
+import { getBadgeAvailability, getBadgeOwnershipStats, validateBadgeAvailability } from '@/lib/badge-phase2'
 
 export const dynamic = 'force-dynamic'
 
 type RouteContext = { params: Promise<{ badgeId: string }> }
 
-function serializeBadge(badge: Record<string, unknown>) {
+function serializeBadge(badge: Record<string, unknown>, stats?: { ownerCount: number; totalUsers: number; rate: number; display: string }) {
   const count = badge._count && typeof badge._count === 'object' ? (badge._count as { UserBadge?: number }).UserBadge || 0 : 0
   const { BadgeRule, ...rest } = badge
-  return { ...rest, rule: BadgeRule || null, iconUrl: toPublicMediaUrl(typeof badge.iconUrl === 'string' ? badge.iconUrl : null), ownerCount: count }
+  return {
+    ...rest,
+    rule: BadgeRule || null,
+    iconUrl: toPublicMediaUrl(typeof badge.iconUrl === 'string' ? badge.iconUrl : null),
+    ownerCount: stats?.ownerCount ?? count,
+    ownershipStats: stats || null,
+    availabilityStatus: getBadgeAvailability({ availableFrom: badge.availableFrom instanceof Date ? badge.availableFrom : badge.availableFrom ? new Date(String(badge.availableFrom)) : null, availableUntil: badge.availableUntil instanceof Date ? badge.availableUntil : badge.availableUntil ? new Date(String(badge.availableUntil)) : null }),
+  }
 }
 
 function badgeStorageKey(value: unknown) {
@@ -68,10 +76,27 @@ export async function PATCH(request: Request, context: RouteContext) {
         grantType: true,
         acquisitionDescription: true,
         acquisitionDescriptionCustomized: true,
+        seriesId: true,
+        tierGroupCode: true,
+        tierLevel: true,
+        availableFrom: true,
+        availableUntil: true,
         BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true } },
       },
     })
     if (!previous) return NextResponse.json({ message: '更新失败，勋章不存在' }, { status: 404 })
+
+    if (data.seriesId) {
+      const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId as string }, select: { id: true } })
+      if (!series) return NextResponse.json({ message: '关联的勋章系列不存在' }, { status: 400 })
+    }
+    const effectiveTierGroupCode = data.tierGroupCode !== undefined ? data.tierGroupCode as string | null : previous.tierGroupCode
+    const effectiveTierLevel = data.tierLevel !== undefined ? data.tierLevel as number | null : previous.tierLevel
+    if ((effectiveTierGroupCode === null) !== (effectiveTierLevel === null)) return NextResponse.json({ message: 'Tier 系列编码与等级必须同时填写或同时留空' }, { status: 400 })
+    const effectiveAvailableFrom = data.availableFrom !== undefined ? data.availableFrom as Date | null : previous.availableFrom
+    const effectiveAvailableUntil = data.availableUntil !== undefined ? data.availableUntil as Date | null : previous.availableUntil
+    const availabilityError = validateBadgeAvailability(effectiveAvailableFrom, effectiveAvailableUntil)
+    if (availabilityError) return NextResponse.json({ message: availabilityError }, { status: 400 })
 
     const nextGrantType = typeof data.grantType === 'string' ? data.grantType : previous.grantType
     const currentRule = previous.BadgeRule
@@ -147,6 +172,25 @@ export async function PATCH(request: Request, context: RouteContext) {
         badgeId,
         detail: { changedFields: Object.keys(data) },
       })
+      if (Object.keys(data).some((field) => field === 'availableFrom' || field === 'availableUntil')) {
+        await writeBadgeAdminAction(tx, {
+          actorId: guard.user.id,
+          action: 'BADGE_AVAILABILITY_UPDATE',
+          badgeId,
+          detail: {
+            availableFrom: effectiveAvailableFrom?.toISOString() || null,
+            availableUntil: effectiveAvailableUntil?.toISOString() || null,
+          },
+        })
+      }
+      if (Object.keys(data).some((field) => field === 'tierGroupCode' || field === 'tierLevel')) {
+        await writeBadgeAdminAction(tx, {
+          actorId: guard.user.id,
+          action: 'BADGE_TIER_UPDATE',
+          badgeId,
+          detail: { tierGroupCode: effectiveTierGroupCode, tierLevel: effectiveTierLevel },
+        })
+      }
       if (previous.BadgeRule && nextGrantType !== 'AUTO') {
         await writeBadgeAdminAction(tx, {
           actorId: guard.user.id,
@@ -173,7 +217,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       revalidatePath(`/user/${formatUid(affectedUser.uid)}`)
       revalidatePath(`/user/${formatUid(affectedUser.uid)}/badges`)
     }
-    return NextResponse.json({ badge: serializeBadge(badge as unknown as Record<string, unknown>) })
+    const stats = await getBadgeOwnershipStats([badge.id])
+    return NextResponse.json({ badge: serializeBadge(badge as unknown as Record<string, unknown>, stats.get(badge.id)) })
   } catch (error) {
     const duplicated = error instanceof Error && /P2002|Unique constraint/i.test(error.message)
     return NextResponse.json({ message: duplicated ? '更新失败：名称、code 或标识已经存在' : '更新失败，勋章可能不存在' }, { status: duplicated ? 409 : 404 })

@@ -728,7 +728,7 @@ export function WantListenLeaderboardManager() {
               <option value="WEEK">本周榜</option>
               <option value="ALL">全部榜</option>
             </select>
-            <input value={bonusQuery} onChange={(event) => setBonusQuery(event.target.value)} placeholder="搜索用户名 / UID" className="w-48 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <input value={bonusQuery} onChange={(event) => setBonusQuery(event.target.value)} placeholder="搜索昵称 / 登录账号 / UID" className="w-48 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </div>
         </div>
 

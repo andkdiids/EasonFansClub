@@ -8,6 +8,7 @@ export const CONTENT_CONTAINS_BANNED_WORD = 'CONTENT_CONTAINS_BANNED_WORD' as co
 export const USERNAME_CONTAINS_BANNED_WORD = 'USERNAME_CONTAINS_BANNED_WORD' as const
 export const BANNED_WORD_MESSAGE = '内容包含违禁词，请修改后再提交。'
 export const USERNAME_BANNED_WORD_MESSAGE = '用户名包含违禁词，请修改。'
+export const NICKNAME_BANNED_WORD_MESSAGE = '昵称包含违禁词，请修改。'
 export const VIOLATION_CONTENT_TEXT = '违规内容'
 export const VIOLATION_USER_TEXT = '违规用户'
 

@@ -253,38 +253,59 @@ enum BadgeNicknameEffect {
   GLOW
 }
 
-model Badge {
-  id                     String                @id @default(cuid())
-  name                   String                @unique
-  slug                   String                @unique
-  code                   String                @unique
-  description            String?               @db.VarChar(500)
-  acquisitionDescription String?               @db.VarChar(500)
-  acquisitionDescriptionCustomized Boolean     @default(false)
-  iconUrl                String?
-  pointsCost             Int?
-  category               BadgeCategory         @default(SYSTEM)
-  visibility             BadgeVisibility       @default(PUBLIC)
-  rarity                 BadgeRarity           @default(COMMON)
-  grantType              BadgeGrantType        @default(MANUAL)
-  isWearable             Boolean               @default(true)
-  isEnabled              Boolean               @default(true)
-  effectType             BadgeEffectType       @default(NONE)
-  nicknameEffect         BadgeNicknameEffect   @default(NONE)
-  nicknameColor          String?               @db.VarChar(20)
-  nicknameGradientStart  String?               @db.VarChar(20)
-  nicknameGradientEnd    String?               @db.VarChar(20)
-  sortOrder              Int                   @default(0)
-  musicTourId            String?
-  musicTour              MusicTour?            @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
-  isAutoGrant            Boolean               @default(false)
-  isActive               Boolean               @default(true)
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-  UserBadge              UserBadge[]
-  BadgeRule              BadgeRule?
-  EquippedByUsers        User[]                @relation("UserEquippedBadge")
+model BadgeSeries {
+  id          String   @id @default(cuid())
+  code        String   @unique @db.VarChar(64)
+  name        String   @db.VarChar(120)
+  description String?  @db.VarChar(500)
+  sortOrder   Int      @default(0)
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  Badges      Badge[]
 
+  @@index([isEnabled, sortOrder])
+}
+
+model Badge {
+  id                               String              @id @default(cuid())
+  name                             String              @unique
+  slug                             String              @unique
+  code                             String              @unique
+  description                      String?             @db.VarChar(500)
+  acquisitionDescription           String?             @db.VarChar(500)
+  acquisitionDescriptionCustomized Boolean             @default(false)
+  iconUrl                          String?
+  pointsCost                       Int?
+  category                         BadgeCategory       @default(SYSTEM)
+  visibility                       BadgeVisibility     @default(PUBLIC)
+  rarity                           BadgeRarity         @default(COMMON)
+  grantType                        BadgeGrantType      @default(MANUAL)
+  isWearable                       Boolean             @default(true)
+  isEnabled                        Boolean             @default(true)
+  effectType                       BadgeEffectType     @default(NONE)
+  nicknameEffect                   BadgeNicknameEffect @default(NONE)
+  nicknameColor                    String?             @db.VarChar(20)
+  nicknameGradientStart            String?             @db.VarChar(20)
+  nicknameGradientEnd              String?             @db.VarChar(20)
+  sortOrder                        Int                 @default(0)
+  seriesId                         String?
+  tierGroupCode                    String?             @db.VarChar(64)
+  tierLevel                        Int?
+  availableFrom                    DateTime?
+  availableUntil                   DateTime?
+  Series                           BadgeSeries?        @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  musicTourId                      String?
+  musicTour                        MusicTour?          @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
+  isAutoGrant                      Boolean             @default(false)
+  isActive                         Boolean             @default(true)
+  createdAt                        DateTime            @default(now())
+  updatedAt                        DateTime            @updatedAt
+  UserBadge                        UserBadge[]
+  BadgeRule                        BadgeRule?
+  EquippedByUsers                  User[]              @relation("UserEquippedBadge")
+
+  @@unique([tierGroupCode, tierLevel])
   @@index([isActive])
   @@index([isEnabled])
   @@index([category])
@@ -292,6 +313,8 @@ model Badge {
   @@index([visibility, isEnabled, sortOrder])
   @@index([grantType])
   @@index([rarity])
+  @@index([seriesId, sortOrder])
+  @@index([availableFrom, availableUntil])
 }
 
 model BadgeRule {
@@ -302,10 +325,10 @@ model BadgeRule {
   threshold          Int
   secondaryThreshold Int?
   configJson         Json?
-  isEnabled           Boolean           @default(true)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  Badge               Badge             @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  isEnabled          Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  Badge              Badge             @relation(fields: [badgeId], references: [id], onDelete: Cascade)
 
   @@index([ruleType, isEnabled])
 }
@@ -1205,7 +1228,7 @@ model WantListenSession {
   mode                       WantListenMode
   status                     WantListenSessionStatus      @default(IN_PROGRESS)
   currentQuestion            Int                          @default(1)
-  questionCount              Int?                         // null = 无尽模式；历史固定 20 题为兼容保留
+  questionCount              Int? // null = 无尽模式；历史固定 20 题为兼容保留
   totalQuestions             Int                          @default(0) // 已答总题数（无尽模式累计）
   currentStreak              Int                          @default(0)
   maxStreak                  Int                          @default(0)
@@ -1291,8 +1314,8 @@ model WantListenLeaderboardEntry {
   periodKey         String
   score             Int
   correctCount      Int
-  maxStreak         Int                  @default(0)   // 无尽模式最高连击
-  totalQuestions    Int                  @default(0)   // 无尽模式总答题数（历史 20 题回填 20）
+  maxStreak         Int                  @default(0) // 无尽模式最高连击
+  totalQuestions    Int                  @default(0) // 无尽模式总答题数（历史 20 题回填 20）
   completionTimeMs  Int
   achievedAt        DateTime
   createdAt         DateTime             @default(now())
@@ -1329,21 +1352,21 @@ model UndercoverWordPair {
 }
 
 model UndercoverRoom {
-  id                   String                 @id @default(cuid())
-  roomCode             String                 @unique
-  passwordHash         String?
-  isPublic             Boolean                @default(true)
-  status               UndercoverRoomStatus   @default(WAITING)
-  difficulty           UndercoverDifficulty   @default(NORMAL)
-  currentMatchId       String?
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
-  lastActivityAt       DateTime               @default(now())
-  closedAt             DateTime?
-  hostId               String
-  Host                 User                   @relation("UndercoverRoomHost", fields: [hostId], references: [id], onDelete: Cascade)
-  UndercoverRoomPlayer UndercoverRoomPlayer[]
-  UndercoverMatch      UndercoverMatch[]
+  id                    String                  @id @default(cuid())
+  roomCode              String                  @unique
+  passwordHash          String?
+  isPublic              Boolean                 @default(true)
+  status                UndercoverRoomStatus    @default(WAITING)
+  difficulty            UndercoverDifficulty    @default(NORMAL)
+  currentMatchId        String?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  lastActivityAt        DateTime                @default(now())
+  closedAt              DateTime?
+  hostId                String
+  Host                  User                    @relation("UndercoverRoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  UndercoverRoomPlayer  UndercoverRoomPlayer[]
+  UndercoverMatch       UndercoverMatch[]
   UndercoverRoomMessage UndercoverRoomMessage[]
 
   @@index([status, isPublic, lastActivityAt])
@@ -1491,9 +1514,9 @@ model UndercoverStats {
 }
 
 model UndercoverRoomMessage {
-  id        String   @id @default(cuid())
-  content   String   @db.VarChar(200)
-  createdAt DateTime @default(now())
+  id        String         @id @default(cuid())
+  content   String         @db.VarChar(200)
+  createdAt DateTime       @default(now())
   roomId    String
   userId    String
   Room      UndercoverRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -1503,15 +1526,15 @@ model UndercoverRoomMessage {
 }
 
 model UndercoverMatchResult {
-  id         String          @id @default(cuid())
-  role       UndercoverRole
-  isWin      Boolean         @default(false)
-  xpAwarded  Int             @default(0)
-  createdAt  DateTime        @default(now())
-  matchId    String
-  userId     String
-  Match      UndercoverMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  User       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String          @id @default(cuid())
+  role      UndercoverRole
+  isWin     Boolean         @default(false)
+  xpAwarded Int             @default(0)
+  createdAt DateTime        @default(now())
+  matchId   String
+  userId    String
+  Match     UndercoverMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  User      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([matchId, userId])
   @@index([userId, createdAt])
@@ -1672,19 +1695,19 @@ model GuessSongRiskLog {
 }
 
 model GameAntiCheatLog {
-  id                String                       @id @default(cuid())
+  id                String                      @id @default(cuid())
   userId            String
   gameType          String
   sessionId         String?
   questionCount     Int?
-  fastestAnswerTime Int?                         // 单题最快答题耗时（毫秒）
-  averageAnswerTime Int?                         // 平均答题耗时（毫秒）
+  fastestAnswerTime Int? // 单题最快答题耗时（毫秒）
+  averageAnswerTime Int? // 平均答题耗时（毫秒）
   ip                String?
   userAgent         String?
   suspiciousType    GameAntiCheatSuspiciousType
   details           Json?
-  createdAt         DateTime                     @default(now())
-  User              User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime                    @default(now())
+  User              User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([gameType, createdAt])
@@ -3407,7 +3430,7 @@ model User {
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
   EquippedBadge                                          Badge?                         @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
-  UserBadgeGrantedBy                                     UserBadge[]                     @relation("UserBadgeGrantedBy")
+  UserBadgeGrantedBy                                     UserBadge[]                    @relation("UserBadgeGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
   MyLivePhoto                                            MyLivePhoto[]
@@ -4126,13 +4149,13 @@ model NicknameViolationLog {
 
 model LeaderboardAdminLog {
   id            String   @id @default(cuid())
-  adminId       String?  // 管理员被删除后置空，审计信息由下方快照字段保留
-  action        String   // CLEAR_ALL / CLEAR_MODE / CLEAR_USER
+  adminId       String? // 管理员被删除后置空，审计信息由下方快照字段保留
+  action        String // CLEAR_ALL / CLEAR_MODE / CLEAR_USER
   targetUserId  String?
-  gameType      String?  // WANT_LISTEN / CANTONESE_FRAGMENT / FALSE_TITLE / ALL
+  gameType      String? // WANT_LISTEN / CANTONESE_FRAGMENT / FALSE_TITLE / ALL
   deletedCount  Int      @default(0)
   reason        String?
-  adminUid      Int?     // 操作管理员快照
+  adminUid      Int? // 操作管理员快照
   adminNickname String?  @db.VarChar(64)
   adminUsername String?  @db.VarChar(64)
   createdAt     DateTime @default(now())

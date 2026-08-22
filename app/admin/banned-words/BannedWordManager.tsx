@@ -118,7 +118,7 @@ export function BannedWordManager({ initialWords }: { initialWords: BannedWordRo
         if (statusData.job.status === 'FAILED') throw new Error(statusData.job.error || '扫描失败')
         if (statusData.job.status === 'COMPLETED') {
           const summary = statusData.job.summary
-          setMessage(`扫描完成：用户名 ${summary.username}，个人简介 ${summary.bio}，帖子 ${summary.posts}，评论 ${summary.comments}，挂号留言 ${summary.checkinMessages}，留言墙 ${summary.wallMessages}，其他 ${summary.other}。`)
+          setMessage(`扫描完成：登录账号 ${summary.username}，个人简介 ${summary.bio}，帖子 ${summary.posts}，评论 ${summary.comments}，挂号留言 ${summary.checkinMessages}，留言墙 ${summary.wallMessages}，其他 ${summary.other}。`)
           return
         }
       }

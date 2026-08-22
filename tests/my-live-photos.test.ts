@@ -133,7 +133,7 @@ test('水印false不改图，true写入最终WebP像素并动态计算字号', a
   assert.ok(overlay.fontSize > 0)
 })
 
-test('水印支持中文英文特殊字符、完整UID和长用户名收缩', () => {
+test('水印支持中文英文特殊字符、完整 UID 和长昵称收缩', () => {
   const nickname = `陈奕迅&EF<hello>"test"'emoji😀`
   assert.equal(escapeXml(nickname), '陈奕迅&amp;EF&lt;hello&gt;&quot;test&quot;&apos;emoji😀')
   const overlay = buildMyLivePhotoWatermarkSvg({ nickname, uid: 72727, width: 900, height: 600 })

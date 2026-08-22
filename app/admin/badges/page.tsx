@@ -2,12 +2,14 @@ import { requireAdminPage } from '@/components/AdminAccess'
 import { BadgeAdminManager, type AdminBadge } from './BadgeAdminManager'
 import { listBadgesForAdmin } from '@/lib/badge-service'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminBadgesPage() {
   await requireAdminPage('/admin/badges', 'achievement_manage')
   const badges = await listBadgesForAdmin()
+  const ownershipStats = await getBadgeOwnershipStats(badges.map((badge) => badge.id))
   const initialBadges: AdminBadge[] = badges.map((badge) => ({
     id: badge.id,
     name: badge.name,
@@ -38,6 +40,14 @@ export default async function AdminBadgesPage() {
     nicknameGradientEnd: badge.nicknameGradientEnd,
     sortOrder: badge.sortOrder,
     ownerCount: badge._count.UserBadge,
+    ownershipStats: ownershipStats.get(badge.id) || null,
+    seriesId: badge.seriesId,
+    series: badge.Series ? { ...badge.Series } : null,
+    tierGroupCode: badge.tierGroupCode,
+    tierLevel: badge.tierLevel,
+    availableFrom: badge.availableFrom?.toISOString() || null,
+    availableUntil: badge.availableUntil?.toISOString() || null,
+    availabilityStatus: getBadgeAvailability(badge),
     createdAt: badge.createdAt.toISOString(),
   }))
   return (

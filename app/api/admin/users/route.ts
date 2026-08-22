@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireAdmin, sanitizeText } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
 import { publicImageUrl } from '@/lib/images'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 
 const DEFAULT_PAGE_SIZE = 100
 const MAX_PAGE_SIZE = 100
@@ -55,6 +56,8 @@ export async function GET(request: Request) {
       id: true,
       uid: true,
       nickname: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
       email: true,
       phone: true,
       emailVerifiedAt: true,
@@ -109,7 +112,7 @@ export async function GET(request: Request) {
       const failures = failureState.get(`account:${hashToken(user.id)}`)
       return {
         ...user,
-        nickname: user.nickname || 'E院用户',
+        nickname: getPublicUserDisplayName(user),
         avatarUrl: publicImageUrl(Profile?.avatarUrl || user.avatarUrl),
         securityQuestionsSet: Boolean(UserSecurityQuestion),
         lastPasswordResetAt: AccountSecurityLog[0]?.createdAt || null,

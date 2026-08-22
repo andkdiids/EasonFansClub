@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import type { BadgeCollectionView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
+import { calculateBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, type BadgeOwnershipStats } from '@/lib/badge-phase2'
+import { getUserBadgeMetric } from '@/lib/badge-metrics'
 
 const BADGE_SELECT = {
   id: true,
@@ -23,13 +25,45 @@ const BADGE_SELECT = {
   nicknameGradientStart: true,
   nicknameGradientEnd: true,
   sortOrder: true,
+  seriesId: true,
+  tierGroupCode: true,
+  tierLevel: true,
+  availableFrom: true,
+  availableUntil: true,
+  Series: { select: { id: true, code: true, name: true, description: true, sortOrder: true, isEnabled: true } },
+} as const
+
+// High-frequency nickname/post/comment surfaces only need the equipped badge
+// presentation fields. Keep Series, Tier, availability and rule metadata out
+// of these bounded batch lookups.
+const EQUIPPED_BADGE_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  iconUrl: true,
+  effectType: true,
+  nicknameEffect: true,
+  nicknameColor: true,
+  nicknameGradientStart: true,
+  nicknameGradientEnd: true,
+  rarity: true,
+  description: true,
+  acquisitionDescription: true,
+  isWearable: true,
+  isEnabled: true,
+  isActive: true,
 } as const
 
 type DbBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_SELECT }>
+const BADGE_COLLECTION_SELECT = {
+  ...BADGE_SELECT,
+  BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
+} as const
+type DbCollectionBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_COLLECTION_SELECT }>
 type DbUserBadge = {
   obtainedAt: Date
   grantedAt: Date
-  Badge: DbBadge
+  Badge: DbCollectionBadge
 }
 
 export type GrantBadgeInput = {
@@ -52,7 +86,7 @@ export type BadgeOperationResult = {
 }
 
 export class BadgeServiceError extends Error {
-  code: 'USER_NOT_FOUND' | 'BADGE_NOT_FOUND' | 'BADGE_DISABLED' | 'BADGE_NOT_WEARABLE' | 'NOT_OWNED' | 'NOT_FOUND' | 'HAS_OWNERS'
+  code: 'USER_NOT_FOUND' | 'BADGE_NOT_FOUND' | 'BADGE_DISABLED' | 'BADGE_NOT_WEARABLE' | 'BADGE_NOT_AVAILABLE' | 'NOT_OWNED' | 'NOT_FOUND' | 'HAS_OWNERS'
 
   constructor(code: BadgeServiceError['code'], message: string) {
     super(message)
@@ -64,7 +98,7 @@ export class BadgeServiceError extends Error {
 type BadgeAdminActionInput = {
   actorId: string
   action: string
-  badgeId: string
+  badgeId?: string
   targetUserId?: string
   detail?: Record<string, unknown>
 }
@@ -76,7 +110,7 @@ export async function writeBadgeAdminAction(tx: Prisma.TransactionClient, input:
       adminId: input.actorId,
       action: input.action,
       targetUserId: input.targetUserId || input.actorId,
-      detail: { badgeId: input.badgeId, ...(input.detail || {}) } as Prisma.InputJsonValue,
+      detail: { ...(input.badgeId ? { badgeId: input.badgeId } : {}), ...(input.detail || {}) } as Prisma.InputJsonValue,
     },
   })
 }
@@ -106,15 +140,30 @@ function publicBadge(badge: DbBadge): Omit<BadgeView, 'status' | 'obtainedAt' | 
     nicknameGradientStart: badge.nicknameGradientStart,
     nicknameGradientEnd: badge.nicknameGradientEnd,
     sortOrder: badge.sortOrder,
+    series: badge.Series ? {
+      id: badge.Series.id,
+      code: badge.Series.code,
+      name: badge.Series.name,
+      description: badge.Series.description,
+      sortOrder: badge.Series.sortOrder,
+      isEnabled: badge.Series.isEnabled,
+    } : null,
+    tierGroupCode: badge.tierGroupCode,
+    tierLevel: badge.tierLevel,
+    availabilityStatus: getBadgeAvailability(badge),
+    availableFrom: badge.availableFrom?.toISOString() || null,
+    availableUntil: badge.availableUntil?.toISOString() || null,
   }
 }
 
-function obtainedBadgeView(record: DbUserBadge, isEquipped: boolean): BadgeView {
+function obtainedBadgeView(record: DbUserBadge, isEquipped: boolean, ownershipStats?: BadgeOwnershipStats | null, isHighestTier = false): BadgeView {
   return {
     ...publicBadge(record.Badge),
     status: 'OBTAINED',
     obtainedAt: record.obtainedAt.toISOString(),
     isEquipped,
+    isHighestTier,
+    ownershipStats: ownershipStats || null,
   }
 }
 
@@ -139,6 +188,9 @@ function hiddenBadgeView(badge: DbBadge): BadgeView {
     status: 'HIDDEN',
     obtainedAt: null,
     isEquipped: false,
+    availabilityStatus: undefined,
+    progress: null,
+    ownershipStats: null,
   }
 }
 
@@ -146,11 +198,41 @@ function sortBadgeViews(items: BadgeView[], equippedBadgeId: string | null) {
   return items.sort((left, right) => {
     if (left.id === equippedBadgeId) return -1
     if (right.id === equippedBadgeId) return 1
+    const rank = (item: BadgeView) => item.status === 'OBTAINED' ? 0 : item.progress ? 1 : item.status === 'HIDDEN' ? 3 : 2
+    if (rank(left) !== rank(right)) return rank(left) - rank(right)
     if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder
     const leftTime = left.obtainedAt ? new Date(left.obtainedAt).getTime() : 0
     const rightTime = right.obtainedAt ? new Date(right.obtainedAt).getTime() : 0
     return rightTime - leftTime || left.name.localeCompare(right.name, 'zh-CN')
   })
+}
+
+function getHighestOwnedTierByGroup(badges: readonly DbCollectionBadge[], ownedIds: ReadonlySet<string>) {
+  const highest = new Map<string, number>()
+  for (const badge of badges) {
+    if (!ownedIds.has(badge.id) || !badge.tierGroupCode || !badge.tierLevel) continue
+    const current = highest.get(badge.tierGroupCode) || 0
+    if (badge.tierLevel > current) highest.set(badge.tierGroupCode, badge.tierLevel)
+  }
+  return highest
+}
+
+function progressForRule(metric: number, rule: { operator: string; threshold: number }) {
+  return calculateBadgeProgress(metric, rule.operator as 'GTE' | 'LTE' | 'EQ', rule.threshold)
+}
+
+async function addProgressToUnownedBadges(userId: string, badges: readonly DbCollectionBadge[], items: BadgeView[]) {
+  const candidates = badges.filter((badge) => badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.BadgeRule?.isEnabled && getBadgeAvailability(badge) === 'AVAILABLE')
+  if (!candidates.length) return
+  const metrics = new Map<string, number>()
+  for (const badge of candidates) {
+    const rule = badge.BadgeRule
+    if (!rule) continue
+    const type = rule.ruleType as Parameters<typeof getUserBadgeMetric>[1]
+    if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
+    const item = items.find((candidate) => candidate.id === badge.id)
+    if (item) item.progress = progressForRule(metrics.get(type) || 0, rule)
+  }
 }
 
 export async function getBadgeCollection(userId: string, viewerId?: string | null): Promise<BadgeCollectionView | null> {
@@ -170,41 +252,57 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
     prisma.userBadge.findMany({
       where: { userId, ...(isSelf ? {} : { isHidden: false }) },
       orderBy: [{ obtainedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
-      select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_SELECT } },
+      select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
     }),
     isSelf
       ? prisma.badge.findMany({
           where: { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId } } }] },
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-          select: BADGE_SELECT,
+          select: BADGE_COLLECTION_SELECT,
         })
-      : Promise.resolve([] as DbBadge[]),
+      : Promise.resolve([] as DbCollectionBadge[]),
   ])
 
-  const equippedBadgeId = target.EquippedBadge && target.EquippedBadge.isEnabled && target.EquippedBadge.isActive && target.EquippedBadge.isWearable && records.some((record) => record.Badge.id === target.EquippedBadge?.id)
+  const visibleRecords = isSelf ? records : records.filter((record) => record.Badge.visibility !== 'SECRET')
+  const equippedBadgeId = target.EquippedBadge && target.EquippedBadge.isEnabled && target.EquippedBadge.isActive && target.EquippedBadge.isWearable && visibleRecords.some((record) => record.Badge.id === target.EquippedBadge?.id)
     ? target.EquippedBadge.id
     : null
-  const recordByBadgeId = new Map(records.map((record) => [record.Badge.id, record]))
+  const recordByBadgeId = new Map(visibleRecords.map((record) => [record.Badge.id, record]))
 
   if (!isSelf) {
+    const stats = await getBadgeOwnershipStats(visibleRecords.filter((record) => record.Badge.visibility === 'PUBLIC').map((record) => record.Badge.id))
+    const highest = getHighestOwnedTierByGroup(visibleRecords.map((record) => record.Badge), new Set(visibleRecords.map((record) => record.Badge.id)))
     return {
       target: { id: target.id, uid: target.uid },
       isSelf: false,
       equippedBadgeId,
-      obtainedCount: records.length,
-      visibleTotal: records.length,
-      items: sortBadgeViews(records.map((record) => obtainedBadgeView(record, record.Badge.id === equippedBadgeId)), equippedBadgeId),
+      obtainedCount: visibleRecords.length,
+      visibleTotal: visibleRecords.length,
+      publicObtainedCount: visibleRecords.filter((record) => record.Badge.visibility === 'PUBLIC').length,
+      publicTotal: visibleRecords.filter((record) => record.Badge.visibility === 'PUBLIC').length,
+      hiddenObtainedCount: visibleRecords.filter((record) => record.Badge.visibility === 'HIDDEN').length,
+      items: sortBadgeViews(visibleRecords.map((record) => obtainedBadgeView(record, record.Badge.id === equippedBadgeId, stats.get(record.Badge.id) || null, Boolean(record.Badge.tierGroupCode && record.Badge.tierLevel && highest.get(record.Badge.tierGroupCode) === record.Badge.tierLevel))), equippedBadgeId),
     }
   }
 
+  const ownershipStats = await getBadgeOwnershipStats(allBadges.filter((badge) => badge.visibility === 'PUBLIC').map((badge) => badge.id))
+  const ownedIds = new Set(records.map((record) => record.Badge.id))
+  const highest = getHighestOwnedTierByGroup(allBadges, ownedIds)
   const items = allBadges.flatMap((badge) => {
     const record = recordByBadgeId.get(badge.id)
-    if (record) return [obtainedBadgeView(record, badge.id === equippedBadgeId)]
+    if (record) return [obtainedBadgeView(record, badge.id === equippedBadgeId, ownershipStats.get(badge.id) || null, Boolean(badge.tierGroupCode && badge.tierLevel && highest.get(badge.tierGroupCode) === badge.tierLevel))]
     if (badge.visibility === 'SECRET') return []
     return [badge.visibility === 'HIDDEN'
       ? hiddenBadgeView(badge)
-      : { ...publicBadge(badge), status: 'NOT_OBTAINED' as const, obtainedAt: null, isEquipped: false }]
+      : { ...publicBadge(badge), status: 'NOT_OBTAINED' as const, obtainedAt: null, isEquipped: false, progress: null, ownershipStats: ownershipStats.get(badge.id) || null }]
   })
+
+  await addProgressToUnownedBadges(userId, allBadges, items)
+
+  const publicBadges = allBadges.filter((badge) => badge.isEnabled && badge.isActive && badge.visibility === 'PUBLIC')
+  const hiddenBadges = allBadges.filter((badge) => badge.isEnabled && badge.isActive && badge.visibility === 'HIDDEN')
+  const publicObtainedCount = records.filter((record) => record.Badge.visibility === 'PUBLIC').length
+  const hiddenObtainedCount = records.filter((record) => record.Badge.visibility === 'HIDDEN').length
 
   return {
     target: { id: target.id, uid: target.uid },
@@ -212,6 +310,11 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
     equippedBadgeId,
     obtainedCount: records.length,
     visibleTotal: allBadges.filter((badge) => badge.isEnabled && badge.isActive && badge.visibility !== 'SECRET').length,
+    publicObtainedCount,
+    publicTotal: publicBadges.length,
+    hiddenObtainedCount,
+    hiddenTotal: hiddenBadges.length,
+    completionPercentage: publicBadges.length ? Math.floor((publicObtainedCount / publicBadges.length) * 100) : 0,
     items: sortBadgeViews(items, equippedBadgeId),
   }
 }
@@ -219,7 +322,7 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
 export async function getEquippedBadgeForUser(userId: string): Promise<EquippedBadgeView | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { equippedBadgeId: true, EquippedBadge: { select: BADGE_SELECT } },
+    select: { equippedBadgeId: true, EquippedBadge: { select: EQUIPPED_BADGE_SELECT } },
   })
   if (!user?.equippedBadgeId || !user.EquippedBadge || !user.EquippedBadge.isEnabled || !user.EquippedBadge.isActive || !user.EquippedBadge.isWearable) return null
 
@@ -256,7 +359,7 @@ export async function getEquippedBadgesForUsers(userIds: Iterable<string>) {
 
   const users = await prisma.user.findMany({
     where: { id: { in: ids } },
-    select: { id: true, equippedBadgeId: true, EquippedBadge: { select: BADGE_SELECT } },
+    select: { id: true, equippedBadgeId: true, EquippedBadge: { select: EQUIPPED_BADGE_SELECT } },
   })
   const equippedUsers = users.filter((user) => Boolean(user.equippedBadgeId && user.EquippedBadge && user.EquippedBadge.isEnabled && user.EquippedBadge.isActive && user.EquippedBadge.isWearable))
   if (!equippedUsers.length) return result
@@ -300,7 +403,7 @@ export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperation
     return await prisma.$transaction(async (tx) => {
       const [user, badge] = await Promise.all([
         tx.user.findUnique({ where: { id: input.userId }, select: { id: true } }),
-        tx.badge.findUnique({ where: { id: input.badgeId }, select: { id: true, name: true } }),
+        tx.badge.findUnique({ where: { id: input.badgeId }, select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true } }),
       ])
       if (!user) throw new BadgeServiceError('USER_NOT_FOUND', '目标用户不存在')
       if (!badge) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
@@ -318,6 +421,13 @@ export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperation
           badgeId: input.badgeId,
           badgeName: badge.name,
         }
+      }
+
+      if (!badge.isEnabled || !badge.isActive) throw new BadgeServiceError('BADGE_DISABLED', '这枚勋章当前已停用')
+
+      const availability = getBadgeAvailability(badge)
+      if (availability !== 'PERMANENT' && availability !== 'AVAILABLE') {
+        throw new BadgeServiceError('BADGE_NOT_AVAILABLE', availability === 'UPCOMING' ? '这枚限定勋章尚未开放' : '这枚限定勋章已经绝版，当前不能再授予')
       }
 
       const record = await tx.userBadge.create({
@@ -409,7 +519,7 @@ export async function equipBadge(userId: string, badgeId: string) {
     await lockBadgeForMutation(tx, badgeId)
     const record = await tx.userBadge.findUnique({
       where: { userId_badgeId: { userId, badgeId } },
-      select: { id: true, obtainedAt: true, Badge: { select: BADGE_SELECT } },
+      select: { id: true, obtainedAt: true, Badge: { select: EQUIPPED_BADGE_SELECT } },
     })
     if (!record) throw new BadgeServiceError('NOT_OWNED', '你还没有获得这枚勋章')
     if (!record.Badge.isEnabled || !record.Badge.isActive) throw new BadgeServiceError('BADGE_DISABLED', '这枚勋章当前已停用')
@@ -489,6 +599,12 @@ export const badgeAdminSelect = {
   category: true,
   musicTourId: true,
   isAutoGrant: true,
+  seriesId: true,
+  tierGroupCode: true,
+  tierLevel: true,
+  availableFrom: true,
+  availableUntil: true,
+  Series: { select: { id: true, code: true, name: true, description: true, sortOrder: true, isEnabled: true } },
   createdAt: true,
   updatedAt: true,
   BadgeRule: {
@@ -511,15 +627,35 @@ export async function findBadgeForAdmin(badgeId: string) {
   return prisma.badge.findUnique({ where: { id: badgeId }, select: badgeAdminSelect })
 }
 
-export async function listBadgesForAdmin({ query, enabled, visibility, grantType }: { query?: string; enabled?: boolean; visibility?: string; grantType?: string } = {}) {
+export async function listBadgesForAdmin({ query, enabled, visibility, grantType, rarity, seriesId, tierGroupCode, availability, order }: { query?: string; enabled?: boolean; visibility?: string; grantType?: string; rarity?: string; seriesId?: string; tierGroupCode?: string; availability?: string; order?: 'sortOrder' | 'ownerCount' | 'rate' | 'createdAt' } = {}) {
   const where: Prisma.BadgeWhereInput = {}
   const normalizedQuery = query?.trim()
   if (normalizedQuery) where.OR = [{ name: { contains: normalizedQuery } }, { code: { contains: normalizedQuery } }, { slug: { contains: normalizedQuery } }]
   if (typeof enabled === 'boolean') where.isEnabled = enabled
   if (visibility === 'PUBLIC' || visibility === 'HIDDEN' || visibility === 'SECRET') where.visibility = visibility
   if (grantType === 'AUTO' || grantType === 'MANUAL' || grantType === 'EVENT') where.grantType = grantType
+  if (rarity === 'COMMON' || rarity === 'RARE' || rarity === 'EPIC' || rarity === 'LEGENDARY' || rarity === 'LIMITED') where.rarity = rarity
+  if (seriesId) where.seriesId = seriesId
+  if (tierGroupCode) where.tierGroupCode = tierGroupCode
+  if (availability === 'PERMANENT') { where.availableFrom = null; where.availableUntil = null }
+  if (availability === 'UPCOMING') where.availableFrom = { gt: new Date() }
+  if (availability === 'ENDED') where.availableUntil = { lte: new Date() }
+  if (availability === 'AVAILABLE') where.AND = [{ OR: [
+    { availableFrom: null, availableUntil: null },
+    { availableFrom: null, availableUntil: { gt: new Date() } },
+    { availableFrom: { lte: new Date() }, availableUntil: null },
+    { availableFrom: { lte: new Date() }, availableUntil: { gt: new Date() } },
+  ] }]
 
-  return prisma.badge.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], select: badgeAdminSelect })
+  const orderBy = order === 'createdAt' ? [{ createdAt: 'desc' as const }] : [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }]
+  const badges = await prisma.badge.findMany({ where, orderBy, select: badgeAdminSelect })
+  if (order !== 'ownerCount' && order !== 'rate') return badges
+  const stats = await getBadgeOwnershipStats(badges.map((badge) => badge.id))
+  return badges.sort((left, right) => {
+    const leftValue = order === 'rate' ? stats.get(left.id)?.rate || 0 : stats.get(left.id)?.ownerCount || 0
+    const rightValue = order === 'rate' ? stats.get(right.id)?.rate || 0 : stats.get(right.id)?.ownerCount || 0
+    return rightValue - leftValue || left.sortOrder - right.sortOrder || left.createdAt.getTime() - right.createdAt.getTime()
+  })
 }
 
 export async function listBadgeOwners(badgeId: string) {

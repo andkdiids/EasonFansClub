@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { getPublicUserDisplayName } from '../lib/friend-remarks'
+import { validateNicknameValue } from '../lib/login-account'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -28,6 +29,7 @@ test('帖子、评论、通知、排行榜和投稿 API 的公开身份链路使
   const postRoute = read('app/api/posts/route.ts')
   const replyRoute = read('app/api/posts/[postId]/replies/route.ts')
   const notifications = read('lib/notifications.ts')
+  const likeNotifications = read('lib/like-notifications.ts')
   const leaderboard = read('lib/guess-song-leaderboard.ts')
   const contributionRoute = read('app/api/admin/music/concerts/contributions/route.ts')
   const attribution = read('components/music/ConcertContributorAttribution.tsx')
@@ -35,11 +37,33 @@ test('帖子、评论、通知、排行榜和投稿 API 的公开身份链路使
   assert.match(postRoute, /nickname: getPublicUserDisplayName\(User\)/)
   assert.match(replyRoute, /nickname: getPublicUserDisplayName\(replyAuthor\)/)
   assert.match(notifications, /fallbackName: getPublicUserDisplayName\(actor\)/)
+  assert.match(notifications, /const displayActorName = actorName \|\| '有人'/)
+  assert.match(likeNotifications, /getPublicUserDisplayName\(latest\.User\)/)
   assert.match(leaderboard, /getPublicUserDisplayName/)
   assert.match(contributionRoute, /displayName: getPublicUserDisplayName\(item\.submitter\)/)
   assert.match(attribution, /contributor\.nickname/)
 
-  for (const source of [postRoute, replyRoute, notifications, leaderboard, contributionRoute, attribution]) {
+  for (const source of [postRoute, replyRoute, notifications, likeNotifications, leaderboard, contributionRoute, attribution]) {
     assert.doesNotMatch(source, /(?:user|User|author|actor|submitter|contributor)\.username\b/)
   }
+})
+
+test('注册、昵称编辑和 My Live 水印不再把昵称称为 username', () => {
+  const register = read('app/register/RegisterForm.tsx')
+  const profileEditor = read('app/profile/ProfileSettingsForm.tsx')
+  const watermark = read('components/music/live/MyLivePhotoPanel.tsx')
+  const authMe = read('app/api/auth/me/route.ts')
+  const profileApi = read('app/api/users/me/route.ts')
+
+  assert.match(register, /<span className="text-sm font-bold text-white">昵称<\/span>/)
+  assert.doesNotMatch(register, /用户名 \/ 昵称/)
+  assert.doesNotMatch(profileEditor, /newUsername/)
+  assert.match(watermark, /你的昵称  UID:当前账号/)
+  assert.doesNotMatch(authMe, /user\.username|username: user\.username/)
+  assert.doesNotMatch(profileApi, /username: profile\.username/)
+})
+
+test('昵称校验错误使用昵称语义，登录账号校验仍保留内部语义', () => {
+  assert.match(validateNicknameValue('bad name').error || '', /昵称/)
+  assert.match(validateNicknameValue('a'.repeat(17)).error || '', /昵称/)
 })

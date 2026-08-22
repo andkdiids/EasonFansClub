@@ -5,7 +5,7 @@ import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificati
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
-import { validateLoginAccountValue } from '@/lib/login-account'
+import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
@@ -179,7 +179,6 @@ export async function GET(request: Request) {
   const profile = await prisma.user.findUnique({
     where: { id: guard.user.id },
     select: {
-      username: true,
       email: true,
       phone: true,
       nickname: true,
@@ -244,7 +243,6 @@ export async function GET(request: Request) {
   const { Profile, UserBadge, _count, usernameChangedAt, nicknameChangedAt, nicknameViolationCount } = profile
   return NextResponse.json({
     profile: {
-      username: profile.username,
       email: profile.email,
       phone: profile.phone,
       emailVerifiedAt: profile.emailVerifiedAt,
@@ -405,7 +403,7 @@ export async function PATCH(request: Request) {
   if (!current) return NextResponse.json({ message: '账号不存在' }, { status: 404 })
 
   if (rawNickname && rawNickname !== current.nickname) {
-    const nicknameValidation = validateLoginAccountValue(rawNickname)
+    const nicknameValidation = validateNicknameValue(rawNickname)
     if (nicknameValidation.error) return NextResponse.json({ message: nicknameValidation.error }, { status: 400 })
   }
 

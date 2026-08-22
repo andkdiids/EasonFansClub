@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FormError } from '@/components/FormError'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
-import { validateLoginAccountValue } from '@/lib/login-account'
+import { validateNicknameValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import { DEFAULT_REGISTRATION_CLOSED_MESSAGE, DEFAULT_REGISTRATION_CLOSED_TITLE, formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { REGISTRATION_PASSWORD_LENGTH_ERROR, REGISTRATION_PASSWORD_MIN_LENGTH, REGISTRATION_PASSWORD_MISMATCH_ERROR, validateRegistrationPasswordFields } from '@/lib/registration-password'
@@ -293,8 +293,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
 
   function validateRegistrationFields() {
     const nextErrors: RegisterErrors = {}
-    const username = form.nickname
-    const usernameValidation = validateLoginAccountValue(username)
+    const nickname = form.nickname
+    const nicknameValidation = validateNicknameValue(nickname)
     const password = form.password
     const confirmPassword = form.confirmPassword
     const email = form.email.trim().toLowerCase()
@@ -302,8 +302,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
     const securityAnswer = form.securityQuestions[0]?.answer.trim() || ''
     const agreementAccepted = form.acceptedAgreement
 
-    if (!username || unicodeLength(username) < 2 || unicodeLength(username) > 16) nextErrors.nickname = '用户名格式不正确'
-    if (!nextErrors.nickname && usernameValidation.error) nextErrors.nickname = usernameValidation.error
+    if (!nickname || unicodeLength(nickname) < 2 || unicodeLength(nickname) > 16) nextErrors.nickname = '昵称格式不正确'
+    if (!nextErrors.nickname && nicknameValidation.error) nextErrors.nickname = nicknameValidation.error
     const phone = normalizePhoneNumber(form.phone, phoneCountry)
     if (!form.phone.trim() || !phone) nextErrors.phone = '手机号格式错误'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) nextErrors.email = '邮箱格式错误'
@@ -1243,14 +1243,14 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
               <button type="button" onClick={() => setRegistrationDetailsExpanded(true)} className="rounded-lg border border-white/30 bg-white px-3 py-2 text-xs font-black text-brand-700">修改资料</button>
             </div>
             <dl className="mt-3 grid gap-2 text-xs font-bold text-white/85 sm:grid-cols-2">
-              <div><dt className="text-white/55">用户名</dt><dd className="mt-0.5 truncate">{form.nickname || '—'}</dd></div>
+              <div><dt className="text-white/55">昵称</dt><dd className="mt-0.5 truncate">{form.nickname || '—'}</dd></div>
               <div><dt className="text-white/55">邮箱</dt><dd className="mt-0.5 truncate">{form.email || '—'}</dd></div>
             </dl>
           </section>
         ) : (
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="block"><span className="text-sm font-bold text-white">用户名 / 昵称</span><input value={form.nickname} onChange={(event) => updateField('nickname', event.target.value)} data-register-field="nickname" autoComplete="nickname" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="2-16 个字符" /><FormError message={errors.nickname} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">昵称</span><input value={form.nickname} onChange={(event) => updateField('nickname', event.target.value)} data-register-field="nickname" autoComplete="nickname" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="2-16 个字符" /><FormError message={errors.nickname} /></label>
               <div className="block">
                 <label htmlFor="register-phone" className="text-sm font-bold text-white">手机号</label>
                 <InternationalPhoneInput

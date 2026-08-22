@@ -181,7 +181,7 @@ export function MyLivePhotoPanel({ attendanceId, photos = [], manage = false, wa
             {manage && selectedCategory === category && selectedFiles.length ? <div className="my-live-photo-confirmation">
               <p>已选择 {selectedFiles.length} 张照片</p>
               <ul>{selectedFiles.map((file) => <li key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}</li>)}</ul>
-              <label className="my-live-photo-watermark-option"><input type="checkbox" checked={watermark} onChange={(event) => setWatermark(event.target.checked)} disabled={busy} /><span>添加我的水印<small>图片右下角将显示：{watermarkPreview || '你的用户名  UID:当前账号'}</small></span></label>
+              <label className="my-live-photo-watermark-option"><input type="checkbox" checked={watermark} onChange={(event) => setWatermark(event.target.checked)} disabled={busy} /><span>添加我的水印<small>图片右下角将显示：{watermarkPreview || '你的昵称  UID:当前账号'}</small></span></label>
               {category === 'TICKET' ? <p className="my-live-photo-note">票根上传前请留意票面中的个人信息。</p> : null}
               <div className="my-live-photo-confirm-actions"><button type="button" onClick={() => clearSelection(category)} disabled={busy}>取消</button><button type="button" onClick={() => void uploadSelected(category)} disabled={busy}>{busy ? '上传中…' : '保存上传'}</button></div>
             </div> : null}

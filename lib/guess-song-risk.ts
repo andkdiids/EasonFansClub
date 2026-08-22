@@ -3,8 +3,8 @@ import type { Prisma } from '@prisma/client'
 import { toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { prisma } from '@/lib/prisma'
 
-export const GUESS_SONG_RISK_THRESHOLD = 80
-export const GUESS_SONG_CHEAT_EXIT_SECONDS = 10
+export { GUESS_SONG_RISK_THRESHOLD, GUESS_SONG_CHEAT_EXIT_SECONDS } from '@/lib/guess-song-constants'
+import { GUESS_SONG_CHEAT_EXIT_SECONDS, GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 
 const RISK_WINDOW_MS = 60_000
 const QUICK_ANSWER_LIMIT_MS = 2_000

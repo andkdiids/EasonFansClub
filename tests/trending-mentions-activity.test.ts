@@ -116,7 +116,7 @@ test('默认好友按 90 天提及频次、最近提及和最近互动排序', (
   assert.match(mentionApi, /b\.lastInteractionAt - a\.lastInteractionAt/)
 })
 
-test('UID 搜索选择后只插入 @用户名并提交稳定 userId', () => {
+test('UID 搜索选择后只插入 @昵称并提交稳定 userId', () => {
   assert.match(mentionInput, /displayText = `@\$\{friend\.name\}`/)
   assert.match(mentionInput, /userId: friend\.id/)
   assert.doesNotMatch(mentionInput, /displayText = `@\$\{friend\.uid\}`/)

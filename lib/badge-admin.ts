@@ -3,6 +3,7 @@ import { sanitizeText } from '@/lib/security'
 import { normalizeBadgeColor } from '@/lib/badge-types'
 import { toStoredMediaUrl } from '@/lib/media-url'
 import { parseBadgeRuleInput, type ParsedBadgeRule } from '@/lib/badge-rules'
+import { parseBadgeAvailabilityDate, validateBadgeAvailability } from '@/lib/badge-phase2'
 
 const CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/
 const CATEGORIES = new Set(['SYSTEM', 'BIRTHDAY', 'CONCERT'])
@@ -11,6 +12,7 @@ const RARITIES = new Set(['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED'])
 const GRANT_TYPES = new Set(['AUTO', 'MANUAL', 'EVENT'])
 const EFFECT_TYPES = new Set(['NONE', 'SHINE', 'GLOW', 'SPARKLE'])
 const NICKNAME_EFFECTS = new Set(['NONE', 'COLOR', 'GOLD', 'GRADIENT', 'GLOW'])
+const TIER_GROUP_PATTERN = /^[A-Z0-9_]{1,64}$/
 
 type BadgeInput = Record<string, unknown>
 
@@ -137,12 +139,46 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
     data.sortOrder = sortOrder
   }
 
+  if (!partial || 'seriesId' in body) {
+    data.seriesId = typeof body.seriesId === 'string' && body.seriesId.trim() ? body.seriesId.trim().slice(0, 191) : null
+  }
+
+  if (!partial || 'tierGroupCode' in body) {
+    const rawGroup = typeof body.tierGroupCode === 'string' ? body.tierGroupCode.trim().toUpperCase() : ''
+    if (rawGroup && !TIER_GROUP_PATTERN.test(rawGroup)) return { error: 'Tier 系列编码只能使用大写字母、数字和下划线' }
+    data.tierGroupCode = rawGroup || null
+  }
+
+  if (!partial || 'tierLevel' in body) {
+    if (body.tierLevel === undefined || body.tierLevel === null || body.tierLevel === '') data.tierLevel = null
+    else {
+      const tierLevel = typeof body.tierLevel === 'number' ? body.tierLevel : typeof body.tierLevel === 'string' && /^\d+$/.test(body.tierLevel.trim()) ? Number(body.tierLevel.trim()) : Number.NaN
+      if (!Number.isSafeInteger(tierLevel) || tierLevel < 1 || tierLevel > 100) return { error: 'Tier 等级必须是 1 到 100 的整数' }
+      data.tierLevel = tierLevel
+    }
+  }
+
+  const availabilityFields = ['availableFrom', 'availableUntil'] as const
+  for (const field of availabilityFields) {
+    if (!partial || field in body) {
+      const parsedDate = parseBadgeAvailabilityDate(body[field], field === 'availableFrom' ? '限定开始时间' : '限定结束时间')
+      if (parsedDate.error) return { error: parsedDate.error }
+      data[field] = parsedDate.value
+    }
+  }
+  if (data.availableFrom !== undefined && data.availableUntil !== undefined) {
+    const availabilityError = validateBadgeAvailability(data.availableFrom as Date | null, data.availableUntil as Date | null)
+    if (availabilityError) return { error: availabilityError }
+  }
+
   if ('musicTourId' in body) {
     data.musicTourId = typeof body.musicTourId === 'string' && body.musicTourId.trim() ? body.musicTourId.trim() : null
   }
 
   if (rule && data.grantType && data.grantType !== 'AUTO') return { error: '手动或事件勋章不能配置自动获取规则' }
   if (!partial && data.grantType === 'AUTO' && !rule) return { error: '自动发放必须配置自动获取规则' }
+
+  if ((data.tierGroupCode === null) !== (data.tierLevel === null)) return { error: 'Tier 系列编码与等级必须同时填写或同时留空' }
 
   return { data, rule }
 }

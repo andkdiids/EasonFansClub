@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
 
@@ -81,11 +82,11 @@ async function loadLikeSnapshot(tx: Prisma.TransactionClient, target: LikeNotifi
     const latest = await tx.like.findFirst({
       where: { postId: target.id },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: { userId: true, createdAt: true, User: { select: { nickname: true } } },
+      select: { userId: true, createdAt: true, User: { select: { nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true } } },
     })
     return {
       count,
-      latest: latest ? { userId: latest.userId, actorName: latest.User.nickname, createdAt: latest.createdAt } : null,
+      latest: latest ? { userId: latest.userId, actorName: getPublicUserDisplayName(latest.User), createdAt: latest.createdAt } : null,
     }
   }
 
@@ -93,11 +94,11 @@ async function loadLikeSnapshot(tx: Prisma.TransactionClient, target: LikeNotifi
   const latest = await tx.replyLike.findFirst({
     where: { replyId: target.id },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    select: { userId: true, createdAt: true, User: { select: { nickname: true } } },
+    select: { userId: true, createdAt: true, User: { select: { nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true } } },
   })
   return {
     count,
-    latest: latest ? { userId: latest.userId, actorName: latest.User.nickname, createdAt: latest.createdAt } : null,
+    latest: latest ? { userId: latest.userId, actorName: getPublicUserDisplayName(latest.User), createdAt: latest.createdAt } : null,
   }
 }
 

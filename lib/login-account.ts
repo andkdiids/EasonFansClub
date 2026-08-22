@@ -1,6 +1,8 @@
 export const loginAccountMinLength = 2
 export const loginAccountMaxLength = 16
 export const loginAccountCharacterError = '用户名只能包含中文、英文、数字和下划线，不能包含空格或特殊字符'
+export const nicknameCharacterError = '昵称只能包含中文、英文、数字和下划线，不能包含空格或特殊字符'
+export const nicknameLengthError = '昵称长度需要 2-16 个字符'
 
 // NFKC is applied before this check so the existing full-width Latin/numeric
 // input remains compatible with the normalized login-account contract.
@@ -32,6 +34,16 @@ export function validateLoginAccountValue(value: unknown) {
     return { account, usernameNormalized, error: '登录账号长度需要 2-16 个字符' }
   }
   return { account, usernameNormalized, error: null }
+}
+
+/** Nickname input keeps the historical character contract without exposing
+ * login-account terminology in public profile and registration feedback. */
+export function validateNicknameValue(value: unknown) {
+  const result = validateLoginAccountValue(value)
+  if (result.error === loginAccountCharacterError) return { ...result, error: nicknameCharacterError }
+  if (result.error === '登录账号长度需要 2-16 个字符') return { ...result, error: nicknameLengthError }
+  if (result.error === '请输入登录账号') return { ...result, error: '请输入昵称' }
+  return result
 }
 
 export function validateAdminLoginAccount(accountValue: unknown, confirmValue: unknown, currentNormalized?: string) {

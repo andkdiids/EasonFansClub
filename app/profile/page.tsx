@@ -11,6 +11,7 @@ import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { getEquippedBadgeForUser } from '@/lib/badge-service'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -64,7 +65,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     console.error('[profile.ensureBirthdayBadge]', error)
   })
 
-  const displayName = profile.nickname || 'E院用户'
+  const displayName = getPublicUserDisplayName(profile)
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
