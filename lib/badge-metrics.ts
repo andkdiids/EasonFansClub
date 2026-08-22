@@ -79,6 +79,10 @@ const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoade
   },
   CONCERT_ATTENDANCE_COUNT: (userId) => prisma.userMusicConcert.count({ where: { userId } }),
   RATING_COUNT: (userId) => prisma.rating.count({ where: { userId } }),
+  // Series completion is evaluated from Badge ownership, not from a numeric
+  // user metric. Keeping a guarded loader here preserves the single registry
+  // shape while the rule engine handles this special rule explicitly.
+  BADGE_SERIES_COMPLETE: async () => 0,
 }
 
 export function getBadgeMetricLoader(ruleType: SupportedBadgeRuleType) {

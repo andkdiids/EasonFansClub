@@ -230,6 +230,7 @@ enum BadgeRuleType {
   WANT_LISTEN_MAX_STREAK
   CONCERT_ATTENDANCE_COUNT
   RATING_COUNT
+  BADGE_SERIES_COMPLETE
 }
 
 enum BadgeRuleOperator {
@@ -254,15 +255,17 @@ enum BadgeNicknameEffect {
 }
 
 model BadgeSeries {
-  id          String   @id @default(cuid())
-  code        String   @unique @db.VarChar(64)
-  name        String   @db.VarChar(120)
-  description String?  @db.VarChar(500)
-  sortOrder   Int      @default(0)
-  isEnabled   Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  Badges      Badge[]
+  id                      String   @id @default(cuid())
+  code                    String   @unique @db.VarChar(64)
+  name                    String   @db.VarChar(120)
+  description             String?  @db.VarChar(500)
+  sortOrder               Int      @default(0)
+  isEnabled               Boolean  @default(true)
+  completionRewardBadgeId String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  Badges                  Badge[]
+  CompletionRewardBadge   Badge?   @relation("BadgeSeriesCompletionReward", fields: [completionRewardBadgeId], references: [id], onDelete: SetNull)
 
   @@index([isEnabled, sortOrder])
 }
@@ -294,7 +297,10 @@ model Badge {
   tierLevel                        Int?
   availableFrom                    DateTime?
   availableUntil                   DateTime?
+  announceOnGrant                  Boolean             @default(false)
+  countsTowardSeriesCompletion     Boolean             @default(true)
   Series                           BadgeSeries?        @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  CompletionRewardForSeries        BadgeSeries[]       @relation("BadgeSeriesCompletionReward")
   musicTourId                      String?
   musicTour                        MusicTour?          @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
   isAutoGrant                      Boolean             @default(false)
@@ -302,6 +308,7 @@ model Badge {
   createdAt                        DateTime            @default(now())
   updatedAt                        DateTime            @updatedAt
   UserBadge                        UserBadge[]
+  UserBadgeShowcase                UserBadgeShowcase[]
   BadgeRule                        BadgeRule?
   EquippedByUsers                  User[]              @relation("UserEquippedBadge")
 
@@ -322,7 +329,7 @@ model BadgeRule {
   badgeId            String            @unique
   ruleType           BadgeRuleType
   operator           BadgeRuleOperator @default(GTE)
-  threshold          Int
+  threshold          Int?
   secondaryThreshold Int?
   configJson         Json?
   isEnabled          Boolean           @default(true)
@@ -3310,6 +3317,7 @@ model User {
   usernameChangedAt                                      DateTime?
   equippedBadgeId                                        String?
   checkinMoodEnabled                                     Boolean                        @default(true)
+  showBadgeActivity                                      Boolean                        @default(true)
   ipRegion                                               String?
   ipRegionUpdatedAt                                      DateTime?
   AccountSecurityLog                                     AccountSecurityLog[]
@@ -3429,6 +3437,7 @@ model User {
   UserAchievement                                        UserAchievement[]
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
+  UserBadgeShowcase                                      UserBadgeShowcase[]
   EquippedBadge                                          Badge?                         @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
   UserBadgeGrantedBy                                     UserBadge[]                    @relation("UserBadgeGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
@@ -3515,6 +3524,21 @@ model UserBadge {
   @@index([userId, obtainedAt])
   @@index([badgeId])
   @@index([grantedBy, createdAt])
+}
+
+model UserBadgeShowcase {
+  id        String   @id @default(cuid())
+  slot      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  badgeId   String
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@unique([userId, slot])
+  @@index([badgeId])
 }
 
 model UserSecurityQuestion {

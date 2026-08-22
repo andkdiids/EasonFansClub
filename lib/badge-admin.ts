@@ -96,6 +96,15 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
     data.isActive = data.isEnabled
   }
 
+  if (!partial || 'announceOnGrant' in body) {
+    if (body.announceOnGrant !== undefined && typeof body.announceOnGrant !== 'boolean') return { error: '勋章动态开关无效' }
+    data.announceOnGrant = body.announceOnGrant === true
+  }
+  if (!partial || 'countsTowardSeriesCompletion' in body) {
+    if (body.countsTowardSeriesCompletion !== undefined && typeof body.countsTowardSeriesCompletion !== 'boolean') return { error: '系列完成度开关无效' }
+    data.countsTowardSeriesCompletion = body.countsTowardSeriesCompletion !== false
+  }
+
   if (!partial || 'effectType' in body) {
     const effectType = typeof body.effectType === 'string' ? body.effectType.toUpperCase() : 'NONE'
     if (!EFFECT_TYPES.has(effectType)) return { error: '勋章动画效果无效' }

@@ -10,7 +10,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
-const ALLOWED_TYPES = ['CHECKIN', 'POST'] as const
+const ALLOWED_TYPES = ['CHECKIN', 'POST', 'BADGE'] as const
 
 function positiveInteger(value: string | null, fallback: number, maximum?: number) {
   const parsed = Number(value)
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
 
   const where = {
     actorId: { in: friendIds },
-    type: type ? { equals: type } : { in: [...ALLOWED_TYPES] },
+      type: type ? { equals: type } : { in: [...ALLOWED_TYPES] },
     createdAt: { gte: startDate, ...(endDate ? { lte: endDate } : {}) },
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }

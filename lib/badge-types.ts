@@ -29,6 +29,20 @@ export type BadgeOwnershipStatsView = {
   display: string
 }
 
+export type BadgeShowcaseItemView = {
+  slot: number
+  badge: BadgeView
+}
+
+export type BadgeSeriesCompletionView = {
+  series: BadgeSeriesView
+  collected: number
+  total: number
+  percentage: number
+  completed: boolean
+  reward: BadgeView | null
+}
+
 export type EquippedBadgeView = {
   id: string
   code?: string
@@ -86,6 +100,9 @@ export type BadgeCollectionView = {
   hiddenTotal?: number
   completionPercentage?: number
   items: BadgeView[]
+  showcase?: BadgeShowcaseItemView[]
+  recent?: BadgeView[]
+  seriesCompletions?: BadgeSeriesCompletionView[]
 }
 
 export const BADGE_VISIBILITIES: BadgeVisibility[] = ['PUBLIC', 'HIDDEN', 'SECRET']

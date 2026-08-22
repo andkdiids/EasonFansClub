@@ -67,3 +67,15 @@ test('昵称校验错误使用昵称语义，登录账号校验仍保留内部�
   assert.match(validateNicknameValue('bad name').error || '', /昵称/)
   assert.match(validateNicknameValue('a'.repeat(17)).error || '', /昵称/)
 })
+
+test('好友申请和对决邀请不使用过宽 User 查询或旧 name 回退', () => {
+  const friendsPage = read('app/friends/page.tsx')
+  const duel = read('components/games/GuessSongDuel.tsx')
+
+  assert.match(friendsPage, /User_FriendRequest_senderIdToUser: \{ select: friendRequestUserSelect \}/)
+  assert.match(friendsPage, /User_FriendRequest_receiverIdToUser: \{ select: friendRequestUserSelect \}/)
+  assert.doesNotMatch(friendsPage, /include: \{ Profile: true \}/)
+  assert.match(duel, /getPublicUserDisplayNameFromNickname\(friend\.nickname, '好友'\)/)
+  assert.doesNotMatch(duel, /friend\.name/)
+  assert.doesNotMatch(duel, /friend\.nickname\s*\|\|\s*friend\.name/)
+})

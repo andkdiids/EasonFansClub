@@ -6,7 +6,7 @@ import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2
 import { parseBadgeDefinition } from '@/lib/badge-admin'
 import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
 import { prisma } from '@/lib/prisma'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,6 +51,7 @@ export async function POST(request: Request) {
 
   const parsed = parseBadgeDefinition(body as Record<string, unknown>)
   if (parsed.error || !parsed.data) return NextResponse.json({ message: parsed.error || '勋章参数无效' }, { status: 400 })
+  if (parsed.rule?.ruleType === 'BADGE_SERIES_COMPLETE') return NextResponse.json({ message: '系列完成规则只能通过勋章系列的完成奖励配置' }, { status: 400 })
   const data = { ...parsed.data } as Prisma.BadgeUncheckedCreateInput
   if (parsed.rule) {
     const generatedDescription = generateBadgeAcquisitionDescription(parsed.rule.ruleType, parsed.rule.threshold)
@@ -85,6 +86,7 @@ export async function POST(request: Request) {
             operator: parsed.rule.operator,
             threshold: parsed.rule.threshold,
             secondaryThreshold: parsed.rule.secondaryThreshold,
+            configJson: parsed.rule.configJson ?? Prisma.JsonNull,
             isEnabled: parsed.rule.isEnabled,
           },
         })

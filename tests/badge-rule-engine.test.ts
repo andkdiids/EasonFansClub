@@ -47,8 +47,8 @@ test('规则注册表统一提供指标、文案、阈值、操作符和事件�
     assert.ok(definition.dataDescription)
     assert.deepEqual(definition.supportedOperators, ['GTE'])
     assert.ok(definition.events.length > 0)
-    assert.equal(definition.threshold.min, 1)
-    assert.equal(definition.threshold.max, 1_000_000_000)
+    assert.equal(definition.threshold!.min, 1)
+    assert.equal(definition.threshold!.max, 1_000_000_000)
   }
 })
 

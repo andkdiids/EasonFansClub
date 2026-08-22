@@ -19,6 +19,23 @@ export const dynamic = 'force-dynamic'
 type RequestTab = 'all' | 'received' | 'sent'
 const REQUEST_LIMIT = 100
 
+const friendRequestUserSelect = {
+  id: true,
+  uid: true,
+  nickname: true,
+  avatarUrl: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
+  Profile: {
+    select: {
+      displayName: true,
+      displayNameModerationStatus: true,
+      avatarUrl: true,
+    },
+  },
+} as const
+
 export default async function FriendsPage({ searchParams }: { searchParams: Promise<{ requestType?: string }> }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
@@ -40,9 +57,15 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
     'friends.requests',
     prisma.friendRequest.findMany({
       where: { AND: [directionFilter, { status: 'PENDING' }] },
-      include: {
-        User_FriendRequest_senderIdToUser: { include: { Profile: true } },
-        User_FriendRequest_receiverIdToUser: { include: { Profile: true } },
+      select: {
+        id: true,
+        senderId: true,
+        receiverId: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        User_FriendRequest_senderIdToUser: { select: friendRequestUserSelect },
+        User_FriendRequest_receiverIdToUser: { select: friendRequestUserSelect },
       },
       orderBy: { updatedAt: 'desc' },
       take: REQUEST_LIMIT,
@@ -115,12 +138,10 @@ type FriendUser = {
   uid: number
   nickname: string
   avatarUrl: string | null
-  bio: string | null
-  status: string
-  isDeleted: boolean
   usernameModerationStatus?: string | null
   nicknameModerationStatus?: string | null
-  Profile: { displayName: string; avatarUrl: string | null; bio: string | null; displayNameModerationStatus?: string | null } | null
+  nicknameViolationDisplay?: string | null
+  Profile: { displayName: string | null; avatarUrl: string | null; displayNameModerationStatus?: string | null } | null
 }
 
 function RequestCard({

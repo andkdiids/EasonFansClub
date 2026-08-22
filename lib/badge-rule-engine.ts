@@ -4,10 +4,11 @@ import { prisma } from '@/lib/prisma'
 import { grantBadge } from '@/lib/badge-service'
 import { badgeAvailabilityWhere, getBadgeAvailability } from '@/lib/badge-phase2'
 import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMetric, VALID_POST_WHERE } from '@/lib/badge-metrics'
+import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
-  BADGE_RULE_TYPES,
+  BADGE_RULE_TYPES_WITH_SPECIAL,
   generateBadgeAcquisitionDescription,
   type ParsedBadgeRule,
   type SupportedBadgeRuleType,
@@ -23,7 +24,7 @@ function supportsEvent(ruleType: SupportedBadgeRuleType, eventType: BadgeEvaluat
 const EVENT_RULE_TYPES = Object.fromEntries(
   BADGE_EVALUATION_EVENTS.map((eventType) => [
     eventType,
-    BADGE_RULE_TYPES.filter((ruleType) => supportsEvent(ruleType, eventType)),
+    BADGE_RULE_TYPES_WITH_SPECIAL.filter((ruleType) => supportsEvent(ruleType, eventType)),
   ]),
 ) as unknown as Record<BadgeEvaluationEvent, readonly SupportedBadgeRuleType[]>
 
@@ -92,9 +93,11 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
   const summary = emptySummary(userId)
   const rules = await loadEnabledRules(ruleTypes)
   const metrics = new Map<SupportedBadgeRuleType, number>()
+  const newlyGranted: Array<{ badgeId: string; recordId: string }> = []
 
   for (const rule of rules) {
     const type = rule.ruleType as SupportedBadgeRuleType
+    if (type === 'BADGE_SERIES_COMPLETE' || rule.threshold === null) continue
     if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
     summary.evaluated += 1
     if (!evaluateBadgeMetric(metrics.get(type) || 0, rule.operator as BadgeRuleOperatorValue, rule.threshold)) continue
@@ -106,12 +109,23 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
         sourceType: 'AUTO_RULE',
         sourceId: rule.id,
         grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: rule.threshold })}`,
+        deferPhase3Effects: true,
       })
-      if (result.created) summary.granted += 1
+      if (result.created) {
+        summary.granted += 1
+        newlyGranted.push({ badgeId: result.badgeId, recordId: result.recordId })
+      }
       else summary.alreadyOwned += 1
     } catch (error) {
       summary.failed += 1
       summary.failures.push(`${rule.id}:${error instanceof Error ? error.message : '发放失败'}`)
+    }
+  }
+  if (newlyGranted.length) {
+    try {
+      await processBadgeGrantEffects({ userId, grants: newlyGranted })
+    } catch (error) {
+      console.error('[badge-rule.phase3-effects]', { userId, error })
     }
   }
   return summary
@@ -247,6 +261,8 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
       rows.forEach((row) => metrics.set(row.userId, row._count._all))
       return metrics
     }
+    case 'BADGE_SERIES_COMPLETE':
+      return metrics
   }
 }
 
@@ -262,12 +278,63 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
       grantType: true,
       availableFrom: true,
       availableUntil: true,
-      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
+      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
     },
   })
   if (!badge || !badge.BadgeRule) throw new Error('勋章或自动规则不存在')
   if (!badge.isEnabled || !badge.isActive || badge.grantType !== 'AUTO' || !badge.BadgeRule.isEnabled) throw new Error('勋章或自动规则当前未启用')
   if (badge.availableFrom || badge.availableUntil) throw new Error('限定勋章没有可靠的历史达标时间，不能使用自动历史补发')
+
+  const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
+  if (type === 'BADGE_SERIES_COMPLETE') {
+    const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson) ? badge.BadgeRule.configJson as { seriesId?: unknown } : null
+    const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
+    if (!seriesId) throw new Error('系列完成规则缺少系列配置')
+    const eligibleIds = await getSeriesCompletionEligibleUserIds(seriesId)
+    const candidates = eligibleIds.filter((id) => !normalizedCursor || id > normalizedCursor)
+    const hasMore = candidates.length > boundedBatchSize
+    const rows = (hasMore ? candidates.slice(0, boundedBatchSize) : candidates).map((id) => ({ id }))
+    const summary: BadgeBackfillSummary = {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: type,
+      scanned: rows.length,
+      granted: 0,
+      alreadyOwned: 0,
+      notEligible: 0,
+      failed: 0,
+      failures: [],
+      nextCursor: hasMore ? rows.at(-1)?.id || null : null,
+      done: !hasMore,
+    }
+    const newlyGranted: Array<{ userId: string; badgeId: string; recordId: string }> = []
+    for (const user of rows) {
+      try {
+        const result = await grantBadge({
+          userId: user.id,
+          badgeId,
+          sourceType: 'AUTO_RULE',
+          sourceId: badge.BadgeRule.id,
+          grantReason: '完成勋章系列后获得',
+          deferPhase3Effects: true,
+        })
+        if (result.created) {
+          summary.granted += 1
+          newlyGranted.push({ userId: user.id, badgeId: result.badgeId, recordId: result.recordId })
+        } else summary.alreadyOwned += 1
+      } catch (error) {
+        summary.failed += 1
+        summary.failures.push(`${user.id}:${error instanceof Error ? error.message : '发放失败'}`)
+      }
+    }
+    // Series-completion backfill may contain multiple users. Effects are
+    // intentionally processed per user so one notification never crosses users.
+    for (const user of rows) {
+      const userGrants = newlyGranted.filter((grant) => grant.userId === user.id).map(({ badgeId: ownedBadgeId, recordId }) => ({ badgeId: ownedBadgeId, recordId }))
+      if (userGrants.length) await processBadgeGrantEffects({ userId: user.id, grants: userGrants }).catch((error) => console.error('[badge.series.backfill.effects]', { userId: user.id, error }))
+    }
+    return summary
+  }
 
   const users = await prisma.user.findMany({
     where: { status: 'ACTIVE', isDeleted: false, ...(normalizedCursor ? { id: { gt: normalizedCursor } } : {}) },
@@ -277,7 +344,6 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
   })
   const hasMore = users.length > boundedBatchSize
   const rows = hasMore ? users.slice(0, boundedBatchSize) : users
-  const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
   const metrics = await getBatchBadgeMetrics(rows, type)
   const summary: BadgeBackfillSummary = {
     badgeId,
@@ -293,8 +359,9 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
     done: !hasMore,
   }
 
+  const newlyGranted: Array<{ userId: string; badgeId: string; recordId: string }> = []
   for (const user of rows) {
-    if (!evaluateBadgeMetric(metrics.get(user.id) || 0, badge.BadgeRule.operator as BadgeRuleOperatorValue, badge.BadgeRule.threshold)) {
+    if (badge.BadgeRule.threshold === null || !evaluateBadgeMetric(metrics.get(user.id) || 0, badge.BadgeRule.operator as BadgeRuleOperatorValue, badge.BadgeRule.threshold)) {
       summary.notEligible += 1
       continue
     }
@@ -305,12 +372,24 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
         sourceType: 'AUTO_RULE',
         sourceId: badge.BadgeRule.id,
         grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: badge.BadgeRule.threshold })}`,
+        deferPhase3Effects: true,
       })
-      if (result.created) summary.granted += 1
+      if (result.created) {
+        summary.granted += 1
+        newlyGranted.push({ userId: user.id, badgeId: result.badgeId, recordId: result.recordId })
+      }
       else summary.alreadyOwned += 1
     } catch (error) {
       summary.failed += 1
       summary.failures.push(`${user.id}:${error instanceof Error ? error.message : '发放失败'}`)
+    }
+  }
+  if (newlyGranted.length) {
+    // A normal backfill batch is scoped to one badge but can contain many users;
+    // effects are kept isolated per user while the grant loop remains idempotent.
+    for (const user of rows) {
+      const grants = newlyGranted.filter((grant) => grant.userId === user.id).map(({ badgeId: ownedBadgeId, recordId }) => ({ badgeId: ownedBadgeId, recordId }))
+      if (grants.length) await processBadgeGrantEffects({ userId: user.id, grants }).catch((error) => console.error('[badge.backfill.effects]', { userId: user.id, error }))
     }
   }
   return summary
@@ -321,7 +400,7 @@ export type BadgeRulePreview = {
   ruleId: string
   ruleType: SupportedBadgeRuleType
   operator: BadgeRuleOperatorValue
-  threshold: number
+  threshold: number | null
   availability: ReturnType<typeof getBadgeAvailability>
   eligibleCount: number
   ownedCount: number
@@ -342,7 +421,7 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
       isActive: true,
       availableFrom: true,
       availableUntil: true,
-      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
+      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
     },
   })
   if (!badge?.BadgeRule) throw new Error('勋章或自动规则不存在')
@@ -367,6 +446,13 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
 
   const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
   const operator = badge.BadgeRule.operator as BadgeRuleOperatorValue
+  if (type === 'BADGE_SERIES_COMPLETE') {
+    const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson) ? badge.BadgeRule.configJson as { seriesId?: unknown } : null
+    const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
+    if (!seriesId) throw new Error('系列完成规则缺少系列配置')
+    const stats = await getSeriesCompletionPreview(seriesId, badgeId)
+    return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats }
+  }
   let cursor: string | undefined
   let eligibleCount = 0
   let pendingCount = 0
@@ -380,7 +466,7 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
     if (!users.length) break
     const metrics = await getBatchBadgeMetrics(users, type)
     const eligibleIds = users
-      .filter((user) => evaluateBadgeMetric(metrics.get(user.id) || 0, operator, badge.BadgeRule!.threshold))
+      .filter((user) => badge.BadgeRule!.threshold !== null && evaluateBadgeMetric(metrics.get(user.id) || 0, operator, badge.BadgeRule!.threshold))
       .map((user) => user.id)
     eligibleCount += eligibleIds.length
     if (eligibleIds.length) {
@@ -424,4 +510,4 @@ export function normalizeBackfillCursor(value: string | null | undefined) {
 }
 
 export const BADGE_RULE_EVENT_MAP = EVENT_RULE_TYPES
-export const SUPPORTED_BADGE_RULE_TYPES = BADGE_RULE_TYPES
+export const SUPPORTED_BADGE_RULE_TYPES = BADGE_RULE_TYPES_WITH_SPECIAL

@@ -8,8 +8,9 @@ import { canApplyDuelAnswerAccepted, canApplyDuelMatchSnapshot, duelQuestionIden
 import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelOption, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { getPublicUserDisplayNameFromNickname } from '@/lib/public-user-name'
 
-type Friend = { id: string; nickname?: string; name?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null; equippedBadge?: EquippedBadgeView | null }
+type Friend = { id: string; nickname?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null; equippedBadge?: EquippedBadgeView | null }
 type DuelStats = { wins: number; participations: number; winRate: number }
 type DuelHistoryItem = { result: DuelMatchResult; roomCode: string }
 type ApiPayload = { ok?: boolean; message?: string; code?: string; [key: string]: unknown }
@@ -32,7 +33,7 @@ function avatar(user: { name: string; avatarUrl: string | null }) {
 }
 
 function friendName(friend: Friend) {
-  return friend.nickname || friend.name || '好友'
+  return getPublicUserDisplayNameFromNickname(friend.nickname, '好友')
 }
 
 function formatDuration(startedAt: string, finishedAt: string | null) {

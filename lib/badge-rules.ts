@@ -31,8 +31,10 @@ export type BadgeRuleRegistryEntry = {
   metricLoader: string
   supportedOperators: readonly string[]
   events: readonly BadgeEvaluationEvent[]
-  threshold: typeof BADGE_RULE_THRESHOLD_LIMITS
-  defaultAcquisitionDescription: (threshold: number) => string
+  threshold: typeof BADGE_RULE_THRESHOLD_LIMITS | null
+  defaultAcquisitionDescription: (threshold: number | null) => string
+  adminSelectable?: boolean
+  seriesCompletion?: boolean
 }
 
 function displayThreshold(threshold: number) {
@@ -54,7 +56,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['POST_CREATED', 'POST_APPROVED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `累计发布 ${displayThreshold(threshold)} 篇帖子后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `累计发布 ${displayThreshold(threshold || 1)} 篇帖子后获得`,
   },
   FEATURED_POST_COUNT: {
     label: '累计精华帖数',
@@ -63,7 +65,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['POST_APPROVED', 'POST_FEATURED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `累计获得 ${displayThreshold(threshold)} 篇精华帖后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `累计获得 ${displayThreshold(threshold || 1)} 篇精华帖后获得`,
   },
   CHECKIN_TOTAL_DAYS: {
     label: '累计挂号天数',
@@ -72,7 +74,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['CHECKIN_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `累计挂号 ${displayThreshold(threshold)} 天后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `累计挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   CHECKIN_STREAK: {
     label: '连续挂号天数',
@@ -81,7 +83,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['CHECKIN_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `连续挂号 ${displayThreshold(threshold)} 天后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `连续挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   ACCOUNT_AGE_DAYS: {
     label: '注册天数',
@@ -90,7 +92,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['USER_LOGIN'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `注册满 ${displayThreshold(threshold)} 天后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `注册满 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   FRIEND_COUNT: {
     label: '好友数',
@@ -99,7 +101,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['FRIENDSHIP_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `好友达到 ${displayThreshold(threshold)} 位后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `好友达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
   FOLLOWER_COUNT: {
     label: '粉丝数',
@@ -108,7 +110,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['FOLLOW_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `粉丝达到 ${displayThreshold(threshold)} 位后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `粉丝达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
   GUESS_SONG_MAX_STREAK: {
     label: '听听最高连击',
@@ -117,7 +119,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['GUESS_SONG_SESSION_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `听听最高连击达到 ${displayThreshold(threshold)} 题后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `听听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
   DUEL_WIN_COUNT: {
     label: '1v1 对决胜场',
@@ -126,7 +128,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['DUEL_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `累计赢得 ${displayThreshold(threshold)} 场听听 1v1 对决后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `累计赢得 ${displayThreshold(threshold || 1)} 场听听 1v1 对决后获得`,
   },
   WANT_LISTEN_MAX_STREAK: {
     label: '想听最高连击',
@@ -135,7 +137,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['WANT_LISTEN_SESSION_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `想听最高连击达到 ${displayThreshold(threshold)} 题后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `想听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
   CONCERT_ATTENDANCE_COUNT: {
     label: '演唱会观看场次',
@@ -144,7 +146,7 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['CONCERT_ATTENDANCE_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `累计观看 ${displayThreshold(threshold)} 场演唱会后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `累计观看 ${displayThreshold(threshold || 1)} 场演唱会后获得`,
   },
   RATING_COUNT: {
     label: '歌·颂评分次数',
@@ -153,25 +155,40 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['RATING_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
-    defaultAcquisitionDescription: (threshold: number) => `累计完成 ${displayThreshold(threshold)} 次歌·颂评分后获得`,
+    defaultAcquisitionDescription: (threshold: number | null) => `累计完成 ${displayThreshold(threshold || 1)} 次歌·颂评分后获得`,
+  },
+  BADGE_SERIES_COMPLETE: {
+    label: '系列全收集',
+    dataDescription: '拥有指定系列内全部计入完成度的勋章，不使用数值阈值',
+    metricLoader: 'BADGE_SERIES_COMPLETE',
+    supportedOperators: ['GTE'],
+    events: [],
+    threshold: null,
+    adminSelectable: false,
+    seriesCompletion: true,
+    defaultAcquisitionDescription: () => '集齐指定系列全部勋章后获得',
   },
 } as const satisfies Record<string, BadgeRuleRegistryEntry>
 
 export type SupportedBadgeRuleType = keyof typeof BADGE_RULE_REGISTRY
-export const BADGE_RULE_TYPES = Object.keys(BADGE_RULE_REGISTRY) as SupportedBadgeRuleType[]
+export const BADGE_RULE_TYPES_WITH_SPECIAL = Object.keys(BADGE_RULE_REGISTRY) as SupportedBadgeRuleType[]
+/** Numeric/event rules exposed to the existing event registry and admin catalog. */
+export const BADGE_RULE_TYPES = BADGE_RULE_TYPES_WITH_SPECIAL
+  .filter((ruleType) => !('seriesCompletion' in BADGE_RULE_REGISTRY[ruleType]))
+export const BADGE_ADMIN_RULE_TYPES = BADGE_RULE_TYPES.filter((ruleType) => !('adminSelectable' in BADGE_RULE_REGISTRY[ruleType]) || BADGE_RULE_REGISTRY[ruleType].adminSelectable !== false)
 
 export const BADGE_RULE_TYPE_LABELS = Object.fromEntries(
-  BADGE_RULE_TYPES.map((ruleType) => [ruleType, BADGE_RULE_REGISTRY[ruleType].label]),
+  BADGE_RULE_TYPES_WITH_SPECIAL.map((ruleType) => [ruleType, BADGE_RULE_REGISTRY[ruleType].label]),
 ) as Record<SupportedBadgeRuleType, string>
 
 export const BADGE_RULE_TYPE_DESCRIPTIONS = Object.fromEntries(
-  BADGE_RULE_TYPES.map((ruleType) => [ruleType, BADGE_RULE_REGISTRY[ruleType].dataDescription]),
+  BADGE_RULE_TYPES_WITH_SPECIAL.map((ruleType) => [ruleType, BADGE_RULE_REGISTRY[ruleType].dataDescription]),
 ) as Record<SupportedBadgeRuleType, string>
 
 export type ParsedBadgeRule = {
   ruleType: SupportedBadgeRuleType
   operator: BadgeRuleOperatorValue
-  threshold: number
+  threshold: number | null
   secondaryThreshold: number | null
   configJson: Prisma.InputJsonValue | null
   isEnabled: boolean
@@ -205,12 +222,32 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
   if (!(BADGE_RULE_OPERATORS as readonly string[]).includes(operator)) return { error: '自动获取规则操作符无效' }
   if (!definition.supportedOperators.includes(operator)) return { error: '当前版本后台仅支持达到（≥）操作符' }
 
-  const thresholdResult = parsePositiveInteger(body.threshold, '规则阈值', definition.threshold)
+  if (definition.seriesCompletion) {
+    const rawConfig = body.configJson
+    if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) return { error: '系列完成规则必须指定系列' }
+    const seriesId = (rawConfig as Record<string, unknown>).seriesId
+    if (typeof seriesId !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(seriesId.trim())) return { error: '系列完成规则的系列标识无效' }
+    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: '系列完成规则不需要数值阈值' }
+    if (body.secondaryThreshold !== undefined && body.secondaryThreshold !== null && body.secondaryThreshold !== '') return { error: '系列完成规则不需要次级阈值' }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
+    return {
+      rule: {
+        ruleType: ruleTypeValue as SupportedBadgeRuleType,
+        operator: 'GTE',
+        threshold: null,
+        secondaryThreshold: null,
+        configJson: { seriesId: seriesId.trim() },
+        isEnabled: body.isEnabled !== false,
+      },
+    }
+  }
+
+  const thresholdResult = parsePositiveInteger(body.threshold, '规则阈值', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
   if ('error' in thresholdResult) return thresholdResult
 
   let secondaryThreshold: number | null = null
   if (body.secondaryThreshold !== undefined && body.secondaryThreshold !== null && body.secondaryThreshold !== '') {
-    const secondaryResult = parsePositiveInteger(body.secondaryThreshold, '规则次级阈值', definition.threshold)
+    const secondaryResult = parsePositiveInteger(body.secondaryThreshold, '规则次级阈值', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
     if ('error' in secondaryResult) return secondaryResult
     secondaryThreshold = secondaryResult.value
   }
@@ -230,7 +267,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
   }
 }
 
-export function generateBadgeAcquisitionDescription(ruleType: SupportedBadgeRuleType, threshold: number) {
+export function generateBadgeAcquisitionDescription(ruleType: SupportedBadgeRuleType, threshold: number | null) {
   const definition = BADGE_RULE_REGISTRY[ruleType]
   return definition?.defaultAcquisitionDescription(threshold) || '达成自动获取条件后获得'
 }

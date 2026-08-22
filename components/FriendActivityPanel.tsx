@@ -10,7 +10,7 @@ import { formatUid } from '@/lib/uid'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
 import { UserDisplayName } from '@/components/UserDisplayName'
 
-type ActivityType = '' | 'CHECKIN' | 'POST'
+type ActivityType = '' | 'CHECKIN' | 'POST' | 'BADGE'
 type TimeFilter = 'today' | 'yesterday' | '7days' | 'custom'
 type FriendActivity = {
   id: string
@@ -19,7 +19,7 @@ type FriendActivity = {
   moodEmoji?: string | null
   moodText?: string | null
   content: string | null
-  type: 'CHECKIN' | 'POST'
+  type: 'CHECKIN' | 'POST' | 'BADGE'
   targetUrl: string | null
   createdAt: string
   actor: {
@@ -131,6 +131,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
             <option value="">全部</option>
             <option value="CHECKIN">今日挂号</option>
             <option value="POST">最近发帖</option>
+            <option value="BADGE">获得勋章</option>
           </select>
         </label>
         {timeFilter === 'custom' ? <>
@@ -147,7 +148,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
           const mood = item.type === 'CHECKIN' ? getMoodDisplay(item) : null
           const name = item.actor.nickname || 'E院用户'
           const avatar = profileImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
-          const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : '最近发帖'
+          const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : item.type === 'BADGE' ? '获得勋章' : '最近发帖'
           const targetUrl = normalizeStoredInternalPath(item.targetUrl)
           return (
             <article key={item.id} className="border border-sky-100 bg-sky-50/60 p-4">
@@ -159,7 +160,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
                   <div className="flex flex-wrap items-center gap-2">
                     <a href={`/user/${formatUid(item.actor.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={item.actor.uid} badge={item.actor.equippedBadge} compact /></a>
                     <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(item.actor.uid)}</span>
-                    <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">{item.type === 'CHECKIN' ? `${mood?.icon || '✚'} ${mood?.label || typeLabel}` : `✎ ${typeLabel}`}</span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">{item.type === 'CHECKIN' ? `${mood?.icon || '✚'} ${mood?.label || typeLabel}` : item.type === 'BADGE' ? `🎖 ${typeLabel}` : `✎ ${typeLabel}`}</span>
                   </div>
                   {item.content ? <p className="mt-2 line-clamp-3 text-sm font-bold leading-6 text-slate-600">{item.content}</p> : null}
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">

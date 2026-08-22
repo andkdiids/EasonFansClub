@@ -192,6 +192,7 @@ export async function GET(request: Request) {
       birthDay: true,
       birthdaySetAt: true,
       birthdayPublic: true,
+      showBadgeActivity: true,
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
       bioModerationStatus: true,
@@ -259,6 +260,7 @@ export async function GET(request: Request) {
       birthDay: profile.birthDay,
       birthdaySetAt: profile.birthdaySetAt,
       birthdayPublic: profile.birthdayPublic,
+      showBadgeActivity: profile.showBadgeActivity,
       profile: Profile ? {
         displayName: Profile.displayName,
         avatarUrl: publicImageUrl(Profile.avatarUrl),
@@ -335,6 +337,7 @@ export async function PATCH(request: Request) {
   const wallVisibility = requestedWallVisibility as ProfileWallVisibility | undefined
   // 生日公开开关：只控制生日祝福卡片是否展示生日日期，不影响生日纪念通知与卡片本身。
   const birthdayPublic = typeof body?.birthdayPublic === 'boolean' ? body.birthdayPublic : undefined
+  const showBadgeActivity = typeof body?.showBadgeActivity === 'boolean' ? body.showBadgeActivity : undefined
   const hasLocation = Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'location'))
   const location = hasLocation ? normalizeUserLocationInput(body.location) : undefined
   if (hasLocation && location === undefined) {
@@ -359,6 +362,7 @@ export async function PATCH(request: Request) {
     birthDay?: number
     birthdaySetAt?: Date
     birthdayPublic?: boolean
+    showBadgeActivity?: boolean
   } = {}
 
   if (body?.bio !== undefined) {
@@ -454,6 +458,7 @@ export async function PATCH(request: Request) {
   }
 
   if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic
+  if (showBadgeActivity !== undefined) data.showBadgeActivity = showBadgeActivity
 
   const nicknameChanged = Boolean(nickname && current && nickname !== current.nickname)
   const currentCooldownDays = computeNicknameCooldownDays(current?.nicknameViolationCount ?? 0)
@@ -512,6 +517,7 @@ export async function PATCH(request: Request) {
         nicknameModerationStatus: true,
         nicknameViolationDisplay: true,
         nicknameViolationCount: true,
+        showBadgeActivity: true,
       },
     })
 
@@ -593,6 +599,7 @@ export async function PATCH(request: Request) {
       bio: updated.bio,
       nicknameModerationStatus: updated.nicknameModerationStatus,
       nicknameViolationDisplay: updated.nicknameViolationDisplay,
+      showBadgeActivity: updated.showBadgeActivity,
       wallVisibility: profileRecord.wallVisibility,
       location: profileRecord.locationCountryCode ? {
         countryCode: profileRecord.locationCountryCode,

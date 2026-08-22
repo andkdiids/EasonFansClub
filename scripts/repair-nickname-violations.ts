@@ -22,7 +22,6 @@ async function main() {
   const client = prisma as unknown as NicknameUniquenessClient
 
   let repaired = 0
-  let skipped = 0
 
   for (let skip = 0; ; skip += BATCH_SIZE) {
     const users = await prisma.user.findMany({
@@ -55,7 +54,6 @@ async function main() {
       repaired += 1
       console.info(`[repair] ${user.id} -> ${display} (count=${count})`)
     }
-    void skipped
   }
 
   console.info(`[repair] done. repaired=${repaired}`)

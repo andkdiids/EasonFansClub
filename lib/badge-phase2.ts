@@ -48,9 +48,9 @@ export function validateBadgeAvailability(availableFrom: Date | null, availableU
   return null
 }
 
-export function calculateBadgeProgress(currentValue: number, operator: 'GTE' | 'LTE' | 'EQ', threshold: number): BadgeProgressView {
+export function calculateBadgeProgress(currentValue: number, operator: 'GTE' | 'LTE' | 'EQ', threshold: number | null): BadgeProgressView {
   const current = Number.isFinite(currentValue) ? Math.max(0, currentValue) : 0
-  const target = Math.max(1, Number.isFinite(threshold) ? threshold : 1)
+  const target = Math.max(1, threshold !== null && Number.isFinite(threshold) ? threshold : 1)
   if (operator !== 'GTE') return { current, target, percentage: 0, operator, progressUnsupported: true }
   return {
     current,

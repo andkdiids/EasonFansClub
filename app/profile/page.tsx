@@ -53,6 +53,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       birthDay: true,
       birthdaySetAt: true,
       birthdayPublic: true,
+      showBadgeActivity: true,
       experience: true,
       createdAt: true,
       Profile: true,
@@ -93,6 +94,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     birthDay: profile.birthDay,
     birthdaySetAt: profile.birthdaySetAt ? profile.birthdaySetAt.toISOString() : null,
     birthdayPublic: profile.birthdayPublic,
+    showBadgeActivity: profile.showBadgeActivity,
     wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
   }
 

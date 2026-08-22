@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { parseBadgeDefinition } from '@/lib/badge-admin'
-import { BADGE_RULE_REGISTRY, BADGE_RULE_TYPES, generateBadgeAcquisitionDescription, parseBadgeRuleInput } from '@/lib/badge-rules'
+import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPES, generateBadgeAcquisitionDescription, parseBadgeRuleInput } from '@/lib/badge-rules'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const baseBadge = { name: '自动测试勋章', code: 'auto_test_1' }
@@ -49,8 +49,9 @@ test('MANUAL and EVENT cannot carry a structured rule', () => {
 test('registry is the only rule catalog used by the admin surface', () => {
   assert.equal(BADGE_RULE_TYPES.length, 12)
   assert.ok(BADGE_RULE_TYPES.every((ruleType) => BADGE_RULE_REGISTRY[ruleType].label && BADGE_RULE_REGISTRY[ruleType].dataDescription))
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 12)
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
-  assert.match(manager, /Object\.entries\(BADGE_RULE_TYPE_LABELS\)/)
+  assert.match(manager, /BADGE_ADMIN_RULE_TYPES\.map/)
   assert.match(manager, /BADGE_RULE_TYPE_DESCRIPTIONS\[draft\.ruleType\]/)
 })
 

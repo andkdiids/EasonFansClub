@@ -9,7 +9,7 @@ import { invalidateCurrentUserCache } from '@/lib/auth'
 import { requireAdmin } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { getBadgeAvailability, getBadgeOwnershipStats, validateBadgeAvailability } from '@/lib/badge-phase2'
 
 export const dynamic = 'force-dynamic'
@@ -99,7 +99,24 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (availabilityError) return NextResponse.json({ message: availabilityError }, { status: 400 })
 
     const nextGrantType = typeof data.grantType === 'string' ? data.grantType : previous.grantType
+    if (previous.BadgeRule?.ruleType === 'BADGE_SERIES_COMPLETE' && nextGrantType !== 'AUTO') {
+      return NextResponse.json({ message: '请先在勋章系列设置中解除完成奖励，再修改这枚奖励勋章的发放类型' }, { status: 400 })
+    }
+    if (data.countsTowardSeriesCompletion === true) {
+      const linkedSeries = await prisma.badgeSeries.findFirst({ where: { completionRewardBadgeId: badgeId }, select: { name: true } })
+      if (linkedSeries) return NextResponse.json({ message: '系列完成奖励勋章不能计入自身系列完成度，请先解除系列奖励' }, { status: 400 })
+    }
+    if (data.isEnabled === false || data.isActive === false) {
+      const linkedSeries = await prisma.badgeSeries.findFirst({ where: { completionRewardBadgeId: badgeId }, select: { name: true } })
+      if (linkedSeries) return NextResponse.json({ message: '请先解除系列完成奖励，再停用这枚奖励勋章' }, { status: 400 })
+    }
     if (parsed.rule && nextGrantType !== 'AUTO') return NextResponse.json({ message: '手动或事件勋章不能配置自动获取规则' }, { status: 400 })
+    if (parsed.rule?.ruleType === 'BADGE_SERIES_COMPLETE') {
+      const config = parsed.rule.configJson && typeof parsed.rule.configJson === 'object' && !Array.isArray(parsed.rule.configJson) ? parsed.rule.configJson as { seriesId?: unknown } : null
+      const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
+      const linkedSeries = seriesId ? await prisma.badgeSeries.findFirst({ where: { id: seriesId, completionRewardBadgeId: badgeId }, select: { id: true } }) : null
+      if (!linkedSeries) return NextResponse.json({ message: '系列完成规则只能由已配置的勋章系列完成奖励管理' }, { status: 400 })
+    }
     const currentRule = previous.BadgeRule
       ? {
           ruleType: previous.BadgeRule.ruleType,
@@ -155,6 +172,7 @@ export async function PATCH(request: Request, context: RouteContext) {
           operator: effectiveRule.operator,
           threshold: effectiveRule.threshold,
           secondaryThreshold: effectiveRule.secondaryThreshold,
+          configJson: effectiveRule.configJson ?? Prisma.JsonNull,
           isEnabled: nextGrantType === 'AUTO' ? effectiveRule.isEnabled : false,
         }
         await tx.badgeRule.upsert({
@@ -169,6 +187,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       const affectedUsers = await tx.user.findMany({ where: { equippedBadgeId: badgeId }, select: { id: true, uid: true } })
       const shouldClearEquipped = data.isEnabled === false || data.isActive === false || data.isWearable === false
       if (shouldClearEquipped) await tx.user.updateMany({ where: { equippedBadgeId: badgeId }, data: { equippedBadgeId: null } })
+      if (data.isEnabled === false || data.isActive === false) await tx.userBadgeShowcase.deleteMany({ where: { badgeId } })
       const action = data.isEnabled === false || data.isActive === false
         ? 'BADGE_DISABLE'
         : data.isEnabled === true || data.isActive === true

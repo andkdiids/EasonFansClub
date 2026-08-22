@@ -139,7 +139,7 @@ function EntertainmentScoreUser({ score }: { score: GuessSongModeHighScore }) {
   return (
     <div className="home-entertainment-score-user" title={score.user.name}>
       <span className="home-entertainment-score-avatar"><SafeAvatar src={score.user.avatarUrl} name={score.user.name} uid={score.user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
-      <Link href={`/user/${formatUid(score.user.uid)}`} className="home-entertainment-score-username"><UserDisplayName name={score.user.name} uid={score.user.uid} badge={score.user.equippedBadge} compact /></Link>
+      <Link href={`/user/${formatUid(score.user.uid)}`} className="home-entertainment-score-name"><UserDisplayName name={score.user.name} uid={score.user.uid} badge={score.user.equippedBadge} compact /></Link>
     </div>
   )
 }
