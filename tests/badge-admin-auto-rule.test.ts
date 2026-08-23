@@ -139,6 +139,24 @@ test('validation errors reopen the relevant collapsed form section', () => {
   assert.match(manager, /open=\{formSections\.display\}/)
 })
 
+test('badge editor snapshots details open state before React state batching', () => {
+  const manager = read('app/admin/badges/BadgeAdminManager.tsx')
+  assert.equal((manager.match(/const open = event\.currentTarget\.open/g) || []).length, 3)
+  assert.doesNotMatch(manager, /setFormSections\(\(current\) => \(\{ \.\.\.current, (?:basic|rules|display): event\.currentTarget\.open \}\)\)/)
+  assert.match(manager, /current\.basic === open \? current/)
+  assert.match(manager, /current\.rules === open \? current/)
+  assert.match(manager, /current\.display === open \? current/)
+})
+
+test('root error boundary preserves diagnostics instead of masking every failure as a timeout', () => {
+  const errorBoundary = read('app/error.tsx')
+  assert.match(errorBoundary, /console\.error\('\[root-error-boundary\]'/)
+  assert.match(errorBoundary, /error\.digest/)
+  assert.match(errorBoundary, /error\.stack/)
+  assert.match(errorBoundary, /onClick=\{reset\}/)
+  assert.doesNotMatch(errorBoundary, /可能是某个数据模块暂时超时/)
+})
+
 test('preview is read-only, permission protected and available from the rule area after save', () => {
   const route = read('app/api/admin/badges/[badgeId]/preview/route.ts')
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
