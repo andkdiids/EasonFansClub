@@ -6,17 +6,20 @@ import { buildMusicLyricSnippet } from '../lib/music-search'
 test('移动底部导航固定为首页、广场、E院中心、EasMusic、我的', () => {
   const navigation = readFileSync('components/layout/navigation.ts', 'utf8')
   const mobile = readFileSync('components/layout/MobileNavigation.tsx', 'utf8')
+  const ecenterRegistry = readFileSync('lib/ecenter-features.ts', 'utf8')
   const shell = readFileSync('components/layout/AppShell.tsx', 'utf8')
   assert.match(navigation, /href: '\/music'[\s\S]*mobile: true/)
   assert.doesNotMatch(navigation, /href: '\/notifications'[\s\S]{0,120}mobile: true/)
   assert.match(mobile, /aria-label="E院中心"/)
   assert.match(mobile, /UiIcon name="grid"/)
   for (const href of ['/posts/new', '/checkin', '/games', '/activities', '/notifications', '/trending', '/feedback']) {
-    assert.match(mobile, new RegExp(`href: '${href.replace('/', '\\/')}'`))
+    assert.match(ecenterRegistry, new RegExp(`href: '${href.replace('/', '\\/')}'`))
   }
   assert.doesNotMatch(mobile, /href: '\/rankings'/)
-  assert.match(mobile, /canAccessAdmin[\s\S]*href: '\/admin'/)
+  assert.match(ecenterRegistry, /featureKey: 'ADMIN',[\s\S]*href: '\/admin',[\s\S]*requiresAdmin: true/)
+  assert.match(mobile, /ecenterFeatures\.filter/)
   assert.match(shell, /canAccessAdmin=\{canAccessAdmin\}/)
+  assert.match(shell, /ecenterFeatures=\{ecenterFeatures\}/)
 })
 
 test('E院中心抽屉支持遮罩、关闭、返回键、路由变化及滚动锁定', () => {

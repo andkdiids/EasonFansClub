@@ -6,10 +6,11 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 test('E院中心增加好友动态且保留管理员条件入口', () => {
   const navigation = read('components/layout/MobileNavigation.tsx')
-  assert.match(navigation, /\{ href: '\/friends\/activity', label: '好友动态', icon: 'friends' as const \}/)
-  assert.match(navigation, /const menuItems = canAccessAdmin/)
-  assert.match(navigation, /\? \[\.\.\.centerItems, \{ href: '\/admin'/)
-  assert.match(navigation, /: centerItems/)
+  const registry = read('lib/ecenter-features.ts')
+  assert.match(registry, /featureKey: 'FRIEND_ACTIVITY',[\s\S]*href: '\/friends\/activity'/)
+  assert.match(navigation, /ecenterFeatures\.filter/)
+  assert.match(navigation, /requiresAdmin/)
+  assert.doesNotMatch(navigation, /const centerItems = \[/)
 })
 
 test('资料编辑器使用全站主题 Surface 和前景色', () => {

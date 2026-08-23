@@ -8,9 +8,11 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
 import type { SessionShellUser } from '@/lib/auth'
-import { isAppNavigationActive, primaryNavigation, quickNavigation, type AppNavigationItem } from './navigation'
+import type { EcenterFeatureItem } from '@/lib/ecenter-features'
+import { isAppNavigationActive, primaryNavigation, type AppNavigationItem } from './navigation'
 
-type NavLeafProps = { item: AppNavigationItem; pathname: string; unreadCount: number }
+type NavLeafItem = Pick<AppNavigationItem, 'href' | 'label' | 'icon' | 'activePrefixes' | 'showsUnread'>
+type NavLeafProps = { item: NavLeafItem; pathname: string; unreadCount: number }
 
 function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
   const active = isAppNavigationActive(pathname, item)
@@ -21,7 +23,7 @@ function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
   </Link>
 }
 
-export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean }>) {
+export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRootRef = useRef<HTMLDivElement>(null)
@@ -55,11 +57,13 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin }: 
     }
   }
 
-  function navigation(items: typeof primaryNavigation, label: string) {
+  function navigation(items: readonly NavLeafItem[], label: string) {
     return <nav className="sidebar-nav" aria-label={label}>{items.map((item) => (
       <NavLeaf key={`${label}-${item.label}`} item={item} pathname={pathname} unreadCount={unreadCount} />
     ))}</nav>
   }
+
+  const quickNavigation = ecenterFeatures.filter((item) => item.showInQuickNavigation)
 
   return <aside className="app-sidebar">
     <Link href="/community" className="sidebar-brand" aria-label="社区首页"><BrandMark logoUrl={logoUrl} compact /></Link>

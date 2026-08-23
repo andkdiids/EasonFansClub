@@ -12,6 +12,7 @@ const commentBoundary = read('components/CommentSectionBoundary.tsx')
 const css = read('app/globals.css')
 const friendDock = read('components/FriendDock.tsx')
 const mobileNavigation = read('components/layout/MobileNavigation.tsx')
+const ecenterRegistry = read('lib/ecenter-features.ts')
 const appShell = read('components/layout/AppShell.tsx')
 const forum = read('components/ForumHome.tsx')
 
@@ -185,7 +186,8 @@ test('E院中心打开时隐藏好友、返回顶部和布局工具', () => {
 
 test('E院中心保留三列且活动中心入口继续可用', () => {
   assert.match(css, /\.mobile-center-sheet>nav \{ display:grid; grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
-  assert.match(mobileNavigation, /\{ href: '\/activities', label: '活动中心'/)
+  assert.match(ecenterRegistry, /featureKey: 'ACTIVITY_CENTER',[\s\S]*label: '活动中心',[\s\S]*href: '\/activities'/)
+  assert.match(mobileNavigation, /ecenterFeatures\.filter/)
 })
 
 test('资料保存区和后台保存区避开移动导航', () => {

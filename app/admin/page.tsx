@@ -70,6 +70,13 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     ],
   },
   {
+    title: '导航管理',
+    desc: '统一管理 E院中心的功能入口顺序与显示状态。',
+    items: [
+      { href: '/admin/ecenter-features', title: 'E院中心功能排序', desc: '调整 E院中心弹窗、移动端中心菜单和侧栏快捷入口的共同顺序与启用状态。' },
+    ],
+  },
+  {
     title: '页面视觉设置',
     desc: '统一管理网站外观、页面媒体与布局。',
     items: [

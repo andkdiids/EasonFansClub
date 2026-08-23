@@ -1,8 +1,8 @@
 export type AppNavigationItem = {
   href: string
   label: string
-  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user' | 'sticker' | 'stethoscope' | 'pill'
-  activePrefixes?: string[]
+  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user' | 'sticker' | 'stethoscope' | 'pill' | 'settings'
+  activePrefixes?: readonly string[]
   mobile?: boolean
   showsUnread?: boolean
   children?: AppNavigationItem[]
@@ -20,14 +20,6 @@ export const primaryNavigation: AppNavigationItem[] = [
   { href: '/activities', label: '活动中心', icon: 'calendar', activePrefixes: ['/activities'] },
   { href: '/notifications', label: '消息', icon: 'bell', activePrefixes: ['/notifications'], showsUnread: true },
   { href: '/profile', label: '我的', icon: 'user', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },
-]
-
-export const quickNavigation: AppNavigationItem[] = [
-  { href: '/badges', label: '勋章展览馆', icon: 'archive', activePrefixes: ['/badges'] },
-  { href: '/checkin', label: '每日挂号', icon: 'check', activePrefixes: [] },
-  { href: '/friends', label: '好友动态', icon: 'friends', activePrefixes: ['/friends'] },
-  { href: '/stickers', label: '表情包商店', icon: 'sticker', activePrefixes: ['/stickers', '/profile/stickers'] },
-  { href: '/feedback', label: '反馈与更新', icon: 'feedback', activePrefixes: ['/feedback'] },
 ]
 
 export function isAppNavigationActive(pathname: string, item: AppNavigationItem) {

@@ -113,6 +113,7 @@ test('museum and mini showcase are connected to the requested routes and profile
   assert.match(read('app/badges/page.tsx'), /getBadgeExhibitionGallery/)
   assert.match(read('components/BadgeExhibitionHall.tsx'), /badge-museum-cabinet/)
   assert.match(read('components/ProfilePageSurface.tsx'), /BadgeMiniShowcase/)
-  assert.match(read('components/layout/MobileNavigation.tsx'), /href: '\/badges'/)
+  assert.match(read('lib/ecenter-features.ts'), /featureKey: 'BADGE_MUSEUM',[\s\S]*href: '\/badges'/)
+  assert.match(read('components/layout/MobileNavigation.tsx'), /ecenterFeatures\.filter/)
   assert.match(read('lib/site-config.ts'), /勋章展览馆.*\/badges/)
 })

@@ -11,25 +11,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { UiIcon } from '@/components/UiIcon'
+import type { EcenterFeatureItem } from '@/lib/ecenter-features'
 import { isAppNavigationActive, primaryNavigation } from './navigation'
 
-const centerItems = [
-  { href: '/badges', label: '勋章展览馆', icon: 'archive' as const },
-  { href: '/posts/new', label: '发布帖子', icon: 'forum' as const },
-  { href: '/clinic', label: '阿士匹灵门诊部', icon: 'stethoscope' as const },
-  { href: '/checkin', label: '每日挂号', icon: 'check' as const },
-  { href: '/games', label: '娱乐天空', icon: 'star' as const },
-  { href: '/ratings', label: '歌·颂', icon: 'chart' as const },
-  { href: '/stickers', label: '表情包商店', icon: 'sticker' as const },
-  { href: '/activities', label: '活动中心', icon: 'calendar' as const },
-  { href: '/today', label: '今日', icon: 'archive' as const },
-  { href: '/notifications', label: '通知中心', icon: 'bell' as const, showsUnread: true },
-  { href: '/friends/activity', label: '好友动态', icon: 'friends' as const },
-  { href: '/trending', label: '热门帖子', icon: 'chart' as const },
-  { href: '/feedback', label: '反馈与更新', icon: 'feedback' as const },
-]
-
-export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unreadCount: number; canAccessAdmin: boolean }>) {
+export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ unreadCount: number; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const router = useRouter()
   const [centerOpen, setCenterOpen] = useState(false)
@@ -37,7 +22,8 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
   const items = primaryNavigation.filter((item) => item.mobile)
   const first = items.slice(0, 2)
   const last = items.slice(2)
-  const centerActive = centerItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+  const menuItems = ecenterFeatures.filter((item) => item.showInCenter && (!item.requiresAdmin || canAccessAdmin))
+  const centerActive = menuItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
   const renderItem = (item: (typeof items)[number]) => <Link key={item.href} href={item.href} aria-current={isAppNavigationActive(pathname, item) ? 'page' : undefined} className={item.showsUnread ? 'mobile-notifications' : undefined}>
     <UiIcon name={item.icon} />{item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}<span>{item.label}</span>
   </Link>
@@ -160,10 +146,6 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
     router.push(href)
   }
 
-  const menuItems = canAccessAdmin
-    ? [...centerItems, { href: '/admin', label: '后台管理', icon: 'settings' as const }]
-    : centerItems
-
   const centerOverlay = centerOpen && typeof document !== 'undefined' ? createPortal(
     <>
       <button
@@ -179,10 +161,10 @@ export function MobileNavigation({ unreadCount, canAccessAdmin }: Readonly<{ unr
           <button type="button" onClick={closeCenter} aria-label="关闭 E院中心">×</button>
         </header>
         <nav aria-label="E院中心功能">
-          {menuItems.map((item) => <button type="button" key={item.href} onClick={() => navigateFromCenter(item.href)}>
+          {menuItems.map((item) => <button type="button" key={item.featureKey} onClick={() => navigateFromCenter(item.href)}>
             <span className="mobile-center-item-icon"><UiIcon name={item.icon} /></span>
             <span>{item.label}</span>
-            {'showsUnread' in item && item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+            {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
           </button>)}
         </nav>
       </section>

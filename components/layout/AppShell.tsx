@@ -8,6 +8,7 @@ import { FriendDock } from '@/components/FriendDock'
 import { IcpRecord } from '@/components/IcpRecord'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import type { SessionShellUser } from '@/lib/auth'
+import type { EcenterFeatureItem } from '@/lib/ecenter-features'
 import type { AppShellGrowth } from '@/components/UserProfileSummary'
 import { DesktopImmersiveToggle } from './DesktopImmersiveToggle'
 import { MobileNavigation } from './MobileNavigation'
@@ -22,7 +23,7 @@ function isImmersiveRoute(pathname: string) {
   return immersiveRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
-export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin }: Readonly<{ children: ReactNode; user: SessionShellUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean }>) {
+export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin, ecenterFeatures }: Readonly<{ children: ReactNode; user: SessionShellUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const isMusicRoute = pathname === '/music' || pathname.startsWith('/music/')
   const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname) || pathname === '/games/guess-song/duel' || pathname.startsWith('/games/guess-song/duel/')
@@ -44,14 +45,14 @@ export function AppShell({ children, user, growth, logoUrl, canManageLayout, can
     data-desktop-immersive={isEntertainmentRoute ? 'true' : undefined}
     data-sidebar-collapsed={isEntertainmentRoute && sidebarCollapsed ? 'true' : undefined}
   >
-    <Sidebar user={user} growth={growth} logoUrl={logoUrl} unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} />
+    <Sidebar user={user} growth={growth} logoUrl={logoUrl} unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures} />
     <div className="app-main-area">
       <Topbar user={user} logoUrl={logoUrl} unreadCount={currentUnreadCount} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin} />
       <div className="app-page-content">{children}</div>
       <footer className="site-footer-info"><IcpRecord /></footer>
       <AdminLayoutQuickLink enabled={canManageLayout} />
     </div>
-    <MobileNavigation unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} />
+    <MobileNavigation unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures} />
     <BackToTopButton />
     <FriendDock currentUserId={user.id} unreadSummary={currentUnreadSummary} />
     <DesktopImmersiveToggle

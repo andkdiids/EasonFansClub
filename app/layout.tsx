@@ -14,6 +14,7 @@ import { publicImageUrl } from '@/lib/images'
 import { getUnreadSummary } from '@/lib/notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getSiteAppearance } from '@/lib/site-config'
+import { getEcenterFeaturesForUser } from '@/lib/ecenter-features'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -45,6 +46,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     hasAdminPermission(sessionUser).catch(() => false),
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
   ]) : [null, emptyUnreadSummary, false, false, fallbackGrowth]
+  const ecenterFeatures = sessionUser ? await getEcenterFeaturesForUser(Boolean(canAccessAdmin)) : []
   const logoUrl = publicImageUrl(appearance?.images.navLogoUrl || appearance?.images.logoUrl)
   const shellUser = sessionUser ? {
     id: sessionUser.id,
@@ -65,7 +67,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <VirtualKeyboardManager />
         <NotificationProvider userId={sessionUser?.id || null} initialSummary={unreadSummary}>
           <MusicPlayerProvider>
-            <AppShell user={shellUser} growth={growth} logoUrl={logoUrl} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin}>
+            <AppShell user={shellUser} growth={growth} logoUrl={logoUrl} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures}>
               {children}
             </AppShell>
           </MusicPlayerProvider>
