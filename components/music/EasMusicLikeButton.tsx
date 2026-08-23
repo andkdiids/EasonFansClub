@@ -19,6 +19,8 @@ type EasMusicLikeButtonProps = {
   initialCount: number
   loggedIn: boolean
   className?: string
+  containerClassName?: string
+  variant?: 'default' | 'inline'
 }
 
 const countFormatter = new Intl.NumberFormat('zh-CN')
@@ -36,7 +38,7 @@ function emitLikeEvent(detail: EasMusicLikeEvent) {
   window.dispatchEvent(new CustomEvent('ecfc:easmusic-like', { detail }))
 }
 
-export function EasMusicLikeButton({ type, targetId, initialLiked, initialCount, loggedIn, className }: Readonly<EasMusicLikeButtonProps>) {
+export function EasMusicLikeButton({ type, targetId, initialLiked, initialCount, loggedIn, className, containerClassName, variant = 'default' }: Readonly<EasMusicLikeButtonProps>) {
   const [liked, setLiked] = useState(initialLiked)
   const [count, setCount] = useState(Math.max(0, initialCount))
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -97,16 +99,22 @@ export function EasMusicLikeButton({ type, targetId, initialLiked, initialCount,
     }
   }
 
+  const buttonClassName = [
+    'easmusic-like-button',
+    className || 'inline-flex min-h-8 items-center gap-1 border border-white/15 px-2.5 py-1 text-xs font-black text-slate-200 transition hover:border-sky-200/40 hover:text-white disabled:cursor-wait disabled:opacity-50',
+  ].join(' ')
+
   return (
-    <div>
+    <div className={containerClassName}>
       <button
         type="button"
         disabled={isSubmitting}
         aria-pressed={liked}
         aria-label={liked ? '取消点赞' : '点赞'}
         data-liked={liked}
+        data-variant={variant}
         onClick={() => void toggleLike()}
-        className={className || 'inline-flex min-h-8 items-center gap-1 border border-white/15 px-2.5 py-1 text-xs font-black text-slate-200 transition hover:border-sky-200/40 hover:text-white disabled:cursor-wait disabled:opacity-50'}
+        className={buttonClassName}
       >
         <span aria-hidden="true" className={liked ? 'text-rose-300' : ''}>{liked ? '♥' : '♡'}</span>
         <span>{countFormatter.format(count)}</span>

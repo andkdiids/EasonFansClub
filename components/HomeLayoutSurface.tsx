@@ -336,8 +336,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           <p>{data.dailyMusic.album.name} · {data.dailyMusic.releaseYear}</p>
           <div className="home-daily-music-lyrics">{data.dailyMusic.lyrics || homeText.noLyrics}</div>
           <HomeDailyMusicPreview music={data.dailyMusic} />
-          <EasMusicLikeButton type="song" targetId={data.dailyMusic.id} initialLiked={data.dailyMusic.likedByMe} initialCount={data.dailyMusic.likeCount} loggedIn className="home-daily-music-like-button" />
         </div>
+        <EasMusicLikeButton type="song" targetId={data.dailyMusic.id} initialLiked={data.dailyMusic.likedByMe} initialCount={data.dailyMusic.likeCount} loggedIn variant="inline" className="home-daily-music-like-button" containerClassName="home-daily-music-like" />
       </div> : <p className="community-empty">{homeText.noMusic}</p>}
     </section>
   )
@@ -474,9 +474,13 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
             {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <article key={album.id} className="home-album-card">
               <Link href={`/music/album/${album.id}`} className="home-album-link">
                 <span>{album.coverUrl ? <Image src={publicImageVariantUrl(album.coverUrl, 'thumb-sm') || album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" loading="lazy" className="object-cover" /> : '♫'}</span>
-                <strong>{album.name}</strong><small>{album.releaseYear}</small>
               </Link>
-              <EasMusicLikeButton type="album" targetId={album.id} initialLiked={album.likedByMe} initialCount={album.likeCount} loggedIn className="home-album-like-button" />
+              <div className="home-album-meta-row">
+                <Link href={`/music/album/${album.id}`} className="home-album-info">
+                  <strong>{album.name}</strong><small>{album.releaseYear}</small>
+                </Link>
+                <EasMusicLikeButton type="album" targetId={album.id} initialLiked={album.likedByMe} initialCount={album.likeCount} loggedIn variant="inline" className="home-album-like-button" containerClassName="home-album-like" />
+              </div>
             </article>)}
             {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
           </div>
