@@ -19,6 +19,7 @@ export async function GET(request: Request) {
   }
 
   const tourId = sanitizeText(params.get('tourId'), 100)
+  const concertId = sanitizeText(params.get('id'), 191)
   const city = sanitizeText(params.get('city'), 100)
   const query = sanitizeText(params.get('q'), 100)
   const dateKey = sanitizeText(params.get('date'), 10)
@@ -29,6 +30,7 @@ export async function GET(request: Request) {
       status: 'PUBLISHED',
       MusicTour: { status: 'PUBLISHED' },
       ...(tourId ? { tourId } : {}),
+      ...(concertId ? { id: concertId } : {}),
       ...(city ? { city: { contains: city } } : {}),
       ...(date && endDate ? { concertDate: { gte: date, lt: endDate } } : {}),
       ...(query ? { OR: [{ city: { contains: query } }, { venue: { contains: query } }, { title: { contains: query } }, { MusicTour: { name: { contains: query } } }] } : {}),

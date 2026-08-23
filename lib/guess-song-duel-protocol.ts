@@ -101,6 +101,12 @@ export type DuelMatchResult = {
   winnerId: string | null
   isDraw: boolean
   rewardAmount: number
+  reward: {
+    granted: boolean
+    amount: number
+    reason: 'GRANTED' | 'DAILY_LIMIT_REACHED' | 'ALREADY_GRANTED_FOR_MATCH' | 'REWARD_FAILED' | 'NOT_ELIGIBLE' | null
+    rewardedAt: string | null
+  }
   startedAt: string
   finishedAt: string | null
   players: Array<{

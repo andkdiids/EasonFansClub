@@ -135,25 +135,28 @@ test('admin badge deletion only cleans known badge COS objects', () => {
   assert.match(read('app/api/admin/badges/[badgeId]/route.ts'), /cleanupBadgeImage/)
 })
 
-test('badge uploader rejects non-PNG MIME input', () => {
-  assert.match(read('app/api/admin/badges/upload/route.ts'), /file\.type\.toLowerCase\(\) !== 'image\/png'/)
-})
-
-test('badge uploader enforces a 2 MiB size limit and PNG signature', () => {
+test('badge uploader accepts only PNG/WebP MIME and matching extensions', () => {
   const route = read('app/api/admin/badges/upload/route.ts')
-  assert.match(route, /MAX_BADGE_PNG_BYTES = 2 \* 1024 \* 1024/)
-  assert.match(route, /hasPngSignature\(buffer\)/)
+  assert.match(route, /\['image\/png', 'image\/webp'\]/)
+  assert.match(route, /扩展名与 MIME 类型不一致/)
 })
 
-test('badge uploader validates PNG metadata and preserves the original buffer', () => {
+test('badge uploader enforces a 2 MiB size limit and image signatures', () => {
+  const route = read('app/api/admin/badges/upload/route.ts')
+  assert.match(route, /MAX_BADGE_IMAGE_BYTES = 2 \* 1024 \* 1024/)
+  assert.match(route, /hasPngSignature\(buffer\)/)
+  assert.match(route, /hasWebpSignature\(buffer\)/)
+})
+
+test('badge uploader validates metadata and preserves the original alpha-capable buffer', () => {
   const route = read('app/api/admin/badges/upload/route.ts')
   assert.match(route, /sharp\(buffer/)
   assert.match(route, /limitInputPixels: 2048 \* 2048/)
-  assert.match(route, /contentType: 'image\/png'/)
+  assert.match(route, /body: buffer, contentType/)
 })
 
-test('badge uploader stores PNGs under the scoped badge COS prefix', () => {
-  assert.match(read('app/api/admin/badges/upload/route.ts'), /badges\/\$\{guard\.user\.id\}\/\$\{randomUUID\(\)\}\.png/)
+test('badge uploader stores images under the scoped badge COS prefix', () => {
+  assert.match(read('app/api/admin/badges/upload/route.ts'), /badges\/\$\{guard\.user\.id\}\/\$\{randomUUID\(\)\}\.\$\{outputExtension\}/)
 })
 
 test('nickname effects accept only controlled visual values and safe colors', () => {

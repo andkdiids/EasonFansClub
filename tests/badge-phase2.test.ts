@@ -171,7 +171,7 @@ test('rule preview reads bounded user pages', () => {
   const engine = read('lib/badge-rule-engine.ts')
   const preview = engine.slice(engine.indexOf('export async function previewBadgeRule'))
   assert.match(preview, /take: BACKFILL_BATCH_MAX/)
-  assert.match(preview, /getBatchBadgeMetrics\(users, type\)/)
+  assert.match(preview, /getBatchBadgeMetrics\(users, type, badge\.BadgeRule\.configJson\)/)
   assert.match(preview, /eligibleIds\.length - ownedEligibleCount/)
   assert.doesNotMatch(preview, /pendingCount: Math\.max\(0, eligibleCount - ownedCount\)/)
 })
@@ -187,14 +187,14 @@ test('series delete only ungroups badges', () => {
   assert.doesNotMatch(service, /tx\.userBadge\.delete|DELETE FROM `UserBadge`/)
 })
 
-test('series parser controls code and name', () => {
-  assert.ok(!parseBadgeSeriesInput({ code: 'bad-code', name: '社区' }).data)
-  assert.ok(parseBadgeSeriesInput({ code: 'COMMUNITY', name: '社区' }).data)
+test('series parser only requires a business name and keeps code internal', () => {
+  assert.ok(parseBadgeSeriesInput({ name: '社区' }).data)
+  assert.match(read('lib/badge-series.ts'), /randomUUID/)
 })
 
 test('tier parser requires a positive bounded level', () => {
-  assert.match(String(parseBadgeDefinition({ name: 'A', code: 'a1', grantType: 'MANUAL', tierGroupCode: 'POST_MASTER', tierLevel: 0 }).error), /Tier 等级/)
-  assert.equal(parseBadgeDefinition({ name: 'A', code: 'a1', grantType: 'MANUAL', tierGroupCode: 'POST_MASTER', tierLevel: 2 }).error, undefined)
+  assert.match(String(parseBadgeDefinition({ name: 'A', grantType: 'MANUAL', tierEnabled: true, tierLevel: 0 }).error), /阶段/)
+  assert.equal(parseBadgeDefinition({ name: 'A', grantType: 'MANUAL', tierEnabled: true, tierLevel: 2 }).error, undefined)
 })
 
 test('legacy AUTO badges without BadgeRule remain editable', () => {

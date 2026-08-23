@@ -92,15 +92,30 @@ async function loadEnabledRules(ruleTypes?: readonly SupportedBadgeRuleType[]) {
 export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonly SupportedBadgeRuleType[]) {
   const summary = emptySummary(userId)
   const rules = await loadEnabledRules(ruleTypes)
-  const metrics = new Map<SupportedBadgeRuleType, number>()
+  const metrics = new Map<string, number>()
   const newlyGranted: Array<{ badgeId: string; recordId: string }> = []
+  const needsConcertTargets = rules.some((rule) => rule.ruleType === 'CONCERT_SHOW_ATTENDED' || rule.ruleType === 'CONCERT_TOUR_ATTENDED')
+  const concertFacts = needsConcertTargets
+    ? await prisma.userMusicConcert.findMany({ where: { userId }, select: { concertId: true, MusicConcert: { select: { tourId: true } } } })
+    : []
 
   for (const rule of rules) {
     const type = rule.ruleType as SupportedBadgeRuleType
-    if (type === 'BADGE_SERIES_COMPLETE' || rule.threshold === null) continue
-    if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
+    if (type === 'BADGE_SERIES_COMPLETE') continue
+    const config = rule.configJson && typeof rule.configJson === 'object' && !Array.isArray(rule.configJson) ? rule.configJson as { concertId?: unknown; tourId?: unknown } : null
+    const isTargetRule = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED'
+    const metricKey = isTargetRule ? `${type}:${String(config?.concertId || config?.tourId || '')}` : type
+    if (!isTargetRule && rule.threshold === null) continue
+    if (!metrics.has(metricKey)) {
+      const targetMetric = type === 'CONCERT_SHOW_ATTENDED'
+        ? concertFacts.some((fact) => fact.concertId === config?.concertId) ? 1 : 0
+        : type === 'CONCERT_TOUR_ATTENDED'
+          ? concertFacts.some((fact) => fact.MusicConcert.tourId === config?.tourId) ? 1 : 0
+          : await getUserBadgeMetric(userId, type)
+      metrics.set(metricKey, targetMetric)
+    }
     summary.evaluated += 1
-    if (!evaluateBadgeMetric(metrics.get(type) || 0, rule.operator as BadgeRuleOperatorValue, rule.threshold)) continue
+    if (!evaluateBadgeMetric(metrics.get(metricKey) || 0, rule.operator as BadgeRuleOperatorValue, isTargetRule ? 1 : rule.threshold!)) continue
     summary.eligible += 1
     try {
       const result = await grantBadge({
@@ -153,7 +168,7 @@ function createMetricMap(rows: BadgeMetricUser[]) {
   return new Map(rows.map((row) => [row.id, 0]))
 }
 
-export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: SupportedBadgeRuleType) {
+export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: SupportedBadgeRuleType, configJson?: unknown) {
   const userIds = users.map((user) => user.id)
   const metrics = createMetricMap(users)
   if (!userIds.length) return metrics
@@ -256,6 +271,21 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
       rows.forEach((row) => metrics.set(row.userId, row._count._all))
       return metrics
     }
+    case 'CONCERT_SHOW_ATTENDED':
+    case 'CONCERT_TOUR_ATTENDED': {
+      const config = configJson && typeof configJson === 'object' && !Array.isArray(configJson) ? configJson as { concertId?: unknown; tourId?: unknown } : null
+      const rows = await prisma.userMusicConcert.findMany({
+        where: {
+          userId: { in: userIds },
+          ...(ruleType === 'CONCERT_SHOW_ATTENDED'
+            ? { concertId: typeof config?.concertId === 'string' ? config.concertId : '__invalid__' }
+            : { MusicConcert: { tourId: typeof config?.tourId === 'string' ? config.tourId : '__invalid__' } }),
+        },
+        select: { userId: true },
+      })
+      rows.forEach((row) => metrics.set(row.userId, 1))
+      return metrics
+    }
     case 'RATING_COUNT': {
       const rows = await prisma.rating.groupBy({ by: ['userId'], where: { userId: { in: userIds } }, _count: { _all: true } })
       rows.forEach((row) => metrics.set(row.userId, row._count._all))
@@ -344,7 +374,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
   })
   const hasMore = users.length > boundedBatchSize
   const rows = hasMore ? users.slice(0, boundedBatchSize) : users
-  const metrics = await getBatchBadgeMetrics(rows, type)
+  const metrics = await getBatchBadgeMetrics(rows, type, badge.BadgeRule.configJson)
   const summary: BadgeBackfillSummary = {
     badgeId,
     ruleId: badge.BadgeRule.id,
@@ -361,7 +391,8 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
 
   const newlyGranted: Array<{ userId: string; badgeId: string; recordId: string }> = []
   for (const user of rows) {
-    if (badge.BadgeRule.threshold === null || !evaluateBadgeMetric(metrics.get(user.id) || 0, badge.BadgeRule.operator as BadgeRuleOperatorValue, badge.BadgeRule.threshold)) {
+    const targetThreshold = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED' ? 1 : badge.BadgeRule.threshold
+    if (targetThreshold === null || !evaluateBadgeMetric(metrics.get(user.id) || 0, badge.BadgeRule.operator as BadgeRuleOperatorValue, targetThreshold)) {
       summary.notEligible += 1
       continue
     }
@@ -464,9 +495,10 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
       select: { id: true, createdAt: true },
     })
     if (!users.length) break
-    const metrics = await getBatchBadgeMetrics(users, type)
+    const metrics = await getBatchBadgeMetrics(users, type, badge.BadgeRule.configJson)
+    const targetThreshold = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED' ? 1 : badge.BadgeRule.threshold
     const eligibleIds = users
-      .filter((user) => badge.BadgeRule!.threshold !== null && evaluateBadgeMetric(metrics.get(user.id) || 0, operator, badge.BadgeRule!.threshold))
+      .filter((user) => targetThreshold !== null && evaluateBadgeMetric(metrics.get(user.id) || 0, operator, targetThreshold))
       .map((user) => user.id)
     eligibleCount += eligibleIds.length
     if (eligibleIds.length) {

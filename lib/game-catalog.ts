@@ -53,7 +53,7 @@ export const gameCatalog: GameCatalogItem[] = [
     available: true,
     featured: true,
     accent: 'blue',
-    rules: ['每天只能领取一次，按北京时间自然日判断。', `每日随机获得 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD} 挂号费，数值越高越稀有。`],
+    rules: ['每天只能领取一次，按北京时间自然日判断。', `每日随机获得 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD} 挂号费。`],
     rewards: [`挂号费奖励范围固定为 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD}，同一天刷新不会重新抽取。`],
   },
   {

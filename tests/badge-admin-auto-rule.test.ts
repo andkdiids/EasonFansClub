@@ -47,18 +47,18 @@ test('MANUAL and EVENT cannot carry a structured rule', () => {
 })
 
 test('registry is the only rule catalog used by the admin surface', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 12)
+  assert.equal(BADGE_RULE_TYPES.length, 14)
   assert.ok(BADGE_RULE_TYPES.every((ruleType) => BADGE_RULE_REGISTRY[ruleType].label && BADGE_RULE_REGISTRY[ruleType].dataDescription))
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 12)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 14)
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
-  assert.match(manager, /BADGE_ADMIN_RULE_TYPES\.map/)
+  assert.match(manager, /BADGE_ADMIN_RULE_TYPES\.filter/)
   assert.match(manager, /BADGE_RULE_TYPE_DESCRIPTIONS\[draft\.ruleType\]/)
 })
 
 test('operator UI exposes only the supported GTE presentation', () => {
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
-  assert.match(manager, /比较方式/)
-  assert.match(manager, /达到（≥）/)
+  assert.match(manager, /需要达到/)
+  assert.match(read('lib/badge-rules.ts'), /ADMIN_BADGE_RULE_OPERATORS = \['GTE'\]/)
   assert.doesNotMatch(manager, /<select[^>]+operator/)
 })
 
@@ -178,7 +178,7 @@ test('Tier and availability controls are optional and clear fields when disabled
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   assert.match(manager, /tierEnabled/)
   assert.match(manager, /limitedEnabled/)
-  assert.match(manager, /tierGroupCode: event\.target\.checked \? .* : null/)
+  assert.match(manager, /tierLevel: event\.target\.value === 'SERIES'/)
   assert.match(manager, /availableUntil: event\.target\.checked \? draft\.availableUntil : null/)
 })
 

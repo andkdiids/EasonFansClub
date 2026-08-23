@@ -1,8 +1,8 @@
 import { randomInt } from 'node:crypto'
 
 import {
-  DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT,
-  drawDailyPrescriptionRewardFromRoll,
+  areRecentDailyPrescriptionRewardsAllLow,
+  generateDailyPrescriptionReward,
   type RandomInteger,
 } from '@/lib/daily-prescription-reward'
 
@@ -10,6 +10,11 @@ export * from '@/lib/daily-prescription-reward'
 
 const secureRandomInteger: RandomInteger = (maxExclusive) => randomInt(maxExclusive)
 
-export function drawDailyPrescriptionReward(randomInteger: RandomInteger = secureRandomInteger) {
-  return drawDailyPrescriptionRewardFromRoll(randomInteger(DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT))
+export function drawDailyPrescriptionReward(
+  recentRewards: readonly number[] = [],
+  randomInteger: RandomInteger = secureRandomInteger,
+) {
+  return generateDailyPrescriptionReward(randomInteger, {
+    excludeLowRange: areRecentDailyPrescriptionRewardsAllLow(recentRewards),
+  })
 }

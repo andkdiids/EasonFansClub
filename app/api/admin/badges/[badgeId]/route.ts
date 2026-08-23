@@ -63,6 +63,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const parsed = parseBadgeDefinition(body as Record<string, unknown>, true)
   if (parsed.error || !parsed.data || (!Object.keys(parsed.data).length && parsed.rule === undefined)) return NextResponse.json({ message: parsed.error || '没有可更新的字段' }, { status: 400 })
   const data = { ...parsed.data } as Prisma.BadgeUncheckedUpdateInput
+  let targetGeneratedDescription: string | null = null
   if (data.musicTourId && typeof data.musicTourId === 'string') {
     const tour = await prisma.musicTour.findUnique({ where: { id: data.musicTourId }, select: { id: true } })
     if (!tour) return NextResponse.json({ message: '关联的巡演不存在' }, { status: 400 })
@@ -87,8 +88,16 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!previous) return NextResponse.json({ message: '更新失败，勋章不存在' }, { status: 404 })
 
     if (data.seriesId) {
-      const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId as string }, select: { id: true } })
+      const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId as string }, select: { id: true, code: true } })
       if (!series) return NextResponse.json({ message: '关联的勋章系列不存在' }, { status: 400 })
+      if (body.tierEnabled === true) data.tierGroupCode = series.code
+    } else if (body.tierEnabled === true && body.legacyTier === true && previous.tierGroupCode && previous.tierLevel) {
+      data.tierGroupCode = previous.tierGroupCode
+      data.tierLevel = previous.tierLevel
+    } else if (body.tierEnabled === true) return NextResponse.json({ message: '分级勋章必须选择勋章系列' }, { status: 400 })
+    if (body.tierEnabled === false) {
+      data.tierGroupCode = null
+      data.tierLevel = null
     }
     const effectiveTierGroupCode = data.tierGroupCode !== undefined ? data.tierGroupCode as string | null : previous.tierGroupCode
     const effectiveTierLevel = data.tierLevel !== undefined ? data.tierLevel as number | null : previous.tierLevel
@@ -111,6 +120,17 @@ export async function PATCH(request: Request, context: RouteContext) {
       if (linkedSeries) return NextResponse.json({ message: '请先解除系列完成奖励，再停用这枚奖励勋章' }, { status: 400 })
     }
     if (parsed.rule && nextGrantType !== 'AUTO') return NextResponse.json({ message: '手动或事件勋章不能配置自动获取规则' }, { status: 400 })
+    if (parsed.rule?.ruleType === 'CONCERT_SHOW_ATTENDED' || parsed.rule?.ruleType === 'CONCERT_TOUR_ATTENDED') {
+      data.category = 'CONCERT'
+      const config = parsed.rule.configJson as { concertId?: string; tourId?: string }
+      const target = parsed.rule.ruleType === 'CONCERT_SHOW_ATTENDED'
+        ? await prisma.musicConcert.findFirst({ where: { id: config.concertId, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } }, select: { id: true, city: true, concertDate: true, MusicTour: { select: { name: true } } } })
+        : await prisma.musicTour.findFirst({ where: { id: config.tourId, status: 'PUBLISHED' }, select: { id: true, name: true } })
+      if (!target) return NextResponse.json({ message: parsed.rule.ruleType === 'CONCERT_SHOW_ATTENDED' ? '选择的演唱会不存在或未发布' : '选择的巡演不存在或未发布' }, { status: 400 })
+      targetGeneratedDescription = parsed.rule.ruleType === 'CONCERT_SHOW_ATTENDED' && 'MusicTour' in target
+        ? `观看「${target.MusicTour.name} · ${target.city} · ${target.concertDate.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })}」后获得`
+        : `观看「${'name' in target ? target.name : ''}」巡演任意一场后获得`
+    }
     if (parsed.rule?.ruleType === 'BADGE_SERIES_COMPLETE') {
       const config = parsed.rule.configJson && typeof parsed.rule.configJson === 'object' && !Array.isArray(parsed.rule.configJson) ? parsed.rule.configJson as { seriesId?: unknown } : null
       const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
@@ -141,7 +161,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const hasDescription = 'acquisitionDescription' in body
     const requestedDescription = typeof data.acquisitionDescription === 'string' ? data.acquisitionDescription.trim() : ''
     if (nextGrantType === 'AUTO' && effectiveRule) {
-      const generatedDescription = generateBadgeAcquisitionDescription(effectiveRule.ruleType, effectiveRule.threshold)
+      const generatedDescription = targetGeneratedDescription || generateBadgeAcquisitionDescription(effectiveRule.ruleType, effectiveRule.threshold)
       const explicitlyResetToDefault = body.acquisitionDescriptionCustomized === false
       const explicitlyCustomized = body.acquisitionDescriptionCustomized === true
       if (explicitlyResetToDefault) {

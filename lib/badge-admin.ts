@@ -5,14 +5,12 @@ import { toStoredMediaUrl } from '@/lib/media-url'
 import { parseBadgeRuleInput, type ParsedBadgeRule } from '@/lib/badge-rules'
 import { parseBadgeAvailabilityDate, validateBadgeAvailability } from '@/lib/badge-phase2'
 
-const CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/
 const CATEGORIES = new Set(['SYSTEM', 'BIRTHDAY', 'CONCERT'])
 const VISIBILITIES = new Set(['PUBLIC', 'HIDDEN', 'SECRET'])
 const RARITIES = new Set(['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED'])
 const GRANT_TYPES = new Set(['AUTO', 'MANUAL', 'EVENT'])
 const EFFECT_TYPES = new Set(['NONE', 'SHINE', 'GLOW', 'SPARKLE'])
 const NICKNAME_EFFECTS = new Set(['NONE', 'COLOR', 'GOLD', 'GRADIENT', 'GLOW'])
-const TIER_GROUP_PATTERN = /^[A-Z0-9_]{1,64}$/
 
 type BadgeInput = Record<string, unknown>
 
@@ -32,18 +30,8 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
     data.name = name
   }
 
-  if (!partial || 'code' in body) {
-    const code = sanitizeText(body.code, 64).toLowerCase()
-    if (!CODE_PATTERN.test(code)) return { error: 'code 只能使用 2～64 位小写字母、数字、短横线或下划线' }
-    data.code = code
-    if (!partial && !('slug' in body)) data.slug = code
-  }
-
-  if (!partial || 'slug' in body) {
-    const slug = sanitizeText('slug' in body ? body.slug : data.code, 191).toLowerCase()
-    if (!slug) return { error: '请填写有效标识' }
-    data.slug = slug
-  }
+  // code/slug are immutable internal identifiers. Creation routes generate
+  // them server-side; update routes deliberately ignore client attempts.
 
   if (!partial || 'description' in body) data.description = optionalText(body, 'description', 500) ?? null
   if (!partial || 'acquisitionDescription' in body) data.acquisitionDescription = optionalText(body, 'acquisitionDescription', 500) ?? null
@@ -152,18 +140,16 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
     data.seriesId = typeof body.seriesId === 'string' && body.seriesId.trim() ? body.seriesId.trim().slice(0, 191) : null
   }
 
-  if (!partial || 'tierGroupCode' in body) {
-    const rawGroup = typeof body.tierGroupCode === 'string' ? body.tierGroupCode.trim().toUpperCase() : ''
-    if (rawGroup && !TIER_GROUP_PATTERN.test(rawGroup)) return { error: 'Tier 系列编码只能使用大写字母、数字和下划线' }
-    data.tierGroupCode = rawGroup || null
-  }
-
-  if (!partial || 'tierLevel' in body) {
+  if (!partial || 'tierLevel' in body || 'tierEnabled' in body) {
+    if ('tierEnabled' in body && typeof body.tierEnabled !== 'boolean') return { error: '分级勋章设置无效' }
+    if (body.tierEnabled === false) data.tierLevel = null
+    else {
     if (body.tierLevel === undefined || body.tierLevel === null || body.tierLevel === '') data.tierLevel = null
     else {
       const tierLevel = typeof body.tierLevel === 'number' ? body.tierLevel : typeof body.tierLevel === 'string' && /^\d+$/.test(body.tierLevel.trim()) ? Number(body.tierLevel.trim()) : Number.NaN
-      if (!Number.isSafeInteger(tierLevel) || tierLevel < 1 || tierLevel > 100) return { error: 'Tier 等级必须是 1 到 100 的整数' }
+      if (!Number.isSafeInteger(tierLevel) || tierLevel < 1 || tierLevel > 100) return { error: '请选择有效的勋章阶段' }
       data.tierLevel = tierLevel
+    }
     }
   }
 
@@ -186,8 +172,6 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
 
   if (rule && data.grantType && data.grantType !== 'AUTO') return { error: '手动或事件勋章不能配置自动获取规则' }
   if (!partial && data.grantType === 'AUTO' && !rule) return { error: '自动授予勋章必须配置获取条件' }
-
-  if ((data.tierGroupCode === null) !== (data.tierLevel === null)) return { error: 'Tier 系列编码与等级必须同时填写或同时留空' }
 
   return { data, rule }
 }

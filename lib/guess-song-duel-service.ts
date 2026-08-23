@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import bcrypt from 'bcryptjs'
-import { Prisma, type GuessSongDuelFinishReason } from '@prisma/client'
+import { Prisma, type GuessSongDuelFinishReason, type GuessSongDuelRewardReason } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getShanghaiDayRange } from '@/lib/checkin'
 import { awardRegistrationFee } from '@/lib/registration-fee'
+import { duelRewardBusinessKey, DUEL_REWARD_ACTION, resolveDuelRewardDecision } from '@/lib/guess-song-duel-reward'
 import { syncUserAchievements } from '@/lib/achievements'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { prisma } from '@/lib/prisma'
@@ -901,12 +902,19 @@ async function loadDuelBaseCorrectCounts(db: DuelAnswerReader, matchId: string) 
 
 async function serializeDuelResult(
   db: DuelAnswerReader,
-  match: { id: string; mode: string; totalQuestions: number; status: string; finishReason: string | null; winnerId: string | null; isDraw: boolean; rewardAmount: number; startedAt: Date; finishedAt: Date | null },
+  match: { id: string; mode: string; totalQuestions: number; status: string; finishReason: string | null; winnerId: string | null; isDraw: boolean; rewardAmount: number; rewardGranted: boolean; rewardReason: string; rewardedAt: Date | null; startedAt: Date; finishedAt: Date | null },
   players: Array<{ slot: number; userId: string; correctCount: number; totalEffectiveAnswerMs: number; User: PublicUserRow }>,
 ): Promise<DuelMatchResult> {
   const mode = match.mode as DuelMode
   const baseTotalQuestions = getDuelBaseQuestionCount(mode)
   const baseCorrectCounts = await loadDuelBaseCorrectCounts(db, match.id)
+  const rewardReason = match.rewardReason === 'DAILY_LIMIT_REACHED'
+    || match.rewardReason === 'ALREADY_GRANTED_FOR_MATCH'
+    || match.rewardReason === 'REWARD_FAILED'
+    || match.rewardReason === 'NOT_ELIGIBLE'
+    ? match.rewardReason
+    : null
+  const rewardGranted = match.rewardGranted && match.rewardAmount > 0 && (match.rewardReason === 'GRANTED' || match.rewardReason === 'ALREADY_GRANTED_FOR_MATCH')
   return {
     matchId: match.id,
     mode,
@@ -915,7 +923,13 @@ async function serializeDuelResult(
     finishReason: match.finishReason,
     winnerId: match.winnerId,
     isDraw: match.isDraw,
-    rewardAmount: match.rewardAmount,
+    rewardAmount: rewardGranted ? match.rewardAmount : 0,
+    reward: {
+      granted: rewardGranted,
+      amount: rewardGranted ? match.rewardAmount : 0,
+      reason: rewardGranted ? (match.rewardReason === 'ALREADY_GRANTED_FOR_MATCH' ? 'ALREADY_GRANTED_FOR_MATCH' : 'GRANTED') : rewardReason,
+      rewardedAt: rewardGranted ? match.rewardedAt?.toISOString() || null : null,
+    },
     startedAt: match.startedAt.toISOString(),
     finishedAt: match.finishedAt?.toISOString() || null,
     players: players.map((player) => ({
@@ -1561,6 +1575,10 @@ function scoreQuestionTimes(
 
 export async function getDuelMatchState(userId: string, matchId: string, now = new Date()): Promise<DuelMatchState> {
   await normalizeUserDuelState(userId, now)
+  // A refresh, HTTP fallback, or a newly reconnected WS can be the first
+  // reader after the game transaction committed. Finish a pending reward
+  // before serializing the result, but never let a failed reward become +7.
+  await ensureDuelWinnerReward(matchId, now)
   return duelTransaction(async (tx) => {
     const match = await loadMatchForState(tx, matchId)
     if (!match.GuessSongDuelPlayer.some((player) => player.userId === userId)) throw new GuessSongDuelServiceError('你不在这场对决中', 403, 'MATCH_NOT_MEMBER')
@@ -1770,6 +1788,9 @@ async function settleMatchTx(
   matchId: string,
   input: { finishReason: GuessSongDuelFinishReason; winnerId: string | null; isDraw: boolean; valid: boolean; now: Date },
 ) {
+  // Every settlement path already locks this row, but keep the lock here as
+  // the final guard for future callers and for WS/HTTP fallback races.
+  await tx.$queryRaw`SELECT id FROM GuessSongDuelMatch WHERE id = ${matchId} FOR UPDATE`
   const match = await tx.guessSongDuelMatch.findUnique({ where: { id: matchId } })
   if (!match) throw new GuessSongDuelServiceError('对决比赛不存在', 404, 'MATCH_NOT_FOUND')
   if (match.status !== 'PLAYING') return { match, userIds: [] as string[], newlySettled: false }
@@ -1777,7 +1798,7 @@ async function settleMatchTx(
   const userIds = players.map((player) => player.userId).sort()
   for (const userId of userIds) await tx.$queryRaw`SELECT id FROM User WHERE id = ${userId} FOR UPDATE`
 
-  let rewardAmount = 0
+  let rewardReason: GuessSongDuelRewardReason = 'NOT_APPLICABLE'
   if (input.valid) {
     // 反作弊：获胜方若存在可疑答题记录（isSuspiciousAnswer），取消胜场与奖金，
     // 避免机器人通过脚本抢答刷取注册费奖励；正常玩家不受影响。
@@ -1789,18 +1810,7 @@ async function settleMatchTx(
         create: { userId: player.userId, participations: 1, wins: input.winnerId === player.userId && !winnerSuspicious ? 1 : 0 },
       })
     }
-    if (input.winnerId && !winnerSuspicious) {
-      const { dateKey } = getShanghaiDayRange(input.now)
-      const reward = await awardRegistrationFee(tx, {
-        userId: input.winnerId,
-        requestedAmount: DUEL_WIN_REWARD,
-        action: 'GUESS_SONG_DUEL_WIN',
-        reason: '听听·对决获胜奖励',
-        businessKey: `guess-song-duel-reward:${input.winnerId}:${dateKey}`,
-        now: input.now,
-      })
-      rewardAmount = reward.awardedAmount
-    }
+    rewardReason = input.winnerId && !input.isDraw && !winnerSuspicious ? 'PENDING' : 'NOT_ELIGIBLE'
   }
   const updated = await tx.guessSongDuelMatch.update({
     where: { id: matchId },
@@ -1810,7 +1820,10 @@ async function settleMatchTx(
       winnerId: input.winnerId,
       isDraw: input.isDraw,
       finishedAt: input.now,
-      rewardAmount,
+      rewardAmount: 0,
+      rewardGranted: false,
+      rewardReason,
+      rewardedAt: null,
     },
   })
   await tx.guessSongDuelRoom.update({ where: { id: match.roomId }, data: { status: 'FINISHED', closedAt: input.now } })
@@ -1823,6 +1836,143 @@ async function resultForTransaction(tx: Prisma.TransactionClient, matchId: strin
     tx.guessSongDuelPlayer.findMany({ where: { matchId }, orderBy: { slot: 'asc' }, include: { User: { select: publicUserSelect } } }),
   ])
   return serializeDuelResult(tx, match, players)
+}
+
+async function settleDuelWinnerReward(matchId: string, now: Date) {
+  try {
+    return await duelTransaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM GuessSongDuelMatch WHERE id = ${matchId} FOR UPDATE`
+      const match = await tx.guessSongDuelMatch.findUnique({ where: { id: matchId } })
+      if (!match) throw new GuessSongDuelServiceError('对决比赛不存在', 404, 'MATCH_NOT_FOUND')
+      if (match.status === 'PLAYING' || match.rewardReason !== 'PENDING') return match
+
+      if (!match.winnerId || match.isDraw) {
+        return tx.guessSongDuelMatch.update({
+          where: { id: matchId },
+          data: { rewardGranted: false, rewardAmount: 0, rewardReason: 'NOT_ELIGIBLE', rewardedAt: null },
+        })
+      }
+
+      const winnerId = match.winnerId
+      const rewardTime = match.finishedAt || now
+      const { dateKey } = getShanghaiDayRange(rewardTime)
+      // Lock the winner before checking the daily ledger. Two different
+      // matches for the same winner therefore cannot both pass this check.
+      await tx.$queryRaw`SELECT id FROM User WHERE id = ${winnerId} FOR UPDATE`
+      const businessKey = duelRewardBusinessKey(matchId)
+      const existing = await tx.pointLog.findUnique({
+        where: { businessKey },
+        select: { id: true, userId: true, action: true, points: true, createdAt: true },
+      })
+      if (existing) {
+        if (existing.userId !== winnerId || existing.action !== DUEL_REWARD_ACTION || existing.points !== DUEL_WIN_REWARD) {
+          throw new Error('DUEL_REWARD_LEDGER_REFERENCE_INVALID')
+        }
+        return tx.guessSongDuelMatch.update({
+          where: { id: matchId },
+          data: { rewardGranted: true, rewardAmount: existing.points, rewardReason: 'ALREADY_GRANTED_FOR_MATCH', rewardedAt: existing.createdAt },
+        })
+      }
+
+      const dailyReward = await tx.pointLog.findFirst({
+        where: { userId: winnerId, action: DUEL_REWARD_ACTION, dateKey, points: { gt: 0 } },
+        select: { id: true },
+      })
+      const decision = resolveDuelRewardDecision({
+        valid: match.status === 'FINISHED',
+        winnerId,
+        isDraw: match.isDraw,
+        winnerSuspicious: false,
+        dailyRewardExists: Boolean(dailyReward),
+      })
+      if (!decision.granted) {
+        return tx.guessSongDuelMatch.update({
+          where: { id: matchId },
+          data: { rewardGranted: false, rewardAmount: 0, rewardReason: decision.reason, rewardedAt: null },
+        })
+      }
+
+      // User.points and PointLog are written by the shared award service in
+      // this same transaction as the Match snapshot. Any failure rolls all
+      // three writes back together.
+      const reward = await awardRegistrationFee(tx, {
+        userId: winnerId,
+        requestedAmount: DUEL_WIN_REWARD,
+        action: DUEL_REWARD_ACTION,
+        reason: '听听·对决获胜奖励',
+        businessKey,
+        now: rewardTime,
+      })
+      if (reward.awardedAmount !== DUEL_WIN_REWARD) throw new Error('DUEL_REWARD_AMOUNT_NOT_GRANTED')
+      return tx.guessSongDuelMatch.update({
+        where: { id: matchId },
+        data: { rewardGranted: true, rewardAmount: reward.awardedAmount, rewardReason: 'GRANTED', rewardedAt: rewardTime },
+      })
+    }, { timeout: 15_000 })
+  } catch (error) {
+    let failureContext: { roomId: string; winnerId: string | null } | null = null
+    try {
+      failureContext = await prisma.guessSongDuelMatch.findUnique({ where: { id: matchId }, select: { roomId: true, winnerId: true } })
+    } catch {
+      // Keep the original reward error as the useful signal if the database
+      // is unavailable even for this best-effort diagnostic read.
+    }
+    console.error('[guess-song-duel.reward]', {
+      matchId,
+      roomId: failureContext?.roomId || null,
+      winnerId: failureContext?.winnerId || null,
+      rewardAmount: 0,
+      rewardGranted: false,
+      rewardReason: 'REWARD_FAILED',
+      rewardedAt: null,
+      code: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : 'REWARD_SETTLEMENT_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    })
+    try {
+      await duelTransaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM GuessSongDuelMatch WHERE id = ${matchId} FOR UPDATE`
+        const match = await tx.guessSongDuelMatch.findUnique({ where: { id: matchId } })
+        if (!match || match.rewardReason !== 'PENDING') return
+        await tx.guessSongDuelMatch.update({
+          where: { id: matchId },
+          data: { rewardGranted: false, rewardAmount: 0, rewardReason: 'REWARD_FAILED', rewardedAt: null },
+        })
+      }, { timeout: 15_000 })
+    } catch (markError) {
+      console.error('[guess-song-duel.reward-failure-mark]', {
+        matchId,
+        code: markError instanceof Prisma.PrismaClientKnownRequestError ? markError.code : 'REWARD_FAILURE_MARK_FAILED',
+        message: markError instanceof Error ? markError.message : String(markError),
+      })
+    }
+    return null
+  }
+}
+
+async function ensureDuelWinnerReward(matchId: string, now: Date) {
+  const pending = await prisma.guessSongDuelMatch.findUnique({
+    where: { id: matchId },
+    select: { status: true, rewardReason: true },
+  })
+  if (!pending || pending.status === 'PLAYING' || pending.rewardReason !== 'PENDING') return
+  await settleDuelWinnerReward(matchId, now)
+}
+
+async function getFinalizedDuelResult(matchId: string, now: Date) {
+  await ensureDuelWinnerReward(matchId, now)
+  const [match, players] = await Promise.all([
+    prisma.guessSongDuelMatch.findUniqueOrThrow({ where: { id: matchId } }),
+    prisma.guessSongDuelPlayer.findMany({ where: { matchId }, orderBy: { slot: 'asc' }, include: { User: { select: publicUserSelect } } }),
+  ])
+  return serializeDuelResult(prisma, match, players)
+}
+
+async function finalizeCompletionReward(completion: CompletionOutcome | null, now: Date) {
+  if (!completion?.matchResult) return completion
+  return {
+    ...completion,
+    matchResult: await getFinalizedDuelResult(completion.matchResult.matchId, now),
+  }
 }
 
 function buildQuestionResult(
@@ -2127,14 +2277,16 @@ export async function submitDuelAnswer(input: {
     }
     return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, roundId: question.id, questionId: question.publicToken, questionToken: question.publicToken, userId: input.userId, selectedOptionKey: optionKey, correct, correctOptionKey: question.correctOptionKey, questionCompletion }
   }, { timeout: 15_000 })
-  if (outcome.questionCompletion?.syncUserIds.length) await syncDuelUsers(outcome.questionCompletion.syncUserIds)
-  return outcome
+  const questionCompletion = await finalizeCompletionReward(outcome.questionCompletion, receivedAt)
+  if (questionCompletion?.syncUserIds.length) await syncDuelUsers(questionCompletion.syncUserIds)
+  return questionCompletion === outcome.questionCompletion ? outcome : { ...outcome, questionCompletion }
 }
 
 export async function finalizeDuelQuestion(matchId: string, questionIndex: number, now = new Date()) {
   const outcome = await duelTransaction((tx) => completeQuestionTx(tx, matchId, questionIndex, now), { timeout: 15_000 })
-  if (outcome?.syncUserIds.length) await syncDuelUsers(outcome.syncUserIds)
-  return outcome
+  const finalized = await finalizeCompletionReward(outcome, now)
+  if (finalized?.syncUserIds.length) await syncDuelUsers(finalized.syncUserIds)
+  return finalized
 }
 
 export async function markDuelPlayerConnected(matchId: string, userId: string, now = new Date()) {
@@ -2189,8 +2341,10 @@ export async function settleDuelDisconnect(matchId: string, userId: string, now 
     })
     return { ...settled, result: await resultForTransaction(tx, matchId) }
   }, { timeout: 15_000 })
-  if (outcome?.userIds.length) await syncDuelUsers(outcome.userIds)
-  return outcome
+  if (!outcome) return outcome
+  const result = await getFinalizedDuelResult(matchId, now)
+  if (outcome.userIds.length) await syncDuelUsers(outcome.userIds)
+  return { ...outcome, result }
 }
 
 export async function forfeitDuelMatch(userId: string, matchId: string, now = new Date()) {
@@ -2213,7 +2367,7 @@ export async function forfeitDuelMatch(userId: string, matchId: string, now = ne
     return { ...settled, result: await resultForTransaction(tx, matchId) }
   }, { timeout: 15_000 })
   if (outcome.userIds.length) await syncDuelUsers(outcome.userIds)
-  return outcome.result
+  return getFinalizedDuelResult(matchId, now)
 }
 
 export async function getDuelStats(userId: string) {
@@ -2263,6 +2417,7 @@ export async function getDuelAdminMatches(limit = 100) {
     })))
     return {
       id: match.id,
+      roomId: match.roomId,
       roomCode: match.Room.roomCode,
       mode: match.mode,
       status: match.status,
@@ -2271,6 +2426,9 @@ export async function getDuelAdminMatches(limit = 100) {
       isDraw: match.isDraw,
       isSuspicious: match.isSuspicious,
       rewardAmount: match.rewardAmount,
+      rewardGranted: match.rewardGranted,
+      rewardReason: match.rewardReason,
+      rewardedAt: match.rewardedAt?.toISOString() || null,
       startedAt: match.startedAt.toISOString(),
       finishedAt: match.finishedAt?.toISOString() || null,
       players: match.GuessSongDuelPlayer.map((player) => ({

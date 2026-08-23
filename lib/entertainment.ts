@@ -208,7 +208,7 @@ export async function getEntertainmentDailyDrawHistory(userId: string, requested
 async function createDrawTransaction(userId: string, dateKey: string, now: Date) {
   return prisma.$transaction(async (tx) => {
     const recentStartKey = shiftBeijingDateKey(dateKey, -7)
-    const [recentDraws, candidates] = await Promise.all([
+    const [recentDraws, recentRewardDraws, candidates] = await Promise.all([
       tx.entertainmentDailyDraw.findMany({
         where: {
           userId,
@@ -216,6 +216,12 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
           lyricPrescriptionId: { not: null },
         },
         select: { lyricPrescriptionId: true },
+      }),
+      tx.entertainmentDailyDraw.findMany({
+        where: { userId, dateKey: { lt: dateKey } },
+        select: { points: true },
+        orderBy: [{ dateKey: 'desc' }, { createdAt: 'desc' }],
+        take: 3,
       }),
       tx.lyricPrescription.findMany({
         where: { enabled: true },
@@ -230,7 +236,7 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
         .filter((id): id is string => Boolean(id)),
     )
     const lyric = selectLyricCandidate(candidates, recentIds)
-    const requestedPoints = drawDailyPrescriptionReward()
+    const requestedPoints = drawDailyPrescriptionReward(recentRewardDraws.map((draw) => draw.points))
     const createdDraw = await tx.entertainmentDailyDraw.create({
       data: {
         userId,

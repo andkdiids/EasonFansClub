@@ -3,12 +3,12 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { getBeijingDateKey, shiftBeijingDateKey } from '../lib/beijing-time'
 import {
-  DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT,
-  DAILY_PRESCRIPTION_REWARD_WEIGHTS,
+  DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS,
+  DAILY_PRESCRIPTION_REWARD_RANGES,
   MAX_DAILY_PRESCRIPTION_REWARD,
   MIN_DAILY_PRESCRIPTION_REWARD,
+  areRecentDailyPrescriptionRewardsAllLow,
   drawDailyPrescriptionReward,
-  getRewardWeight,
 } from '../lib/entertainment-rewards'
 import { selectLyricCandidate, type LyricCandidate } from '../lib/entertainment'
 
@@ -22,6 +22,16 @@ const lyrics: LyricCandidate[] = [
   { id: 'c', text: '短句 C', songTitle: '歌曲 C', albumTitle: null },
 ]
 
+function randomIntegerSequence(...rolls: number[]) {
+  let index = 0
+  return (maxExclusive: number) => {
+    const roll = rolls[index]
+    index += 1
+    assert.ok(Number.isInteger(roll) && roll >= 0 && roll < maxExclusive)
+    return roll
+  }
+}
+
 test('每日处方连续大量抽取始终是 7 到 27 的整数', () => {
   const rewards = Array.from({ length: 10_000 }, () => drawDailyPrescriptionReward())
   assert.ok(rewards.every((reward) => Number.isInteger(reward)))
@@ -29,29 +39,60 @@ test('每日处方连续大量抽取始终是 7 到 27 的整数', () => {
 })
 
 test('每日处方的 7 和 27 都是可达结果', () => {
-  assert.equal(drawDailyPrescriptionReward(() => 0), MIN_DAILY_PRESCRIPTION_REWARD)
-  assert.equal(drawDailyPrescriptionReward(() => DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT - 1), MAX_DAILY_PRESCRIPTION_REWARD)
+  assert.equal(drawDailyPrescriptionReward([], randomIntegerSequence(0, 0)), MIN_DAILY_PRESCRIPTION_REWARD)
+  assert.equal(drawDailyPrescriptionReward([], randomIntegerSequence(99, 5)), MAX_DAILY_PRESCRIPTION_REWARD)
 })
 
-test('每日处方权重严格递减并符合 28 - reward', () => {
-  for (let reward = MIN_DAILY_PRESCRIPTION_REWARD; reward < MAX_DAILY_PRESCRIPTION_REWARD; reward += 1) {
-    assert.ok(getRewardWeight(reward) > getRewardWeight(reward + 1))
-  }
-  assert.deepEqual(
-    DAILY_PRESCRIPTION_REWARD_WEIGHTS.map((item) => item.weight),
-    Array.from({ length: 21 }, (_, index) => 21 - index),
-  )
-  assert.equal(DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT, 231)
+test('每日处方区间权重固定为 27:46:27，左右相同且中间更高', () => {
+  assert.deepEqual(DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS, {
+    low: 27,
+    middle: 46,
+    high: 27,
+  })
+  assert.equal(DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.low, DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.high)
+  assert.ok(DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.middle > DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.low)
+  assert.ok(DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.middle > DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.high)
 })
 
-test('每日处方按整数权重区间的左右边界抽取', () => {
-  let start = 0
-  for (const item of DAILY_PRESCRIPTION_REWARD_WEIGHTS) {
-    assert.equal(drawDailyPrescriptionReward(() => start), item.reward)
-    assert.equal(drawDailyPrescriptionReward(() => start + item.weight - 1), item.reward)
-    start += item.weight
+test('每日处方中间区间的出现频率明显高于低位和高位区间', () => {
+  const counts = { low: 0, middle: 0, high: 0 }
+  for (let index = 0; index < 50_000; index += 1) {
+    const reward = drawDailyPrescriptionReward()
+    if (reward <= DAILY_PRESCRIPTION_REWARD_RANGES.low.max) counts.low += 1
+    else if (reward <= DAILY_PRESCRIPTION_REWARD_RANGES.middle.max) counts.middle += 1
+    else counts.high += 1
   }
-  assert.equal(start, DAILY_PRESCRIPTION_REWARD_TOTAL_WEIGHT)
+
+  assert.ok(counts.middle > counts.low * 1.5)
+  assert.ok(counts.middle > counts.high * 1.5)
+})
+
+test('每日处方只给区间设置权重，每个区间内部使用同一个等概率整数抽取', () => {
+  for (let offset = 0; offset <= 4; offset += 1) {
+    assert.equal(drawDailyPrescriptionReward([], randomIntegerSequence(0, offset)), 7 + offset)
+  }
+  for (let offset = 0; offset <= 9; offset += 1) {
+    assert.equal(drawDailyPrescriptionReward([], randomIntegerSequence(27, offset)), 12 + offset)
+  }
+  for (let offset = 0; offset <= 5; offset += 1) {
+    assert.equal(drawDailyPrescriptionReward([], randomIntegerSequence(73, offset)), 22 + offset)
+  }
+
+  const rewardSource = source('lib/daily-prescription-reward.ts')
+  assert.doesNotMatch(rewardSource, /getRewardWeight|REWARD_WEIGHTS|28\s*-\s*reward/)
+  assert.match(rewardSource, /const rangeSize = range\.max - range\.min \+ 1/)
+  assert.match(rewardSource, /return range\.min \+ valueRoll/)
+})
+
+test('最近连续三次低位奖励时排除低位区间，出现中位奖励后恢复普通随机', () => {
+  assert.equal(areRecentDailyPrescriptionRewardsAllLow([8, 10, 7]), true)
+  assert.equal(drawDailyPrescriptionReward([8, 10, 7], randomIntegerSequence(0, 0)), 12)
+  assert.equal(drawDailyPrescriptionReward([8, 10, 7], randomIntegerSequence(45, 9)), 21)
+  assert.equal(drawDailyPrescriptionReward([8, 10, 7], randomIntegerSequence(46, 0)), 22)
+  assert.equal(drawDailyPrescriptionReward([8, 10, 7], randomIntegerSequence(72, 5)), 27)
+
+  assert.equal(areRecentDailyPrescriptionRewardsAllLow([16, 8, 10]), false)
+  assert.equal(drawDailyPrescriptionReward([16, 8, 10], randomIntegerSequence(0, 0)), 7)
 })
 
 test('北京时间日期键在 UTC 跨日边界按 Asia/Shanghai 计算', () => {
@@ -85,7 +126,8 @@ test('抽奖服务在同一事务创建记录、通过统一服务增加挂号�
   assert.match(service, /prisma\.\$transaction/)
   assert.match(service, /tx\.entertainmentDailyDraw\.create/)
   assert.match(service, /awardRegistrationFee\(tx/)
-  assert.match(service, /drawDailyPrescriptionReward\(\)/)
+  assert.match(service, /drawDailyPrescriptionReward\(recentRewardDraws\.map\(\(draw\) => draw\.points\)\)/)
+  assert.match(service, /take: 3/)
   assert.match(service, /requestedAmount: requestedPoints/)
   assert.doesNotMatch(service, /countsTowardDailyLimit|registrationFeeLimitReached/)
   assert.match(service, /points: requestedPoints/)

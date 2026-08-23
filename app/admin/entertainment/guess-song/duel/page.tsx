@@ -56,7 +56,9 @@ export default async function AdminGuessSongDuelPage() {
                       <div className="mt-1 text-xs text-slate-500">{match.finishReason || '—'}</div>
                     </td>
                     <td className="px-4 py-4">
-                      <div className="font-bold text-slate-800">+{match.rewardAmount}</div>
+                      <div className="font-bold text-slate-800">+{match.rewardGranted ? match.rewardAmount : 0}</div>
+                      <div className="mt-1 text-xs text-slate-500">{match.rewardReason}</div>
+                      {match.rewardedAt ? <div className="mt-1 text-xs text-slate-500">到账 {formatDate(match.rewardedAt)}</div> : null}
                       <div className={match.isSuspicious ? 'mt-1 text-xs font-bold text-rose-600' : 'mt-1 text-xs text-slate-500'}>{match.isSuspicious ? 'suspicious' : '正常'}</div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-500">

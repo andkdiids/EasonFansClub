@@ -31,6 +31,7 @@
     "anti-cheat:scan": "tsx scripts/scan-entertainment-anti-cheat.ts",
     "leaderboard:audit": "tsx scripts/leaderboard-audit-want-listen.ts",
     "leaderboard:repair": "tsx scripts/leaderboard-repair-want-listen.ts",
+    "badges:concert:backfill": "tsx scripts/backfill-concert-badges.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

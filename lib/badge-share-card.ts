@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 import sharp from 'sharp'
 import { BADGE_RARITY_LABELS } from '@/lib/badge-types'
 import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
@@ -8,9 +10,21 @@ import { formatUid } from '@/lib/uid'
 
 const CARD_WIDTH = 900
 const CARD_HEIGHT = 1200
+const BADGE_SHARE_FONT_PATH = path.join(process.cwd(), 'public', 'fonts', 'NotoSansSC-VF.ttf')
+export const BADGE_SHARE_FONT_FAMILY = 'Noto Sans SC'
+export const BADGE_SHARE_FONT_STACK = 'Noto Sans SC, Noto Color Emoji, Apple Color Emoji, Segoe UI Emoji, sans-serif'
 
-function escapeXml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character] || character)
+type ShareTextLayerInput = {
+  text: string
+  top: number
+  width?: number
+  fontSize: number
+  color: string
+  weight?: number
+}
+
+function escapePango(value: string) {
+  return value.replace(/[&<>]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[character] || character)
 }
 
 function cleanText(value: unknown, maxLength: number) {
@@ -44,8 +58,37 @@ async function loadSafeBadgeImage(url: string | null) {
   }
 }
 
-function textLines(lines: string[], x: number, y: number, size: number, color: string, weight = 600, lineHeight = size * 1.35) {
-  return lines.map((line, index) => `<text x="${x}" y="${y + index * lineHeight}" fill="${color}" font-size="${size}" font-weight="${weight}" text-anchor="middle">${escapeXml(line)}</text>`).join('')
+export function assertBadgeShareFontAvailable() {
+  if (!existsSync(BADGE_SHARE_FONT_PATH)) {
+    throw new Error(`BADGE_SHARE_FONT_MISSING:${BADGE_SHARE_FONT_PATH}`)
+  }
+}
+
+/**
+ * Render share-card copy with Sharp/Pango and an explicit bundled CJK font.
+ * The returned pixels no longer depend on fonts installed on the production
+ * host or on the phone that downloads the finished PNG. Pango may still use
+ * the listed emoji families for characters outside the CJK font.
+ */
+export async function createBadgeShareTextLayer(input: ShareTextLayerInput) {
+  assertBadgeShareFontAvailable()
+  const width = input.width || 760
+  const markup = `<span foreground="${input.color}" font_weight="${input.weight || 600}">${escapePango(input.text)}</span>`
+  const rendered = await sharp({
+    text: {
+      text: markup,
+      font: `${BADGE_SHARE_FONT_STACK} ${input.fontSize}`,
+      fontfile: BADGE_SHARE_FONT_PATH,
+      width,
+      align: 'center',
+      rgba: true,
+    },
+  }).png().toBuffer({ resolveWithObject: true })
+  return {
+    input: rendered.data,
+    left: Math.max(0, Math.round((CARD_WIDTH - rendered.info.width) / 2)),
+    top: input.top,
+  }
 }
 
 export async function generateBadgeShareCard(userId: string, badgeId: string) {
@@ -90,26 +133,30 @@ export async function generateBadgeShareCard(userId: string, badgeId: string) {
   const series = cleanText(record.Badge.Series?.name, 24)
   const availability = getBadgeAvailability(record.Badge)
   const limitedLabel = availability === 'ENDED' ? '限定 · 已绝版' : availability === 'AVAILABLE' || availability === 'UPCOMING' ? '限定勋章' : ''
-  const statsLabel = stats ? `全站获得率 ${escapeXml(stats.display)}` : ''
+  const statsLabel = stats ? `全站获得率 ${stats.display}` : ''
   const imageMarkup = image
     ? `<image href="${image}" x="300" y="210" width="300" height="300" preserveAspectRatio="xMidYMid meet" />`
-    : '<text x="450" y="375" fill="#c58b3a" font-size="116" text-anchor="middle">🏅</text>'
+    : '<g transform="translate(450 360)"><circle r="76" fill="#f6d99b"/><path d="M0-45 13-15 46-13 20 9 28 42 0 24-28 42-20 9-46-13-13-15Z" fill="#c58b3a"/></g>'
   const subtitle = [BADGE_RARITY_LABELS[record.Badge.rarity], series ? `${series}系列` : '', limitedLabel].filter(Boolean).join(' · ')
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}">
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+  <svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}">
     <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f5fbff"/><stop offset="1" stop-color="#fff7f1"/></linearGradient><filter id="shadow"><feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#163b4d" flood-opacity="0.16"/></filter></defs>
     <rect width="900" height="1200" rx="42" fill="url(#bg)"/>
     <circle cx="90" cy="108" r="110" fill="#d9eef5" opacity="0.7"/><circle cx="820" cy="1090" r="160" fill="#f2dfcf" opacity="0.65"/>
-    <text x="450" y="108" fill="#0f5f78" font-size="30" font-weight="800" text-anchor="middle" letter-spacing="5">私家E院 · EasonFansClub</text>
     <rect x="165" y="170" width="570" height="390" rx="36" fill="#ffffff" opacity="0.88" filter="url(#shadow)"/>
     ${imageMarkup}
-    ${textLines(wrapText(badgeName, 15, 2), 450, 590, 46, '#173d4d', 800, 60)}
-    ${textLines(wrapText(subtitle, 24, 2), 450, 720, 24, '#0f5f78', 700, 36)}
-    ${textLines(descriptionLines, 450, 805, 27, '#536875', 600, 42)}
     <line x1="220" y1="955" x2="680" y2="955" stroke="#c58b3a" stroke-width="2" opacity="0.55"/>
-    <text x="450" y="1010" fill="#173d4d" font-size="27" font-weight="800" text-anchor="middle">${escapeXml(nickname)} · UID ${escapeXml(formatUid(user.uid))}</text>
-    <text x="450" y="1055" fill="#6f8088" font-size="23" font-weight="600" text-anchor="middle">获得于 ${escapeXml(new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai' }).format(record.obtainedAt))}</text>
-    ${statsLabel ? `<text x="450" y="1098" fill="#6f8088" font-size="22" font-weight="600" text-anchor="middle">${statsLabel}</text>` : ''}
-    <text x="450" y="1155" fill="#0f5f78" font-size="20" font-weight="800" text-anchor="middle" letter-spacing="3">真实荣誉 · 值得收藏</text>
   </svg>`
-  return sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer()
+  const textLayerInputs: ShareTextLayerInput[] = [
+    { text: '私家E院 · EasonFansClub', top: 72, width: 760, fontSize: 30, color: '#0f5f78', weight: 800 },
+    ...wrapText(badgeName, 15, 2).map((line, index) => ({ text: line, top: 560 + index * 60, width: 760, fontSize: 46, color: '#173d4d', weight: 800 })),
+    ...wrapText(subtitle, 24, 2).map((line, index) => ({ text: line, top: 690 + index * 36, width: 760, fontSize: 24, color: '#0f5f78', weight: 700 })),
+    ...descriptionLines.map((line, index) => ({ text: line, top: 775 + index * 42, width: 760, fontSize: 27, color: '#536875', weight: 600 })),
+    { text: `${nickname} · UID ${formatUid(user.uid)}`, top: 980, width: 760, fontSize: 27, color: '#173d4d', weight: 800 },
+    { text: `获得于 ${new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai' }).format(record.obtainedAt)}`, top: 1032, width: 760, fontSize: 23, color: '#6f8088', weight: 600 },
+    ...(statsLabel ? [{ text: statsLabel, top: 1075, width: 760, fontSize: 22, color: '#6f8088', weight: 600 }] : []),
+    { text: '真实荣誉 · 值得收藏', top: 1130, width: 760, fontSize: 20, color: '#0f5f78', weight: 800 },
+  ]
+  const textLayers = await Promise.all(textLayerInputs.map(createBadgeShareTextLayer))
+  return sharp(Buffer.from(svg, 'utf8')).composite(textLayers).png({ compressionLevel: 9 }).toBuffer()
 }

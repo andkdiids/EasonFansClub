@@ -434,7 +434,7 @@ function mapStats(stats: { ratingCount: number; ratingScoreTotal: number; averag
   return statsView(stats)
 }
 
-const userSelect = {
+export const ratingPublicUserSelect = {
   id: true,
   uid: true,
   nickname: true,
@@ -445,12 +445,18 @@ const userSelect = {
   Profile: { select: { avatarUrl: true, displayName: true, displayNameModerationStatus: true } },
 } as const
 
+export function publicRatingReviewVisibilityWhere(): Prisma.RatingReviewWhereInput {
+  return {
+    deletedAt: null,
+    User: { status: 'ACTIVE', isDeleted: false },
+  }
+}
+
 async function getReviewsForTarget(target: RatingTarget, id: string, viewerId: string | null, sort: RatingReviewSort) {
   const rows = await prisma.ratingReview.findMany({
     where: {
-      deletedAt: null,
+      ...publicRatingReviewVisibilityWhere(),
       Rating: targetRelationWhere(target, id),
-      User: { status: 'ACTIVE', isDeleted: false },
     },
     orderBy: sort === 'latest' ? [{ createdAt: 'desc' }, { id: 'asc' }] : [{ likeCount: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
     take: 50,
@@ -460,7 +466,7 @@ async function getReviewsForTarget(target: RatingTarget, id: string, viewerId: s
       content: true,
       likeCount: true,
       createdAt: true,
-      User: { select: userSelect },
+      User: { select: ratingPublicUserSelect },
       Rating: { select: { score: true } },
       RatingReviewLike: { where: { userId: viewerId || '__guest__' }, select: { id: true } },
     },

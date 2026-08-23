@@ -229,6 +229,8 @@ enum BadgeRuleType {
   DUEL_WIN_COUNT
   WANT_LISTEN_MAX_STREAK
   CONCERT_ATTENDANCE_COUNT
+  CONCERT_SHOW_ATTENDED
+  CONCERT_TOUR_ATTENDED
   RATING_COUNT
   BADGE_SERIES_COMPLETE
 }
@@ -1761,6 +1763,9 @@ model GuessSongDuelMatch {
   startedAt              DateTime                   @default(now())
   finishedAt             DateTime?
   rewardAmount           Int                        @default(0)
+  rewardGranted          Boolean                    @default(false)
+  rewardReason           GuessSongDuelRewardReason  @default(NOT_APPLICABLE)
+  rewardedAt             DateTime?
   createdAt              DateTime                   @default(now())
   updatedAt              DateTime                   @updatedAt
   roomId                 String                     @unique
@@ -1772,6 +1777,7 @@ model GuessSongDuelMatch {
 
   @@index([status, createdAt])
   @@index([winnerId, finishedAt])
+  @@index([rewardReason, finishedAt])
   @@index([startedAt])
 }
 
@@ -1997,28 +2003,29 @@ model LyricPrescription {
 }
 
 model MusicAlbum {
-  id             String                 @id @default(cuid())
-  name           String
-  artist         String                 @default("陈奕迅")
-  releaseYear    Int
-  coverUrl       String?
-  description    String?
-  language       String                 @default("粤语")
-  createdAt      DateTime               @default(now())
-  era            String?
-  albumType      String?
-  releaseDate    DateTime?
-  company        String?
-  story          String?
-  status         MusicPublicationStatus @default(DRAFT)
-  displayOrder   Int                    @default(0)
-  isFeatured     Boolean                @default(false)
-  featuredOrder  Int?
-  AlbumReview    AlbumReview[]
-  MusicAlbumLike MusicAlbumLike[]
-  Rating         Rating[]
-  RatingStats    RatingStats?
-  MusicSong      MusicSong[]
+  id                  String                 @id @default(cuid())
+  name                String
+  artist              String                 @default("陈奕迅")
+  releaseYear         Int
+  coverUrl            String?
+  description         String?
+  language            String                 @default("粤语")
+  createdAt           DateTime               @default(now())
+  era                 String?
+  albumType           String?
+  releaseDate         DateTime?
+  company             String?
+  story               String?
+  status              MusicPublicationStatus @default(DRAFT)
+  displayOrder        Int                    @default(0)
+  isFeatured          Boolean                @default(false)
+  featuredOrder       Int?
+  AlbumReview         AlbumReview[]
+  MusicAlbumLike      MusicAlbumLike[]
+  Rating              Rating[]
+  RatingStats         RatingStats?
+  PersonalRankingItem PersonalRankingItem[]
+  MusicSong           MusicSong[]
 
   @@unique([name, artist, releaseYear])
   @@index([releaseYear, createdAt])
@@ -2151,6 +2158,7 @@ model MusicSong {
   UserDailyMusicRecommendation UserDailyMusicRecommendation[]
   Rating                       Rating[]
   RatingStats                  RatingStats?
+  PersonalRankingItem          PersonalRankingItem[]
   MusicAlbum                   MusicAlbum                     @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, title])
@@ -2239,6 +2247,41 @@ model RatingStats {
 
   @@index([targetType, averageScore, ratingCount])
   @@index([targetType, updatedAt])
+}
+
+model PersonalRanking {
+  id         String                    @id @default(cuid())
+  userId     String
+  type       PersonalRankingType
+  visibility PersonalRankingVisibility @default(PRIVATE)
+  revision   Int                       @default(0)
+  createdAt  DateTime                  @default(now())
+  updatedAt  DateTime                  @updatedAt
+  User       User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items      PersonalRankingItem[]
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+model PersonalRankingItem {
+  id         String          @id @default(cuid())
+  rankingId  String
+  songId     String?
+  albumId    String?
+  position   Int
+  note       String?         @db.Text
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  ranking    PersonalRanking @relation(fields: [rankingId], references: [id], onDelete: Cascade)
+  MusicSong  MusicSong?      @relation(fields: [songId], references: [id], onDelete: Cascade)
+  MusicAlbum MusicAlbum?     @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([rankingId, songId])
+  @@unique([rankingId, albumId])
+  @@index([rankingId, position])
+  @@index([songId])
+  @@index([albumId])
 }
 
 model MusicTour {
@@ -2565,6 +2608,7 @@ model PointLog {
   @@index([postId])
   @@index([replyId])
   @@index([userId, createdAt])
+  @@index([userId, action, dateKey])
 }
 
 model Poll {
@@ -3369,6 +3413,7 @@ model User {
   Rating                                                 Rating[]
   RatingReview                                           RatingReview[]
   RatingReviewLike                                       RatingReviewLike[]
+  PersonalRanking                                        PersonalRanking[]
   AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
   PostReviewedBy                                         Post[]                         @relation("PostReviewedBy")
@@ -3898,6 +3943,16 @@ enum RatingTargetType {
   ALBUM
 }
 
+enum PersonalRankingType {
+  SONG
+  ALBUM
+}
+
+enum PersonalRankingVisibility {
+  PRIVATE
+  PUBLIC
+}
+
 enum ConcertContributionType {
   SHOW
   SETLIST
@@ -4035,6 +4090,16 @@ enum GuessSongDuelFinishReason {
   FORFEIT
   DISCONNECT_INVALID
   FORFEIT_INVALID
+}
+
+enum GuessSongDuelRewardReason {
+  NOT_APPLICABLE
+  PENDING
+  GRANTED
+  DAILY_LIMIT_REACHED
+  ALREADY_GRANTED_FOR_MATCH
+  REWARD_FAILED
+  NOT_ELIGIBLE
 }
 
 enum PostContentType {

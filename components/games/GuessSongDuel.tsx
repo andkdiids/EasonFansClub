@@ -1086,7 +1086,15 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
           {result.mode === 'BUZZER' ? <p className="duel-final-score">最终比分：{result.players.map((player) => player.correctCount).join(' : ')}</p> : null}
           <p className="duel-result-reason">{result.status === 'INVALID' ? '有效比赛题目不足，双方不计胜场、参与次数和奖励' : result.isDraw ? '加赛仍未分出胜负' : result.finishReason === 'DISCONNECT' ? '对手在重连保护期内未回来' : result.finishReason === 'FORFEIT' ? '对手主动退出比赛' : result.finishReason === 'SCORE_THRESHOLD' ? '率先拿下 16 题' : result.finishReason === 'TIEBREAKER' ? '加赛分出胜负' : '基础题目完成，答对更多的一方获胜'} · 本场用时 {formatDuration(result.startedAt, result.finishedAt)}</p>
           <div className="duel-reward-card">
-            {result.rewardAmount ? <><b>+{result.rewardAmount} 挂号费</b><span>今日对决胜利奖励已发放</span></> : result.winnerId === userId ? <><b>今日奖励已领取</b><span>本场胜场正常增加，今日最多领取一次 +7</span></> : <><b>本场未获得挂号费</b><span>参与次数仅在正常结算后增加</span></>}
+            {result.reward.granted && result.reward.amount > 0
+              ? <><b>+{result.reward.amount} 挂号费</b><span>今日对决胜利奖励已发放</span></>
+              : result.winnerId === userId && result.reward.reason === 'DAILY_LIMIT_REACHED'
+                ? <><b>本局获胜</b><span>今日对决奖励已领取，本局未重复发放挂号费</span></>
+                : result.winnerId === userId && result.reward.reason === 'REWARD_FAILED'
+                  ? <><b>本局获胜</b><span>奖励结算失败，挂号费未到账</span></>
+                  : result.winnerId === userId
+                    ? <><b>本局获胜</b><span>本场未获得挂号费</span></>
+                    : <><b>本场未获得挂号费</b><span>参与次数仅在正常结算后增加</span></>}
           </div>
           <button type="button" className="duel-primary-button" onClick={() => void resetAfterResult()} disabled={busy}>返回对决大厅</button>
         </section>

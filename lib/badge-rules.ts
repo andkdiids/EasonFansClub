@@ -35,6 +35,9 @@ export type BadgeRuleRegistryEntry = {
   defaultAcquisitionDescription: (threshold: number | null) => string
   adminSelectable?: boolean
   seriesCompletion?: boolean
+  group: '社区' | '挂号' | '账号' | '娱乐天空' | 'EasMusic / 演唱会' | '歌·颂' | '系统'
+  unit?: string
+  targetKind?: 'CONCERT' | 'TOUR'
 }
 
 function displayThreshold(threshold: number) {
@@ -50,6 +53,7 @@ function displayThreshold(threshold: number) {
  */
 export const BADGE_RULE_REGISTRY = {
   POST_COUNT: {
+    group: '社区', unit: '篇',
     label: '累计发帖数',
     dataDescription: '有效且已通过审核的帖子数量',
     metricLoader: 'POST_COUNT',
@@ -59,6 +63,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `累计发布 ${displayThreshold(threshold || 1)} 篇帖子后获得`,
   },
   FEATURED_POST_COUNT: {
+    group: '社区', unit: '篇',
     label: '累计精华帖数',
     dataDescription: '有效且被设置为精华的帖子数量',
     metricLoader: 'FEATURED_POST_COUNT',
@@ -68,6 +73,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `累计获得 ${displayThreshold(threshold || 1)} 篇精华帖后获得`,
   },
   CHECKIN_TOTAL_DAYS: {
+    group: '挂号', unit: '天',
     label: '累计挂号天数',
     dataDescription: '按上海时区去重后的挂号日期数量',
     metricLoader: 'CHECKIN_TOTAL_DAYS',
@@ -77,6 +83,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `累计挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   CHECKIN_STREAK: {
+    group: '挂号', unit: '天',
     label: '连续挂号天数',
     dataDescription: '复用现有上海时区连续挂号算法的当前连续天数',
     metricLoader: 'CHECKIN_STREAK',
@@ -86,6 +93,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `连续挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   ACCOUNT_AGE_DAYS: {
+    group: '账号', unit: '天',
     label: '注册天数',
     dataDescription: '从正式注册时间到当前时间经过的完整上海时区自然日',
     metricLoader: 'ACCOUNT_AGE_DAYS',
@@ -95,6 +103,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `注册满 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   FRIEND_COUNT: {
+    group: '社区', unit: '人',
     label: '好友数',
     dataDescription: '已建立的双向好友关系数量',
     metricLoader: 'FRIEND_COUNT',
@@ -104,6 +113,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `好友达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
   FOLLOWER_COUNT: {
+    group: '社区', unit: '人',
     label: '粉丝数',
     dataDescription: '现有 canonical Follow 关注关系中的粉丝数量',
     metricLoader: 'FOLLOWER_COUNT',
@@ -113,6 +123,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `粉丝达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
   GUESS_SONG_MAX_STREAK: {
+    group: '娱乐天空', unit: '题',
     label: '听听最高连击',
     dataDescription: '有效且已完成的听听对局记录中的最高连击',
     metricLoader: 'GUESS_SONG_MAX_STREAK',
@@ -122,6 +133,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `听听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
   DUEL_WIN_COUNT: {
+    group: '娱乐天空', unit: '场',
     label: '1v1 对决胜场',
     dataDescription: '有效完成的听听 1v1 对决统计中的胜场数',
     metricLoader: 'DUEL_WIN_COUNT',
@@ -131,6 +143,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `累计赢得 ${displayThreshold(threshold || 1)} 场听听 1v1 对决后获得`,
   },
   WANT_LISTEN_MAX_STREAK: {
+    group: '娱乐天空', unit: '题',
     label: '想听最高连击',
     dataDescription: '复用想听统计表中的最高连击',
     metricLoader: 'WANT_LISTEN_MAX_STREAK',
@@ -140,6 +153,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `想听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
   CONCERT_ATTENDANCE_COUNT: {
+    group: 'EasMusic / 演唱会', unit: '场',
     label: '演唱会观看场次',
     dataDescription: '我的现场中现存的观演记录数量',
     metricLoader: 'CONCERT_ATTENDANCE_COUNT',
@@ -148,7 +162,30 @@ export const BADGE_RULE_REGISTRY = {
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     defaultAcquisitionDescription: (threshold: number | null) => `累计观看 ${displayThreshold(threshold || 1)} 场演唱会后获得`,
   },
+  CONCERT_SHOW_ATTENDED: {
+    group: 'EasMusic / 演唱会',
+    label: '观看指定演唱会',
+    dataDescription: '我的现场中存在所选具体场次的观演记录',
+    metricLoader: 'CONCERT_SHOW_ATTENDED',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['CONCERT_ATTENDANCE_CREATED'],
+    threshold: null,
+    targetKind: 'CONCERT',
+    defaultAcquisitionDescription: () => '观看指定演唱会后获得',
+  },
+  CONCERT_TOUR_ATTENDED: {
+    group: 'EasMusic / 演唱会',
+    label: '观看指定巡演',
+    dataDescription: '我的现场中存在所选巡演任意一场的观演记录',
+    metricLoader: 'CONCERT_TOUR_ATTENDED',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['CONCERT_ATTENDANCE_CREATED'],
+    threshold: null,
+    targetKind: 'TOUR',
+    defaultAcquisitionDescription: () => '观看指定巡演任意一场后获得',
+  },
   RATING_COUNT: {
+    group: '歌·颂', unit: '次',
     label: '歌·颂评分次数',
     dataDescription: '歌·颂中已提交的歌曲与专辑评分数量',
     metricLoader: 'RATING_COUNT',
@@ -158,6 +195,7 @@ export const BADGE_RULE_REGISTRY = {
     defaultAcquisitionDescription: (threshold: number | null) => `累计完成 ${displayThreshold(threshold || 1)} 次歌·颂评分后获得`,
   },
   BADGE_SERIES_COMPLETE: {
+    group: '系统',
     label: '系列全收集',
     dataDescription: '拥有指定系列内全部计入完成度的勋章，不使用数值阈值',
     metricLoader: 'BADGE_SERIES_COMPLETE',
@@ -240,6 +278,17 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         isEnabled: body.isEnabled !== false,
       },
     }
+  }
+
+  if (definition.targetKind) {
+    const rawConfig = body.configJson
+    if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) return { error: `请选择${definition.targetKind === 'CONCERT' ? '演唱会' : '巡演'}` }
+    const key = definition.targetKind === 'CONCERT' ? 'concertId' : 'tourId'
+    const targetId = (rawConfig as Record<string, unknown>)[key]
+    if (typeof targetId !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(targetId.trim())) return { error: `请选择有效的${definition.targetKind === 'CONCERT' ? '演唱会' : '巡演'}` }
+    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: '指定演唱会规则不需要填写数量' }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
+    return { rule: { ruleType: ruleTypeValue as SupportedBadgeRuleType, operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: { [key]: targetId.trim() }, isEnabled: body.isEnabled !== false } }
   }
 
   const thresholdResult = parsePositiveInteger(body.threshold, '规则阈值', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)

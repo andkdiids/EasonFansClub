@@ -2,8 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 import { writeBadgeAdminAction } from '@/lib/badge-service'
-
-const SERIES_CODE_PATTERN = /^[A-Z0-9_]{2,64}$/
+import { randomUUID } from 'node:crypto'
 
 export type BadgeSeriesInput = {
   code?: unknown
@@ -15,11 +14,7 @@ export type BadgeSeriesInput = {
 }
 export function parseBadgeSeriesInput(body: BadgeSeriesInput, partial = false) {
   const data: Prisma.BadgeSeriesUncheckedCreateInput = {} as Prisma.BadgeSeriesUncheckedCreateInput
-  if (!partial || 'code' in body) {
-    const code = sanitizeText(body.code, 64).toUpperCase()
-    if (!SERIES_CODE_PATTERN.test(code)) return { error: '系列 code 只能使用 2～64 位大写字母、数字或下划线' }
-    data.code = code
-  }
+  // Series code is an immutable implementation detail generated on create.
   if (!partial || 'name' in body) {
     const name = sanitizeText(body.name, 120)
     if (!name) return { error: '请填写系列名称' }
@@ -55,7 +50,8 @@ export async function listBadgeSeriesForAdmin() {
 
 export async function createBadgeSeries(input: { actorId: string; data: Prisma.BadgeSeriesUncheckedCreateInput }) {
   return prisma.$transaction(async (tx) => {
-    const series = await tx.badgeSeries.create({ data: input.data })
+    const code = `SERIES_${Date.now().toString(36).toUpperCase()}_${randomUUID().slice(0, 8).toUpperCase()}`
+    const series = await tx.badgeSeries.create({ data: { ...input.data, code } })
     if (input.data.completionRewardBadgeId) await configureCompletionReward(tx, input.actorId, series.id, input.data.completionRewardBadgeId)
     await writeBadgeAdminAction(tx, {
       actorId: input.actorId,

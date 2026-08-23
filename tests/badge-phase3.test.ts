@@ -42,8 +42,8 @@ test('series reward relation is nullable and deleting a series only ungroups bad
 })
 
 test('series completion is a registry rule but is never an admin numeric rule', () => {
-  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 13)
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 12)
+  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 15)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 14)
   assert.equal(BADGE_RULE_REGISTRY.BADGE_SERIES_COMPLETE.seriesCompletion, true)
   const parsed = parseBadgeRuleInput({
     ruleType: 'BADGE_SERIES_COMPLETE',
@@ -135,7 +135,7 @@ test('share card is rate-limited, server-owned, escaped and bounded', () => {
   const card = read('lib/badge-share-card.ts')
   assert.match(route, /rejectInvalidRequestOrigin/)
   assert.match(route, /limit: 10/)
-  assert.match(card, /escapeXml/)
+  assert.match(card, /escapePango/)
   assert.match(card, /buffer\.length > 2 \* 1024 \* 1024/)
   assert.match(card, /AbortSignal\.timeout\(3000\)/)
   assert.match(card, /getBadgeOwnershipStats/)

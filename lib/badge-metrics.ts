@@ -78,6 +78,10 @@ const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoade
     return safeMetric(result._max.maxStreak)
   },
   CONCERT_ATTENDANCE_COUNT: (userId) => prisma.userMusicConcert.count({ where: { userId } }),
+  // Targeted show/tour rules require configJson and are evaluated by the
+  // config-aware concert evaluator, never by this scalar loader.
+  CONCERT_SHOW_ATTENDED: async () => 0,
+  CONCERT_TOUR_ATTENDED: async () => 0,
   RATING_COUNT: (userId) => prisma.rating.count({ where: { userId } }),
   // Series completion is evaluated from Badge ownership, not from a numeric
   // user metric. Keeping a guarded loader here preserves the single registry

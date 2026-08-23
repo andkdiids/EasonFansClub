@@ -168,7 +168,7 @@ export function EntertainmentCenter() {
 
           {!loading && !drawResult ? (
             <div className="daily-draw-action">
-              <p>每日随机获得 {MIN_DAILY_PRESCRIPTION_REWARD}～{MAX_DAILY_PRESCRIPTION_REWARD} 挂号费，数值越高越稀有。奖励与歌词处方均由服务端随机决定。</p>
+              <p>每日随机获得 {MIN_DAILY_PRESCRIPTION_REWARD}～{MAX_DAILY_PRESCRIPTION_REWARD} 挂号费。奖励与歌词处方均由服务端随机决定。</p>
               <button type="button" onClick={issueDraw} disabled={drawing}>
                 {drawing ? '正在开具处方……' : '抽取今日处方'}
               </button>

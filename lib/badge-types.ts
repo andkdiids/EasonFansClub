@@ -156,10 +156,10 @@ export const BADGE_GRANT_TYPE_LABELS: Record<BadgeGrantType, string> = {
 }
 
 export const BADGE_EFFECT_TYPE_LABELS: Record<BadgeEffectType, string> = {
-  NONE: '静态',
-  SHINE: '扫光',
+  NONE: '无效果',
+  SHINE: '闪耀（扫光）',
   GLOW: '呼吸光',
-  SPARKLE: '闪点',
+  SPARKLE: '闪烁点缀',
 }
 
 export const BADGE_NICKNAME_EFFECT_LABELS: Record<BadgeNicknameEffect, string> = {

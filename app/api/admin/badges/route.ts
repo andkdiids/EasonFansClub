@@ -3,6 +3,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { requireAdmin } from '@/lib/security'
 import { badgeAdminSelect, listBadgesForAdmin, writeBadgeAdminAction } from '@/lib/badge-service'
 import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
+import { randomUUID } from 'node:crypto'
 import { parseBadgeDefinition } from '@/lib/badge-admin'
 import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
 import { prisma } from '@/lib/prisma'
@@ -53,6 +54,9 @@ export async function POST(request: Request) {
   if (parsed.error || !parsed.data) return NextResponse.json({ message: parsed.error || '勋章参数无效' }, { status: 400 })
   if (parsed.rule?.ruleType === 'BADGE_SERIES_COMPLETE') return NextResponse.json({ message: '系列完成规则只能通过勋章系列的完成奖励配置' }, { status: 400 })
   const data = { ...parsed.data } as Prisma.BadgeUncheckedCreateInput
+  const generatedCode = `badge-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
+  data.code = generatedCode
+  data.slug = generatedCode
   if (parsed.rule) {
     const generatedDescription = generateBadgeAcquisitionDescription(parsed.rule.ruleType, parsed.rule.threshold)
     const requestedDescription = typeof body.acquisitionDescription === 'string' ? body.acquisitionDescription.trim() : ''
@@ -71,8 +75,27 @@ export async function POST(request: Request) {
     if (!tour) return NextResponse.json({ message: '关联的巡演不存在' }, { status: 400 })
   }
   if (data.seriesId) {
-    const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId }, select: { id: true } })
+    const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId }, select: { id: true, code: true } })
     if (!series) return NextResponse.json({ message: '关联的勋章系列不存在' }, { status: 400 })
+    if (body.tierEnabled === true) data.tierGroupCode = series.code
+  } else if (body.tierEnabled === true) return NextResponse.json({ message: '分级勋章必须选择勋章系列' }, { status: 400 })
+  if (body.tierEnabled !== true) {
+    data.tierGroupCode = null
+    data.tierLevel = null
+  }
+  if (parsed.rule?.ruleType === 'CONCERT_SHOW_ATTENDED' || parsed.rule?.ruleType === 'CONCERT_TOUR_ATTENDED') {
+    data.category = 'CONCERT'
+    const config = parsed.rule.configJson as { concertId?: string; tourId?: string }
+    const target = parsed.rule.ruleType === 'CONCERT_SHOW_ATTENDED'
+      ? await prisma.musicConcert.findFirst({ where: { id: config.concertId, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } }, select: { id: true, city: true, concertDate: true, MusicTour: { select: { name: true } } } })
+      : await prisma.musicTour.findFirst({ where: { id: config.tourId, status: 'PUBLISHED' }, select: { id: true, name: true } })
+    if (!target) return NextResponse.json({ message: parsed.rule.ruleType === 'CONCERT_SHOW_ATTENDED' ? '选择的演唱会不存在或未发布' : '选择的巡演不存在或未发布' }, { status: 400 })
+    if (body.acquisitionDescriptionCustomized !== true) {
+      data.acquisitionDescription = parsed.rule.ruleType === 'CONCERT_SHOW_ATTENDED' && 'MusicTour' in target
+        ? `观看「${target.MusicTour.name} · ${target.city} · ${target.concertDate.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })}」后获得`
+        : `观看「${'name' in target ? target.name : ''}」巡演任意一场后获得`
+      data.acquisitionDescriptionCustomized = false
+    }
   }
 
   try {
