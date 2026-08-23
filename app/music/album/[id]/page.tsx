@@ -4,12 +4,14 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { MusicCover } from '@/components/music/MusicCover'
 import { MusicDetailReveal } from '@/components/music/MusicDetailReveal'
 import { MusicAlbumTrackList } from '@/components/music/MusicAlbumTrackList'
+import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
 import { formatMusicReleaseDate, formatTrackCount } from '@/lib/music-display'
 import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { getEasMusicAlbumLikeState, getEasMusicSongLikeStates } from '@/lib/easmusic-likes'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +23,11 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
     getSiteAppearance(),
   ])
   if (!album) notFound()
+
+  const [albumLikeState, songLikeStates] = await Promise.all([
+    getEasMusicAlbumLikeState(album.id, currentUser?.id),
+    getEasMusicSongLikeStates(album.MusicSong.map((song) => song.id), currentUser?.id),
+  ])
 
   const coverUrl = publicImageVariantUrl(album.coverUrl, 'large')
   album.coverUrl = coverUrl
@@ -51,6 +58,7 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
         <div className="mt-4 flex flex-wrap gap-x-3 gap-y-2 text-sm font-bold text-slate-300/65">
           <span>{releaseLabel}</span><span aria-hidden="true">·</span><span>{album.company || '唱片公司待补充'}</span><span aria-hidden="true">·</span><span>{formatTrackCount(album.MusicSong.length)}</span>
         </div>
+        <div className="mt-5"><EasMusicLikeButton type="album" targetId={album.id} initialLiked={albumLikeState.liked} initialCount={albumLikeState.likeCount} loggedIn={Boolean(currentUser)} /></div>
         {album.description ? <p className="mt-7 max-w-2xl whitespace-pre-wrap text-sm font-medium leading-8 text-slate-300/75">{album.description}</p> : null}
       </MusicDetailReveal>
     </section>
@@ -78,7 +86,9 @@ export default async function MusicAlbumPage({ params }: { params: Promise<{ id:
           lyricist: song.lyricist,
           composer: song.composer,
           arranger: song.arranger,
-        }))} />
+          liked: songLikeStates.get(song.id)?.liked || false,
+          likeCount: songLikeStates.get(song.id)?.likeCount || 0,
+        }))} loggedIn={Boolean(currentUser)} />
       ) : <p className="mt-7 rounded-[24px] border border-white/10 bg-white/[0.05] p-6 text-sm font-bold text-slate-300/65">歌曲资料正在整理中。</p>}
     </section>
   </MusicArchiveShell>

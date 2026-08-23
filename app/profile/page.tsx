@@ -10,7 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
-import { getEquippedBadgeForUser } from '@/lib/badge-service'
+import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-service'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
@@ -70,11 +70,12 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
-  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge, badgeSummary] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
     getEquippedBadgeForUser(profile.id),
+    getBadgeProfileSummary(profile.id, user.id),
   ])
 
   const profileEditorInitialProfile = {
@@ -116,6 +117,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
           publicLiveCount: 0,
           equippedBadge,
+          badgeSummary,
         }}
         growth={growth}
         relationship={{

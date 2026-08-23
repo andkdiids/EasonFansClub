@@ -2,15 +2,18 @@
 
 import Link from 'next/link'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
+import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
 
 type AlbumTrack = MusicPreviewTrack & {
   trackNumber: number
   lyricist?: string | null
   composer?: string | null
   arranger?: string | null
+  liked: boolean
+  likeCount: number
 }
 
-export function MusicAlbumTrackList({ songs }: Readonly<{ songs: AlbumTrack[] }>) {
+export function MusicAlbumTrackList({ songs, loggedIn }: Readonly<{ songs: AlbumTrack[]; loggedIn: boolean }>) {
   const player = useMusicPlayer()
   const playable = songs.filter((song) => Boolean(song.previewUrl))
 
@@ -26,14 +29,17 @@ export function MusicAlbumTrackList({ songs }: Readonly<{ songs: AlbumTrack[] }>
               <span className="col-start-2 mt-2 truncate text-xs font-bold text-slate-300/55 sm:col-start-auto sm:mt-0">作词：{song.lyricist || '待补充'}</span>
               <span className="col-start-2 truncate text-xs font-bold text-slate-300/55 sm:col-start-auto">作曲：{song.composer || '待补充'}</span>
               <span className="col-start-2 truncate text-xs font-bold text-slate-300/55 sm:col-start-auto">编曲：{song.arranger || '待补充'}</span>
-              <button
-                type="button"
-                disabled={!song.previewUrl}
-                className="col-start-3 row-span-2 min-h-11 min-w-20 border border-white/15 px-3 text-xs font-black text-white disabled:opacity-45 sm:col-start-auto sm:row-span-1"
-                onClick={() => song.previewUrl && void player.playTrack(song, playable)}
-              >
-                {!song.previewUrl ? '暂无试听' : active && player.playing ? '暂停' : '播放'}
-              </button>
+              <div className="col-start-3 row-span-2 flex min-w-0 flex-col items-end gap-2 sm:col-start-auto sm:row-span-1 sm:flex-row sm:items-center">
+                <EasMusicLikeButton type="song" targetId={song.id} initialLiked={song.liked} initialCount={song.likeCount} loggedIn={loggedIn} className="music-track-like-button" />
+                <button
+                  type="button"
+                  disabled={!song.previewUrl}
+                  className="min-h-11 min-w-20 border border-white/15 px-3 text-xs font-black text-white disabled:opacity-45"
+                  onClick={() => song.previewUrl && void player.playTrack(song, playable)}
+                >
+                  {!song.previewUrl ? '暂无试听' : active && player.playing ? '暂停' : '播放'}
+                </button>
+              </div>
             </article>
           )
         })}

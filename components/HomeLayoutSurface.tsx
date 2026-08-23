@@ -8,6 +8,7 @@ import { LikeButton } from '@/components/PostActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
+import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
 import { getPageLayoutModules } from '@/components/page-layout/PageLayoutRenderer'
 import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMode } from '@/lib/guess-song-config'
 import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
@@ -76,10 +77,10 @@ const todayTypeLabels: Record<string, string> = {
 
 type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
 type Post = { id: string; title: string; content: string; likeCount: number; likedByMe: boolean; replyCount: number; viewCount: number; isPinned: boolean; isFeatured: boolean; createdAt: string; board: { name: string }; author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null } }
-type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null }
+type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null; likedByMe: boolean; likeCount: number }
 type Stats = { consecutiveDays: number; checkIns: { id: string }[]; _count: { checkIns: number } }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
-type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; album: { id: string; name: string; coverUrl: string | null } }
+type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; likedByMe: boolean; likeCount: number; album: { id: string; name: string; coverUrl: string | null } }
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
 type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
 type HomeConcert = { id: string; title: string; concertDate: string; city: string; venue: string | null; tourName: string; posterUrl: string | null; href: string }
@@ -335,6 +336,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           <p>{data.dailyMusic.album.name} · {data.dailyMusic.releaseYear}</p>
           <div className="home-daily-music-lyrics">{data.dailyMusic.lyrics || homeText.noLyrics}</div>
           <HomeDailyMusicPreview music={data.dailyMusic} />
+          <EasMusicLikeButton type="song" targetId={data.dailyMusic.id} initialLiked={data.dailyMusic.likedByMe} initialCount={data.dailyMusic.likeCount} loggedIn className="home-daily-music-like-button" />
         </div>
       </div> : <p className="community-empty">{homeText.noMusic}</p>}
     </section>
@@ -469,7 +471,13 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="每日推荐专辑">
           <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
           <div className="album-strip home-album-strip">
-            {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <Link key={album.id} href={`/music/album/${album.id}`}><span>{album.coverUrl ? <Image src={publicImageVariantUrl(album.coverUrl, 'thumb-sm') || album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" loading="lazy" className="object-cover" /> : '♫'}</span><strong>{album.name}</strong><small>{album.releaseYear}</small></Link>)}
+            {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <article key={album.id} className="home-album-card">
+              <Link href={`/music/album/${album.id}`} className="home-album-link">
+                <span>{album.coverUrl ? <Image src={publicImageVariantUrl(album.coverUrl, 'thumb-sm') || album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" loading="lazy" className="object-cover" /> : '♫'}</span>
+                <strong>{album.name}</strong><small>{album.releaseYear}</small>
+              </Link>
+              <EasMusicLikeButton type="album" targetId={album.id} initialLiked={album.likedByMe} initialCount={album.likeCount} loggedIn className="home-album-like-button" />
+            </article>)}
             {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
           </div>
         </section>

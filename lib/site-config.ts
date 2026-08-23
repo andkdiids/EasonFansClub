@@ -142,8 +142,9 @@ export const defaultSiteAppearance: SiteAppearanceConfig = {
     { label: '活动中心', href: '/activities', icon: '◇', title: '活动中心', isVisible: true, sortOrder: 5 },
     { label: '今日', href: '/today', icon: '▣', title: '历史上的今天', isVisible: true, sortOrder: 6 },
     { label: '成就系统', href: '/achievements', icon: '◎', title: '成就系统', isVisible: true, sortOrder: 7 },
-    { label: '文化馆', href: '/culture', icon: '✦', title: 'Eason 文化馆', isVisible: true, sortOrder: 8 },
-    { label: '消息中心', href: '/notifications', icon: '•', title: '消息中心', isVisible: true, sortOrder: 9 },
+    { label: '勋章展览馆', href: '/badges', icon: '◇', title: 'E院勋章展览馆', isVisible: true, sortOrder: 8 },
+    { label: '文化馆', href: '/culture', icon: '✦', title: 'Eason 文化馆', isVisible: true, sortOrder: 9 },
+    { label: '消息中心', href: '/notifications', icon: '•', title: '消息中心', isVisible: true, sortOrder: 10 },
   ],
   heroSlides: [
     {

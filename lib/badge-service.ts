@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
-import type { BadgeCollectionView, BadgeShowcaseItemView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
+import type { BadgeCollectionView, BadgeGalleryView, BadgeShowcaseItemView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
 import { calculateBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, type BadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 
@@ -413,6 +413,138 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
     showcase,
     recent,
     seriesCompletions,
+  }
+}
+
+/**
+ * Load the public exhibition hall in one bounded catalog query plus one bounded
+ * ownership query. The response is already privacy-filtered; the client never
+ * receives an unearned SECRET or an unearned HIDDEN badge's real metadata.
+ */
+export async function getBadgeExhibitionGallery(viewerId?: string | null): Promise<BadgeGalleryView> {
+  const isAuthenticated = Boolean(viewerId)
+  const [allBadges, ownedRecords, viewer] = await Promise.all([
+    prisma.badge.findMany({
+      where: viewerId
+        ? { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId: viewerId } } }] }
+        : { isEnabled: true, isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      select: BADGE_COLLECTION_SELECT,
+    }),
+    viewerId
+      ? prisma.userBadge.findMany({
+          where: { userId: viewerId },
+          orderBy: [{ obtainedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
+          select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+        })
+      : Promise.resolve([] as DbUserBadge[]),
+    viewerId
+      ? prisma.user.findUnique({ where: { id: viewerId }, select: { equippedBadgeId: true } })
+      : Promise.resolve(null),
+  ])
+
+  const ownedIds = new Set(ownedRecords.map((record) => record.Badge.id))
+  const recordByBadgeId = new Map(ownedRecords.map((record) => [record.Badge.id, record]))
+  const equippedBadgeId = viewer?.equippedBadgeId && ownedIds.has(viewer.equippedBadgeId) ? viewer.equippedBadgeId : null
+  const publicIds = allBadges
+    .filter((badge) => badge.isEnabled && badge.isActive && badge.visibility === 'PUBLIC')
+    .map((badge) => badge.id)
+  const ownershipStats = await getBadgeOwnershipStats(publicIds)
+  const highest = getHighestOwnedTierByGroup(allBadges, ownedIds)
+  const visibleBadges = allBadges.filter((badge) => badge.visibility !== 'SECRET' || ownedIds.has(badge.id))
+  const items = visibleBadges.flatMap((badge) => {
+    const owned = recordByBadgeId.get(badge.id)
+    if (owned) {
+      return [obtainedBadgeView(
+        owned,
+        badge.id === equippedBadgeId,
+        ownershipStats.get(badge.id) || null,
+        Boolean(badge.tierGroupCode && badge.tierLevel && highest.get(badge.tierGroupCode) === badge.tierLevel),
+      )]
+    }
+    if (badge.visibility === 'SECRET') return []
+    if (badge.visibility === 'HIDDEN') return [hiddenBadgeView(badge)]
+    return [{
+      ...publicBadge(badge),
+      status: 'NOT_OBTAINED' as const,
+      obtainedAt: null,
+      isEquipped: false,
+      progress: null,
+      ownershipStats: ownershipStats.get(badge.id) || null,
+    }]
+  })
+
+  if (viewerId) await addProgressToUnownedBadges(viewerId, allBadges, items)
+
+  // Hidden unearned badges are intentionally excluded from these named
+  // sections, so a series name cannot be used to infer a hidden condition.
+  const seriesIds = [...new Set(visibleBadges
+    .filter((badge) => badge.visibility !== 'HIDDEN' || ownedIds.has(badge.id))
+    .map((badge) => badge.seriesId)
+    .filter((id): id is string => Boolean(id)))]
+  const seriesRows = seriesIds.length
+    ? await prisma.badgeSeries.findMany({
+        where: { id: { in: seriesIds } },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          description: true,
+          sortOrder: true,
+          isEnabled: true,
+          CompletionRewardBadge: { select: BADGE_COLLECTION_SELECT },
+        },
+      })
+    : []
+  const itemByBadgeId = new Map(items.map((item) => [item.id, item]))
+  const series = seriesRows.flatMap((row) => {
+    const candidates = visibleBadges.filter((badge) => (
+      badge.seriesId === row.id
+      && badge.isEnabled
+      && badge.isActive
+      && badge.countsTowardSeriesCompletion
+      && (badge.visibility !== 'HIDDEN' || ownedIds.has(badge.id))
+    ))
+    if (!candidates.length) return []
+    const collected = candidates.filter((badge) => ownedIds.has(badge.id)).length
+    const rewardBadge = row.CompletionRewardBadge
+    let reward: BadgeView | null = null
+    if (rewardBadge) {
+      const existing = itemByBadgeId.get(rewardBadge.id)
+      if (existing) reward = existing
+      else if (rewardBadge.visibility === 'PUBLIC') reward = {
+        ...publicBadge(rewardBadge),
+        status: 'NOT_OBTAINED',
+        obtainedAt: null,
+        isEquipped: false,
+        progress: null,
+        ownershipStats: ownershipStats.get(rewardBadge.id) || null,
+      }
+      else if (rewardBadge.visibility === 'HIDDEN') reward = hiddenBadgeView(rewardBadge)
+    }
+    const total = candidates.length
+    return [{
+      series: seriesView(row),
+      collected,
+      total,
+      percentage: total ? Math.floor((collected / total) * 100) : 0,
+      completed: total > 0 && collected === total,
+      reward,
+    }]
+  })
+
+  const collectibleTotal = allBadges.filter((badge) => badge.isEnabled && badge.isActive && badge.visibility === 'PUBLIC').length
+  const collectibleObtainedCount = allBadges.filter((badge) => badge.isEnabled && badge.isActive && badge.visibility === 'PUBLIC' && ownedIds.has(badge.id)).length
+  return {
+    isAuthenticated,
+    items,
+    total: items.length,
+    obtainedCount: items.filter((item) => item.status === 'OBTAINED').length,
+    collectibleTotal,
+    collectibleObtainedCount,
+    completionPercentage: collectibleTotal ? Math.floor((collectibleObtainedCount / collectibleTotal) * 100) : 0,
+    series,
   }
 }
 

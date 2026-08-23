@@ -13,6 +13,7 @@ import { countTodayBirthdays, grantTodayBirthdayRewards } from '@/lib/birthday'
 import { getTodayEventRecords } from '@/lib/today-events'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -274,21 +275,26 @@ export async function getHomeTracks() {
   ))
 }
 
-export async function getHomeAlbums() {
+export async function getHomeAlbums(userId?: string) {
   const dateKey = getShanghaiDateKey(new Date())
-  return cachedHomeData(`home.albums:${dateKey}`, () => safeDb(
+  const albums = await cachedHomeData(`home.albums:${dateKey}`, () => safeDb(
     'MusicAlbum.findMany home.albums',
     prisma.musicAlbum.findMany({
       where: { status: 'PUBLISHED', coverUrl: { not: null } },
       select: { id: true, name: true, releaseYear: true, coverUrl: true },
-    }).then((albums) => albums.sort((a, b) => dailyAlbumRank(a.id) - dailyAlbumRank(b.id)).slice(0, 6).map((album) => ({ ...album, coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-sm') }))),
+    }).then((rows) => rows.sort((a, b) => dailyAlbumRank(a.id, dateKey) - dailyAlbumRank(b.id, dateKey)).slice(0, 6).map((album) => ({ ...album, coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-sm') }))),
     [],
     5000,
   ))
+  const likeStates = await getEasMusicAlbumLikeStates(albums.map((album) => album.id), userId)
+  return albums.map((album) => ({
+    ...album,
+    likedByMe: likeStates.get(album.id)?.liked || false,
+    likeCount: likeStates.get(album.id)?.likeCount || 0,
+  }))
 }
 
-function dailyAlbumRank(id: string) {
-  const seed = getShanghaiDateKey(new Date())
+function dailyAlbumRank(id: string, seed = getShanghaiDateKey(new Date())) {
   let hash = 2166136261
   for (const character of `${seed}:${id}`) {
     hash ^= character.charCodeAt(0)

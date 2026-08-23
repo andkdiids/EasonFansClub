@@ -28,7 +28,7 @@ export async function GET() {
       getHomePosts(user?.id),
       getHomeActivities(),
       getHomeConcerts(),
-      getHomeAlbums(),
+      getHomeAlbums(user?.id),
       getHomeUserStats(user?.id),
       getHomeDailyMusicRecommendation(user?.id, anonymousId),
       getHomeSiteStats(),

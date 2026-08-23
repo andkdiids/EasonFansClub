@@ -1997,32 +1997,46 @@ model LyricPrescription {
 }
 
 model MusicAlbum {
-  id            String                 @id @default(cuid())
-  name          String
-  artist        String                 @default("陈奕迅")
-  releaseYear   Int
-  coverUrl      String?
-  description   String?
-  language      String                 @default("粤语")
-  createdAt     DateTime               @default(now())
-  era           String?
-  albumType     String?
-  releaseDate   DateTime?
-  company       String?
-  story         String?
-  status        MusicPublicationStatus @default(DRAFT)
-  displayOrder  Int                    @default(0)
-  isFeatured    Boolean                @default(false)
-  featuredOrder Int?
-  AlbumReview   AlbumReview[]
-  Rating        Rating[]
-  RatingStats   RatingStats?
-  MusicSong     MusicSong[]
+  id             String                 @id @default(cuid())
+  name           String
+  artist         String                 @default("陈奕迅")
+  releaseYear    Int
+  coverUrl       String?
+  description    String?
+  language       String                 @default("粤语")
+  createdAt      DateTime               @default(now())
+  era            String?
+  albumType      String?
+  releaseDate    DateTime?
+  company        String?
+  story          String?
+  status         MusicPublicationStatus @default(DRAFT)
+  displayOrder   Int                    @default(0)
+  isFeatured     Boolean                @default(false)
+  featuredOrder  Int?
+  AlbumReview    AlbumReview[]
+  MusicAlbumLike MusicAlbumLike[]
+  Rating         Rating[]
+  RatingStats    RatingStats?
+  MusicSong      MusicSong[]
 
   @@unique([name, artist, releaseYear])
   @@index([releaseYear, createdAt])
   @@index([status, displayOrder, releaseYear])
   @@index([status, isFeatured, featuredOrder, createdAt])
+}
+
+model MusicAlbumLike {
+  id         String     @id @default(cuid())
+  userId     String
+  albumId    String
+  createdAt  DateTime   @default(now())
+  User       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicAlbum MusicAlbum @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, albumId])
+  @@index([albumId])
+  @@index([userId])
 }
 
 model AlbumReview {
@@ -2133,6 +2147,7 @@ model MusicSong {
   expertEnabled                Boolean                        @default(true)
   GuessSongQuestion            GuessSongQuestion[]
   MusicConcertSetlistItem      MusicConcertSetlistItem[]
+  MusicSongLike                MusicSongLike[]
   UserDailyMusicRecommendation UserDailyMusicRecommendation[]
   Rating                       Rating[]
   RatingStats                  RatingStats?
@@ -2142,6 +2157,19 @@ model MusicSong {
   @@unique([albumId, trackNumber])
   @@index([albumId, trackNumber])
   @@index([title, artist])
+}
+
+model MusicSongLike {
+  id        String    @id @default(cuid())
+  userId    String
+  songId    String
+  createdAt DateTime  @default(now())
+  User      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicSong MusicSong @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@index([songId])
+  @@index([userId])
 }
 
 model Rating {
@@ -3326,6 +3354,7 @@ model User {
   AlbumReview                                            AlbumReview[]
   AlbumReviewFavorite                                    AlbumReviewFavorite[]
   AlbumReviewLike                                        AlbumReviewLike[]
+  MusicAlbumLike                                         MusicAlbumLike[]
   Rating                                                 Rating[]
   RatingReview                                           RatingReview[]
   RatingReviewLike                                       RatingReviewLike[]
@@ -3408,6 +3437,7 @@ model User {
   LyricCard                                              LyricCard[]
   MusicFavorite                                          MusicFavorite[]
   MusicPlayRecord                                        MusicPlayRecord[]
+  MusicSongLike                                          MusicSongLike[]
   Notification_Notification_actorIdToUser                Notification[]                 @relation("Notification_actorIdToUser")
   Notification_Notification_recipientIdToUser            Notification[]                 @relation("Notification_recipientIdToUser")
   OnlineSession                                          OnlineSession[]

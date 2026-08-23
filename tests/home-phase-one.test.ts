@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { dailyRecommendationIndex } from '../lib/daily-music'
+import { DAILY_MUSIC_RECOMMENDATION_SEED, dailyRecommendationIndex, globalDailyRecommendationIndex } from '../lib/daily-music'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -11,14 +11,17 @@ test('daily recommendation stays fixed for an identity during one day', () => {
   assert.notEqual(first, dailyRecommendationIndex('user-a', '2026-08-05', 1000))
 })
 
-test('different users participate with different recommendation identities', () => {
-  assert.notEqual(
-    dailyRecommendationIndex('user-a', '2026-08-04', 1000),
-    dailyRecommendationIndex('user-b', '2026-08-04', 1000),
-  )
+test('all users share one stable Shanghai-date recommendation identity', () => {
+  const first = globalDailyRecommendationIndex('2026-08-04', 1000)
+  assert.equal(first, globalDailyRecommendationIndex('2026-08-04', 1000))
+  assert.equal(first, dailyRecommendationIndex(DAILY_MUSIC_RECOMMENDATION_SEED, '2026-08-04', 1000))
+  assert.notEqual(first, globalDailyRecommendationIndex('2026-08-05', 1000))
   const source = read('prisma/schema.prisma')
   assert.match(source, /@@unique\(\[userId, recommendDate\]\)/)
   assert.match(source, /@@unique\(\[anonymousId, recommendDate\]\)/)
+  const music = read('lib/daily-music.ts')
+  assert.match(music, /DAILY_MUSIC_RECOMMENDATION_SEED = 'easmusic-global'/)
+  assert.doesNotMatch(music, /userDailyMusicRecommendation\.(findUnique|create|findMany)/)
 })
 
 test('daily recommendation has a random fallback when no daily record exists', () => {
@@ -56,7 +59,7 @@ test('post review creates an admin notification and public home query only accep
 test('homepage uses date-seeded random albums and only featured or pinned posts', () => {
   const home = read('lib/home-data.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
-  assert.match(home, /dailyAlbumRank\(a\.id\) - dailyAlbumRank\(b\.id\)/)
+  assert.match(home, /dailyAlbumRank\(a\.id, dateKey\) - dailyAlbumRank\(b\.id, dateKey\)/)
   assert.match(home, /slice\(0, 6\)/)
   assert.match(surface, /data\.posts\.slice\(0,\s*4\)/)
   assert.match(surface, /homeText\.dailyMusic/)

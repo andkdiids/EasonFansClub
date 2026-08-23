@@ -8,7 +8,8 @@ import type { GrowthSummary } from '@/lib/growth'
 import { formatUid } from '@/lib/uid'
 import type { ProfileRecentMessage, ProfileRecordPagination, ProfileWallVisibility } from '@/lib/profile-page'
 import { formatUserLocation, type UserLocation } from '@/lib/user-location'
-import type { EquippedBadgeView } from '@/lib/badge-types'
+import type { BadgeCollectionView, EquippedBadgeView } from '@/lib/badge-types'
+import { BadgeMiniShowcase } from '@/components/BadgeMiniShowcase'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -26,6 +27,7 @@ export type ProfilePageSurfaceProfile = {
   wallVisibility: ProfileWallVisibility
   publicLiveCount: number
   equippedBadge: EquippedBadgeView | null
+  badgeSummary?: BadgeCollectionView | null
 }
 
 export type ProfilePageSurfaceRelationship = {
@@ -111,6 +113,8 @@ export function ProfilePageSurface({
           {profile.bio || '这个成员还没有填写个人简介。'}
         </p>
       </section>
+
+      <BadgeMiniShowcase uid={profile.uid} summary={profile.badgeSummary || null} equippedBadge={profile.equippedBadge} isSelf={isSelf} />
 
       <div className="profile-actions-scroll min-w-0" aria-label={isSelf ? '个人操作' : '好友操作'}>
         <div className="flex w-max min-w-full flex-nowrap items-center gap-2 py-0.5">

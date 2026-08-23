@@ -105,6 +105,30 @@ export type BadgeCollectionView = {
   seriesCompletions?: BadgeSeriesCompletionView[]
 }
 
+export type BadgeGallerySeriesView = {
+  series: BadgeSeriesView
+  collected: number
+  total: number
+  percentage: number
+  completed: boolean
+  reward: BadgeView | null
+}
+
+/**
+ * The bounded, privacy-filtered DTO used by the public badge exhibition hall.
+ * It intentionally contains BadgeView fields only; BadgeRule is never exposed.
+ */
+export type BadgeGalleryView = {
+  isAuthenticated: boolean
+  items: BadgeView[]
+  total: number
+  obtainedCount: number
+  collectibleTotal: number
+  collectibleObtainedCount: number
+  completionPercentage: number
+  series: BadgeGallerySeriesView[]
+}
+
 export const BADGE_VISIBILITIES: BadgeVisibility[] = ['PUBLIC', 'HIDDEN', 'SECRET']
 export const BADGE_RARITIES: BadgeRarity[] = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED']
 export const BADGE_GRANT_TYPES: BadgeGrantType[] = ['AUTO', 'MANUAL', 'EVENT']

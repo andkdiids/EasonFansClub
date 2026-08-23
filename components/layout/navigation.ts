@@ -23,6 +23,7 @@ export const primaryNavigation: AppNavigationItem[] = [
 ]
 
 export const quickNavigation: AppNavigationItem[] = [
+  { href: '/badges', label: '勋章展览馆', icon: 'archive', activePrefixes: ['/badges'] },
   { href: '/checkin', label: '每日挂号', icon: 'check', activePrefixes: [] },
   { href: '/friends', label: '好友动态', icon: 'friends', activePrefixes: ['/friends'] },
   { href: '/stickers', label: '表情包商店', icon: 'sticker', activePrefixes: ['/stickers', '/profile/stickers'] },

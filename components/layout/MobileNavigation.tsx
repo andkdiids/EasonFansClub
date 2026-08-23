@@ -14,6 +14,7 @@ import { UiIcon } from '@/components/UiIcon'
 import { isAppNavigationActive, primaryNavigation } from './navigation'
 
 const centerItems = [
+  { href: '/badges', label: '勋章展览馆', icon: 'archive' as const },
   { href: '/posts/new', label: '发布帖子', icon: 'forum' as const },
   { href: '/clinic', label: '阿士匹灵门诊部', icon: 'stethoscope' as const },
   { href: '/checkin', label: '每日挂号', icon: 'check' as const },

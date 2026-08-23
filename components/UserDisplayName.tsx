@@ -62,10 +62,12 @@ export function badgeNicknameStyle(badge?: UserDisplayNameBadge | null): BadgeNi
 }
 
 export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: Pick<UserDisplayNameBadge, 'name' | 'imageUrl' | 'effectType'>; size?: 'inline' | 'wall' | 'detail'; className?: string }) {
+  const [failedSource, setFailedSource] = useState<string | null>(null)
+  useEffect(() => setFailedSource(null), [badge.imageUrl])
   const sizeClass = size === 'detail' ? 'badge-image-detail' : size === 'wall' ? 'badge-image-wall' : 'badge-image-inline'
-  return badge.imageUrl ? (
+  return badge.imageUrl && failedSource !== badge.imageUrl ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={badge.imageUrl} alt={badge.name} className={`user-badge-image ${sizeClass} ${badgeEffectClass(badge.effectType)} ${className}`} loading="lazy" />
+    <img src={badge.imageUrl} alt={badge.name} onError={() => { if (process.env.NODE_ENV === 'development') console.warn('[badge-image] failed to load', badge.imageUrl); setFailedSource(badge.imageUrl) }} className={`user-badge-image ${sizeClass} ${badgeEffectClass(badge.effectType)} ${className}`} loading="lazy" />
   ) : <span className={`user-badge-placeholder ${sizeClass} ${className}`} aria-label={badge.name}>?</span>
 }
 

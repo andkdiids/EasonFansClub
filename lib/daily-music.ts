@@ -3,9 +3,11 @@ import { getShanghaiDateKey } from '@/lib/checkin'
 import { isSupabaseStorageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getMusicPlaybackUrl } from '@/lib/music-playback'
+import { getEasMusicSongLikeState } from '@/lib/easmusic-likes'
 import { prisma } from '@/lib/prisma'
 
 export const DAILY_MUSIC_ANONYMOUS_COOKIE = 'eason-daily-music-anonymous'
+export const DAILY_MUSIC_RECOMMENDATION_SEED = 'easmusic-global'
 
 const songSelect = {
   id: true,
@@ -43,13 +45,24 @@ export function dailyRecommendationIndex(identity: string, recommendDate: string
   return (hash >>> 0) % count
 }
 
-function recommendationWhere(recommendDate: string, userId?: string, anonymousId?: string) {
-  if (userId) return { userId_recommendDate: { userId, recommendDate } }
-  if (anonymousId) return { anonymousId_recommendDate: { anonymousId, recommendDate } }
-  throw new Error('DAILY_MUSIC_IDENTITY_REQUIRED')
+export function globalDailyRecommendationIndex(recommendDate: string, count: number) {
+  const currentIndex = dailyRecommendationIndex(DAILY_MUSIC_RECOMMENDATION_SEED, recommendDate, count)
+  if (count <= 1) return currentIndex
+
+  // Avoid selecting the same song on two adjacent business dates when the
+  // candidate pool is unchanged, while keeping the choice deterministic.
+  const previousIndex = dailyRecommendationIndex(DAILY_MUSIC_RECOMMENDATION_SEED, shiftDateKey(recommendDate, -1), count)
+  return currentIndex === previousIndex ? (currentIndex + 1) % count : currentIndex
 }
 
-function serializeSong(song: DailySong) {
+function shiftDateKey(value: string, days: number) {
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
+}
+
+async function serializeSong(song: DailySong, userId?: string) {
+  const likeState = await getEasMusicSongLikeState(song.id, userId)
   return {
     id: song.id,
     title: song.title,
@@ -61,10 +74,12 @@ function serializeSong(song: DailySong) {
     previewUrl: song.previewUrl ? `${getMusicPlaybackUrl(song.id)}?preview=1` : '',
     previewDuration: Math.min(60, Math.max(1, song.previewDuration || 60)),
     isFullPlayback: false,
+    likedByMe: likeState.liked,
+    likeCount: likeState.likeCount,
   }
 }
 
-export async function getFallbackDailyMusicRecommendation(userId?: string, anonymousId?: string, now = new Date()) {
+export async function getFallbackDailyMusicRecommendation(userId?: string, _anonymousId?: string, now = new Date()) {
   const candidates = await prisma.musicSong.findMany({
     where: dailyMusicCandidateWhere,
     orderBy: { id: 'asc' },
@@ -73,50 +88,16 @@ export async function getFallbackDailyMusicRecommendation(userId?: string, anony
   })
   if (!candidates.length) return null
 
-  const identity = userId || anonymousId || 'anonymous'
   const recommendDate = getShanghaiDateKey(now)
-  const selected = candidates[dailyRecommendationIndex(identity, recommendDate, candidates.length)]
-  return selected ? serializeSong(selected) : null
+  const selected = candidates[globalDailyRecommendationIndex(recommendDate, candidates.length)]
+  return selected ? serializeSong(selected, userId) : null
 }
 
 export async function getDailyMusicRecommendation(userId?: string, anonymousId?: string, now = new Date()) {
-  const recommendDate = getShanghaiDateKey(now)
-  const where = recommendationWhere(recommendDate, userId, anonymousId)
-  const existing = await prisma.userDailyMusicRecommendation.findUnique({
-    where,
-    include: { MusicSong: { select: songSelect } },
-  })
-  if (existing?.MusicSong?.MusicAlbum) return serializeSong(existing.MusicSong)
-
-  const candidates = await prisma.musicSong.findMany({
-    where: dailyMusicCandidateWhere,
-    orderBy: { id: 'asc' },
-    select: { id: true },
-  })
-  if (!candidates.length) return null
-
-  const occupied = await prisma.userDailyMusicRecommendation.findMany({
-    where: { recommendDate },
-    select: { songId: true },
-  })
-  const occupiedIds = new Set(occupied.map((item) => item.songId))
-  const available = candidates.filter((candidate) => !occupiedIds.has(candidate.id))
-  const pool = available.length ? available : candidates
-  const identity = userId || anonymousId || 'anonymous'
-  const selectedId = pool[dailyRecommendationIndex(identity, recommendDate, pool.length)].id
-
-  try {
-    const recommendation = await prisma.userDailyMusicRecommendation.create({
-      data: { recommendDate, userId: userId || null, anonymousId: userId ? null : anonymousId || null, songId: selectedId },
-      include: { MusicSong: { select: songSelect } },
-    })
-    return serializeSong(recommendation.MusicSong)
-  } catch (error) {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error
-    const concurrent = await prisma.userDailyMusicRecommendation.findUnique({
-      where,
-      include: { MusicSong: { select: songSelect } },
-    })
-    return concurrent?.MusicSong ? serializeSong(concurrent.MusicSong) : null
-  }
+  // The original UserDailyMusicRecommendation table stored a different row
+  // per user/anonymous identity. That cannot satisfy the product rule that
+  // every visitor sees one shared daily song, so the legacy rows are left
+  // untouched and the live recommendation is now a date-only deterministic
+  // selection from the published catalogue.
+  return getFallbackDailyMusicRecommendation(userId, anonymousId, now)
 }
