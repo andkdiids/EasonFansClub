@@ -1,64 +1,212 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ADMIN_MAKEUP_DEFAULT_RANGE_DAYS,
+  ADMIN_MAKEUP_RANGE_OPTIONS,
+  type AdminMakeupRangeDays,
+} from '@/lib/admin-checkin-makeup'
 
 type UserResult = { id: string; uid: number; nickname: string; points: number }
+
+type AdminMakeupData = {
+  user: UserResult & { createdDateKey: string }
+  eligibleMissingDates: string[]
+  recentCheckIns: Array<{
+    checkinDateKey: string
+    type: string
+    streakDay: number
+    status: 'CHECKED_IN' | 'MISSING'
+  }>
+  rangeDays: AdminMakeupRangeDays
+  startDateKey: string
+  todayKey: string
+}
+
+function formatDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  return `${year}年${month}月${day}日`
+}
+
+function typeLabel(type: string) {
+  if (type === 'MAKEUP_ADMIN') return '管理员补签'
+  if (type === 'MAKEUP_PAID' || type === 'MAKEUP_FREE_QUIZ') return '用户补签'
+  return '正常挂号'
+}
 
 export function AdminCheckInMakeup() {
   const [query, setQuery] = useState('')
   const [users, setUsers] = useState<UserResult[]>([])
   const [selected, setSelected] = useState<UserResult | null>(null)
-  const [targetDate, setTargetDate] = useState('')
+  const [rangeDays, setRangeDays] = useState<AdminMakeupRangeDays>(ADMIN_MAKEUP_DEFAULT_RANGE_DAYS)
+  const [makeupData, setMakeupData] = useState<AdminMakeupData | null>(null)
+  const [selectedDateKey, setSelectedDateKey] = useState('')
   const [reason, setReason] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [preview, setPreview] = useState<{ status: string; nearby: Array<{ checkinDateKey: string; type: string; streakDay: number }> } | null>(null)
+  const [loadingMakeup, setLoadingMakeup] = useState(false)
+
+  const loadMakeupData = useCallback(async (userId: string, days: AdminMakeupRangeDays, signal?: AbortSignal) => {
+    setLoadingMakeup(true)
+    try {
+      const response = await fetch(`/api/admin/checkin-makeup?userId=${encodeURIComponent(userId)}&rangeDays=${days}`, { cache: 'no-store', signal })
+      const data = await response.json() as AdminMakeupData & { message?: string }
+      if (!response.ok) throw new Error(data.message || '加载漏签日期失败')
+      setMakeupData(data)
+    } catch (error) {
+      if (!signal?.aborted) {
+        setMakeupData(null)
+        setMessage(error instanceof Error ? error.message : '加载漏签日期失败')
+      }
+    } finally {
+      if (!signal?.aborted) setLoadingMakeup(false)
+    }
+  }, [])
 
   useEffect(() => {
-    if (!selected || !targetDate) { setPreview(null); return }
+    if (!selected) {
+      setMakeupData(null)
+      setLoadingMakeup(false)
+      return
+    }
     const controller = new AbortController()
-    void fetch(`/api/admin/checkin-makeup?userId=${encodeURIComponent(selected.id)}&targetDate=${encodeURIComponent(targetDate)}`, { cache: 'no-store', signal: controller.signal })
-      .then(async (response) => { const data = await response.json(); if (response.ok) setPreview(data) })
-      .catch(() => null)
+    void loadMakeupData(selected.id, rangeDays, controller.signal)
     return () => controller.abort()
-  }, [selected, targetDate])
+  }, [loadMakeupData, rangeDays, selected])
 
   async function search() {
-    setBusy(true); setMessage('')
+    setBusy(true)
+    setMessage('')
+    setUsers([])
+    setSelected(null)
+    setSelectedDateKey('')
+    setMakeupData(null)
     try {
       const response = await fetch(`/api/admin/checkin-makeup?q=${encodeURIComponent(query)}`, { cache: 'no-store' })
-      const data = await response.json()
+      const data = await response.json() as { users?: UserResult[]; message?: string }
       if (!response.ok) throw new Error(data.message || '搜索失败')
-      setUsers(data.users)
-    } catch (error) { setMessage(error instanceof Error ? error.message : '搜索失败') } finally { setBusy(false) }
+      const foundUsers = data.users || []
+      setUsers(foundUsers)
+      if (foundUsers.length === 1) setSelected(foundUsers[0])
+      if (!foundUsers.length) setMessage('没有找到匹配的用户')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '搜索失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function selectUser(user: UserResult) {
+    setSelected(user)
+    setSelectedDateKey('')
+    setMakeupData(null)
+    setMessage('')
   }
 
   async function submit() {
-    if (!selected) return setMessage('请先选择用户')
-    setBusy(true); setMessage('')
+    if (!selected || !makeupData || !selectedDateKey || !makeupData.eligibleMissingDates.includes(selectedDateKey) || !reason.trim()) {
+      setMessage('请先选择有效漏签日期并填写补签原因')
+      return
+    }
+    setBusy(true)
+    setMessage('')
     try {
       const response = await fetch('/api/admin/checkin-makeup', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: selected.id, targetDate, reason }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: selected.id, targetDateKey: selectedDateKey, reason }),
       })
-      const data = await response.json()
+      const data = await response.json() as { message?: string; targetDateKey?: string; targetDate?: string; longTermRewardTriggered?: boolean }
       if (!response.ok) throw new Error(data.message || '补签失败')
-      setMessage(`已为 ${selected.nickname} 补签 ${data.targetDate}${data.longTermRewardTriggered ? '，并触发长期患者奖励' : ''}`)
-    } catch (error) { setMessage(error instanceof Error ? error.message : '补签失败') } finally { setBusy(false) }
+      const dateLabel = formatDateKey(data.targetDateKey || data.targetDate || selectedDateKey)
+      setSelectedDateKey('')
+      const successMessage = `补签成功\n已为 ${selected.nickname}（E院ID ${selected.uid}）补签 ${dateLabel}。消耗挂号费：0${data.longTermRewardTriggered ? '。已补齐连续7天挂号，并触发长期患者奖励。' : ''}`
+      setMessage(successMessage)
+      await loadMakeupData(selected.id, rangeDays)
+      setMessage(successMessage)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '补签失败')
+      if ((error as { message?: string }).message === '该日期已经挂号') {
+        void loadMakeupData(selected.id, rangeDays)
+      }
+    } finally {
+      setBusy(false)
+    }
   }
+
+  const disabledReason = useMemo(() => {
+    if (busy) return '正在处理请求，请稍候'
+    if (!selected) return '请先搜索并选择用户'
+    if (loadingMakeup) return '正在加载该用户的漏签日期'
+    if (!makeupData) return '暂时无法加载漏签日期，请重试'
+    if (!makeupData.eligibleMissingDates.length) return '当前查询范围内没有可补签日期'
+    if (!selectedDateKey) return '请选择需要补签的日期'
+    if (!makeupData.eligibleMissingDates.includes(selectedDateKey)) return '所选日期已不再是可补签漏签，请重新选择'
+    if (!reason.trim()) return '请填写补签原因'
+    return ''
+  }, [busy, loadingMakeup, makeupData, reason, selected, selectedDateKey])
 
   return (
     <section className="space-y-5 border border-sky-100 bg-white p-5">
       <div className="flex flex-col gap-2 sm:flex-row">
         <input className="min-h-11 flex-1 border border-slate-300 px-3" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="昵称 / 用户名 / E院ID" />
-        <button className="min-h-11 bg-brand-950 px-5 font-black text-white" disabled={busy || !query.trim()} onClick={() => void search()}>搜索用户</button>
+        <button className="min-h-11 bg-brand-950 px-5 font-black text-white disabled:opacity-50" disabled={busy || !query.trim()} onClick={() => void search()}>搜索用户</button>
       </div>
-      {users.length ? <div className="grid gap-2 sm:grid-cols-2">{users.map((user) => <button key={user.id} type="button" onClick={() => setSelected(user)} className={`border p-3 text-left ${selected?.id === user.id ? 'border-brand-700 bg-sky-50' : 'border-slate-200'}`}><strong>{user.nickname}</strong><span className="ml-2 text-sm text-slate-500">E院ID {user.uid} · {user.points} 挂号费</span></button>)}</div> : null}
-      <label className="block"><span className="mb-1 block text-sm font-black">目标日期</span><input className="min-h-11 w-full border border-slate-300 px-3" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
-      {preview ? <div className="border border-sky-100 bg-sky-50 p-3 text-sm"><p className="font-black">当天状态：{preview.status === 'CHECKED_IN' ? '已挂号，不可重复补签' : '未挂号'}</p><p className="mt-2">附近记录：{preview.nearby.length ? preview.nearby.map((item) => `${item.checkinDateKey}（${item.streakDay}天）`).join('、') : '前后3天暂无记录'}</p></div> : null}
+
+      {users.length ? (
+        <div className="grid gap-2 sm:grid-cols-2" aria-label="用户搜索结果">
+          {users.map((user) => (
+            <button key={user.id} type="button" onClick={() => selectUser(user)} className={`border p-3 text-left ${selected?.id === user.id ? 'border-brand-700 bg-sky-50' : 'border-slate-200'}`}>
+              <strong>{user.nickname}</strong>
+              <span className="ml-2 text-sm text-slate-500">E院ID {user.uid} · {user.points} 挂号费</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {selected ? (
+        <div className="space-y-4 border border-slate-200 p-4">
+          <div>
+            <p className="font-black text-brand-950">{selected.nickname}</p>
+            <p className="text-sm text-slate-500">E院ID {selected.uid} · 当前挂号费 {makeupData?.user.points ?? selected.points}</p>
+            {makeupData ? <p className="mt-1 text-xs text-slate-500">注册日期 {formatDateKey(makeupData.user.createdDateKey)} · 查询起点 {formatDateKey(makeupData.startDateKey)}</p> : null}
+          </div>
+          <label className="block">
+            <span className="mb-1 block text-sm font-black">漏签查询范围</span>
+            <select className="min-h-11 w-full border border-slate-300 px-3" value={rangeDays} onChange={(event) => { setRangeDays(Number(event.target.value) as AdminMakeupRangeDays); setSelectedDateKey('') }} disabled={loadingMakeup}>
+              {ADMIN_MAKEUP_RANGE_OPTIONS.map((days) => <option key={days} value={days}>最近{days}天</option>)}
+            </select>
+          </label>
+
+          {loadingMakeup ? <p className="border border-sky-100 bg-sky-50 p-3 text-sm">正在加载签到记录并计算漏签日期…</p> : null}
+          {!loadingMakeup && makeupData && makeupData.eligibleMissingDates.length ? (
+            <label className="block">
+              <span className="mb-1 block text-sm font-black">选择漏签日期</span>
+              <select className="min-h-11 w-full border border-slate-300 px-3" value={selectedDateKey} onChange={(event) => setSelectedDateKey(event.target.value)}>
+                <option value="">请选择需要补签的日期</option>
+                {makeupData.eligibleMissingDates.map((dateKey) => <option key={dateKey} value={dateKey}>{formatDateKey(dateKey)} · 未签到</option>)}
+              </select>
+            </label>
+          ) : null}
+          {!loadingMakeup && makeupData && !makeupData.eligibleMissingDates.length ? <p className="border border-amber-200 bg-amber-50 p-3 text-sm font-bold">当前查询范围内没有可补签的日期。</p> : null}
+
+          {selectedDateKey ? <div className="border border-sky-100 bg-sky-50 p-3 text-sm"><p className="font-black">{formatDateKey(selectedDateKey)}</p><p className="mt-1">当前状态：未签到</p><p className="mt-1">可执行管理员补签</p></div> : null}
+
+          {makeupData?.recentCheckIns.length ? (
+            <div>
+              <p className="mb-2 text-sm font-black">最近签到概览</p>
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+                {makeupData.recentCheckIns.map((item) => <div key={item.checkinDateKey} className={`border p-2 ${item.status === 'MISSING' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><span>{formatDateKey(item.checkinDateKey)}</span><span className="ml-2 font-bold">{item.status === 'MISSING' ? '可补' : '✓'}</span><p className="mt-1 text-xs text-slate-500">{item.status === 'MISSING' ? '未签到' : typeLabel(item.type)}</p></div>)}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <label className="block"><span className="mb-1 block text-sm font-black">补签原因（必填）</span><textarea className="min-h-28 w-full border border-slate-300 p-3" maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="系统异常 / 客服补偿 / 数据修复 / 其他详细原因" /></label>
-      <button className="min-h-11 bg-brand-700 px-5 font-black text-white disabled:opacity-50" disabled={busy || !selected || !targetDate || !reason.trim() || preview?.status === 'CHECKED_IN'} onClick={() => void submit()}>确认免费补签</button>
-      {message ? <p role="status" className="border border-sky-100 bg-sky-50 p-3 text-sm font-bold">{message}</p> : null}
+      <button className="min-h-11 bg-brand-700 px-5 font-black text-white disabled:opacity-50" disabled={Boolean(disabledReason)} onClick={() => void submit()}>确认免费补签</button>
+      {disabledReason ? <p className="text-sm font-bold text-amber-700" role="status">{disabledReason}</p> : null}
+      {message ? <p role="alert" className="whitespace-pre-line border border-sky-100 bg-sky-50 p-3 text-sm font-bold">{message}</p> : null}
     </section>
   )
 }

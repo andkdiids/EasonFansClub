@@ -101,9 +101,10 @@ test('analytics preview batches users and metric signatures instead of badge N+1
 
 test('task center and year review are linked from the museum', () => {
   const museum = read('components/BadgeExhibitionHall.tsx')
-  assert.match(museum, /href="\/badges\/tasks"/)
-  assert.match(museum, /href="\/badges\/year-in-review"/)
-  assert.match(read('components/BadgeCollectionPanel.tsx'), /加入任务/)
+  assert.match(museum, /BadgeCenterTabs/)
+  assert.match(read('components/BadgeCenterTabs.tsx'), /href: '\/badges\/tasks'/)
+  assert.match(read('components/BadgeCenterTabs.tsx'), /href: '\/badges\/year-in-review'/)
+  assert.match(read('components/BadgeCollectionPanel.tsx'), /追踪此勋章/)
 })
 
 test('weekly push is intentionally absent without a reliable scheduler', () => {

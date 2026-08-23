@@ -105,6 +105,16 @@ export type BadgeCollectionView = {
   seriesCompletions?: BadgeSeriesCompletionView[]
 }
 
+/** The client-safe mirror of the server-side tracking eligibility rules. */
+export function canTrackBadgeView(badge: BadgeView) {
+  return badge.status === 'NOT_OBTAINED'
+    && badge.visibility === 'PUBLIC'
+    && badge.grantType === 'AUTO'
+    && badge.isEnabled
+    && Boolean(badge.progress && !badge.progress.progressUnsupported)
+    && (badge.availabilityStatus === 'PERMANENT' || badge.availabilityStatus === 'AVAILABLE')
+}
+
 export type BadgeGallerySeriesView = {
   series: BadgeSeriesView
   collected: number

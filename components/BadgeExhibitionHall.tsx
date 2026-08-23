@@ -1,14 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { BadgeCenterTabs } from '@/components/BadgeCenterTabs'
 import { BadgeDetailDialog } from '@/components/BadgeCollectionPanel'
 import { BadgeImage } from '@/components/UserDisplayName'
 import { chunkMuseumShelves, orderMuseumBadges } from '@/lib/badge-museum'
-import type { BadgeGalleryView, BadgeView } from '@/lib/badge-types'
+import { canTrackBadgeView, type BadgeGalleryView, type BadgeView } from '@/lib/badge-types'
 
 type Props = { gallery: BadgeGalleryView }
-type MuseumView = 'all' | 'mine'
+type MuseumView = 'all' | 'obtained'
 
 function availabilityLabel(badge: BadgeView) {
   if (badge.availabilityStatus === 'ENDED') return '已绝版'
@@ -30,7 +30,7 @@ function BadgeMuseumItem({ badge, onOpen }: { badge: BadgeView; onOpen: () => vo
     >
       <span className="badge-museum-item-image"><BadgeImage badge={badge} size="wall" /></span>
       <span className="badge-museum-item-name">{hidden ? '???' : badge.name}</span>
-      {obtained ? <span className="badge-museum-item-state">{badge.isEquipped ? '佩戴中' : '已收藏'}</span> : hidden ? <span className="badge-museum-item-state">隐藏勋章</span> : <span className="badge-museum-item-state">{limited || (badge.progress ? `${badge.progress.current}/${badge.progress.target}` : '未获得')}</span>}
+      {obtained ? <span className="badge-museum-item-state">{badge.isEquipped ? '佩戴中' : '已获得'}</span> : hidden ? <span className="badge-museum-item-state">隐藏勋章</span> : <span className="badge-museum-item-state">{limited || (badge.progress ? `${badge.progress.current}/${badge.progress.target}` : '未获得')}</span>}
       {limited ? <span className="badge-museum-item-tag">{limited}</span> : null}
     </button>
   )
@@ -49,7 +49,7 @@ export function BadgeExhibitionHall({ gallery }: Props) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const initialView = params.get('view')
-    if (initialView === 'mine' && gallery.isAuthenticated) setView('mine')
+    if ((initialView === 'obtained' || initialView === 'mine') && gallery.isAuthenticated) setView('obtained')
     const requestedSeries = params.get('series')
     const validSeries = requestedSeries && gallery.series.some((entry) => entry.series.id === requestedSeries)
       ? requestedSeries
@@ -58,14 +58,14 @@ export function BadgeExhibitionHall({ gallery }: Props) {
     const badgeId = params.get('badge')
     if (badgeId) {
       const requestedBadge = gallery.items.find((item) => item.id === badgeId)
-      const canOpenInInitialView = initialView === 'mine' || requestedBadge?.visibility !== 'SECRET'
+      const canOpenInInitialView = initialView === 'obtained' || initialView === 'mine' || requestedBadge?.visibility !== 'SECRET'
       setSelected(canOpenInInitialView ? requestedBadge || null : null)
     }
   }, [gallery])
 
   const selectedTierItems = useMemo(() => selected?.tierGroupCode
     ? gallery.items
-      .filter((item) => (view === 'mine' || item.visibility !== 'SECRET') && item.tierGroupCode === selected.tierGroupCode)
+      .filter((item) => (view === 'obtained' || item.visibility !== 'SECRET') && item.tierGroupCode === selected.tierGroupCode)
       .sort((left, right) => (left.tierLevel || 0) - (right.tierLevel || 0))
     : [], [gallery.items, selected, view])
 
@@ -73,8 +73,7 @@ export function BadgeExhibitionHall({ gallery }: Props) {
     const query = search.trim().toLocaleLowerCase('zh-CN')
     return gallery.items.filter((badge) => {
       if (view === 'all' && badge.visibility === 'SECRET') return false
-      // “我的收藏” keeps PUBLIC and safe HIDDEN positions dimmed so the user
-      // can see what remains to collect; unearned SECRET is absent from DTO.
+      if (view === 'obtained' && badge.status !== 'OBTAINED') return false
       if (seriesFilter !== 'all' && badge.series?.id !== seriesFilter) return false
       if (!query || badge.status === 'HIDDEN') return !query || badge.name.toLocaleLowerCase('zh-CN').includes(query)
       return badge.name.toLocaleLowerCase('zh-CN').includes(query)
@@ -83,7 +82,7 @@ export function BadgeExhibitionHall({ gallery }: Props) {
     })
   }, [gallery.items, search, seriesFilter, view])
 
-  const displaySeries = useMemo(() => gallery.series.filter((entry) => view === 'mine' || gallery.items.some((badge) => badge.series?.id === entry.series.id && badge.visibility !== 'SECRET')), [gallery.items, gallery.series, view])
+  const displaySeries = useMemo(() => gallery.series.filter((entry) => gallery.items.some((badge) => badge.series?.id === entry.series.id && badge.visibility !== 'SECRET' && (view === 'all' || badge.status === 'OBTAINED'))), [gallery.items, gallery.series, view])
 
   const sections = useMemo(() => {
     const groups = new Map<string, { id: string; name: string; sortOrder: number; items: BadgeView[] }>()
@@ -107,8 +106,10 @@ export function BadgeExhibitionHall({ gallery }: Props) {
     setView(next)
     if (next === 'all') setSelected((current) => current?.visibility === 'SECRET' ? null : current)
     const params = new URLSearchParams(window.location.search)
-    params.set('view', next)
-    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+    if (next === 'all') params.delete('view')
+    else params.set('view', next)
+    const query = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
   }
 
   const updateSeriesFilter = (next: string) => {
@@ -119,43 +120,58 @@ export function BadgeExhibitionHall({ gallery }: Props) {
     window.history.replaceState(null, '', `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`)
   }
 
+  const openBadge = (badge: BadgeView) => {
+    setSelected(badge)
+    const params = new URLSearchParams(window.location.search)
+    params.set('badge', badge.id)
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+  }
+
+  const closeBadge = () => {
+    setSelected(null)
+    const params = new URLSearchParams(window.location.search)
+    params.delete('badge')
+    const query = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
+  }
+
   return (
     <section className="badge-museum-page">
-      <header className="badge-museum-hero">
+      <header className="badge-center-heading">
         <div>
-          <p className="badge-museum-kicker">EASON FANS CLUB · HONOR ARCHIVE</p>
           <h1>勋章展览馆</h1>
           <p className="badge-museum-intro">把每一份真实获得的荣誉，放进属于 E 院的陈列柜。</p>
         </div>
-        <div className="badge-museum-stat" aria-label="我的馆藏完成度">
-          <span>我的馆藏</span>
+        <div className="badge-center-heading-stat" aria-label="我的勋章完成度">
+          <span>我的勋章</span>
           <strong>{gallery.collectibleObtainedCount} <em>/ {gallery.collectibleTotal}</em></strong>
           <small>完成度 {gallery.completionPercentage}%</small>
         </div>
       </header>
 
+      <BadgeCenterTabs active="all" />
+
       <div className="badge-museum-toolbar">
-        <div className="badge-museum-tabs" role="tablist" aria-label="展览视角">
-          <button type="button" role="tab" aria-selected={view === 'all'} onClick={() => updateView('all')}>全部馆藏</button>
-          {gallery.isAuthenticated ? <button type="button" role="tab" aria-selected={view === 'mine'} onClick={() => updateView('mine')}>我的收藏</button> : null}
-        </div>
         <label className="badge-museum-search"><span className="sr-only">搜索勋章</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索勋章" /></label>
-        {gallery.isAuthenticated ? <div className="flex gap-2"><Link href="/badges/tasks" className="rounded-full bg-sky-50 px-4 py-2 text-xs font-black text-brand-700">任务</Link><Link href="/badges/year-in-review" className="rounded-full bg-amber-50 px-4 py-2 text-xs font-black text-amber-800">年度回顾</Link></div> : null}
+        {gallery.isAuthenticated ? <div className="badge-museum-view-filters" role="tablist" aria-label="展览筛选">
+          <button type="button" role="tab" aria-selected={view === 'all'} onClick={() => updateView('all')}>全部</button>
+          <button type="button" role="tab" aria-selected={view === 'obtained'} onClick={() => updateView('obtained')}>已获得</button>
+        </div> : null}
       </div>
       <nav className="badge-museum-series-nav" aria-label="勋章系列导航">
-        <button type="button" className={seriesFilter === 'all' ? 'is-active' : ''} onClick={() => updateSeriesFilter('all')}>全部</button>
+        <button type="button" className={seriesFilter === 'all' ? 'is-active' : ''} onClick={() => updateSeriesFilter('all')}>全部系列</button>
         {displaySeries.map((entry, index) => <button type="button" key={entry.series.id} className={seriesFilter === entry.series.id ? 'is-active' : ''} onClick={() => updateSeriesFilter(entry.series.id)}>{String(index + 1).padStart(2, '0')} {entry.series.name}</button>)}
       </nav>
 
       {sections.length ? <div className="badge-museum-sections">{sections.map((section, sectionIndex) => {
         const completion = gallery.series.find((entry) => entry.series.id === section.id)
         return <section key={section.id} id={`badge-series-${section.id}`} className="badge-museum-series">
-          <header className="badge-museum-series-header"><div className="badge-museum-series-title"><span className="badge-museum-series-number">{String(sectionIndex + 1).padStart(2, '0')}</span><div><h2>{section.name}</h2>{completion ? <p>{completion.completed ? '系列完成 ✓' : `已收藏 ${completion.collected} / ${completion.total}`} · {completion.percentage}%</p> : <p>荣誉陈列</p>}</div></div>{completion?.reward ? <span className="badge-museum-reward">{completion.reward.status === 'HIDDEN' ? '完成奖励 · ???' : completion.reward.status === 'OBTAINED' ? '已解锁系列奖励' : '完成奖励 · 未解锁'}</span> : null}</header>
-          <div className="badge-museum-cabinet"><div className="badge-museum-cabinet-cap" />{section.shelves.map((shelf, shelfIndex) => <div className="badge-museum-shelf" key={`${section.id}-${shelfIndex}`}><span className="badge-museum-shelf-number">Shelf {String(shelfIndex + 1).padStart(2, '0')}</span><div className="badge-museum-shelf-display">{shelf.map((badge) => <BadgeMuseumItem key={badge.id} badge={badge} onOpen={() => setSelected(badge)} />)}</div><div className="badge-museum-shelf-board" /></div>)}<div className="badge-museum-cabinet-base" /></div>
+          <header className="badge-museum-series-header"><div className="badge-museum-series-title"><span className="badge-museum-series-number">{String(sectionIndex + 1).padStart(2, '0')}</span><div><h2>{section.name}</h2>{completion ? <p>{completion.completed ? '系列完成 ✓' : `已获得 ${completion.collected} / ${completion.total}`} · {completion.percentage}%</p> : <p>荣誉陈列</p>}</div></div>{completion?.reward ? <span className="badge-museum-reward">{completion.reward.status === 'HIDDEN' ? '完成奖励 · ???' : completion.reward.status === 'OBTAINED' ? '已解锁系列奖励' : '完成奖励 · 未解锁'}</span> : null}</header>
+          <div className="badge-museum-cabinet"><div className="badge-museum-cabinet-cap" />{section.shelves.map((shelf, shelfIndex) => <div className="badge-museum-shelf" key={`${section.id}-${shelfIndex}`}><span className="badge-museum-shelf-number">Shelf {String(shelfIndex + 1).padStart(2, '0')}</span><div className="badge-museum-shelf-display">{shelf.map((badge) => <BadgeMuseumItem key={badge.id} badge={badge} onOpen={() => openBadge(badge)} />)}</div><div className="badge-museum-shelf-board" /></div>)}<div className="badge-museum-cabinet-base" /></div>
         </section>
       })}</div> : <MuseumEmptyState />}
 
-      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={() => setSelected(null)} canEquip={false} canTrack={gallery.isAuthenticated && selected.status !== 'OBTAINED' && selected.status !== 'HIDDEN' && Boolean(selected.progress && !selected.progress.progressUnsupported) && ['PERMANENT', 'AVAILABLE'].includes(selected.availabilityStatus || '')} onEquip={() => undefined} onUnequip={() => undefined} busy={false} /> : null}
+      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={closeBadge} canEquip={false} canTrack={gallery.isAuthenticated && canTrackBadgeView(selected)} onEquip={() => undefined} onUnequip={() => undefined} busy={false} /> : null}
     </section>
   )
 }

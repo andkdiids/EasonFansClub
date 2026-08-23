@@ -140,7 +140,7 @@ export async function trackBadge(userId: string, badgeId: string) {
       const existing = await tx.userBadgeTracking.findUnique({ where: { userId_badgeId: { userId, badgeId } } })
       if (existing) return existing
       const count = await tx.userBadgeTracking.count({ where: { userId } })
-      if (count >= MAX_BADGE_TRACKING) throw new Error(`最多只能追踪 ${MAX_BADGE_TRACKING} 枚勋章`)
+      if (count >= MAX_BADGE_TRACKING) throw new Error(`最多同时追踪 ${MAX_BADGE_TRACKING} 枚勋章，请先取消一个目标。`)
       return tx.userBadgeTracking.create({ data: { userId, badgeId } })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   } catch (error) {

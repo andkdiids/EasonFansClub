@@ -99,7 +99,7 @@ test('39-48 管理员历史补签使用 checkin_manage、免费、不占额度�
   assert.match(route, /CHECK_IN_ADMIN_MAKEUP/)
   assert.match(route, /longTermRewardTriggered/)
   assert.match(route, /if \(!reason\)/)
-  assert.match(route, /targetDateKey >= getShanghaiDateKey/)
+  assert.match(route, /targetDateKey >= todayKey/)
   assert.match(route, /ALREADY_CHECKED_IN/)
   assert.doesNotMatch(route, /consumeRegistrationFee|pointLog/)
   const service = source('lib/checkin-makeup.ts')

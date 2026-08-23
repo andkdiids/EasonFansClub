@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BadgeImage } from '@/components/UserDisplayName'
-import { BADGE_RARITY_LABELS, type BadgeCollectionView, type BadgeShowcaseItemView, type BadgeView } from '@/lib/badge-types'
+import { BADGE_RARITY_LABELS, canTrackBadgeView, type BadgeCollectionView, type BadgeShowcaseItemView, type BadgeView } from '@/lib/badge-types'
 
 type Props = { uid: string; isSelf: boolean; previewOnly?: boolean }
 
@@ -27,14 +27,25 @@ export type BadgeDetailDialogProps = { badge: BadgeView; tierItems: BadgeView[];
 
 export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrack = false, onEquip, onUnequip, onShare, busy }: BadgeDetailDialogProps) {
   const [tracked, setTracked] = useState(false)
+  const [trackingCount, setTrackingCount] = useState(0)
+  const [trackingLimit, setTrackingLimit] = useState(10)
   const [trackingBusy, setTrackingBusy] = useState(false)
   const [trackingMessage, setTrackingMessage] = useState('')
 
   useEffect(() => {
+    setTracked(false)
+    setTrackingCount(0)
+    setTrackingMessage('')
     if (!canTrack) return
+    let active = true
     void fetch('/api/users/me/badge-tasks', { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).then((data) => {
-      setTracked(Boolean(data?.tracking?.some((item: { id: string }) => item.id === badge.id)))
+      if (!active) return
+      const items = Array.isArray(data?.tracking) ? data.tracking as Array<{ id: string }> : []
+      setTracked(items.some((item) => item.id === badge.id))
+      setTrackingCount(items.length)
+      if (Number.isInteger(data?.maxTracking)) setTrackingLimit(data.maxTracking)
     }).catch(() => undefined)
+    return () => { active = false }
   }, [badge.id, canTrack])
 
   const toggleTracking = async () => {
@@ -43,7 +54,10 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
       const response = await fetch(`/api/users/me/badge-tasks/${encodeURIComponent(badge.id)}`, { method: tracked ? 'DELETE' : 'POST' })
       const data = await response.json().catch(() => null) as { message?: string } | null
       if (!response.ok) throw new Error(data?.message || '操作失败')
-      setTracked((value) => !value)
+      const nextTracked = !tracked
+      setTracked(nextTracked)
+      setTrackingCount((value) => Math.max(0, value + (nextTracked ? 1 : -1)))
+      window.dispatchEvent(new CustomEvent('eason-badge-task-updated', { detail: { badgeId: badge.id, tracked: nextTracked } }))
     } catch (error) { setTrackingMessage(error instanceof Error ? error.message : '操作失败') } finally { setTrackingBusy(false) }
   }
   return (
@@ -70,7 +84,10 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
           </div>
         ) : null}
         {onShare ? <button type="button" onClick={onShare} disabled={busy} className="mt-3 min-h-10 rounded-full border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-800">分享勋章</button> : null}
-        {canTrack ? <button type="button" onClick={() => void toggleTracking()} disabled={trackingBusy} className="mt-3 min-h-10 rounded-full border border-sky-200 bg-sky-50 px-4 text-sm font-black text-brand-700">{trackingBusy ? '处理中…' : tracked ? '取消追踪' : '加入任务'}</button> : null}
+        {canTrack ? <>
+          <button type="button" onClick={() => void toggleTracking()} disabled={trackingBusy} aria-pressed={tracked} className={`mt-3 min-h-10 rounded-full border px-4 text-sm font-black ${tracked ? 'border-brand-700 bg-brand-950 text-white' : 'border-sky-200 bg-sky-50 text-brand-700'}`}>{trackingBusy ? '处理中…' : tracked ? '✓ 正在追踪（取消）' : '＋ 追踪此勋章'}</button>
+          <p className="mt-1 text-[11px] font-bold text-slate-500">正在追踪 {trackingCount} / {trackingLimit} 枚</p>
+        </> : null}
         {trackingMessage ? <p className="mt-2 text-xs font-bold text-rose-600">{trackingMessage}</p> : null}
       </section>
     </div>
@@ -119,6 +136,21 @@ export function BadgeCollectionPanel({ uid, isSelf, previewOnly = true }: Props)
   const [showcaseIds, setShowcaseIds] = useState<string[]>([])
   const [savingShowcase, setSavingShowcase] = useState(false)
   const [shareSrc, setShareSrc] = useState<string | null>(null)
+
+  const openBadge = useCallback((badge: BadgeView) => {
+    setSelected(badge)
+    const params = new URLSearchParams(window.location.search)
+    params.set('badge', badge.id)
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+  }, [])
+
+  const closeBadge = useCallback(() => {
+    setSelected(null)
+    const params = new URLSearchParams(window.location.search)
+    params.delete('badge')
+    const query = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -272,10 +304,10 @@ export function BadgeCollectionPanel({ uid, isSelf, previewOnly = true }: Props)
         )}
       </div>
       {error ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700">{error}</p> : null}
-      {collection.showcase?.length || collection.recent?.length ? <div className="mt-4 grid gap-4 lg:grid-cols-2"><div id="showcase" className="rounded-2xl border border-amber-100 bg-amber-50/50 p-4"><div className="flex items-center justify-between gap-2"><h3 className="text-sm font-black text-brand-950">荣誉橱窗</h3>{isSelf ? <button type="button" onClick={() => void openShowcaseEditor()} className="text-xs font-black text-brand-700">编辑橱窗</button> : null}</div><div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">{(collection.showcase || []).map((item) => <button key={item.badge.id} type="button" onClick={() => setSelected(item.badge)} className="grid min-w-0 place-items-center gap-1 rounded-xl bg-white/80 p-2"><BadgeImage badge={item.badge} size="wall" /><span className="w-full truncate text-center text-[10px] font-black text-brand-950">{item.badge.name}</span></button>)}{!collection.showcase?.length ? <p className="col-span-full py-3 text-xs font-bold text-slate-500">还没有放入橱窗的勋章。</p> : null}</div></div><div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><h3 className="text-sm font-black text-brand-950">最近获得</h3><div className="mt-3 space-y-2">{(collection.recent || []).slice(0, 5).map((badge) => <button key={badge.id} type="button" onClick={() => setSelected(badge)} className="flex w-full items-center gap-2 rounded-xl bg-white/80 p-2 text-left"><BadgeImage badge={badge} size="wall" /><span className="min-w-0"><strong className="block truncate text-xs font-black text-brand-950">{badge.name}</strong><span className="text-[10px] font-bold text-slate-500">获得于 {formatDate(badge.obtainedAt)}</span></span></button>)}{!collection.recent?.length ? <p className="py-3 text-xs font-bold text-slate-500">还没有获得记录。</p> : null}</div></div></div> : null}
+      {collection.showcase?.length || collection.recent?.length ? <div className="mt-4 grid gap-4 lg:grid-cols-2"><div id="showcase" className="rounded-2xl border border-amber-100 bg-amber-50/50 p-4"><div className="flex items-center justify-between gap-2"><h3 className="text-sm font-black text-brand-950">荣誉橱窗</h3>{isSelf ? <button type="button" onClick={() => void openShowcaseEditor()} className="text-xs font-black text-brand-700">编辑橱窗</button> : null}</div><div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">{(collection.showcase || []).map((item) => <button key={item.badge.id} type="button" onClick={() => openBadge(item.badge)} className="grid min-w-0 place-items-center gap-1 rounded-xl bg-white/80 p-2"><BadgeImage badge={item.badge} size="wall" /><span className="w-full truncate text-center text-[10px] font-black text-brand-950">{item.badge.name}</span></button>)}{!collection.showcase?.length ? <p className="col-span-full py-3 text-xs font-bold text-slate-500">还没有放入橱窗的勋章。</p> : null}</div></div><div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><h3 className="text-sm font-black text-brand-950">最近获得</h3><div className="mt-3 space-y-2">{(collection.recent || []).slice(0, 5).map((badge) => <button key={badge.id} type="button" onClick={() => openBadge(badge)} className="flex w-full items-center gap-2 rounded-xl bg-white/80 p-2 text-left"><BadgeImage badge={badge} size="wall" /><span className="min-w-0"><strong className="block truncate text-xs font-black text-brand-950">{badge.name}</strong><span className="text-[10px] font-bold text-slate-500">获得于 {formatDate(badge.obtainedAt)}</span></span></button>)}{!collection.recent?.length ? <p className="py-3 text-xs font-bold text-slate-500">还没有获得记录。</p> : null}</div></div></div> : null}
       {!previewOnly && collection.seriesCompletions?.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2">{collection.seriesCompletions.map((series) => <Link key={series.series.id} href={`/badge-series/${series.series.id}`} className="rounded-2xl border border-violet-100 bg-violet-50/50 p-3"><div className="flex items-center justify-between gap-2"><strong className="text-sm font-black text-brand-950">{series.series.name}</strong><span className="text-xs font-black text-violet-700">{series.completed ? '已完成' : `${series.collected}/${series.total}`}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white"><span className="block h-full rounded-full bg-violet-700" style={{ width: `${series.percentage}%` }} /></div>{series.reward ? <p className="mt-2 text-[11px] font-bold text-slate-500">完成奖励：{series.reward.status === 'HIDDEN' ? '???' : series.reward.name}</p> : null}</Link>)}</div> : null}
-      {!previewOnly && (groupedItems.length ? <div className="mt-4 space-y-5">{groupedItems.map((group) => <div key={group.name}><h3 className="mb-2 flex items-center gap-2 text-sm font-black text-brand-950"><span>{group.name}</span><span className="text-[11px] font-bold text-slate-400">{group.items.length} 枚</span></h3><div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3">{group.items.map((badge) => <BadgeCard key={badge.id} badge={badge} isSelf={isSelf} onOpen={() => setSelected(badge)} onEquip={() => void changeEquipment(badge, true)} onUnequip={() => void changeEquipment(badge, false)} busy={busyId === badge.id} />)}</div></div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-sky-200 px-4 py-6 text-center text-sm font-bold text-slate-500">还没有可展示的勋章。</p>)}
-      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={() => setSelected(null)} canEquip={isSelf && selected.status === 'OBTAINED' && selected.isWearable && selected.isEnabled} canTrack={isSelf && selected.status !== 'OBTAINED' && selected.status !== 'HIDDEN' && Boolean(selected.progress && !selected.progress.progressUnsupported) && ['PERMANENT', 'AVAILABLE'].includes(selected.availabilityStatus || '')} onEquip={() => void changeEquipment(selected, true)} onUnequip={() => void changeEquipment(selected, false)} onShare={isSelf && selected.status === 'OBTAINED' ? () => void shareBadge(selected) : undefined} busy={busyId === selected.id} /> : null}
+      {!previewOnly && (groupedItems.length ? <div className="mt-4 space-y-5">{groupedItems.map((group) => <div key={group.name}><h3 className="mb-2 flex items-center gap-2 text-sm font-black text-brand-950"><span>{group.name}</span><span className="text-[11px] font-bold text-slate-400">{group.items.length} 枚</span></h3><div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3">{group.items.map((badge) => <BadgeCard key={badge.id} badge={badge} isSelf={isSelf} onOpen={() => openBadge(badge)} onEquip={() => void changeEquipment(badge, true)} onUnequip={() => void changeEquipment(badge, false)} busy={busyId === badge.id} />)}</div></div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-sky-200 px-4 py-6 text-center text-sm font-bold text-slate-500">还没有可展示的勋章。</p>)}
+      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={closeBadge} canEquip={isSelf && selected.status === 'OBTAINED' && selected.isWearable && selected.isEnabled} canTrack={isSelf && canTrackBadgeView(selected)} onEquip={() => void changeEquipment(selected, true)} onUnequip={() => void changeEquipment(selected, false)} onShare={isSelf && selected.status === 'OBTAINED' ? () => void shareBadge(selected) : undefined} busy={busyId === selected.id} /> : null}
       {showcaseEditor ? <ShowcaseEditor badges={showcaseCandidates} selectedIds={showcaseIds} onToggle={(badgeId) => setShowcaseIds((current) => current.includes(badgeId) ? current.filter((id) => id !== badgeId) : current.length >= 6 ? current : [...current, badgeId])} onMove={moveShowcase} onClose={() => setShowcaseEditor(false)} onSave={() => void saveShowcase()} saving={savingShowcase} /> : null}
       {shareSrc ? <ShareCardDialog src={shareSrc} onClose={() => { URL.revokeObjectURL(shareSrc); setShareSrc(null) }} /> : null}
     </section>

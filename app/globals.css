@@ -6065,6 +6065,25 @@ body:has(.duel-page) .app-page-content {
 .admin-badge-list-button.danger { border-color:#fecaca; color:#b91c1c; background:#fff1f2; }
 .badge-admin-dialog { width:min(620px,100%); max-height:min(80vh,720px); overflow:auto; border:1px solid var(--border,#cbd5e1); border-radius:20px; padding:22px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 18px 60px rgba(15,23,42,.2); }
 
+/* Badge center: shared page chrome keeps the museum, tasks and review inside E院. */
+.badge-center-page { min-width:0; color:var(--foreground); }
+.badge-center-heading { display:flex; min-width:0; align-items:flex-end; justify-content:space-between; gap:18px; border-bottom:1px solid var(--border); padding:4px 0 16px; }
+.badge-center-heading h1 { margin:0; color:var(--foreground); font-size:clamp(24px,4vw,32px); font-weight:950; letter-spacing:-.04em; }
+.badge-center-heading p { margin:6px 0 0; color:var(--foreground-muted); font-size:13px; font-weight:700; line-height:1.7; }
+.badge-center-heading-stat { flex:none; color:var(--foreground-muted); font-size:12px; font-weight:800; text-align:right; }
+.badge-center-heading-stat strong { color:var(--primary); font-size:22px; font-weight:950; }
+.badge-center-heading-stat strong em { color:var(--foreground-muted); font-size:14px; font-style:normal; }
+.badge-center-heading-stat small { display:block; margin-top:2px; color:var(--foreground-muted); font-size:11px; font-weight:800; }
+.badge-center-heading-stat span { margin-left:4px; }
+.badge-center-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; width:100%; border-bottom:1px solid var(--border); padding:4px; background:color-mix(in srgb,var(--surface-subtle) 72%,transparent); }
+.badge-center-tab { display:flex; min-height:40px; align-items:center; justify-content:center; border-bottom:2px solid transparent; color:var(--foreground-muted); font-size:13px; font-weight:900; text-decoration:none; transition:color 150ms ease,background 150ms ease,border-color 150ms ease; }
+.badge-center-tab:hover { color:var(--primary); background:color-mix(in srgb,var(--primary) 7%,transparent); }
+.badge-center-tab[aria-current='page'] { border-color:var(--primary); color:var(--primary); background:var(--surface); }
+.badge-center-panel { border:1px solid var(--border); background:color-mix(in srgb,var(--surface) 92%,transparent); box-shadow:0 8px 22px rgba(15,23,42,.05); }
+.badge-center-empty { border:1px dashed var(--border); background:var(--surface-subtle); }
+.badge-center-page :where(.rounded-2xl,.rounded-3xl) { border-radius:10px; }
+.badge-center-page :where(.rounded-xl) { border-radius:8px; }
+
 /* Phase 4: the exhibition hall is a light, CSS-only cabinet rather than a second card grid. */
 .badge-museum-page { min-width:0; color:var(--foreground); }
 .badge-museum-hero { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:20px; border:1px solid var(--border); border-radius:24px; padding:26px; background:linear-gradient(135deg, color-mix(in srgb,var(--surface) 92%,#d7b98b), var(--surface-subtle)); box-shadow:0 14px 34px rgba(57,42,25,.08); }
@@ -6075,13 +6094,16 @@ body:has(.duel-page) .app-page-content {
 .badge-museum-stat span,.badge-museum-stat small { display:block; color:var(--foreground-muted); font-size:11px; font-weight:800; }
 .badge-museum-stat strong { display:block; margin:5px 0 2px; color:var(--foreground); font-size:28px; font-weight:950; }
 .badge-museum-stat strong em { color:var(--foreground-muted); font-size:14px; font-style:normal; }
-.badge-museum-toolbar { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:12px; margin-top:18px; }
+.badge-museum-toolbar { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; margin-top:16px; }
 .badge-museum-tabs { display:flex; gap:6px; }
 .badge-museum-tabs button,.badge-museum-series-nav button { min-height:38px; border:1px solid var(--border); border-radius:999px; padding:8px 14px; color:var(--foreground-muted); background:var(--surface); font-size:12px; font-weight:900; cursor:pointer; }
 .badge-museum-tabs button[aria-selected='true'],.badge-museum-series-nav button.is-active { border-color:color-mix(in srgb,var(--primary) 45%,var(--border)); color:var(--primary-foreground); background:var(--primary); }
 .badge-museum-search { min-width:150px; max-width:230px; flex:1; }
 .badge-museum-search input { box-sizing:border-box; width:100%; min-height:38px; border:1px solid var(--border); border-radius:999px; padding:8px 14px; color:var(--foreground); background:var(--surface); font:inherit; font-size:12px; font-weight:700; outline:none; }
 .badge-museum-search input:focus { border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 18%,transparent); }
+.badge-museum-view-filters { display:flex; gap:6px; }
+.badge-museum-view-filters button { min-height:38px; border:1px solid var(--border); border-radius:999px; padding:8px 14px; color:var(--foreground-muted); background:var(--surface); font-size:12px; font-weight:900; cursor:pointer; }
+.badge-museum-view-filters button[aria-selected='true'] { border-color:color-mix(in srgb,var(--primary) 45%,var(--border)); color:var(--primary-foreground); background:var(--primary); }
 .badge-museum-series-nav { display:flex; min-width:0; gap:7px; margin:12px 0 20px; overflow-x:auto; padding:2px 1px 5px; scrollbar-width:none; }
 .badge-museum-series-nav::-webkit-scrollbar { display:none; }
 .badge-museum-series-nav button { flex:none; min-height:34px; padding-inline:12px; }
@@ -6093,7 +6115,7 @@ body:has(.duel-page) .app-page-content {
 .badge-museum-series-header h2 { margin:0; overflow:hidden; color:var(--foreground); font-size:19px; font-weight:950; text-overflow:ellipsis; white-space:nowrap; }
 .badge-museum-series-header p { margin:3px 0 0; color:var(--foreground-muted); font-size:11px; font-weight:800; }
 .badge-museum-reward { flex:none; border:1px solid color-mix(in srgb,#c99a53 40%,var(--border)); border-radius:999px; padding:6px 10px; color:#94601f; background:color-mix(in srgb,#f6d99c 32%,var(--surface)); font-size:10px; font-weight:900; }
-.badge-museum-cabinet { position:relative; overflow:hidden; border:1px solid color-mix(in srgb,#8b633d 35%,var(--border)); border-radius:17px; padding:10px 12px 13px; background:linear-gradient(180deg,color-mix(in srgb,#8f6848 11%,var(--surface)),color-mix(in srgb,#5b3d27 12%,var(--surface-subtle))); box-shadow:inset 0 1px 0 rgba(255,255,255,.62),0 12px 26px rgba(65,45,27,.08); }
+.badge-museum-cabinet { position:relative; overflow:hidden; border:1px solid color-mix(in srgb,#8b633d 35%,var(--border)); border-radius:10px; padding:10px 12px 13px; background:linear-gradient(180deg,color-mix(in srgb,#8f6848 11%,var(--surface)),color-mix(in srgb,#5b3d27 12%,var(--surface-subtle))); box-shadow:inset 0 1px 0 rgba(255,255,255,.62),0 12px 26px rgba(65,45,27,.08); }
 .badge-museum-cabinet-cap { height:5px; margin:-10px -2px 9px; border-radius:999px; background:linear-gradient(90deg,transparent,#c89b63 18%,#efd29a 50%,#c89b63 82%,transparent); opacity:.7; }
 .badge-museum-shelf { position:relative; min-width:0; padding:12px 7px 0; }
 .badge-museum-shelf-display { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:end; gap:7px; min-height:104px; padding:0 5px 9px; }
@@ -6113,7 +6135,7 @@ body:has(.duel-page) .app-page-content {
 .badge-museum-item-state { max-width:100%; overflow:hidden; color:var(--foreground-muted); font-size:8px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
 .badge-museum-item-tag { position:absolute; top:0; right:0; border-radius:999px; padding:2px 4px; color:#94601f; background:color-mix(in srgb,#f6d99c 68%,var(--surface)); font-size:7px; font-weight:950; }
 .badge-museum-cabinet-base { height:13px; margin:10px -2px -4px; border-top:1px solid color-mix(in srgb,#754a2a 42%,var(--border)); border-radius:0 0 10px 10px; background:linear-gradient(180deg,color-mix(in srgb,#8a5d36 34%,var(--surface)),color-mix(in srgb,#4d321f 23%,var(--surface-subtle))); }
-.badge-museum-empty { display:grid; min-height:240px; place-items:center; align-content:center; gap:8px; border:1px dashed var(--border); border-radius:20px; color:var(--foreground-muted); background:var(--surface-subtle); text-align:center; }
+.badge-museum-empty { display:grid; min-height:240px; place-items:center; align-content:center; gap:8px; border:1px dashed var(--border); border-radius:10px; color:var(--foreground-muted); background:var(--surface-subtle); text-align:center; }
 .badge-museum-empty strong { color:var(--foreground); font-size:16px; }
 .badge-museum-empty span:last-child { font-size:12px; font-weight:700; }
 .badge-museum-empty-mark { color:#c89b63; font-size:30px; }
@@ -6145,10 +6167,13 @@ body:has(.duel-page) .app-page-content {
   .badge-mini-showcase-cabinet { grid-template-columns:repeat(6,minmax(0,1fr)); }
 }
 @media (max-width:767px) {
+  .badge-center-heading { align-items:flex-start; flex-direction:column; gap:8px; padding-bottom:12px; }
+  .badge-center-heading-stat { text-align:left; }
+  .badge-center-tabs { position:relative; }
   .badge-museum-hero { grid-template-columns:minmax(0,1fr); gap:16px; padding:20px; }
   .badge-museum-stat { border-top:1px solid var(--border); border-left:0; padding:12px 0 0; text-align:left; }
   .badge-museum-stat strong { font-size:24px; }
-  .badge-museum-toolbar { align-items:stretch; flex-direction:column; }
+  .badge-museum-toolbar { grid-template-columns:minmax(0,1fr); align-items:stretch; }
   .badge-museum-search { max-width:none; }
   .badge-museum-series-header { align-items:flex-start; flex-direction:column; }
   .badge-museum-reward { margin-left:44px; }

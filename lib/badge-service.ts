@@ -306,7 +306,7 @@ function progressForRule(metric: number, rule: { operator: string; threshold: nu
 }
 
 async function addProgressToUnownedBadges(userId: string, badges: readonly DbCollectionBadge[], items: BadgeView[]) {
-  const candidates = badges.filter((badge) => badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.BadgeRule?.isEnabled && badge.BadgeRule.ruleType !== 'BADGE_SERIES_COMPLETE' && badge.BadgeRule.threshold !== null && getBadgeAvailability(badge) === 'AVAILABLE')
+  const candidates = badges.filter((badge) => badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.BadgeRule?.isEnabled && badge.BadgeRule.ruleType !== 'BADGE_SERIES_COMPLETE' && badge.BadgeRule.threshold !== null && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge)))
   if (!candidates.length) return
   const metrics = new Map<string, number>()
   for (const badge of candidates) {
