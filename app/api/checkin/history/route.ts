@@ -3,6 +3,8 @@ import { getCurrentCheckInMonth, getCheckInMonthBounds, getCheckInMonthKey, pars
 import { getCurrentUser } from '@/lib/auth'
 import { getBeijingDateKey } from '@/lib/beijing-time'
 import { prisma } from '@/lib/prisma'
+import { getMakeupEligibility, getMakeupWeek, getShanghaiMonthKey, getShanghaiWeekStart, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
+import { shiftShanghaiDateKey } from '@/lib/checkin'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +37,9 @@ export async function GET(request: Request) {
   const { startKey, endKey } = getCheckInMonthBounds(year, month)
   const monthKey = getCheckInMonthKey(year, month)
   const todayKey = getBeijingDateKey()
-  const [firstRecord, records, recordsWithMessages] = await Promise.all([
+  const currentWeek = getMakeupWeek(todayKey)
+  const candidateStart = shiftShanghaiDateKey(getShanghaiWeekStart(todayKey), new Date(`${todayKey}T12:00:00+08:00`).getUTCDay() === 1 ? -1 : 0)
+  const [firstRecord, records, recordsWithMessages, recordTypes, currentWeekMakeup, makeupsInWindow, monthlyChallenge, profile] = await Promise.all([
     prisma.checkIn.findFirst({
       where: { userId: user.id },
       orderBy: { checkinDateKey: 'asc' },
@@ -50,11 +54,35 @@ export async function GET(request: Request) {
       where: { userId: user.id, checkinDateKey: { gte: startKey, lt: endKey }, message: { not: null } },
       select: { id: true },
     }),
+    prisma.checkIn.findMany({
+      where: { userId: user.id, checkinDateKey: { gte: startKey, lt: endKey } },
+      select: { id: true, type: true },
+    }),
+    prisma.checkIn.findFirst({
+      where: { userId: user.id, type: { in: USER_MAKEUP_TYPES }, checkinDateKey: { gte: currentWeek.startKey, lt: currentWeek.endKey } },
+      select: { id: true },
+    }),
+    prisma.checkIn.findMany({
+      where: { userId: user.id, type: { in: USER_MAKEUP_TYPES }, checkinDateKey: { gte: getShanghaiWeekStart(candidateStart), lt: todayKey } },
+      select: { checkinDateKey: true },
+    }),
+    prisma.makeupChallenge.findUnique({
+      where: { userId_monthKey: { userId: user.id, monthKey: getShanghaiMonthKey() } },
+      select: { status: true, targetDateKey: true },
+    }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { points: true } }),
   ])
 
   const recordIdsWithMessages = new Set(recordsWithMessages.map((record) => record.id))
+  const typeById = new Map(recordTypes.map((record) => [record.id, record.type]))
   const firstDate = firstRecord ? parseCheckInDateKey(firstRecord.checkinDateKey) : null
   const targetIsFuture = monthKey > todayKey.slice(0, 7)
+  const eligibleDateKeys: string[] = []
+  for (let key = candidateStart; key < todayKey; key = shiftShanghaiDateKey(key, 1)) {
+    const eligibility = getMakeupEligibility(key)
+    const weekUsed = eligibility.eligible && makeupsInWindow.some((record) => record.checkinDateKey >= eligibility.week.startKey && record.checkinDateKey < eligibility.week.endKey)
+    if (key >= startKey && key < endKey && eligibility.eligible && !weekUsed && !records.some((record) => record.checkinDateKey === key)) eligibleDateKeys.push(key)
+  }
 
   return NextResponse.json({
     year,
@@ -71,8 +99,18 @@ export async function GET(request: Request) {
       moodType: record.moodType,
       moodEmoji: record.moodEmoji,
       moodText: record.moodText,
+      type: typeById.get(record.id) || 'NORMAL',
       hasMessage: recordIdsWithMessages.has(record.id),
     })),
+    makeup: {
+      eligibleDateKeys,
+      weeklyAvailable: !currentWeekMakeup,
+      monthlyChallengeAvailable: !monthlyChallenge,
+      monthlyChallengePending: monthlyChallenge?.status === 'PENDING',
+      monthlyChallengeTargetDate: monthlyChallenge?.status === 'PENDING' ? monthlyChallenge.targetDateKey : null,
+      cost: 74,
+      currentBalance: profile?.points ?? 0,
+    },
     isFutureMonth: targetIsFuture,
   }, {
     headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' },

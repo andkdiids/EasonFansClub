@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
+import { CheckInMakeupDialog } from '@/components/CheckInMakeupDialog'
 import {
   compareCheckInMonths,
   getCheckInCalendarCells,
@@ -26,8 +27,16 @@ type MonthResponse = {
   earliestYear: number
   records: CheckInHistoryMonthRecord[]
   isFutureMonth: boolean
+  makeup: {
+    eligibleDateKeys: string[]
+    weeklyAvailable: boolean
+    monthlyChallengeAvailable: boolean
+    monthlyChallengePending: boolean
+    monthlyChallengeTargetDate: string | null
+    cost: number
+    currentBalance: number
+  }
 }
-
 type DetailResponse = { record: CheckInHistoryDetail }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -61,6 +70,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
   const [detail, setDetail] = useState<CheckInHistoryDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
+  const [selectedMakeupDate, setSelectedMakeupDate] = useState<string | null>(null)
   const cacheRef = useRef(new Map<string, MonthResponse>())
   const detailCacheRef = useRef(new Map<string, CheckInHistoryDetail>())
   const requestIdRef = useRef(0)
@@ -274,7 +284,8 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
               </div>
             ) : null}
 
-            <div className="checkin-history-dialog-body">
+              <div className="checkin-history-dialog-body">
+              {monthData ? <div className="mb-3 grid grid-cols-2 gap-2 text-sm font-black"><p className="border border-sky-100 bg-sky-50 p-2">本周补签：{monthData.makeup.weeklyAvailable ? '1次可用' : '已使用'}</p><p className="border border-sky-100 bg-sky-50 p-2">本月免费挑战：{monthData.makeup.monthlyChallengeAvailable || monthData.makeup.monthlyChallengePending ? '1次可用' : '已使用'}</p></div> : null}
               {loadError ? <p className="checkin-history-state is-error" role="alert">{loadError}</p> : null}
               {isLoading && !monthData ? <p className="checkin-history-state">正在加载本月记录…</p> : null}
               <div className="checkin-history-calendar" aria-label={`${view.year}年${view.month}月挂号记录`}>
@@ -285,9 +296,11 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                   {calendarCells.map((cell) => {
                     const record = recordsByDate.get(cell.key)
                     const isFuture = cell.key > currentMonth.dateKey
+                    const canMakeUp = Boolean(monthData?.makeup.eligibleDateKeys.includes(cell.key))
                     const visibleRecord = record && !isFuture ? record : undefined
                     const mood = visibleRecord ? getMoodDisplay(visibleRecord) : null
-                    const moodLabel = mood?.label || (mood?.icon ? '' : '未填写心情')
+                    const madeUp = Boolean(visibleRecord?.type && visibleRecord.type !== 'NORMAL')
+                    const moodLabel = madeUp ? '已补签' : mood?.label || (mood?.icon ? '' : '已挂号')
                     const content = (
                       <>
                         <span className="checkin-history-day-number">{cell.day}</span>
@@ -295,8 +308,12 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                       </>
                     )
                     return visibleRecord ? (
-                      <button key={cell.key} type="button" className={cellClassName(cell, visibleRecord, currentMonth.dateKey)} onClick={() => void openDetail(visibleRecord)} aria-label={`${cell.key}，${mood?.label || '已挂号'}`}>
+                      <button key={cell.key} type="button" className={cellClassName(cell, visibleRecord, currentMonth.dateKey)} onClick={() => void openDetail(visibleRecord)} aria-label={`${cell.key}，${madeUp ? '已补签' : mood?.label || '已挂号'}`}>
                         {content}
+                      </button>
+                    ) : canMakeUp ? (
+                      <button key={cell.key} type="button" className={`${cellClassName(cell, undefined, currentMonth.dateKey)} is-makeup-available`} onClick={() => setSelectedMakeupDate(cell.key)} aria-label={`${cell.key}，未挂号，可补签`}>
+                        <span className="checkin-history-day-number">{cell.day}</span><span className="checkin-history-mood"><span className="checkin-history-mood-label">可补签</span></span>
                       </button>
                     ) : (
                       <div key={cell.key} className={cellClassName(cell, undefined, currentMonth.dateKey)} aria-hidden={isFuture ? 'true' : undefined}>
@@ -326,6 +343,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                         <dl className="checkin-history-detail-facts">
                           <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).formatted || '未填写心情'}</dd></div>
                           <div><dt>挂号时间</dt><dd>{formatBeijingDateTimeMinute(detail.createdAt)}</dd></div>
+                          <div><dt>挂号方式</dt><dd>{detail.type && detail.type !== 'NORMAL' ? '该日通过补签完成' : '正常挂号'}</dd></div>
                           {detail.streakDay > 0 ? <div><dt>连续挂号</dt><dd>{detail.streakDay} 天</dd></div> : null}
                         </dl>
                         <section className="checkin-history-message">
@@ -338,12 +356,10 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                 </article>
               </div>
             ) : null}
+            {selectedMakeupDate && monthData ? <CheckInMakeupDialog targetDate={selectedMakeupDate} monthlyChallengeAvailable={monthData.makeup.monthlyChallengeAvailable} monthlyChallengePending={monthData.makeup.monthlyChallengePending && monthData.makeup.monthlyChallengeTargetDate === selectedMakeupDate} currentBalance={monthData.makeup.currentBalance} cost={monthData.makeup.cost} onClose={() => setSelectedMakeupDate(null)} onCompleted={() => { cacheRef.current.clear(); detailCacheRef.current.clear(); setSelectedMakeupDate(null); void loadMonth(view.year, view.month) }} /> : null}
           </section>
         </div>
       ) : null}
     </>
   )
 }
-
-undefined
-undefined

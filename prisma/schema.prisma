@@ -311,6 +311,7 @@ model Badge {
   updatedAt                        DateTime            @updatedAt
   UserBadge                        UserBadge[]
   UserBadgeShowcase                UserBadgeShowcase[]
+  UserBadgeTracking                UserBadgeTracking[]
   BadgeRule                        BadgeRule?
   EquippedByUsers                  User[]              @relation("UserEquippedBadge")
 
@@ -502,28 +503,60 @@ model Changelog {
 }
 
 model CheckIn {
-  id             String           @id @default(cuid())
-  checkDate      DateTime
-  points         Int              @default(10)
-  streakDay      Int              @default(1)
-  createdAt      DateTime         @default(now())
-  userId         String
-  isMakeUp       Boolean          @default(false)
-  exp            Int              @default(0)
-  message        String?
-  mood           String?
-  moodType       String?          @db.VarChar(16)
-  moodEmoji      String?          @db.VarChar(32)
-  moodText       String?          @db.VarChar(191)
-  checkinDateKey String
-  User           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  DailyMessage   DailyMessage?
-  FriendActivity FriendActivity[]
+  id              String           @id @default(cuid())
+  checkDate       DateTime
+  points          Int              @default(10)
+  streakDay       Int              @default(1)
+  createdAt       DateTime         @default(now())
+  userId          String
+  isMakeUp        Boolean          @default(false)
+  type            CheckInType      @default(NORMAL)
+  madeUpAt        DateTime?
+  makeupCost      Int?
+  challengeId     String?          @unique
+  exp             Int              @default(0)
+  message         String?
+  mood            String?
+  moodType        String?          @db.VarChar(16)
+  moodEmoji       String?          @db.VarChar(32)
+  moodText        String?          @db.VarChar(191)
+  checkinDateKey  String
+  User            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  DailyMessage    DailyMessage?
+  FriendActivity  FriendActivity[]
+  MakeupChallenge MakeupChallenge? @relation(fields: [challengeId], references: [id])
 
   @@unique([userId, checkDate])
   @@unique([userId, checkinDateKey])
   @@index([checkDate])
   @@index([userId, createdAt])
+  @@index([userId, type, checkinDateKey])
+}
+
+model MakeupChallenge {
+  id                String                @id @default(cuid())
+  userId            String
+  targetDate        DateTime
+  targetDateKey     String
+  monthKey          String
+  questionId        String
+  correctOptionId   String
+  options           Json
+  audioStoragePath  String
+  playbackSeconds   Int                   @default(10)
+  status            MakeupChallengeStatus @default(PENDING)
+  selectedOptionId  String?
+  answeredAt        DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  User              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  GuessSongQuestion GuessSongQuestion     @relation(fields: [questionId], references: [id])
+  CheckIn           CheckIn?
+
+  @@unique([userId, monthKey])
+  @@index([userId, status])
+  @@index([targetDateKey])
+  @@index([questionId])
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
@@ -1591,6 +1624,7 @@ model GuessSongQuestion {
   MusicSong                MusicSong?                 @relation(fields: [musicSongId], references: [id])
   GuessSongSessionQuestion GuessSongSessionQuestion[]
   GuessSongDuelQuestion    GuessSongDuelQuestion[]
+  MakeupChallenge          MakeupChallenge[]
 
   @@index([allowEndless, enabled])
   @@index([createdAt])
@@ -3401,6 +3435,7 @@ model User {
   equippedBadgeId                                        String?
   checkinMoodEnabled                                     Boolean                        @default(true)
   showBadgeActivity                                      Boolean                        @default(true)
+  showBadgeProgressNotifications                         Boolean                        @default(true)
   ipRegion                                               String?
   ipRegionUpdatedAt                                      DateTime?
   AccountSecurityLog                                     AccountSecurityLog[]
@@ -3429,6 +3464,7 @@ model User {
   BoardFavorite                                          BoardFavorite[]
   Changelog                                              Changelog[]
   CheckIn                                                CheckIn[]
+  MakeupChallenge                                        MakeupChallenge[]
   ConversationParticipant                                ConversationParticipant[]
   CultureComment                                         CultureComment[]
   CultureFavorite                                        CultureFavorite[]
@@ -3524,6 +3560,7 @@ model User {
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
   UserBadgeShowcase                                      UserBadgeShowcase[]
+  UserBadgeTracking                                      UserBadgeTracking[]
   EquippedBadge                                          Badge?                         @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
   UserBadgeGrantedBy                                     UserBadge[]                    @relation("UserBadgeGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
@@ -3624,6 +3661,21 @@ model UserBadgeShowcase {
 
   @@unique([userId, badgeId])
   @@unique([userId, slot])
+  @@index([badgeId])
+}
+
+model UserBadgeTracking {
+  id            String   @id @default(cuid())
+  lastMilestone Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  userId        String
+  badgeId       String
+  User          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Badge         Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId, createdAt])
   @@index([badgeId])
 }
 
@@ -4060,6 +4112,20 @@ enum PointActionType {
   COMMENT_REVOKE
   GUESS_SONG_DUEL_WIN
   USER_REWARD
+  CHECK_IN_MAKEUP
+}
+
+enum CheckInType {
+  NORMAL
+  MAKEUP_FREE_QUIZ
+  MAKEUP_PAID
+  MAKEUP_ADMIN
+}
+
+enum MakeupChallengeStatus {
+  PENDING
+  CORRECT
+  WRONG
 }
 
 enum GuessSongDuelRoomStatus {

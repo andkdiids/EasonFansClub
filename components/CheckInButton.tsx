@@ -220,11 +220,17 @@ export function CheckInButton({
           message: note,
         }),
       })
-      const data = await response.json().catch(() => ({}))
+      let data = await response.json().catch(() => ({}))
 
       if (!response.ok) {
         setError(data.message || '挂号失败')
         return
+      }
+
+      const verifyResponse = await fetch('/api/checkin', { cache: 'no-store' }).catch(() => null)
+      const verifyData = await verifyResponse?.json().catch(() => null)
+      if (verifyResponse?.ok && verifyData?.checkedToday && verifyData.todayCheckIn) {
+        data = { ...data, ...verifyData, created: data.created }
       }
 
       if (!data?.checkedToday || !data.todayCheckIn) {

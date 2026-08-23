@@ -29,6 +29,7 @@ type InitialProfile = {
   birthdaySetAt: string | null
   birthdayPublic: boolean
   showBadgeActivity: boolean
+  showBadgeProgressNotifications: boolean
 }
 
 type UploadKind = 'avatar' | 'background'
@@ -591,6 +592,7 @@ export function ProfileSettingsForm({
         // 生日公开开关：始终提交，服务端直接写回（不影响生日纪念通知与卡片本身）。
         birthdayPublic: Boolean(form.birthdayPublic),
         showBadgeActivity: Boolean(form.showBadgeActivity),
+        showBadgeProgressNotifications: Boolean(form.showBadgeProgressNotifications),
         // 生日仅在未设置时提交；已设置则由服务端忽略。
         ...(form.birthdaySetAt
           ? {}
@@ -614,6 +616,7 @@ export function ProfileSettingsForm({
         phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
         wallVisibility: data.profile.wallVisibility || current.wallVisibility,
         showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
+        showBadgeProgressNotifications: typeof data.profile.showBadgeProgressNotifications === 'boolean' ? data.profile.showBadgeProgressNotifications : current.showBadgeProgressNotifications,
         location: data.profile.location || null,
       }))
       const nextPhone = data.profile.phone || ''
@@ -800,6 +803,10 @@ export function ProfileSettingsForm({
           <label className="flex items-center justify-between gap-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
             <span><span className="text-sm font-black text-slate-700">勋章获得动态</span><span className="mt-1 block text-xs font-bold leading-5 text-slate-500">开启后，明确设置为公开动态的稀有勋章才会出现在好友动态；个人勋章墙不受影响。</span></span>
             <input type="checkbox" checked={form.showBadgeActivity} onChange={(event) => update('showBadgeActivity', event.target.checked)} className="h-5 w-5 shrink-0 accent-sky-600" />
+          </label>
+          <label className="flex items-center justify-between gap-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+            <span><span className="text-sm font-black text-slate-700">勋章进度提醒</span><span className="mt-1 block text-xs font-bold leading-5 text-slate-500">追踪中的勋章达到 25%、50%、75% 或 90% 时发送站内提醒；正式获得通知不受影响。</span></span>
+            <input type="checkbox" checked={form.showBadgeProgressNotifications} onChange={(event) => update('showBadgeProgressNotifications', event.target.checked)} className="h-5 w-5 shrink-0 accent-sky-600" />
           </label>
         </section>
 

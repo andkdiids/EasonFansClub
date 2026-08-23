@@ -10,6 +10,7 @@ export type CheckInHistoryMonthRecord = {
   moodEmoji?: string | null
   moodText?: string | null
   hasMessage: boolean
+  type?: 'NORMAL' | 'MAKEUP_FREE_QUIZ' | 'MAKEUP_PAID' | 'MAKEUP_ADMIN'
 }
 
 export type CheckInHistoryDetail = {
@@ -24,6 +25,9 @@ export type CheckInHistoryDetail = {
   points: number
   exp: number
   streakDay: number
+  type?: 'NORMAL' | 'MAKEUP_FREE_QUIZ' | 'MAKEUP_PAID' | 'MAKEUP_ADMIN'
+  madeUpAt?: string | null
+  makeupCost?: number | null
 }
 
 export type CheckInCalendarCell = {

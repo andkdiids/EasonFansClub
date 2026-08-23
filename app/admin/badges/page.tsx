@@ -3,6 +3,7 @@ import { BadgeAdminManager, type AdminBadge } from './BadgeAdminManager'
 import { listBadgesForAdmin } from '@/lib/badge-service'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +60,7 @@ export default async function AdminBadgesPage() {
         <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Badge / Honor</p>
         <h1 className="mt-2 text-3xl font-black text-brand-950">E院勋章管理</h1>
         <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600">维护勋章图鉴、PNG 资源、可见性、昵称效果、发放记录和佩戴规则。已有用户获得的勋章不会被硬删除。</p>
+        <Link href="/admin/badges/analytics" className="mt-4 inline-flex rounded-full bg-sky-50 px-4 py-2 text-xs font-black text-brand-700">查看勋章数据看板</Link>
       </header>
       <BadgeAdminManager initialBadges={initialBadges} />
     </main>

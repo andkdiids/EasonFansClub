@@ -193,6 +193,7 @@ export async function GET(request: Request) {
       birthdaySetAt: true,
       birthdayPublic: true,
       showBadgeActivity: true,
+      showBadgeProgressNotifications: true,
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
       bioModerationStatus: true,
@@ -261,6 +262,7 @@ export async function GET(request: Request) {
       birthdaySetAt: profile.birthdaySetAt,
       birthdayPublic: profile.birthdayPublic,
       showBadgeActivity: profile.showBadgeActivity,
+      showBadgeProgressNotifications: profile.showBadgeProgressNotifications,
       profile: Profile ? {
         displayName: Profile.displayName,
         avatarUrl: publicImageUrl(Profile.avatarUrl),
@@ -338,6 +340,7 @@ export async function PATCH(request: Request) {
   // 生日公开开关：只控制生日祝福卡片是否展示生日日期，不影响生日纪念通知与卡片本身。
   const birthdayPublic = typeof body?.birthdayPublic === 'boolean' ? body.birthdayPublic : undefined
   const showBadgeActivity = typeof body?.showBadgeActivity === 'boolean' ? body.showBadgeActivity : undefined
+  const showBadgeProgressNotifications = typeof body?.showBadgeProgressNotifications === 'boolean' ? body.showBadgeProgressNotifications : undefined
   const hasLocation = Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'location'))
   const location = hasLocation ? normalizeUserLocationInput(body.location) : undefined
   if (hasLocation && location === undefined) {
@@ -363,6 +366,7 @@ export async function PATCH(request: Request) {
     birthdaySetAt?: Date
     birthdayPublic?: boolean
     showBadgeActivity?: boolean
+    showBadgeProgressNotifications?: boolean
   } = {}
 
   if (body?.bio !== undefined) {
@@ -459,6 +463,7 @@ export async function PATCH(request: Request) {
 
   if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic
   if (showBadgeActivity !== undefined) data.showBadgeActivity = showBadgeActivity
+  if (showBadgeProgressNotifications !== undefined) data.showBadgeProgressNotifications = showBadgeProgressNotifications
 
   const nicknameChanged = Boolean(nickname && current && nickname !== current.nickname)
   const currentCooldownDays = computeNicknameCooldownDays(current?.nicknameViolationCount ?? 0)
@@ -518,6 +523,7 @@ export async function PATCH(request: Request) {
         nicknameViolationDisplay: true,
         nicknameViolationCount: true,
         showBadgeActivity: true,
+        showBadgeProgressNotifications: true,
       },
     })
 
@@ -600,6 +606,7 @@ export async function PATCH(request: Request) {
       nicknameModerationStatus: updated.nicknameModerationStatus,
       nicknameViolationDisplay: updated.nicknameViolationDisplay,
       showBadgeActivity: updated.showBadgeActivity,
+      showBadgeProgressNotifications: updated.showBadgeProgressNotifications,
       wallVisibility: profileRecord.wallVisibility,
       location: profileRecord.locationCountryCode ? {
         countryCode: profileRecord.locationCountryCode,

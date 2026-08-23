@@ -143,6 +143,12 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
       console.error('[badge-rule.phase3-effects]', { userId, error })
     }
   }
+  try {
+    const { processTrackedBadgeMilestones } = await import('@/lib/badge-phase5')
+    await processTrackedBadgeMilestones(userId, ruleTypes || [...new Set(rules.map((rule) => rule.ruleType as SupportedBadgeRuleType))])
+  } catch (error) {
+    console.error('[badge-rule.milestones]', { userId, error })
+  }
   return summary
 }
 

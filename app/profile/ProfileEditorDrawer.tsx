@@ -25,6 +25,7 @@ type InitialProfile = {
   birthdaySetAt: string | null
   birthdayPublic: boolean
   showBadgeActivity: boolean
+  showBadgeProgressNotifications: boolean
 }
 
 export function ProfileEditorDrawer({

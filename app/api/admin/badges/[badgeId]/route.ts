@@ -204,6 +204,13 @@ export async function PATCH(request: Request, context: RouteContext) {
         await tx.badgeRule.delete({ where: { badgeId } })
       }
       const updated = await tx.badge.findUniqueOrThrow({ where: { id: badgeId }, select: badgeAdminSelect })
+      const trackingStillValid = updated.grantType === 'AUTO'
+        && updated.isEnabled && updated.isActive
+        && updated.visibility === 'PUBLIC'
+        && updated.BadgeRule?.isEnabled && updated.BadgeRule.operator === 'GTE'
+        && updated.BadgeRule.threshold !== null
+        && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(updated))
+      if (!trackingStillValid) await tx.userBadgeTracking.deleteMany({ where: { badgeId } })
       const affectedUsers = await tx.user.findMany({ where: { equippedBadgeId: badgeId }, select: { id: true, uid: true } })
       const shouldClearEquipped = data.isEnabled === false || data.isActive === false || data.isWearable === false
       if (shouldClearEquipped) await tx.user.updateMany({ where: { equippedBadgeId: badgeId }, data: { equippedBadgeId: null } })

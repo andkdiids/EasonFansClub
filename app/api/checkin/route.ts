@@ -439,14 +439,17 @@ postCheckinResults.forEach((item, index) => {
 
 triggerBadgeEvaluation(user.id, 'CHECKIN_CREATED')
 
+const verifiedRewards = verifyCheckIn
+  ? { gainedPoints: verifyCheckIn.points, gainedExp: verifyCheckIn.exp }
+  : { gainedPoints: result.checkIn.points, gainedExp: result.checkIn.exp }
+
 return NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
     todayCheckIn: result.checkIn,
     mood,
-    gainedPoints: result.checkIn.points,
-    gainedExp: result.checkIn.exp,
+    ...verifiedRewards,
     bonus: result.bonus,
     ordinaryRegistrationFee: result.ordinaryRegistrationFee,
     streakBonusRegistrationFee: result.streakBonusRegistrationFee,

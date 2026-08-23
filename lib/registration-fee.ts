@@ -27,6 +27,7 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   ENTERTAINMENT_DAILY_DRAW: '每日处方',
   POST_DAILY_FIRST: '发帖奖励',
   POST_COMMENT_DAILY: '回复奖励',
+  CHECK_IN_MAKEUP: '补挂号',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
@@ -163,6 +164,54 @@ export async function reverseRegistrationFee(
     duplicate: false,
     dateKey,
   }
+}
+
+type RegistrationFeeConsumptionInput = {
+  userId: string
+  amount: number
+  action: PointActionType
+  reason: string
+  businessKey: string
+  now?: Date
+  checkInId?: string
+}
+
+/** Atomically consumes registration fees without ever allowing a negative balance. */
+export async function consumeRegistrationFee(
+  tx: Prisma.TransactionClient,
+  input: RegistrationFeeConsumptionInput,
+) {
+  if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    throw new RangeError('REGISTRATION_FEE_CONSUMPTION_MUST_BE_POSITIVE_INTEGER')
+  }
+  const now = input.now || new Date()
+  const { dateKey } = getShanghaiDayRange(now)
+  await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${input.userId} FOR UPDATE`
+  const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, select: { points: true } })
+  const existing = await tx.pointLog.findUnique({ where: { businessKey: input.businessKey }, select: { id: true } })
+  if (existing) return { consumedAmount: 0, totalPoints: user.points, duplicate: true, dateKey }
+  if (user.points < input.amount) throw new RangeError('REGISTRATION_FEE_INSUFFICIENT')
+  const changed = await tx.user.updateMany({
+    where: { id: input.userId, points: { gte: input.amount } },
+    data: { points: { decrement: input.amount } },
+  })
+  if (changed.count !== 1) throw new RangeError('REGISTRATION_FEE_INSUFFICIENT')
+  const after = user.points - input.amount
+  await tx.pointLog.create({
+    data: {
+      userId: input.userId,
+      action: input.action,
+      points: -input.amount,
+      before: user.points,
+      after,
+      reason: input.reason,
+      businessKey: input.businessKey,
+      checkInId: input.checkInId,
+      dateKey,
+      createdAt: now,
+    },
+  })
+  return { consumedAmount: input.amount, totalPoints: after, duplicate: false, dateKey }
 }
 
 type RegistrationFeeBalanceAdjustmentInput = {

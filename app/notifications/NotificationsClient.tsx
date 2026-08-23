@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { SystemNotificationDialog } from '@/components/SystemNotificationDialog'
 import { NotificationReplyComposer, type NotificationReplyPayload } from '@/components/NotificationReplyComposer'
 import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
@@ -13,6 +14,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 import { UserDisplayName } from '@/components/UserDisplayName'
+import { safeInternalPathOrNull } from '@/lib/url-safety'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING', 'USER_REWARD'])
@@ -269,6 +271,7 @@ export function NotificationsClient({
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false)
   const [loadError, setLoadError] = useState(initialLoadError || '')
   const [loadWarning, setLoadWarning] = useState(initialLoadWarning || '')
+  const [selectedSystemNotification, setSelectedSystemNotification] = useState<UnifiedNotification | null>(null)
 
   const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[], nextPagination?: NotificationPagination) => {
     const merged = filterDismissedSystemNotifications(serverNotifications).map((item) => {
@@ -466,6 +469,13 @@ export function NotificationsClient({
   function selectCategory(category: NotificationCategory) {
     setActiveCategory(category)
     router.push(buildNotificationHref(1, category), { scroll: true })
+  }
+
+  function openSystemNotification(item: UnifiedNotification) {
+    // Open from the current row snapshot, while the existing markRead helper
+    // keeps the shared unread summary and list state authoritative.
+    void markRead(item)
+    setSelectedSystemNotification(item)
   }
 
   async function markRead(item: UnifiedNotification): Promise<boolean> {
@@ -760,7 +770,8 @@ export function NotificationsClient({
   function renderNotification(item: UnifiedNotification) {
     const itemKey = `${item.source}:${item.id}`
     const category = (item.category || 'system') as NotificationCategory
-    const target = getNotificationTarget(item)
+    const systemNotification = isSystemNotification(item)
+    const target = systemNotification ? null : getNotificationTarget(item)
     const systemLike = isSystemLikeNotification(item)
     const isBirthday = isBirthdayNotification(item)
     const isUserReward = item.type === 'USER_REWARD'
@@ -779,7 +790,8 @@ export function NotificationsClient({
 
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
-      if (target) void navigateToNotification(item)
+      if (systemNotification) openSystemNotification(item)
+      else if (target) void navigateToNotification(item)
       else void markRead(item)
     }
 
@@ -797,7 +809,7 @@ export function NotificationsClient({
           }}
           className={`notification-list-item group flex min-w-0 gap-2 rounded-sm border p-2.5 transition sm:gap-2.5 sm:p-3 ${
             isNotificationRead(item) ? 'is-read' : 'is-unread'
-          } ${emphasisClass} ${target ? 'cursor-pointer' : ''}`}
+          } ${emphasisClass} ${target || systemNotification ? 'cursor-pointer' : ''}`}
         >
           {/* 头像区 */}
           <div className="relative shrink-0">
@@ -1041,6 +1053,19 @@ export function NotificationsClient({
       ) : null}
 
       <div className="sr-only" aria-live="polite">未读通知 {unreadCount}</div>
+      {selectedSystemNotification ? (
+        <SystemNotificationDialog
+          notification={selectedSystemNotification}
+          actionHref={safeInternalPathOrNull(selectedSystemNotification.link)}
+          onClose={() => setSelectedSystemNotification(null)}
+          onAction={() => {
+            const target = safeInternalPathOrNull(selectedSystemNotification.link)
+            if (!target) return
+            setSelectedSystemNotification(null)
+            router.push(target)
+          }}
+        />
+      ) : null}
       <ConfirmDialog
         open={Boolean(clearConfirm)}
         title={clearConfirm?.title || ''}

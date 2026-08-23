@@ -776,6 +776,10 @@ export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperation
         select: { id: true },
       })
 
+      // A completed task becomes historical ownership immediately. Keeping
+      // this in the grant transaction prevents a stale 100/100 task.
+      await tx.userBadgeTracking.deleteMany({ where: { userId: input.userId, badgeId: input.badgeId } })
+
       if (input.actorId) await writeBadgeAdminAction(tx, {
         actorId: input.actorId,
         action: 'BADGE_GRANT',

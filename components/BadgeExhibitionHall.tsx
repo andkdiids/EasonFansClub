@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { BadgeDetailDialog } from '@/components/BadgeCollectionPanel'
 import { BadgeImage } from '@/components/UserDisplayName'
 import { chunkMuseumShelves, orderMuseumBadges } from '@/lib/badge-museum'
@@ -139,6 +140,7 @@ export function BadgeExhibitionHall({ gallery }: Props) {
           {gallery.isAuthenticated ? <button type="button" role="tab" aria-selected={view === 'mine'} onClick={() => updateView('mine')}>我的收藏</button> : null}
         </div>
         <label className="badge-museum-search"><span className="sr-only">搜索勋章</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索勋章" /></label>
+        {gallery.isAuthenticated ? <div className="flex gap-2"><Link href="/badges/tasks" className="rounded-full bg-sky-50 px-4 py-2 text-xs font-black text-brand-700">任务</Link><Link href="/badges/year-in-review" className="rounded-full bg-amber-50 px-4 py-2 text-xs font-black text-amber-800">年度回顾</Link></div> : null}
       </div>
       <nav className="badge-museum-series-nav" aria-label="勋章系列导航">
         <button type="button" className={seriesFilter === 'all' ? 'is-active' : ''} onClick={() => updateSeriesFilter('all')}>全部</button>
@@ -153,7 +155,7 @@ export function BadgeExhibitionHall({ gallery }: Props) {
         </section>
       })}</div> : <MuseumEmptyState />}
 
-      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={() => setSelected(null)} canEquip={false} onEquip={() => undefined} onUnequip={() => undefined} busy={false} /> : null}
+      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={() => setSelected(null)} canEquip={false} canTrack={gallery.isAuthenticated && selected.status !== 'OBTAINED' && selected.status !== 'HIDDEN' && Boolean(selected.progress && !selected.progress.progressUnsupported) && ['PERMANENT', 'AVAILABLE'].includes(selected.availabilityStatus || '')} onEquip={() => undefined} onUnequip={() => undefined} busy={false} /> : null}
     </section>
   )
 }
