@@ -3,12 +3,15 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { BadgeCenterTabs } from '@/components/BadgeCenterTabs'
+import { BadgeImage, BadgeName } from '@/components/UserDisplayName'
+import type { BadgeEffectType } from '@/lib/badge-types'
 
 type TaskItem = {
   id: string
   name: string
   description: string | null
   imageUrl: string | null
+  effectType: BadgeEffectType
   rarity: string
   progress: { current: number; target: number; percentage: number }
   remainingLabel: string
@@ -46,11 +49,11 @@ export function BadgeTaskCenter({ initialTracking, initialRecommendations, maxTr
   const card = (badge: TaskItem, tracked: boolean) => <article key={badge.id} className="badge-center-panel rounded-2xl p-4">
     <Link href={`/badges?badge=${encodeURIComponent(badge.id)}`} className="flex min-w-0 items-center gap-3 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
       <span className="flex h-16 w-16 shrink-0 items-center justify-center">
-        {badge.imageUrl ? <img src={badge.imageUrl} alt="" loading="lazy" className="h-full w-full object-contain" /> : <span className="text-3xl" aria-hidden>🏅</span>}
+        {badge.imageUrl ? <BadgeImage badge={{ name: badge.name, imageUrl: badge.imageUrl, effectType: badge.effectType }} size="wall" /> : <span className="text-3xl" aria-hidden>🏅</span>}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-black text-sky-700">{badge.series?.name || badge.ruleLabel}</span>
-        <strong className="block truncate text-base font-black text-brand-950">{badge.name}</strong>
+        <strong className="block truncate text-base font-black text-brand-950"><BadgeName badge={badge} /></strong>
         <span className="mt-1 block text-xs font-bold text-slate-500">{badge.progress.current} / {badge.progress.target} · {badge.remainingLabel}</span>
       </span>
     </Link>

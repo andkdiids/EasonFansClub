@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeVisibility } from '@/lib/badge-types'
 import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_EFFECT_LABELS, BADGE_RARITY_LABELS, BADGE_VISIBILITY_LABELS } from '@/lib/badge-types'
 import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, parseBadgeRuleInput, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
-import { BadgeImage } from '@/components/UserDisplayName'
+import { BadgeImage, BadgeName } from '@/components/UserDisplayName'
 
 export type AdminBadge = {
   id: string
@@ -494,7 +494,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.countsTowardSeriesCompletion} onChange={(event) => setDraft({ ...draft, countsTowardSeriesCompletion: event.target.checked })} />计入系列完成度</label>
           <label className="flex items-center gap-2 text-sm font-black text-brand-950 md:col-span-2"><input type="checkbox" checked={draft.announceOnGrant} onChange={(event) => setDraft({ ...draft, announceOnGrant: event.target.checked })} />获得时发布好友动态 <span className="text-xs font-bold text-slate-400">SECRET 不会自动广播</span></label>
         </div></details>
-        <section className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/60 p-4"><p className="text-xs font-black text-amber-800">勋章预览</p><div className="mt-3 flex items-center gap-4">{draft.imageUrl || draft.iconUrl ? <BadgeImage badge={{ name: draft.name || '勋章预览', imageUrl: draft.imageUrl || draft.iconUrl, effectType: draft.effectType }} size="detail" /> : <div className="grid h-20 w-20 place-items-center text-3xl">🏅</div>}<div><h3 className="font-black text-brand-950">{draft.name || '勋章名称'}</h3><p className="mt-1 text-xs font-bold text-slate-600">{draft.acquisitionDescription || '填写获取方式后将在这里预览'}</p><p className="mt-1 text-[11px] font-black text-amber-700">{BADGE_EFFECT_TYPE_LABELS[draft.effectType]}</p>{draft.tierEnabled ? <p className="mt-1 text-[11px] font-black text-violet-700">{series.find((item) => item.id === draft.seriesId)?.name || '请选择系列'} · 第 {draft.tierLevel || 1} 阶</p> : null}</div></div></section>
+        <section className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/60 p-4"><p className="text-xs font-black text-amber-800">勋章预览</p><div className="mt-3 flex items-center gap-4">{draft.imageUrl || draft.iconUrl ? <BadgeImage badge={{ name: draft.name || '勋章预览', imageUrl: draft.imageUrl || draft.iconUrl, effectType: draft.effectType }} size="detail" /> : <div className="grid h-20 w-20 place-items-center text-3xl">🏅</div>}<div><h3 className="font-black text-brand-950"><BadgeName badge={{ name: draft.name || '勋章名称', effectType: draft.effectType }} /></h3><p className="mt-1 text-xs font-bold text-slate-600">{draft.acquisitionDescription || '填写获取方式后将在这里预览'}</p><p className="mt-1 text-[11px] font-black text-amber-700">{BADGE_EFFECT_TYPE_LABELS[draft.effectType]}</p>{draft.tierEnabled ? <p className="mt-1 text-[11px] font-black text-violet-700">{series.find((item) => item.id === draft.seriesId)?.name || '请选择系列'} · 第 {draft.tierLevel || 1} 阶</p> : null}</div></div></section>
         <button type="submit" disabled={busy || uploading || Boolean(getAutoRuleError(draft))} className="mt-5 min-h-11 rounded-xl bg-brand-950 px-5 text-sm font-black text-white disabled:opacity-50">{busy ? '保存中…' : '保存勋章'}</button>
       </form> : null}
       <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/85 shadow-sm">
@@ -505,7 +505,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="font-black text-brand-950">{badge.name}</h2>
+                <h2 className="font-black text-brand-950"><BadgeName badge={badge} /></h2>
                 <span className={`rounded-full px-2 py-1 text-[10px] font-black ${badge.isEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{badge.isEnabled ? '启用' : '停用'}</span>
               </div>
               <p className="mt-1 text-xs font-bold text-slate-500">{badge.series?.name || '未分类'} · {BADGE_VISIBILITY_LABELS[badge.visibility]} · {BADGE_RARITY_LABELS[badge.rarity]} · {BADGE_GRANT_TYPE_LABELS[badge.grantType]} · 已获得 {badge.ownerCount} 人（{badge.ownershipStats?.display || '0%'}） · {badge.availabilityStatus === 'PERMANENT' ? '永久' : badge.availabilityStatus === 'UPCOMING' ? '即将开放' : badge.availabilityStatus === 'ENDED' ? '已绝版' : '可获得'}</p>

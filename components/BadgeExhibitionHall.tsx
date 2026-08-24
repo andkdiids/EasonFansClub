@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BadgeCenterTabs } from '@/components/BadgeCenterTabs'
 import { BadgeDetailDialog } from '@/components/BadgeCollectionPanel'
-import { BadgeImage } from '@/components/UserDisplayName'
+import { BadgeImage, BadgeName } from '@/components/UserDisplayName'
 import { chunkMuseumShelves, orderMuseumBadges } from '@/lib/badge-museum'
 import { canTrackBadgeView, type BadgeGalleryView, type BadgeView } from '@/lib/badge-types'
 
@@ -29,7 +29,7 @@ function BadgeMuseumItem({ badge, onOpen }: { badge: BadgeView; onOpen: () => vo
       aria-label={`${hidden ? '隐藏勋章' : badge.name}详情`}
     >
       <span className="badge-museum-item-image"><BadgeImage badge={badge} size="wall" /></span>
-      <span className="badge-museum-item-name">{hidden ? '???' : badge.name}</span>
+      <span className="badge-museum-item-name">{hidden ? '???' : <BadgeName badge={badge} />}</span>
       {obtained ? <span className="badge-museum-item-state">{badge.isEquipped ? '佩戴中' : '已获得'}</span> : hidden ? <span className="badge-museum-item-state">隐藏勋章</span> : <span className="badge-museum-item-state">{limited || (badge.progress ? `${badge.progress.current}/${badge.progress.target}` : '未获得')}</span>}
       {limited ? <span className="badge-museum-item-tag">{limited}</span> : null}
     </button>

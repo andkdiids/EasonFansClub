@@ -20,6 +20,13 @@ import type { FriendDockUser, RelationshipStatus, UndercoverPresence } from '@/l
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { mergeUniqueFriendPage, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
+import {
+  calculateFriendListRestoredScrollTop,
+  createFriendListReturnState,
+  FRIEND_LIST_RETURN_STATE_KEY,
+  parseFriendListReturnState,
+  type FriendListReturnState,
+} from '@/lib/friend-list-return-state'
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
@@ -111,6 +118,7 @@ export function FriendDock({
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [friendTotal, setFriendTotal] = useState(0)
   const [loadingList, setLoadingList] = useState(false)
+  const [refreshingFriendList, setRefreshingFriendList] = useState(false)
   const [profileFriend, setProfileFriend] = useState<FriendDockUser | null>(null)
   const [conversationId, setConversationId] = useState('')
   const [chatFriend, setChatFriend] = useState<FriendDockUser | null>(null)
@@ -130,6 +138,7 @@ export function FriendDock({
   const panelRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
+  const friendListRef = useRef<HTMLDivElement>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const cursorRef = useRef('')
   const beforeCursorRef = useRef('')
@@ -140,7 +149,42 @@ export function FriendDock({
   const friendListRequestRef = useRef(0)
   const friendsRef = useRef<FriendDockUser[]>([])
   const friendListPageRef = useRef(1)
+  const friendListRestorePendingRef = useRef(false)
+  const friendListReturnStateRef = useRef<FriendListReturnState | null>(null)
   const groupRequestRef = useRef(new Map<string, number>())
+
+  const clearFriendListReturnState = useCallback(() => {
+    friendListRestorePendingRef.current = false
+    friendListReturnStateRef.current = null
+    try {
+      window.sessionStorage.removeItem(FRIEND_LIST_RETURN_STATE_KEY)
+    } catch {
+      // Private browsing and blocked storage should not affect the chat flow.
+    }
+  }, [])
+
+  const saveFriendListReturnState = useCallback((friendId: string) => {
+    const list = friendListRef.current
+    const row = list
+      ? Array.from(list.querySelectorAll<HTMLElement>('[data-friend-id]')).find((item) => item.dataset.friendId === friendId)
+      : null
+    const listTop = list?.getBoundingClientRect().top || 0
+    const rowTop = row?.getBoundingClientRect().top
+    const state = createFriendListReturnState({
+      friendId,
+      scrollTop: list?.scrollTop || 0,
+      scrollY: window.scrollY,
+      viewportOffset: typeof rowTop === 'number' ? rowTop - listTop : null,
+      query: debouncedQuery,
+    })
+    friendListReturnStateRef.current = state
+    try {
+      window.sessionStorage.setItem(FRIEND_LIST_RETURN_STATE_KEY, JSON.stringify(state))
+    } catch {
+      // The in-memory snapshot still lets same-mount navigation restore.
+    }
+    friendListRestorePendingRef.current = false
+  }, [debouncedQuery])
 
   // 统一表情面板选中系统 emoji 时，在当前光标处插入并恢复焦点
   const insertEmoji = useCallback((emoji: string) => {
@@ -179,13 +223,15 @@ export function FriendDock({
 
   const closeDock = useCallback(() => {
     window.clearTimeout(backdropCloseTimerRef.current)
+    clearFriendListReturnState()
     setOpen(false)
     setProfileFriend(null)
     resetChat()
     window.requestAnimationFrame(() => toggleRef.current?.focus())
-  }, [resetChat])
+  }, [clearFriendListReturnState, resetChat])
 
   const openFriendList = useCallback(() => {
+    clearFriendListReturnState()
     resetChat()
     setProfileFriend(null)
     setCollapsed(false)
@@ -195,7 +241,7 @@ export function FriendDock({
     setGroupFriends({})
     setGroupPagination({})
     setOpen(true)
-  }, [resetChat])
+  }, [clearFriendListReturnState, resetChat])
 
   const notifyClients = useCallback((type: 'friends' | 'messages' | 'unread') => {
     window.dispatchEvent(new Event('unread-summary:refresh'))
@@ -256,6 +302,26 @@ export function FriendDock({
       }
     }
   }, [])
+
+  const refreshLoadedFriendGroups = useCallback(async () => {
+    const jobs = Object.entries(groupFriends)
+      .filter(([groupId, items]) => !collapsedGroupIds.has(groupId) && items.length > 0)
+      .map(([groupId]) => {
+        const pagination = groupPagination[groupId]
+        const lastLoadedPage = Math.max(1, pagination?.page || 1)
+        const pageAfterLoadedRange = pagination?.hasMore ? lastLoadedPage + 1 : lastLoadedPage
+        return (async () => {
+          await loadGroupFriends(groupId, 1, false)
+          for (let page = 2; page <= pageAfterLoadedRange; page += 1) {
+            await loadGroupFriends(groupId, page, true)
+          }
+        })()
+      })
+    if (!jobs.length) return
+    setRefreshingFriendList(true)
+    await Promise.allSettled(jobs)
+    setRefreshingFriendList(false)
+  }, [collapsedGroupIds, groupFriends, groupPagination, loadGroupFriends])
 
   const invalidateAllGroupCaches = useCallback(() => {
     groupRequestRef.current.forEach((requestId, groupId) => groupRequestRef.current.set(groupId, requestId + 1))
@@ -493,10 +559,73 @@ export function FriendDock({
   }, [chatFriend, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, groupFriends, loadingGroupIds, loadGroupFriends, open, ungroupedCount])
 
   useEffect(() => {
+    if (!open || chatFriend || loadingList || loadingGroupIds.size > 0 || refreshingFriendList || !friendListRestorePendingRef.current) return
+    let state: ReturnType<typeof parseFriendListReturnState> = null
+    try {
+      const raw = window.sessionStorage.getItem(FRIEND_LIST_RETURN_STATE_KEY)
+      state = parseFriendListReturnState(raw)
+      if (!state && friendListReturnStateRef.current) {
+        state = parseFriendListReturnState(JSON.stringify(friendListReturnStateRef.current))
+      }
+    } catch {
+      state = friendListReturnStateRef.current
+        ? parseFriendListReturnState(JSON.stringify(friendListReturnStateRef.current))
+        : null
+    }
+    if (!state) {
+      clearFriendListReturnState()
+      return
+    }
+    if (state.query !== debouncedQuery) {
+      clearFriendListReturnState()
+      return
+    }
+
+    const groupScopes = [
+      { id: UNGROUPED_FRIEND_GROUP_ID, count: ungroupedCount },
+      ...friendGroups.map((group) => ({ id: group.id, count: group.count })),
+    ]
+    const listDataReady = debouncedQuery
+      ? true
+      : friendListReady && groupScopes.every((scope) => (
+        collapsedGroupIds.has(scope.id) || scope.count === 0 || groupFriends[scope.id] !== undefined
+      ))
+    if (!listDataReady) return
+
+    let frame = 0
+    let attempts = 0
+    const restore = () => {
+      const list = friendListRef.current
+      if (!list) return
+      const row = Array.from(list.querySelectorAll<HTMLElement>('[data-friend-id]')).find((item) => item.dataset.friendId === state?.friendId) || null
+      const listRect = list.getBoundingClientRect()
+      const rowRect = row?.getBoundingClientRect()
+      const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight)
+      list.scrollTop = calculateFriendListRestoredScrollTop({
+        currentScrollTop: list.scrollTop,
+        fallbackScrollTop: state?.scrollTop || 0,
+        maxScrollTop,
+        containerTop: listRect.top,
+        friendTop: rowRect?.top ?? null,
+        savedViewportOffset: state?.viewportOffset ?? null,
+      })
+      if (!row && attempts < 4) {
+        attempts += 1
+        frame = window.requestAnimationFrame(restore)
+        return
+      }
+      clearFriendListReturnState()
+    }
+    frame = window.requestAnimationFrame(restore)
+    return () => window.cancelAnimationFrame(frame)
+  }, [chatFriend, clearFriendListReturnState, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, groupFriends, loadingGroupIds, loadingList, open, refreshingFriendList, ungroupedCount])
+
+  useEffect(() => {
+    clearFriendListReturnState()
     setOpen(false)
     setProfileFriend(null)
     resetChat()
-  }, [pathname, currentUserId, resetChat])
+  }, [clearFriendListReturnState, pathname, currentUserId, resetChat])
 
   useEffect(() => {
     const openDock = () => openFriendList()
@@ -725,6 +854,7 @@ export function FriendDock({
   }
 
   function leaveChat() {
+    void refreshLoadedFriendGroups()
     resetChat()
   }
 
@@ -767,6 +897,7 @@ export function FriendDock({
 
   async function openChat(friend: FriendDockUser) {
     const chatSession = ++chatSessionRef.current
+    saveFriendListReturnState(friend.id)
     setError('')
     setProfileFriend(null)
     const response = await fetch('/api/direct-conversations', {
@@ -777,11 +908,13 @@ export function FriendDock({
     const data = await response.json().catch(() => ({}))
     if (chatSession !== chatSessionRef.current) return
     if (!response.ok) {
+      clearFriendListReturnState()
       setError(data.message || '无法打开会话')
       return
     }
     const nextConversationId = data.conversation.id as string
     setChatFriend(friend)
+    friendListRestorePendingRef.current = true
     setChatActionsOpen(false)
     setConversationId(nextConversationId)
     setMessages([])
@@ -1247,7 +1380,7 @@ export function FriendDock({
                 <button type="button" onClick={() => void createFriendGroup()}>新建分组</button>
               </div>
             ) : null}
-            <div className="friend-dock-list">
+            <div ref={friendListRef} className="friend-dock-list">
               {debouncedQuery ? visibleUsers.map((friend) => (
                 <FriendRow
                   key={friend.id}
@@ -1376,7 +1509,7 @@ function FriendRow({
   const canOpenProfile = status === 'FRIEND'
   const presence = friend.undercoverPresence
   return (
-    <article className={`friend-dock-row ${friend.unreadCount ? 'has-unread' : ''}`}>
+    <article data-friend-id={friend.id} className={`friend-dock-row ${friend.unreadCount ? 'has-unread' : ''}`}>
       <button type="button" className="friend-dock-avatar-button" onClick={canOpenProfile ? onProfile : undefined} disabled={!canOpenProfile} aria-label={canOpenProfile ? `查看${name}的资料卡` : undefined}>
         <SafeAvatar src={avatar} name={name} className="h-full w-full" />
       </button>
