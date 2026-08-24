@@ -7,12 +7,16 @@ import { createUUID } from '@/lib/utils/uuid'
 export const CHECK_IN_MAKEUP_COST = 74
 export const CHECK_IN_MAKEUP_PLAYBACK_SECONDS = 10
 export const USER_MAKEUP_TYPES: CheckInType[] = ['MAKEUP_FREE_QUIZ', 'MAKEUP_PAID']
+export const USER_MAKEUP_DEFAULT_RANGE_DAYS = 90
 
 export type UserMakeupAvailableDate = {
   dateKey: string
   weekStartKey: string
   weekEndKey: string
   freeChallengeAvailable: boolean
+  weeklyUsed?: boolean
+  canUseNow?: boolean
+  blockedReason?: 'WEEKLY_LIMIT_USED' | 'OUTSIDE_MAKEUP_WINDOW'
 }
 
 export class CheckInMakeupError extends Error {
@@ -36,7 +40,7 @@ export function getMakeupWeek(dateKey: string) {
   return { startKey, endKey: shiftShanghaiDateKey(startKey, 7) }
 }
 
-export function getMakeupEligibility(targetDateKey: string, now = new Date()) {
+export function getMakeupEligibility(targetDateKey: string, now = new Date(), options: { allowHistorical?: boolean } = {}) {
   const targetDate = parseBeijingDate(targetDateKey)
   if (!targetDate) return { eligible: false as const, code: 'INVALID_DATE', message: '补签日期无效' }
   const todayKey = getShanghaiDateKey(now)
@@ -47,7 +51,7 @@ export function getMakeupEligibility(targetDateKey: string, now = new Date()) {
   }
   const currentWeekStart = getShanghaiWeekStart(todayKey)
   const mondaySundayException = weekday(todayKey) === 1 && targetDateKey === shiftShanghaiDateKey(todayKey, -1)
-  if (targetDateKey < currentWeekStart && !mondaySundayException) {
+  if (!options.allowHistorical && targetDateKey < currentWeekStart && !mondaySundayException) {
     return { eligible: false as const, code: 'OUTSIDE_MAKEUP_WINDOW', message: '只能补签本周已过去的漏签日期' }
   }
   const week = getMakeupWeek(targetDateKey)
@@ -67,26 +71,64 @@ export function buildUserMakeupAvailableDates(input: {
   monthlyChallengeTargetDate?: string | null
   now?: Date
 }): UserMakeupAvailableDate[] {
+  // Keep the historical helper's original ascending, currently-usable shape,
+  // while delegating date enumeration and quota handling to the shared service.
+  return getEligibleMakeupDates({
+    todayKey: input.todayKey,
+    startDateKey: input.candidateStartKey,
+    checkedInDateKeys: input.checkedInDateKeys,
+    makeupDateKeys: input.makeupDateKeys,
+    scope: 'USER',
+    monthlyChallengeStatus: input.monthlyChallengeStatus,
+    monthlyChallengeTargetDate: input.monthlyChallengeTargetDate,
+    now: input.now,
+  }).filter((item) => item.canUseNow).reverse()
+}
+
+export type MakeupDateScope = 'USER' | 'ADMIN'
+
+/**
+ * Shared missing-date enumeration for the user and admin surfaces.
+ * It intentionally returns historical missing dates separately from whether
+ * the current actor may execute a makeup now. Quota exhaustion must not make
+ * the historical list disappear.
+ */
+export function getEligibleMakeupDates(input: {
+  todayKey: string
+  startDateKey: string
+  checkedInDateKeys: Iterable<string>
+  makeupDateKeys: Iterable<string>
+  scope: MakeupDateScope
+  monthlyChallengeStatus?: string | null
+  monthlyChallengeTargetDate?: string | null
+  now?: Date
+}): UserMakeupAvailableDate[] {
   const checkedInDateKeys = new Set(input.checkedInDateKeys)
   const makeupDateKeys = new Set(input.makeupDateKeys)
   const now = input.now || new Date()
   const available: UserMakeupAvailableDate[] = []
 
-  for (let dateKey = input.candidateStartKey; dateKey < input.todayKey; dateKey = shiftShanghaiDateKey(dateKey, 1)) {
-    const eligibility = getMakeupEligibility(dateKey, now)
-    if (!eligibility.eligible || checkedInDateKeys.has(dateKey)) continue
-    const weekUsed = [...makeupDateKeys].some((makeupDateKey) => makeupDateKey >= eligibility.week.startKey && makeupDateKey < eligibility.week.endKey)
-    if (weekUsed) continue
+  for (let dateKey = input.startDateKey; dateKey < input.todayKey; dateKey = shiftShanghaiDateKey(dateKey, 1)) {
+    if (checkedInDateKeys.has(dateKey)) continue
+    const eligibility = getMakeupEligibility(dateKey, now, { allowHistorical: true })
+    if (!eligibility.eligible) continue
+    const weekUsed = [...makeupDateKeys].some((makeupDateKey) => (
+      makeupDateKey >= eligibility.week.startKey && makeupDateKey < eligibility.week.endKey
+    ))
+    const canUseNow = input.scope === 'ADMIN' || !weekUsed
     available.push({
       dateKey,
       weekStartKey: eligibility.week.startKey,
       weekEndKey: eligibility.week.endKey,
       freeChallengeAvailable: !input.monthlyChallengeStatus
         || (input.monthlyChallengeStatus === 'PENDING' && input.monthlyChallengeTargetDate === dateKey),
+      weeklyUsed: weekUsed,
+      canUseNow,
+      blockedReason: input.scope === 'USER' && weekUsed ? 'WEEKLY_LIMIT_USED' : undefined,
     })
   }
 
-  return available
+  return available.reverse()
 }
 
 export async function assertUserMakeupAvailable(
@@ -95,8 +137,17 @@ export async function assertUserMakeupAvailable(
   targetDateKey: string,
   now = new Date(),
 ) {
-  const eligibility = getMakeupEligibility(targetDateKey, now)
+  const eligibility = getMakeupEligibility(targetDateKey, now, { allowHistorical: true })
   if (!eligibility.eligible) throw new CheckInMakeupError(eligibility.message, 409, eligibility.code)
+  const oldestAllowedDateKey = shiftShanghaiDateKey(eligibility.todayKey, -(USER_MAKEUP_DEFAULT_RANGE_DAYS - 1))
+  if (targetDateKey < oldestAllowedDateKey) {
+    throw new CheckInMakeupError('补签日期超出最近90天范围', 409, 'OUTSIDE_MAKEUP_WINDOW')
+  }
+  const user = await tx.user.findUnique({ where: { id: userId }, select: { createdAt: true, isDeleted: true } })
+  if (!user || user.isDeleted) throw new CheckInMakeupError('用户不存在', 404, 'USER_NOT_FOUND')
+  if (targetDateKey < getShanghaiDateKey(user.createdAt)) {
+    throw new CheckInMakeupError('不能补签用户注册前的日期', 409, 'BEFORE_REGISTRATION')
+  }
   const existing = await tx.checkIn.findUnique({
     where: { userId_checkinDateKey: { userId, checkinDateKey: targetDateKey } },
     select: { id: true, type: true },
@@ -114,15 +165,32 @@ export async function assertUserMakeupAvailable(
   return eligibility
 }
 
-type StreakReconcileResult = { currentStreak: number; longestStreak: number; totalDays: number; rewardTriggered: boolean; rewardAmount: number }
+export type StreakReconcileResult = {
+  currentStreak: number
+  longestStreak: number
+  totalDays: number
+  rewardTriggered: boolean
+  rewardAmount: number
+  rewardCount: number
+  rewardCheckInIds: string[]
+}
+
+export function getMakeupRewardCandidates(
+  records: Array<{ id: string; checkinDateKey: string; nextStreakDay: number }>,
+  insertedDateKeys: Iterable<string>,
+) {
+  const insertedKeys = new Set(insertedDateKeys)
+  return records.filter((record) => insertedKeys.has(record.checkinDateKey) && Boolean(getStreakBonus(record.nextStreakDay)))
+}
 
 /** Recompute the existing CheckIn streak snapshots and issue only missing, existing long-term-patient rewards. */
 export async function reconcileCheckInStreakAndLongTermReward(
   tx: Prisma.TransactionClient,
   userId: string,
-  insertedDateKey: string,
+  insertedDateKeys: string | Iterable<string>,
   now = new Date(),
 ): Promise<StreakReconcileResult> {
+  const insertedKeys = new Set(typeof insertedDateKeys === 'string' ? [insertedDateKeys] : insertedDateKeys)
   const records = await tx.checkIn.findMany({
     where: { userId },
     orderBy: [{ checkinDateKey: 'asc' }, { id: 'asc' }],
@@ -141,13 +209,13 @@ export async function reconcileCheckInStreakAndLongTermReward(
     }
   }
 
-  const insertedIndex = computed.findIndex((record) => record.checkinDateKey === insertedDateKey)
-  let segmentEnd = insertedIndex
-  while (segmentEnd + 1 < computed.length
-    && shiftShanghaiDateKey(computed[segmentEnd].checkinDateKey, 1) === computed[segmentEnd + 1].checkinDateKey) segmentEnd += 1
-
   let rewardAmount = 0
-  for (const record of computed.slice(Math.max(0, insertedIndex), segmentEnd + 1)) {
+  const rewardCheckInIds: string[] = []
+  // A makeup only creates a new reward opportunity for the records created by
+  // this operation. Existing historical records may now have a larger
+  // recalculated streak, but replaying them here would retroactively emit one
+  // +7 PointLog per historical day (the original bug).
+  for (const record of getMakeupRewardCandidates(computed, insertedKeys)) {
     const bonus = getStreakBonus(record.nextStreakDay)
     if (!bonus) continue
     const award = await awardRegistrationFee(tx, {
@@ -160,6 +228,7 @@ export async function reconcileCheckInStreakAndLongTermReward(
       now,
     })
     rewardAmount += award.awardedAmount
+    if (!award.duplicate && award.awardedAmount > 0) rewardCheckInIds.push(record.id)
   }
 
   const streaks = calculateCheckinStreaks(computed.map((record) => record.checkinDateKey), now)
@@ -171,7 +240,7 @@ export async function reconcileCheckInStreakAndLongTermReward(
       lastCheckInDate: latest ? parseBeijingDate(latest) : null,
     },
   })
-  return { ...streaks, rewardTriggered: rewardAmount > 0, rewardAmount }
+  return { ...streaks, rewardTriggered: rewardAmount > 0, rewardAmount, rewardCount: rewardCheckInIds.length, rewardCheckInIds }
 }
 
 export async function createMakeupCheckIn(
@@ -197,8 +266,37 @@ export async function createMakeupCheckIn(
       streakDay: 1,
     },
   })
-  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, input.targetDateKey, now)
+  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, [input.targetDateKey], now)
   return { checkIn, streak }
+}
+
+export async function createMakeupCheckIns(
+  tx: Prisma.TransactionClient,
+  input: { userId: string; targetDateKeys: string[]; type: Exclude<CheckInType, 'NORMAL'>; cost: number; now?: Date },
+) {
+  const now = input.now || new Date()
+  const checkIns = []
+  for (const targetDateKey of input.targetDateKeys) {
+    const targetDate = parseBeijingDate(targetDateKey)
+    if (!targetDate) throw new CheckInMakeupError('补签日期无效')
+    checkIns.push(await tx.checkIn.create({
+      data: {
+        userId: input.userId,
+        checkDate: targetDate,
+        checkinDateKey: targetDateKey,
+        createdAt: now,
+        isMakeUp: true,
+        type: input.type,
+        madeUpAt: now,
+        makeupCost: input.cost,
+        points: 0,
+        exp: 0,
+        streakDay: 1,
+      },
+    }))
+  }
+  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, input.targetDateKeys, now)
+  return { checkIns, streak }
 }
 
 export function createChallengeOptions(question: { correctAnswer: string; wrongOption1: string; wrongOption2: string; wrongOption3: string }) {

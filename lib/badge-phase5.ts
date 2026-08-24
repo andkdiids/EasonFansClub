@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client'
-import { calculateBadgeProgress, badgeAvailabilityWhere, getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
+import { calculateBadgeRuleProgress, badgeAvailabilityWhere, getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { BADGE_RULE_REGISTRY, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { toPublicMediaUrl } from '@/lib/media-url'
@@ -50,7 +50,8 @@ async function loadMetrics(userId: string, badges: readonly TaskBadge[]) {
 function toTaskItem(badge: TaskBadge, metrics: Map<SupportedBadgeRuleType, number>, tracking?: { createdAt: Date; lastMilestone: number }) {
   const rule = badge.BadgeRule!
   const type = rule.ruleType as SupportedBadgeRuleType
-  const progress = calculateBadgeProgress(metrics.get(type) || 0, rule.operator, rule.threshold)
+  const progress = calculateBadgeRuleProgress(metrics.get(type) || 0, rule)
+  if (!progress) return null
   return {
     id: badge.id,
     name: badge.name,
@@ -105,9 +106,10 @@ export async function getBadgeTaskCenter(userId: string, now = new Date()) {
   }
   const allBadges = [...validTracked.map((row) => row.Badge), ...candidates]
   const metrics = await loadMetrics(userId, allBadges)
-  const tracking = validTracked.map((row) => toTaskItem(row.Badge, metrics, row))
+  const tracking = validTracked.map((row) => toTaskItem(row.Badge, metrics, row)).filter((item): item is NonNullable<typeof item> => Boolean(item))
   const recommendations = candidates
     .map((badge) => toTaskItem(badge, metrics))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter((item) => item.progress.current < item.progress.target)
     .sort((left, right) => right.progress.percentage - left.progress.percentage
       || dailyTieBreaker(userId, left.id, now) - dailyTieBreaker(userId, right.id, now)
@@ -171,7 +173,7 @@ export async function processTrackedBadgeMilestones(userId: string, ruleTypes?: 
         BadgeRule: { is: { isEnabled: true, operator: 'GTE', threshold: { not: null }, ...(ruleTypes ? { ruleType: { in: [...ruleTypes] } } : {}) } },
       },
     },
-    select: { id: true, lastMilestone: true, Badge: { select: { id: true, name: true, BadgeRule: { select: { ruleType: true, threshold: true } } } } },
+    select: { id: true, lastMilestone: true, Badge: { select: { id: true, name: true, BadgeRule: { select: { ruleType: true, operator: true, threshold: true } } } } },
   })
   const types = [...new Set(rows.map((row) => row.Badge.BadgeRule!.ruleType as SupportedBadgeRuleType))]
   const metrics = new Map(await Promise.all(types.map(async (type) => [type, await getUserBadgeMetric(userId, type)] as const)))
@@ -179,7 +181,8 @@ export async function processTrackedBadgeMilestones(userId: string, ruleTypes?: 
   for (const row of rows) {
     const rule = row.Badge.BadgeRule!
     const type = rule.ruleType as SupportedBadgeRuleType
-    const progress = calculateBadgeProgress(metrics.get(type) || 0, 'GTE', rule.threshold)
+    const progress = calculateBadgeRuleProgress(metrics.get(type) || 0, rule)
+    if (!progress) continue
     if (progress.percentage >= 100) continue
     const milestone = highestBadgeMilestone(progress.percentage)
     if (!milestone || milestone <= row.lastMilestone) continue

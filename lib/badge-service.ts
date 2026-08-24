@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import type { BadgeCollectionView, BadgeGalleryView, BadgeShowcaseItemView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
-import { calculateBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, type BadgeOwnershipStats } from '@/lib/badge-phase2'
+import { calculateBadgeRuleProgress, getBadgeAvailability, getBadgeOwnershipStats, getUserBadgeRuleProgress, isBadgeProgressRule, type BadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 
 const BADGE_SELECT = {
@@ -309,13 +309,8 @@ function getHighestOwnedTierByGroup(badges: readonly DbCollectionBadge[], ownedI
   return highest
 }
 
-function progressForRule(metric: number, rule: { operator: string; threshold: number | null }) {
-  if (rule.threshold === null) return null
-  return calculateBadgeProgress(metric, rule.operator as 'GTE' | 'LTE' | 'EQ', rule.threshold)
-}
-
 async function addProgressToUnownedBadges(userId: string, badges: readonly DbCollectionBadge[], items: BadgeView[]) {
-  const candidates = badges.filter((badge) => badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.BadgeRule?.isEnabled && badge.BadgeRule.ruleType !== 'BADGE_SERIES_COMPLETE' && badge.BadgeRule.threshold !== null && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge)))
+  const candidates = badges.filter((badge) => badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.BadgeRule?.isEnabled && isBadgeProgressRule(badge.BadgeRule) && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge)))
   if (!candidates.length) return
   const metrics = new Map<string, number>()
   for (const badge of candidates) {
@@ -324,7 +319,7 @@ async function addProgressToUnownedBadges(userId: string, badges: readonly DbCol
     const type = rule.ruleType as Parameters<typeof getUserBadgeMetric>[1]
     if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
     const item = items.find((candidate) => candidate.id === badge.id)
-    if (item) item.progress = progressForRule(metrics.get(type) || 0, rule)
+    if (item) item.progress = calculateBadgeRuleProgress(metrics.get(type) || 0, rule)
   }
 }
 
@@ -423,6 +418,44 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
     recent,
     seriesCompletions,
   }
+}
+
+/**
+ * Reload the detail DTO for the current user. The detail modal uses this
+ * no-store path so a newly completed check-in is reflected without trusting a
+ * stale museum/collection payload or calculating metrics in the browser.
+ */
+export async function getBadgeDetailForUser(userId: string, badgeId: string): Promise<BadgeView | null> {
+  const [badge, record, viewer] = await Promise.all([
+    prisma.badge.findUnique({ where: { id: badgeId }, select: BADGE_COLLECTION_SELECT }),
+    prisma.userBadge.findUnique({
+      where: { userId_badgeId: { userId, badgeId } },
+      select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+    }),
+    prisma.user.findUnique({ where: { id: userId }, select: { equippedBadgeId: true } }),
+  ])
+  if (!badge) return null
+  if (!record && (!badge.isEnabled || !badge.isActive)) return null
+  if (!record && badge.visibility === 'SECRET') return null
+
+  const ownershipStats = badge.visibility === 'PUBLIC'
+    ? (await getBadgeOwnershipStats([badge.id])).get(badge.id) || null
+    : null
+  if (record) return obtainedBadgeView(record, viewer?.equippedBadgeId === badge.id, ownershipStats)
+  if (badge.visibility === 'HIDDEN') return hiddenBadgeView(badge)
+
+  const detail: BadgeView = {
+    ...publicBadge(badge),
+    status: 'NOT_OBTAINED',
+    obtainedAt: null,
+    isEquipped: false,
+    progress: null,
+    ownershipStats,
+  }
+  if (['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge))) {
+    detail.progress = await getUserBadgeRuleProgress(userId, badge.BadgeRule)
+  }
+  return detail
 }
 
 /**

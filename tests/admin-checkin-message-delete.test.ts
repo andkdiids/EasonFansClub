@@ -42,7 +42,7 @@ test('删除接口服务端独立鉴权并对不存在留言返回 404', () => {
   assert.match(adminRoute, /留言不存在或已被删除/)
   assert.match(adminRoute, /status: 404/)
   // 软删除只作用于指定 id
-  assert.match(adminRoute, /prisma\.dailyMessage\.update\(\{\s*where: \{ id: messageId \}/)
+  assert.match(adminRoute, /(?:prisma|tx)\.dailyMessage\.update\(\{\s*where: \{ id: messageId \}/)
 })
 
 test('删除失败保留留言并显示中文错误', () => {

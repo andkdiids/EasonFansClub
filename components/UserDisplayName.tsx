@@ -28,6 +28,9 @@ type BadgeNicknameStyle = CSSProperties & {
   '--badge-gradient-mid'?: string
   '--badge-gradient-end'?: string
 }
+type BadgeVisualStyle = CSSProperties & {
+  '--badge-shine-mask'?: string
+}
 
 export function badgeEffectClass(effectType: EquippedBadgeView['effectType']) {
   if (effectType === 'SHINE') return 'badge-effect-shine'
@@ -91,15 +94,16 @@ export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: 
   const hasImage = Boolean(badge.imageUrl && failedSource !== badge.imageUrl)
   if (!hasImage) return <span className={`user-badge-placeholder ${sizeClass} ${className}`} aria-label={badge.name}>?</span>
   const effectClass = badgeEffectClass(badge.effectType)
+  const visualStyle: BadgeVisualStyle | undefined = badge.effectType === 'SHINE'
+    ? { '--badge-shine-mask': `url(${JSON.stringify(badge.imageUrl || '')})` }
+    : undefined
   return (
-    <span className={`badge-visual ${sizeClass} ${effectClass} ${className}`.trim()}>
+    <span className={`badge-visual ${sizeClass} ${effectClass} ${className}`.trim()} style={visualStyle}>
       {badge.effectType === 'SPARKLE' ? <span className="badge-visual-sparkles" aria-hidden="true"><i /><i /><i /><i /></span> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={badge.imageUrl || ''} alt={badge.name} onError={() => { if (process.env.NODE_ENV === 'development') console.warn('[badge-image] failed to load', badge.imageUrl); setFailedSource(badge.imageUrl) }} className="user-badge-image" loading="lazy" />
       {badge.effectType === 'SHINE' ? (
-        // A duplicate transparent PNG lets the shine follow the badge alpha instead of painting a rectangle.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={badge.imageUrl || ''} alt="" aria-hidden="true" className="badge-visual-shine" loading="lazy" decoding="async" onError={(event) => { event.currentTarget.style.display = 'none' }} />
+        <span className="badge-shimmer-clip" aria-hidden="true"><span className="badge-shimmer-layer" /></span>
       ) : null}
     </span>
   )

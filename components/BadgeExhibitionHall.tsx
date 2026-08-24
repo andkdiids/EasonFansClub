@@ -171,7 +171,7 @@ export function BadgeExhibitionHall({ gallery }: Props) {
         </section>
       })}</div> : <MuseumEmptyState />}
 
-      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={closeBadge} canEquip={false} canTrack={gallery.isAuthenticated && canTrackBadgeView(selected)} onEquip={() => undefined} onUnequip={() => undefined} busy={false} /> : null}
+      {selected ? <BadgeDetailDialog badge={selected} tierItems={selectedTierItems} onClose={closeBadge} canEquip={false} canTrack={gallery.isAuthenticated && canTrackBadgeView(selected)} refreshProgress={gallery.isAuthenticated} onEquip={() => undefined} onUnequip={() => undefined} busy={false} /> : null}
     </section>
   )
 }

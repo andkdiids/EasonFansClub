@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { deleteDailyMessageForOwner, isValidDailyMessageId } from '@/lib/daily-message-deletion'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
@@ -15,22 +15,16 @@ export async function DELETE(_request: Request, context: RouteContext) {
   if (limited) return limited
 
   const { messageId } = await context.params
-  const message = await prisma.dailyMessage.findUnique({
-    where: { id: messageId },
-    select: { id: true, userId: true, isDeleted: true },
-  })
-
-  if (!message || message.isDeleted) {
-    return NextResponse.json({ message: '挂号留言不存在' }, { status: 404 })
-  }
-  if (message.userId !== guard.user.id) {
-    return NextResponse.json({ message: '只能删除自己的挂号留言' }, { status: 403 })
+  if (!isValidDailyMessageId(messageId)) {
+    return NextResponse.json({ message: '留言 ID 格式不正确' }, { status: 400 })
   }
 
-  await prisma.dailyMessage.update({
-    where: { id: message.id },
-    data: { isDeleted: true, deletedAt: new Date() },
-  })
+  const result = await deleteDailyMessageForOwner(messageId, guard.user.id)
+  if (result.status !== 200) {
+    return NextResponse.json({ message: result.message }, { status: result.status })
+  }
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, message: result.message, alreadyDeleted: result.alreadyDeleted }, {
+    headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' },
+  })
 }

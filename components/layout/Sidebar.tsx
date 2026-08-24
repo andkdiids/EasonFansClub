@@ -70,23 +70,19 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ec
   const fallbackQuickNavigation = ecenterFeatures.filter((item) => !item.hidden && item.showInQuickNavigation)
   const quickNavigation = userFeatures.length > 0 ? userFeatures.filter((item) => !item.hidden && item.showInQuickNavigation) : fallbackQuickNavigation
 
-  return <aside className="app-sidebar">
-    <Link href="/community" className="sidebar-brand" aria-label="社区首页"><BrandMark logoUrl={logoUrl} compact /></Link>
-    <div className="app-sidebar-scroll">
-      {navigation(primaryNavigation, '主要导航')}
-      <div className="sidebar-section-heading">
-        <p className="sidebar-section-label">快捷入口</p>
-        <EcenterEditButton onClick={() => setEcenterEditing((value) => !value)}>{ecenterEditing ? '收起' : '编辑'}</EcenterEditButton>
+  return <>
+    <aside className="app-sidebar">
+      <Link href="/community" className="sidebar-brand" aria-label="社区首页"><BrandMark logoUrl={logoUrl} compact /></Link>
+      <div className="app-sidebar-scroll" data-ecenter-editing={ecenterEditing ? 'true' : undefined}>
+        {navigation(primaryNavigation, '主要导航')}
+        {!ecenterEditing ? <div className="sidebar-section-heading">
+          <p className="sidebar-section-label">快捷入口</p>
+          <EcenterEditButton onClick={() => setEcenterEditing(true)}>编辑</EcenterEditButton>
+        </div> : null}
+        {!ecenterEditing ? navigation(quickNavigation, '快捷入口') : null}
+        {canAccessAdmin ? <nav className="sidebar-nav sidebar-admin-nav" aria-label="管理入口"><Link href="/admin" aria-current={pathname.startsWith('/admin') ? 'page' : undefined}><UiIcon name="settings" /><span>后台管理</span></Link></nav> : null}
       </div>
-      {ecenterEditing ? <EcenterShortcutEditorPanel
-        initialFeatures={userFeatures}
-        variant="sidebar"
-        onSaved={(features) => setUserFeatures(features)}
-        onDone={() => setEcenterEditing(false)}
-      /> : navigation(quickNavigation, '快捷入口')}
-      {canAccessAdmin ? <nav className="sidebar-nav sidebar-admin-nav" aria-label="管理入口"><Link href="/admin" aria-current={pathname.startsWith('/admin') ? 'page' : undefined}><UiIcon name="settings" /><span>后台管理</span></Link></nav> : null}
-    </div>
-    <div ref={menuRootRef} className="sidebar-user">
+      <div ref={menuRootRef} className="sidebar-user">
       {menuOpen ? <div className="sidebar-user-menu" role="menu">
         <Link href="/profile" role="menuitem">个人病历</Link>
         <Link href="/notifications" role="menuitem">消息中心</Link>
@@ -103,6 +99,16 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ec
         <ThemeToggle />
         <button type="button" onClick={logout} aria-label="退出登录"><UiIcon name="logout" /></button>
       </div>
-    </div>
-  </aside>
+      </div>
+    </aside>
+    {ecenterEditing ? <>
+      <button type="button" className="ecenter-editor-backdrop" onClick={() => setEcenterEditing(false)} aria-label="关闭编辑 E院中心" />
+      <EcenterShortcutEditorPanel
+        initialFeatures={userFeatures}
+        variant="sidebar"
+        onSaved={(features) => setUserFeatures(features)}
+        onDone={() => setEcenterEditing(false)}
+      />
+    </> : null}
+  </>
 }

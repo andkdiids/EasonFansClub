@@ -164,7 +164,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
         onPointerDown={consumeBackdropEvent}
         onClick={closeCenterFromBackdrop}
       />
-      <section className="mobile-center-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-center-title">
+      <section className="mobile-center-sheet" data-center-editing={centerEditing ? 'true' : undefined} role="dialog" aria-modal="true" aria-labelledby="mobile-center-title">
         <header>
           <div><p>EASON FANS CLUB</p><h2 id="mobile-center-title">{centerEditing ? '编辑 E院中心' : 'E院中心'}</h2></div>
           <div className="mobile-center-header-actions">

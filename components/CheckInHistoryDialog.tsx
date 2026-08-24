@@ -29,6 +29,8 @@ type MonthResponse = {
   isFutureMonth: boolean
   makeup: {
     eligibleDateKeys: string[]
+    availableDates: Array<{ dateKey: string; cost: number; freeChallengeAvailable: boolean; canUseNow?: boolean; weeklyUsed?: boolean; blockedReason?: string }>
+    weeklyRemaining?: number
     weeklyAvailable: boolean
     monthlyChallengeAvailable: boolean
     monthlyChallengePending: boolean
@@ -296,7 +298,9 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                   {calendarCells.map((cell) => {
                     const record = recordsByDate.get(cell.key)
                     const isFuture = cell.key > currentMonth.dateKey
-                    const canMakeUp = Boolean(monthData?.makeup.eligibleDateKeys.includes(cell.key))
+                    const makeupDate = monthData?.makeup.availableDates.find((item) => item.dateKey === cell.key)
+                    const canMakeUp = Boolean(makeupDate?.canUseNow !== false)
+                    const hasMakeupDate = Boolean(makeupDate)
                     const visibleRecord = record && !isFuture ? record : undefined
                     const mood = visibleRecord ? getMoodDisplay(visibleRecord) : null
                     const madeUp = Boolean(visibleRecord?.type && visibleRecord.type !== 'NORMAL')
@@ -311,9 +315,9 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                       <button key={cell.key} type="button" className={cellClassName(cell, visibleRecord, currentMonth.dateKey)} onClick={() => void openDetail(visibleRecord)} aria-label={`${cell.key}，${madeUp ? '已补签' : mood?.label || '已挂号'}`}>
                         {content}
                       </button>
-                    ) : canMakeUp ? (
-                      <button key={cell.key} type="button" className={`${cellClassName(cell, undefined, currentMonth.dateKey)} is-makeup-available`} onClick={() => setSelectedMakeupDate(cell.key)} aria-label={`${cell.key}，未挂号，可补签`}>
-                        <span className="checkin-history-day-number">{cell.day}</span><span className="checkin-history-mood"><span className="checkin-history-mood-label">可补签</span></span>
+                    ) : hasMakeupDate ? (
+                      <button key={cell.key} type="button" disabled={!canMakeUp} className={`${cellClassName(cell, undefined, currentMonth.dateKey)} is-makeup-available`} onClick={() => { if (canMakeUp) setSelectedMakeupDate(cell.key) }} aria-label={`${cell.key}，未挂号，${canMakeUp ? '可补签' : '本周补签次数已用完'}`}>
+                        <span className="checkin-history-day-number">{cell.day}</span><span className="checkin-history-mood"><span className="checkin-history-mood-label">{canMakeUp ? '可补签' : '本周已用完'}</span></span>
                       </button>
                     ) : (
                       <div key={cell.key} className={cellClassName(cell, undefined, currentMonth.dateKey)} aria-hidden={isFuture ? 'true' : undefined}>

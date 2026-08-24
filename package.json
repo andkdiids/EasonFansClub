@@ -22,6 +22,7 @@
     "migration": "tsx scripts/database-migration/migrate.ts",
     "checkin:recalculate": "tsx scripts/recalculate-checkin-stats.ts",
     "checkin:audit-duplicates": "tsx scripts/audit-checkin-duplicates.ts",
+    "checkin:makeup-audit": "tsx scripts/audit-checkin-makeup-rewards.ts",
     "moderation:scan": "tsx scripts/scan-content-moderation.ts",
     "nickname:repair": "tsx scripts/repair-nickname-violations.ts",
     "migration:check:mysql": "tsx scripts/check-migrations-mysql.ts",

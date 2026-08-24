@@ -8,11 +8,17 @@ type AvailableDate = {
   dateKey: string
   cost: number
   freeChallengeAvailable: boolean
+  canUseNow?: boolean
+  weeklyUsed?: boolean
+  blockedReason?: 'WEEKLY_LIMIT_USED' | 'OUTSIDE_MAKEUP_WINDOW'
 }
 
 type AvailabilityResponse = {
   makeup: {
     availableDates: AvailableDate[]
+    eligibleDateKeys?: string[]
+    weeklyAvailable?: boolean
+    weeklyRemaining?: number
     monthlyChallengeAvailable: boolean
     monthlyChallengePending: boolean
     monthlyChallengeTargetDate: string | null
@@ -125,13 +131,14 @@ export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMo
                         <h3>{formatDate(item.dateKey)}</h3>
                         <p>未签到</p>
                         <p className="checkin-makeup-entry-cost">{item.freeChallengeAvailable ? '本月免费补签挑战可用' : `补签费用：${item.cost} 挂号费`}</p>
+                        {item.canUseNow === false ? <p className="text-amber-700">本周补签次数已用完</p> : null}
                       </div>
-                      <button type="button" className="checkin-makeup-entry-action" onClick={() => setSelected(item)}>补签</button>
+                      <button type="button" className="checkin-makeup-entry-action" disabled={item.canUseNow === false} onClick={() => setSelected(item)}>{item.canUseNow === false ? '本周已用完' : '补签'}</button>
                     </article>
                   ))}
                 </div>
               ) : null}
-              {availability ? <p className="checkin-makeup-entry-hint">每周最多补签 1 次；补签会计入连续挂号，但不会补发当天普通签到奖励。</p> : null}
+              {availability ? <p className="checkin-makeup-entry-hint">{availability.makeup.weeklyRemaining === 0 && availability.makeup.availableDates.length > 0 ? `本周补签次数已用完；你仍有 ${availability.makeup.availableDates.length} 个历史缺签日期，下周可继续补签。` : '每周最多补签 1 次；补签会计入连续挂号，但不会补发当天普通签到奖励。'}</p> : null}
             </div>
           </section>
         </div>

@@ -64,7 +64,8 @@ test('管理员页面选择服务端漏签列表，业务日期为YYYY-MM-DD并�
   const page = source('app/admin/checkin-makeup/AdminCheckInMakeup.tsx')
   assert.match(page, /eligibleMissingDates/)
   assert.match(page, /recentCheckIns/)
-  assert.match(page, /targetDateKey: selectedDateKey/)
+  assert.match(page, /dates: validSelectedDates/)
+  assert.match(page, /type="checkbox"/)
   assert.doesNotMatch(page, /type="date"/)
   assert.match(page, /请先搜索并选择用户/)
   assert.match(page, /正在加载该用户的漏签日期/)
@@ -92,8 +93,21 @@ test('管理员查询接口服务端计算漏签，提交再次校验权限、�
 
 test('成功补签后管理员页面清空已选日期并重新加载漏签列表', () => {
   const page = source('app/admin/checkin-makeup/AdminCheckInMakeup.tsx')
-  assert.match(page, /setSelectedDateKey\('\'\)/)
+  assert.match(page, /setSelectedDateKeys\(\[\]\)/)
   assert.match(page, /补签成功/)
   assert.match(page, /消耗挂号费：0/)
   assert.match(page, /longTermRewardTriggered/)
+})
+
+test('管理员页面一次可选择多个日期并显示数量，提交后刷新候选列表', () => {
+  const page = source('app/admin/checkin-makeup/AdminCheckInMakeup.tsx')
+  assert.match(page, /selectedDateKeys/)
+  assert.match(page, /已找到 \{makeupData\.eligibleMissingDates\.length\} 个缺签日期/)
+  assert.match(page, /确认补签\{selectedDateKeys\.length \? `/)
+  assert.match(page, /setSelectedDateKeys\(\[\]\)/)
+  const route = source('app/api/admin/checkin-makeup/route.ts')
+  assert.match(route, /body\?\.dates/)
+  assert.match(route, /createMakeupCheckIns/)
+  assert.match(route, /makeupCount/)
+  assert.match(route, /newRewards/)
 })

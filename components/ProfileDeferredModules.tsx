@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { getMoodDisplay } from '@/lib/checkin-mood'
@@ -96,6 +97,8 @@ export function ProfileRecentMessages() {
   const [messages, setMessages] = useState<LoadState<Message[]>>(initial([]))
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleteNotice, setDeleteNotice] = useState('')
   const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
@@ -108,27 +111,33 @@ export function ProfileRecentMessages() {
     setExpanded((current) => ({ ...current, [id]: !current[id] }))
   }
 
-  async function deleteMessage(id: string) {
-    if (deletingId) return
-    if (!window.confirm('确认删除这条挂号留言吗？')) return
+  async function deleteMessage() {
+    if (!deleteTarget || deletingId) return
+    const id = deleteTarget
 
     setDeletingId(id)
+    setDeleteNotice('')
     setDeleteError('')
     try {
       const response = await fetch(`/api/daily-messages/${id}`, { method: 'DELETE', credentials: 'same-origin' })
       const data = await response.json().catch(() => null)
       if (!response.ok) throw new Error(data?.message || '留言删除失败')
       setMessages((current) => ({ ...current, data: current.data.filter((item) => item.id !== id) }))
+      setDeleteNotice('留言已删除')
+      setDeleteTarget(null)
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : '留言删除失败')
+      setDeleteTarget(null)
     } finally {
       setDeletingId(null)
     }
   }
 
   return (
+    <>
 <div className="h-full  border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <h2 className="text-2xl font-black text-brand-950">最近留言</h2>
+      {deleteNotice ? <p role="status" className="mt-3 rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{deleteNotice}</p> : null}
       {deleteError ? <p className="mt-3 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{deleteError}</p> : null}
       <div className="mt-5 space-y-3">
         {messages.failed ? <ModuleFallback /> : null}
@@ -170,7 +179,7 @@ export function ProfileRecentMessages() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => deleteMessage(item.id)}
+                  onClick={() => { setDeleteNotice(''); setDeleteError(''); setDeleteTarget(item.id) }}
                   disabled={deletingId === item.id}
                   className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-black text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -205,5 +214,16 @@ export function ProfileRecentMessages() {
         {!messages.loading && !messages.failed && !messages.data.length ? <ModuleFallback title="还没有历史留言。" /> : null}
       </div>
     </div>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="删除挂号留言？"
+        description="删除后将无法恢复，但不会影响该日的挂号记录、连续签到和已获得奖励。"
+        confirmLabel="确认删除"
+        cancelLabel="取消"
+        loading={Boolean(deletingId)}
+        onConfirm={() => void deleteMessage()}
+        onCancel={() => { if (!deletingId) setDeleteTarget(null) }}
+      />
+    </>
   )
 }

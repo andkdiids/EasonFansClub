@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
+import { invalidateHomeDataCache } from '@/lib/home-data'
+import { isValidDailyMessageId, syncDailyMessageDeletionEffects } from '@/lib/daily-message-deletion'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
 
@@ -53,11 +56,27 @@ export async function DELETE(request: Request, context: RouteContext) {
   if (!guard.user) return guard.response
 
   const { id } = await context.params
+  if (!isValidDailyMessageId(id)) {
+    return NextResponse.json({ message: '留言 ID 格式不正确' }, { status: 400 })
+  }
+
   try {
-    await prisma.dailyMessage.update({
+    const existing = await prisma.dailyMessage.findUnique({
       where: { id },
-      data: { isDeleted: true, deletedAt: new Date() },
+      select: { id: true, userId: true, checkInId: true, content: true, isDeleted: true, deletedAt: true },
     })
+    if (!existing) return NextResponse.json({ message: '留言不存在' }, { status: 404 })
+
+    await prisma.$transaction(async (tx) => {
+      await tx.dailyMessage.updateMany({
+        where: { id },
+        data: { isDeleted: true, deletedAt: existing.deletedAt || new Date() },
+      })
+      await syncDailyMessageDeletionEffects(tx, existing, true)
+    })
+
+    invalidateCheckInMessagesCache()
+    invalidateHomeDataCache()
     revalidatePath('/admin/registration-messages')
     return NextResponse.json({ message: '已删除' })
   } catch (error) {

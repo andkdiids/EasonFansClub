@@ -2,6 +2,8 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { parseBeijingDateTime } from '@/lib/registration-availability'
 import type { BadgeProgressView } from '@/lib/badge-types'
+import { getUserBadgeMetric } from '@/lib/badge-metrics'
+import { BADGE_RULE_REGISTRY, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 
 export const BADGE_AVAILABILITY_STATUSES = ['PERMANENT', 'UPCOMING', 'AVAILABLE', 'ENDED'] as const
 export type BadgeAvailabilityStatus = typeof BADGE_AVAILABILITY_STATUSES[number]
@@ -58,6 +60,47 @@ export function calculateBadgeProgress(currentValue: number, operator: 'GTE' | '
     percentage: Math.max(0, Math.min(100, Math.floor((current / target) * 100))),
     operator,
   }
+}
+
+export type BadgeProgressRuleInput = {
+  ruleType: string
+  operator: string
+  threshold: number | null
+  isEnabled?: boolean
+}
+
+/**
+ * Numeric progress is deliberately derived from the same registry used by
+ * the rule engine and Task Center. Special rules and non-GTE operators do not
+ * receive a fabricated 0/target progress card.
+ */
+export function isBadgeProgressRule(rule: BadgeProgressRuleInput | null | undefined): rule is BadgeProgressRuleInput {
+  if (!rule || rule.isEnabled === false || rule.operator !== 'GTE' || rule.threshold === null) return false
+  const entry = BADGE_RULE_REGISTRY[rule.ruleType as SupportedBadgeRuleType]
+  return Boolean(
+    entry
+    && entry.threshold !== null
+    && !('seriesCompletion' in entry && entry.seriesCompletion)
+    && Number.isSafeInteger(rule.threshold)
+    && rule.threshold >= 1,
+  )
+}
+
+/** Build the client-safe progress view with its registry-owned unit label. */
+export function calculateBadgeRuleProgress(currentValue: number, rule: BadgeProgressRuleInput): BadgeProgressView | null {
+  if (!isBadgeProgressRule(rule)) return null
+  const entry = BADGE_RULE_REGISTRY[rule.ruleType as SupportedBadgeRuleType]
+  return {
+    ...calculateBadgeProgress(currentValue, 'GTE', rule.threshold),
+    unitLabel: 'unit' in entry ? entry.unit || '' : '',
+  }
+}
+
+/** Load one user's current metric for a supported BadgeRule. */
+export async function getUserBadgeRuleProgress(userId: string, rule: BadgeProgressRuleInput | null | undefined) {
+  if (!isBadgeProgressRule(rule)) return null
+  const current = await getUserBadgeMetric(userId, rule.ruleType as SupportedBadgeRuleType)
+  return calculateBadgeRuleProgress(current, rule)
 }
 
 export type BadgeOwnershipStats = {

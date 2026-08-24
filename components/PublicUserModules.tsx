@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { Pagination } from '@/components/ui/Pagination'
 import { getMoodDisplay } from '@/lib/checkin-mood'
@@ -74,6 +75,10 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
   const [active, setActive] = useState<ModuleKey>('posts')
   const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1 })
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
+  const [deleteTarget, setDeleteTarget] = useState<ProfileRecentMessage | null>(null)
+  const [isDeletingRecentMessage, setIsDeletingRecentMessage] = useState(false)
+  const [recentMessageNotice, setRecentMessageNotice] = useState('')
+  const [recentMessageError, setRecentMessageError] = useState('')
   const modulesSectionRef = useRef<HTMLElement>(null)
   const initialRecentPage = recentMessagesPagination?.page || 1
   const [cache, setCache] = useState<CacheState>(() => ({
@@ -146,7 +151,77 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
     if (currentPostsPage > 1) void loadModule('posts', currentPostsPage)
   }, [loadModule, modulePages.posts])
 
+  const removeRecentMessageFromCache = useCallback((messageId: string) => {
+    setCache((current) => {
+      const hasMessageInRecentCache = Object.entries(current).some(([key, value]) => (
+        key.startsWith('recent-messages:') && Boolean(value?.items.some((item) => item.id === messageId))
+      ))
+      const next: CacheState = {}
+      for (const [key, value] of Object.entries(current)) {
+        if (!value) continue
+        const isRecentMessagesCache = key.startsWith('recent-messages:')
+        const items = isRecentMessagesCache ? value.items.filter((item) => item.id !== messageId) : value.items
+        const pagination = value.pagination
+        const total = pagination && isRecentMessagesCache
+          ? Math.max(0, pagination.total - (hasMessageInRecentCache ? 1 : 0))
+          : undefined
+        const totalPages = pagination ? Math.max(1, Math.ceil((total || 0) / pagination.pageSize)) : undefined
+        next[key] = {
+          ...value,
+          items,
+          ...(pagination && total !== undefined && totalPages !== undefined
+            ? { pagination: { ...pagination, total, totalPages, hasMore: pagination.page < totalPages } }
+            : {}),
+        }
+      }
+      return next
+    })
+  }, [])
+
+  async function confirmDeleteRecentMessage() {
+    if (!deleteTarget || isDeletingRecentMessage) return
+    const messageId = deleteTarget.id
+    setIsDeletingRecentMessage(true)
+    setRecentMessageNotice('')
+    setRecentMessageError('')
+    try {
+      const response = await fetch(`/api/daily-messages/${encodeURIComponent(messageId)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      const data = await response.json().catch(() => ({})) as { message?: string }
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '删除失败，请稍后重试')
+
+      const recentPage = modulePages['recent-messages']
+      const recentState = cache[moduleCacheKey('recent-messages', recentPage)]
+      const deletedVisibleMessage = Boolean(recentState?.items.some((item) => item.id === messageId))
+      const nextTotalPages = recentState?.pagination && deletedVisibleMessage
+        ? Math.max(1, Math.ceil(Math.max(0, recentState.pagination.total - 1) / recentState.pagination.pageSize))
+        : recentState?.pagination?.totalPages || 1
+      removeRecentMessageFromCache(messageId)
+      setExpandedRecentMessages((current) => {
+        const next = { ...current }
+        delete next[messageId]
+        return next
+      })
+      if (recentPage > nextTotalPages) {
+        const nextPage = Math.max(1, nextTotalPages)
+        setModulePages((current) => ({ ...current, 'recent-messages': nextPage }))
+        void loadModule('recent-messages', nextPage)
+      }
+      setRecentMessageNotice('留言已删除')
+      setDeleteTarget(null)
+    } catch (error) {
+      setRecentMessageError(error instanceof Error ? error.message : '删除失败，请稍后重试')
+      setDeleteTarget(null)
+    } finally {
+      setIsDeletingRecentMessage(false)
+    }
+  }
+
   return (
+    <>
 <section ref={modulesSectionRef} id="profile-modules" className="h-full min-w-0 scroll-mt-24">
 <div className="flex flex-wrap gap-2 border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
           {tabs.map((tab) => (
@@ -161,6 +236,8 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
       </div>
 
 <div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5">
+      {recentMessageNotice ? <p role="status" className="mb-3 border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700">{recentMessageNotice}</p> : null}
+      {recentMessageError ? <p role="alert" className="mb-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{recentMessageError}</p> : null}
       {state?.failed ? <ModuleFallback /> : null}
         {state?.loading || !state ? <ModuleFallback title="正在加载..." /> : null}
         {state && !state.loading && !state.failed ? (
@@ -175,10 +252,23 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
             onProfilePinChanged={handleProfilePinChanged}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
+            onRequestDeleteRecentMessage={isSelf ? (message) => { setRecentMessageNotice(''); setRecentMessageError(''); setDeleteTarget(message) } : undefined}
+            deletingRecentMessageId={isDeletingRecentMessage ? deleteTarget?.id || null : null}
           />
         ) : null}
       </div>
     </section>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="删除挂号留言？"
+        description="删除后将无法恢复，但不会影响该日的挂号记录、连续签到和已获得奖励。"
+        confirmLabel="确认删除"
+        cancelLabel="取消"
+        loading={isDeletingRecentMessage}
+        onConfirm={() => void confirmDeleteRecentMessage()}
+        onCancel={() => { if (!isDeletingRecentMessage) setDeleteTarget(null) }}
+      />
+    </>
   )
 }
 
@@ -193,6 +283,8 @@ function ModuleContent({
   onProfilePinChanged,
   expandedRecentMessages,
   onToggleRecentMessage,
+  onRequestDeleteRecentMessage,
+  deletingRecentMessageId,
 }: {
   moduleKey: ModuleKey
   uid: string
@@ -204,6 +296,8 @@ function ModuleContent({
   onProfilePinChanged: () => void
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
+  onRequestDeleteRecentMessage?: (message: ProfileRecentMessage) => void
+  deletingRecentMessageId?: string | null
 }) {
   if (moduleKey !== 'badges' && !items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
 
@@ -291,6 +385,17 @@ function ModuleContent({
                   <span className="ml-1">{expandedRecentMessages[message.id] ? '收起' : '查看'}</span>
                 </button>
               ) : <span>回复 0</span>}
+              {isSelf && onRequestDeleteRecentMessage ? (
+                <button
+                  type="button"
+                  aria-label="删除留言"
+                  onClick={() => onRequestDeleteRecentMessage(message)}
+                  disabled={deletingRecentMessageId === message.id}
+                  className="ml-auto inline-flex min-h-8 shrink-0 items-center rounded-sm bg-red-50 px-2.5 py-1 text-xs font-black text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {deletingRecentMessageId === message.id ? '删除中…' : '删除'}
+                </button>
+              ) : null}
             </div>
             {expandedRecentMessages[message.id] ? (
               <ul className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">

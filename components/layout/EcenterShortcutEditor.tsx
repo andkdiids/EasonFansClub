@@ -148,8 +148,15 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
   const controlLabel = '隐藏'
 
   return <section className={`ecenter-shortcut-editor ecenter-shortcut-editor-${variant}`} aria-label="编辑 E院中心">
-    <div className="ecenter-editor-heading">
+    {variant === 'sidebar' ? <header className="ecenter-editor-modal-header">
+      <p>EASON FANS CLUB</p>
       <div>
+        <h2>编辑 E院中心</h2>
+        <button type="button" className="ecenter-editor-close" onClick={() => void handleDone()} disabled={saving} aria-label="关闭编辑 E院中心">×</button>
+      </div>
+    </header> : null}
+    <div className="ecenter-editor-heading">
+      <div className="ecenter-editor-heading-copy">
         <p className="ecenter-editor-kicker">E院中心</p>
         <h3>编辑快捷入口</h3>
       </div>
@@ -157,17 +164,22 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
     </div>
     {loading ? <p className="ecenter-editor-state">正在读取你的布局…</p> : null}
     <p className="ecenter-editor-hint">拖动卡片调整顺序；手机端也可以使用上下按钮。</p>
+    <div className="ecenter-editor-list-heading"><h4>快捷入口列表</h4></div>
     <div className="ecenter-editor-list" aria-label="可见快捷入口">
       {visibleFeatures.map((feature, index) => <article
         key={feature.featureKey}
         className={`ecenter-editor-item${draggedKey === feature.featureKey ? ' is-dragging' : ''}${dropKey === feature.featureKey ? ' is-drop-target' : ''}`}
-        draggable
-        onDragStart={(event) => handleDragStart(event, feature.featureKey)}
-        onDragEnd={() => { setDraggedKey(null); setDropKey(null) }}
         onDragOver={(event) => { event.preventDefault(); setDropKey(feature.featureKey) }}
         onDrop={(event) => handleDrop(event, feature.featureKey)}
       >
-        <span className="ecenter-editor-drag-handle" aria-hidden="true">≡</span>
+        <button
+          type="button"
+          className="ecenter-editor-drag-handle"
+          draggable
+          onDragStart={(event) => handleDragStart(event, feature.featureKey)}
+          onDragEnd={() => { setDraggedKey(null); setDropKey(null) }}
+          aria-label={`拖动${feature.label}调整顺序`}
+        >≡</button>
         <span className="ecenter-editor-icon"><UiIcon name={feature.icon} /></span>
         <span className="ecenter-editor-label">{feature.label}</span>
         <span className="ecenter-editor-actions">

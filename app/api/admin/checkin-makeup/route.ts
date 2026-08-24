@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getShanghaiDateKey, parseBeijingDate, shiftShanghaiDateKey } from '@/lib/checkin'
-import { createMakeupCheckIn, CheckInMakeupError } from '@/lib/checkin-makeup'
+import { createMakeupCheckIns, CheckInMakeupError } from '@/lib/checkin-makeup'
 import {
-  buildAdminEligibleMissingDates,
   buildAdminRecentCheckIns,
   getAdminMakeupWindow,
   normalizeAdminMakeupRangeDays,
 } from '@/lib/admin-checkin-makeup'
+import { getEligibleMakeupDates, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -33,11 +33,14 @@ export async function GET(request: Request) {
       orderBy: { checkinDateKey: 'asc' },
       select: { checkinDateKey: true, type: true, streakDay: true },
     })
-    const eligibleMissingDates = buildAdminEligibleMissingDates({
+    const eligibleMissingDates = getEligibleMakeupDates({
       startDateKey: window.startDateKey,
       todayKey,
-      checkinDateKeys: records.map((record) => record.checkinDateKey),
-    })
+      checkedInDateKeys: records.map((record) => record.checkinDateKey),
+      makeupDateKeys: records.filter((record) => USER_MAKEUP_TYPES.includes(record.type as (typeof USER_MAKEUP_TYPES)[number])).map((record) => record.checkinDateKey),
+      scope: 'ADMIN',
+      now: new Date(),
+    }).map((item) => item.dateKey)
     const recentCheckIns = buildAdminRecentCheckIns({
       startDateKey: window.startDateKey,
       todayKey,
@@ -103,16 +106,20 @@ export async function POST(request: Request) {
   if (rejectInvalidRequestOrigin(request)) return NextResponse.json({ message: '请求来源校验失败' }, { status: 403 })
   const guard = await requireAdmin('checkin_manage')
   if (!guard.user) return guard.response
-  const body = await request.json().catch(() => null) as { userId?: unknown; targetDate?: unknown; targetDateKey?: unknown; reason?: unknown } | null
+  const body = await request.json().catch(() => null) as { userId?: unknown; dates?: unknown; date?: unknown; targetDate?: unknown; targetDateKey?: unknown; reason?: unknown } | null
   const userId = sanitizeText(body?.userId, 100)
-  const targetDateKey = sanitizeText(body?.targetDateKey ?? body?.targetDate, 10)
+  const rawDates = Array.isArray(body?.dates) ? body.dates : [body?.targetDateKey ?? body?.targetDate ?? body?.date]
+  const targetDateKeys = [...new Set(rawDates.map((value) => sanitizeText(value, 10)).filter(Boolean))]
   const reason = sanitizeText(body?.reason, 500)
+  if (!userId) return NextResponse.json({ message: '用户不能为空', code: 'USER_REQUIRED' }, { status: 400 })
+  if (!targetDateKeys.length) return NextResponse.json({ message: '至少选择一个补签日期', code: 'DATES_REQUIRED' }, { status: 400 })
   if (!reason) return NextResponse.json({ message: '补签原因必填', code: 'REASON_REQUIRED' }, { status: 400 })
-  const targetDate = parseBeijingDate(targetDateKey)
-  if (!targetDate) return NextResponse.json({ message: '补签日期无效', code: 'INVALID_DATE' }, { status: 400 })
   const todayKey = getShanghaiDateKey()
-  if (targetDateKey >= todayKey) {
-    return NextResponse.json({ message: targetDateKey === todayKey ? '今天请使用正常挂号' : '不能补签未来日期', code: 'FUTURE_NOT_ALLOWED' }, { status: 409 })
+  for (const targetDateKey of targetDateKeys) {
+    if (!parseBeijingDate(targetDateKey)) return NextResponse.json({ message: `补签日期无效：${targetDateKey}`, code: 'INVALID_DATE' }, { status: 400 })
+    if (targetDateKey >= todayKey) {
+      return NextResponse.json({ message: targetDateKey === todayKey ? '今天请使用正常挂号' : `不能补签未来日期：${targetDateKey}`, code: 'FUTURE_NOT_ALLOWED' }, { status: 409 })
+    }
   }
   const now = new Date()
   try {
@@ -121,34 +128,50 @@ export async function POST(request: Request) {
       const targetUser = await tx.user.findUnique({ where: { id: userId }, select: { id: true, createdAt: true, isDeleted: true } })
       if (!targetUser) throw new CheckInMakeupError('用户不存在', 404, 'USER_NOT_FOUND')
       if (targetUser.isDeleted) throw new CheckInMakeupError('用户不存在', 404, 'USER_NOT_FOUND')
-      if (targetDateKey < getShanghaiDateKey(targetUser.createdAt)) {
+      const registrationDateKey = getShanghaiDateKey(targetUser.createdAt)
+      if (targetDateKeys.some((targetDateKey) => targetDateKey < registrationDateKey)) {
         throw new CheckInMakeupError('不能补签用户注册前的日期', 409, 'BEFORE_REGISTRATION')
       }
-      const existing = await tx.checkIn.findUnique({ where: { userId_checkinDateKey: { userId, checkinDateKey: targetDateKey } } })
-      if (existing) throw new CheckInMakeupError('该日期已经挂号', 409, 'ALREADY_CHECKED_IN')
-      const madeUp = await createMakeupCheckIn(tx, { userId, targetDateKey, type: 'MAKEUP_ADMIN', cost: 0, now })
-      await tx.adminActionLog.create({
-        data: {
-          adminId: guard.user.id,
-          targetUserId: userId,
-          action: 'CHECK_IN_ADMIN_MAKEUP',
-          detail: {
-            targetDate: targetDateKey,
-            targetDateKey,
-            reason,
-            source: 'MAKEUP_ADMIN',
-            checkInId: madeUp.checkIn.id,
-            longTermRewardTriggered: madeUp.streak.rewardTriggered,
-            longTermRewardAmount: madeUp.streak.rewardAmount,
+      const existing = await tx.checkIn.findMany({ where: { userId, checkinDateKey: { in: targetDateKeys } }, select: { checkinDateKey: true } })
+      if (existing.length) throw new CheckInMakeupError(`以下日期已经挂号：${existing.map((item) => item.checkinDateKey).join('、')}`, 409, 'ALREADY_CHECKED_IN')
+      const madeUp = await createMakeupCheckIns(tx, { userId, targetDateKeys, type: 'MAKEUP_ADMIN', cost: 0, now })
+      for (const [index, checkIn] of madeUp.checkIns.entries()) {
+        await tx.adminActionLog.create({
+          data: {
+            adminId: guard.user.id,
+            targetUserId: userId,
+            action: 'CHECK_IN_ADMIN_MAKEUP',
+            detail: {
+              targetDate: targetDateKeys[index],
+              targetDateKey: targetDateKeys[index],
+              dates: targetDateKeys,
+              reason,
+              source: 'MAKEUP_ADMIN',
+              checkInId: checkIn.id,
+              rewardCount: madeUp.streak.rewardCount,
+              longTermRewardTriggered: madeUp.streak.rewardTriggered,
+              longTermRewardAmount: madeUp.streak.rewardAmount,
+            },
           },
-        },
-      })
+        })
+      }
+      const sortedTargetDateKeys = [...targetDateKeys].sort()
       const nearby = await tx.checkIn.findMany({
-        where: { userId, checkinDateKey: { gte: shiftShanghaiDateKey(targetDateKey, -3), lte: shiftShanghaiDateKey(targetDateKey, 3) } },
+        where: { userId, checkinDateKey: { gte: shiftShanghaiDateKey(sortedTargetDateKeys[0], -3), lte: shiftShanghaiDateKey(sortedTargetDateKeys.at(-1)!, 3) } },
         orderBy: { checkinDateKey: 'asc' },
         select: { checkinDateKey: true, type: true },
       })
-      return { checkInId: madeUp.checkIn.id, targetDate: targetDateKey, targetDateKey, nearby, longTermRewardTriggered: madeUp.streak.rewardTriggered, longTermRewardAmount: madeUp.streak.rewardAmount }
+      const newRewards = madeUp.streak.rewardCheckInIds.map((checkInId) => ({ checkInId, amount: 7, label: '长期患者奖励' }))
+      return {
+        success: true,
+        makeupCount: madeUp.checkIns.length,
+        checkInIds: madeUp.checkIns.map((checkIn) => checkIn.id),
+        dates: targetDateKeys,
+        nearby,
+        newRewards,
+        longTermRewardTriggered: madeUp.streak.rewardTriggered,
+        longTermRewardAmount: madeUp.streak.rewardAmount,
+      }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     return NextResponse.json(result, { status: 201 })
   } catch (error) {

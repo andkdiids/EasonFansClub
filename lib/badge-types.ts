@@ -19,6 +19,7 @@ export type BadgeProgressView = {
   target: number
   percentage: number
   operator: 'GTE' | 'LTE' | 'EQ'
+  unitLabel?: string
   progressUnsupported?: boolean
 }
 

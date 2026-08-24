@@ -1,4 +1,5 @@
 import { getShanghaiDateKey, shiftShanghaiDateKey } from '@/lib/checkin'
+import { getEligibleMakeupDates } from '@/lib/checkin-makeup'
 
 export const ADMIN_MAKEUP_DEFAULT_RANGE_DAYS = 90
 export const ADMIN_MAKEUP_RANGE_OPTIONS = [30, 90, 180] as const
@@ -62,10 +63,14 @@ export function buildAdminEligibleMissingDates(input: {
   todayKey: string
   checkinDateKeys: Iterable<string>
 }) {
-  const checkinDateKeys = new Set(input.checkinDateKeys)
-  return listPastDateKeys(input.startDateKey, input.todayKey)
-    .filter((dateKey) => !checkinDateKeys.has(dateKey))
-    .reverse()
+  return getEligibleMakeupDates({
+    startDateKey: input.startDateKey,
+    todayKey: input.todayKey,
+    checkedInDateKeys: input.checkinDateKeys,
+    makeupDateKeys: [],
+    scope: 'ADMIN',
+    now: new Date(`${input.todayKey}T12:00:00+08:00`),
+  }).map((item) => item.dateKey)
 }
 
 export function buildAdminRecentCheckIns(input: {
