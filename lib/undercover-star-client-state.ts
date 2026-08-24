@@ -8,8 +8,10 @@ export function canApplyUndercoverSnapshot(
   if (!current) return true
   if (current.phase === 'FINISHED' && next.phase !== 'FINISHED') return false
   if (next.round < current.round) return false
-  if (next.revision < current.revision) return false
-  if (next.revision === current.revision && next.phase !== current.phase) return false
+  const currentVersion = current.stateVersion ?? current.revision
+  const nextVersion = next.stateVersion ?? next.revision
+  if (nextVersion < currentVersion) return false
+  if (nextVersion === currentVersion && next.phase !== current.phase) return false
   return true
 }
 
@@ -20,8 +22,12 @@ export function canApplyUndercoverPrivateState(
   if (current && current.matchId !== next.matchId) return false
   if (current && current.phase === 'FINISHED' && next.phase !== 'FINISHED') return false
   if (current && next.round < current.round) return false
-  if (current && next.revision < current.revision) return false
-  if (current && next.revision === current.revision && next.phase !== current.phase) return false
+  if (current) {
+    const currentVersion = current.stateVersion ?? current.revision
+    const nextVersion = next.revision
+    if (nextVersion < currentVersion) return false
+    if (nextVersion === currentVersion && next.phase !== current.phase) return false
+  }
   return true
 }
 

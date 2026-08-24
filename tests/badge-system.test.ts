@@ -159,20 +159,26 @@ test('badge uploader stores images under the scoped badge COS prefix', () => {
   assert.match(read('app/api/admin/badges/upload/route.ts'), /badges\/\$\{guard\.user\.id\}\/\$\{randomUUID\(\)\}\.\$\{outputExtension\}/)
 })
 
-test('nickname effects accept only controlled visual values and safe colors', () => {
+test('nickname shine separates enabled state and shine color from the inherited base color', () => {
   const component = read('components/UserDisplayName.tsx')
-  for (const value of ['COLOR', 'GOLD', 'GRADIENT']) {
-    assert.match(component, new RegExp(`badge\.nicknameEffect === '${value}'`))
-  }
+  const types = read('lib/badge-types.ts')
+  assert.match(component, /isBadgeNicknameShineEnabled/)
+  assert.match(component, /getBadgeNicknameShineColor/)
+  assert.match(component, /--badge-shine-color/)
+  assert.match(component, /user-display-name-base/)
+  assert.match(component, /user-display-name-highlight/)
+  assert.match(types, /nicknameColor is the shine color/)
   assert.match(component, /normalizeBadgeColor/)
-  assert.match(component, /--badge-name-fallback/)
-  assert.match(component, /textShadow:/)
+  assert.doesNotMatch(component, /color:\s*normalizeBadgeColor\(badge\.nicknameColor\)/)
 })
 
-test('gradient nickname effects keep a CSS fallback color', () => {
+test('nickname CSS never makes the base text transparent or owns the page text color', () => {
   const css = read('app/globals.css')
-  assert.match(css, /user-display-name-text-gradient/)
-  assert.match(css, /@supports \(\(-webkit-background-clip:text\) or \(background-clip:text\)\)/)
+  const nicknameCss = css.slice(css.indexOf('/* E院勋章'), css.indexOf('.user-display-badge {'))
+  assert.match(nicknameCss, /\.user-display-name-base \{ color:inherit; \}/)
+  assert.match(nicknameCss, /\.user-display-name-highlight \{[^}]*color:var\(--badge-shine-color/)
+  assert.match(nicknameCss, /mask-image:linear-gradient/)
+  assert.doesNotMatch(nicknameCss, /background-clip:text|-webkit-text-fill-color|color:transparent/)
 })
 
 test('badge hover, focus and click details are available in the unified name component', () => {
@@ -210,6 +216,21 @@ test('post, forum, check-in, friend, search and leaderboard surfaces use batch b
     'lib/guess-song-leaderboard.ts',
     'lib/want-listen-leaderboard.ts',
   ]) assert.match(read(path), /getEquippedBadgesForUsers/)
+})
+
+test('major nickname surfaces render through the shared UserDisplayName component', () => {
+  for (const path of [
+    'components/FriendDock.tsx',
+    'components/FriendActivityPanel.tsx',
+    'components/ProfileWall.tsx',
+    'components/PostRepliesSection.tsx',
+    'components/PostList.tsx',
+    'components/ForumDiscoveryCard.tsx',
+    'components/CheckInMessagesPanel.tsx',
+    'app/search/page.tsx',
+    'app/notifications/NotificationsClient.tsx',
+  ]) assert.match(read(path), /UserDisplayName/)
+  assert.match(read('components/UserDisplayName.tsx'), /user-display-name-highlight/)
 })
 
 test('homepage entertainment scores include equipped badges and link to profiles', () => {

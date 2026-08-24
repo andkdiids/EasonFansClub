@@ -84,12 +84,14 @@ export type EcenterShortcutPreference = {
 
 const registryByKey = new Map<string, EcenterFeatureDefinition>(ECENTER_FEATURES.map((feature) => [feature.featureKey, feature]))
 
-function stableSort<T extends { sortOrder: number; defaultSortOrder: number; featureKey: string }>(features: T[]) {
-  return [...features].sort((left, right) => (
-    left.sortOrder - right.sortOrder
+function compareFeatureOrder<T extends { sortOrder: number; defaultSortOrder: number; featureKey: string }>(left: T, right: T) {
+  return left.sortOrder - right.sortOrder
     || left.defaultSortOrder - right.defaultSortOrder
     || left.featureKey.localeCompare(right.featureKey)
-  ))
+}
+
+function stableSort<T extends { sortOrder: number; defaultSortOrder: number; featureKey: string }>(features: T[]) {
+  return [...features].sort(compareFeatureOrder)
 }
 
 export function mergeFeatureRegistryWithSettings(
@@ -137,17 +139,60 @@ export function applyEcenterShortcutPreferences(
   preferences: readonly EcenterShortcutPreference[] = [],
 ) {
   const preferenceByKey = new Map(preferences.map((item) => [item.itemKey, item]))
-  const merged = features.map((feature) => {
-    const preference = preferenceByKey.get(feature.featureKey)
-    return {
-      ...feature,
-      sortOrder: Number.isSafeInteger(preference?.sortOrder) && (preference?.sortOrder ?? 0) >= 0
-        ? preference!.sortOrder
-        : feature.sortOrder,
-      hidden: preference ? preference.hidden : feature.hidden,
+  const ordered = [...features].sort((left, right) => {
+    const leftPreference = preferenceByKey.get(left.featureKey)
+    const rightPreference = preferenceByKey.get(right.featureKey)
+    if (leftPreference && rightPreference) {
+      return leftPreference.sortOrder - rightPreference.sortOrder
+        || left.defaultSortOrder - right.defaultSortOrder
+        || left.featureKey.localeCompare(right.featureKey)
     }
+    if (leftPreference) return -1
+    if (rightPreference) return 1
+    return compareFeatureOrder(left, right)
   })
-  return stableSort(merged)
+  return ordered.map((feature, index) => ({
+    ...feature,
+    sortOrder: index,
+    hidden: preferenceByKey.get(feature.featureKey)?.hidden ?? feature.hidden,
+  }))
+}
+
+/** Keep the current array order and assign dense persisted positions. */
+export function normalizeEcenterFeatureOrder(features: readonly EcenterFeatureItem[]) {
+  return features.map((feature, index) => ({ ...feature, sortOrder: index }))
+}
+
+/** Reorder only visible entries while keeping hidden entries at their existing positions. */
+export function reorderEcenterFeatures(
+  features: readonly EcenterFeatureItem[],
+  featureKey: string,
+  targetIndex: number,
+) {
+  const ordered = stableSort([...features])
+  const visible = ordered.filter((feature) => !feature.hidden)
+  const currentIndex = visible.findIndex((feature) => feature.featureKey === featureKey)
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visible.length || currentIndex === targetIndex) {
+    return normalizeEcenterFeatureOrder(ordered)
+  }
+
+  const nextVisible = [...visible]
+  const [moved] = nextVisible.splice(currentIndex, 1)
+  nextVisible.splice(targetIndex, 0, moved)
+  let visibleIndex = 0
+  const next = ordered.map((feature) => feature.hidden ? feature : nextVisible[visibleIndex++])
+  return normalizeEcenterFeatureOrder(next)
+}
+
+/** Hide/show an entry without changing its saved position. */
+export function setEcenterFeatureHidden(
+  features: readonly EcenterFeatureItem[],
+  featureKey: string,
+  hidden: boolean,
+) {
+  return normalizeEcenterFeatureOrder(stableSort([...features]).map((feature) => (
+    feature.featureKey === featureKey ? { ...feature, hidden } : feature
+  )))
 }
 
 export function getVisibleEcenterFeatures(

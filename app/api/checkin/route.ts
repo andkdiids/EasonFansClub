@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
@@ -6,6 +7,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { CUSTOM_MOOD_BANNED_WORD_MESSAGE, CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_TYPE, PRESET_MOOD_TYPE, normalizeCustomMoodText, validateCustomMoodInput } from '@/lib/checkin-mood'
 import { getCheckInMessage, invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
+import { getTodayCheckInCount } from '@/lib/checkin-stats'
 import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience } from '@/lib/growth'
@@ -16,6 +18,148 @@ import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+
+const SLOW_CHECKIN_REQUEST_MS = 1000
+
+function getCheckInRequestId(request: Request) {
+  const provided = request.headers.get('x-request-id')?.trim()
+  return provided && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(provided)
+    ? provided
+    : randomUUID()
+}
+
+function serializeCheckInError(error: unknown) {
+  if (error instanceof Error) return { name: error.name, message: error.message, stack: error.stack?.split('\n').slice(0, 3).join('\n') }
+  return { message: String(error) }
+}
+
+function logCheckInPostProcessError(input: { requestId: string; userId: string; phase: string; error: unknown }) {
+  console.error('[checkin.post_process_failed]', {
+    route: '/api/checkin',
+    method: 'POST',
+    requestId: input.requestId,
+    userId: input.userId,
+    phase: input.phase,
+    error: serializeCheckInError(input.error),
+  })
+}
+
+async function runCheckInPostProcess(input: {
+  requestId: string
+  userId: string
+  checkInId: string
+  dailyMessageId: string | null
+  todayKey: string
+  today: Date
+  ipLocation: Parameters<typeof updateUserIpRegion>[1]
+  mood: string | null
+  moodType: string | null
+  moodEmoji: string | null
+  moodText: string | null
+  message: string
+}) {
+  const jobs: Array<{ phase: string; run: () => Promise<unknown> | unknown }> = [
+    {
+      phase: 'ipRegion',
+      run: () => updateUserIpRegion(input.userId, input.ipLocation),
+    },
+    {
+      phase: 'friendActivity',
+      run: () => prisma.friendActivity.create({
+        data: {
+          actorId: input.userId,
+          type: 'CHECKIN',
+          checkInId: input.checkInId,
+          dailyMessageId: input.dailyMessageId,
+          mood: input.mood,
+          moodType: input.moodType,
+          moodEmoji: input.moodEmoji,
+          moodText: input.moodText,
+          content: input.message || null,
+          targetUrl: `/checkin?date=${input.todayKey}${input.dailyMessageId ? `&message=${input.dailyMessageId}` : ''}`,
+        },
+      }),
+    },
+    {
+      phase: 'achievements',
+      run: () => syncUserAchievements(input.userId, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
+    },
+    {
+      phase: 'dailyTaskProgress',
+      run: async () => {
+        const signTask = await prisma.dailyTaskTemplate.findUnique({
+          where: { key: 'daily-checkin' },
+          select: { id: true },
+        })
+        if (!signTask) return null
+        return prisma.dailyTaskProgress.upsert({
+          where: {
+            userId_templateId_taskDate: {
+              userId: input.userId,
+              templateId: signTask.id,
+              taskDate: input.today,
+            },
+          },
+          update: {
+            progress: 1,
+            isCompleted: true,
+            completedAt: new Date(),
+          },
+          create: {
+            userId: input.userId,
+            templateId: signTask.id,
+            taskDate: input.today,
+            progress: 1,
+            isCompleted: true,
+            completedAt: new Date(),
+          },
+        })
+      },
+    },
+    {
+      phase: 'badgeEvaluation',
+      run: () => triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED'),
+    },
+  ]
+
+  const results = await Promise.allSettled(jobs.map((job) => Promise.resolve().then(job.run)))
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      logCheckInPostProcessError({
+        requestId: input.requestId,
+        userId: input.userId,
+        phase: jobs[index].phase,
+        error: result.reason,
+      })
+    }
+  })
+}
+
+function logSlowCheckIn(input: {
+  requestId: string
+  userId: string
+  totalMs: number
+  authMs: number
+  precheckMs: number
+  transactionMs: number
+  postProcessMs: number
+}) {
+  if (input.totalMs <= SLOW_CHECKIN_REQUEST_MS) return
+  console.warn('[checkin.performance]', {
+    route: '/api/checkin',
+    method: 'POST',
+    ...input,
+  })
+}
+
+function logSlowCheckInPostProcess(input: { requestId: string; userId: string; postProcessMs: number }) {
+  if (input.postProcessMs <= SLOW_CHECKIN_REQUEST_MS) return
+  console.warn('[checkin.post_process.performance]', {
+    route: '/api/checkin',
+    method: 'POST',
+    ...input,
+  })
+}
 
 export async function GET(request: Request) {
   const user = await getCurrentUser()
@@ -28,12 +172,12 @@ export async function GET(request: Request) {
 
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey()
-  const [profile, todayCheckIn, todayCount, moodStats, history] = await Promise.all([
+  const [profile, todayCheckIn, todayCount, history] = await Promise.all([
     safeDb(
       'User.findUnique checkinApi.profile',
       prisma.user.findUnique({
         where: { id: user.id },
-        select: { points: true, exp: true, experience: true, level: true, consecutiveDays: true, checkinMoodEnabled: true },
+        select: { points: true, exp: true, experience: true, level: true, checkinMoodEnabled: true },
       }),
       null,
     ),
@@ -45,16 +189,7 @@ export async function GET(request: Request) {
       }),
       8000,
     ),
-    safeDb('CheckIn.count checkinApi.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),
-    safeDb(
-      'CheckIn.groupBy checkinApi.moodStats',
-      prisma.checkIn.groupBy({
-        by: ['mood'],
-        where: { checkinDateKey: todayKey, mood: { not: null } },
-        _count: { mood: true },
-      }),
-      [],
-    ),
+    getTodayCheckInCount(todayKey),
     safeDb('CheckIn.findMany checkinApi.history', prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }), []),
   ])
 
@@ -74,15 +209,19 @@ export async function GET(request: Request) {
     experience: profile.experience,
     level: profile.level,
     todayCount,
-    moodStats,
     checkinMoodEnabled: profile.checkinMoodEnabled,
     todayValue: formatBeijingDate(today),
   })
 }
 
 export async function POST(request: Request) {
+  const requestId = getCheckInRequestId(request)
+  const routeStartedAt = Date.now()
+  const authStartedAt = Date.now()
   const user = await getCurrentUser()
+  const authMs = Date.now() - authStartedAt
   if (!user) return NextResponse.json({ message: '请先登录后再挂号' }, { status: 401 })
+  const precheckStartedAt = Date.now()
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/checkin',
     ip: { limit: 30, windowSeconds: 60 },
@@ -120,7 +259,6 @@ export async function POST(request: Request) {
   const message = rawMessage
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null
-  void updateUserIpRegion(user.id, ipLocation)
 
   if (preference.checkinMoodEnabled && !mood && !customMood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
@@ -162,6 +300,8 @@ export async function POST(request: Request) {
     })
   }
 
+  const precheckMs = Date.now() - precheckStartedAt
+  const transactionStartedAt = Date.now()
   let result
   try {
     result = await prisma.$transaction(async (tx) => {
@@ -247,21 +387,6 @@ export async function POST(request: Request) {
       dailyMessageId = dailyMessage.id
     }
 
-    await tx.friendActivity.create({
-      data: {
-        actorId: user.id,
-        type: 'CHECKIN',
-        checkInId: checkIn.id,
-        dailyMessageId,
-        mood: mood?.key ?? null,
-        moodType: mood ? PRESET_MOOD_TYPE : customMood ? CUSTOM_MOOD_TYPE : null,
-        moodEmoji: customMood?.emoji ?? null,
-        moodText: customMood?.text ?? null,
-        content: message || null,
-        targetUrl: `/checkin?date=${todayKey}${dailyMessageId ? `&message=${dailyMessageId}` : ''}`,
-      },
-    })
-
     const updatedUser = await tx.user.update({
       where: { id: user.id },
       data: {
@@ -304,6 +429,8 @@ export async function POST(request: Request) {
     throw error
   }
 
+  const transactionMs = Date.now() - transactionStartedAt
+  const postProcessStartedAt = Date.now()
   invalidateCheckInMessagesCache()
   invalidateHomeDataCache()
   const createdMessage = result.dailyMessageId
@@ -314,142 +441,47 @@ export async function POST(request: Request) {
         viewerId: user.id,
         viewerCanModerate: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
       }).catch((error) => {
-        console.error('[checkin] failed to load created daily message', error)
+        logCheckInPostProcessError({ requestId, userId: user.id, phase: 'dailyMessageResponse', error })
         return null
       })
     : null
 
-const [verifyCheckIn, verifyUser] = await Promise.all([
-  safeDb(
-    'CheckIn.findUnique checkinApi.postVerify',
-    prisma.checkIn.findUnique({
-      where: {
-        userId_checkinDateKey: {
-          userId: user.id,
-          checkinDateKey: todayKey,
-        },
-      },
-      select: {
-        id: true,
-        checkDate: true,
-        points: true,
-        exp: true,
-        mood: true,
-        moodType: true,
-        moodEmoji: true,
-        moodText: true,
-        message: true,
-        streakDay: true,
-        createdAt: true,
-      },
-    }),
-    null,
-  ),
-  safeDb(
-    'User.findUnique checkinApi.postVerify',
-    prisma.user.findUnique({
-      where: {
-        id: user.id,
-      },
-      select: {
-        points: true,
-        exp: true,
-        experience: true,
-        level: true,
-        consecutiveDays: true,
-      },
-    }),
-    null,
-  ),
-])
-
-const verifyMatchesTransaction = Boolean(
-  verifyCheckIn
-  && verifyCheckIn.id === result.checkIn.id
-  && verifyCheckIn.points === result.checkIn.points
-  && verifyCheckIn.exp === result.checkIn.exp,
-)
-
-if (verifyCheckIn && !verifyMatchesTransaction) {
-  console.error('[checkin.verify.mismatch]', {
+  const backgroundPostProcessStartedAt = Date.now()
+  void runCheckInPostProcess({
+    requestId,
     userId: user.id,
+    checkInId: result.checkIn.id,
+    dailyMessageId: result.dailyMessageId,
     todayKey,
-    transaction: {
-      id: result.checkIn.id,
-      points: result.checkIn.points,
-      exp: result.checkIn.exp,
-    },
-    verified: {
-      id: verifyCheckIn.id,
-      points: verifyCheckIn.points,
-      exp: verifyCheckIn.exp,
-    },
-  })
-} else if (!verifyCheckIn) {
-  console.warn('[checkin.verify.unavailable]', {
-    userId: user.id,
-    todayKey,
-  })
-}
-
-
-
-const postCheckinResults = await Promise.allSettled([
-  syncUserAchievements(user.id, ['CHECKIN_STREAK', 'CHECKIN_TOTAL']),
-  prisma.dailyTaskTemplate.findUnique({ 
-    where: { key: 'daily-checkin' }, 
-    select: { id: true } 
-  }).then((signTask) => (
-    signTask
-      ? prisma.dailyTaskProgress.upsert({
-          where: {
-            userId_templateId_taskDate: {
-              userId: user.id,
-              templateId: signTask.id,
-              taskDate: today,
-            },
-          },
-          update: { 
-            progress: 1, 
-            isCompleted: true, 
-            completedAt: new Date() 
-          },
-          create: {
-            userId: user.id,
-            templateId: signTask.id,
-            taskDate: today,
-            progress: 1,
-            isCompleted: true,
-            completedAt: new Date(),
-          },
-        })
-      : null
-  )),
-])
-postCheckinResults.forEach((item, index) => {
-    if (item.status === 'rejected') {
-      console.error(
-        index === 0 
-          ? '[achievements:checkin]' 
-          : '[dailyTask:checkin]', 
-        item.reason
-      )
-    }
+    today,
+    ipLocation,
+    mood: mood?.key ?? null,
+    moodType: mood ? PRESET_MOOD_TYPE : customMood ? CUSTOM_MOOD_TYPE : null,
+    moodEmoji: customMood?.emoji ?? null,
+    moodText: customMood?.text ?? null,
+    message,
+  }).catch((error) => {
+    logCheckInPostProcessError({ requestId, userId: user.id, phase: 'postProcessCoordinator', error })
+  }).finally(() => {
+    logSlowCheckInPostProcess({
+      requestId,
+      userId: user.id,
+      postProcessMs: Date.now() - backgroundPostProcessStartedAt,
+    })
   })
 
-triggerBadgeEvaluation(user.id, 'CHECKIN_CREATED')
+  const postProcessMs = Date.now() - postProcessStartedAt
+  const totalMs = Date.now() - routeStartedAt
+  logSlowCheckIn({ requestId, userId: user.id, totalMs, authMs, precheckMs, transactionMs, postProcessMs })
 
-const verifiedRewards = verifyCheckIn
-  ? { gainedPoints: verifyCheckIn.points, gainedExp: verifyCheckIn.exp }
-  : { gainedPoints: result.checkIn.points, gainedExp: result.checkIn.exp }
-
-return NextResponse.json({
+  return NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
     todayCheckIn: result.checkIn,
     mood,
-    ...verifiedRewards,
+    gainedPoints: result.checkIn.points,
+    gainedExp: result.checkIn.exp,
     bonus: result.bonus,
     ordinaryRegistrationFee: result.ordinaryRegistrationFee,
     streakBonusRegistrationFee: result.streakBonusRegistrationFee,
@@ -458,10 +490,10 @@ return NextResponse.json({
     consecutiveDays: result.streaks.currentStreak,
     currentStreak: result.streaks.currentStreak,
     longestStreak: result.streaks.longestStreak,
-    points: verifyUser?.points ?? result.user.points,
-    exp: verifyUser?.exp ?? result.user.exp,
-    experience: verifyUser?.experience ?? result.user.experience,
-    level: verifyUser?.level ?? result.user.level,
+    points: result.user.points,
+    exp: result.user.exp,
+    experience: result.user.experience,
+    level: result.user.level,
     created: true,
   })
 }

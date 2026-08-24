@@ -167,7 +167,9 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
       </div>
 
       <div className="block">
-        <span className="text-sm font-bold text-slate-700">{identifierType === 'email' ? '邮箱' : identifierType === 'phone' ? '手机号' : '登录账号'}</span>
+        <label className="block" htmlFor="login-identifier">
+          <span className="text-sm font-bold text-slate-700">{identifierType === 'email' ? '邮箱' : identifierType === 'phone' ? '手机号' : '登录账号'}</span>
+        </label>
         {identifierType === 'phone' ? (
           <InternationalPhoneInput
             id="login-identifier"

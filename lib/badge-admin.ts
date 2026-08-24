@@ -1,6 +1,6 @@
-import { Prisma, type BadgeCategory, type BadgeEffectType, type BadgeGrantType, type BadgeNicknameEffect, type BadgeRarity, type BadgeVisibility } from '@prisma/client'
+import { Prisma, type BadgeCategory, type BadgeEffectType, type BadgeGrantType, type BadgeRarity, type BadgeVisibility } from '@prisma/client'
 import { sanitizeText } from '@/lib/security'
-import { normalizeBadgeColor } from '@/lib/badge-types'
+import { BADGE_NICKNAME_SHINE_FALLBACK, normalizeBadgeColor } from '@/lib/badge-types'
 import { toStoredMediaUrl } from '@/lib/media-url'
 import { parseBadgeRuleInput, type ParsedBadgeRule } from '@/lib/badge-rules'
 import { parseBadgeAvailabilityDate, validateBadgeAvailability } from '@/lib/badge-phase2'
@@ -100,33 +100,21 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
   }
 
   if (!partial || 'nicknameEffect' in body) {
-    const nicknameEffect = typeof body.nicknameEffect === 'string' ? body.nicknameEffect.toUpperCase() : 'NONE'
-    if (!NICKNAME_EFFECTS.has(nicknameEffect)) return { error: '昵称效果无效' }
-    data.nicknameEffect = nicknameEffect as BadgeNicknameEffect
-
+    const requestedNicknameEffect = typeof body.nicknameEffect === 'string' ? body.nicknameEffect.toUpperCase() : 'NONE'
+    if (!NICKNAME_EFFECTS.has(requestedNicknameEffect)) return { error: '昵称闪光设置无效' }
+    const nicknameShineEnabled = requestedNicknameEffect !== 'NONE'
     const color = normalizeBadgeColor(body.nicknameColor)
-    const start = normalizeBadgeColor(body.nicknameGradientStart)
-    const end = normalizeBadgeColor(body.nicknameGradientEnd)
-    if (nicknameEffect === 'COLOR' && !color) return { error: '单色昵称效果需要填写 #RRGGBB 颜色' }
-    if (nicknameEffect === 'GRADIENT' && (!start || !end)) return { error: '渐变昵称效果需要填写起止 #RRGGBB 颜色' }
-    data.nicknameColor = nicknameEffect === 'COLOR' ? color : null
-    data.nicknameGradientStart = nicknameEffect === 'GRADIENT' ? start : null
-    data.nicknameGradientEnd = nicknameEffect === 'GRADIENT' ? end : null
+    if (nicknameShineEnabled && body.nicknameColor && !color) return { error: '昵称闪光颜色必须是 #RRGGBB 格式' }
+    // Keep the legacy enum values accepted at the API boundary, but persist the
+    // new two-part meaning: enabled + one shine color. Gradient endpoints are
+    // intentionally ignored and remain available only for old stored records.
+    data.nicknameEffect = nicknameShineEnabled ? 'COLOR' : 'NONE'
+    data.nicknameColor = nicknameShineEnabled ? color || BADGE_NICKNAME_SHINE_FALLBACK : null
   } else {
     if ('nicknameColor' in body) {
       const color = normalizeBadgeColor(body.nicknameColor)
-      if (body.nicknameColor && !color) return { error: '昵称颜色必须是 #RRGGBB 格式' }
+      if (body.nicknameColor && !color) return { error: '昵称闪光颜色必须是 #RRGGBB 格式' }
       data.nicknameColor = color
-    }
-    if ('nicknameGradientStart' in body) {
-      const start = normalizeBadgeColor(body.nicknameGradientStart)
-      if (body.nicknameGradientStart && !start) return { error: '渐变起始颜色必须是 #RRGGBB 格式' }
-      data.nicknameGradientStart = start
-    }
-    if ('nicknameGradientEnd' in body) {
-      const end = normalizeBadgeColor(body.nicknameGradientEnd)
-      if (body.nicknameGradientEnd && !end) return { error: '渐变结束颜色必须是 #RRGGBB 格式' }
-      data.nicknameGradientEnd = end
     }
   }
 

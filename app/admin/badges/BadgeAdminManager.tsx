@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeVisibility } from '@/lib/badge-types'
-import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_EFFECT_LABELS, BADGE_RARITY_LABELS, BADGE_VISIBILITY_LABELS } from '@/lib/badge-types'
+import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_SHINE_FALLBACK, BADGE_RARITY_LABELS, BADGE_VISIBILITY_LABELS, getBadgeNicknameShineColor, isBadgeNicknameShineEnabled } from '@/lib/badge-types'
 import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, parseBadgeRuleInput, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
-import { BadgeImage, BadgeName } from '@/components/UserDisplayName'
+import { BadgeImage, BadgeName, UserDisplayName } from '@/components/UserDisplayName'
 
 export type AdminBadge = {
   id: string
@@ -61,6 +61,12 @@ function toDraft(badge: AdminBadge): BadgeDraft {
   return {
     ...badge,
     imageUrl: badge.iconUrl,
+    nicknameEffect: isBadgeNicknameShineEnabled(badge) ? 'COLOR' : 'NONE',
+    nicknameColor: isBadgeNicknameShineEnabled(badge) ? getBadgeNicknameShineColor(badge) : '',
+    // The columns stay in the DTO for backward compatibility, but are no
+    // longer editable or used by the nickname renderer.
+    nicknameGradientStart: '',
+    nicknameGradientEnd: '',
     badgeType: badge.seriesId ? 'SERIES' : 'STANDARD',
     acquisitionDescription,
     ruleType: rule?.ruleType || 'POST_COUNT',
@@ -286,6 +292,10 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...draft,
+          // The legacy enum is retained server-side, but the admin surface now
+          // sends only the new enabled + shine-color semantics.
+          nicknameEffect: draft.nicknameEffect !== 'NONE' ? 'COLOR' : 'NONE',
+          nicknameColor: draft.nicknameEffect !== 'NONE' ? draft.nicknameColor || BADGE_NICKNAME_SHINE_FALLBACK : null,
           imageUrl: draft.imageUrl || draft.iconUrl || null,
           rule: draft.grantType === 'AUTO' && !draft.legacyAuto
             ? draft.seriesCompletionRule
@@ -457,6 +467,16 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
 
   const savedDraftBadge = draft?.id ? badges.find((badge) => badge.id === draft.id) || null : null
   const savedDraftBackfill = savedDraftBadge?.rule ? getBackfillUiState(savedDraftBadge) : null
+  const nicknamePreviewBadge = draft ? {
+    id: 'admin-nickname-preview',
+    name: draft.name || '勋章预览',
+    imageUrl: null,
+    effectType: 'NONE' as const,
+    nicknameEffect: draft.nicknameEffect,
+    nicknameColor: draft.nicknameColor || BADGE_NICKNAME_SHINE_FALLBACK,
+    nicknameGradientStart: null,
+    nicknameGradientEnd: null,
+  } : null
 
   return (
     <div className="space-y-5">
@@ -518,17 +538,16 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           ) : null}
           {draft.grantType === 'AUTO' && !draft.legacyAuto ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-100 bg-white p-3 md:col-span-2"><div><p className="text-xs font-black text-violet-800">规则操作</p><p className="mt-1 text-[11px] font-bold text-slate-500">预览只读；补发只处理符合条件且尚未拥有的用户，且需要先保存。限定勋章只按可证明的限定期数据扫描。</p>{getAutoRuleError(draft) ? <p className="mt-1 text-xs font-black text-red-600">{getAutoRuleError(draft)}</p> : null}{savedDraftBackfill ? <p className="mt-1 text-[11px] font-bold text-slate-500">{savedDraftBackfill.reason}</p> : null}</div><div className="flex flex-wrap gap-2"><button type="button" aria-label="预览已保存规则" title="预览已保存规则" disabled={busy || !draft.id || Boolean(getAutoRuleError(draft))} onClick={previewSavedDraft} className="admin-badge-list-button disabled:opacity-50">{draft.id ? '预览达标用户' : '保存后预览'}</button><button type="button" disabled={busy || !draft.id || !draft.ruleEnabled || Boolean(getAutoRuleError(draft)) || !savedDraftBackfill || savedDraftBackfill.disabled} onClick={backfillSavedDraft} className="admin-badge-list-button disabled:opacity-50">{draft.id ? savedDraftBackfill?.label || '暂不可扫描' : '保存后扫描'}</button></div></div> : null}
         </div></details>
-        <details open={formSections.display} onToggle={(event) => { const open = event.currentTarget.open; setFormSections((current) => current.display === open ? current : { ...current, display: open }) }} className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3"><summary className="cursor-pointer list-none text-sm font-black text-brand-950">展示设置与状态</summary><p className="mt-1 text-[11px] font-bold text-slate-500">动画、昵称效果、PNG、可佩戴和启用状态只影响展示与可用性，不改变历史获得记录。</p>
+        <details open={formSections.display} onToggle={(event) => { const open = event.currentTarget.open; setFormSections((current) => current.display === open ? current : { ...current, display: open }) }} className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3"><summary className="cursor-pointer list-none text-sm font-black text-brand-950">展示设置与状态</summary><p className="mt-1 text-[11px] font-bold text-slate-500">勋章动画、昵称闪光、PNG、可佩戴和启用状态只影响展示与可用性，不改变历史获得记录。</p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <label className="text-xs font-black text-slate-500">昵称效果<select value={draft.nicknameEffect} onChange={(event) => setDraft({ ...draft, nicknameEffect: event.target.value as BadgeNicknameEffect })} className="admin-badge-input">{Object.entries(BADGE_NICKNAME_EFFECT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          {draft.nicknameEffect === 'COLOR' ? <label className="text-xs font-black text-slate-500">昵称颜色<input type="color" value={draft.nicknameColor || '#0f5f78'} onChange={(event) => setDraft({ ...draft, nicknameColor: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-sky-200 p-1" /></label> : null}
-          {draft.nicknameEffect === 'GRADIENT' ? <><label className="text-xs font-black text-slate-500">渐变起始颜色<input type="color" value={draft.nicknameGradientStart || '#0f5f78'} onChange={(event) => setDraft({ ...draft, nicknameGradientStart: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-sky-200 p-1" /></label><label className="text-xs font-black text-slate-500">渐变结束颜色<input type="color" value={draft.nicknameGradientEnd || '#7c3aed'} onChange={(event) => setDraft({ ...draft, nicknameGradientEnd: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-sky-200 p-1" /></label></> : null}
+          <div className="rounded-xl border border-amber-100 bg-white/75 p-3 md:col-span-2"><label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.nicknameEffect !== 'NONE'} onChange={(event) => setDraft({ ...draft, nicknameEffect: event.target.checked ? 'COLOR' : 'NONE', nicknameColor: event.target.checked ? draft.nicknameColor || BADGE_NICKNAME_SHINE_FALLBACK : '' })} />昵称闪光</label><p className="mt-1 text-[11px] font-bold text-slate-500">仅在闪光带经过时显示，不会改变昵称原本颜色。</p></div>
+          {draft.nicknameEffect !== 'NONE' ? <label className="text-xs font-black text-slate-500">昵称闪光颜色<input type="color" value={draft.nicknameColor || BADGE_NICKNAME_SHINE_FALLBACK} onChange={(event) => setDraft({ ...draft, nicknameColor: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-sky-200 p-1" /></label> : null}
           <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.isWearable} onChange={(event) => setDraft({ ...draft, isWearable: event.target.checked })} />允许用户佩戴</label>
           <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.isEnabled} onChange={(event) => setDraft({ ...draft, isEnabled: event.target.checked })} />启用勋章</label>
           <label className="flex items-center gap-2 text-sm font-black text-brand-950"><input type="checkbox" checked={draft.countsTowardSeriesCompletion} onChange={(event) => setDraft({ ...draft, countsTowardSeriesCompletion: event.target.checked })} />计入系列完成度</label>
           <label className="flex items-center gap-2 text-sm font-black text-brand-950 md:col-span-2"><input type="checkbox" checked={draft.announceOnGrant} onChange={(event) => setDraft({ ...draft, announceOnGrant: event.target.checked })} />获得时发布好友动态 <span className="text-xs font-bold text-slate-400">SECRET 不会自动广播</span></label>
         </div></details>
-        <section className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/60 p-4"><p className="text-xs font-black text-amber-800">勋章预览</p><div className="mt-3 flex items-center gap-4">{draft.imageUrl || draft.iconUrl ? <BadgeImage badge={{ name: draft.name || '勋章预览', imageUrl: draft.imageUrl || draft.iconUrl, effectType: draft.effectType }} size="detail" /> : <div className="grid h-20 w-20 place-items-center text-3xl">🏅</div>}<div><h3 className="font-black text-brand-950"><BadgeName badge={{ name: draft.name || '勋章名称', effectType: draft.effectType }} /></h3><p className="mt-1 text-xs font-bold text-slate-600">{draft.acquisitionDescription || '填写获取方式后将在这里预览'}</p><p className="mt-1 text-[11px] font-black text-amber-700">{BADGE_EFFECT_TYPE_LABELS[draft.effectType]}</p>{draft.tierEnabled ? <p className="mt-1 text-[11px] font-black text-violet-700">{series.find((item) => item.id === draft.seriesId)?.name || '请选择系列'} · {draft.tierLevel || 1}级</p> : null}</div></div></section>
+        <section className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/60 p-4"><p className="text-xs font-black text-amber-800">勋章预览</p><div className="mt-3 flex items-center gap-4">{draft.imageUrl || draft.iconUrl ? <BadgeImage badge={{ name: draft.name || '勋章预览', imageUrl: draft.imageUrl || draft.iconUrl, effectType: draft.effectType }} size="detail" /> : <div className="grid h-20 w-20 place-items-center text-3xl">🏅</div>}<div><h3 className="font-black text-brand-950"><BadgeName badge={{ name: draft.name || '勋章名称', effectType: draft.effectType }} /></h3><p className="mt-1 text-xs font-bold text-slate-600">{draft.acquisitionDescription || '填写获取方式后将在这里预览'}</p><p className="mt-1 text-[11px] font-black text-amber-700">{BADGE_EFFECT_TYPE_LABELS[draft.effectType]}</p>{draft.tierEnabled ? <p className="mt-1 text-[11px] font-black text-violet-700">{series.find((item) => item.id === draft.seriesId)?.name || '请选择系列'} · {draft.tierLevel || 1}级</p> : null}</div></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-slate-200 bg-white p-3 text-slate-950"><p className="text-[11px] font-black text-slate-500">浅色页面预览</p><p className="mt-2 text-lg font-black"><UserDisplayName name="Jeremy" badge={nicknamePreviewBadge} badgeInteraction="static" showBadgeIcon={false} compact /></p></div><div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-white"><p className="text-[11px] font-black text-slate-300">深色页面预览</p><p className="mt-2 text-lg font-black"><UserDisplayName name="Jeremy" badge={nicknamePreviewBadge} badgeInteraction="static" showBadgeIcon={false} compact /></p></div></div><p className="mt-3 text-[11px] font-bold text-slate-500">昵称闪光颜色仅在局部闪光带经过时显示，基础文字始终继承页面原本颜色。</p></section>
         <button type="submit" disabled={busy || uploading || Boolean(getAutoRuleError(draft))} className="mt-5 min-h-11 rounded-xl bg-brand-950 px-5 text-sm font-black text-white disabled:opacity-50">{busy ? '保存中…' : '保存勋章'}</button>
       </form> : null}
       <section className="overflow-hidden rounded-[24px] border border-sky-100 bg-white/85 shadow-sm">

@@ -12,6 +12,12 @@ import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 
+const MAKEUP_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 10_000,
+  timeout: 15_000,
+} as const
+
 export async function GET(request: Request) {
   const guard = await requireAdmin('checkin_manage')
   if (!guard.user) return guard.response
@@ -172,7 +178,7 @@ export async function POST(request: Request) {
         longTermRewardTriggered: madeUp.streak.rewardTriggered,
         longTermRewardAmount: madeUp.streak.rewardAmount,
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    }, MAKEUP_TRANSACTION_OPTIONS)
     return NextResponse.json(result, { status: 201 })
   } catch (error) {
     if (error instanceof CheckInMakeupError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status })

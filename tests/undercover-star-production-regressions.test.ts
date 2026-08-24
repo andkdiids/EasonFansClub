@@ -226,9 +226,9 @@ test('Bug4：snapshot 暴露 phaseDeadline，客户端据此计算 remaining（r
   assert.match(service, /phaseDeadline: match\.phaseDeadline\?\.toISOString\(\) \|\| null,/)
 })
 
-test('Bug4：客户端 revision/matchId guard 丢弃旧 deadline snapshot（reconnect 不覆盖新状态）', () => {
+test('Bug4：客户端 stateVersion/matchId guard 丢弃旧 deadline snapshot（reconnect 不覆盖新状态）', () => {
   assert.match(clientState, /if \(current \&\& current\.matchId !== next\.matchId\) return false/)
-  assert.match(clientState, /if \(next\.revision < current\.revision\) return false/)
+  assert.match(clientState, /if \(nextVersion < currentVersion\) return false/)
 })
 
 test('Bug4：阶段推进由服务端 authoritative 状态机负责（realtime tick 调 advanceExpiredUndercoverMatch）', () => {

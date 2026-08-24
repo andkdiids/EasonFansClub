@@ -5,13 +5,16 @@ import { calculateCheckinStreaks } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
+import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
 import {
   canExchangeMaterial,
   canRedeemMaterial,
   compareMaterialRuleValue,
   getMaterialExchangeState,
+  isMaterialRedeemToken,
   isMaterialRedemptionRuleOperator,
   isMaterialRedemptionRuleType,
+  parseMaterialRedeemCode,
   parseDateInput,
   parsePositiveInteger,
   validateMaterialRedemptionSchedule,
@@ -41,9 +44,9 @@ export const materialRuleOperatorLabels = {
 export const materialOrderStatusLabels = {
   SUCCESS: '待核销',
   REDEEMED: '已核销',
-  CANCELLED: '已取消',
-  EXPIRED: '已过期',
-  REFUNDED: '已退款',
+  CANCELLED: '兑换已取消',
+  EXPIRED: '已超过核销截止时间',
+  REFUNDED: '已退款，兑换码无效',
 } as const
 
 type MaterialRuleType = keyof typeof materialRuleTypeLabels
@@ -241,16 +244,36 @@ export function serializeAdminMaterial(material: MaterialWithRules, now = new Da
   }
 }
 
-function makeRedeemCode() {
-  return `EFC-${randomBytes(6).toString('hex').toUpperCase()}`
-}
-
 function makeRedeemToken() {
   return randomBytes(32).toString('base64url')
 }
 
 function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+function materialRedeemIdentifierCandidates(value: unknown) {
+  const code = parseMaterialRedeemCode(value)
+  if (code) return { kind: 'code' as const, values: code.candidates }
+  const token = typeof value === 'string' ? value.trim() : ''
+  if (isMaterialRedeemToken(token)) return { kind: 'token' as const, values: [token] as [string] }
+  throw new MaterialRedemptionError('INVALID_REDEEM_TOKEN', '请提供有效的兑换码或核销令牌', 400)
+}
+
+async function findMaterialOrderByRedeemIdentifier(db: MaterialDb, value: unknown) {
+  const identifier = materialRedeemIdentifierCandidates(value)
+  if (identifier.kind === 'token') {
+    return db.materialRedemptionOrder.findUnique({ where: { redeemToken: identifier.values[0] }, include: materialOrderInclude })
+  }
+  for (const redeemCode of identifier.values) {
+    const order = await db.materialRedemptionOrder.findUnique({ where: { redeemCode }, include: materialOrderInclude })
+    if (order) return order
+  }
+  const token = typeof value === 'string' ? value.trim() : ''
+  if (isMaterialRedeemToken(token)) {
+    return db.materialRedemptionOrder.findUnique({ where: { redeemToken: token }, include: materialOrderInclude })
+  }
+  return null
 }
 
 async function writeMaterialAdminLog(
@@ -630,7 +653,7 @@ export async function exchangeMaterialRedemption(userId: string, materialId: str
           unitCost: material.cost,
           totalCost,
           status: 'SUCCESS',
-          redeemCode: makeRedeemCode(),
+          redeemCode: generateMaterialRedeemCode(),
           redeemToken: makeRedeemToken(),
           eligibilitySnapshot: eligibilitySnapshot as unknown as Prisma.InputJsonValue,
           idempotencyKey: input.idempotencyKey,
@@ -684,12 +707,7 @@ async function notifyMaterialOrder(userId: string, orderId: string, content: str
 }
 
 export async function getAdminMaterialOrderPreview(token: string) {
-  const normalized = token.trim()
-  if (!normalized) throw new MaterialRedemptionError('INVALID_REDEEM_TOKEN', '请提供兑换码或核销令牌', 400)
-  const order = await prisma.materialRedemptionOrder.findFirst({
-    where: { OR: [{ redeemToken: normalized }, { redeemCode: normalized.toUpperCase() }] },
-    include: materialOrderInclude,
-  })
+  const order = await findMaterialOrderByRedeemIdentifier(prisma, token)
   if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
   const expired = order.status === 'EXPIRED' || (order.status === 'SUCCESS' && !canRedeemMaterial(order.material.status, order.material.redeemEndAt))
   return {
@@ -701,14 +719,9 @@ export async function getAdminMaterialOrderPreview(token: string) {
 }
 
 export async function redeemMaterialOrder(adminId: string, token: string) {
-  const normalized = token.trim()
-  if (!normalized) throw new MaterialRedemptionError('INVALID_REDEEM_TOKEN', '请提供兑换码或核销令牌', 400)
   const now = new Date()
   const result = await prisma.$transaction(async (tx) => {
-    const order = await tx.materialRedemptionOrder.findFirst({
-      where: { OR: [{ redeemToken: normalized }, { redeemCode: normalized.toUpperCase() }] },
-      include: materialOrderInclude,
-    })
+    const order = await findMaterialOrderByRedeemIdentifier(tx, token)
     if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
     if (order.status === 'REDEEMED') throw new MaterialRedemptionError('ALREADY_REDEEMED', '该兑换码已经核销', 409)
     if (order.status !== 'SUCCESS') throw new MaterialRedemptionError('ORDER_NOT_REDEEMABLE', `该订单当前状态为${materialOrderStatusLabels[order.status as keyof typeof materialOrderStatusLabels] || order.status}`)
@@ -786,9 +799,16 @@ export async function listAdminMaterialOrders(params: { status?: string; query?:
   const query = sanitizeText(params.query, 80)
   const status = params.status && Object.prototype.hasOwnProperty.call(materialOrderStatusLabels, params.status) ? params.status as keyof typeof materialOrderStatusLabels : undefined
   const numericUid = query ? Number(query) : NaN
+  const codeQuery = parseMaterialRedeemCode(query)
+  const tokenQuery = !codeQuery && isMaterialRedeemToken(query) ? query.trim() : ''
+  const identifierSearch: Prisma.MaterialRedemptionOrderWhereInput[] = codeQuery
+    ? [{ redeemCode: { in: codeQuery.candidates } }, ...(isMaterialRedeemToken(query) ? [{ redeemToken: query.trim() }] : [])]
+    : tokenQuery
+      ? [{ redeemToken: tokenQuery }]
+      : []
   const searchFilter: Prisma.MaterialRedemptionOrderWhereInput | undefined = query ? {
     OR: [
-      { redeemCode: { contains: query.toUpperCase() } },
+      ...identifierSearch,
       { material: { title: { contains: query } } },
       {
         user: {

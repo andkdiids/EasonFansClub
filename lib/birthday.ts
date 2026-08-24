@@ -2,7 +2,8 @@ import { prisma } from '@/lib/prisma'
 import { grantBadge } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
-import { getShanghaiDateKey } from '@/lib/checkin'
+import { getShanghaiDateKey, parseBeijingDate } from '@/lib/checkin'
+import { runDailyJob } from '@/lib/daily-job-execution'
 import { getTodayMonthDay } from '@/lib/today'
 
 /** 生日祝福通知标题与内容（不出现用户名、不写「祝 xxx 生日快乐」、不写生日日期）。 */
@@ -44,8 +45,14 @@ async function pickBirthdayMessage(): Promise<{ title: string; content: string }
  * 统计今天过生日的有效用户数。
  * 仅使用 birthMonth / birthDay（月、日）匹配，不暴露任何具体用户。
  */
-export async function countTodayBirthdays(): Promise<number> {
-  const { month, day } = getTodayMonthDay()
+function getBirthdayDateContext(dateKey = getShanghaiDateKey()) {
+  const date = parseBeijingDate(dateKey)
+  if (!date) throw new Error('INVALID_BIRTHDAY_DATE_KEY')
+  return { dateKey, date, ...getTodayMonthDay(date) }
+}
+
+export async function countTodayBirthdays(dateKey = getShanghaiDateKey()): Promise<number> {
+  const { month, day } = getBirthdayDateContext(dateKey)
   return safeDb(
     'User.count birthdays.today',
     prisma.user.count({
@@ -67,7 +74,7 @@ export async function countTodayBirthdays(): Promise<number> {
  * - 不绑定年份：只要月日匹配即授予，因此永久保留。
  * - 失败不抛出，避免影响登录 / 资料页主流程。
  */
-export async function ensureBirthdayBadge(userId: string): Promise<void> {
+export async function ensureBirthdayBadge(userId: string, dateKey = getShanghaiDateKey()): Promise<void> {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -75,7 +82,7 @@ export async function ensureBirthdayBadge(userId: string): Promise<void> {
     })
     if (!user?.birthMonth || !user?.birthDay) return
 
-    const { month, day } = getTodayMonthDay()
+    const { month, day } = getBirthdayDateContext(dateKey)
     if (user.birthMonth !== month || user.birthDay !== day) return
 
     const badge = await prisma.badge.findUnique({
@@ -109,8 +116,9 @@ function getShanghaiYear(now = new Date()): number {
  * - 不出现用户名 / 「祝 xxx 生日快乐」/ 生日日期。
  * - 返回 true 表示本次实际新建了通知，false 表示已存在（跳过）。
  */
-export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
-  const year = getShanghaiYear()
+export async function sendBirthdayGreeting(userId: string, dateKey = getShanghaiDateKey()): Promise<boolean> {
+  const { date, month, day } = getBirthdayDateContext(dateKey)
+  const year = getShanghaiYear(date)
   const key = `${BIRTHDAY_GREETING_KEY_PREFIX}-${year}`
   try {
     // 前置强校验（安全修复）：仅当用户真正设置了生日且今天就是其生日，才允许发送。
@@ -122,7 +130,6 @@ export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
     })
     if (user?.birthMonth == null || user?.birthDay == null) return false
 
-    const { month, day } = getTodayMonthDay()
     if (user.birthMonth !== month || user.birthDay !== day) return false
 
     const existing = await prisma.notification.findFirst({
@@ -159,10 +166,10 @@ export async function sendBirthdayGreeting(userId: string): Promise<boolean> {
  * - 幂等：以 key = `friend-birthday:${生日用户id}:${year}` + (recipientId) 唯一约束保证同好友同年每个生日用户只提醒一次。
  * - 失败不影响其他流程：整体及单好友异常均被吞掉并记录日志。
  */
-export async function sendFriendBirthdayReminders(): Promise<void> {
+export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()): Promise<void> {
   try {
-    const year = getShanghaiYear()
-    const { month, day } = getTodayMonthDay()
+    const { date, month, day } = getBirthdayDateContext(dateKey)
+    const year = getShanghaiYear(date)
     const birthdayUsers = await safeDb(
       'User.findMany birthday.friendReminder.sources',
       prisma.user.findMany({
@@ -226,11 +233,11 @@ export async function sendFriendBirthdayReminders(): Promise<void> {
  * 同时给这些生日用户的「好友」发送生日提醒。
  * - 幂等：徽章靠 UserBadge(userId, badgeId) 唯一约束，通知靠 key 唯一约束，重复执行安全。
  * - 失败不影响调用方：整体及单用户异常均被吞掉并记录日志。
- * - 不新增 cron：由首页加载 / 用户登录等现有访问链路触发（见 lib/home-data.ts、login route）。
+ * - 由受保护的内部每日任务调用；重复执行由通知、徽章唯一约束共同保证安全。
  */
-export async function grantTodayBirthdayRewards(): Promise<void> {
+export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()): Promise<void> {
   try {
-    const { month, day } = getTodayMonthDay()
+    const { month, day } = getBirthdayDateContext(dateKey)
     const users = await safeDb(
       'User.findMany birthday.rewards',
       prisma.user.findMany({
@@ -248,18 +255,26 @@ export async function grantTodayBirthdayRewards(): Promise<void> {
 
     for (const user of users) {
       try {
-        await ensureBirthdayBadge(user.id)
-        await sendBirthdayGreeting(user.id)
+        await ensureBirthdayBadge(user.id, dateKey)
+        await sendBirthdayGreeting(user.id, dateKey)
       } catch (error) {
         console.error('[birthday.grantRewards.user]', user.id, error)
       }
     }
 
     // 好友生日提醒与本人生日通知相互独立：即便上面没有任何生日用户，也由内部自行短路。
-    await sendFriendBirthdayReminders()
+    await sendFriendBirthdayReminders(dateKey)
   } catch (error) {
     console.error('[birthday.grantTodayBirthdayRewards]', error)
   }
+}
+
+export function runDailyBirthdayRewards(dateKey = getShanghaiDateKey()) {
+  return runDailyJob({
+    jobKey: 'birthday-rewards',
+    dateKey,
+    run: () => grantTodayBirthdayRewards(dateKey),
+  })
 }
 
 /** 已发送的生日祝福通知总数（用于后台统计）。 */

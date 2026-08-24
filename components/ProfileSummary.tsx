@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { resolveGrowthLevelName } from '@/lib/growth-display'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { badgeTextEffectClass, badgeTextStyle, UserDisplayName } from '@/components/UserDisplayName'
+import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type ProfileHeaderProps = {
@@ -122,7 +122,7 @@ export function ProfileHeader({
             </div>
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center justify-start gap-1.5 text-xs font-bold leading-none text-white/90">
-            <span className={`profile-identity-badge profile-identity-uid ${badgeTextEffectClass(equippedBadge?.effectType || 'NONE')}`} style={equippedBadge?.effectType && equippedBadge.effectType !== 'NONE' ? badgeTextStyle(equippedBadge) : undefined}>UID {formatUid(uid)}</span>
+            <span className="profile-identity-badge profile-identity-uid">UID {formatUid(uid)}</span>
             <span className="profile-identity-badge">{growthLevelName}</span>
           </div>
           <p className="mt-2 text-[11px] font-bold text-white/82">

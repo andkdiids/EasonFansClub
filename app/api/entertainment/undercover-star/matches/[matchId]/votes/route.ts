@@ -28,6 +28,7 @@ export async function POST(request: Request, { params }: Context) {
     // 不得把已经成功的投票变成 500，否则客户端会误报“提交失败”。
     try {
       undercoverRealtimeHub.broadcastMatchState(matchId)
+      await undercoverRealtimeHub.broadcastRoom(state.snapshot.roomId)
       undercoverRealtimeHub.scheduleMatch(matchId, state.snapshot.phaseDeadline)
     } catch (broadcastError) {
       console.error('[undercover-star.broadcast] vote', broadcastError)

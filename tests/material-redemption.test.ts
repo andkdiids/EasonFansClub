@@ -5,8 +5,13 @@ import {
   canExchangeMaterial,
   compareMaterialRuleValue,
   getMaterialExchangeState,
+  normalizeMaterialRedeemCode,
+  parseMaterialRedeemCode,
+  parseMaterialRedemptionQr,
   validateMaterialRedemptionSchedule,
 } from '@/lib/material-redemption-domain'
+import { stopMaterialRedemptionCamera } from '@/lib/material-redemption-scanner'
+import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
 import { normalizeMaterialRules } from '@/lib/material-redemptions'
 
 const schedule = {
@@ -43,6 +48,36 @@ test('资格数值运算符和条件结构只允许后端定义的形式', () =>
   if ('error' in invalidOperator) assert.match(invalidOperator.error, /只能使用等于/)
 })
 
+test('兑换码统一使用 ECFC，并按精确候选兼容历史 EFC', () => {
+  const suffix = 'DAF5E468775C'
+  const generated = generateMaterialRedeemCode()
+  assert.match(generated, /^ECFC-[A-Z0-9]{12}$/)
+  assert.notEqual(generated, generateMaterialRedeemCode())
+  assert.equal(normalizeMaterialRedeemCode(suffix), `ECFC-${suffix}`)
+  assert.deepEqual(parseMaterialRedeemCode(suffix)?.candidates, [`ECFC-${suffix}`, `EFC-${suffix}`])
+  assert.equal(normalizeMaterialRedeemCode(` ECFC-${suffix.toLowerCase()} `), `ECFC-${suffix}`)
+  assert.equal(normalizeMaterialRedeemCode(`ecfc - ${suffix.toLowerCase()}`), `ECFC-${suffix}`)
+  assert.equal(normalizeMaterialRedeemCode(`EFC-${suffix}`), `EFC-${suffix}`)
+  assert.equal(parseMaterialRedeemCode('-'), null)
+})
+
+test('二维码只接受 token 或本站核销 URL，不跳转外部地址', () => {
+  const token = 'x'.repeat(32)
+  assert.deepEqual(parseMaterialRedemptionQr(token), { source: 'token', redeemToken: token })
+  assert.deepEqual(parseMaterialRedemptionQr('ECFC-DAF5E468775C'), { source: 'code', redeemCode: 'ECFC-DAF5E468775C' })
+  assert.deepEqual(parseMaterialRedemptionQr('https://ecfc.fans/admin/material-redemptions/verify?token=xxxx'), { source: 'url', redeemToken: 'xxxx' })
+  assert.equal(parseMaterialRedemptionQr('https://evil.example.com/test'), null)
+  assert.equal(parseMaterialRedemptionQr('https://ecfc.fans/profile?token=xxxx'), null)
+})
+
+test('摄像头关闭时会停止 ZXing 控制器和所有 MediaStreamTrack', () => {
+  let trackStops = 0
+  let scannerStops = 0
+  stopMaterialRedemptionCamera({ getTracks: () => [{ stop: () => { trackStops += 1 } }, { stop: () => { trackStops += 1 } }] }, { stop: () => { scannerStops += 1 } })
+  assert.equal(trackStops, 2)
+  assert.equal(scannerStops, 1)
+})
+
 test('兑换服务保留事务、幂等、条件库存扣减和订单归属保护', () => {
   const service = readFileSync('lib/material-redemptions.ts', 'utf8')
   const registrationFee = readFileSync('lib/registration-fee.ts', 'utf8')
@@ -66,4 +101,20 @@ test('兑换服务保留事务、幂等、条件库存扣减和订单归属保�
   assert.match(registrationFee, /export async function awardRegistrationFee\(\s*tx:\s*Prisma\.TransactionClient/)
   assert.match(registrationFee, /await tx\.pointLog\.create/)
   assert.match(schema, /idempotencyKey\s+String\s+@unique/)
+  assert.match(service, /generateMaterialRedeemCode\(\)/)
+  assert.doesNotMatch(service, /redeemCode:\s*\{\s*contains/)
+})
+
+test('扫码器使用后置优先、原生 BarcodeDetector 和 ZXing fallback，并锁定重复扫描', () => {
+  const scanner = readFileSync('components/MaterialRedemptionScanner.tsx', 'utf8')
+  const list = readFileSync('app/material-redemptions/MaterialRedemptionsClient.tsx', 'utf8')
+  const css = readFileSync('app/globals.css', 'utf8')
+  assert.match(scanner, /BarcodeDetector/)
+  assert.match(scanner, /@zxing\/browser/)
+  assert.match(scanner, /facingMode:\s*\{\s*ideal:\s*'environment'/)
+  assert.match(scanner, /scanningLockedRef/)
+  assert.match(scanner, /return \(\) => stopCamera\(\)/)
+  assert.match(list, /material-redemption-grid/)
+  assert.match(css, /\.material-redemption-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.match(css, /\.material-redemption-card-image img \{[^}]*object-fit:contain/)
 })

@@ -626,6 +626,7 @@ model CheckIn {
   @@unique([userId, checkDate])
   @@unique([userId, checkinDateKey])
   @@index([checkDate])
+  @@index([checkinDateKey, mood])
   @@index([userId, createdAt])
   @@index([userId, type, checkinDateKey])
 }
@@ -3240,6 +3241,21 @@ model ContentModerationScanJob {
   @@index([status, createdAt])
 }
 
+model DailyJobExecution {
+  id         String                  @id @default(cuid())
+  jobKey     String
+  dateKey    String
+  status     DailyJobExecutionStatus @default(RUNNING)
+  startedAt  DateTime                @default(now())
+  finishedAt DateTime?
+  error      String?                 @db.Text
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  @@unique([jobKey, dateKey])
+  @@index([status, startedAt])
+}
+
 model SiteSetting {
   id        String               @id @default(cuid())
   key       String               @unique
@@ -4343,6 +4359,12 @@ enum ContentModerationStatus {
 enum ContentModerationScanJobStatus {
   SCANNING
   COMPLETED
+  FAILED
+}
+
+enum DailyJobExecutionStatus {
+  RUNNING
+  SUCCEEDED
   FAILED
 }
 

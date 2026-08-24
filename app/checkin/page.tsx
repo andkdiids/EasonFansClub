@@ -3,6 +3,7 @@ import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { getCheckInPublicStats } from '@/lib/checkin-stats'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getFriendFollowedIds, getFriendIds } from '@/lib/friends'
@@ -68,12 +69,12 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const emptyMessagePagination: CheckInMessagePagination = { page: 1, pageSize: CHECK_IN_MESSAGE_PAGE_SIZE, total: 0, totalPages: 1, hasMore: false }
 
   const friendIdsPromise = safeDb('Friendship.findMany checkin.friendIds', getFriendIds(sessionUser.id), [], 3000)
-  const [user, activeUsers, todayCount, todayCheckIn, selectedMessagePage, friendIds, moodStats, checkInHistory] = await Promise.all([
+  const [user, activeUsers, publicStats, todayCheckIn, selectedMessagePage, friendIds, checkInHistory] = await Promise.all([
     withDbTimeout(
       'User.findUnique checkin.user',
       prisma.user.findUnique({
         where: { id: sessionUser.id },
-        select: { points: true, exp: true, level: true, consecutiveDays: true, checkinMoodEnabled: true },
+        select: { points: true, exp: true, level: true, checkinMoodEnabled: true },
       }),
     ),
     safeDb(
@@ -81,7 +82,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } }),
       0,
     ),
-    safeDb('CheckIn.count checkin.todayCount', prisma.checkIn.count({ where: { checkinDateKey: todayKey } }), 0),
+    getCheckInPublicStats(todayKey),
     withDbTimeout(
       'CheckIn.findUnique checkin.todayCheckIn',
       prisma.checkIn.findUnique({
@@ -104,17 +105,9 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       8000,
     ),
     friendIdsPromise,
-    safeDb(
-      'CheckIn.groupBy checkin.moodStats',
-      prisma.checkIn.groupBy({
-        by: ['mood'],
-        where: { checkinDateKey: todayKey, mood: { not: null } },
-        _count: { mood: true },
-      }),
-      [],
-    ),
     safeDb('CheckIn.findMany checkin.history', prisma.checkIn.findMany({ where: { userId: sessionUser.id }, select: { checkinDateKey: true } }), []),
   ])
+  const { todayCount, moodStats } = publicStats
   const followedFriendIds = await safeDb(
     'FriendFollow.findMany checkin.followedFriendIds',
     getFriendFollowedIds(sessionUser.id, friendIds),

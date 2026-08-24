@@ -4,6 +4,100 @@ export type MaterialRedemptionSchedule = {
   redeemEndAt: Date
 }
 
+export const MATERIAL_REDEMPTION_CODE_PREFIX = 'ECFC-'
+export const LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX = 'EFC-'
+const MATERIAL_REDEMPTION_CODE_SUFFIX_PATTERN = /^[A-Z0-9]{8,59}$/
+const MATERIAL_REDEMPTION_TOKEN_PATTERN = /^[A-Za-z0-9_+=\/-]{4,128}$/
+const MATERIAL_REDEMPTION_VERIFY_PATH = '/admin/material-redemptions/verify'
+const MATERIAL_REDEMPTION_PUBLIC_HOSTS = new Set(['ecfc.fans', 'www.ecfc.fans'])
+const MATERIAL_REDEMPTION_LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+
+export type MaterialRedeemCodeParseResult = {
+  input: string
+  normalized: string
+  prefix: typeof MATERIAL_REDEMPTION_CODE_PREFIX | typeof LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX | null
+  suffix: string
+  candidates: [string, string]
+}
+
+export type MaterialRedemptionQrParseResult = {
+  source: 'token' | 'url' | 'code'
+  redeemToken?: string
+  redeemCode?: string
+}
+
+export function normalizeMaterialRedeemCodeInput(value: unknown) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, '').toUpperCase() : ''
+}
+
+export function parseMaterialRedeemCode(value: unknown): MaterialRedeemCodeParseResult | null {
+  const input = normalizeMaterialRedeemCodeInput(value)
+  if (!input) return null
+
+  let prefix: MaterialRedeemCodeParseResult['prefix'] = null
+  let suffix = input
+  if (input.startsWith(MATERIAL_REDEMPTION_CODE_PREFIX)) {
+    prefix = MATERIAL_REDEMPTION_CODE_PREFIX
+    suffix = input.slice(MATERIAL_REDEMPTION_CODE_PREFIX.length)
+  } else if (input.startsWith(LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX)) {
+    prefix = LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX
+    suffix = input.slice(LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX.length)
+  } else if (input.includes('-')) {
+    return null
+  }
+
+  if (!MATERIAL_REDEMPTION_CODE_SUFFIX_PATTERN.test(suffix)) return null
+  const current = `${MATERIAL_REDEMPTION_CODE_PREFIX}${suffix}`
+  const legacy = `${LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX}${suffix}`
+  const candidates: [string, string] = prefix === LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX ? [legacy, current] : [current, legacy]
+  return { input, normalized: candidates[0], prefix, suffix, candidates }
+}
+
+export function normalizeMaterialRedeemCode(value: unknown) {
+  return parseMaterialRedeemCode(value)?.normalized || ''
+}
+
+export function isMaterialRedeemToken(value: unknown): value is string {
+  return typeof value === 'string' && MATERIAL_REDEMPTION_TOKEN_PATTERN.test(value.trim())
+}
+
+function parseMaterialRedemptionQrToken(value: unknown): MaterialRedemptionQrParseResult | null {
+  const token = typeof value === 'string' ? value.trim() : ''
+  const code = parseMaterialRedeemCode(token)
+  if (code && (code.prefix === MATERIAL_REDEMPTION_CODE_PREFIX || code.prefix === LEGACY_MATERIAL_REDEMPTION_CODE_PREFIX)) {
+    return { source: 'code', redeemCode: code.normalized }
+  }
+  if (isMaterialRedeemToken(token)) return { source: 'token', redeemToken: token }
+  return code ? { source: 'code', redeemCode: code.normalized } : null
+}
+
+function isAllowedMaterialRedemptionQrUrl(url: URL) {
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (MATERIAL_REDEMPTION_PUBLIC_HOSTS.has(hostname)) return url.protocol === 'https:' && url.port === ''
+  if (MATERIAL_REDEMPTION_LOCAL_HOSTS.has(hostname)) return (url.protocol === 'http:' || url.protocol === 'https:') && (!url.port || url.port === '3000' || url.port === '8000')
+  return false
+}
+
+export function parseMaterialRedemptionQr(value: unknown): MaterialRedemptionQrParseResult | null {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return null
+  const direct = parseMaterialRedemptionQrToken(raw)
+  if (direct) return direct
+
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+  if (!isAllowedMaterialRedemptionQrUrl(url) || url.username || url.password) return null
+  if (url.pathname.replace(/\/+$/, '') !== MATERIAL_REDEMPTION_VERIFY_PATH) return null
+  const tokens = url.searchParams.getAll('token')
+  if (tokens.length !== 1) return null
+  const parsed = parseMaterialRedemptionQrToken(tokens[0])
+  return parsed ? { ...parsed, source: 'url' } : null
+}
+
 export type MaterialRedemptionStatusValue = 'DRAFT' | 'PUBLISHED' | 'PAUSED' | 'ENDED' | 'ARCHIVED'
 
 export type MaterialExchangeState =

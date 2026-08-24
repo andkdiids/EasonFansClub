@@ -1,7 +1,7 @@
 import type { UndercoverPublicMatchSnapshot, UndercoverRoomState, UndercoverRealtimeEvent } from '@/lib/undercover-star-protocol'
 import { UNDERCOVER_PRESENCE_HEARTBEAT_MS } from '@/lib/undercover-star-config'
 
-type RealtimeStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
+export type UndercoverRealtimeStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline'
 
 type Options = {
   roomId?: string | null
@@ -10,8 +10,8 @@ type Options = {
   fetchMatch?: (matchId: string) => Promise<UndercoverPublicMatchSnapshot | null>
   onRoom?: (state: UndercoverRoomState) => void
   onMatch?: (state: UndercoverPublicMatchSnapshot) => void
-  onStatus?: (status: RealtimeStatus) => void
-  onError?: (message: string) => void
+  onStatus?: (status: UndercoverRealtimeStatus) => void
+  onError?: (message: string, code?: string) => void
   onKicked?: (payload: { roomId: string }) => void
 }
 
@@ -26,6 +26,7 @@ export class UndercoverStarRealtimeClient {
   private connectTimer: number | null = null
   private generation = 0
   private failures = 0
+  private hadConnectionFailure = false
   private options: Options
 
   constructor(options: Options = {}) {
@@ -40,6 +41,7 @@ export class UndercoverStarRealtimeClient {
     this.stop(false)
     this.generation += 1
     this.failures = 0
+    this.hadConnectionFailure = false
     this.connect(this.generation)
   }
 
@@ -90,6 +92,10 @@ export class UndercoverStarRealtimeClient {
       this.clearConnectTimer()
       this.failures = 0
       this.options.onStatus?.('connected')
+      if (this.hadConnectionFailure) {
+        console.info('[undercover.connection.recover]', JSON.stringify({ result: 'CONNECTED' }))
+        this.hadConnectionFailure = false
+      }
       this.stopFallback()
       if (this.options.matchId) this.send({ type: 'JOIN_MATCH', matchId: this.options.matchId })
       else if (this.options.roomId) this.send({ type: 'JOIN_ROOM', roomId: this.options.roomId })
@@ -106,7 +112,10 @@ export class UndercoverStarRealtimeClient {
       }
     }
     socket.onerror = () => {
-      if (generation === this.generation) this.options.onStatus?.('disconnected')
+      if (generation === this.generation) {
+        this.hadConnectionFailure = true
+        this.options.onStatus?.('reconnecting')
+      }
     }
     socket.onclose = () => {
       if (generation !== this.generation) return
@@ -115,7 +124,8 @@ export class UndercoverStarRealtimeClient {
       if (this.pingTimer !== null) window.clearInterval(this.pingTimer)
       this.pingTimer = null
       this.failures += 1
-      this.options.onStatus?.('disconnected')
+      this.hadConnectionFailure = true
+      this.options.onStatus?.(this.failures >= 3 ? 'offline' : 'reconnecting')
       this.startFallback(generation)
       const delay = Math.min(8_000, 500 * 2 ** Math.min(this.failures - 1, 4))
       this.reconnectTimer = window.setTimeout(() => this.connect(generation), delay)
@@ -157,7 +167,7 @@ export class UndercoverStarRealtimeClient {
       if (event.state.status === 'FINISHED') this.stop()
       return
     }
-    if (event.type === 'ERROR') this.options.onError?.(event.message)
+    if (event.type === 'ERROR') this.options.onError?.(event.message, event.code)
     if (event.type === 'ROOM_KICKED') this.options.onKicked?.(event)
   }
 
@@ -176,8 +186,8 @@ export class UndercoverStarRealtimeClient {
           if (generation !== this.generation || !state) return
           this.options.onRoom?.(state)
         }
-      } catch (error) {
-        this.options.onError?.(error instanceof Error ? error.message : '恢复对局状态失败。')
+      } catch {
+        this.options.onStatus?.('reconnecting')
       }
     }
     void poll()

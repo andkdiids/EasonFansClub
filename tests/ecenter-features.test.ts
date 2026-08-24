@@ -8,6 +8,8 @@ import {
   getVisibleEcenterFeatures,
   mergeEcenterFeatureSettings,
   mergeFeatureRegistryWithSettings,
+  reorderEcenterFeatures,
+  setEcenterFeatureHidden,
   validateEcenterShortcutPreferences,
   validateEcenterFeatureUpdates,
 } from '../lib/ecenter-features'
@@ -185,6 +187,59 @@ test('用户偏好只覆盖顺序与隐藏状态，新入口没有 Preference �
   assert.equal(getVisibleEcenterFeatures(merged).some((feature) => feature.featureKey === 'CHECKIN'), false)
 })
 
+test('用户保存顺序优先于默认顺序，新入口只追加到用户布局之后', () => {
+  const futureFeature = {
+    ...ECENTER_FEATURES[0],
+    featureKey: 'FUTURE_TEST_FEATURE',
+    label: '未来测试功能',
+    href: '/future-test-feature',
+    defaultSortOrder: 999,
+    activePrefixes: ['/future-test-feature'],
+  }
+  const base = mergeFeatureRegistryWithSettings([...ECENTER_FEATURES, futureFeature], []) as unknown as ReturnType<typeof mergeEcenterFeatureSettings>
+  const resolved = applyEcenterShortcutPreferences(base, [
+    { itemKey: 'ENTERTAINMENT', sortOrder: 0, hidden: false },
+    { itemKey: 'CREATE_POST', sortOrder: 1, hidden: false },
+    { itemKey: 'CHECKIN', sortOrder: 2, hidden: false },
+  ])
+  assert.deepEqual(resolved.slice(0, 3).map((feature) => feature.featureKey), ['ENTERTAINMENT', 'CREATE_POST', 'CHECKIN'])
+  assert.equal(resolved.at(-1)?.featureKey, 'FUTURE_TEST_FEATURE')
+})
+
+test('活动中心和物料兑换使用稳定 ID并可参与用户自定义排序', () => {
+  const base = mergeEcenterFeatureSettings([])
+  const resolved = applyEcenterShortcutPreferences(base, [
+    { itemKey: 'MATERIAL_REDEMPTIONS', sortOrder: 0, hidden: false },
+    { itemKey: 'ACTIVITY_CENTER', sortOrder: 1, hidden: false },
+  ])
+  assert.deepEqual(resolved.slice(0, 2).map((feature) => feature.featureKey), ['MATERIAL_REDEMPTIONS', 'ACTIVITY_CENTER'])
+  assert.equal(resolved.find((feature) => feature.featureKey === 'ACTIVITY_CENTER')?.href, '/activities')
+  assert.equal(resolved.find((feature) => feature.featureKey === 'MATERIAL_REDEMPTIONS')?.href, '/material-redemptions')
+})
+
+test('隐藏和恢复只改变可见性，不会把用户保存顺序重排成默认顺序', () => {
+  const base = mergeEcenterFeatureSettings([])
+  const ordered = applyEcenterShortcutPreferences(base, [
+    { itemKey: 'ENTERTAINMENT', sortOrder: 0, hidden: false },
+    { itemKey: 'CREATE_POST', sortOrder: 1, hidden: false },
+    { itemKey: 'CHECKIN', sortOrder: 2, hidden: true },
+    { itemKey: 'DAILY_PRESCRIPTION', sortOrder: 3, hidden: false },
+  ])
+  assert.deepEqual(ordered.filter((feature) => !feature.hidden).slice(0, 3).map((feature) => feature.featureKey), ['ENTERTAINMENT', 'CREATE_POST', 'DAILY_PRESCRIPTION'])
+  const restored = setEcenterFeatureHidden(ordered, 'CHECKIN', false)
+  assert.deepEqual(restored.slice(0, 4).map((feature) => feature.featureKey), ['ENTERTAINMENT', 'CREATE_POST', 'CHECKIN', 'DAILY_PRESCRIPTION'])
+})
+
+test('上移下移使用同一个不可变重排函数并保留边界', () => {
+  const base = mergeEcenterFeatureSettings([]).slice(0, 3)
+  const movedUp = reorderEcenterFeatures(base, 'DAILY_PRESCRIPTION', 1)
+  assert.deepEqual(movedUp.map((feature) => feature.featureKey), ['CREATE_POST', 'DAILY_PRESCRIPTION', 'CHECKIN'])
+  const movedDown = reorderEcenterFeatures(base, 'CREATE_POST', 1)
+  assert.deepEqual(movedDown.map((feature) => feature.featureKey), ['CHECKIN', 'CREATE_POST', 'DAILY_PRESCRIPTION'])
+  assert.deepEqual(reorderEcenterFeatures(base, 'CREATE_POST', -1).map((feature) => feature.featureKey), base.map((feature) => feature.featureKey))
+  assert.deepEqual(reorderEcenterFeatures(base, 'DAILY_PRESCRIPTION', 3).map((feature) => feature.featureKey), base.map((feature) => feature.featureKey))
+})
+
 test('用户偏好 API 严格拒绝未知、重复和非法排序项', () => {
   const unknown = validateEcenterShortcutPreferences([{ itemKey: 'NOT_A_FEATURE', sortOrder: 0, hidden: false }])
   const duplicate = validateEcenterShortcutPreferences([
@@ -215,7 +270,11 @@ test('编辑态提供拖拽、移动端上下按钮、隐藏恢复和二次确�
   const editor = read('components/layout/EcenterShortcutEditor.tsx')
   const mobile = read('components/layout/MobileNavigation.tsx')
   const sidebar = read('components/layout/Sidebar.tsx')
-  assert.match(editor, /draggable/)
+  assert.match(editor, /onPointerDown=\{\(event\) => handlePointerDown\(/)
+  assert.match(editor, /onPointerMove=\{handlePointerMove\}/)
+  assert.match(editor, /onPointerCancel=\{handlePointerEnd\}/)
+  assert.match(editor, /setPointerCapture\(event\.pointerId\)/)
+  assert.doesNotMatch(editor, /\bdraggable\b|onDragStart|onDrop/)
   assert.match(editor, /将\$\{feature\.label\}上移/)
   assert.match(editor, /将\$\{feature\.label\}下移/)
   assert.match(editor, /隐藏功能/)
@@ -224,4 +283,15 @@ test('编辑态提供拖拽、移动端上下按钮、隐藏恢复和二次确�
   assert.match(mobile, /EcenterShortcutEditorPanel/)
   assert.match(sidebar, /EcenterShortcutEditorPanel/)
   assert.match(read('app/games/[slug]/page.tsx'), /export default/)
+})
+
+test('保存 payload 和接口完整传递用户顺序与隐藏状态', () => {
+  const editor = read('components/layout/EcenterShortcutEditor.tsx')
+  const route = read('app/api/users/me/e-center-preferences/route.ts')
+  assert.match(editor, /preferences: featurePayload\(featuresRef\.current\)/)
+  assert.match(editor, /itemKey: feature\.featureKey[\s\S]*sortOrder: feature\.sortOrder[\s\S]*hidden: feature\.hidden/)
+  assert.match(route, /validateEcenterShortcutPreferences\(body\.preferences\)/)
+  assert.match(route, /sortOrder: preference\.sortOrder/)
+  assert.match(route, /hidden: preference\.hidden/)
+  assert.match(route, /userCenterShortcutPreference\.createMany/)
 })

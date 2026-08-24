@@ -122,6 +122,18 @@ test('收入、余额和业务记录在同一事务内完成，并由业务键�
   assert.match(achievement, /prisma\.\$transaction\(async \(tx\)/)
 })
 
+test('奖励业务键先查重、锁内再用当前读复核，保证并发只加一次', () => {
+  const service = read('lib/registration-fee.ts')
+  const award = service.slice(service.indexOf('export async function awardRegistrationFee'), service.indexOf('type RegistrationFeeReversalInput'))
+  const precheck = award.indexOf('existingBeforeLock')
+  const userLock = award.indexOf('FOR UPDATE')
+  const lockedCheck = award.indexOf('existingAfterLock')
+  assert.ok(precheck >= 0 && precheck < userLock)
+  assert.ok(userLock < lockedCheck)
+  assert.match(award, /PointLog.*FOR UPDATE/)
+  assert.match(award, /tx\.user\.update[\s\S]*tx\.pointLog\.create/)
+})
+
 test('每日挂号费查询按北京时间边界倒序读取当前用户正向流水', () => {
   const route = read('app/api/points/today/route.ts')
   const service = read('lib/registration-fee.ts')

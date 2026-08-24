@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { getCheckInPublicStats } from '@/lib/checkin-stats'
 import { DAILY_MOODS, calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { prisma } from '@/lib/prisma'
 
@@ -9,14 +10,9 @@ export async function GET() {
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey(today)
 
-  const [todayCount, onlineCount, moodStats, tasks, progress, history] = await Promise.all([
-    prisma.checkIn.count({ where: { checkinDateKey: todayKey } }),
+  const [publicStats, onlineCount, tasks, progress, history] = await Promise.all([
+    getCheckInPublicStats(todayKey),
     prisma.user.count({ where: { isOnline: true, isDeleted: false } }),
-    prisma.checkIn.groupBy({
-      by: ['mood'],
-      where: { checkinDateKey: todayKey, mood: { not: null } },
-      _count: { mood: true },
-    }),
     prisma.dailyTaskTemplate.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -31,6 +27,7 @@ export async function GET() {
       ? prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } })
       : Promise.resolve([]),
   ])
+  const { todayCount, moodStats } = publicStats
 
   const progressMap = new Map(progress.map((item) => [item.templateId, item]))
   const moodMap = new Map(moodStats.map((item) => [item.mood, item._count.mood]))

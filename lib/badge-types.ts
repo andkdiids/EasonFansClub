@@ -188,3 +188,16 @@ export function normalizeBadgeColor(value: unknown) {
   const color = value.trim().toLowerCase()
   return BADGE_COLOR_PATTERN.test(color) ? color : null
 }
+
+// The legacy nicknameEffect enum remains in the database for compatibility.
+// In the nickname renderer, every non-NONE value now means "shine enabled";
+// nicknameColor is the shine color and never controls the base text color.
+export const BADGE_NICKNAME_SHINE_FALLBACK = '#f3d98b'
+
+export function isBadgeNicknameShineEnabled(badge?: Pick<EquippedBadgeView, 'nicknameEffect'> | null) {
+  return Boolean(badge && badge.nicknameEffect !== 'NONE')
+}
+
+export function getBadgeNicknameShineColor(badge?: Pick<EquippedBadgeView, 'nicknameColor'> | null) {
+  return normalizeBadgeColor(badge?.nicknameColor) || BADGE_NICKNAME_SHINE_FALLBACK
+}

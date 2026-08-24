@@ -9,7 +9,8 @@ import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
 import { getTodayMonthDay } from '@/lib/today'
-import { countTodayBirthdays, grantTodayBirthdayRewards } from '@/lib/birthday'
+import { countTodayBirthdays } from '@/lib/birthday'
+import { getTodayCheckInCount } from '@/lib/checkin-stats'
 import { getTodayEventRecords } from '@/lib/today-events'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
@@ -318,23 +319,12 @@ export async function getHomeEntertainmentRanking(userId?: string) {
   return getGuessSongModeHighScores(userId)
 }
 
-// 生日奖励（徽章 + 通知）每日最多触发一次，由首页加载自然带起，无需 cron。
-// 失败不影响首页渲染；登录链路已按用户单独兜底，这里只负责把当天未登录的生日用户也覆盖到。
-let lastBirthdaySweepDateKey: string | null = null
-function triggerBirthdayRewardsSweep() {
-  const dateKey = getShanghaiDateKey(new Date())
-  if (dateKey === lastBirthdaySweepDateKey) return
-  lastBirthdaySweepDateKey = dateKey
-  void grantTodayBirthdayRewards().catch(() => {})
-}
-
 export async function getHomeSiteStats() {
   const dateKey = getShanghaiDateKey(new Date())
-  triggerBirthdayRewardsSweep()
   const [memberCount, todayCheckIns, todayBirthdays] = await Promise.all([
     safeDb('User.count home.siteStats.members', prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false } }), 0, 5000),
-    safeDb('CheckIn.count home.siteStats.today', prisma.checkIn.count({ where: { checkinDateKey: dateKey } }), 0, 5000),
-    safeDb('TodayEvent.count home.siteStats.birthdays', countTodayBirthdays(), 0, 5000),
+    getTodayCheckInCount(dateKey),
+    safeDb('User.count home.siteStats.birthdays', countTodayBirthdays(dateKey), 0, 5000),
   ])
   return { memberCount, todayCheckIns, todayBirthdays }
 }

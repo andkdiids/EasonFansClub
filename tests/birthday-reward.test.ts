@@ -23,14 +23,14 @@ test('grantTodayBirthdayRewards scans only today birthday users and grants badge
   // 只查询生日月日 == 今天的用户 => 今日生日用户提供徽章
   assert.match(birthdayLib, /birthMonth:\s*month/)
   assert.match(birthdayLib, /birthDay:\s*day/)
-  assert.match(birthdayLib, /await ensureBirthdayBadge\(user\.id\)/)
+  assert.match(birthdayLib, /await ensureBirthdayBadge\(user\.id, dateKey\)/)
   // 非今日生日用户不会被查询到 => 不会获得（2: 非今日生日不会获得）
-  assert.match(birthdayLib, /getTodayMonthDay\(\)/)
+  assert.match(birthdayLib, /getBirthdayDateContext\(dateKey\)/)
 })
 
 test('grantTodayBirthdayRewards is idempotent and fails safe', () => {
   // 单个用户处理被 try/catch 包裹，整体也被 try/catch 包裹，错误不影响页面
-  assert.match(birthdayLib, /try \{\s*await ensureBirthdayBadge\(user\.id\)/)
+  assert.match(birthdayLib, /try \{\s*await ensureBirthdayBadge\(user\.id, dateKey\)/)
   assert.match(birthdayLib, /console\.error\('\[birthday\.grantRewards\.user\]'/)
   assert.match(birthdayLib, /console\.error\('\[birthday\.grantTodayBirthdayRewards\]'/)
 })
@@ -64,7 +64,7 @@ test('birthday greeting never leaks birthday date or user name (4: 不泄露生�
   assert.match(greetFn, /prisma\.user\.findUnique/)
   assert.match(greetFn, /user\?\.birthMonth == null \|\| user\?\.birthDay == null/)
   assert.match(greetFn, /user\.birthMonth !== month \|\| user\.birthDay !== day/)
-  assert.match(greetFn, /getTodayMonthDay\(\)/)
+  assert.match(greetFn, /getBirthdayDateContext\(dateKey\)/)
   assert.match(greetFn, /return false/)
 })
 
@@ -80,10 +80,9 @@ test('login flow also grants greeting per-user (no cron needed)', () => {
   assert.match(loginRoute, /await sendBirthdayGreeting\(user\.id\)/)
 })
 
-test('homepage load triggers the daily sweep (fire-and-forget, no cron)', () => {
-  assert.match(homeData, /import \{ countTodayBirthdays, grantTodayBirthdayRewards \} from '@\/lib\/birthday'/)
-  assert.match(homeData, /triggerBirthdayRewardsSweep\(\)/)
-  assert.match(homeData, /void grantTodayBirthdayRewards\(\)\.catch/)
+test('homepage load only reads birthday stats and never triggers the batch task', () => {
+  assert.match(homeData, /import \{ countTodayBirthdays \} from '@\/lib\/birthday'/)
+  assert.doesNotMatch(homeData, /grantTodayBirthdayRewards|triggerBirthdayRewardsSweep/)
 })
 
 test('birthday greeting gets a friendly label in notification list', () => {

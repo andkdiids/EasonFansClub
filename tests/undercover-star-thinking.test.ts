@@ -62,7 +62,7 @@ function makeMatch(overrides: Record<string, unknown> = {}) {
 }
 
 function snapshot(revision: number, phase: UndercoverPublicMatchSnapshot['phase']) {
-  return { matchId: 'match-1', roomId: 'room-1', status: 'PLAYING', phase, round: 1, revision, serverNow: '2026-08-20T10:00:00.000Z', phaseDeadline: '2026-08-20T10:00:15.000Z', currentSpeakerId: null, viewerUndercoverFound: false, players: [], descriptions: [], descriptionHistory: [], voteProgress: { submitted: 0, total: 4, stage: null, abstained: 0 }, tieCandidates: [], roundHistory: [], lastRoundResult: null, finalResult: null } as UndercoverPublicMatchSnapshot
+  return { matchId: 'match-1', roomId: 'room-1', status: 'PLAYING', phase, round: 1, revision, stateVersion: revision, updatedAt: '2026-08-20T10:00:00.000Z', serverNow: '2026-08-20T10:00:00.000Z', phaseDeadline: '2026-08-20T10:00:15.000Z', currentSpeakerId: null, viewerUndercoverFound: false, players: [], descriptions: [], descriptionHistory: [], voteProgress: { submitted: 0, total: 4, stage: null, abstained: 0 }, voteState: { stage: null, completedVoteCount: 0, totalVoterCount: 4, abstainCount: 0, isComplete: false }, viewerVoteStatus: { hasVoted: false, targetPlayerId: null, abstained: false, stage: null }, alivePlayerIds: [], voteResult: null, winner: null, tieCandidates: [], roundHistory: [], lastRoundResult: null, finalResult: null } as UndercoverPublicMatchSnapshot
 }
 
 test('THINKING is a single shared 15-second server deadline', () => {

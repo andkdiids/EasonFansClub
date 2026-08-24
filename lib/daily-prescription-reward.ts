@@ -3,27 +3,37 @@ export const MAX_DAILY_PRESCRIPTION_REWARD = 27
 
 export type RandomInteger = (maxExclusive: number) => number
 
-export const DAILY_PRESCRIPTION_REWARD_RANGES = {
-  low: { min: 7, max: 11 },
-  middle: { min: 12, max: 21 },
-  high: { min: 22, max: 27 },
-} as const
+// One global pool for 7–27. Each weight is one thousandth of a percentage
+// point, so the total weight is 100,000 and the displayed probability is
+// weight / 1,000 percent.
+export const DAILY_PRESCRIPTION_REWARD_WEIGHTS = [
+  { reward: 7, weight: 8024 },
+  { reward: 8, weight: 7698 },
+  { reward: 9, weight: 7371 },
+  { reward: 10, weight: 7045 },
+  { reward: 11, weight: 6719 },
+  { reward: 12, weight: 6393 },
+  { reward: 13, weight: 6067 },
+  { reward: 14, weight: 5740 },
+  { reward: 15, weight: 5414 },
+  { reward: 16, weight: 5088 },
+  { reward: 17, weight: 4762 },
+  { reward: 18, weight: 4436 },
+  { reward: 19, weight: 4110 },
+  { reward: 20, weight: 3783 },
+  { reward: 21, weight: 3457 },
+  { reward: 22, weight: 3131 },
+  { reward: 23, weight: 2805 },
+  { reward: 24, weight: 2479 },
+  { reward: 25, weight: 2152 },
+  { reward: 26, weight: 1826 },
+  { reward: 27, weight: 1500 },
+] as const
 
-export const DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS = {
-  low: 27,
-  middle: 46,
-  high: 27,
-} as const
-
-type RewardRange = (typeof DAILY_PRESCRIPTION_REWARD_RANGES)[keyof typeof DAILY_PRESCRIPTION_REWARD_RANGES]
-
-// These are range weights only. Every integer inside the selected range is
-// drawn uniformly in a separate step.
-const REWARD_RANGE_OPTIONS: ReadonlyArray<{ range: RewardRange; weight: number }> = [
-  { range: DAILY_PRESCRIPTION_REWARD_RANGES.low, weight: DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.low },
-  { range: DAILY_PRESCRIPTION_REWARD_RANGES.middle, weight: DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.middle },
-  { range: DAILY_PRESCRIPTION_REWARD_RANGES.high, weight: DAILY_PRESCRIPTION_REWARD_RANGE_WEIGHTS.high },
-]
+export const DAILY_PRESCRIPTION_REWARD_WEIGHT_TOTAL = DAILY_PRESCRIPTION_REWARD_WEIGHTS.reduce(
+  (total, option) => total + option.weight,
+  0,
+)
 
 function assertRandomIntegerResult(value: number, maxExclusive: number) {
   if (!Number.isInteger(value) || value < 0 || value >= maxExclusive) {
@@ -31,39 +41,15 @@ function assertRandomIntegerResult(value: number, maxExclusive: number) {
   }
 }
 
-function selectRewardRange(randomInteger: RandomInteger, excludeLowRange: boolean) {
-  const eligibleRanges = excludeLowRange
-    ? REWARD_RANGE_OPTIONS.filter((option) => option.range !== DAILY_PRESCRIPTION_REWARD_RANGES.low)
-    : REWARD_RANGE_OPTIONS
-  const totalWeight = eligibleRanges.reduce((total, option) => total + option.weight, 0)
-  const rangeRoll = randomInteger(totalWeight)
-  assertRandomIntegerResult(rangeRoll, totalWeight)
+export function generateDailyPrescriptionReward(randomInteger: RandomInteger) {
+  const rewardRoll = randomInteger(DAILY_PRESCRIPTION_REWARD_WEIGHT_TOTAL)
+  assertRandomIntegerResult(rewardRoll, DAILY_PRESCRIPTION_REWARD_WEIGHT_TOTAL)
 
   let upperBound = 0
-  for (const option of eligibleRanges) {
+  for (const option of DAILY_PRESCRIPTION_REWARD_WEIGHTS) {
     upperBound += option.weight
-    if (rangeRoll < upperBound) return option.range
+    if (rewardRoll < upperBound) return option.reward
   }
 
-  throw new Error('DAILY_PRESCRIPTION_REWARD_RANGE_DRAW_FAILED')
-}
-
-export function areRecentDailyPrescriptionRewardsAllLow(recentRewards: readonly number[]) {
-  return recentRewards.length >= 3
-    && recentRewards.slice(0, 3).every(
-      (reward) => Number.isInteger(reward)
-        && reward >= DAILY_PRESCRIPTION_REWARD_RANGES.low.min
-        && reward <= DAILY_PRESCRIPTION_REWARD_RANGES.low.max,
-    )
-}
-
-export function generateDailyPrescriptionReward(
-  randomInteger: RandomInteger,
-  options: { excludeLowRange?: boolean } = {},
-) {
-  const range = selectRewardRange(randomInteger, options.excludeLowRange === true)
-  const rangeSize = range.max - range.min + 1
-  const valueRoll = randomInteger(rangeSize)
-  assertRandomIntegerResult(valueRoll, rangeSize)
-  return range.min + valueRoll
+  throw new Error('DAILY_PRESCRIPTION_REWARD_DRAW_FAILED')
 }

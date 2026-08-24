@@ -74,6 +74,16 @@ test('注册和登录页面复用共享手机号选择器，服务端不再固�
   for (const route of [prepare, complete, loginRoute]) assert.doesNotMatch(route, /\^1\\d\{10\}\$/)
 })
 
+test('登录手机号、邮箱和密码字段标题复用深色认证卡的白色 label 样式', () => {
+  const login = source('app/login/LoginForm.tsx')
+  const styles = source('app/globals.css')
+  const labelClass = 'text-sm font-bold text-slate-700'
+
+  assert.match(login, new RegExp(`<label className="block" htmlFor="login-identifier">\\s*<span className="${labelClass}">`))
+  assert.match(login, new RegExp(`<label className="block" htmlFor="login-password">\\s*<span className="${labelClass}">密码</span>`))
+  assert.match(styles, /\.auth-form-panel label>span \{ color:rgba\(255,255,255,\.82\)!important; \}/)
+})
+
 test('注册和登录共享紧凑区号触发器，且展开面板保留足够宽度', () => {
   const selector = source('components/InternationalPhoneInput.tsx')
   assert.match(selector, /relative w-\[72px\] shrink-0/)

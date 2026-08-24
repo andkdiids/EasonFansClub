@@ -3,6 +3,7 @@ import { getAdminPermissionSet, isSuperAdmin } from '@/lib/admin-permissions'
 import type { SessionUser } from '@/lib/auth'
 import { formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { getCheckInMessages } from '@/lib/checkin-messages'
+import { getTodayCheckInCount } from '@/lib/checkin-stats'
 import { getDailyQuote } from '@/lib/daily'
 import {
   getHomeActivities,
@@ -89,7 +90,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     const [stats, userStats, todayCheckIn, messages] = await Promise.all([
       moduleData(async () => ({
         activeUsers: await prisma.user.count({ where: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } }),
-        todayCount: await prisma.checkIn.count({ where: { checkinDateKey: getShanghaiDateKey(today) } }),
+        todayCount: await getTodayCheckInCount(getShanghaiDateKey(today)),
         totalCheckIns: await prisma.checkIn.count({ where: { userId: user.id } }),
       })),
       moduleData(() => prisma.user.findUnique({

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { matchSnapshot, type MatchRow } from '../lib/undercover-star'
+import { resolveVoteResult } from '../lib/undercover-star-vote'
 import type { UndercoverDescriptionByRound } from '../lib/undercover-star-protocol'
 
 const root = join(process.cwd())
@@ -62,19 +63,20 @@ test('submitUndercoverVote 支持明确的 abstain 入参', () => {
 })
 
 test('弃票创建 isAbstain=true 且 targetId=null', () => {
-  assert.match(service, /targetId: null, isAbstain: true \}/)
+  assert.match(service, /let targetId: string \| null = null/)
+  assert.match(service, /targetId, isAbstain: wantAbstain/)
 })
 
 test('普通投票创建 isAbstain=false', () => {
   // 普通投票分支使用 targetId（变量）并显式 isAbstain: false，与弃票分支的 targetId: null 区分。
-  assert.match(service, /targetId, isAbstain: false \}/)
+  assert.match(service, /targetId, isAbstain: wantAbstain/)
 })
 
 test('尚未投票与弃票可以区分', () => {
   // 未投票：根本不存在 Vote 记录（existing 为 null 时直接 return，不写入）。
-  assert.match(service, /const existing = await tx\.undercoverVote\.findUnique[\s\S]*?if \(existing\) return null/)
+  assert.match(service, /const existing = await tx\.undercoverVote\.findUnique[\s\S]*?if \(existing\) \{[\s\S]*?alreadySubmitted = true/)
   // 弃票：仍然创建一条 Vote 记录（isAbstain=true），因此“已投票”的玩家一定能查到记录。
-  assert.match(service, /if \(wantAbstain\) \{[\s\S]*?isAbstain: true/)
+  assert.match(service, /let targetId: string \| null = null/)
 })
 
 test('弃票算完成投票（voteProgress.submitted 包含弃票）', () => {
@@ -94,26 +96,66 @@ test('弃票算完成投票（voteProgress.submitted 包含弃票）', () => {
 })
 
 test('弃票不增加候选人票数（settle 仅统计 targetId）', () => {
-  assert.match(service, /for \(const vote of votes\) if \(vote\.targetId\) counts\.set\(vote\.targetId,/)
+  const result = resolveVoteResult({
+    round: 2,
+    alivePlayerIds: ['a', 'b', 'c', 'd'],
+    votes: [
+      { targetId: 'b', isAbstain: false },
+      { targetId: null, isAbstain: true },
+      { targetId: 'b', isAbstain: false },
+      { targetId: null, isAbstain: true },
+    ],
+  })
+  assert.deepEqual(result.voteCounts, [{ playerId: 'b', count: 2 }])
 })
 
 test('弃票不能成为被淘汰候选人（voteCounts 仅含正数）', () => {
   // candidates 只来自 counts > 0；弃票 targetId 为 null 不会进入 counts。
-  assert.match(service, /voteCounts[\s\S]*?\.filter\(\(item\) => item\.count > 0\)/)
-  assert.match(service, /const candidates = maxVotes > 0 \? alive\.filter/)
+  const result = resolveVoteResult({
+    round: 2,
+    alivePlayerIds: ['a', 'b', 'c', 'd'],
+    votes: [{ targetId: null, isAbstain: true }, { targetId: null, isAbstain: true }],
+  })
+  assert.equal(result.eliminatedPlayerId, null)
+  assert.deepEqual(result.candidates, [])
 })
 
-test('A2/B2/弃票3 → A/B 平票（candidates.length > 1 进入加赛）', () => {
-  assert.match(service, /if \(candidates\.length > 1\) \{[\s\S]*?phase: 'TIE_VOTING'/)
+test('A2/B2/弃票3 → A/B 平票（无人淘汰并进入下一轮）', () => {
+  const result = resolveVoteResult({
+    round: 2,
+    alivePlayerIds: ['a', 'b', 'c', 'd', 'e'],
+    votes: [
+      { targetId: 'a', isAbstain: false },
+      { targetId: 'a', isAbstain: false },
+      { targetId: 'b', isAbstain: false },
+      { targetId: 'b', isAbstain: false },
+      { targetId: null, isAbstain: true },
+    ],
+  })
+  assert.equal(result.outcome, 'TIE')
+  assert.equal(result.eliminatedPlayerId, null)
+  assert.doesNotMatch(service, /phase: 'TIE_VOTING'/)
 })
 
-test('A2/B1/弃票2 → A 被投出（candidates.length === 1 淘汰）', () => {
-  assert.match(service, /const eliminatedId = candidates\[0\]/)
-  assert.match(service, /await tx\.undercoverMatchPlayer\.update\(\{ where: \{ id: eliminated\.id \}/)
+test('第一轮 A2/B1/弃票2 → 票数不足，无人淘汰', () => {
+  const result = resolveVoteResult({
+    round: 1,
+    alivePlayerIds: ['a', 'b', 'c', 'd', 'e'],
+    votes: [
+      { targetId: 'a', isAbstain: false },
+      { targetId: 'a', isAbstain: false },
+      { targetId: 'b', isAbstain: false },
+      { targetId: null, isAbstain: true },
+      { targetId: null, isAbstain: true },
+    ],
+  })
+  assert.equal(result.outcome, 'NO_ELIMINATION')
+  assert.equal(result.reason, 'ROUND_ONE_THRESHOLD')
+  assert.equal(result.eliminatedPlayerId, null)
 })
 
 test('全员弃票不会卡死（无候选人时进入下一轮而非死循环）', () => {
-  assert.match(service, /if \(!candidates\.length\) \{[\s\S]*?startNextRoundTx\(/)
+  assert.match(service, /if \(resolution\.outcome === 'NO_ELIMINATION'\) \{[\s\S]*?startNextRoundTx\(/)
 })
 
 test('全员弃票进入下一轮（round + 1）', () => {
@@ -121,19 +163,18 @@ test('全员弃票进入下一轮（round + 1）', () => {
   assert.match(service, /round: match\.round \+ 1,/)
 })
 
-test('TIE_VOTING 允许弃票（abstain 分支不校验平票候选）', () => {
-  // 弃票分支直接创建 isAbstain=true，不经过 TIE 候选校验。
-  assert.match(service, /if \(wantAbstain\) \{[\s\S]*?await tx\.undercoverVote\.create/)
-  // 平票候选校验只在普通投票分支（非 abstain）执行。
+test('旧 TIE_VOTING 只做兼容收敛，不再允许加赛投票', () => {
+  assert.match(service, /canVote: match\.status === 'PLAYING' && match\.phase === 'VOTING'/)
+  assert.match(service, /const isLegacyTieStage = match\?\.phase === 'TIE_VOTING'/)
+})
+
+test('服务端仍拒绝旧 TIE_VOTING 请求中的普通目标', () => {
   assert.match(service, /if \(stage === 'TIE' && !readStringArray\(match\.tieCandidateIds\)\.includes\(targetId\)\) throw/)
 })
 
-test('TIE_VOTING 普通票只能投平票候选', () => {
-  assert.match(service, /throw new UndercoverStarServiceError\('加赛只能投平票候选人。', 400, 'TIE_TARGET_INVALID'\)/)
-})
-
-test('重复投票被拒绝（幂等）', () => {
-  assert.match(service, /const existing = await tx\.undercoverVote\.findUnique[\s\S]*?if \(existing\) return null/)
+test('重复投票返回 alreadySubmitted（幂等成功）', () => {
+  assert.match(service, /alreadySubmitted = true/)
+  assert.match(service, /result: 'ALREADY_SUBMITTED'/)
 })
 
 test('非有效玩家不能投票（非成员 / 已淘汰）', () => {

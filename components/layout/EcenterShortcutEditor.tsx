@@ -1,8 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { UiIcon } from '@/components/UiIcon'
-import type { EcenterFeatureItem } from '@/lib/ecenter-features'
+import {
+  normalizeEcenterFeatureOrder,
+  reorderEcenterFeatures,
+  setEcenterFeatureHidden,
+  type EcenterFeatureItem,
+} from '@/lib/ecenter-features'
 
 type EditorFeature = EcenterFeatureItem
 
@@ -13,27 +18,8 @@ type EcenterShortcutEditorPanelProps = Readonly<{
   variant: 'mobile' | 'sidebar'
 }>
 
-function normalizeOrder(features: readonly EditorFeature[]) {
-  const visible = features.filter((feature) => !feature.hidden).sort((left, right) => left.sortOrder - right.sortOrder || left.defaultSortOrder - right.defaultSortOrder)
-  const hidden = features.filter((feature) => feature.hidden).sort((left, right) => left.sortOrder - right.sortOrder || left.defaultSortOrder - right.defaultSortOrder)
-  return [...visible.map((feature, index) => ({ ...feature, sortOrder: index })), ...hidden.map((feature, index) => ({ ...feature, sortOrder: visible.length + index }))]
-}
-
-function moveFeature(features: readonly EditorFeature[], featureKey: string, targetIndex: number) {
-  const visible = features.filter((feature) => !feature.hidden).sort((left, right) => left.sortOrder - right.sortOrder)
-  const currentIndex = visible.findIndex((feature) => feature.featureKey === featureKey)
-  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visible.length || currentIndex === targetIndex) return [...features]
-  const [moved] = visible.splice(currentIndex, 1)
-  visible.splice(targetIndex, 0, moved)
-  const visibleKeys = new Set(visible.map((feature) => feature.featureKey))
-  return normalizeOrder([
-    ...visible,
-    ...features.filter((feature) => !visibleKeys.has(feature.featureKey)),
-  ])
-}
-
 function featurePayload(features: readonly EditorFeature[]) {
-  return normalizeOrder(features).map((feature) => ({
+  return normalizeEcenterFeatureOrder(features).map((feature) => ({
     itemKey: feature.featureKey,
     sortOrder: feature.sortOrder,
     hidden: feature.hidden,
@@ -46,7 +32,10 @@ function featureFromApi(value: unknown): EditorFeature[] {
 }
 
 export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, variant }: EcenterShortcutEditorPanelProps) {
-  const [features, setFeatures] = useState<EditorFeature[]>(() => normalizeOrder(initialFeatures))
+  const [features, setFeatures] = useState<EditorFeature[]>(() => normalizeEcenterFeatureOrder(initialFeatures))
+  const featuresRef = useRef<EditorFeature[]>(features)
+  const itemRefs = useRef(new Map<string, HTMLElement>())
+  const pointerDragRef = useRef<{ pointerId: number; featureKey: string } | null>(null)
   const [draggedKey, setDraggedKey] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -61,7 +50,11 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
         const payload = await response.json().catch(() => null) as { features?: unknown; message?: string } | null
         if (!response.ok) throw new Error(payload?.message || 'E院中心设置暂时无法读取')
         const nextFeatures = featureFromApi(payload?.features)
-        if (nextFeatures.length > 0) setFeatures(normalizeOrder(nextFeatures))
+        if (nextFeatures.length > 0) {
+          const normalized = normalizeEcenterFeatureOrder(nextFeatures)
+          featuresRef.current = normalized
+          setFeatures(normalized)
+        }
       })
       .catch((error: unknown) => {
         if ((error as { name?: string })?.name !== 'AbortError') setMessage(error instanceof Error ? error.message : 'E院中心设置暂时无法读取')
@@ -70,41 +63,76 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
     return () => controller.abort()
   }, [])
 
-  const visibleFeatures = useMemo(() => normalizeOrder(features).filter((feature) => !feature.hidden), [features])
-  const hiddenFeatures = useMemo(() => normalizeOrder(features).filter((feature) => feature.hidden), [features])
+  const visibleFeatures = useMemo(() => features.filter((feature) => !feature.hidden), [features])
+  const hiddenFeatures = useMemo(() => features.filter((feature) => feature.hidden), [features])
 
   function updateFeatures(next: readonly EditorFeature[]) {
-    setFeatures(normalizeOrder(next))
+    const normalized = normalizeEcenterFeatureOrder(next)
+    featuresRef.current = normalized
+    setFeatures(normalized)
     setDirty(true)
     setMessage('')
   }
 
+  function hasSameOrder(left: readonly EditorFeature[], right: readonly EditorFeature[]) {
+    return left.length === right.length && left.every((feature, index) => (
+      feature.featureKey === right[index]?.featureKey
+      && feature.hidden === right[index]?.hidden
+    ))
+  }
+
   function moveTo(featureKey: string, targetIndex: number) {
-    updateFeatures(moveFeature(features, featureKey, targetIndex))
+    if (loading || saving) return
+    const next = reorderEcenterFeatures(featuresRef.current, featureKey, targetIndex)
+    if (!hasSameOrder(featuresRef.current, next)) updateFeatures(next)
   }
 
-  function handleDragStart(event: DragEvent<HTMLElement>, featureKey: string) {
-    setDraggedKey(featureKey)
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', featureKey)
+  function getDropIndex(clientY: number) {
+    if (!visibleFeatures.length) return -1
+    const targetIndex = visibleFeatures.findIndex((feature) => {
+      const element = itemRefs.current.get(feature.featureKey)
+      if (!element) return false
+      const rect = element.getBoundingClientRect()
+      return clientY < rect.top + rect.height / 2
+    })
+    return targetIndex >= 0 ? targetIndex : visibleFeatures.length - 1
   }
 
-  function handleDrop(event: DragEvent<HTMLElement>, targetKey: string) {
+  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>, featureKey: string) {
+    if (loading || saving || event.button !== 0) return
     event.preventDefault()
-    const sourceKey = draggedKey || event.dataTransfer.getData('text/plain')
-    const targetIndex = visibleFeatures.findIndex((feature) => feature.featureKey === targetKey)
-    if (sourceKey && targetIndex >= 0) moveTo(sourceKey, targetIndex)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    pointerDragRef.current = { pointerId: event.pointerId, featureKey }
+    setDraggedKey(featureKey)
+    setDropKey(featureKey)
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = pointerDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    const targetIndex = getDropIndex(event.clientY)
+    const targetFeature = visibleFeatures[targetIndex]
+    setDropKey(targetFeature?.featureKey || null)
+    if (targetIndex >= 0) moveTo(drag.featureKey, targetIndex)
+  }
+
+  function handlePointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = pointerDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    pointerDragRef.current = null
     setDraggedKey(null)
     setDropKey(null)
   }
 
   function hideFeature(featureKey: string) {
-    updateFeatures(features.map((feature) => feature.featureKey === featureKey ? { ...feature, hidden: true } : feature))
+    if (loading || saving) return
+    updateFeatures(setEcenterFeatureHidden(featuresRef.current, featureKey, true))
   }
 
   function restoreFeature(featureKey: string) {
-    const visibleCount = features.filter((feature) => !feature.hidden).length
-    updateFeatures(features.map((feature) => feature.featureKey === featureKey ? { ...feature, hidden: false, sortOrder: visibleCount } : feature))
+    if (loading || saving) return
+    updateFeatures(setEcenterFeatureHidden(featuresRef.current, featureKey, false))
   }
 
   async function persist(reset = false) {
@@ -114,13 +142,14 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
       const response = await fetch('/api/users/me/e-center-preferences', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reset ? { reset: true } : { preferences: featurePayload(features) }),
+        body: JSON.stringify(reset ? { reset: true } : { preferences: featurePayload(featuresRef.current) }),
       })
       const payload = await response.json().catch(() => null) as { features?: unknown; message?: string } | null
       if (!response.ok) throw new Error(payload?.message || 'E院中心设置暂时无法保存')
       const nextFeatures = featureFromApi(payload?.features)
       if (nextFeatures.length > 0) {
-        const normalized = normalizeOrder(nextFeatures)
+        const normalized = normalizeEcenterFeatureOrder(nextFeatures)
+        featuresRef.current = normalized
         setFeatures(normalized)
         onSaved(normalized)
       }
@@ -152,7 +181,7 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
       <p>EASON FANS CLUB</p>
       <div>
         <h2>编辑 E院中心</h2>
-        <button type="button" className="ecenter-editor-close" onClick={() => void handleDone()} disabled={saving} aria-label="关闭编辑 E院中心">×</button>
+      <button type="button" className="ecenter-editor-close" onClick={() => void handleDone()} disabled={loading || saving} aria-label="关闭编辑 E院中心">×</button>
       </div>
     </header> : null}
     <div className="ecenter-editor-heading">
@@ -160,32 +189,32 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
         <p className="ecenter-editor-kicker">E院中心</p>
         <h3>编辑快捷入口</h3>
       </div>
-      <button type="button" className="ecenter-editor-done" onClick={() => void handleDone()} disabled={saving}>{saving ? '保存中…' : '完成'}</button>
+      <button type="button" className="ecenter-editor-done" onClick={() => void handleDone()} disabled={loading || saving}>{saving ? '保存中…' : '完成'}</button>
     </div>
     {loading ? <p className="ecenter-editor-state">正在读取你的布局…</p> : null}
-    <p className="ecenter-editor-hint">拖动卡片调整顺序；手机端也可以使用上下按钮。</p>
+    <p className="ecenter-editor-hint">按住左侧手柄拖动调整顺序；手机端也可以使用上下按钮。</p>
     <div className="ecenter-editor-list-heading"><h4>快捷入口列表</h4></div>
-    <div className="ecenter-editor-list" aria-label="可见快捷入口">
+    <div className="ecenter-editor-list" aria-label="可见快捷入口" onPointerMove={handlePointerMove} onPointerUp={handlePointerEnd} onPointerCancel={handlePointerEnd}>
       {visibleFeatures.map((feature, index) => <article
         key={feature.featureKey}
         className={`ecenter-editor-item${draggedKey === feature.featureKey ? ' is-dragging' : ''}${dropKey === feature.featureKey ? ' is-drop-target' : ''}`}
-        onDragOver={(event) => { event.preventDefault(); setDropKey(feature.featureKey) }}
-        onDrop={(event) => handleDrop(event, feature.featureKey)}
+        ref={(element) => {
+          if (element) itemRefs.current.set(feature.featureKey, element)
+          else itemRefs.current.delete(feature.featureKey)
+        }}
       >
         <button
           type="button"
           className="ecenter-editor-drag-handle"
-          draggable
-          onDragStart={(event) => handleDragStart(event, feature.featureKey)}
-          onDragEnd={() => { setDraggedKey(null); setDropKey(null) }}
+          onPointerDown={(event) => handlePointerDown(event, feature.featureKey)}
           aria-label={`拖动${feature.label}调整顺序`}
         >≡</button>
         <span className="ecenter-editor-icon"><UiIcon name={feature.icon} /></span>
         <span className="ecenter-editor-label">{feature.label}</span>
         <span className="ecenter-editor-actions">
-          <button type="button" onClick={() => moveTo(feature.featureKey, index - 1)} disabled={index === 0} aria-label={`将${feature.label}上移`}>↑</button>
-          <button type="button" onClick={() => moveTo(feature.featureKey, index + 1)} disabled={index === visibleFeatures.length - 1} aria-label={`将${feature.label}下移`}>↓</button>
-          <button type="button" className="ecenter-editor-hide" onClick={() => hideFeature(feature.featureKey)}>{controlLabel}</button>
+          <button type="button" onClick={() => moveTo(feature.featureKey, index - 1)} disabled={loading || saving || index === 0} aria-label={`将${feature.label}上移`}>↑</button>
+          <button type="button" onClick={() => moveTo(feature.featureKey, index + 1)} disabled={loading || saving || index === visibleFeatures.length - 1} aria-label={`将${feature.label}下移`}>↓</button>
+          <button type="button" className="ecenter-editor-hide" onClick={() => hideFeature(feature.featureKey)} disabled={loading || saving}>{controlLabel}</button>
         </span>
       </article>)}
       {visibleFeatures.length === 0 ? <p className="ecenter-editor-state">当前没有显示中的快捷入口。</p> : null}
@@ -195,12 +224,12 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
       <div>
         {hiddenFeatures.length === 0 ? <p className="ecenter-editor-state">暂无隐藏功能</p> : hiddenFeatures.map((feature) => <div className="ecenter-hidden-feature" key={feature.featureKey}>
           <span><UiIcon name={feature.icon} />{feature.label}</span>
-          <button type="button" onClick={() => restoreFeature(feature.featureKey)}>恢复显示</button>
+          <button type="button" onClick={() => restoreFeature(feature.featureKey)} disabled={loading || saving}>恢复显示</button>
         </div>)}
       </div>
     </details>
     <div className="ecenter-editor-footer">
-      <button type="button" className="ecenter-reset-layout" onClick={() => void handleReset()} disabled={saving}>恢复默认布局</button>
+      <button type="button" className="ecenter-reset-layout" onClick={() => void handleReset()} disabled={loading || saving}>恢复默认布局</button>
       {message ? <p role="status">{message}</p> : null}
     </div>
   </section>

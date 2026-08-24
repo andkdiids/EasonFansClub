@@ -69,11 +69,28 @@ export async function awardRegistrationFee(
   const now = input.now || new Date()
   const { dateKey } = getShanghaiDayRange(now)
 
-  await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${input.userId} FOR UPDATE`
-  const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, select: { points: true } })
   if (input.businessKey) {
-    const existing = await tx.pointLog.findUnique({ where: { businessKey: input.businessKey }, select: { id: true } })
-    if (existing) {
+    const existingBeforeLock = await tx.pointLog.findUnique({ where: { businessKey: input.businessKey }, select: { id: true } })
+    if (existingBeforeLock) {
+      const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, select: { points: true } })
+      return { awardedAmount: 0, totalPoints: user.points, duplicate: true, dateKey }
+    }
+  }
+
+  // 先用当前读锁住 User，再次检查 businessKey。这样同一用户的并发奖励会串行，
+  // 但已经完成过的重复请求可以在加锁前直接返回，不再等待 User 行锁。
+  const lockedUsers = await tx.$queryRaw<Array<{ id: string; points: number }>>`
+    SELECT \`id\`, \`points\` FROM \`User\` WHERE \`id\` = ${input.userId} FOR UPDATE
+  `
+  const user = lockedUsers[0]
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  if (input.businessKey) {
+    // 使用 FOR UPDATE 当前读，避免事务在加锁前建立的快照漏掉并发事务刚提交的流水。
+    const existingAfterLock = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT \`id\` FROM \`PointLog\` WHERE \`businessKey\` = ${input.businessKey} LIMIT 1 FOR UPDATE
+    `
+    if (existingAfterLock.length > 0) {
       return { awardedAmount: 0, totalPoints: user.points, duplicate: true, dateKey }
     }
   }

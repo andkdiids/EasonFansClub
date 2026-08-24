@@ -180,6 +180,7 @@ export type StreakReconcileResult = {
   rewardAmount: number
   rewardCount: number
   rewardCheckInIds: string[]
+  rewardCandidates: Array<{ id: string; checkinDateKey: string; nextStreakDay: number }>
 }
 
 export function getMakeupRewardCandidates(
@@ -190,39 +191,22 @@ export function getMakeupRewardCandidates(
   return records.filter((record) => insertedKeys.has(record.checkinDateKey) && Boolean(getStreakBonus(record.nextStreakDay)))
 }
 
-/** Recompute the existing CheckIn streak snapshots and issue only missing, existing long-term-patient rewards. */
-export async function reconcileCheckInStreakAndLongTermReward(
+type MakeupRewardSettlement = Pick<StreakReconcileResult, 'rewardTriggered' | 'rewardAmount' | 'rewardCount' | 'rewardCheckInIds'>
+
+function emptyMakeupRewardSettlement(): MakeupRewardSettlement {
+  return { rewardTriggered: false, rewardAmount: 0, rewardCount: 0, rewardCheckInIds: [] }
+}
+
+/** Issue only missing long-term-patient rewards for the records created by this makeup operation. */
+export async function settleMakeupLongTermRewards(
   tx: Prisma.TransactionClient,
   userId: string,
-  insertedDateKeys: string | Iterable<string>,
+  candidates: Array<{ id: string; checkinDateKey: string; nextStreakDay: number }>,
   now = new Date(),
-): Promise<StreakReconcileResult> {
-  const insertedKeys = new Set(typeof insertedDateKeys === 'string' ? [insertedDateKeys] : insertedDateKeys)
-  const records = await tx.checkIn.findMany({
-    where: { userId },
-    orderBy: [{ checkinDateKey: 'asc' }, { id: 'asc' }],
-    select: { id: true, checkinDateKey: true, streakDay: true },
-  })
-  let running = 0
-  let previous: string | null = null
-  const computed = records.map((record) => {
-    running = previous && shiftShanghaiDateKey(previous, 1) === record.checkinDateKey ? running + 1 : 1
-    previous = record.checkinDateKey
-    return { ...record, nextStreakDay: running }
-  })
-  for (const record of computed) {
-    if (record.streakDay !== record.nextStreakDay) {
-      await tx.checkIn.update({ where: { id: record.id }, data: { streakDay: record.nextStreakDay } })
-    }
-  }
-
+): Promise<MakeupRewardSettlement> {
   let rewardAmount = 0
   const rewardCheckInIds: string[] = []
-  // A makeup only creates a new reward opportunity for the records created by
-  // this operation. Existing historical records may now have a larger
-  // recalculated streak, but replaying them here would retroactively emit one
-  // +7 PointLog per historical day (the original bug).
-  for (const record of getMakeupRewardCandidates(computed, insertedKeys)) {
+  for (const record of candidates) {
     const bonus = getStreakBonus(record.nextStreakDay)
     if (!bonus) continue
     const award = await awardRegistrationFee(tx, {
@@ -237,6 +221,49 @@ export async function reconcileCheckInStreakAndLongTermReward(
     rewardAmount += award.awardedAmount
     if (!award.duplicate && award.awardedAmount > 0) rewardCheckInIds.push(record.id)
   }
+  return {
+    rewardTriggered: rewardAmount > 0,
+    rewardAmount,
+    rewardCount: rewardCheckInIds.length,
+    rewardCheckInIds,
+  }
+}
+
+/** Recompute the existing CheckIn streak snapshots and optionally settle long-term rewards. */
+export async function reconcileCheckInStreakAndLongTermReward(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  insertedDateKeys: string | Iterable<string>,
+  now = new Date(),
+  options: { settleRewards?: boolean } = {},
+): Promise<StreakReconcileResult> {
+  const insertedKeys = new Set(typeof insertedDateKeys === 'string' ? [insertedDateKeys] : insertedDateKeys)
+  const records = await tx.checkIn.findMany({
+    where: { userId },
+    orderBy: [{ checkinDateKey: 'asc' }, { id: 'asc' }],
+    select: { id: true, checkinDateKey: true, streakDay: true },
+  })
+  let running = 0
+  let previous: string | null = null
+  const computed = records.map((record) => {
+    running = previous && shiftShanghaiDateKey(previous, 1) === record.checkinDateKey ? running + 1 : 1
+    previous = record.checkinDateKey
+    return { ...record, nextStreakDay: running }
+  })
+  const changedRecords = computed.filter((record) => record.streakDay !== record.nextStreakDay)
+  if (changedRecords.length) {
+    // One CASE update keeps the core transaction bounded even for users with a
+    // long history. The old implementation held the user lock while issuing
+    // one Prisma UPDATE round-trip per historical CheckIn.
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE \`CheckIn\`
+      SET \`streakDay\` = CASE \`id\`
+        ${Prisma.join(changedRecords.map((record) => Prisma.sql`WHEN ${record.id} THEN ${record.nextStreakDay}`), ' ')}
+        ELSE \`streakDay\`
+      END
+      WHERE \`id\` IN (${Prisma.join(changedRecords.map((record) => record.id))})
+    `)
+  }
 
   const streaks = calculateCheckinStreaks(computed.map((record) => record.checkinDateKey), now)
   const latest = computed.at(-1)?.checkinDateKey
@@ -247,12 +274,20 @@ export async function reconcileCheckInStreakAndLongTermReward(
       lastCheckInDate: latest ? parseBeijingDate(latest) : null,
     },
   })
-  return { ...streaks, rewardTriggered: rewardAmount > 0, rewardAmount, rewardCount: rewardCheckInIds.length, rewardCheckInIds }
+  // A makeup only creates a new reward opportunity for the records created by
+  // this operation. Existing historical records may now have a larger
+  // recalculated streak, but replaying them here would retroactively emit one
+  // +7 PointLog per historical day (the original bug).
+  const rewardCandidates = getMakeupRewardCandidates(computed, insertedKeys)
+  const rewardSettlement = options.settleRewards === false
+    ? emptyMakeupRewardSettlement()
+    : await settleMakeupLongTermRewards(tx, userId, rewardCandidates, now)
+  return { ...streaks, ...rewardSettlement, rewardCandidates }
 }
 
 export async function createMakeupCheckIn(
   tx: Prisma.TransactionClient,
-  input: { userId: string; targetDateKey: string; type: Exclude<CheckInType, 'NORMAL'>; cost: number; challengeId?: string; now?: Date },
+  input: { userId: string; targetDateKey: string; type: Exclude<CheckInType, 'NORMAL'>; cost: number; challengeId?: string; now?: Date; settleRewards?: boolean },
 ) {
   const now = input.now || new Date()
   const targetDate = parseBeijingDate(input.targetDateKey)
@@ -273,13 +308,13 @@ export async function createMakeupCheckIn(
       streakDay: 1,
     },
   })
-  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, [input.targetDateKey], now)
+  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, [input.targetDateKey], now, { settleRewards: input.settleRewards })
   return { checkIn, streak }
 }
 
 export async function createMakeupCheckIns(
   tx: Prisma.TransactionClient,
-  input: { userId: string; targetDateKeys: string[]; type: Exclude<CheckInType, 'NORMAL'>; cost: number; now?: Date },
+  input: { userId: string; targetDateKeys: string[]; type: Exclude<CheckInType, 'NORMAL'>; cost: number; now?: Date; settleRewards?: boolean },
 ) {
   const now = input.now || new Date()
   const checkIns = []
@@ -302,7 +337,7 @@ export async function createMakeupCheckIns(
       },
     }))
   }
-  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, input.targetDateKeys, now)
+  const streak = await reconcileCheckInStreakAndLongTermReward(tx, input.userId, input.targetDateKeys, now, { settleRewards: input.settleRewards })
   return { checkIns, streak }
 }
 

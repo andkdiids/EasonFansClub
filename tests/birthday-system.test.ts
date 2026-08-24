@@ -33,7 +33,8 @@ test('birthday service exports count + idempotent grant helpers', () => {
 test('homepage birthday count uses real user month/day, not TodayEvent', () => {
   const home = read('lib/home-data.ts')
   assert.match(home, /import \{ countTodayBirthdays.*\} from '@\/lib\/birthday'/)
-  assert.match(home, /safeDb\('TodayEvent.count home.siteStats.birthdays', countTodayBirthdays\(\)/)
+  assert.match(home, /safeDb\('User.count home.siteStats.birthdays', countTodayBirthdays\(dateKey\)/)
+  assert.doesNotMatch(home, /grantTodayBirthdayRewards|triggerBirthdayRewardsSweep/)
   assert.doesNotMatch(home, /type:\s*'BIRTHDAY', status:\s*'APPROVED'/)
 })
 

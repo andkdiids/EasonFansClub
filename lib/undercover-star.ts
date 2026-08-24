@@ -38,6 +38,7 @@ import {
   isDirectUndercoverWordMention,
   normalizeUndercoverWord,
 } from '@/lib/undercover-star-title'
+import { resolveVoteResult } from '@/lib/undercover-star-vote'
 import type {
   UndercoverActiveState,
   UndercoverDescriptionByRound,
@@ -112,6 +113,7 @@ type StoredDescription = {
 type StoredRoundResult = {
   round: number
   kind: UndercoverRoundResult['kind']
+  reason?: UndercoverRoundResult['reason']
   eliminatedPlayerId: string | null
   voteCounts: Array<{ playerId: string; count: number }>
   tieCandidates: string[]
@@ -121,6 +123,10 @@ type StoredRoundResult = {
 type FinishResult = {
   changed: boolean
   userIds: string[]
+}
+
+function logUndercoverVote(event: string, data: Record<string, unknown>) {
+  console.info(`[undercover.vote.${event}]`, JSON.stringify(data))
 }
 
 export class UndercoverStarServiceError extends Error {
@@ -241,6 +247,7 @@ function readHistory(value: Prisma.JsonValue | null | undefined): StoredRoundRes
     return [{
       round: Math.max(1, Math.trunc(row.round)),
       kind: row.kind as StoredRoundResult['kind'],
+      reason: row.reason === 'TIE' || row.reason === 'NO_VALID_VOTES' || row.reason === 'ROUND_ONE_THRESHOLD' ? row.reason : undefined,
       eliminatedPlayerId: typeof row.eliminatedPlayerId === 'string' ? row.eliminatedPlayerId : null,
       voteCounts,
       tieCandidates: Array.isArray(row.tieCandidates) ? row.tieCandidates.filter((candidate): candidate is string => typeof candidate === 'string') : [],
@@ -603,7 +610,9 @@ export async function getUndercoverRoomPublicState(roomId: string, now = new Dat
 export async function enterUndercoverRoom(userId: string, roomId: string, now = new Date()) {
   const state = await getUndercoverRoomState(userId, roomId, now)
   await touchUndercoverPresence(userId, roomId, state.matchId || undefined, now)
-  return state
+  // Return the post-touch snapshot so clients receive the refreshed activity
+  // timestamp as well as the retained membership state.
+  return getUndercoverRoomState(userId, roomId, now)
 }
 
 export async function setUndercoverReady(userId: string, roomId: string, ready: boolean, now = new Date()) {
@@ -718,9 +727,27 @@ export async function kickUndercoverPlayer(hostId: string, roomId: string, targe
 
 function assertExpectedState(match: MatchRow, expectedRevision?: number, expectedRound?: number) {
   if (expectedRevision !== undefined && expectedRevision !== match.revision) {
+    console.warn('[undercover.snapshot.stale]', JSON.stringify({
+      roomId: match.roomId,
+      matchId: match.id,
+      round: match.round,
+      phase: match.phase,
+      expectedRevision,
+      stateVersion: match.revision,
+      result: 'STATE_STALE',
+    }))
     throw new UndercoverStarServiceError('对局状态已经更新，请刷新当前页面。', 409, 'STATE_STALE')
   }
   if (expectedRound !== undefined && expectedRound !== match.round) {
+    console.warn('[undercover.snapshot.stale]', JSON.stringify({
+      roomId: match.roomId,
+      matchId: match.id,
+      round: match.round,
+      phase: match.phase,
+      expectedRound,
+      stateVersion: match.revision,
+      result: 'ROUND_STALE',
+    }))
     throw new UndercoverStarServiceError('对局轮次已经更新，请刷新当前页面。', 409, 'ROUND_STALE')
   }
 }
@@ -765,6 +792,7 @@ function historyPublic(match: MatchRow, history: StoredRoundResult[]): Undercove
   return history.map((entry) => ({
     round: entry.round,
     kind: entry.kind,
+    ...(entry.reason ? { reason: entry.reason } : {}),
     eliminatedPlayerId: entry.eliminatedPlayerId,
     voteCounts: entry.voteCounts,
     tieCandidates: entry.tieCandidates,
@@ -808,7 +836,9 @@ export function matchSnapshot(match: MatchRow, now = new Date(), viewerId?: stri
   })
   const descriptionHistory = descriptionHistoryByRound(match)
   const stage: UndercoverVoteStage | null = match.phase === 'VOTING' ? 'MAIN' : match.phase === 'TIE_VOTING' ? 'TIE' : null
-  const stageVotes = stage ? match.UndercoverVote.filter((vote) => vote.round === match.round && vote.stage === stage) : []
+  const alivePlayerIds = activeMatchPlayers(match).map((player) => player.id)
+  const alivePlayerSet = new Set(alivePlayerIds)
+  const stageVotes = stage ? match.UndercoverVote.filter((vote) => vote.round === match.round && vote.stage === stage && alivePlayerSet.has(vote.voterId)) : []
   const voteProgress = stage
     ? {
         submitted: stageVotes.length,
@@ -819,6 +849,16 @@ export function matchSnapshot(match: MatchRow, now = new Date(), viewerId?: stri
     : { submitted: 0, total: activeMatchPlayers(match).length, stage: null, abstained: 0 }
   const history = historyPublic(match, readHistory(match.roundHistory))
   const viewerPlayer = viewerId ? match.UndercoverMatchPlayer.find((item) => item.User.id === viewerId) || null : null
+  const viewerVote = viewerPlayer && stage
+    ? match.UndercoverVote.find((vote) => vote.round === match.round && vote.stage === stage && vote.voterId === viewerPlayer.id) || null
+    : null
+  const voteState = {
+    stage,
+    completedVoteCount: voteProgress.submitted,
+    totalVoterCount: voteProgress.total,
+    abstainCount: voteProgress.abstained,
+    isComplete: stage !== null && voteProgress.submitted >= voteProgress.total,
+  }
   const viewerUndercoverFound = match.status === 'PLAYING' && match.phase === 'UNDERCOVER_GUESS' && Boolean(viewerPlayer && viewerPlayer.role === 'UNDERCOVER' && !match.undercoverGuessAt)
   return {
     matchId: match.id,
@@ -827,6 +867,8 @@ export function matchSnapshot(match: MatchRow, now = new Date(), viewerId?: stri
     phase: match.phase,
     round: match.round,
     revision: match.revision,
+    stateVersion: match.revision,
+    updatedAt: match.updatedAt ? match.updatedAt.toISOString() : now.toISOString(),
     serverNow: now.toISOString(),
     phaseDeadline: match.phaseDeadline?.toISOString() || null,
     currentSpeakerId: match.currentSpeakerId,
@@ -835,6 +877,16 @@ export function matchSnapshot(match: MatchRow, now = new Date(), viewerId?: stri
     descriptions,
     descriptionHistory,
     voteProgress,
+    voteState,
+    viewerVoteStatus: {
+      hasVoted: Boolean(viewerVote),
+      targetPlayerId: viewerVote?.targetId || null,
+      abstained: Boolean(viewerVote?.isAbstain),
+      stage,
+    },
+    alivePlayerIds,
+    voteResult: history.length ? history[history.length - 1] : null,
+    winner: match.winner || null,
     tieCandidates: readStringArray(match.tieCandidateIds),
     roundHistory: history,
     lastRoundResult: history.length ? history[history.length - 1] : null,
@@ -864,9 +916,12 @@ export function privateState(match: MatchRow, userId: string): UndercoverPrivate
     voteSubmitted: Boolean(existingVote),
     voteStage: stage,
     voteTargetId: existingVote?.targetId || null,
+    voteAbstained: Boolean(existingVote?.isAbstain),
     guessSubmitted: Boolean(match.undercoverGuessAt),
     canDescribe: match.status === 'PLAYING' && match.phase === 'DESCRIBING' && player.isAlive && match.currentSpeakerId === player.id && !existingDescription,
-    canVote: match.status === 'PLAYING' && (match.phase === 'VOTING' || match.phase === 'TIE_VOTING') && player.isAlive && !existingVote,
+    // TIE_VOTING is retained only so an already-running old match can be
+    // migrated safely; new ties never open a second voting stage.
+    canVote: match.status === 'PLAYING' && match.phase === 'VOTING' && player.isAlive && !existingVote,
     canGuess: match.status === 'PLAYING' && match.phase === 'UNDERCOVER_GUESS' && player.role === 'UNDERCOVER' && !match.undercoverGuessAt,
     phaseDeadline: match.phaseDeadline?.toISOString() || null,
   }
@@ -1108,6 +1163,16 @@ async function finishMatchTx(
   })
   if (!changed.count) {
     return { changed: false, userIds: match.UndercoverMatchPlayer.map((player) => player.User.id) }
+  }
+  if (reason === 'UNDERCOVER_EXIT') {
+    console.info('[undercover.game.abort]', JSON.stringify({
+      roomId: match.roomId,
+      matchId: match.id,
+      round: match.round,
+      phase: match.phase,
+      stateVersion: match.revision + 1,
+      result: reason,
+    }))
   }
 
   const players = await tx.undercoverMatchPlayer.findMany({
@@ -1406,46 +1471,55 @@ function descriptionHistoryByRound(match: MatchRow): UndercoverDescriptionByRoun
 }
 
 async function settleVoteStageTx(tx: Prisma.TransactionClient, match: MatchRow, stage: UndercoverVoteStage, now: Date): Promise<FinishResult | null> {
+  // The match row is locked by every caller. This phase check is the
+  // compare-and-set guard that makes resolution one-shot: a second request
+  // arriving after the first transaction advanced the phase becomes a no-op.
+  const expectedPhase = stage === 'MAIN' ? 'VOTING' : 'TIE_VOTING'
+  if (match.status !== 'PLAYING' || match.phase !== expectedPhase) return null
+
   const votes = await tx.undercoverVote.findMany({ where: { matchId: match.id, round: match.round, stage } })
   const alive = await tx.undercoverMatchPlayer.findMany({ where: { matchId: match.id, isAlive: true }, orderBy: { createdAt: 'asc' }, include: { User: { select: publicUserSelect } } })
-  const counts = new Map<string, number>()
-  for (const vote of votes) if (vote.targetId) counts.set(vote.targetId, (counts.get(vote.targetId) || 0) + 1)
-  const maxVotes = Math.max(0, ...Array.from(counts.values()))
-  const candidates = maxVotes > 0 ? alive.filter((player) => counts.get(player.id) === maxVotes).map((player) => player.id) : []
   const baseMatch = await tx.undercoverMatch.findUnique({ where: { id: match.id }, include: matchInclude })
   if (!baseMatch) throw new UndercoverStarServiceError('对局不存在。', 404, 'MATCH_NOT_FOUND')
-  const voteCounts = alive.map((player) => ({ playerId: player.id, count: counts.get(player.id) || 0 })).filter((item) => item.count > 0)
+  const resolution = resolveVoteResult({
+    round: baseMatch.round,
+    alivePlayerIds: alive.map((player) => player.id),
+    votes: votes.map((vote) => ({ voterId: vote.voterId, targetId: vote.targetId, isAbstain: vote.isAbstain })),
+  })
+  const commonLog = {
+    roomId: baseMatch.roomId,
+    matchId: baseMatch.id,
+    round: baseMatch.round,
+    phase: baseMatch.phase,
+    stage,
+    stateVersion: baseMatch.revision,
+    completedVoteCount: votes.length,
+    alivePlayerCount: alive.length,
+  }
+  logUndercoverVote('resolve', { ...commonLog, result: resolution.outcome, highestVoteCount: resolution.highestVoteCount })
   const descriptions = currentRoundDescriptions(baseMatch)
   const noElimination: StoredRoundResult = {
     round: baseMatch.round,
     kind: 'NO_ELIMINATION',
+    reason: resolution.reason || undefined,
     eliminatedPlayerId: null,
-    voteCounts,
-    tieCandidates: candidates,
+    voteCounts: resolution.voteCounts,
+    tieCandidates: resolution.outcome === 'TIE' ? resolution.candidates : [],
     descriptions,
   }
-  if (candidates.length > 1) {
-    if (stage === 'MAIN') {
-      await tx.undercoverMatch.update({
-        where: { id: match.id },
-        data: {
-          phase: 'TIE_VOTING',
-          tieCandidateIds: inputJson(candidates),
-          phaseDeadline: new Date(now.getTime() + UNDERCOVER_VOTING_MS),
-          revision: { increment: 1 },
-        },
-      })
-      return null
-    }
+  if (resolution.outcome === 'TIE') {
+    logUndercoverVote('tie', { ...commonLog, result: 'TIE', candidates: resolution.candidates })
     await startNextRoundTx(tx, baseMatch, noElimination, now)
     return null
   }
-  if (!candidates.length) {
+  if (resolution.outcome === 'NO_ELIMINATION') {
+    logUndercoverVote('no-elimination', { ...commonLog, result: resolution.reason || 'NO_VALID_VOTES' })
     await startNextRoundTx(tx, baseMatch, noElimination, now)
     return null
   }
 
-  const eliminatedId = candidates[0]
+  const eliminatedId = resolution.eliminatedPlayerId
+  if (!eliminatedId) throw new UndercoverStarServiceError('淘汰目标不存在。', 409, 'ELIMINATION_TARGET_INVALID')
   const eliminated = alive.find((player) => player.id === eliminatedId)
   if (!eliminated) throw new UndercoverStarServiceError('淘汰目标不存在。', 409, 'ELIMINATION_TARGET_INVALID')
   await tx.undercoverMatchPlayer.update({ where: { id: eliminated.id }, data: { isAlive: false, eliminatedAt: now, eliminatedRound: baseMatch.round, updatedAt: now } })
@@ -1453,10 +1527,11 @@ async function settleVoteStageTx(tx: Prisma.TransactionClient, match: MatchRow, 
     round: baseMatch.round,
     kind: eliminated.role === 'UNDERCOVER' ? 'UNDERCOVER_FOUND' : 'CIVILIAN_ELIMINATED',
     eliminatedPlayerId: eliminated.id,
-    voteCounts,
+    voteCounts: resolution.voteCounts,
     tieCandidates: [],
     descriptions,
   }
+  logUndercoverVote('eliminate', { ...commonLog, result: result.kind, eliminatedPlayerId: eliminated.id })
   const refreshed = await tx.undercoverMatch.findUnique({ where: { id: match.id }, include: matchInclude })
   if (!refreshed) throw new UndercoverStarServiceError('对局不存在。', 404, 'MATCH_NOT_FOUND')
   const history = appendHistory(refreshed.roundHistory, result)
@@ -1513,29 +1588,109 @@ async function fillMissingVotesAndSettleTx(tx: Prisma.TransactionClient, match: 
 
 export async function submitUndercoverVote(userId: string, matchId: string, input: { targetId?: unknown; abstain?: unknown; expectedRevision?: number; expectedRound?: number }, now = new Date()) {
   await advanceExpiredUndercoverMatch(matchId, now)
+  let alreadySubmitted = false
   const finish = await undercoverTransaction(async (tx): Promise<FinishResult | null> => {
     let result: FinishResult | null = null
     await lockMatch(tx, matchId)
     const match = await tx.undercoverMatch.findUnique({ where: { id: matchId }, include: matchInclude })
     if (!match) throw new UndercoverStarServiceError('对局不存在。', 404, 'MATCH_NOT_FOUND')
     const player = matchPlayerForUser(match, userId)
+    // A lost response can be retried after the last vote has already moved
+    // the match into the next round or FINISHED. Check the requested round
+    // before phase/alive validation so that an already-persisted vote is still
+    // an idempotent success, not a misleading PHASE_INVALID/PLAYER_ELIMINATED.
+    const requestedRound = input.expectedRound ?? match.round
+    const previousVote = match.UndercoverVote.find((vote) => vote.round === requestedRound && vote.voterId === player.id)
+    if (previousVote) {
+      alreadySubmitted = true
+      logUndercoverVote('duplicate', {
+        roomId: match.roomId,
+        matchId: match.id,
+        round: previousVote.round,
+        phase: match.phase,
+        stage: previousVote.stage,
+        voterId: player.id,
+        targetId: previousVote.targetId,
+        stateVersion: match.revision,
+        result: 'ALREADY_SUBMITTED_AFTER_ADVANCE',
+      })
+      return null
+    }
     const stage: UndercoverVoteStage = match.phase === 'VOTING' ? 'MAIN' : match.phase === 'TIE_VOTING' ? 'TIE' : (() => { throw new UndercoverStarServiceError('当前不是投票阶段。', 409, 'PHASE_INVALID') })()
-    const existing = await tx.undercoverVote.findUnique({ where: { matchId_round_stage_voterId: { matchId, round: match.round, stage, voterId: player.id } } })
-    if (existing) return null
-    assertExpectedState(match, input.expectedRevision, input.expectedRound)
     if (!player.isAlive) throw new UndercoverStarServiceError('被淘汰后不能投票。', 403, 'PLAYER_ELIMINATED')
+    const existing = await tx.undercoverVote.findUnique({ where: { matchId_round_stage_voterId: { matchId, round: match.round, stage, voterId: player.id } } })
+    if (existing) {
+      alreadySubmitted = true
+      logUndercoverVote('duplicate', {
+        roomId: match.roomId,
+        matchId: match.id,
+        round: match.round,
+        phase: match.phase,
+        stage,
+        voterId: player.id,
+        targetId: existing.targetId,
+        stateVersion: match.revision,
+        result: 'ALREADY_SUBMITTED',
+      })
+      return null
+    }
+    assertExpectedState(match, input.expectedRevision, input.expectedRound)
     // 明确弃票：targetId 必须为空，isAbstain=true，不计入候选票。
     const wantAbstain = input.abstain === true
+    let targetId: string | null = null
     if (wantAbstain) {
-      await tx.undercoverVote.create({ data: { id: randomUUID(), matchId, round: match.round, stage, voterId: player.id, targetId: null, isAbstain: true } })
+      logUndercoverVote('abstain', {
+        roomId: match.roomId,
+        matchId: match.id,
+        round: match.round,
+        phase: match.phase,
+        stage,
+        voterId: player.id,
+        targetId: null,
+        stateVersion: match.revision,
+        result: 'ABSTAIN',
+      })
     } else {
-      const targetId = typeof input.targetId === 'string' ? input.targetId : ''
+      targetId = typeof input.targetId === 'string' ? input.targetId : ''
       if (!targetId) throw new UndercoverStarServiceError('请选择一名玩家投票，或选择弃票。', 400, 'VOTE_TARGET_REQUIRED')
       if (targetId === player.id) throw new UndercoverStarServiceError('不能投自己。', 400, 'CANNOT_VOTE_SELF')
       const target = match.UndercoverMatchPlayer.find((item) => item.id === targetId)
       if (!target || !target.isAlive) throw new UndercoverStarServiceError('不能投已淘汰的玩家。', 400, 'VOTE_TARGET_INVALID')
       if (stage === 'TIE' && !readStringArray(match.tieCandidateIds).includes(targetId)) throw new UndercoverStarServiceError('加赛只能投平票候选人。', 400, 'TIE_TARGET_INVALID')
-      await tx.undercoverVote.create({ data: { id: randomUUID(), matchId, round: match.round, stage, voterId: player.id, targetId, isAbstain: false } })
+      logUndercoverVote('submit', {
+        roomId: match.roomId,
+        matchId: match.id,
+        round: match.round,
+        phase: match.phase,
+        stage,
+        voterId: player.id,
+        targetId,
+        stateVersion: match.revision,
+        result: 'ACCEPTED',
+      })
+    }
+    try {
+      await tx.undercoverVote.create({ data: { id: randomUUID(), matchId, round: match.round, stage, voterId: player.id, targetId, isAbstain: wantAbstain } })
+    } catch (error) {
+      // The unique key is the database-level idempotency boundary. The row
+      // lock normally makes this path unreachable, but it also protects us
+      // from a concurrent writer that entered before the lock was acquired.
+      if (errorCode(error) !== 'P2002') throw error
+      const duplicate = await tx.undercoverVote.findUnique({ where: { matchId_round_stage_voterId: { matchId, round: match.round, stage, voterId: player.id } } })
+      if (!duplicate) throw error
+      alreadySubmitted = true
+      logUndercoverVote('duplicate', {
+        roomId: match.roomId,
+        matchId: match.id,
+        round: match.round,
+        phase: match.phase,
+        stage,
+        voterId: player.id,
+        targetId: duplicate.targetId,
+        stateVersion: match.revision,
+        result: 'ALREADY_SUBMITTED_P2002',
+      })
+      return null
     }
     await tx.undercoverMatchPlayer.update({ where: { id: player.id }, data: { lastSeenAt: now, isOnline: true, updatedAt: now } })
     const total = await tx.undercoverMatchPlayer.count({ where: { matchId, isAlive: true } })
@@ -1550,7 +1705,7 @@ export async function submitUndercoverVote(userId: string, matchId: string, inpu
     return result
   })
   if (finish?.changed) await syncUndercoverAchievements(finish.userIds)
-  return getUndercoverMatchState(userId, matchId, now)
+  return { ...(await getUndercoverMatchState(userId, matchId, now)), alreadySubmitted }
 }
 
 export async function submitUndercoverGuess(userId: string, matchId: string, input: { guess?: unknown; expectedRevision?: number }, now = new Date()) {
@@ -1579,7 +1734,8 @@ export async function advanceExpiredUndercoverMatch(matchId: string, now = new D
   const finish = await undercoverTransaction(async (tx): Promise<FinishResult | null> => {
     await lockMatch(tx, matchId)
     const match = await tx.undercoverMatch.findUnique({ where: { id: matchId }, include: matchInclude })
-    if (!match || match.status !== 'PLAYING' || !match.phaseDeadline || match.phaseDeadline.getTime() > now.getTime()) return null
+    const isLegacyTieStage = match?.phase === 'TIE_VOTING'
+    if (!match || match.status !== 'PLAYING' || (!isLegacyTieStage && (!match.phaseDeadline || match.phaseDeadline.getTime() > now.getTime()))) return null
     if (match.phase === 'ROLE_REVEAL') {
       await setRoleRevealConfirmedTx(tx, match, now)
       return null

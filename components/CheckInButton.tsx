@@ -41,13 +41,15 @@ function formatBeijingTime(value?: string | Date | null) {
   return formatBeijingDateTimeMinute(value)
 }
 
-function msUntilNextBeijingMidnight() {
-  const now = new Date()
-  const beijingNow = new Date(now.toLocaleString('en-US', { timeZone: BEIJING_TIME_ZONE }))
-  const next = new Date(beijingNow)
-  next.setDate(beijingNow.getDate() + 1)
-  next.setHours(0, 0, 2, 0)
-  return Math.max(next.getTime() - beijingNow.getTime(), 1000)
+function getCurrentBeijingDateKey() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BEIJING_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
 }
 
 export function CheckInButton({
@@ -57,6 +59,7 @@ export function CheckInButton({
   density,
   previewMode = false,
   checkinMoodEnabled = true,
+  todayValue,
   onStateChange,
 }: Readonly<{
   initialCheckIn: TodayCheckIn
@@ -65,12 +68,15 @@ export function CheckInButton({
   density?: PageLayoutModuleDensity
   previewMode?: boolean
   checkinMoodEnabled?: boolean
+  todayValue?: string
   onStateChange?: (state: CheckInStateChange) => void
 }>) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const customMoodInputRef = useRef<HTMLInputElement>(null)
   const moodBeforeCustomRef = useRef('')
   const submittingRef = useRef(false)
+  const knownDateRef = useRef(todayValue || getCurrentBeijingDateKey())
+  const refreshPromiseRef = useRef<Promise<void> | null>(null)
   const [mood, setMood] = useState('')
   const [customMoodOpen, setCustomMoodOpen] = useState(false)
   const [customMoodEmoji, setCustomMoodEmoji] = useState('')
@@ -94,75 +100,60 @@ export function CheckInButton({
 
   useEffect(() => {
     if (previewMode) return
-    let timer: number | undefined
+    const refresh = async (force = false) => {
+      const currentDateKey = getCurrentBeijingDateKey()
+      if (!force && currentDateKey === knownDateRef.current) return
+      if (refreshPromiseRef.current) return refreshPromiseRef.current
 
-    async function refreshTodayState() {
-      try {
-        const response = await fetch('/api/checkin', { cache: 'no-store' })
-        const data = await response.json().catch(() => null)
-        if (response.ok && data) {
-          const nextCheckIn = data.todayCheckIn || null
-          setTodayCheckIn(nextCheckIn)
-          setStats((current) => {
-            const refreshedStats = {
-              ...current,
-              level: data.level ?? current.level,
-              points: data.points ?? current.points,
-              exp: data.exp ?? current.exp,
-              consecutiveDays: data.consecutiveDays ?? current.consecutiveDays,
-            }
-            onStateChange?.({
-              todayCheckIn: nextCheckIn,
-              stats: refreshedStats,
-              created: false,
-              todayCount: typeof data.todayCount === 'number' ? data.todayCount : undefined,
-              totalCheckIns: typeof data.totalCheckIns === 'number' ? data.totalCheckIns : undefined,
-            })
-            return refreshedStats
+      const previousDateKey = knownDateRef.current
+      const promise = (async () => {
+        const response = await fetch('/api/checkin', { cache: 'no-store' }).catch(() => null)
+        const data = await response?.json().catch(() => null)
+        if (!response?.ok || !data) return
+
+        const nextCheckIn = data.todayCheckIn || null
+        const responseDateKey = typeof data.todayValue === 'string' ? data.todayValue : currentDateKey
+        knownDateRef.current = responseDateKey
+        setTodayCheckIn(nextCheckIn)
+        setStats((current) => {
+          const nextStats = {
+            level: data.level ?? current.level,
+            points: data.points ?? current.points,
+            exp: data.exp ?? current.exp,
+            consecutiveDays: data.consecutiveDays ?? current.consecutiveDays,
+          }
+          onStateChange?.({
+            todayCheckIn: nextCheckIn,
+            stats: nextStats,
+            created: false,
+            todayCount: typeof data.todayCount === 'number' ? data.todayCount : undefined,
+            totalCheckIns: typeof data.totalCheckIns === 'number' ? data.totalCheckIns : undefined,
           })
-          window.dispatchEvent(new CustomEvent('checkin:dayChanged', { detail: { date: data.todayValue } }))
+          return nextStats
+        })
+        if (responseDateKey !== previousDateKey) {
+          window.dispatchEvent(new CustomEvent('checkin:dayChanged', { detail: { date: responseDateKey } }))
         }
-      } finally {
-        timer = window.setTimeout(refreshTodayState, msUntilNextBeijingMidnight())
-      }
+      })().finally(() => {
+        refreshPromiseRef.current = null
+      })
+      refreshPromiseRef.current = promise
+      return promise
     }
 
-    timer = window.setTimeout(refreshTodayState, msUntilNextBeijingMidnight())
+    const onFocus = () => void refresh()
+    const onStorage = (event: StorageEvent) => { if (event.key === 'checkin:last-updated') void refresh(true) }
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('storage', onStorage)
     return () => {
-      if (timer) window.clearTimeout(timer)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('storage', onStorage)
     }
   }, [onStateChange, previewMode])
 
   useEffect(() => {
-    if (previewMode) return
-    const refresh = async () => {
-      const response = await fetch('/api/checkin', { cache: 'no-store' }).catch(() => null)
-      const data = await response?.json().catch(() => null)
-      if (!response?.ok || !data) return
-      const nextCheckIn = data.todayCheckIn || null
-      setTodayCheckIn(nextCheckIn)
-      setStats((current) => {
-        const nextStats = {
-          level: data.level ?? current.level,
-          points: data.points ?? current.points,
-          exp: data.exp ?? current.exp,
-          consecutiveDays: data.consecutiveDays ?? current.consecutiveDays,
-        }
-        onStateChange?.({ todayCheckIn: nextCheckIn, stats: nextStats, created: false, todayCount: data.todayCount, totalCheckIns: data.totalCheckIns })
-        return nextStats
-      })
-    }
-    const onStorage = (event: StorageEvent) => { if (event.key === 'checkin:last-updated') void refresh() }
-    const onCheckInCompleted = () => void refresh()
-    window.addEventListener('focus', refresh)
-    window.addEventListener('storage', onStorage)
-    window.addEventListener('checkin:completed', onCheckInCompleted)
-    return () => {
-      window.removeEventListener('focus', refresh)
-      window.removeEventListener('storage', onStorage)
-      window.removeEventListener('checkin:completed', onCheckInCompleted)
-    }
-  }, [onStateChange, previewMode])
+    if (todayValue) knownDateRef.current = todayValue
+  }, [todayValue])
   
   function selectPresetMood(key: string) {
     setMood(key)
@@ -198,7 +189,15 @@ export function CheckInButton({
   }
 
   async function checkIn() {
-    if (previewMode || submittingRef.current || isSubmitting || todayCheckIn) return
+    const currentDateKey = getCurrentBeijingDateKey()
+    const dateChangedSinceRender = currentDateKey !== knownDateRef.current
+    if (dateChangedSinceRender) {
+      // 页面一直保持焦点时不会收到 focus 事件；用户主动点击时直接以服务端当前日期为准，
+      // 避免旧日期的 todayCheckIn 状态阻塞新一天的首次挂号。
+      knownDateRef.current = currentDateKey
+      setTodayCheckIn(null)
+    }
+    if (previewMode || submittingRef.current || isSubmitting || (!dateChangedSinceRender && todayCheckIn)) return
 
     setMessage('')
     setError('')
@@ -226,17 +225,11 @@ export function CheckInButton({
           message: note,
         }),
       })
-      let data = await response.json().catch(() => ({}))
+      const data = await response.json().catch(() => ({}))
 
       if (!response.ok) {
         setError(data.message || '挂号失败')
         return
-      }
-
-      const verifyResponse = await fetch('/api/checkin', { cache: 'no-store' }).catch(() => null)
-      const verifyData = await verifyResponse?.json().catch(() => null)
-      if (verifyResponse?.ok && verifyData?.checkedToday && verifyData.todayCheckIn) {
-        data = { ...data, ...verifyData, created: data.created }
       }
 
       if (!data?.checkedToday || !data.todayCheckIn) {
@@ -244,12 +237,14 @@ export function CheckInButton({
         return
       }
 
-const elapsed = Date.now() - submittingStartTime
-const remaining = 1000 - elapsed
+      if (typeof data.checkDate === 'string') knownDateRef.current = data.checkDate
 
-if (remaining > 0) {
-  await new Promise((resolve) => setTimeout(resolve, remaining))
-}
+      const elapsed = Date.now() - submittingStartTime
+      const remaining = 1000 - elapsed
+
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining))
+      }
       const nextCheckIn = data.todayCheckIn || null
 
       setTodayCheckIn(nextCheckIn)

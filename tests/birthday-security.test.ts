@@ -25,7 +25,7 @@ test('sendBirthdayGreeting rejects users without a birthday (1: 无生日用户 
 
 test('sendBirthdayGreeting rejects users whose birthday is not today (2: 非今日生日 → 0 通知)', () => {
   // 取上海时区今天月/日，与用户生日不符立即 return false
-  assert.match(greetFn, /getTodayMonthDay\(\)/)
+  assert.match(greetFn, /getBirthdayDateContext\(dateKey\)/)
   assert.match(greetFn, /user\.birthMonth !== month \|\| user\.birthDay !== day/)
 })
 
@@ -46,8 +46,8 @@ test('batch reward sweep only selects users who actually have today birthday (4:
   assert.match(birthdayLib, /status:\s*'ACTIVE'/)
   assert.match(birthdayLib, /isDeleted:\s*false/)
   // 批量流程遍历的是「今日生日用户列表」，逐位授予徽章 + 祝福
-  assert.match(birthdayLib, /await ensureBirthdayBadge\(user\.id\)/)
-  assert.match(birthdayLib, /await sendBirthdayGreeting\(user\.id\)/)
+  assert.match(birthdayLib, /await ensureBirthdayBadge\(user\.id, dateKey\)/)
+  assert.match(birthdayLib, /await sendBirthdayGreeting\(user\.id, dateKey\)/)
 })
 
 test('login flow triggers greeting but the in-function guard protects non-birthday users', () => {
@@ -57,7 +57,7 @@ test('login flow triggers greeting but the in-function guard protects non-birthd
   assert.match(greetFn, /user\?\.birthMonth == null \|\| user\?\.birthDay == null/)
 })
 
-test('homepage sweep routes through the guarded grant (no blanket greeting to all users)', () => {
-  assert.match(homeData, /triggerBirthdayRewardsSweep\(\)/)
-  assert.match(homeData, /void grantTodayBirthdayRewards\(\)\.catch/)
+test('homepage only reads birthday count; batch runs through the protected job endpoint', () => {
+  assert.doesNotMatch(homeData, /triggerBirthdayRewardsSweep|grantTodayBirthdayRewards/)
+  assert.match(read('app/api/internal/daily-jobs/birthday/route.ts'), /x-daily-job-secret/)
 })

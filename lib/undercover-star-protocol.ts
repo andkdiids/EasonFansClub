@@ -107,10 +107,26 @@ export type UndercoverDescriptionByRound = {
 export type UndercoverRoundResult = {
   round: number
   kind: 'NO_ELIMINATION' | 'CIVILIAN_ELIMINATED' | 'UNDERCOVER_FOUND' | 'UNDERCOVER_GUESS'
+  reason?: 'TIE' | 'NO_VALID_VOTES' | 'ROUND_ONE_THRESHOLD'
   eliminatedPlayerId: string | null
   voteCounts: Array<{ playerId: string; count: number }>
   tieCandidates: string[]
   descriptions: UndercoverDescriptionPublic[]
+}
+
+export type UndercoverViewerVoteStatus = {
+  hasVoted: boolean
+  targetPlayerId: string | null
+  abstained: boolean
+  stage: UndercoverVoteStage | null
+}
+
+export type UndercoverVoteState = {
+  stage: UndercoverVoteStage | null
+  completedVoteCount: number
+  totalVoterCount: number
+  abstainCount: number
+  isComplete: boolean
 }
 
 export type UndercoverFinalPlayer = {
@@ -138,6 +154,9 @@ export type UndercoverPublicMatchSnapshot = {
   phase: UndercoverMatchPhase
   round: number
   revision: number
+  /** Monotonic public alias for revision used by realtime clients. */
+  stateVersion: number
+  updatedAt: string
   serverNow: string
   phaseDeadline: string | null
   currentSpeakerId: string | null
@@ -153,6 +172,11 @@ export type UndercoverPublicMatchSnapshot = {
   descriptions: UndercoverDescriptionPublic[]
   descriptionHistory: UndercoverDescriptionByRound[]
   voteProgress: { submitted: number; total: number; stage: UndercoverVoteStage | null; abstained: number }
+  voteState: UndercoverVoteState
+  viewerVoteStatus: UndercoverViewerVoteStatus
+  alivePlayerIds: string[]
+  voteResult: UndercoverRoundResult | null
+  winner: UndercoverWinnerSide | null
   tieCandidates: string[]
   roundHistory: UndercoverRoundResult[]
   lastRoundResult: UndercoverRoundResult | null
@@ -177,6 +201,7 @@ export type UndercoverPrivateState = {
   voteSubmitted: boolean
   voteStage: UndercoverVoteStage | null
   voteTargetId: string | null
+  voteAbstained: boolean
   guessSubmitted: boolean
   canDescribe: boolean
   canVote: boolean

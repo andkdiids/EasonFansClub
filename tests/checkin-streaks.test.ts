@@ -52,15 +52,15 @@ test('POST 已签到与 P2002 分支与事务内同为重算口径', () => {
   assert.doesNotMatch(post, /profile\?\.consecutiveDays|verifyUser\?\.consecutiveDays|result\.user\.consecutiveDays/)
 })
 
-test('签到成功响应严格使用事务后查询到的 CheckIn 奖励值', () => {
+test('签到成功响应直接使用事务返回值，不再提交后重复验证', () => {
   const route = readFileSync('app/api/checkin/route.ts', 'utf8')
   const button = readFileSync('components/CheckInButton.tsx', 'utf8')
-  assert.match(route, /gainedPoints: verifyCheckIn\.points/)
-  assert.match(route, /gainedExp: verifyCheckIn\.exp/)
+  assert.match(route, /gainedPoints: result\.checkIn\.points/)
+  assert.match(route, /gainedExp: result\.checkIn\.exp/)
+  assert.doesNotMatch(route, /verifyCheckIn|verifyUser|postVerify/)
   assert.doesNotMatch(route, /\[checkin\.(?:create|update)\.(?:before|after)\]/)
   assert.doesNotMatch(route, /\[checkin\.verify\.result\]/)
-  assert.match(route, /\[checkin\.verify\.mismatch\]/)
-  assert.match(button, /verifyData\?\.checkedToday/)
+  assert.doesNotMatch(button, /verifyData\?\.checkedToday|verifyResponse/)
   assert.match(button, /\+\$\{nextCheckIn\.points\} 挂号费、\+\$\{nextCheckIn\.exp\} 经验/)
 })
 

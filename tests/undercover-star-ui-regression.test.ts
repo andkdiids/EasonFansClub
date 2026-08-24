@@ -72,11 +72,11 @@ test('发言区历史仅展示早于当前轮的发言', () => {
 
 // 5) 弃权 payload：前端投票提交支持 abstain:true
 test('投票提交支持弃权 payload', () => {
-  // onVoteSubmit 在父组件返回体中定义（早于 function Match），故截取文件起始到 Match 之前
+  // 弃票与普通投票统一进入 submitVote，再由同一个 endpoint 发送 abstain:true。
   const parentRegion = clientSource.slice(0, clientSource.indexOf('function Match('))
   assert.match(
     parentRegion,
-    /onVoteSubmit=\{\(\) => void matchAction\([^]*?abstain: true/,
+    /async function submitVote\([^]*?abstain: true/,
     '弃权时须发送 abstain:true',
   )
 })
@@ -114,11 +114,11 @@ test('realtime 广播失败不影响 HTTP 成功', () => {
 })
 
 // 9) 旧 snapshot 不能覆盖新 revision：低 revision / 低 round 的实时快照被丢弃
-test('旧实时快照按 revision/round 丢弃，不覆盖新状态', () => {
+test('旧实时快照按 stateVersion/round 丢弃，不覆盖新状态', () => {
   assert.match(
     clientStateSource,
-    /if \(next\.revision < current\.revision\) return false/,
-    'revision 更旧的快照必须被丢弃',
+    /const currentVersion = current\.stateVersion \?\? current\.revision/,
+    '客户端应优先比较 stateVersion，并兼容旧 revision',
   )
   assert.match(
     clientStateSource,

@@ -170,6 +170,7 @@ function CheckInStatusContent({
           density={density}
           previewMode={previewMode}
           checkinMoodEnabled={checkinMoodEnabled}
+          todayValue={todayValue}
           onStateChange={handleStateChange}
         />
       </div>
