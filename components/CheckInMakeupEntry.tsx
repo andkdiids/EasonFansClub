@@ -17,8 +17,10 @@ type AvailabilityResponse = {
   makeup: {
     availableDates: AvailableDate[]
     eligibleDateKeys?: string[]
-    weeklyAvailable?: boolean
-    weeklyRemaining?: number
+    weeklyLimit: number
+    weeklyUsed: boolean
+    weeklyAvailable: boolean
+    weeklyRemaining: number
     monthlyChallengeAvailable: boolean
     monthlyChallengePending: boolean
     monthlyChallengeTargetDate: string | null
@@ -36,6 +38,9 @@ function isAvailabilityResponse(value: unknown): value is AvailabilityResponse {
     && typeof item.monthlyChallengeAvailable === 'boolean'
     && typeof item.monthlyChallengePending === 'boolean'
     && (item.monthlyChallengeTargetDate === null || typeof item.monthlyChallengeTargetDate === 'string')
+    && Number.isSafeInteger(item.weeklyLimit)
+    && Number.isSafeInteger(item.weeklyRemaining)
+    && typeof item.weeklyUsed === 'boolean'
     && Number.isSafeInteger(item.cost)
     && Number.isSafeInteger(item.currentBalance)
 }
@@ -117,14 +122,16 @@ export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMo
               <button type="button" className="checkin-history-close" onClick={closeEntry} aria-label="关闭补签">×</button>
             </header>
             <div className="checkin-history-dialog-body">
-              <p className="checkin-makeup-entry-intro">系统已根据你的签到历史筛出当前允许补签的漏签日期，无需手动查找日期。</p>
+              <p className="checkin-makeup-entry-intro">系统已根据你的注册日期和签到历史列出全部历史缺签日期，无需手动查找日期。</p>
               {loadError ? <p className="checkin-history-state is-error" role="alert">{loadError}</p> : null}
               {isLoading ? <p className="checkin-history-state" aria-live="polite">正在读取可补签日期…</p> : null}
               {!isLoading && !loadError && availability?.makeup.availableDates.length === 0 ? (
                 <p className="checkin-history-empty" role="status">目前没有可补签的日期</p>
               ) : null}
               {!isLoading && !loadError && availability?.makeup.availableDates.length ? (
-                <div className="checkin-makeup-entry-list">
+                <>
+                  <p className="checkin-makeup-entry-count" role="status">共 {availability.makeup.availableDates.length} 个历史缺签日期</p>
+                  <div className="checkin-makeup-entry-list">
                   {availability.makeup.availableDates.map((item) => (
                     <article key={item.dateKey} className="checkin-makeup-entry-item">
                       <div className="checkin-makeup-entry-item-copy">
@@ -136,7 +143,8 @@ export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMo
                       <button type="button" className="checkin-makeup-entry-action" disabled={item.canUseNow === false} onClick={() => setSelected(item)}>{item.canUseNow === false ? '本周已用完' : '补签'}</button>
                     </article>
                   ))}
-                </div>
+                  </div>
+                </>
               ) : null}
               {availability ? <p className="checkin-makeup-entry-hint">{availability.makeup.weeklyRemaining === 0 && availability.makeup.availableDates.length > 0 ? `本周补签次数已用完；你仍有 ${availability.makeup.availableDates.length} 个历史缺签日期，下周可继续补签。` : '每周最多补签 1 次；补签会计入连续挂号，但不会补发当天普通签到奖励。'}</p> : null}
             </div>

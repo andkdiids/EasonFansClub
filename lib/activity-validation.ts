@@ -1,0 +1,153 @@
+import { activityStatusValues, activityTypeValues, parseActivityDateInput, type ActivityStatusValue, type ActivityTypeValue } from '@/lib/activity'
+import { parseActivityImageInput } from '@/lib/activity-image-url'
+import { sanitizeText } from '@/lib/security'
+
+export type ActivityEditableValues = {
+  title: string
+  subtitle: string | null
+  description: string
+  type: ActivityTypeValue
+  status: ActivityStatusValue
+  coverUrl: string | null
+  bannerUrl: string | null
+  locationName: string | null
+  locationAddress: string | null
+  onlineUrl: string | null
+  startsAt: Date | null
+  endsAt: Date | null
+  registrationStartAt: Date | null
+  registrationEndAt: Date | null
+  signupLimit: number | null
+  organizer: string | null
+  contactInfo: string | null
+  isFeatured: boolean
+  isPinned: boolean
+  sortOrder: number
+}
+
+type ActivityValidationResult =
+  | { valid: true; value: ActivityEditableValues }
+  | { valid: false; message: string }
+
+function recordValue(body: Record<string, unknown>, key: string, fallback: unknown) {
+  return Object.prototype.hasOwnProperty.call(body, key) ? body[key] : fallback
+}
+
+function nullableText(value: unknown, maxLength: number) {
+  const result = sanitizeText(value, maxLength)
+  return result || null
+}
+
+function parseNullableDate(value: unknown, fieldLabel: string): { value: Date | null; message?: string } {
+  if (value === undefined || value === null || value === '') return { value: null }
+  const parsed = parseActivityDateInput(value)
+  return parsed ? { value: parsed } : { value: null, message: `${fieldLabel}格式不正确，请使用北京时间 YYYY-MM-DD HH:mm` }
+}
+
+function parseNullableInteger(value: unknown, fieldLabel: string, minimum = 0) {
+  if (value === undefined || value === null || value === '') return { value: null as number | null }
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > 2_000_000_000) return { value: null as number | null, message: `${fieldLabel}必须是有效的整数` }
+  return { value: parsed }
+}
+
+function parseBoolean(value: unknown, fallback: boolean) {
+  if (value === undefined) return fallback
+  if (typeof value === 'boolean') return value
+  return value === 'true' || value === '1' || value === 1
+}
+
+function parseUrl(value: unknown, fieldLabel: string, maxLength = 500): { value: string | null; message?: string } {
+  const result = nullableText(value, maxLength)
+  if (!result) return { value: null }
+  try {
+    const parsed = new URL(result)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('INVALID_PROTOCOL')
+    return { value: parsed.toString() }
+  } catch {
+    return { value: null, message: `${fieldLabel}必须是 http(s) 链接` }
+  }
+}
+
+function parseImage(value: unknown, fieldLabel: string, existingValue?: string | null) {
+  const result = parseActivityImageInput(value, existingValue)
+  return result.valid
+    ? { value: result.value }
+    : { value: null, message: `${fieldLabel}无效，请使用活动图片上传入口` }
+}
+
+export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEditableValues): ActivityValidationResult {
+  const body = bodyValue && typeof bodyValue === 'object' && !Array.isArray(bodyValue) ? bodyValue as Record<string, unknown> : {}
+  const title = sanitizeText(recordValue(body, 'title', existing?.title ?? ''), 160)
+  const subtitle = nullableText(recordValue(body, 'subtitle', existing?.subtitle ?? null), 300)
+  const description = sanitizeText(recordValue(body, 'description', existing?.description ?? ''), 20_000)
+  const typeValue = recordValue(body, 'type', existing?.type ?? 'OTHER')
+  const type = typeof typeValue === 'string' && activityTypeValues.includes(typeValue as ActivityTypeValue)
+    ? typeValue as ActivityTypeValue
+    : null
+  if (!type) return { valid: false, message: '活动类型不正确' }
+
+  const statusValue = recordValue(body, 'status', existing?.status ?? 'DRAFT')
+  const status = typeof statusValue === 'string' && activityStatusValues.includes(statusValue as ActivityStatusValue)
+    ? statusValue as ActivityStatusValue
+    : null
+  if (!status) return { valid: false, message: '活动状态不正确' }
+
+  const cover = parseImage(recordValue(body, 'coverUrl', existing?.coverUrl), '封面图片', existing?.coverUrl)
+  if (cover.message) return { valid: false, message: cover.message }
+  const banner = parseImage(recordValue(body, 'bannerUrl', existing?.bannerUrl), '横幅图片', existing?.bannerUrl)
+  if (banner.message) return { valid: false, message: banner.message }
+
+  const starts = parseNullableDate(recordValue(body, 'startsAt', existing?.startsAt), '开始时间')
+  if (starts.message) return { valid: false, message: starts.message }
+  const ends = parseNullableDate(recordValue(body, 'endsAt', existing?.endsAt), '结束时间')
+  if (ends.message) return { valid: false, message: ends.message }
+  const registrationStart = parseNullableDate(recordValue(body, 'registrationStartAt', existing?.registrationStartAt), '报名开始时间')
+  if (registrationStart.message) return { valid: false, message: registrationStart.message }
+  const registrationEnd = parseNullableDate(recordValue(body, 'registrationEndAt', existing?.registrationEndAt), '报名结束时间')
+  if (registrationEnd.message) return { valid: false, message: registrationEnd.message }
+
+  const signupLimit = parseNullableInteger(recordValue(body, 'signupLimit', existing?.signupLimit), '报名名额')
+  if (signupLimit.message) return { valid: false, message: signupLimit.message }
+  const sortOrder = parseNullableInteger(recordValue(body, 'sortOrder', existing?.sortOrder ?? 0), '排序值')
+  if (sortOrder.message || sortOrder.value === null) return { valid: false, message: sortOrder.message || '排序值不正确' }
+
+  const onlineUrl = parseUrl(recordValue(body, 'onlineUrl', existing?.onlineUrl), '线上活动链接')
+  if (onlineUrl.message) return { valid: false, message: onlineUrl.message }
+
+  const value: ActivityEditableValues = {
+    title,
+    subtitle,
+    description,
+    type,
+    status,
+    coverUrl: cover.value,
+    bannerUrl: banner.value,
+    locationName: nullableText(recordValue(body, 'locationName', existing?.locationName), 300),
+    locationAddress: nullableText(recordValue(body, 'locationAddress', existing?.locationAddress), 500),
+    onlineUrl: onlineUrl.value,
+    startsAt: starts.value ?? (recordValue(body, 'startsAt', undefined) === undefined ? existing?.startsAt ?? null : null),
+    endsAt: ends.value ?? (recordValue(body, 'endsAt', undefined) === undefined ? existing?.endsAt ?? null : null),
+    registrationStartAt: registrationStart.value ?? (recordValue(body, 'registrationStartAt', undefined) === undefined ? existing?.registrationStartAt ?? null : null),
+    registrationEndAt: registrationEnd.value ?? (recordValue(body, 'registrationEndAt', undefined) === undefined ? existing?.registrationEndAt ?? null : null),
+    signupLimit: signupLimit.value,
+    organizer: nullableText(recordValue(body, 'organizer', existing?.organizer), 160),
+    contactInfo: nullableText(recordValue(body, 'contactInfo', existing?.contactInfo), 500),
+    isFeatured: parseBoolean(recordValue(body, 'isFeatured', existing?.isFeatured ?? false), existing?.isFeatured ?? false),
+    isPinned: parseBoolean(recordValue(body, 'isPinned', existing?.isPinned ?? false), existing?.isPinned ?? false),
+    sortOrder: sortOrder.value,
+  }
+
+  if (value.startsAt && value.endsAt && value.endsAt <= value.startsAt) return { valid: false, message: '结束时间必须晚于开始时间' }
+  if (value.registrationStartAt && value.registrationEndAt && value.registrationEndAt <= value.registrationStartAt) return { valid: false, message: '报名结束时间必须晚于报名开始时间' }
+
+  if (status === 'PUBLISHED') {
+    if (title.length < 2) return { valid: false, message: '发布活动前请填写至少 2 个字的标题' }
+    if (description.length < 5) return { valid: false, message: '发布活动前请填写活动说明' }
+    if (!value.startsAt) return { valid: false, message: '发布活动前请填写开始时间' }
+    if (type === 'ONLINE' && !value.onlineUrl) return { valid: false, message: '线上活动请填写活动链接' }
+    if (type === 'OFFLINE' && !value.locationName) return { valid: false, message: '线下活动请填写活动地点' }
+  }
+
+  return { valid: true, value }
+}

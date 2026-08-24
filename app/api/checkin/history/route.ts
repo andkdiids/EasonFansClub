@@ -3,8 +3,7 @@ import { getCurrentCheckInMonth, getCheckInMonthBounds, getCheckInMonthKey, pars
 import { getCurrentUser } from '@/lib/auth'
 import { getBeijingDateKey } from '@/lib/beijing-time'
 import { prisma } from '@/lib/prisma'
-import { CHECK_IN_MAKEUP_COST, getEligibleMakeupDates, getMakeupWeek, getShanghaiMonthKey, USER_MAKEUP_DEFAULT_RANGE_DAYS, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
-import { shiftShanghaiDateKey } from '@/lib/checkin'
+import { CHECK_IN_MAKEUP_COST, getEligibleMakeupDates, getMakeupOperationWeek, getShanghaiMonthKey, isMakeupOperationInWeek, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,12 +37,11 @@ export async function GET(request: Request) {
   const { startKey, endKey } = getCheckInMonthBounds(year, month)
   const monthKey = getCheckInMonthKey(year, month)
   const todayKey = getBeijingDateKey(now)
-  const currentWeek = getMakeupWeek(todayKey)
-  const makeupStartKey = shiftShanghaiDateKey(todayKey, -(USER_MAKEUP_DEFAULT_RANGE_DAYS - 1))
-  // Include the Monday before the 90-day boundary so a makeup in that
-  // boundary week still consumes the user's one-per-week quota.
-  const makeupRecordsStartKey = getMakeupWeek(makeupStartKey).startKey
-  const [firstRecord, records, recordsWithMessages, recordTypes, candidateRecords, currentWeekMakeup, monthlyChallenge, profile] = await Promise.all([
+  const operationWeek = getMakeupOperationWeek(now)
+  const profile = await prisma.user.findUnique({ where: { id: user.id }, select: { points: true, createdAt: true } })
+  if (!profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+  const registrationDateKey = getBeijingDateKey(profile.createdAt)
+  const [firstRecord, records, recordsWithMessages, recordTypes, candidateRecords, monthlyChallenge] = await Promise.all([
     prisma.checkIn.findFirst({
       where: { userId: user.id },
       orderBy: { checkinDateKey: 'asc' },
@@ -63,39 +61,31 @@ export async function GET(request: Request) {
       select: { id: true, type: true },
     }),
     prisma.checkIn.findMany({
-      where: { userId: user.id, checkinDateKey: { gte: makeupRecordsStartKey, lt: todayKey } },
-      select: { checkinDateKey: true, type: true },
-    }),
-    prisma.checkIn.findFirst({
-      where: { userId: user.id, type: { in: USER_MAKEUP_TYPES }, checkinDateKey: { gte: currentWeek.startKey, lt: currentWeek.endKey } },
-      select: { id: true },
+      where: { userId: user.id, checkinDateKey: { gte: registrationDateKey, lt: todayKey } },
+      select: { checkinDateKey: true, type: true, createdAt: true },
     }),
     prisma.makeupChallenge.findUnique({
       where: { userId_monthKey: { userId: user.id, monthKey: getShanghaiMonthKey() } },
       select: { status: true, targetDateKey: true },
     }),
-    prisma.user.findUnique({ where: { id: user.id }, select: { points: true, createdAt: true } }),
   ])
 
   const recordIdsWithMessages = new Set(recordsWithMessages.map((record) => record.id))
   const typeById = new Map(recordTypes.map((record) => [record.id, record.type]))
   const firstDate = firstRecord ? parseCheckInDateKey(firstRecord.checkinDateKey) : null
   const targetIsFuture = monthKey > todayKey.slice(0, 7)
-  const registrationDateKey = profile?.createdAt ? getBeijingDateKey(profile.createdAt) : makeupStartKey
-  const candidateStartKey = registrationDateKey > makeupStartKey ? registrationDateKey : makeupStartKey
+  const currentWeekMakeup = candidateRecords.some((record) => USER_MAKEUP_TYPES.includes(record.type) && isMakeupOperationInWeek(record.createdAt, operationWeek))
   const availableDates = getEligibleMakeupDates({
-    startDateKey: candidateStartKey,
+    startDateKey: registrationDateKey,
     scope: 'USER',
     todayKey,
     checkedInDateKeys: candidateRecords.map((record) => record.checkinDateKey),
-    makeupDateKeys: candidateRecords.filter((record) => USER_MAKEUP_TYPES.includes(record.type)).map((record) => record.checkinDateKey),
+    makeupOperationTimes: candidateRecords.filter((record) => USER_MAKEUP_TYPES.includes(record.type)).map((record) => record.createdAt),
     monthlyChallengeStatus: monthlyChallenge?.status,
     monthlyChallengeTargetDate: monthlyChallenge?.targetDateKey,
     now,
   })
-  const eligibleDateKeys = availableDates
-    .filter((item) => item.canUseNow && item.dateKey >= startKey && item.dateKey < endKey)
-    .map((item) => item.dateKey)
+  const eligibleDateKeys = availableDates.map((item) => item.dateKey)
 
   return NextResponse.json({
     year,
@@ -128,7 +118,7 @@ export async function GET(request: Request) {
       weeklyAvailable: !currentWeekMakeup,
       weeklyUsed: Boolean(currentWeekMakeup),
       weeklyRemaining: currentWeekMakeup ? 0 : 1,
-      rangeDays: USER_MAKEUP_DEFAULT_RANGE_DAYS,
+      weeklyLimit: 1,
       monthlyChallengeAvailable: !monthlyChallenge,
       monthlyChallengePending: monthlyChallenge?.status === 'PENDING',
       monthlyChallengeTargetDate: monthlyChallenge?.status === 'PENDING' ? monthlyChallenge.targetDateKey : null,

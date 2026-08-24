@@ -23,7 +23,7 @@ test('前台补签入口使用服务端筛出的当前可补签日期，并标�
     candidateStartKey: '2026-08-17',
     todayKey: '2026-08-21',
     checkedInDateKeys: ['2026-08-17', '2026-08-19'],
-    makeupDateKeys: [],
+    makeupOperationTimes: [],
     now: shanghai('2026-08-21T12:00:00'),
   })
   assert.deepEqual(available.map((item) => item.dateKey), ['2026-08-18', '2026-08-20'])
@@ -32,7 +32,7 @@ test('前台补签入口使用服务端筛出的当前可补签日期，并标�
     candidateStartKey: '2026-08-17',
     todayKey: '2026-08-21',
     checkedInDateKeys: ['2026-08-17'],
-    makeupDateKeys: [],
+    makeupOperationTimes: [],
     monthlyChallengeStatus: 'PENDING',
     monthlyChallengeTargetDate: '2026-08-18',
     now: shanghai('2026-08-21T12:00:00'),
@@ -59,7 +59,7 @@ test('1-10 付费补签资格、74 挂号费、流水、余额和周额度均由
   assert.equal(getMakeupEligibility('2026-08-20', shanghai('2026-08-21T12:00:00')).eligible, true)
   assert.equal(getMakeupEligibility('2026-08-21', shanghai('2026-08-21T12:00:00')).code, 'TODAY_NOT_ALLOWED')
   assert.equal(getMakeupEligibility('2026-08-22', shanghai('2026-08-21T12:00:00')).code, 'FUTURE_NOT_ALLOWED')
-  assert.equal(getMakeupEligibility('2026-08-13', shanghai('2026-08-21T12:00:00')).code, 'OUTSIDE_MAKEUP_WINDOW')
+  assert.equal(getMakeupEligibility('2026-08-13', shanghai('2026-08-21T12:00:00')).eligible, true)
   assert.equal(getMakeupWeek('2026-08-20').startKey, '2026-08-17')
   assert.equal(getMakeupWeek('2026-08-23').endKey, '2026-08-24')
   const route = source('app/api/checkin/makeup/paid/route.ts')
@@ -73,15 +73,14 @@ test('1-10 付费补签资格、74 挂号费、流水、余额和周额度均由
   assert.match(fee, /REGISTRATION_FEE_INSUFFICIENT/)
 })
 
-test('11-14 周一补周日归属上一自然周且不占新周额度', () => {
+test('11-14 历史补签不再按目标日期所在周限制，额度以当前操作周为准', () => {
   const monday = shanghai('2026-08-24T09:00:00')
   const result = getMakeupEligibility('2026-08-23', monday)
   assert.equal(result.eligible, true)
   if (!result.eligible) return
-  assert.equal(result.mondaySundayException, true)
-  assert.deepEqual(result.week, { startKey: '2026-08-17', endKey: '2026-08-24' })
+  assert.deepEqual(result.operationWeek, { startKey: '2026-08-24', endKey: '2026-08-31' })
   assert.equal(getShanghaiWeekStart('2026-08-24'), '2026-08-24')
-  assert.equal(getMakeupEligibility('2026-08-22', monday).eligible, false)
+  assert.equal(getMakeupEligibility('2026-08-22', monday).eligible, true)
 })
 
 test('15-20 Challenge 月度唯一、固定题目、10 秒四选一且 PENDING 不泄漏答案', () => {

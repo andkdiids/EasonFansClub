@@ -217,9 +217,9 @@ export async function getHomeActivities() {
     'Activity.findMany home.activities',
     prisma.activity.findMany({
       where: { status: 'PUBLISHED' },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
       take: 3,
-      select: { id: true, title: true, description: true, coverUrl: true, startsAt: true, endsAt: true },
+      select: { id: true, title: true, subtitle: true, description: true, type: true, status: true, coverUrl: true, bannerUrl: true, startsAt: true, endsAt: true, isFeatured: true, isPinned: true, sortOrder: true },
     }),
     [],
     5000,

@@ -7,7 +7,7 @@ import {
   getAdminMakeupWindow,
   normalizeAdminMakeupRangeDays,
 } from '@/lib/admin-checkin-makeup'
-import { getEligibleMakeupDates, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
+import { getEligibleMakeupDates } from '@/lib/checkin-makeup'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       startDateKey: window.startDateKey,
       todayKey,
       checkedInDateKeys: records.map((record) => record.checkinDateKey),
-      makeupDateKeys: records.filter((record) => USER_MAKEUP_TYPES.includes(record.type as (typeof USER_MAKEUP_TYPES)[number])).map((record) => record.checkinDateKey),
+      makeupOperationTimes: [],
       scope: 'ADMIN',
       now: new Date(),
     }).map((item) => item.dateKey)

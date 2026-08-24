@@ -63,6 +63,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/clinic', title: '阿士匹灵门诊部', desc: '处理匿名病历、会诊和举报；后台可核对真实用户身份。' },
       { href: '/admin/today', title: '今日管理', desc: '管理历史上的今天内容并审核用户提交。' },
       { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '管理挂号页留言、公告和活动提醒。' },
+      { href: '/admin/activities', title: '活动中心管理', desc: '创建、编辑、发布、取消和维护活动。' },
       { href: '/admin/stickers', title: '表情包审核', desc: '审核用户提交的表情包合集。' },
       { href: '/admin/birthdays', title: '生日管理', desc: '查看今日生日用户并保护隐私信息。' },
       { href: '/admin/birthday-messages', title: '生日祝福文案', desc: '维护生日纪念通知文案池。' },
@@ -75,6 +76,13 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     desc: '统一管理 E院中心的功能入口顺序与显示状态。',
     items: [
       { href: '/admin/ecenter-features', title: 'E院中心功能排序', desc: '调整 E院中心弹窗、移动端中心菜单和侧栏快捷入口的共同顺序与启用状态。' },
+    ],
+  },
+  {
+    title: '物料兑换',
+    desc: '维护限时物料、库存、兑换订单和现场核销。',
+    items: [
+      { href: '/admin/material-redemptions', title: '还有什么可以送给你', desc: '创建物料、设置资格条件、处理库存、订单、核销与退款。' },
     ],
   },
   {

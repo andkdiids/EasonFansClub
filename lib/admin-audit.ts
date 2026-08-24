@@ -13,6 +13,12 @@ export const adminAuditOperations = {
   POST_RESTORED: 'POST_RESTORED',
   POST_EDITED: 'POST_EDITED',
   ECENTER_FEATURES_UPDATED: 'ECENTER_FEATURES_UPDATED',
+  ACTIVITY_CREATE: 'ACTIVITY_CREATE',
+  ACTIVITY_UPDATE: 'ACTIVITY_UPDATE',
+  ACTIVITY_PUBLISH: 'ACTIVITY_PUBLISH',
+  ACTIVITY_UNPUBLISH: 'ACTIVITY_UNPUBLISH',
+  ACTIVITY_CANCEL: 'ACTIVITY_CANCEL',
+  ACTIVITY_DELETE: 'ACTIVITY_DELETE',
 } as const
 
 export type AdminAuditOperation = typeof adminAuditOperations[keyof typeof adminAuditOperations]
@@ -28,6 +34,12 @@ export const adminAuditOperationLabels: Record<AdminAuditOperation, string> = {
   POST_RESTORED: '恢复帖子',
   POST_EDITED: '管理员编辑帖子',
   ECENTER_FEATURES_UPDATED: '更新 E院中心功能入口',
+  ACTIVITY_CREATE: '创建活动',
+  ACTIVITY_UPDATE: '编辑活动',
+  ACTIVITY_PUBLISH: '发布活动',
+  ACTIVITY_UNPUBLISH: '撤下活动',
+  ACTIVITY_CANCEL: '取消活动',
+  ACTIVITY_DELETE: '删除活动',
 }
 
 type AuditDatabaseClient = Pick<Prisma.TransactionClient, 'user' | 'adminAction' | 'postModerationHistory'>

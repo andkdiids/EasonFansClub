@@ -48,17 +48,35 @@ model Achievement {
 model Activity {
   id                   String                 @id @default(cuid())
   title                String
-  description          String
+  subtitle             String?                @db.VarChar(300)
+  description          String                 @db.Text
   type                 ActivityType           @default(OTHER)
   status               ActivityStatus         @default(DRAFT)
   coverUrl             String?
+  bannerUrl            String?
+  locationName         String?                @db.VarChar(300)
+  locationAddress      String?                @db.VarChar(500)
+  onlineUrl            String?                @db.VarChar(500)
   pointsReward         Int?
   signupLimit          Int?
   signupCount          Int                    @default(0)
   startsAt             DateTime?
   endsAt               DateTime?
+  registrationStartAt  DateTime?
+  registrationEndAt    DateTime?
+  organizer            String?                @db.VarChar(160)
+  contactInfo          String?                @db.VarChar(500)
+  isFeatured           Boolean                @default(false)
+  isPinned             Boolean                @default(false)
+  sortOrder            Int                    @default(0)
+  viewCount            Int                    @default(0)
+  publishedAt          DateTime?
+  createdById          String?
+  updatedById          String?
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
+  CreatedBy            User?                  @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  UpdatedBy            User?                  @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   ActivityFavorite     ActivityFavorite[]
   ActivityRegistration ActivityRegistration[]
   Lottery              Lottery[]
@@ -66,6 +84,11 @@ model Activity {
   @@index([status, createdAt])
   @@index([status, startsAt])
   @@index([type])
+  @@index([isPinned, sortOrder, startsAt])
+  @@index([isFeatured])
+  @@index([publishedAt])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model ActivityFavorite {
@@ -159,6 +182,80 @@ model AdminPermission {
   @@unique([userId, permissionKey])
   @@index([permissionKey, enabled])
   @@index([userId, enabled])
+}
+
+model MaterialRedemption {
+  id               String                    @id @default(cuid())
+  title            String                    @db.VarChar(191)
+  description      String                    @db.Text
+  coverImageUrl    String?                   @db.Text
+  instructions     String?                   @db.Text
+  cost             Int                       @default(0)
+  stockTotal       Int
+  stockRemaining   Int
+  perUserLimit     Int                       @default(1)
+  exchangeStartAt  DateTime
+  exchangeEndAt    DateTime
+  redeemEndAt      DateTime
+  status           MaterialRedemptionStatus  @default(DRAFT)
+  createdByAdminId String
+  publishedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  createdByAdmin   User                      @relation("MaterialRedemptionCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  rules            MaterialRedemptionRule[]
+  orders           MaterialRedemptionOrder[]
+
+  @@index([status, exchangeStartAt, exchangeEndAt])
+  @@index([createdByAdminId, createdAt])
+}
+
+model MaterialRedemptionRule {
+  id         String                         @id @default(cuid())
+  materialId String
+  type       MaterialRedemptionRuleType
+  operator   MaterialRedemptionRuleOperator @default(GTE)
+  value      String                         @db.VarChar(191)
+  sortOrder  Int                            @default(0)
+  createdAt  DateTime                       @default(now())
+  updatedAt  DateTime                       @updatedAt
+  material   MaterialRedemption             @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, sortOrder])
+  @@index([type])
+}
+
+model MaterialRedemptionOrder {
+  id                  String                        @id @default(cuid())
+  materialId          String
+  userId              String
+  quantity            Int                           @default(1)
+  unitCost            Int
+  totalCost           Int
+  status              MaterialRedemptionOrderStatus @default(SUCCESS)
+  redeemCode          String                        @unique @db.VarChar(64)
+  redeemToken         String                        @unique @db.VarChar(128)
+  eligibilitySnapshot Json
+  idempotencyKey      String                        @unique @db.VarChar(191)
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+  redeemedAt          DateTime?
+  redeemedByAdminId   String?
+  expiredAt           DateTime?
+  cancelledAt         DateTime?
+  cancelledByAdminId  String?
+  refundedAt          DateTime?
+  refundedByAdminId   String?
+  refundReason        String?                       @db.VarChar(500)
+  material            MaterialRedemption            @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  user                User                          @relation("MaterialRedemptionOrderUser", fields: [userId], references: [id], onDelete: Cascade)
+  redeemedByAdmin     User?                         @relation("MaterialRedemptionOrderRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
+  cancelledByAdmin    User?                         @relation("MaterialRedemptionOrderCancelledByAdmin", fields: [cancelledByAdminId], references: [id], onDelete: SetNull)
+  refundedByAdmin     User?                         @relation("MaterialRedemptionOrderRefundedByAdmin", fields: [refundedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([materialId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 model UserReward {
@@ -3455,6 +3552,8 @@ model User {
   AccountSecurityLog                                     AccountSecurityLog[]
   ActivityFavorite                                       ActivityFavorite[]
   ActivityRegistration                                   ActivityRegistration[]
+  ActivityCreatedBy                                      Activity[]                     @relation("ActivityCreatedBy")
+  ActivityUpdatedBy                                      Activity[]                     @relation("ActivityUpdatedBy")
   AlbumReview                                            AlbumReview[]
   AlbumReviewFavorite                                    AlbumReviewFavorite[]
   AlbumReviewLike                                        AlbumReviewLike[]
@@ -3471,6 +3570,11 @@ model User {
   AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]               @relation("AdminActionLog_adminIdToUser")
   AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]               @relation("AdminActionLog_targetUserIdToUser")
   AdminPermission                                        AdminPermission[]
+  MaterialRedemptionsCreated                             MaterialRedemption[]           @relation("MaterialRedemptionCreatedByAdmin")
+  MaterialRedemptionOrders                               MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderUser")
+  MaterialRedemptionOrdersRedeemedByAdmin                MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderRedeemedByAdmin")
+  MaterialRedemptionOrdersCancelledByAdmin               MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderCancelledByAdmin")
+  MaterialRedemptionOrdersRefundedByAdmin                MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderRefundedByAdmin")
   UserReward_UserReward_operatorIdToUser                 UserReward[]                   @relation("UserRewardOperator")
   UserReward_UserReward_userIdToUser                     UserReward[]                   @relation("UserRewardRecipient")
   BannedWordCreated                                      BannedWord[]                   @relation("BannedWordCreatedBy")
@@ -3741,16 +3845,47 @@ enum AchievementRarity {
 enum ActivityStatus {
   DRAFT
   PUBLISHED
-  CLOSED
-  FINISHED
   CANCELLED
 }
 
+enum MaterialRedemptionStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  ENDED
+  ARCHIVED
+}
+
+enum MaterialRedemptionRuleType {
+  NONE
+  REGISTER_DAYS
+  CHECKIN_TOTAL
+  CHECKIN_STREAK
+  HAS_BADGE
+  ATTENDED_CONCERT
+  SPECIFIC_USER
+}
+
+enum MaterialRedemptionRuleOperator {
+  GTE
+  EQ
+  LTE
+}
+
+enum MaterialRedemptionOrderStatus {
+  SUCCESS
+  REDEEMED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
 enum ActivityType {
-  CONCERT_SIGNUP
-  GATHERING
+  OFFLINE
   ONLINE
-  LOTTERY
+  CONCERT
+  COMMUNITY
+  BENEFIT
   OTHER
 }
 
@@ -4128,6 +4263,8 @@ enum PointActionType {
   GUESS_SONG_DUEL_WIN
   USER_REWARD
   CHECK_IN_MAKEUP
+  MATERIAL_REDEMPTION
+  MATERIAL_REDEMPTION_REFUND
 }
 
 enum CheckInType {

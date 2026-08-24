@@ -1,7 +1,7 @@
 export type AppNavigationItem = {
   href: string
   label: string
-  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user' | 'sticker' | 'stethoscope' | 'pill' | 'settings'
+  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user' | 'sticker' | 'stethoscope' | 'pill' | 'settings' | 'gift'
   activePrefixes?: readonly string[]
   mobile?: boolean
   showsUnread?: boolean

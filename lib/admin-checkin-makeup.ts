@@ -67,7 +67,7 @@ export function buildAdminEligibleMissingDates(input: {
     startDateKey: input.startDateKey,
     todayKey: input.todayKey,
     checkedInDateKeys: input.checkinDateKeys,
-    makeupDateKeys: [],
+    makeupOperationTimes: [],
     scope: 'ADMIN',
     now: new Date(`${input.todayKey}T12:00:00+08:00`),
   }).map((item) => item.dateKey)

@@ -7,6 +7,8 @@ export const adminPermissionGroups = [
   { key: 'board_manage', label: '板块管理', description: '创建、编辑、隐藏和排序论坛板块。' },
   { key: 'checkin_manage', label: '每日挂号管理', description: '查看签到记录、补签和重置签到。' },
   { key: 'daily_message_manage', label: '病友留言管理', description: '删除、精选和管理留言互动。' },
+  { key: 'activity_manage', label: '活动中心管理', description: '创建、编辑、发布、取消和删除活动。' },
+  { key: 'material_redemption_manage', label: '物料兑换管理', description: '维护限时物料、库存、兑换订单、核销与退款。' },
   { key: 'music_manage', label: 'EasMusic 管理', description: '维护音乐专辑、歌曲资料和播放来源预留信息。' },
   { key: 'rating_manage', label: '歌·颂管理', description: '查看评分统计并删除违规歌·颂评价。' },
   { key: 'entertainment_manage', label: '娱乐中心管理', description: '维护每日抽奖使用的歌词处方库。' },
@@ -85,5 +87,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/birthdays': 'stats_view',
   '/admin/stickers': 'sticker_manage',
   '/admin/registration-messages': 'daily_message_manage',
+  '/admin/activities': 'activity_manage',
+  '/admin/material-redemptions': 'material_redemption_manage',
   '/admin/banned-words': 'banned_word_manage',
 }

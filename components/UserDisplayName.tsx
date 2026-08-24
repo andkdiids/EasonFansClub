@@ -14,6 +14,7 @@ type UserDisplayNameProps = {
   badge?: UserDisplayNameBadge | null
   showBadge?: boolean
   showBadgeName?: boolean
+  badgeInteraction?: 'interactive' | 'static'
   compact?: boolean
   className?: string
   nameClassName?: string
@@ -22,15 +23,22 @@ type UserDisplayNameProps = {
 const GOLD_START = '#b88a3b'
 const GOLD_MID = '#f3d98b'
 const GOLD_END = '#9b6a24'
+const BADGE_TEXT_FALLBACK = '#f3d98b'
+const BADGE_TEXT_HIGHLIGHT = '#fff7c9'
 type BadgeNicknameStyle = CSSProperties & {
   '--badge-name-fallback'?: string
   '--badge-gradient-start'?: string
   '--badge-gradient-mid'?: string
   '--badge-gradient-end'?: string
 }
+type BadgeTextStyle = CSSProperties & {
+  '--badge-text-base'?: string
+  '--badge-text-highlight'?: string
+}
 type BadgeVisualStyle = CSSProperties & {
   '--badge-shine-mask'?: string
 }
+type BadgeNameBadge = Pick<UserDisplayNameBadge, 'name' | 'effectType'> & Partial<Pick<UserDisplayNameBadge, 'nicknameEffect' | 'nicknameColor' | 'nicknameGradientStart' | 'nicknameGradientEnd'>>
 
 export function badgeEffectClass(effectType: EquippedBadgeView['effectType']) {
   if (effectType === 'SHINE') return 'badge-effect-shine'
@@ -43,6 +51,12 @@ function badgeNameEffectClass(effectType: EquippedBadgeView['effectType']) {
   if (effectType === 'SHINE') return 'badge-name-shine'
   if (effectType === 'GLOW') return 'badge-name-glow'
   if (effectType === 'SPARKLE') return 'badge-name-sparkle'
+  return ''
+}
+
+export function badgeTextEffectClass(effectType: EquippedBadgeView['effectType']) {
+  if (effectType === 'SHINE') return 'badge-text-shine'
+  if (effectType === 'GLOW') return 'badge-text-glow'
   return ''
 }
 
@@ -82,12 +96,46 @@ export function badgeNicknameStyle(badge?: UserDisplayNameBadge | null): BadgeNi
   }
 }
 
-export function BadgeName({ badge, className = '' }: { badge: Pick<UserDisplayNameBadge, 'name' | 'effectType'>; className?: string }) {
+export function badgeTextStyle(badge?: BadgeNameBadge | null): BadgeTextStyle {
+  if (!badge) return {}
+  if (badge.nicknameEffect === 'COLOR') {
+    return {
+      '--badge-text-base': normalizeBadgeColor(badge.nicknameColor) || BADGE_TEXT_FALLBACK,
+      '--badge-text-highlight': BADGE_TEXT_HIGHLIGHT,
+    }
+  }
+  if (badge.nicknameEffect === 'GOLD') {
+    return {
+      '--badge-text-base': GOLD_START,
+      '--badge-text-highlight': GOLD_MID,
+    }
+  }
+  if (badge.nicknameEffect === 'GRADIENT') {
+    return {
+      '--badge-text-base': normalizeBadgeColor(badge.nicknameGradientStart) || BADGE_TEXT_FALLBACK,
+      '--badge-text-highlight': BADGE_TEXT_HIGHLIGHT,
+    }
+  }
+  if (badge.nicknameEffect === 'GLOW') {
+    return {
+      '--badge-text-base': normalizeBadgeColor(badge.nicknameColor) || BADGE_TEXT_FALLBACK,
+      '--badge-text-highlight': BADGE_TEXT_HIGHLIGHT,
+    }
+  }
+  if (badge.effectType !== 'NONE') {
+    return {
+      '--badge-text-base': BADGE_TEXT_FALLBACK,
+      '--badge-text-highlight': BADGE_TEXT_HIGHLIGHT,
+    }
+  }
+  return {}
+}
+
+export function BadgeName({ badge, className = '' }: { badge: BadgeNameBadge; className?: string }) {
   const effectClass = badgeNameEffectClass(badge.effectType)
   return (
-    <span className={`badge-name-display ${effectClass} ${className}`.trim()}>
+    <span className={`badge-name-display ${effectClass} ${className}`.trim()} style={badgeTextStyle(badge)}>
       {badge.name}
-      {badge.effectType === 'SHINE' ? <span className="badge-name-shine-overlay" aria-hidden="true">{badge.name}</span> : null}
     </span>
   )
 }
@@ -130,7 +178,7 @@ function BadgeDetail({ badge, onClose }: { badge: UserDisplayNameBadge; onClose:
   )
 }
 
-export function UserDisplayName({ name, uid, href, badge, showBadge = true, showBadgeName = false, compact = false, className = '', nameClassName = '' }: UserDisplayNameProps) {
+export function UserDisplayName({ name, uid, href, badge, showBadge = true, showBadgeName = false, badgeInteraction = 'interactive', compact = false, className = '', nameClassName = '' }: UserDisplayNameProps) {
   const [detailOpen, setDetailOpen] = useState(false)
   const [liveBadge, setLiveBadge] = useState<UserDisplayNameBadge | null | undefined>(badge)
   useEffect(() => setLiveBadge(badge), [badge])
@@ -144,6 +192,7 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
     return () => window.removeEventListener('eason-badge-updated', updateBadge)
   }, [uid])
   const displayBadge = showBadge ? liveBadge : null
+  const isStaticBadge = badgeInteraction === 'static'
   const style = useMemo(() => badgeNicknameStyle(displayBadge), [displayBadge])
   const nicknameClass = displayBadge ? nicknameEffectClass(displayBadge.nicknameEffect) : ''
   const badgeClick = (event: MouseEvent<HTMLSpanElement>) => {
@@ -157,30 +206,39 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
     event.stopPropagation()
     if (displayBadge) setDetailOpen(true)
   }
+  const badgeInner = displayBadge ? (
+    <>
+      <BadgeImage badge={displayBadge} />
+      {showBadgeName && !compact ? <span className="user-display-badge-name"><BadgeName badge={displayBadge} /></span> : null}
+      <span className="user-display-badge-tooltip" role="tooltip">
+        <BadgeImage badge={displayBadge} size="wall" />
+        <span>
+          <strong><BadgeName badge={displayBadge} /></strong>
+          {displayBadge.obtainedAt ? <small>获得于 {new Date(displayBadge.obtainedAt).toLocaleDateString('zh-CN')}</small> : null}
+        </span>
+      </span>
+    </>
+  ) : null
 
   const content = (
     <span className={`user-display-name ${compact ? 'user-display-name-compact' : ''} ${className}`}>
       <span className={`user-display-name-text ${displayBadge?.nicknameEffect === 'GOLD' || displayBadge?.nicknameEffect === 'GRADIENT' ? 'user-display-name-text-gradient' : ''} ${nicknameClass} ${nameClassName}`.trim()} style={style}>{name}</span>
       {displayBadge ? (
-        <span
-          className="user-display-badge"
-          role="button"
-          tabIndex={0}
-          title={`${displayBadge.name} · 点击查看详情`}
-          aria-label={`${displayBadge.name}，点击查看详情`}
-          onClick={badgeClick}
-          onKeyDown={badgeKeyDown}
-        >
-          <BadgeImage badge={displayBadge} />
-          {showBadgeName && !compact ? <span className="user-display-badge-name"><BadgeName badge={displayBadge} /></span> : null}
-          <span className="user-display-badge-tooltip" role="tooltip">
-            <BadgeImage badge={displayBadge} size="wall" />
-            <span>
-              <strong><BadgeName badge={displayBadge} /></strong>
-              {displayBadge.obtainedAt ? <small>获得于 {new Date(displayBadge.obtainedAt).toLocaleDateString('zh-CN')}</small> : null}
-            </span>
+        isStaticBadge ? (
+          <span className="user-display-badge user-display-badge-static" title={displayBadge.name} aria-label={displayBadge.name}>{badgeInner}</span>
+        ) : (
+          <span
+            className="user-display-badge user-display-badge-interactive"
+            role="button"
+            tabIndex={0}
+            title={`${displayBadge.name} · 点击查看详情`}
+            aria-label={`${displayBadge.name}，点击查看详情`}
+            onClick={badgeClick}
+            onKeyDown={badgeKeyDown}
+          >
+            {badgeInner}
           </span>
-        </span>
+        )
       ) : null}
     </span>
   )
@@ -188,7 +246,7 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
   return (
     <>
       {href ? <Link href={href} className="user-display-name-link">{content}</Link> : content}
-      {detailOpen && displayBadge ? <BadgeDetail badge={displayBadge} onClose={() => setDetailOpen(false)} /> : null}
+      {!isStaticBadge && detailOpen && displayBadge ? <BadgeDetail badge={displayBadge} onClose={() => setDetailOpen(false)} /> : null}
     </>
   )
 }

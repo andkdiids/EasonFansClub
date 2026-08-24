@@ -38,9 +38,9 @@ test('本人和他人主页都传入真实等级称号且不显示 Lv', () => {
   assert.doesNotMatch(profileSummary + sidebarSummary, /Lv\./)
 })
 
-test('等级胶囊不会再被 flat-page 改成白底白字且 320px 可换行', () => {
-  assert.equal((profileSummary.match(/className="profile-identity-badge"/g) || []).length, 2)
-  assert.match(css, /\.profile-identity-badge \{[^}]*min-height:24px;[^}]*border-radius:9999px;[^}]*padding:4px 8px;[^}]*color:#fff;[^}]*background:rgba\(2,8,18,.58\)/)
+test('个人主页身份信息不再使用会形成方框的胶囊背景且支持换行', () => {
+  assert.equal((profileSummary.match(/className="[^"]*profile-identity-badge/g) || []).length, 2)
+  assert.match(css, /\.profile-identity-badge \{[^}]*min-height:0;[^}]*border:0;[^}]*border-radius:0;[^}]*padding:0;[^}]*color:inherit;[^}]*background:transparent;[^}]*box-shadow:none/)
   assert.match(profileSummary, /profile-identity-badges[\s\S]*flex-wrap/)
 })
 

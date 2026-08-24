@@ -28,6 +28,8 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   POST_DAILY_FIRST: '发帖奖励',
   POST_COMMENT_DAILY: '回复奖励',
   CHECK_IN_MAKEUP: '补挂号',
+  MATERIAL_REDEMPTION: '物料兑换',
+  MATERIAL_REDEMPTION_REFUND: '物料兑换退款',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {

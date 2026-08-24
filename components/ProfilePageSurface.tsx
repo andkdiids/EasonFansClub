@@ -91,6 +91,7 @@ export function ProfilePageSurface({
         avatarUrl={profile.avatarUrl}
         backgroundUrl={profile.backgroundUrl}
         equippedBadge={profile.equippedBadge}
+        badgeInteraction={isSelf ? 'static' : 'interactive'}
         showGrowth
       />
 

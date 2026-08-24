@@ -7,7 +7,6 @@ import { createUUID } from '@/lib/utils/uuid'
 export const CHECK_IN_MAKEUP_COST = 74
 export const CHECK_IN_MAKEUP_PLAYBACK_SECONDS = 10
 export const USER_MAKEUP_TYPES: CheckInType[] = ['MAKEUP_FREE_QUIZ', 'MAKEUP_PAID']
-export const USER_MAKEUP_DEFAULT_RANGE_DAYS = 90
 
 export type UserMakeupAvailableDate = {
   dateKey: string
@@ -40,7 +39,18 @@ export function getMakeupWeek(dateKey: string) {
   return { startKey, endKey: shiftShanghaiDateKey(startKey, 7) }
 }
 
-export function getMakeupEligibility(targetDateKey: string, now = new Date(), options: { allowHistorical?: boolean } = {}) {
+export function getMakeupOperationWeek(now = new Date()) {
+  return getMakeupWeek(getShanghaiDateKey(now))
+}
+
+export function isMakeupOperationInWeek(value: Date | string, week: { startKey: string; endKey: string }) {
+  const operationDate = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(operationDate.getTime())) return false
+  const operationDateKey = getShanghaiDateKey(operationDate)
+  return operationDateKey >= week.startKey && operationDateKey < week.endKey
+}
+
+export function getMakeupEligibility(targetDateKey: string, now = new Date()) {
   const targetDate = parseBeijingDate(targetDateKey)
   if (!targetDate) return { eligible: false as const, code: 'INVALID_DATE', message: '补签日期无效' }
   const todayKey = getShanghaiDateKey(now)
@@ -49,13 +59,7 @@ export function getMakeupEligibility(targetDateKey: string, now = new Date(), op
       ? { eligible: false as const, code: 'TODAY_NOT_ALLOWED', message: '今天请使用正常挂号' }
       : { eligible: false as const, code: 'FUTURE_NOT_ALLOWED', message: '不能补签未来日期' }
   }
-  const currentWeekStart = getShanghaiWeekStart(todayKey)
-  const mondaySundayException = weekday(todayKey) === 1 && targetDateKey === shiftShanghaiDateKey(todayKey, -1)
-  if (!options.allowHistorical && targetDateKey < currentWeekStart && !mondaySundayException) {
-    return { eligible: false as const, code: 'OUTSIDE_MAKEUP_WINDOW', message: '只能补签本周已过去的漏签日期' }
-  }
-  const week = getMakeupWeek(targetDateKey)
-  return { eligible: true as const, targetDate, targetDateKey, todayKey, week, mondaySundayException }
+  return { eligible: true as const, targetDate, targetDateKey, todayKey, operationWeek: getMakeupOperationWeek(now) }
 }
 
 export function getShanghaiMonthKey(now = new Date()) {
@@ -66,7 +70,7 @@ export function buildUserMakeupAvailableDates(input: {
   candidateStartKey: string
   todayKey: string
   checkedInDateKeys: Iterable<string>
-  makeupDateKeys: Iterable<string>
+  makeupOperationTimes: Iterable<Date | string>
   monthlyChallengeStatus?: string | null
   monthlyChallengeTargetDate?: string | null
   now?: Date
@@ -77,7 +81,7 @@ export function buildUserMakeupAvailableDates(input: {
     todayKey: input.todayKey,
     startDateKey: input.candidateStartKey,
     checkedInDateKeys: input.checkedInDateKeys,
-    makeupDateKeys: input.makeupDateKeys,
+    makeupOperationTimes: input.makeupOperationTimes,
     scope: 'USER',
     monthlyChallengeStatus: input.monthlyChallengeStatus,
     monthlyChallengeTargetDate: input.monthlyChallengeTargetDate,
@@ -88,6 +92,11 @@ export function buildUserMakeupAvailableDates(input: {
 export type MakeupDateScope = 'USER' | 'ADMIN'
 
 /**
+ * 普通用户补签规则：可补注册日至昨天之间任意历史缺签日期，一次只能补一天，
+ * 每个自然周最多执行一次；周额度按补签操作时间(createdAt)计算，而不是目标日期。
+ * 额度用完后仍返回历史缺签列表，补签后的连续挂号和历史奖励继续由事务内的幂等逻辑处理。
+ */
+/**
  * Shared missing-date enumeration for the user and admin surfaces.
  * It intentionally returns historical missing dates separately from whether
  * the current actor may execute a makeup now. Quota exhaustion must not make
@@ -97,34 +106,32 @@ export function getEligibleMakeupDates(input: {
   todayKey: string
   startDateKey: string
   checkedInDateKeys: Iterable<string>
-  makeupDateKeys: Iterable<string>
+  makeupOperationTimes: Iterable<Date | string>
   scope: MakeupDateScope
   monthlyChallengeStatus?: string | null
   monthlyChallengeTargetDate?: string | null
   now?: Date
 }): UserMakeupAvailableDate[] {
   const checkedInDateKeys = new Set(input.checkedInDateKeys)
-  const makeupDateKeys = new Set(input.makeupDateKeys)
   const now = input.now || new Date()
+  const operationWeek = getMakeupOperationWeek(now)
+  const weeklyUsed = [...input.makeupOperationTimes].some((value) => isMakeupOperationInWeek(value, operationWeek))
   const available: UserMakeupAvailableDate[] = []
 
   for (let dateKey = input.startDateKey; dateKey < input.todayKey; dateKey = shiftShanghaiDateKey(dateKey, 1)) {
     if (checkedInDateKeys.has(dateKey)) continue
-    const eligibility = getMakeupEligibility(dateKey, now, { allowHistorical: true })
+    const eligibility = getMakeupEligibility(dateKey, now)
     if (!eligibility.eligible) continue
-    const weekUsed = [...makeupDateKeys].some((makeupDateKey) => (
-      makeupDateKey >= eligibility.week.startKey && makeupDateKey < eligibility.week.endKey
-    ))
-    const canUseNow = input.scope === 'ADMIN' || !weekUsed
+    const canUseNow = input.scope === 'ADMIN' || !weeklyUsed
     available.push({
       dateKey,
-      weekStartKey: eligibility.week.startKey,
-      weekEndKey: eligibility.week.endKey,
+      weekStartKey: operationWeek.startKey,
+      weekEndKey: operationWeek.endKey,
       freeChallengeAvailable: !input.monthlyChallengeStatus
         || (input.monthlyChallengeStatus === 'PENDING' && input.monthlyChallengeTargetDate === dateKey),
-      weeklyUsed: weekUsed,
+      weeklyUsed,
       canUseNow,
-      blockedReason: input.scope === 'USER' && weekUsed ? 'WEEKLY_LIMIT_USED' : undefined,
+      blockedReason: input.scope === 'USER' && weeklyUsed ? 'WEEKLY_LIMIT_USED' : undefined,
     })
   }
 
@@ -137,12 +144,8 @@ export async function assertUserMakeupAvailable(
   targetDateKey: string,
   now = new Date(),
 ) {
-  const eligibility = getMakeupEligibility(targetDateKey, now, { allowHistorical: true })
+  const eligibility = getMakeupEligibility(targetDateKey, now)
   if (!eligibility.eligible) throw new CheckInMakeupError(eligibility.message, 409, eligibility.code)
-  const oldestAllowedDateKey = shiftShanghaiDateKey(eligibility.todayKey, -(USER_MAKEUP_DEFAULT_RANGE_DAYS - 1))
-  if (targetDateKey < oldestAllowedDateKey) {
-    throw new CheckInMakeupError('补签日期超出最近90天范围', 409, 'OUTSIDE_MAKEUP_WINDOW')
-  }
   const user = await tx.user.findUnique({ where: { id: userId }, select: { createdAt: true, isDeleted: true } })
   if (!user || user.isDeleted) throw new CheckInMakeupError('用户不存在', 404, 'USER_NOT_FOUND')
   if (targetDateKey < getShanghaiDateKey(user.createdAt)) {
@@ -153,11 +156,15 @@ export async function assertUserMakeupAvailable(
     select: { id: true, type: true },
   })
   if (existing) throw new CheckInMakeupError('该日期已经挂号', 409, 'ALREADY_CHECKED_IN')
+  const operationWeek = getMakeupOperationWeek(now)
+  const operationWeekStart = parseBeijingDate(operationWeek.startKey)
+  const operationWeekEnd = parseBeijingDate(operationWeek.endKey)
+  if (!operationWeekStart || !operationWeekEnd) throw new CheckInMakeupError('补签周范围无效', 500, 'MAKEUP_WEEK_INVALID')
   const used = await tx.checkIn.findFirst({
     where: {
       userId,
       type: { in: USER_MAKEUP_TYPES },
-      checkinDateKey: { gte: eligibility.week.startKey, lt: eligibility.week.endKey },
+      createdAt: { gte: operationWeekStart, lt: operationWeekEnd },
     },
     select: { id: true },
   })
