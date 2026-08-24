@@ -442,7 +442,6 @@ jobs:
             log_step "3/8" "Extract source into existing application directory"
             cd "${APP_DIR}"
             tar -xzf "${incoming_dir}/${PACKAGE_NAME}"
-            printf '%s\n' "${DEPLOY_SHA}" > .deployed-sha
 
             test -f .env
             test -f package.json
@@ -470,7 +469,19 @@ jobs:
 
             log_step "6/8" "Build Next.js production bundle"
             build_started="$(date +%s)"
-            pnpm build
+            build_node_options="--max-old-space-size=4096"
+            echo "Node build options: ${build_node_options}"
+            echo "Memory before build:"
+            free -h || true
+            echo "Swap before build:"
+            swapon --show || true
+            echo "Top memory-consuming processes before build:"
+            ps -eo pid,ppid,%mem,%cpu,rss,cmd --sort=-rss | head -15 || true
+            echo "Existing next build processes before build:"
+            pgrep -af "next build" || true
+            NODE_OPTIONS="${build_node_options}" pnpm build
+            echo "Memory after build:"
+            free -h || true
             echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
             log_step "7/8" "Restart PM2 application"
@@ -497,12 +508,13 @@ jobs:
               sleep 3
             done
 
-            test "$(cat .deployed-sha)" = "${DEPLOY_SHA}"
             pm2 describe easonfansclub
             if ! ss -ltn | grep -Eq "[[:space:]](127\\.0\\.0\\.1|\\[::1\\]):${APP_PORT}[[:space:]]"; then
               echo 'Application port must be bound to localhost behind Nginx.' >&2
               exit 1
             fi
+            printf '%s\n' "${DEPLOY_SHA}" > .deployed-sha
+            test "$(cat .deployed-sha)" = "${DEPLOY_SHA}"
             echo "Deployment health check passed for ${DEPLOY_SHA}."
 
       - name: Verify public website
