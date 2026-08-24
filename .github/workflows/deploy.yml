@@ -136,7 +136,23 @@ jobs:
             echo "Deploy user: $(id -un)"
             echo "Application directory: ${APP_DIR}"
             stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
+            echo "Remote uptime:"
+            uptime
+            echo "Remote memory:"
+            if command -v free >/dev/null 2>&1; then
+              free -h
+            else
+              echo "free command is unavailable; continuing without memory summary."
+            fi
+            echo "Remote disk space:"
             df -h "${APP_DIR}"
+            echo "Remote inode usage:"
+            df -i "${APP_DIR}"
+            if command -v rsync >/dev/null 2>&1; then
+              echo "Remote rsync: $(command -v rsync)"
+            else
+              echo "Remote rsync: unavailable; upload step will use scp fallback."
+            fi
 
       - name: Configure deployment SSH
         env:
@@ -161,7 +177,7 @@ jobs:
           chmod 600 "${HOME}/.ssh/known_hosts"
 
       - name: Upload deploy package
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
@@ -169,41 +185,40 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "===== [upload 1/2] Upload source archive ====="
+          echo "===== [upload 1/6] Prepare resumable upload ====="
           ARCHIVE=".deploy/${PACKAGE_NAME}"
-          UPLOAD_DESTINATION="${SERVER_USER}@${SERVER_HOST}:${APP_DIR}/.deploy-incoming/"
+          CHECKSUM_FILE="${ARCHIVE}.sha256"
+          REMOTE_HOST="${SERVER_USER}@${SERVER_HOST}"
+          REMOTE_DIR="${APP_DIR}/.deploy-incoming"
+          REMOTE_ARCHIVE="${REMOTE_DIR}/${PACKAGE_NAME}"
+          REMOTE_ARCHIVE_PART="${REMOTE_ARCHIVE}.part"
+          REMOTE_CHECKSUM="${REMOTE_DIR}/${PACKAGE_NAME}.sha256"
+          REMOTE_CHECKSUM_PART="${REMOTE_CHECKSUM}.part"
+          UPLOAD_ATTEMPTS=3
+          LOCAL_SHA256="$(awk 'NR == 1 { print $1; exit }' "${CHECKSUM_FILE}")"
+
+          if ! command -v rsync >/dev/null 2>&1; then
+            echo "Runner rsync: unavailable; upload step will use scp fallback."
+            RUNNER_RSYNC_AVAILABLE=false
+          else
+            echo "Runner rsync: $(command -v rsync)"
+            RUNNER_RSYNC_AVAILABLE=true
+          fi
+          command -v timeout >/dev/null 2>&1
+          if [[ ! "${LOCAL_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "::error::Local deploy package checksum is missing or malformed."
+            exit 1
+          fi
+
           ls -lh "${ARCHIVE}"
           du -h "${ARCHIVE}"
           echo "Archive size: ${PACKAGE_BYTES} bytes (${PACKAGE_MIB} MiB)"
-          echo "Upload destination: ${UPLOAD_DESTINATION}"
+          echo "Local SHA256: ${LOCAL_SHA256}"
+          echo "Upload destination: ${REMOTE_HOST}:${REMOTE_DIR}/"
 
-          echo "===== [upload preflight] Check SSH connectivity ====="
-          set +e
-          ssh \
+          SSH_OPTIONS=(
             -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
             -p "${SERVER_PORT}" \
-            -o BatchMode=yes \
-            -o ConnectTimeout=30 \
-            -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=3 \
-            -o TCPKeepAlive=yes \
-            -o StrictHostKeyChecking=yes \
-            "${SERVER_USER}@${SERVER_HOST}" \
-            "echo SSH_OK"
-          SSH_PRECHECK_EXIT=$?
-          set -e
-
-          if [ "${SSH_PRECHECK_EXIT}" -ne 0 ]; then
-            echo "::error::SSH connection precheck failed with exit code ${SSH_PRECHECK_EXIT}."
-            exit "${SSH_PRECHECK_EXIT}"
-          fi
-
-          UPLOAD_START=$(date +%s)
-          echo "Upload started at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          set +e
-          scp \
-            -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
-            -P "${SERVER_PORT}" \
             -o BatchMode=yes \
             -o ConnectTimeout=30 \
             -o ConnectionAttempts=3 \
@@ -211,26 +226,181 @@ jobs:
             -o ServerAliveCountMax=20 \
             -o TCPKeepAlive=yes \
             -o StrictHostKeyChecking=yes \
-            "${ARCHIVE}" \
-            ".deploy/${PACKAGE_NAME}.sha256" \
-            "${UPLOAD_DESTINATION}"
-          UPLOAD_EXIT=$?
-          set -e
+          )
 
-          UPLOAD_END=$(date +%s)
-          if [ "${UPLOAD_EXIT}" -ne 0 ]; then
-            echo "::error::Source archive upload failed with exit code ${UPLOAD_EXIT}"
-            if [ "${UPLOAD_EXIT}" -eq 124 ]; then
-              echo "::error::Upload command timed out."
-            fi
-            echo "Upload failed at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "Upload elapsed: $((UPLOAD_END - UPLOAD_START)) seconds"
-            exit "${UPLOAD_EXIT}"
+          echo "===== [upload 2/6] Check SSH connectivity ====="
+          timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" "echo SSH_OK"
+
+          echo "===== [upload 3/6] Select upload transport ====="
+          REMOTE_RSYNC_AVAILABLE="$(
+            timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+              'if command -v rsync >/dev/null 2>&1; then printf yes; else printf no; fi'
+          )"
+          if [ "${RUNNER_RSYNC_AVAILABLE}" = true ] && [ "${REMOTE_RSYNC_AVAILABLE}" = yes ]; then
+            USE_RSYNC=true
+            TRANSPORT=rsync
+            echo "Using rsync with partial resume and progress reporting."
+          else
+            USE_RSYNC=false
+            TRANSPORT=scp
+            echo "Using scp fallback with bounded retries."
           fi
 
+          RSYNC_SSH_COMMAND="ssh -i ${RUNNER_TEMP}/easonfansclub_deploy_key -p ${SERVER_PORT} -o BatchMode=yes -o ConnectTimeout=30 -o ConnectionAttempts=3 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o StrictHostKeyChecking=yes"
+          UPLOAD_START=$(date +%s)
+          echo "Upload started at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          upload_once() {
+            local archive_exit=1
+            local checksum_exit=1
+
+            if [ "${USE_RSYNC}" = true ]; then
+              if rsync \
+                --archive \
+                --partial \
+                --inplace \
+                --append-verify \
+                --human-readable \
+                --info=progress2 \
+                --timeout=120 \
+                -e "${RSYNC_SSH_COMMAND}" \
+                "${ARCHIVE}" \
+                "${REMOTE_HOST}:${REMOTE_ARCHIVE_PART}"; then
+                archive_exit=0
+              else
+                archive_exit=$?
+              fi
+
+              if [ "${archive_exit}" -eq 0 ]; then
+                if rsync \
+                  --archive \
+                  --partial \
+                  --inplace \
+                  --append-verify \
+                  --human-readable \
+                  --info=progress2 \
+                  --timeout=120 \
+                  -e "${RSYNC_SSH_COMMAND}" \
+                  "${CHECKSUM_FILE}" \
+                  "${REMOTE_HOST}:${REMOTE_CHECKSUM_PART}"; then
+                  checksum_exit=0
+                else
+                  checksum_exit=$?
+                fi
+              fi
+            else
+              if scp \
+                -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
+                -P "${SERVER_PORT}" \
+                -o BatchMode=yes \
+                -o ConnectTimeout=30 \
+                -o ConnectionAttempts=3 \
+                -o ServerAliveInterval=15 \
+                -o ServerAliveCountMax=20 \
+                -o TCPKeepAlive=yes \
+                -o StrictHostKeyChecking=yes \
+                "${ARCHIVE}" \
+                "${REMOTE_HOST}:${REMOTE_ARCHIVE_PART}"; then
+                archive_exit=0
+              else
+                archive_exit=$?
+              fi
+
+              if [ "${archive_exit}" -eq 0 ]; then
+                if scp \
+                  -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
+                  -P "${SERVER_PORT}" \
+                  -o BatchMode=yes \
+                  -o ConnectTimeout=30 \
+                  -o ConnectionAttempts=3 \
+                  -o ServerAliveInterval=15 \
+                  -o ServerAliveCountMax=20 \
+                  -o TCPKeepAlive=yes \
+                  -o StrictHostKeyChecking=yes \
+                  "${CHECKSUM_FILE}" \
+                  "${REMOTE_HOST}:${REMOTE_CHECKSUM_PART}"; then
+                  checksum_exit=0
+                else
+                  checksum_exit=$?
+                fi
+              fi
+            fi
+
+            if [ "${archive_exit}" -eq 0 ] && [ "${checksum_exit}" -eq 0 ]; then
+              return 0
+            fi
+
+            echo "Upload attempt failed (archive=${archive_exit}, checksum=${checksum_exit})."
+            return 1
+          }
+
+          upload_succeeded=false
+          ATTEMPTS_USED=0
+          for attempt in $(seq 1 "${UPLOAD_ATTEMPTS}"); do
+            ATTEMPTS_USED="${attempt}"
+            attempt_start=$(date +%s)
+            attempt_started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "===== Upload attempt ${attempt}/${UPLOAD_ATTEMPTS} ====="
+            echo "Transport: ${TRANSPORT}"
+            echo "Started: ${attempt_started_at}"
+            if upload_once; then
+              upload_succeeded=true
+              break
+            fi
+
+            echo "Upload attempt ${attempt}/${UPLOAD_ATTEMPTS} failed"
+            echo "Elapsed: $(( $(date +%s) - attempt_start )) seconds"
+            if [ "${attempt}" -lt "${UPLOAD_ATTEMPTS}" ]; then
+              backoff_seconds=$((10 * attempt))
+              echo "Retrying in ${backoff_seconds} seconds; resumable partial files are preserved."
+              sleep "${backoff_seconds}"
+            fi
+          done
+
+          UPLOAD_END=$(date +%s)
+          if [ "${upload_succeeded}" != true ]; then
+            echo "::error::Upload failed after ${UPLOAD_ATTEMPTS} attempts."
+            echo "Upload failed at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Upload elapsed: $((UPLOAD_END - UPLOAD_START)) seconds"
+            exit 1
+          fi
+
+          echo "===== [upload 4/6] Verify remote SHA256 ====="
+          REMOTE_SHA256="$(
+            timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+              "test -s '${REMOTE_ARCHIVE_PART}' && sha256sum -- '${REMOTE_ARCHIVE_PART}' | awk '{print \$1}'"
+          )"
+          echo "Remote partial SHA256: ${REMOTE_SHA256}"
+          if [ "${LOCAL_SHA256}" != "${REMOTE_SHA256}" ]; then
+            echo "::error::SHA256 mismatch: local=${LOCAL_SHA256}, remote=${REMOTE_SHA256}"
+            echo "Upload failed after $((UPLOAD_END - UPLOAD_START)) seconds."
+            exit 1
+          fi
+
+          echo "===== [upload 5/6] Promote verified package ====="
+          timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+            "set -e; mv -f -- '${REMOTE_CHECKSUM_PART}' '${REMOTE_CHECKSUM}'; mv -f -- '${REMOTE_ARCHIVE_PART}' '${REMOTE_ARCHIVE}'"
+
+          echo "===== [upload 6/6] Confirm promoted package ====="
+          REMOTE_FINAL_SHA256="$(
+            timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+              "sha256sum -- '${REMOTE_ARCHIVE}' | awk '{print \$1}'"
+          )"
+          if [ "${LOCAL_SHA256}" != "${REMOTE_FINAL_SHA256}" ]; then
+            echo "::error::Promoted package SHA256 mismatch: local=${LOCAL_SHA256}, remote=${REMOTE_FINAL_SHA256}"
+            echo "Upload failed after $(( $(date +%s) - UPLOAD_START )) seconds."
+            exit 1
+          fi
+
+          echo "Remote final SHA256: ${REMOTE_FINAL_SHA256}"
+          echo "Upload completed"
+          echo "Transport: ${TRANSPORT}"
+          echo "Attempts used: ${ATTEMPTS_USED}"
+          echo "Elapsed: $(( $(date +%s) - UPLOAD_START )) seconds"
+          echo "Local SHA256: ${LOCAL_SHA256}"
+          echo "Remote SHA256: ${REMOTE_FINAL_SHA256}"
+          echo "SHA256_OK"
           echo "Upload finished at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          echo "===== [upload 2/2] Upload completed ====="
-          echo "Upload completed in $((UPLOAD_END - UPLOAD_START)) seconds."
 
       - name: Install, migrate, build, and restart
         uses: appleboy/ssh-action@v1
