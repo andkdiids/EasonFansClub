@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client'
-import { calculateBadgeRuleProgress, badgeAvailabilityWhere, getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
+import { calculateBadgeRuleProgress, badgeAvailabilityWhere, canExposeLiveBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { BADGE_RULE_REGISTRY, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { toPublicMediaUrl } from '@/lib/media-url'
@@ -94,10 +94,8 @@ export async function getBadgeTaskCenter(userId: string, now = new Date()) {
   ])
   const validTracked = trackingRows.filter((row) => {
     const badge = row.Badge
-    return badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.isEnabled && badge.isActive
-      && badge.BadgeRule?.isEnabled && badge.BadgeRule.threshold !== null
-      && badge.BadgeRule.operator === 'GTE' && TRACKABLE_RULE_TYPES.includes(badge.BadgeRule.ruleType as SupportedBadgeRuleType)
-      && getBadgeAvailability(badge) !== 'ENDED' && getBadgeAvailability(badge) !== 'UPCOMING'
+    return TRACKABLE_RULE_TYPES.includes(badge.BadgeRule?.ruleType as SupportedBadgeRuleType)
+      && canExposeLiveBadgeProgress(badge, now)
   })
   const validIds = new Set(validTracked.map((row) => row.Badge.id))
   const staleIds = trackingRows.filter((row) => !validIds.has(row.Badge.id)).map((row) => row.Badge.id)

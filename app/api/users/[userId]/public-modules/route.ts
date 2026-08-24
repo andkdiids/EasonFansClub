@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { buildProfilePostWhere } from '@/lib/post-moderation'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -34,9 +35,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   if (moduleKey === 'posts') {
     const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || await hasAdminPermission(viewer, 'post_manage')))
-    const postWhere = canViewPendingPosts
-      ? { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const }
-      : { authorId: target.id, isDeleted: false, status: 'PUBLISHED' as const, moderationStatus: { in: ['APPROVED', 'VIOLATION'] as Array<'APPROVED' | 'VIOLATION'> } }
+    const postWhere = buildProfilePostWhere(target.id, canViewPendingPosts)
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
     const pagination = getProfileRecordPagination(total, page)
     const posts = await safeDb(

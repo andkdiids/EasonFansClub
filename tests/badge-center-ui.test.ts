@@ -55,7 +55,7 @@ test('badge detail, task cards and museum all use the same tracking API', () => 
   assert.match(museum, /canTrack=\{gallery\.isAuthenticated && canTrackBadgeView\(selected\)\}/)
   assert.match(read('components/BadgeTaskCenter.tsx'), /\/api\/users\/me\/badge-tasks\//)
   assert.match(read('components/BadgeTaskCenter.tsx'), /href=\{`\/badges\?badge=/)
-  assert.match(read('lib/badge-service.ts'), /\['PERMANENT', 'AVAILABLE'\]\.includes\(getBadgeAvailability\(badge\)\)/)
+  assert.match(read('lib/badge-service.ts'), /canExposeLiveBadgeProgress\(badge\)/)
 })
 
 test('center pages keep detail URL state and mobile tabs in one row', () => {

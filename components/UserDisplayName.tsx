@@ -84,7 +84,12 @@ export function badgeNicknameStyle(badge?: UserDisplayNameBadge | null): BadgeNi
 
 export function BadgeName({ badge, className = '' }: { badge: Pick<UserDisplayNameBadge, 'name' | 'effectType'>; className?: string }) {
   const effectClass = badgeNameEffectClass(badge.effectType)
-  return <span className={`badge-name-display ${effectClass} ${className}`.trim()}>{badge.name}</span>
+  return (
+    <span className={`badge-name-display ${effectClass} ${className}`.trim()}>
+      {badge.name}
+      {badge.effectType === 'SHINE' ? <span className="badge-name-shine-overlay" aria-hidden="true">{badge.name}</span> : null}
+    </span>
+  )
 }
 
 export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: Pick<UserDisplayNameBadge, 'name' | 'imageUrl' | 'effectType'>; size?: 'inline' | 'wall' | 'detail'; className?: string }) {

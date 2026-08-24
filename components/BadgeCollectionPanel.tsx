@@ -42,24 +42,41 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
       && badge.visibility === 'PUBLIC'
       && badge.grantType === 'AUTO'
       && badge.isEnabled
-      && (badge.availabilityStatus === 'PERMANENT' || badge.availabilityStatus === 'AVAILABLE')
     if (!canRequestProgress) return
     let active = true
+    let requestController: AbortController | null = null
     const refresh = async () => {
+      requestController?.abort()
+      const controller = new AbortController()
+      requestController = controller
       setProgressLoading(true)
       try {
-        const response = await fetch(`/api/users/me/badges/${encodeURIComponent(badge.id)}`, { cache: 'no-store' })
+        const response = await fetch(`/api/users/me/badges/${encodeURIComponent(badge.id)}`, { cache: 'no-store', signal: controller.signal })
         const data = await response.json().catch(() => null) as { badge?: BadgeView } | null
-        if (active && response.ok && data?.badge) setDisplayBadge(data.badge)
+        if (active && !controller.signal.aborted && response.ok && data?.badge) setDisplayBadge(data.badge)
+      } catch {
+        // A transient refresh failure should leave the last server DTO visible.
       } finally {
-        if (active) setProgressLoading(false)
+        if (active && requestController === controller) {
+          requestController = null
+          setProgressLoading(false)
+        }
       }
     }
     void refresh()
     const onCheckinChanged = () => { void refresh() }
+    const onVisibilityChanged = () => { if (document.visibilityState === 'visible') void refresh() }
     window.addEventListener('checkin:dayChanged', onCheckinChanged)
-    return () => { active = false; window.removeEventListener('checkin:dayChanged', onCheckinChanged) }
-  }, [badge, refreshProgress])
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisibilityChanged)
+    return () => {
+      active = false
+      requestController?.abort()
+      window.removeEventListener('checkin:dayChanged', onCheckinChanged)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisibilityChanged)
+    }
+  }, [badge.id, badge.status, badge.visibility, badge.grantType, badge.isEnabled, refreshProgress])
 
   const canTrackNow = Boolean((refreshProgress || canTrack) && canTrackBadgeView(displayBadge))
 

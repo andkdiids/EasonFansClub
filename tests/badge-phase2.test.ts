@@ -136,8 +136,11 @@ test('SECRET badges are excluded from the public denominator', () => {
 })
 
 test('only PUBLIC auto rules receive detailed progress', () => {
-  assert.match(read('lib/badge-service.ts'), /visibility === 'PUBLIC' && badge\.grantType === 'AUTO'/)
-  assert.match(read('lib/badge-service.ts'), /BadgeRule\?\.isEnabled/)
+  const phase2 = read('lib/badge-phase2.ts')
+  assert.match(phase2, /export function canExposeLiveBadgeProgress/)
+  assert.match(phase2, /badge\.visibility === 'PUBLIC'/)
+  assert.match(phase2, /badge\.grantType === 'AUTO'/)
+  assert.match(phase2, /isBadgeProgressRule\(badge\.BadgeRule\)/)
 })
 
 test('availability is evaluated on the server for rule scans', () => {

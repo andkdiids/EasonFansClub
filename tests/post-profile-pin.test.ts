@@ -36,7 +36,7 @@ test('profile post pagination sorts personal pins first without changing regular
   assert.match(publicModulesRoute, /orderBy: \[\{ profilePinnedAt: 'desc' \}, \{ createdAt: 'desc' \}, \{ id: 'desc' \}\]/)
   assert.match(publicModulesRoute, /skip: \(pagination\.page - 1\) \* pagination\.pageSize/)
   assert.match(publicModulesRoute, /take: pagination\.pageSize/)
-  assert.match(publicModulesRoute, /moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\]/)
+  assert.match(publicModulesRoute, /buildProfilePostWhere\(target\.id, canViewPendingPosts\)/)
   assert.match(publicModulesRoute, /isProfilePinned: Boolean\(profilePinnedAt\)/)
 })
 
@@ -44,7 +44,7 @@ test('profile pins survive moderation filtering for the author but stay hidden f
   const pendingBranch = publicModulesRoute.slice(publicModulesRoute.indexOf('const canViewPendingPosts'))
   assert.match(pendingBranch, /viewer\.id === target\.id/)
   assert.match(pendingBranch, /status: 'PUBLISHED'/)
-  assert.match(pendingBranch, /moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\]/)
+  assert.match(pendingBranch, /buildProfilePostWhere\(target\.id, canViewPendingPosts\)/)
   assert.match(profileModules, /post\.isProfilePinned/)
 })
 

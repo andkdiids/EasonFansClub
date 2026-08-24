@@ -195,6 +195,8 @@ async function postDeleteResponse(postId: string, user: SessionUser, canManagePo
       revalidatePath('/trending')
       revalidatePath('/rankings')
       revalidatePath('/search')
+      revalidatePath('/profile')
+      revalidatePath('/user/[uid]', 'page')
       revalidatePath(`/posts/${postId}`)
       revalidateTag('trending-posts')
     } catch (error) {

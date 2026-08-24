@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import type { BadgeCollectionView, BadgeGalleryView, BadgeShowcaseItemView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
-import { calculateBadgeRuleProgress, getBadgeAvailability, getBadgeOwnershipStats, getUserBadgeRuleProgress, isBadgeProgressRule, type BadgeOwnershipStats } from '@/lib/badge-phase2'
+import { calculateBadgeRuleProgress, canExposeLiveBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, getUserBadgeRuleProgress, type BadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 
 const BADGE_SELECT = {
@@ -310,16 +310,17 @@ function getHighestOwnedTierByGroup(badges: readonly DbCollectionBadge[], ownedI
 }
 
 async function addProgressToUnownedBadges(userId: string, badges: readonly DbCollectionBadge[], items: BadgeView[]) {
-  const candidates = badges.filter((badge) => badge.visibility === 'PUBLIC' && badge.grantType === 'AUTO' && badge.BadgeRule?.isEnabled && isBadgeProgressRule(badge.BadgeRule) && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge)))
+  const candidates = badges.filter((badge) => canExposeLiveBadgeProgress(badge))
   if (!candidates.length) return
   const metrics = new Map<string, number>()
+  const itemByBadgeId = new Map(items.map((item) => [item.id, item]))
   for (const badge of candidates) {
     const rule = badge.BadgeRule
     if (!rule) continue
     const type = rule.ruleType as Parameters<typeof getUserBadgeMetric>[1]
     if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
-    const item = items.find((candidate) => candidate.id === badge.id)
-    if (item) item.progress = calculateBadgeRuleProgress(metrics.get(type) || 0, rule)
+    const item = itemByBadgeId.get(badge.id)
+    if (item?.status === 'NOT_OBTAINED') item.progress = calculateBadgeRuleProgress(metrics.get(type) || 0, rule)
   }
 }
 
@@ -452,7 +453,7 @@ export async function getBadgeDetailForUser(userId: string, badgeId: string): Pr
     progress: null,
     ownershipStats,
   }
-  if (['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge))) {
+  if (canExposeLiveBadgeProgress(badge)) {
     detail.progress = await getUserBadgeRuleProgress(userId, badge.BadgeRule)
   }
   return detail

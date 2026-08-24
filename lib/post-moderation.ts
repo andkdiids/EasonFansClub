@@ -49,3 +49,19 @@ export const publicPostWhere = {
   status: 'PUBLISHED' as const,
   moderationStatus: { in: publicPostModerationStatuses },
 }
+
+/**
+ * Profile post history uses the same public lifecycle filter as every other
+ * ordinary-user-facing post query. The profile owner (and the existing admin
+ * preview path) may additionally see pending posts, but a rejected post must
+ * never become a normal profile record again.
+ */
+export function buildProfilePostWhere(authorId: string, includePending = false) {
+  return {
+    ...publicPostWhere,
+    authorId,
+    ...(includePending
+      ? { moderationStatus: { in: ['PENDING', ...publicPostModerationStatuses] as PostModerationStatus[] } }
+      : {}),
+  }
+}

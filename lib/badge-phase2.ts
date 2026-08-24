@@ -69,6 +69,16 @@ export type BadgeProgressRuleInput = {
   isEnabled?: boolean
 }
 
+export type BadgeProgressBadgeInput = {
+  visibility: string
+  grantType: string
+  isEnabled: boolean
+  isActive?: boolean
+  availableFrom: Date | null
+  availableUntil: Date | null
+  BadgeRule?: BadgeProgressRuleInput | null
+}
+
 /**
  * Numeric progress is deliberately derived from the same registry used by
  * the rule engine and Task Center. Special rules and non-GTE operators do not
@@ -84,6 +94,20 @@ export function isBadgeProgressRule(rule: BadgeProgressRuleInput | null | undefi
     && Number.isSafeInteger(rule.threshold)
     && rule.threshold >= 1,
   )
+}
+
+/**
+ * One server-side gate for every live numeric progress surface. The rule
+ * engine may know how to evaluate a rule, but the client-safe DTO must also
+ * enforce visibility, grant mode, enabled state and current availability.
+ */
+export function canExposeLiveBadgeProgress(badge: BadgeProgressBadgeInput, now = new Date()) {
+  return badge.visibility === 'PUBLIC'
+    && badge.grantType === 'AUTO'
+    && badge.isEnabled
+    && badge.isActive !== false
+    && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(badge, now))
+    && isBadgeProgressRule(badge.BadgeRule)
 }
 
 /** Build the client-safe progress view with its registry-owned unit label. */

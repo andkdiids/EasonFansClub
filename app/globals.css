@@ -6035,19 +6035,25 @@ body:has(.duel-page) .app-page-content {
 .user-display-name { display:inline-flex; min-width:0; align-items:center; gap:5px; border:0; background:transparent; box-shadow:none; vertical-align:middle; }
 .user-display-name-text { min-width:0; overflow-wrap:anywhere; }
 .user-display-name-text-gradient { color:var(--badge-name-fallback,#0f5f78); }
-.user-nickname-effect-gold,.user-nickname-effect-gradient { background-image:none; background-repeat:no-repeat; }
+.user-nickname-effect-gold,.user-nickname-effect-gradient { --badge-shine-highlight:rgba(255,247,201,.88); background-image:none; background-repeat:no-repeat; background-size:240% 100%; background-position:0 50%; will-change:background-position; }
+.user-nickname-effect-gold { animation:eason-badge-nickname-gold-fallback 4s ease-in-out infinite; }
+.user-nickname-effect-gradient { animation:eason-badge-nickname-gradient-fallback 4s ease-in-out infinite; }
 @supports ((-webkit-background-clip:text) or (background-clip:text)) {
   .user-display-name-text-gradient { color:transparent; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-  .user-nickname-effect-gold,.user-nickname-effect-gradient { color:transparent; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+  .user-nickname-effect-gold,.user-nickname-effect-gradient { color:transparent; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:eason-badge-nickname-shine 4s ease-in-out infinite; }
   .user-nickname-effect-gold { background-image:linear-gradient(105deg,var(--badge-gradient-start,#9b6a24) 0%,var(--badge-gradient-start,#b88a3b) 22%,var(--badge-gradient-mid,#f3d98b) 48%,var(--badge-gradient-start,#b88a3b) 72%,var(--badge-gradient-end,#9b6a24) 100%); }
-  .user-nickname-effect-gradient { background-image:linear-gradient(90deg,var(--badge-gradient-start,#0f5f78),var(--badge-gradient-end,#7c3aed)); }
+  .user-nickname-effect-gradient { background-image:linear-gradient(105deg,var(--badge-gradient-start,#0f5f78) 0%,var(--badge-gradient-start,#0f5f78) 28%,rgba(255,255,255,.24) 44%,var(--badge-shine-highlight) 50%,rgba(255,255,255,.2) 56%,var(--badge-gradient-end,#7c3aed) 72%,var(--badge-gradient-end,#7c3aed) 100%); }
 }
+:root[data-theme='midnight'] .badge-visual,
+:root[data-theme='midnight'] .badge-name-shine-overlay,
+:root[data-theme='midnight'] .user-nickname-effect-gold,
+:root[data-theme='midnight'] .user-nickname-effect-gradient { --badge-shine-highlight:rgba(255,231,157,.76); }
 .user-nickname-effect-gold { text-shadow:0 1px 1px rgba(111,69,19,.35),0 0 5px rgba(243,217,139,.26); }
 .user-nickname-effect-gradient { text-shadow:0 0 4px rgba(15,95,120,.24); }
-.user-nickname-effect-glow { text-shadow:0 0 4px currentColor,0 0 10px rgba(14,116,144,.38); }
+.user-nickname-effect-glow { text-shadow:0 0 4px currentColor,0 0 10px rgba(14,116,144,.38); animation:eason-badge-nickname-glow 4s ease-in-out infinite; }
 .user-display-name-compact { gap:3px; }
 .user-display-badge { position:relative; display:inline-flex; min-width:0; align-items:center; gap:3px; border:0; border-radius:999px; background:transparent; box-shadow:none; cursor:pointer; outline:none; }
-.user-display-badge:focus-visible { outline:none; }
+.user-display-badge:focus-visible { outline:2px solid var(--primary,#0e7490); outline-offset:3px; border-radius:999px; }
 .user-display-badge-name { max-width:12rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.82em; font-weight:800; color:var(--foreground-muted,#64748b); }
 .user-display-badge-tooltip { position:absolute; z-index:90; left:50%; bottom:calc(100% + 9px); display:flex; min-width:180px; align-items:center; gap:9px; border:1px solid var(--border,#cbd5e1); border-radius:12px; padding:9px 11px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 12px 34px rgba(15,23,42,.18); opacity:0; pointer-events:none; transform:translate(-50%,4px); transition:opacity .16s ease,transform .16s ease; text-align:left; }
 .user-display-badge-tooltip::after { position:absolute; left:50%; bottom:-5px; width:9px; height:9px; border-right:1px solid var(--border,#cbd5e1); border-bottom:1px solid var(--border,#cbd5e1); background:var(--surface,#fff); content:""; transform:translateX(-50%) rotate(45deg); }
@@ -6059,15 +6065,15 @@ body:has(.duel-page) .app-page-content {
 .badge-image-wall { width:52px; height:52px; }
 .badge-image-detail { width:108px; height:108px; }
 .user-badge-placeholder { border:1px solid var(--border,#cbd5e1); border-radius:50%; color:var(--foreground-muted,#64748b); background:var(--surface-subtle,#f8fafc); font-size:12px; font-weight:900; }
-.badge-visual { position:relative; display:inline-grid; flex:none; place-items:center; width:18px; height:18px; overflow:visible; border:0; background:transparent; box-shadow:none; isolation:isolate; vertical-align:middle; }
+.badge-visual { --badge-shine-highlight:rgba(255,247,201,.9); position:relative; display:inline-grid; flex:none; place-items:center; width:18px; height:18px; overflow:visible; border:0; background:transparent; box-shadow:none; isolation:isolate; vertical-align:middle; }
 .badge-visual.badge-image-wall { width:52px; height:52px; }
 .badge-visual.badge-image-detail { width:108px; height:108px; }
 .badge-visual .user-badge-image { position:relative; z-index:1; display:block; width:100%; height:100%; object-fit:contain; }
-.badge-shimmer-clip { position:absolute; z-index:2; inset:0; overflow:hidden; pointer-events:none; opacity:1; }
-.badge-shimmer-layer { position:absolute; inset:-35% -55%; pointer-events:none; background:linear-gradient(112deg,transparent 42%,rgba(255,255,255,.04) 46%,rgba(255,247,201,.9) 50%,rgba(255,255,255,.24) 53%,rgba(255,216,102,.03) 57%,transparent 61%); filter:blur(.55px); opacity:0; transform:translate3d(-45%,0,0); will-change:transform,opacity; }
+.badge-shimmer-clip { position:absolute; z-index:2; inset:0; overflow:hidden; pointer-events:none; opacity:0; }
+.badge-shimmer-layer { position:absolute; inset:-35% -55%; pointer-events:none; background:linear-gradient(112deg,transparent 42%,rgba(255,255,255,.04) 46%,var(--badge-shine-highlight) 50%,rgba(255,255,255,.24) 53%,rgba(255,216,102,.03) 57%,transparent 61%); filter:blur(.55px); opacity:0; transform:translate3d(-45%,0,0); will-change:transform,opacity; }
 .badge-effect-shine .user-badge-image { animation:eason-badge-shine-fallback 4s ease-in-out infinite; animation-play-state:running; }
 @supports ((mask-image:url("")) or (-webkit-mask-image:url(""))) {
-  .badge-effect-shine .badge-shimmer-clip { -webkit-mask-image:var(--badge-shine-mask); mask-image:var(--badge-shine-mask); mask-mode:alpha; -webkit-mask-size:100% 100%; mask-size:100% 100%; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; }
+  .badge-effect-shine .badge-shimmer-clip { opacity:1; -webkit-mask-image:var(--badge-shine-mask); mask-image:var(--badge-shine-mask); -webkit-mask-mode:alpha; mask-mode:alpha; -webkit-mask-position:0 0; mask-position:0 0; -webkit-mask-size:100% 100%; mask-size:100% 100%; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; }
   .badge-effect-shine .badge-shimmer-layer { animation:eason-badge-shine 4s ease-in-out infinite; animation-play-state:running; }
 }
 .badge-effect-glow .user-badge-image { animation:eason-badge-glow 3.8s ease-in-out infinite; }
@@ -6078,9 +6084,11 @@ body:has(.duel-page) .app-page-content {
 .badge-visual-sparkles i:nth-child(3) { bottom:5%; left:8%; animation-delay:-1.8s; }
 .badge-visual-sparkles i:nth-child(4) { right:22%; bottom:17%; width:max(2px,5%); animation-delay:-2.35s; }
 .badge-name-display { position:relative; display:inline-block; max-width:100%; }
-.badge-name-shine { color:var(--foreground); background:transparent; background-size:230% 100%; background-position:0 50%; }
+.badge-name-shine { overflow:hidden; color:inherit; text-shadow:0 0 2px rgba(255,231,157,.16); animation:eason-badge-name-fallback 4s ease-in-out infinite; }
+.badge-name-shine-overlay { --badge-shine-highlight:rgba(255,247,201,.9); position:absolute; inset:0; display:block; overflow:hidden; pointer-events:none; color:transparent; background:transparent; background-repeat:no-repeat; background-size:230% 100%; background-position:0 50%; -webkit-text-fill-color:transparent; }
 @supports ((-webkit-background-clip:text) or (background-clip:text)) {
-  .badge-name-shine { color:transparent; background:linear-gradient(105deg,var(--foreground) 20%,#d6a94e 42%,#fff4bf 50%,var(--foreground) 66%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:eason-badge-name-shine 3.4s ease-in-out infinite; }
+  .badge-name-shine { animation:none; }
+  .badge-name-shine-overlay { background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.1) 44%,var(--badge-shine-highlight) 50%,rgba(255,255,255,.22) 56%,transparent 65%); -webkit-background-clip:text; background-clip:text; animation:eason-badge-name-shine 4s ease-in-out infinite; }
 }
 .badge-name-glow { color:var(--foreground); text-shadow:0 0 3px rgba(255,219,127,.55),0 0 9px rgba(238,177,67,.38); animation:eason-badge-name-glow 3.8s ease-in-out infinite; }
 .badge-name-sparkle { color:var(--foreground); text-shadow:0 0 3px rgba(255,239,164,.58); }
@@ -6090,9 +6098,14 @@ body:has(.duel-page) .app-page-content {
 @keyframes eason-badge-shine-fallback { 0%,14%,100% { filter:drop-shadow(0 0 2px rgba(255,221,126,.32)); } 42% { filter:drop-shadow(0 0 4px rgba(255,231,157,.72)) drop-shadow(0 0 8px rgba(242,175,56,.28)); } }
 @keyframes eason-badge-glow { 0%,100% { filter:drop-shadow(0 0 3px rgba(255,215,119,.58)) drop-shadow(0 0 7px rgba(242,175,56,.2)); } 50% { filter:drop-shadow(0 0 5px rgba(255,231,157,.98)) drop-shadow(0 0 14px rgba(242,175,56,.62)); } }
 @keyframes eason-badge-sparkle { 0%,62%,100% { opacity:0; transform:scale(.45); } 72% { opacity:.35; transform:scale(.72); } 82% { opacity:1; transform:scale(1.25); } 92% { opacity:0; transform:scale(.62); } }
+@keyframes eason-badge-name-fallback { 0%,18%,100% { text-shadow:0 0 2px rgba(255,231,157,.16); } 52% { text-shadow:0 0 4px rgba(255,239,164,.72),0 0 8px rgba(238,177,67,.22); } 66% { text-shadow:0 0 2px rgba(255,231,157,.16); } }
 @keyframes eason-badge-name-shine { 0%,18%,100% { background-position:0 50%; } 52% { background-position:100% 50%; } 66% { background-position:100% 50%; } }
 @keyframes eason-badge-name-glow { 0%,100% { text-shadow:0 0 3px rgba(255,219,127,.48),0 0 7px rgba(238,177,67,.25); } 50% { text-shadow:0 0 5px rgba(255,239,164,.9),0 0 12px rgba(238,177,67,.58); } }
 @keyframes eason-badge-name-sparkle { 0%,62%,100% { opacity:.35; transform:scale(.72) rotate(0deg); } 78% { opacity:1; transform:scale(1.18) rotate(14deg); } 90% { opacity:.35; transform:scale(.72) rotate(0deg); } }
+@keyframes eason-badge-nickname-shine { 0%,18%,100% { background-position:0 50%; } 52% { background-position:100% 50%; } 66% { background-position:100% 50%; } }
+@keyframes eason-badge-nickname-gold-fallback { 0%,18%,100% { text-shadow:0 1px 1px rgba(111,69,19,.35),0 0 5px rgba(243,217,139,.26); } 52% { text-shadow:0 1px 1px rgba(111,69,19,.35),0 0 8px rgba(255,239,164,.78),0 0 12px rgba(243,181,67,.22); } 66% { text-shadow:0 1px 1px rgba(111,69,19,.35),0 0 5px rgba(243,217,139,.26); } }
+@keyframes eason-badge-nickname-gradient-fallback { 0%,18%,100% { text-shadow:0 0 4px rgba(15,95,120,.24); } 52% { text-shadow:0 0 7px rgba(255,255,255,.62),0 0 12px rgba(124,58,237,.24); } 66% { text-shadow:0 0 4px rgba(15,95,120,.24); } }
+@keyframes eason-badge-nickname-glow { 0%,100% { text-shadow:0 0 4px currentColor,0 0 7px rgba(14,116,144,.24); } 50% { text-shadow:0 0 6px currentColor,0 0 13px rgba(14,116,144,.54); } }
 .badge-detail-backdrop { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.48); }
 .badge-detail-dialog { position:relative; display:flex; min-width:min(320px,100%); flex-direction:column; align-items:center; gap:10px; border:1px solid var(--border,#cbd5e1); border-radius:20px; padding:28px 32px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 18px 60px rgba(15,23,42,.2); text-align:center; }
 .badge-detail-dialog h3 { margin:3px 0 0; font-size:20px; font-weight:900; }
@@ -6102,9 +6115,10 @@ body:has(.duel-page) .app-page-content {
   .badge-effect-shine .user-badge-image { animation:none; filter:drop-shadow(0 0 3px rgba(255,221,126,.52)); }
   .badge-effect-glow .user-badge-image { animation:none; filter:drop-shadow(0 0 4px rgba(255,221,126,.75)) drop-shadow(0 0 9px rgba(242,175,56,.34)); }
   .badge-visual-sparkles i { animation:none; opacity:.72; transform:scale(1); }
-  .badge-name-shine { animation:none; background-position:50% 50%; }
+  .badge-name-shine,.badge-name-shine-overlay { animation:none; background-position:50% 50%; }
   .badge-name-glow { animation:none; text-shadow:0 0 4px rgba(255,221,126,.68),0 0 9px rgba(238,177,67,.35); }
   .badge-name-sparkle::after { animation:none; opacity:.8; transform:none; }
+  .user-nickname-effect-gold,.user-nickname-effect-gradient,.user-nickname-effect-glow { animation:none; }
 }
 @supports ((mask-image:url("")) or (-webkit-mask-image:url(""))) {
   @media (prefers-reduced-motion: reduce) {
@@ -6258,7 +6272,7 @@ body:has(.duel-page) .app-page-content {
 .badge-museum-item:not(.is-obtained) .badge-visual.badge-effect-shine .badge-shimmer-layer { animation:none; opacity:.16; transform:translate3d(0,0,0); }
 .badge-museum-item:not(.is-obtained) .badge-visual.badge-effect-glow .user-badge-image { animation:none; filter:grayscale(.72) saturate(.5) drop-shadow(0 3px 2px rgba(30,22,15,.14)); }
 .badge-museum-item:not(.is-obtained) .badge-visual.badge-effect-sparkle .badge-visual-sparkles i { animation:none; opacity:.26; transform:scale(.8); }
-.badge-museum-item:not(.is-obtained) .badge-name-shine { animation:none; }
+.badge-museum-item:not(.is-obtained) .badge-name-shine,.badge-museum-item:not(.is-obtained) .badge-name-shine-overlay { animation:none; }
 .badge-museum-item:not(.is-obtained) .badge-name-glow { animation:none; text-shadow:0 0 2px rgba(255,219,127,.28); }
 .badge-museum-item:not(.is-obtained) .badge-name-sparkle::after { animation:none; opacity:.3; }
 @media (min-width:768px) {

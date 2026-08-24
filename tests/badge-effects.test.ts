@@ -10,6 +10,7 @@ test('BadgeImage has separate visual layers for shine, glow and sparkle', () => 
   assert.match(component, /badge-visual/)
   assert.match(component, /badge-shimmer-clip/)
   assert.match(component, /badge-shimmer-layer/)
+  assert.match(component, /badge-name-shine-overlay/)
   assert.match(component, /badge-visual-sparkles/)
   assert.match(component, /effectType === 'SPARKLE'/)
   assert.match(component, /effectType === 'SHINE'/)
@@ -49,6 +50,11 @@ test('nickname GOLD, GRADIENT and GLOW have visible text-level contracts and saf
   assert.match(css, /\.user-nickname-effect-gold[\s\S]*background-image:linear-gradient/)
   assert.match(css, /\.user-nickname-effect-gradient[\s\S]*background-image:linear-gradient/)
   assert.match(css, /\.user-nickname-effect-glow[\s\S]*text-shadow/)
+  assert.match(css, /\.user-nickname-effect-gold[^}]*animation:eason-badge-nickname-gold-fallback/)
+  assert.match(css, /\.user-nickname-effect-gradient[^}]*animation:eason-badge-nickname-gradient-fallback/)
+  assert.match(css, /\.user-nickname-effect-gold,.user-nickname-effect-gradient[^}]*animation:eason-badge-nickname-shine/)
+  assert.match(css, /@keyframes eason-badge-nickname-shine/)
+  assert.match(css, /@keyframes eason-badge-nickname-glow/)
 })
 
 test('shine uses one fixed PNG plus a masked CSS gradient that moves with transform', () => {
@@ -59,9 +65,11 @@ test('shine uses one fixed PNG plus a masked CSS gradient that moves with transf
   assert.match(component, /className="user-badge-image"/)
   assert.equal((component.match(/className="user-badge-image"/g) || []).length, 1)
   assert.match(component, /--badge-shine-mask/)
-  assert.match(css, /\.badge-shimmer-clip \{[\s\S]*overflow:hidden[\s\S]*opacity:1/)
+  assert.match(css, /\.badge-shimmer-clip \{[\s\S]*overflow:hidden[\s\S]*opacity:0/)
+  assert.match(css, /@supports \(\(mask-image:url\(""\)\) or \(-webkit-mask-image:url\(""\)\)\)[\s\S]*\.badge-effect-shine \.badge-shimmer-clip \{[\s\S]*opacity:1/)
   assert.match(css, /\.badge-shimmer-layer \{[\s\S]*background:linear-gradient[\s\S]*transform:translate3d\(-45%,0,0\)/)
   assert.match(css, /-webkit-mask-image:var\(--badge-shine-mask\)/)
+  assert.match(css, /-webkit-mask-mode:alpha/)
   assert.match(css, /mask-image:var\(--badge-shine-mask\)/)
   assert.match(css, /\.badge-visual \{[\s\S]*border:0[\s\S]*background:transparent[\s\S]*box-shadow:none/)
   assert.match(css, /@keyframes eason-badge-shine[\s\S]*transform:translate3d\(-45%,0,0\)/)
@@ -72,9 +80,11 @@ test('shine uses one fixed PNG plus a masked CSS gradient that moves with transf
   assert.doesNotMatch(component, /<img[^>]+badge-visual-shine/)
 })
 
-test('badge focus state never adds a rectangular outline around the image wrapper', () => {
+test('badge focus state uses an accessible rounded outline instead of a rectangular box', () => {
   const css = read('app/globals.css')
-  assert.match(css, /\.user-display-badge:focus-visible \{[^}]*outline:none/)
+  assert.match(css, /\.user-display-badge:focus-visible \{[^}]*outline:2px solid/)
+  assert.match(css, /\.user-display-badge:focus-visible \{[^}]*border-radius:999px/)
+  assert.doesNotMatch(css, /\.user-display-badge:focus-visible \{[^}]*box-shadow/)
 })
 
 test('museum and mini showcase keep GLOW on the badge image instead of the shelf item', () => {
