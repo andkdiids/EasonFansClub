@@ -59,7 +59,7 @@ test('shine uses one fixed PNG plus a masked CSS gradient that moves with transf
   assert.match(component, /className="user-badge-image"/)
   assert.equal((component.match(/className="user-badge-image"/g) || []).length, 1)
   assert.match(component, /--badge-shine-mask/)
-  assert.match(css, /\.badge-shimmer-clip \{[\s\S]*overflow:hidden[\s\S]*opacity:0/)
+  assert.match(css, /\.badge-shimmer-clip \{[\s\S]*overflow:hidden[\s\S]*opacity:1/)
   assert.match(css, /\.badge-shimmer-layer \{[\s\S]*background:linear-gradient[\s\S]*transform:translate3d\(-45%,0,0\)/)
   assert.match(css, /-webkit-mask-image:var\(--badge-shine-mask\)/)
   assert.match(css, /mask-image:var\(--badge-shine-mask\)/)
