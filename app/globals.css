@@ -494,6 +494,17 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 .checkin-history-message h3 { margin:0; color:var(--primary); font-size:11px; font-weight:950; letter-spacing:.12em; }
 .checkin-history-message p { margin:10px 0 0; overflow-wrap:anywhere; color:var(--foreground); font-size:14px; font-weight:700; line-height:1.8; white-space:pre-wrap; }
 .checkin-history-message p.is-muted { color:var(--foreground-muted); }
+.checkin-makeup-entry-trigger { margin-top:8px; }
+.checkin-makeup-entry-intro { margin:0 0 12px; color:var(--foreground-muted); font-size:12px; font-weight:750; line-height:1.7; }
+.checkin-makeup-entry-list { display:grid; gap:8px; }
+.checkin-makeup-entry-item { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--border); padding:12px; background:var(--surface-subtle); }
+.checkin-makeup-entry-item-copy { min-width:0; }
+.checkin-makeup-entry-item-copy h3 { margin:0; color:var(--foreground); font-size:15px; font-weight:950; }
+.checkin-makeup-entry-item-copy p { margin:3px 0 0; color:var(--foreground-muted); font-size:11px; font-weight:750; }
+.checkin-makeup-entry-item-copy .checkin-makeup-entry-cost { color:var(--primary); font-weight:900; }
+.checkin-makeup-entry-action { flex:none; min-height:40px; border:1px solid var(--primary); padding:0 14px; color:var(--primary-foreground); background:var(--primary); font-size:12px; font-weight:950; }
+.checkin-makeup-entry-action:hover { filter:brightness(.95); }
+.checkin-makeup-entry-hint { margin:12px 0 0; color:var(--foreground-muted); font-size:11px; font-weight:750; line-height:1.6; }
 
 @media (max-width:767px) {
   .checkin-history-trigger { width:100%; margin-top:12px; }
@@ -508,6 +519,9 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .checkin-history-day-cell { min-height:62px; border-radius:9px; padding-top:6px; }
   .checkin-history-detail-backdrop { align-items:flex-end; padding:0; }
   .checkin-history-detail { width:100%; max-height:calc(100% - env(safe-area-inset-top)); border-right:0; border-bottom:0; border-left:0; border-radius:20px 20px 0 0; padding-bottom:env(safe-area-inset-bottom); }
+  .checkin-makeup-entry-trigger { width:100%; }
+  .checkin-makeup-entry-item { align-items:flex-start; }
+  .checkin-makeup-entry-action { min-height:44px; padding-inline:16px; }
 }
 
 /* 挂号记录沿用当前每日挂号页的直角、扁平视觉；禁用日期仍保留弱化对比。 */

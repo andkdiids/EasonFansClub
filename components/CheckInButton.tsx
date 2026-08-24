@@ -153,9 +153,15 @@ export function CheckInButton({
       })
     }
     const onStorage = (event: StorageEvent) => { if (event.key === 'checkin:last-updated') void refresh() }
+    const onCheckInCompleted = () => void refresh()
     window.addEventListener('focus', refresh)
     window.addEventListener('storage', onStorage)
-    return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', onStorage) }
+    window.addEventListener('checkin:completed', onCheckInCompleted)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('checkin:completed', onCheckInCompleted)
+    }
   }, [onStateChange, previewMode])
   
   function selectPresetMood(key: string) {

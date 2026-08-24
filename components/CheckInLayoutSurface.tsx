@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { CheckInButton, type CheckInStateChange, type CheckInStats, type TodayCheckIn } from '@/components/CheckInButton'
 import { CheckInMessagesPanel } from '@/components/CheckInMessagesPanel'
 import { CheckInHistoryDialog } from '@/components/CheckInHistoryDialog'
+import { CheckInMakeupEntry } from '@/components/CheckInMakeupEntry'
 import { CheckInLikeProvider } from '@/components/checkin-like-context'
 import { TodayRegistrationFeePanel } from '@/components/TodayRegistrationFeePanel'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
@@ -99,6 +100,7 @@ function CheckInStatusContent({
   initialCheckIn,
   initialStats,
   todayValue,
+  sessionUserId,
   previewMode,
   checkinMoodEnabled = true,
 }: Readonly<{
@@ -110,6 +112,7 @@ function CheckInStatusContent({
   initialCheckIn: TodayCheckInPayload
   initialStats: CheckInStats
   todayValue: string
+  sessionUserId?: string
   previewMode: boolean
   checkinMoodEnabled: boolean
 }>) {
@@ -170,6 +173,7 @@ function CheckInStatusContent({
           onStateChange={handleStateChange}
         />
       </div>
+      {sessionUserId ? <CheckInMakeupEntry previewMode={previewMode} /> : null}
       <CheckInHistoryDialog initialDate={todayValue} previewMode={previewMode} />
       <TodayRegistrationFeePanel initialBalance={stats.points} previewMode={previewMode} />
     </section>
@@ -211,6 +215,7 @@ export function createCheckInLayoutModules({
             initialCheckIn={todayCheckIn}
             initialStats={stats}
             todayValue={todayValue}
+            sessionUserId={sessionUserId}
             previewMode={previewMode}
             checkinMoodEnabled={checkinMoodEnabled}
           />

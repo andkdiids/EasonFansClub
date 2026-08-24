@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client'
 import {
   CHECK_IN_MAKEUP_COST,
   CHECK_IN_MAKEUP_PLAYBACK_SECONDS,
+  buildUserMakeupAvailableDates,
   createChallengeOptions,
   getMakeupEligibility,
   getMakeupWeek,
@@ -16,6 +17,42 @@ import {
 
 const source = (path: string) => readFileSync(path, 'utf8')
 const shanghai = (value: string) => new Date(`${value}+08:00`)
+
+test('前台补签入口使用服务端筛出的当前可补签日期，并标记免费挑战状态', () => {
+  const available = buildUserMakeupAvailableDates({
+    candidateStartKey: '2026-08-17',
+    todayKey: '2026-08-21',
+    checkedInDateKeys: ['2026-08-17', '2026-08-19'],
+    makeupDateKeys: [],
+    now: shanghai('2026-08-21T12:00:00'),
+  })
+  assert.deepEqual(available.map((item) => item.dateKey), ['2026-08-18', '2026-08-20'])
+  assert.equal(available.every((item) => item.freeChallengeAvailable), true)
+  assert.deepEqual(buildUserMakeupAvailableDates({
+    candidateStartKey: '2026-08-17',
+    todayKey: '2026-08-21',
+    checkedInDateKeys: ['2026-08-17'],
+    makeupDateKeys: [],
+    monthlyChallengeStatus: 'PENDING',
+    monthlyChallengeTargetDate: '2026-08-18',
+    now: shanghai('2026-08-21T12:00:00'),
+  }).map((item) => ({ dateKey: item.dateKey, free: item.freeChallengeAvailable })), [
+    { dateKey: '2026-08-18', free: true },
+    { dateKey: '2026-08-19', free: false },
+    { dateKey: '2026-08-20', free: false },
+  ])
+})
+
+test('前台补签入口复用用户历史 API、现有补签弹窗和完成后的实时刷新事件', () => {
+  const entry = source('components/CheckInMakeupEntry.tsx')
+  assert.match(entry, /fetch\('\/api\/checkin\/history'/)
+  assert.match(entry, /目前没有可补签的日期/)
+  assert.match(entry, /<CheckInMakeupDialog/)
+  assert.match(entry, /monthlyChallengeAvailable/)
+  assert.match(entry, /void loadAvailability\(\)/)
+  assert.match(source('components/CheckInLayoutSurface.tsx'), /CheckInMakeupEntry/)
+  assert.match(source('components/CheckInButton.tsx'), /checkin:completed/)
+})
 
 test('1-10 付费补签资格、74 挂号费、流水、余额和周额度均由服务端事务保护', () => {
   assert.equal(CHECK_IN_MAKEUP_COST, 74)

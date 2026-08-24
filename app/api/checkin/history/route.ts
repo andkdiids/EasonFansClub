@@ -3,7 +3,7 @@ import { getCurrentCheckInMonth, getCheckInMonthBounds, getCheckInMonthKey, pars
 import { getCurrentUser } from '@/lib/auth'
 import { getBeijingDateKey } from '@/lib/beijing-time'
 import { prisma } from '@/lib/prisma'
-import { getMakeupEligibility, getMakeupWeek, getShanghaiMonthKey, getShanghaiWeekStart, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
+import { buildUserMakeupAvailableDates, CHECK_IN_MAKEUP_COST, getMakeupWeek, getShanghaiMonthKey, getShanghaiWeekStart, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
 import { shiftShanghaiDateKey } from '@/lib/checkin'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +24,8 @@ export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
 
-  const current = getCurrentCheckInMonth()
+  const now = new Date()
+  const current = getCurrentCheckInMonth(now)
   const { searchParams } = new URL(request.url)
   const yearParam = searchParams.get('year')
   const monthParam = searchParams.get('month')
@@ -36,10 +37,10 @@ export async function GET(request: Request) {
 
   const { startKey, endKey } = getCheckInMonthBounds(year, month)
   const monthKey = getCheckInMonthKey(year, month)
-  const todayKey = getBeijingDateKey()
+  const todayKey = getBeijingDateKey(now)
   const currentWeek = getMakeupWeek(todayKey)
   const candidateStart = shiftShanghaiDateKey(getShanghaiWeekStart(todayKey), new Date(`${todayKey}T12:00:00+08:00`).getUTCDay() === 1 ? -1 : 0)
-  const [firstRecord, records, recordsWithMessages, recordTypes, currentWeekMakeup, makeupsInWindow, monthlyChallenge, profile] = await Promise.all([
+  const [firstRecord, records, recordsWithMessages, recordTypes, candidateRecords, currentWeekMakeup, makeupsInWindow, monthlyChallenge, profile] = await Promise.all([
     prisma.checkIn.findFirst({
       where: { userId: user.id },
       orderBy: { checkinDateKey: 'asc' },
@@ -57,6 +58,10 @@ export async function GET(request: Request) {
     prisma.checkIn.findMany({
       where: { userId: user.id, checkinDateKey: { gte: startKey, lt: endKey } },
       select: { id: true, type: true },
+    }),
+    prisma.checkIn.findMany({
+      where: { userId: user.id, checkinDateKey: { gte: candidateStart, lt: todayKey } },
+      select: { checkinDateKey: true },
     }),
     prisma.checkIn.findFirst({
       where: { userId: user.id, type: { in: USER_MAKEUP_TYPES }, checkinDateKey: { gte: currentWeek.startKey, lt: currentWeek.endKey } },
@@ -77,12 +82,18 @@ export async function GET(request: Request) {
   const typeById = new Map(recordTypes.map((record) => [record.id, record.type]))
   const firstDate = firstRecord ? parseCheckInDateKey(firstRecord.checkinDateKey) : null
   const targetIsFuture = monthKey > todayKey.slice(0, 7)
-  const eligibleDateKeys: string[] = []
-  for (let key = candidateStart; key < todayKey; key = shiftShanghaiDateKey(key, 1)) {
-    const eligibility = getMakeupEligibility(key)
-    const weekUsed = eligibility.eligible && makeupsInWindow.some((record) => record.checkinDateKey >= eligibility.week.startKey && record.checkinDateKey < eligibility.week.endKey)
-    if (key >= startKey && key < endKey && eligibility.eligible && !weekUsed && !records.some((record) => record.checkinDateKey === key)) eligibleDateKeys.push(key)
-  }
+  const availableDates = buildUserMakeupAvailableDates({
+    candidateStartKey: candidateStart,
+    todayKey,
+    checkedInDateKeys: candidateRecords.map((record) => record.checkinDateKey),
+    makeupDateKeys: makeupsInWindow.map((record) => record.checkinDateKey),
+    monthlyChallengeStatus: monthlyChallenge?.status,
+    monthlyChallengeTargetDate: monthlyChallenge?.targetDateKey,
+    now,
+  })
+  const eligibleDateKeys = availableDates
+    .filter((item) => item.dateKey >= startKey && item.dateKey < endKey)
+    .map((item) => item.dateKey)
 
   return NextResponse.json({
     year,
@@ -104,11 +115,16 @@ export async function GET(request: Request) {
     })),
     makeup: {
       eligibleDateKeys,
+      availableDates: availableDates.map((item) => ({
+        dateKey: item.dateKey,
+        cost: CHECK_IN_MAKEUP_COST,
+        freeChallengeAvailable: item.freeChallengeAvailable,
+      })),
       weeklyAvailable: !currentWeekMakeup,
       monthlyChallengeAvailable: !monthlyChallenge,
       monthlyChallengePending: monthlyChallenge?.status === 'PENDING',
       monthlyChallengeTargetDate: monthlyChallenge?.status === 'PENDING' ? monthlyChallenge.targetDateKey : null,
-      cost: 74,
+      cost: CHECK_IN_MAKEUP_COST,
       currentBalance: profile?.points ?? 0,
     },
     isFutureMonth: targetIsFuture,

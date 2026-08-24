@@ -8,6 +8,13 @@ export const CHECK_IN_MAKEUP_COST = 74
 export const CHECK_IN_MAKEUP_PLAYBACK_SECONDS = 10
 export const USER_MAKEUP_TYPES: CheckInType[] = ['MAKEUP_FREE_QUIZ', 'MAKEUP_PAID']
 
+export type UserMakeupAvailableDate = {
+  dateKey: string
+  weekStartKey: string
+  weekEndKey: string
+  freeChallengeAvailable: boolean
+}
+
 export class CheckInMakeupError extends Error {
   constructor(message: string, public status = 400, public code = 'MAKEUP_INVALID') {
     super(message)
@@ -49,6 +56,37 @@ export function getMakeupEligibility(targetDateKey: string, now = new Date()) {
 
 export function getShanghaiMonthKey(now = new Date()) {
   return getShanghaiDateKey(now).slice(0, 7)
+}
+
+export function buildUserMakeupAvailableDates(input: {
+  candidateStartKey: string
+  todayKey: string
+  checkedInDateKeys: Iterable<string>
+  makeupDateKeys: Iterable<string>
+  monthlyChallengeStatus?: string | null
+  monthlyChallengeTargetDate?: string | null
+  now?: Date
+}): UserMakeupAvailableDate[] {
+  const checkedInDateKeys = new Set(input.checkedInDateKeys)
+  const makeupDateKeys = new Set(input.makeupDateKeys)
+  const now = input.now || new Date()
+  const available: UserMakeupAvailableDate[] = []
+
+  for (let dateKey = input.candidateStartKey; dateKey < input.todayKey; dateKey = shiftShanghaiDateKey(dateKey, 1)) {
+    const eligibility = getMakeupEligibility(dateKey, now)
+    if (!eligibility.eligible || checkedInDateKeys.has(dateKey)) continue
+    const weekUsed = [...makeupDateKeys].some((makeupDateKey) => makeupDateKey >= eligibility.week.startKey && makeupDateKey < eligibility.week.endKey)
+    if (weekUsed) continue
+    available.push({
+      dateKey,
+      weekStartKey: eligibility.week.startKey,
+      weekEndKey: eligibility.week.endKey,
+      freeChallengeAvailable: !input.monthlyChallengeStatus
+        || (input.monthlyChallengeStatus === 'PENDING' && input.monthlyChallengeTargetDate === dateKey),
+    })
+  }
+
+  return available
 }
 
 export async function assertUserMakeupAvailable(
