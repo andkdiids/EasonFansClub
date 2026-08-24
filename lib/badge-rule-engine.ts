@@ -5,6 +5,7 @@ import { grantBadge } from '@/lib/badge-service'
 import { badgeAvailabilityWhere, getBadgeAvailability } from '@/lib/badge-phase2'
 import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMetric, VALID_POST_WHERE } from '@/lib/badge-metrics'
 import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
+import { getBatchHistoricalBadgeMetrics, getHistoricalBackfillCapability, getHistoricalQualificationWindow, type HistoricalQualificationWindow } from '@/lib/badge-historical'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -50,6 +51,8 @@ export type BadgeBackfillSummary = {
   failures: string[]
   nextCursor: string | null
   done: boolean
+  mode: 'CURRENT' | 'HISTORICAL_WINDOW'
+  historicalWindow: { from: string; until: string } | null
 }
 
 function emptySummary(userId: string): BadgeEvaluationSummary {
@@ -319,9 +322,18 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
   })
   if (!badge || !badge.BadgeRule) throw new Error('勋章或自动规则不存在')
   if (!badge.isEnabled || !badge.isActive || badge.grantType !== 'AUTO' || !badge.BadgeRule.isEnabled) throw new Error('勋章或自动规则当前未启用')
-  if (badge.availableFrom || badge.availableUntil) throw new Error('限定勋章没有可靠的历史达标时间，不能使用自动历史补发')
 
   const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
+  const availability = getBadgeAvailability(badge)
+  if (availability === 'UPCOMING') throw new Error('限定勋章尚未开始，不能进行历史扫描')
+  const historicalCapability = getHistoricalBackfillCapability(type)
+  const isLimited = Boolean(badge.availableFrom || badge.availableUntil)
+  const mode: BadgeBackfillSummary['mode'] = isLimited ? 'HISTORICAL_WINDOW' : 'CURRENT'
+  const historicalWindow: HistoricalQualificationWindow | null = isLimited
+    ? getHistoricalQualificationWindow({ availableFrom: badge.availableFrom, availableUntil: badge.availableUntil })
+    : null
+  if (isLimited && !historicalCapability.supported) throw new Error(`该规则无法可靠判断限定期历史资格：${historicalCapability.basis}`)
+
   if (type === 'BADGE_SERIES_COMPLETE') {
     const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson) ? badge.BadgeRule.configJson as { seriesId?: unknown } : null
     const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
@@ -342,6 +354,8 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
       failures: [],
       nextCursor: hasMore ? rows.at(-1)?.id || null : null,
       done: !hasMore,
+      mode,
+      historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
     }
     const newlyGranted: Array<{ userId: string; badgeId: string; recordId: string }> = []
     for (const user of rows) {
@@ -352,6 +366,8 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
           sourceType: 'AUTO_RULE',
           sourceId: badge.BadgeRule.id,
           grantReason: '完成勋章系列后获得',
+          availabilityMode: mode,
+          ...(historicalWindow ? { historicalWindow } : {}),
           deferPhase3Effects: true,
         })
         if (result.created) {
@@ -380,7 +396,9 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
   })
   const hasMore = users.length > boundedBatchSize
   const rows = hasMore ? users.slice(0, boundedBatchSize) : users
-  const metrics = await getBatchBadgeMetrics(rows, type, badge.BadgeRule.configJson)
+  const metrics = mode === 'HISTORICAL_WINDOW'
+    ? await getBatchHistoricalBadgeMetrics(rows, type, badge.BadgeRule.configJson, historicalWindow!)
+    : await getBatchBadgeMetrics(rows, type, badge.BadgeRule.configJson)
   const summary: BadgeBackfillSummary = {
     badgeId,
     ruleId: badge.BadgeRule.id,
@@ -393,6 +411,8 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
     failures: [],
     nextCursor: hasMore ? rows.at(-1)?.id || null : null,
     done: !hasMore,
+    mode,
+    historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
   }
 
   const newlyGranted: Array<{ userId: string; badgeId: string; recordId: string }> = []
@@ -408,7 +428,11 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
         badgeId,
         sourceType: 'AUTO_RULE',
         sourceId: badge.BadgeRule.id,
-        grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: badge.BadgeRule.threshold })}`,
+        grantReason: mode === 'HISTORICAL_WINDOW'
+          ? `限定期历史资格补发：${historicalWindow!.from.toISOString()} 至 ${historicalWindow!.until.toISOString()}；${ruleDescription({ ruleType: type, threshold: badge.BadgeRule.threshold })}`
+          : `自动达成：${ruleDescription({ ruleType: type, threshold: badge.BadgeRule.threshold })}`,
+        availabilityMode: mode,
+        ...(historicalWindow ? { historicalWindow } : {}),
         deferPhase3Effects: true,
       })
       if (result.created) {
@@ -442,6 +466,14 @@ export type BadgeRulePreview = {
   eligibleCount: number
   ownedCount: number
   pendingCount: number
+  historical: {
+    supported: boolean
+    mode: 'CURRENT' | 'HISTORICAL_WINDOW' | 'UNSUPPORTED' | 'UPCOMING'
+    basis: string
+    from: string | null
+    until: string | null
+    message: string | null
+  }
 }
 
 /**
@@ -466,29 +498,41 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
   if (!badge.isEnabled || !badge.isActive) throw new Error('勋章当前未启用')
   if (!badge.BadgeRule.isEnabled) throw new Error('自动规则当前未启用')
   const availability = getBadgeAvailability(badge)
+  const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
+  const operator = badge.BadgeRule.operator as BadgeRuleOperatorValue
+  const capability = getHistoricalBackfillCapability(type)
+  const isLimited = Boolean(badge.availableFrom || badge.availableUntil)
+  const historicalWindow = isLimited ? getHistoricalQualificationWindow({ availableFrom: badge.availableFrom, availableUntil: badge.availableUntil }) : null
+  const historical = {
+    supported: capability.supported,
+    mode: availability === 'UPCOMING' ? 'UPCOMING' as const : isLimited && !capability.supported ? 'UNSUPPORTED' as const : isLimited ? 'HISTORICAL_WINDOW' as const : 'CURRENT' as const,
+    basis: capability.basis,
+    from: historicalWindow?.from.toISOString() || null,
+    until: historicalWindow?.until.toISOString() || null,
+    message: availability === 'UPCOMING' ? '限定勋章尚未开始，当前没有可扫描的历史资格' : isLimited && !capability.supported ? `该规则无法可靠判断限定期历史资格：${capability.basis}` : null,
+  }
   const ownedCount = await prisma.userBadge.count({ where: { badgeId, User: ACTIVE_RELATION_USER_WHERE } })
-  if (availability === 'UPCOMING' || availability === 'ENDED') {
+  if (availability === 'UPCOMING' || (isLimited && !capability.supported)) {
     return {
       badgeId,
       ruleId: badge.BadgeRule.id,
-      ruleType: badge.BadgeRule.ruleType as SupportedBadgeRuleType,
-      operator: badge.BadgeRule.operator as BadgeRuleOperatorValue,
+      ruleType: type,
+      operator,
       threshold: badge.BadgeRule.threshold,
       availability,
       eligibleCount: 0,
       ownedCount,
       pendingCount: 0,
+      historical,
     }
   }
 
-  const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
-  const operator = badge.BadgeRule.operator as BadgeRuleOperatorValue
   if (type === 'BADGE_SERIES_COMPLETE') {
     const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson) ? badge.BadgeRule.configJson as { seriesId?: unknown } : null
     const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
     if (!seriesId) throw new Error('系列完成规则缺少系列配置')
     const stats = await getSeriesCompletionPreview(seriesId, badgeId)
-    return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats }
+    return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
   }
   let cursor: string | undefined
   let eligibleCount = 0
@@ -501,7 +545,9 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
       select: { id: true, createdAt: true },
     })
     if (!users.length) break
-    const metrics = await getBatchBadgeMetrics(users, type, badge.BadgeRule.configJson)
+    const metrics = historicalWindow
+      ? await getBatchHistoricalBadgeMetrics(users, type, badge.BadgeRule.configJson, historicalWindow)
+      : await getBatchBadgeMetrics(users, type, badge.BadgeRule.configJson)
     const targetThreshold = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED' ? 1 : badge.BadgeRule.threshold
     const eligibleIds = users
       .filter((user) => targetThreshold !== null && evaluateBadgeMetric(metrics.get(user.id) || 0, operator, targetThreshold))
@@ -526,6 +572,7 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
     eligibleCount,
     ownedCount,
     pendingCount,
+    historical,
   }
 }
 

@@ -265,7 +265,7 @@ export function FriendDock({
         pageSize: '20',
         groupId,
       })
-      const response = await fetch(`/api/friends/list?${params}`, { cache: 'no-store' })
+      const response = await fetch(`/api/friends/list?${params}`, { credentials: 'same-origin', cache: 'no-store' })
       const data = await response.json().catch(() => ({}))
       if (groupRequestRef.current.get(groupId) !== requestId) return
       if (!response.ok) {
@@ -335,7 +335,7 @@ export function FriendDock({
     if (!silent) setLoadingList(true)
     try {
       const params = new URLSearchParams({ page: String(nextPage), pageSize: '30' })
-      const response = await fetch(`/api/friends/list?${params}`, { signal, cache: 'no-store' })
+      const response = await fetch(`/api/friends/list?${params}`, { signal, credentials: 'same-origin', cache: 'no-store' })
       const data = await response.json().catch(() => ({}))
       if (requestId !== friendListRequestRef.current) return
       if (!response.ok) {
@@ -512,7 +512,9 @@ export function FriendDock({
   }, [collapsed, currentUserId])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300)
+    // Keep rapid typing below the friends-list rate-limit window while the
+    // server remains the final authority for abuse protection.
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 600)
     return () => window.clearTimeout(timer)
   }, [query])
 
@@ -522,10 +524,13 @@ export function FriendDock({
     if (!debouncedQuery) {
       setSearchResults([])
       void loadFriends(1, false, controller.signal)
+    } else if (debouncedQuery.length < 2) {
+      setSearchResults([])
+      setLoadingList(false)
     } else {
       setLoadingList(true)
       const params = new URLSearchParams({ q: debouncedQuery })
-      fetch(`/api/friends/list?${params}`, { signal: controller.signal, cache: 'no-store' })
+      fetch(`/api/friends/list?${params}`, { signal: controller.signal, credentials: 'same-origin', cache: 'no-store' })
         .then(async (response) => {
           const data = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(data.message || '搜索失败')

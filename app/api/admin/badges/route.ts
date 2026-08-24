@@ -4,7 +4,7 @@ import { requireAdmin } from '@/lib/security'
 import { badgeAdminSelect, listBadgesForAdmin, writeBadgeAdminAction } from '@/lib/badge-service'
 import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2'
 import { randomUUID } from 'node:crypto'
-import { parseBadgeDefinition } from '@/lib/badge-admin'
+import { getBadgeDuplicateMessage, parseBadgeDefinition } from '@/lib/badge-admin'
 import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
@@ -142,7 +142,7 @@ export async function POST(request: Request) {
     })
     return NextResponse.json({ badge: serializeBadge(badge as unknown as Record<string, unknown>) }, { status: 201 })
   } catch (error) {
-    const duplicated = error instanceof Error && /P2002|Unique constraint/i.test(error.message)
-    return NextResponse.json({ message: duplicated ? '创建失败：名称、code 或标识已经存在' : '创建失败，请稍后重试' }, { status: duplicated ? 409 : 500 })
+    const duplicateMessage = getBadgeDuplicateMessage(error, { name: typeof data.name === 'string' ? data.name : undefined, tierLevel: typeof data.tierLevel === 'number' ? data.tierLevel : null })
+    return NextResponse.json({ message: duplicateMessage || '创建失败，请稍后重试' }, { status: duplicateMessage ? 409 : 500 })
   }
 }

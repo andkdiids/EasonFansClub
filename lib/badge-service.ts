@@ -68,6 +68,8 @@ type DbUserBadge = {
   Badge: DbCollectionBadge
 }
 
+export type BadgeGrantAvailabilityMode = 'CURRENT' | 'HISTORICAL_WINDOW' | 'ADMIN_MANUAL'
+
 export type GrantBadgeInput = {
   userId: string
   badgeId: string
@@ -76,6 +78,13 @@ export type GrantBadgeInput = {
   grantReason?: string | null
   actorId?: string | null
   obtainedAt?: Date
+  /**
+   * The default mode is the live eligibility path. Historical and admin
+   * grants must opt in explicitly so a normal event evaluator can never
+   * accidentally award an ended or upcoming badge.
+   */
+  availabilityMode?: BadgeGrantAvailabilityMode
+  historicalWindow?: { from: Date; until: Date }
   /** Used by a batch evaluator so Phase 3 effects can be emitted once. */
   deferPhase3Effects?: boolean
 }
@@ -757,8 +766,19 @@ export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperation
       if (!badge.isEnabled || !badge.isActive) throw new BadgeServiceError('BADGE_DISABLED', '这枚勋章当前已停用')
 
       const availability = getBadgeAvailability(badge)
-      if (availability !== 'PERMANENT' && availability !== 'AVAILABLE') {
+      const availabilityMode = input.availabilityMode || 'CURRENT'
+      if (availabilityMode === 'CURRENT' && availability !== 'PERMANENT' && availability !== 'AVAILABLE') {
         throw new BadgeServiceError('BADGE_NOT_AVAILABLE', availability === 'UPCOMING' ? '这枚限定勋章尚未开放' : '这枚限定勋章已经绝版，当前不能再授予')
+      }
+      if (availabilityMode === 'HISTORICAL_WINDOW') {
+        if (availability === 'UPCOMING') throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '这枚限定勋章尚未开始，不能进行历史资格补发')
+        const window = input.historicalWindow
+        if (availability !== 'PERMANENT' && (!window || !(window.from instanceof Date) || !(window.until instanceof Date) || Number.isNaN(window.from.getTime()) || Number.isNaN(window.until.getTime()) || window.from > window.until)) {
+          throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '历史资格补发缺少有效的限定时间窗口')
+        }
+      }
+      if (availabilityMode === 'ADMIN_MANUAL' && availability !== 'PERMANENT' && !grantReason) {
+        throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '限定勋章手动补发必须填写补发原因')
       }
 
       const record = await tx.userBadge.create({

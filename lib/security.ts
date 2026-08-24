@@ -25,7 +25,7 @@ export async function requireUser(): Promise<GuardResult> {
     if (isAuthServiceUnavailableError(error)) {
       return {
         user: null,
-        response: NextResponse.json({ message: '登录服务暂时不可用，请稍后再试' }, { status: 503 }),
+        response: NextResponse.json({ ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后再试' }, { status: 503 }),
       }
     }
     throw error

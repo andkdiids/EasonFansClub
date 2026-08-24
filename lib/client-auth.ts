@@ -14,7 +14,7 @@ type SessionAuthorityBody = {
   code?: unknown
 }
 
-type SessionAuthorityResult = {
+export type SessionAuthorityResult = {
   state: SessionAuthorityState
   status: number | null
   code?: string
@@ -77,6 +77,133 @@ function resolveSessionAuthority() {
 }
 
 /**
+ * Ask the server whether the current browser cookie is still authoritative.
+ * A caller may use this before an action when its server-rendered auth prop is
+ * stale.  `unknown` deliberately does not redirect or clear anything.
+ */
+export async function confirmSessionAuthority(): Promise<SessionAuthorityResult> {
+  return resolveSessionAuthority()
+}
+
+function currentPath(fallback = '/') {
+  if (typeof window === 'undefined') return fallback
+  return `${window.location.pathname}${window.location.search}` || fallback
+}
+
+function safeNextPath(nextPath?: string) {
+  const candidate = nextPath || currentPath()
+  return candidate.startsWith('/') && !candidate.startsWith('//') ? candidate : '/'
+}
+
+function startConfirmedLoginRedirect(source: string, status: number | undefined, code: string | undefined, nextPath?: string) {
+  if (forceLogoutStarted) return true
+
+  forceLogoutStarted = true
+  recordForceLogout('SESSION_INVALID', source, status, code)
+  if (typeof window !== 'undefined') {
+    window.location.replace(`/login?next=${encodeURIComponent(safeNextPath(nextPath))}`)
+  }
+  return true
+}
+
+/**
+ * Use this for client-side login preconditions whose server-rendered `user`
+ * prop may be stale.  It returns true only for a confirmed valid session.
+ * Unknown/failed checks keep the user on the current page and let the caller
+ * show its normal retry/error state.
+ */
+export async function confirmSessionForAction(source: string, nextPath?: string) {
+  const result = await resolveSessionAuthority()
+  if (result.state === 'invalid') {
+    startConfirmedLoginRedirect(source, result.status ?? undefined, result.code, nextPath)
+    return false
+  }
+  return result.state === 'valid'
+}
+
+type FetchInput = RequestInfo | URL
+
+function getFetchUrl(input: FetchInput) {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = input instanceof Request ? input.url : input instanceof URL ? input.toString() : input
+    return new URL(raw, window.location.href)
+  } catch {
+    return null
+  }
+}
+
+function isGuardedApiRequest(input: FetchInput) {
+  const url = getFetchUrl(input)
+  if (!url || url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) return false
+  // Authentication endpoints have their own semantics. In particular, do not
+  // turn an explicit user logout into a session-recovery request.
+  return !url.pathname.startsWith('/api/auth/')
+}
+
+function getFetchMethod(input: FetchInput, init?: RequestInit) {
+  return (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase()
+}
+
+function authUncertainResponse() {
+  return new Response(JSON.stringify({
+    ok: false,
+    code: 'AUTH_SESSION_UNCERTAIN',
+    message: '登录状态暂时无法确认，请稍后重试',
+  }), {
+    status: 503,
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+  })
+}
+
+/**
+ * Install one browser-wide guard for same-origin API requests.  Individual
+ * components historically handled 401s differently; this prevents an
+ * unverified 401 from being rendered as “请先登录” or causing a redirect.
+ * Only idempotent reads are retried. Mutating requests are never replayed.
+ */
+export function installAuthenticatedFetchGuard() {
+  if (typeof window === 'undefined') return () => undefined
+
+  const originalFetch = window.fetch.bind(window)
+  const guardedFetch: typeof window.fetch = async (input, init) => {
+    const response = await originalFetch(input, init)
+    if (response.status !== 401 || !isGuardedApiRequest(input)) return response
+
+    const sourceUrl = getFetchUrl(input)
+    const source = sourceUrl?.pathname || 'same-origin-api'
+    const authority = await resolveSessionAuthority()
+    if (authority.state === 'invalid') {
+      startConfirmedLoginRedirect(source, response.status, authority.code)
+      return response
+    }
+
+    // A valid authority check can recover a stale GET without replaying a
+    // state-changing request. If the retry remains 401, classify it as a
+    // service uncertainty instead of presenting a false login prompt.
+    const method = getFetchMethod(input, init)
+    if (authority.state === 'valid' && ['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      try {
+        const retried = await originalFetch(input, init)
+        return retried.status === 401 ? authUncertainResponse() : retried
+      } catch {
+        return authUncertainResponse()
+      }
+    }
+
+    return authUncertainResponse()
+  }
+
+  window.fetch = guardedFetch
+  return () => {
+    if (window.fetch === guardedFetch) window.fetch = originalFetch
+  }
+}
+
+/**
  * 二次确认：普通接口收到 401 后调用。仅返回“权威确认无效”这一种可登出结果；
  * 服务异常、网络波动、超时和 Session 仍有效全部返回 false。
  */
@@ -94,15 +221,7 @@ export async function redirectToLoginAfterConfirmedSessionInvalid(response: Resp
 
   const result = await resolveSessionAuthority()
   if (result.state !== 'invalid') return false
-  if (forceLogoutStarted) return true
-
-  forceLogoutStarted = true
-  recordForceLogout('SESSION_INVALID', source, response.status, result.code)
-  if (typeof window !== 'undefined') {
-    const nextPath = `${window.location.pathname}${window.location.search}` || '/'
-    window.location.replace(`/login?next=${encodeURIComponent(nextPath)}`)
-  }
-  return true
+  return startConfirmedLoginRedirect(source, response.status, result.code)
 }
 
 /**
@@ -110,7 +229,9 @@ export async function redirectToLoginAfterConfirmedSessionInvalid(response: Resp
  * 之后必须明确是「哪个接口、什么原因」把用户踢下线。
  */
 export function recordForceLogout(reason: string, source: string, httpStatus?: number, errorCode?: string) {
-  const pathname = typeof window !== 'undefined' ? window.location.pathname + window.location.search : ''
+  // Keep query parameters out of diagnostics: login/reset flows may carry
+  // one-time codes or other private values in the URL.
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : ''
   console.error('[auth] redirect to login', {
     event: 'AUTH_REDIRECT_LOGIN',
     source,

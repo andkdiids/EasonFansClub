@@ -38,6 +38,10 @@ export type BadgeRuleRegistryEntry = {
   group: '社区' | '挂号' | '账号' | '娱乐天空' | 'EasMusic / 演唱会' | '歌·颂' | '系统'
   unit?: string
   targetKind?: 'CONCERT' | 'TOUR'
+  /** Whether the rule can be recomputed against a bounded historical window. */
+  supportsHistoricalBackfill: boolean
+  /** Human-readable evidence source shown to administrators. */
+  historicalBasis: string
 }
 
 function displayThreshold(threshold: number) {
@@ -60,6 +64,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['POST_CREATED', 'POST_APPROVED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内有效帖子的 createdAt 重算',
     defaultAcquisitionDescription: (threshold: number | null) => `累计发布 ${displayThreshold(threshold || 1)} 篇帖子后获得`,
   },
   FEATURED_POST_COUNT: {
@@ -70,6 +76,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['POST_APPROVED', 'POST_FEATURED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: false,
+    historicalBasis: '帖子没有可靠的历史精华时间，不能证明限定期内何时成为精华',
     defaultAcquisitionDescription: (threshold: number | null) => `累计获得 ${displayThreshold(threshold || 1)} 篇精华帖后获得`,
   },
   CHECKIN_TOTAL_DAYS: {
@@ -80,6 +88,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['CHECKIN_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内上海时区去重后的签到日期重算',
     defaultAcquisitionDescription: (threshold: number | null) => `累计挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   CHECKIN_STREAK: {
@@ -90,6 +100,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['CHECKIN_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定窗口内的签到日期重算最长连续天数',
     defaultAcquisitionDescription: (threshold: number | null) => `连续挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   ACCOUNT_AGE_DAYS: {
@@ -100,6 +112,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['USER_LOGIN'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按用户注册时间与限定期结束日重算账号年龄',
     defaultAcquisitionDescription: (threshold: number | null) => `注册满 ${displayThreshold(threshold || 1)} 天后获得`,
   },
   FRIEND_COUNT: {
@@ -110,6 +124,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['FRIENDSHIP_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: false,
+    historicalBasis: '关系删除后没有历史快照，无法可靠还原限定期结束时的好友数',
     defaultAcquisitionDescription: (threshold: number | null) => `好友达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
   FOLLOWER_COUNT: {
@@ -120,6 +136,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['FOLLOW_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: false,
+    historicalBasis: '关系删除后没有历史快照，无法可靠还原限定期结束时的粉丝数',
     defaultAcquisitionDescription: (threshold: number | null) => `粉丝达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
   GUESS_SONG_MAX_STREAK: {
@@ -130,6 +148,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['GUESS_SONG_SESSION_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内已完成且有效的听听对局重算最高连击',
     defaultAcquisitionDescription: (threshold: number | null) => `听听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
   DUEL_WIN_COUNT: {
@@ -140,6 +160,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['DUEL_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: false,
+    historicalBasis: '现有胜场统计没有逐场时间，无法可靠重建限定期胜场数',
     defaultAcquisitionDescription: (threshold: number | null) => `累计赢得 ${displayThreshold(threshold || 1)} 场听听 1v1 对决后获得`,
   },
   WANT_LISTEN_MAX_STREAK: {
@@ -150,6 +172,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['WANT_LISTEN_SESSION_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: false,
+    historicalBasis: '现有最高连击统计没有历史快照，无法可靠重建限定期最高连击',
     defaultAcquisitionDescription: (threshold: number | null) => `想听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
   CONCERT_ATTENDANCE_COUNT: {
@@ -160,6 +184,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['CONCERT_ATTENDANCE_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内 UserMusicConcert.createdAt 重算观演记录',
     defaultAcquisitionDescription: (threshold: number | null) => `累计观看 ${displayThreshold(threshold || 1)} 场演唱会后获得`,
   },
   CONCERT_SHOW_ATTENDED: {
@@ -171,6 +197,8 @@ export const BADGE_RULE_REGISTRY = {
     events: ['CONCERT_ATTENDANCE_CREATED'],
     threshold: null,
     targetKind: 'CONCERT',
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内添加的指定场次观演记录重算',
     defaultAcquisitionDescription: () => '观看指定演唱会后获得',
   },
   CONCERT_TOUR_ATTENDED: {
@@ -182,6 +210,8 @@ export const BADGE_RULE_REGISTRY = {
     events: ['CONCERT_ATTENDANCE_CREATED'],
     threshold: null,
     targetKind: 'TOUR',
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内添加的指定巡演观演记录重算',
     defaultAcquisitionDescription: () => '观看指定巡演任意一场后获得',
   },
   RATING_COUNT: {
@@ -192,6 +222,8 @@ export const BADGE_RULE_REGISTRY = {
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: ['RATING_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按限定期内 Rating.createdAt 重算评分次数',
     defaultAcquisitionDescription: (threshold: number | null) => `累计完成 ${displayThreshold(threshold || 1)} 次歌·颂评分后获得`,
   },
   BADGE_SERIES_COMPLETE: {
@@ -204,6 +236,8 @@ export const BADGE_RULE_REGISTRY = {
     threshold: null,
     adminSelectable: false,
     seriesCompletion: true,
+    supportsHistoricalBackfill: false,
+    historicalBasis: '没有可靠的系列首次完成时间，不能用当前完成状态倒推历史资格',
     defaultAcquisitionDescription: () => '集齐指定系列全部勋章后获得',
   },
 } as const satisfies Record<string, BadgeRuleRegistryEntry>

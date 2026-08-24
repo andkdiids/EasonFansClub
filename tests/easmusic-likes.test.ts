@@ -69,13 +69,14 @@ test('首页与专辑详情复用同一份 SongLike/AlbumLike 状态', () => {
   assert.match(tracks, /type="song"[\s\S]*initialCount=\{song\.likeCount\}/)
 })
 
-test('通用按钮提供 optimistic 回滚、请求中禁用和现有登录 next 引导', () => {
+test('通用按钮提供 optimistic 回滚、请求中禁用和统一会话确认引导', () => {
   const button = read('components/music/EasMusicLikeButton.tsx')
   assert.match(button, /setLiked\(nextLiked\)/)
   assert.match(button, /setCount\(Math\.max\(0, previousCount \+ \(nextLiked \? 1 : -1\)\)\)/)
   assert.match(button, /setLiked\(previousLiked\)/)
   assert.match(button, /disabled=\{isSubmitting\}/)
-  assert.match(button, /\/login\?next=/)
+  assert.match(button, /confirmSessionForAction/)
+  assert.match(button, /currentPath\(\)/)
   assert.match(button, /redirectToLoginAfterConfirmedSessionInvalid/)
   assert.match(button, /cache: 'no-store'/)
 })

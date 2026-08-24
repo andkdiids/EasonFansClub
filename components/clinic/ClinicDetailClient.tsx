@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { UiIcon } from '@/components/UiIcon'
+import { confirmSessionForAction } from '@/lib/client-auth'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
 import type { ClinicPublicConsultation, ClinicPublicRecordDetail } from '@/lib/clinic-service'
 import { ClinicIdentityBadge } from './ClinicIdentityBadge'
@@ -29,7 +29,6 @@ function findParentName(items: ClinicPublicConsultation[], id: string) {
 }
 
 export function ClinicDetailClient({ record: initialRecord, isAuthenticated, initialFocusId, returnHref }: Readonly<{ record: ClinicPublicRecordDetail; isAuthenticated: boolean; initialFocusId?: string | null; returnHref?: string | null }>) {
-  const router = useRouter()
   const [record, setRecord] = useState(initialRecord)
   const [identityMode, setIdentityMode] = useState<'PUBLIC' | 'ANONYMOUS'>('PUBLIC')
   const [draft, setDraft] = useState('')
@@ -40,14 +39,13 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   const [reportTarget, setReportTarget] = useState<{ recordId: string } | { consultationId: string } | null>(null)
   const focusId = useMemo(() => initialFocusId || '', [initialFocusId])
 
-  function requireLogin() {
+  async function requireLogin() {
     if (isAuthenticated) return true
-    router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
-    return false
+    return confirmSessionForAction('clinic.detail.action', window.location.pathname)
   }
 
   async function toggleRecordAspirin() {
-    if (!requireLogin() || recordAspirinPending) return
+    if (!(await requireLogin()) || recordAspirinPending) return
     const active = record.viewerHasAspirin
     const previousRecord = record
     setRecordAspirinPending(true)
@@ -67,7 +65,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function submitConsultation() {
-    if (!requireLogin() || sending) return
+    if (!(await requireLogin()) || sending) return
     if (draft.trim().length < 2) {
       setActionError('会诊内容至少需要 2 个有效字符。')
       return
@@ -93,7 +91,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function toggleConsultationAspirin(item: ClinicPublicConsultation) {
-    if (!requireLogin()) return
+    if (!(await requireLogin())) return
     const active = item.viewerHasAspirin
     setRecord((current) => ({ ...current, consultations: updateConsultation(current.consultations, item.id, (value) => ({ ...value, viewerHasAspirin: !active, aspirinCount: Math.max(0, value.aspirinCount + (active ? -1 : 1)) })) }))
     try {
@@ -108,7 +106,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function toggleMouthpiece(item: ClinicPublicConsultation) {
-    if (!requireLogin()) return
+    if (!(await requireLogin())) return
     const active = item.viewerHasMouthpiece
     setRecord((current) => ({ ...current, mouthpieceCount: Math.max(0, current.mouthpieceCount + (active ? -1 : 1)), consultations: updateConsultation(current.consultations, item.id, (value) => ({ ...value, viewerHasMouthpiece: !active, mouthpieceCount: Math.max(0, value.mouthpieceCount + (active ? -1 : 1)) })) }))
     try {
@@ -123,7 +121,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function deleteRecord() {
-    if (!requireLogin() || !window.confirm('删除后，这份病历和下面的全部会诊将不再公开显示，无法恢复。\n\n确定要烧掉这份病历吗？')) return
+    if (!(await requireLogin()) || !window.confirm('删除后，这份病历和下面的全部会诊将不再公开显示，无法恢复。\n\n确定要烧掉这份病历吗？')) return
     const response = await fetch(`/api/clinic/${record.id}`, { method: 'DELETE' })
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { message?: string }
@@ -134,7 +132,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function deleteConsultation(item: ClinicPublicConsultation) {
-    if (!requireLogin() || !window.confirm('确定要删除这条会诊吗？有楼中楼回复时会保留删除占位。')) return
+    if (!(await requireLogin()) || !window.confirm('确定要删除这条会诊吗？有楼中楼回复时会保留删除占位。')) return
     const response = await fetch(`/api/clinic/consultations/${item.id}`, { method: 'DELETE' })
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { message?: string }
@@ -144,17 +142,21 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
     setRecord((current) => ({ ...current, consultationCount: Math.max(0, current.consultationCount - (item.isDeleted ? 0 : 1)), consultations: updateConsultation(current.consultations, item.id, (value) => ({ ...value, isDeleted: true, author: null, content: '这条会诊已被删除。', canDelete: false })) }))
   }
 
-  function openReply(item: ClinicPublicConsultation) {
-    if (!requireLogin()) return
+  async function openReply(item: ClinicPublicConsultation) {
+    if (!(await requireLogin())) return
     setReplyTo(item.id)
     document.getElementById('clinic-consultation-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  async function openReport(target: { recordId: string } | { consultationId: string }) {
+    if (await requireLogin()) setReportTarget(target)
   }
 
   return (
     <main className="clinic-page-shell clinic-detail-page">
       <div className="clinic-detail-back"><Link href={returnHref || '/clinic'}>← 返回候诊大厅</Link></div>
       <article className="clinic-detail-record">
-        <header className="clinic-detail-header"><div><span className="clinic-category-label">{record.categoryLabel}</span><span className="clinic-record-time"><ClinicTime value={record.createdAt} /></span></div><div className="clinic-detail-header-actions"><button type="button" className="clinic-more-button" aria-label="病历举报" onClick={() => { if (requireLogin()) setReportTarget({ recordId: record.id }) }}>···</button>{record.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => void deleteRecord()}>烧掉这份病历</button> : null}</div></header>
+        <header className="clinic-detail-header"><div><span className="clinic-category-label">{record.categoryLabel}</span><span className="clinic-record-time"><ClinicTime value={record.createdAt} /></span></div><div className="clinic-detail-header-actions"><button type="button" className="clinic-more-button" aria-label="病历举报" onClick={() => { void openReport({ recordId: record.id }) }}>···</button>{record.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => void deleteRecord()}>烧掉这份病历</button> : null}</div></header>
         <div className="clinic-detail-author"><ClinicIdentityBadge identity={record.author} /><span className="clinic-detail-separator">·</span><span>患者诉求：{record.needLabel}</span></div>
         <p className="clinic-detail-content">{record.content}</p>
         <footer className="clinic-detail-actions">
@@ -167,7 +169,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       <section id="consultations" className="clinic-consultations-section" aria-labelledby="clinic-consultations-title">
         <header className="clinic-section-heading"><div><h2 id="clinic-consultations-title">病友会诊</h2></div><span>{record.consultationCount} 次会诊</span></header>
         {record.bestMouthpiece ? <p className="clinic-best-mouthpiece clinic-detail-best"><span>本楼最佳嘴替</span>「{record.bestMouthpiece.content}」 · {record.bestMouthpiece.mouthpieceCount} 人认同</p> : null}
-        {!record.consultations.length ? <p className="clinic-empty-consultation">暂时还没有病友会诊。</p> : <div className="clinic-consultation-list">{record.consultations.map((item) => <ClinicConsultationItem key={item.id} item={item} focusId={focusId} onAspirin={(id) => { const target = findConsultation(record.consultations, id); if (target) void toggleConsultationAspirin(target) }} onMouthpiece={(id) => { const target = findConsultation(record.consultations, id); if (target) void toggleMouthpiece(target) }} onReply={(id) => { const target = findConsultation(record.consultations, id); if (target) openReply(target) }} onDelete={(id) => { const target = findConsultation(record.consultations, id); if (target) void deleteConsultation(target) }} onReport={(id) => { if (requireLogin()) setReportTarget({ consultationId: id }) }} />)}</div>}
+        {!record.consultations.length ? <p className="clinic-empty-consultation">暂时还没有病友会诊。</p> : <div className="clinic-consultation-list">{record.consultations.map((item) => <ClinicConsultationItem key={item.id} item={item} focusId={focusId} onAspirin={(id) => { const target = findConsultation(record.consultations, id); if (target) void toggleConsultationAspirin(target) }} onMouthpiece={(id) => { const target = findConsultation(record.consultations, id); if (target) void toggleMouthpiece(target) }} onReply={(id) => { const target = findConsultation(record.consultations, id); if (target) void openReply(target) }} onDelete={(id) => { const target = findConsultation(record.consultations, id); if (target) void deleteConsultation(target) }} onReport={(id) => { void openReport({ consultationId: id }) }} />)}</div>}
       </section>
 
       <section id="clinic-consultation-composer" className="clinic-composer-section">

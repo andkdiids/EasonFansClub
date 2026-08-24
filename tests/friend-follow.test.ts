@@ -18,7 +18,7 @@ test('好友关注使用独立单向模型和唯一约束，不修改 Friendship
 test('关注 API 服务端验证目标用户、自己关系和 Friendship，并以 upsert 保证幂等', () => {
   const route = read('app/api/friends/[userId]/follow/route.ts')
 
-  assert.match(route, /getCurrentUser\(\)/)
+  assert.match(route, /requireUser\(\)/)
   assert.match(route, /userId === viewer\.id/)
   assert.match(route, /prisma\.user\.findFirst/)
   assert.match(route, /normalizeFriendPair\(viewer\.id, target\.id\)/)

@@ -1,10 +1,9 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere } from '@/lib/friends'
 import { buildFriendGroupIndex } from '@/lib/friend-grouping'
 import { prisma } from '@/lib/prisma'
-import { sanitizeText } from '@/lib/security'
+import { requireUser, sanitizeText } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const FRIEND_GROUP_NAME_MAX_LENGTH = 30
@@ -19,8 +18,9 @@ function parseGroupName(value: unknown) {
 }
 
 export async function GET() {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
 
   const [groups, friendships] = await Promise.all([
     prisma.friendGroup.findMany({
@@ -56,8 +56,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
 
   const body = await request.json().catch(() => null)
   const parsed = parseGroupName(body?.name)

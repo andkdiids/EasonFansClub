@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '@/components/BrandMark'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
+import { EcenterEditButton, EcenterShortcutEditorPanel } from './EcenterShortcutEditor'
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
 import type { SessionShellUser } from '@/lib/auth'
 import type { EcenterFeatureItem } from '@/lib/ecenter-features'
@@ -26,9 +27,12 @@ function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
 export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [ecenterEditing, setEcenterEditing] = useState(false)
+  const [userFeatures, setUserFeatures] = useState<readonly EcenterFeatureItem[]>(ecenterFeatures)
   const menuRootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => setMenuOpen(false), [pathname])
+  useEffect(() => setUserFeatures(ecenterFeatures), [ecenterFeatures])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -63,14 +67,23 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ec
     ))}</nav>
   }
 
-  const quickNavigation = ecenterFeatures.filter((item) => item.showInQuickNavigation)
+  const fallbackQuickNavigation = ecenterFeatures.filter((item) => !item.hidden && item.showInQuickNavigation)
+  const quickNavigation = userFeatures.length > 0 ? userFeatures.filter((item) => !item.hidden && item.showInQuickNavigation) : fallbackQuickNavigation
 
   return <aside className="app-sidebar">
     <Link href="/community" className="sidebar-brand" aria-label="社区首页"><BrandMark logoUrl={logoUrl} compact /></Link>
     <div className="app-sidebar-scroll">
       {navigation(primaryNavigation, '主要导航')}
-      <p className="sidebar-section-label">快捷入口</p>
-      {navigation(quickNavigation, '快捷入口')}
+      <div className="sidebar-section-heading">
+        <p className="sidebar-section-label">快捷入口</p>
+        <EcenterEditButton onClick={() => setEcenterEditing((value) => !value)}>{ecenterEditing ? '收起' : '编辑'}</EcenterEditButton>
+      </div>
+      {ecenterEditing ? <EcenterShortcutEditorPanel
+        initialFeatures={userFeatures}
+        variant="sidebar"
+        onSaved={(features) => setUserFeatures(features)}
+        onDone={() => setEcenterEditing(false)}
+      /> : navigation(quickNavigation, '快捷入口')}
       {canAccessAdmin ? <nav className="sidebar-nav sidebar-admin-nav" aria-label="管理入口"><Link href="/admin" aria-current={pathname.startsWith('/admin') ? 'page' : undefined}><UiIcon name="settings" /><span>后台管理</span></Link></nav> : null}
     </div>
     <div ref={menuRootRef} className="sidebar-user">

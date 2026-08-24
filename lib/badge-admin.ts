@@ -1,4 +1,4 @@
-import type { BadgeCategory, BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeVisibility, Prisma } from '@prisma/client'
+import { Prisma, type BadgeCategory, type BadgeEffectType, type BadgeGrantType, type BadgeNicknameEffect, type BadgeRarity, type BadgeVisibility } from '@prisma/client'
 import { sanitizeText } from '@/lib/security'
 import { normalizeBadgeColor } from '@/lib/badge-types'
 import { toStoredMediaUrl } from '@/lib/media-url'
@@ -143,14 +143,15 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
   if (!partial || 'tierLevel' in body || 'tierEnabled' in body) {
     if ('tierEnabled' in body && typeof body.tierEnabled !== 'boolean') return { error: '分级勋章设置无效' }
     if (body.tierEnabled === false) data.tierLevel = null
-    else {
-    if (body.tierLevel === undefined || body.tierLevel === null || body.tierLevel === '') data.tierLevel = null
-    else {
+    else if (body.tierLevel === undefined || body.tierLevel === null || body.tierLevel === '') {
+      if (body.tierEnabled === true) return { error: '成长型分级勋章必须选择等级' }
+      data.tierLevel = null
+    } else {
       const tierLevel = typeof body.tierLevel === 'number' ? body.tierLevel : typeof body.tierLevel === 'string' && /^\d+$/.test(body.tierLevel.trim()) ? Number(body.tierLevel.trim()) : Number.NaN
-      if (!Number.isSafeInteger(tierLevel) || tierLevel < 1 || tierLevel > 100) return { error: '请选择有效的勋章阶段' }
+      if (!Number.isSafeInteger(tierLevel) || tierLevel < 1 || tierLevel > 99) return { error: '等级必须是 1 到 99 的整数' }
       data.tierLevel = tierLevel
     }
-    }
+    if (body.tierEnabled === true && !data.seriesId && body.legacyTier !== true) return { error: '成长型分级勋章必须选择成长系列' }
   }
 
   const availabilityFields = ['availableFrom', 'availableUntil'] as const
@@ -174,4 +175,19 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
   if (!partial && data.grantType === 'AUTO' && !rule) return { error: '自动授予勋章必须配置获取条件' }
 
   return { data, rule }
+}
+
+/** Convert Prisma duplicate metadata into an administrator-safe Chinese message. */
+export function getBadgeDuplicateMessage(error: unknown, context: { name?: string; tierLevel?: number | null } = {}) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null
+  const target = Array.isArray(error.meta?.target)
+    ? error.meta.target.map(String)
+    : typeof error.meta?.target === 'string' ? [error.meta.target] : []
+  if (target.includes('tierGroupCode') || target.includes('tierLevel') || target.includes('Badge_tierGroupCode_tierLevel_key')) {
+    return `该成长系列已经存在「${context.tierLevel || ''}级」勋章，请选择其他等级`
+  }
+  if (target.includes('name') || target.includes('Badge_name_key')) return context.name ? `已存在同名勋章「${context.name}」` : '已存在同名勋章'
+  if (target.includes('slug') || target.includes('Badge_slug_key')) return '页面标识发生冲突，请重新保存'
+  if (target.includes('code') || target.includes('Badge_code_key')) return '系统标识发生冲突，请重新保存'
+  return '勋章保存失败：已有相同的唯一标识'
 }

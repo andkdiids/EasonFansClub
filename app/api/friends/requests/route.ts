@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { createFriendRequest } from '@/lib/friends'
-import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/friends/requests',
     ip: { limit: 50, windowSeconds: 60 * 60 },

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 
 type PostInteractionDetail = {
   postId?: string
@@ -70,7 +71,8 @@ export function LikeButton({
         cache: 'no-store',
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.message || '操作失败，请先登录')
+      if (response.status === 401 && await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/posts/${postId}/like`)) return
+      if (!response.ok) throw new Error(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : data.message || '操作失败，请稍后重试')
       setLiked(Boolean(data.isLiked))
       setCount(Math.max(Number(data.likeCount || 0), 0))
       emitPostInteraction({ postId, isLiked: Boolean(data.isLiked), likeCount: Number(data.likeCount || 0) })
@@ -141,7 +143,8 @@ export function FavoriteButton({
       const data = await response.json().catch(() => ({}))
 
       if (!response.ok) {
-      setError(data.message || '操作失败，请先登录')
+        if (response.status === 401 && await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/posts/${postId}/favorite`)) return
+        setError(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : data.message || '操作失败，请稍后重试')
         return
       }
 

@@ -50,6 +50,8 @@ export async function POST(request: Request, context: RouteContext) {
           alreadyOwned: summary.alreadyOwned,
           notEligible: summary.notEligible,
           failed: summary.failed,
+          mode: summary.mode,
+          historicalWindow: summary.historicalWindow,
         },
       })
     })

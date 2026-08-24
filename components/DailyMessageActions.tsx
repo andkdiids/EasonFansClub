@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
+import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 
 export function DailyMessageActions({
   messageId,
@@ -62,8 +63,14 @@ export function DailyMessageActions({
     try {
       const response = await fetch(`/api/daily-messages/${messageId}/like`, { method: 'POST' })
       const data = await response.json().catch(() => ({}))
+      if (response.status === 401 && await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/daily-messages/${messageId}/like`)) {
+        setIsLiked(previousLiked)
+        setLikes(previousLikes)
+        onLikeChange?.({ liked: previousLiked, likeCount: previousLikes })
+        return
+      }
       if (!response.ok) {
-        throw new Error(typeof data.message === 'string' ? data.message : '操作失败，请先登录')
+        throw new Error(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : typeof data.message === 'string' ? data.message : '操作失败，请稍后再试')
       }
       const serverLiked = Boolean(data.isLiked)
       const serverCount = Math.max(Number(data.likeCount || 0), 0)
@@ -90,7 +97,8 @@ export function DailyMessageActions({
     setIsSubmitting(false)
 
     if (!response.ok) {
-      setError(data.message || '操作失败，请先登录')
+      if (response.status === 401 && await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/daily-messages/${messageId}/favorite`)) return
+      setError(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : data.message || '操作失败，请稍后再试')
       return
     }
 
@@ -110,7 +118,8 @@ export function DailyMessageActions({
     const data = await response.json().catch(() => ({}))
     setIsSubmitting(false)
     if (!response.ok) {
-      setError(data.message || '评论失败，请稍后再试')
+      if (response.status === 401 && await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/daily-messages/${messageId}/comments`)) return
+      setError(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : data.message || '评论失败，请稍后再试')
       return
     }
     setComment('')

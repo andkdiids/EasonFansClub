@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { FavoriteButton, LikeButton } from '@/components/PostActions'
+import { confirmSessionForAction } from '@/lib/client-auth'
 
 export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, initialLikeCount, initialFavorited, initialFavoriteCount, initialReplyCount }: Readonly<{
   postId: string
@@ -33,11 +34,8 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, i
     return () => window.removeEventListener('ecfc:post-reply-count', onReplyCount)
   }, [postId])
 
-  function openComposer() {
-    if (!currentUserId) {
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
-      return
-    }
+  async function openComposer() {
+    if (!currentUserId && !(await confirmSessionForAction('/forum/discovery/reply'))) return
     if (isMobile) {
       window.dispatchEvent(new CustomEvent('ecfc:open-post-reply-sheet', { detail: { postId } }))
       return
@@ -51,7 +49,7 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, i
 
   return (
     <div className="forum-discovery-action-bar" data-forum-discovery-action-bar>
-      <button type="button" className="forum-discovery-comment-trigger" onClick={openComposer}>说点什么…</button>
+      <button type="button" className="forum-discovery-comment-trigger" onClick={() => void openComposer()}>说点什么…</button>
       <LikeButton
         postId={postId}
         initialLiked={initialLiked}

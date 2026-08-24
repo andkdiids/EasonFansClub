@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere, normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
+import { requireUser } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 type RouteContext = { params: Promise<{ userId: string }> }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ ok: false, message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const viewer = guard.user
 
   const { userId } = await context.params
   if (!userId || userId === viewer.id) return NextResponse.json({ ok: false, message: '目标好友无效' }, { status: 400, headers: privateHeaders })

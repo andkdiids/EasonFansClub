@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { deleteFromCos } from '@/lib/tencent-cos'
 import { PUBLIC_COS_HOST, toPublicMediaUrl, toStoredMediaUrl } from '@/lib/media-url'
-import { parseBadgeDefinition } from '@/lib/badge-admin'
+import { getBadgeDuplicateMessage, parseBadgeDefinition } from '@/lib/badge-admin'
 import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
 import { BadgeServiceError, badgeAdminSelect, deleteBadgeSafely, writeBadgeAdminAction } from '@/lib/badge-service'
 import { invalidateCurrentUserCache } from '@/lib/auth'
@@ -87,21 +87,24 @@ export async function PATCH(request: Request, context: RouteContext) {
     })
     if (!previous) return NextResponse.json({ message: '更新失败，勋章不存在' }, { status: 404 })
 
-    if (data.seriesId) {
-      const series = await prisma.badgeSeries.findUnique({ where: { id: data.seriesId as string }, select: { id: true, code: true } })
-      if (!series) return NextResponse.json({ message: '关联的勋章系列不存在' }, { status: 400 })
-      if (body.tierEnabled === true) data.tierGroupCode = series.code
-    } else if (body.tierEnabled === true && body.legacyTier === true && previous.tierGroupCode && previous.tierLevel) {
-      data.tierGroupCode = previous.tierGroupCode
-      data.tierLevel = previous.tierLevel
-    } else if (body.tierEnabled === true) return NextResponse.json({ message: '分级勋章必须选择勋章系列' }, { status: 400 })
+    if (body.tierEnabled === true) {
+      const tierSeriesId = typeof data.seriesId === 'string' ? data.seriesId : previous.seriesId
+      if (tierSeriesId) {
+        const series = await prisma.badgeSeries.findUnique({ where: { id: tierSeriesId }, select: { id: true, code: true } })
+        if (!series) return NextResponse.json({ message: '关联的成长系列不存在' }, { status: 400 })
+        data.tierGroupCode = series.code
+      } else if (body.legacyTier === true && previous.tierGroupCode && previous.tierLevel) {
+        data.tierGroupCode = previous.tierGroupCode
+        data.tierLevel = previous.tierLevel
+      } else return NextResponse.json({ message: '成长型分级勋章必须选择成长系列' }, { status: 400 })
+    }
     if (body.tierEnabled === false) {
       data.tierGroupCode = null
       data.tierLevel = null
     }
     const effectiveTierGroupCode = data.tierGroupCode !== undefined ? data.tierGroupCode as string | null : previous.tierGroupCode
     const effectiveTierLevel = data.tierLevel !== undefined ? data.tierLevel as number | null : previous.tierLevel
-    if ((effectiveTierGroupCode === null) !== (effectiveTierLevel === null)) return NextResponse.json({ message: 'Tier 系列编码与等级必须同时填写或同时留空' }, { status: 400 })
+    if ((effectiveTierGroupCode === null) !== (effectiveTierLevel === null)) return NextResponse.json({ message: '成长系列与等级必须同时设置或同时留空' }, { status: 400 })
     const effectiveAvailableFrom = data.availableFrom !== undefined ? data.availableFrom as Date | null : previous.availableFrom
     const effectiveAvailableUntil = data.availableUntil !== undefined ? data.availableUntil as Date | null : previous.availableUntil
     const availabilityError = validateBadgeAvailability(effectiveAvailableFrom, effectiveAvailableUntil)
@@ -274,8 +277,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     const stats = await getBadgeOwnershipStats([badge.id])
     return NextResponse.json({ badge: serializeBadge(badge as unknown as Record<string, unknown>, stats.get(badge.id)) })
   } catch (error) {
-    const duplicated = error instanceof Error && /P2002|Unique constraint/i.test(error.message)
-    return NextResponse.json({ message: duplicated ? '更新失败：名称、code 或标识已经存在' : '更新失败，勋章可能不存在' }, { status: duplicated ? 409 : 404 })
+    const duplicateMessage = getBadgeDuplicateMessage(error, {
+      name: typeof data.name === 'string' ? data.name : undefined,
+      tierLevel: typeof data.tierLevel === 'number' ? data.tierLevel : null,
+    })
+    return NextResponse.json({ message: duplicateMessage || '更新失败，勋章可能不存在' }, { status: duplicateMessage ? 409 : 404 })
   }
 }
 

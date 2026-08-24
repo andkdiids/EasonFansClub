@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { UiIcon } from '@/components/UiIcon'
+import { EcenterEditButton, EcenterShortcutEditorPanel } from './EcenterShortcutEditor'
 import type { EcenterFeatureItem } from '@/lib/ecenter-features'
 import { isAppNavigationActive, primaryNavigation } from './navigation'
 
@@ -18,11 +19,16 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
   const pathname = usePathname()
   const router = useRouter()
   const [centerOpen, setCenterOpen] = useState(false)
+  const [centerEditing, setCenterEditing] = useState(false)
+  const [userFeatures, setUserFeatures] = useState<readonly EcenterFeatureItem[]>(ecenterFeatures)
   const pendingHref = useRef('')
   const items = primaryNavigation.filter((item) => item.mobile)
   const first = items.slice(0, 2)
   const last = items.slice(2)
-  const menuItems = ecenterFeatures.filter((item) => item.showInCenter && (!item.requiresAdmin || canAccessAdmin))
+  useEffect(() => setUserFeatures(ecenterFeatures), [ecenterFeatures])
+
+  const fallbackMenuItems = ecenterFeatures.filter((item) => !item.hidden && item.showInCenter && (!item.requiresAdmin || canAccessAdmin))
+  const menuItems = userFeatures.length > 0 ? userFeatures.filter((item) => !item.hidden && item.showInCenter && (!item.requiresAdmin || canAccessAdmin)) : fallbackMenuItems
   const centerActive = menuItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
   const renderItem = (item: (typeof items)[number]) => <Link key={item.href} href={item.href} aria-current={isAppNavigationActive(pathname, item) ? 'page' : undefined} className={item.showsUnread ? 'mobile-notifications' : undefined}>
     <UiIcon name={item.icon} />{item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}<span>{item.label}</span>
@@ -69,6 +75,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
   }, [centerOpen, router])
 
   useEffect(() => setCenterOpen(false), [pathname])
+  useEffect(() => setCenterEditing(false), [pathname])
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return
@@ -105,12 +112,14 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
 
   function openCenter() {
     if (centerOpen) return
+    setCenterEditing(false)
     window.dispatchEvent(new Event('friend-dock:close'))
     window.history.pushState({ ...window.history.state, easonCenterSheet: true }, '')
     setCenterOpen(true)
   }
 
   function closeCenter() {
+    setCenterEditing(false)
     pendingHref.current = ''
     if (window.history.state?.easonCenterSheet) window.history.back()
     else setCenterOpen(false)
@@ -157,16 +166,24 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
       />
       <section className="mobile-center-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-center-title">
         <header>
-          <div><p>EASON FANS CLUB</p><h2 id="mobile-center-title">E院中心</h2></div>
-          <button type="button" onClick={closeCenter} aria-label="关闭 E院中心">×</button>
+          <div><p>EASON FANS CLUB</p><h2 id="mobile-center-title">{centerEditing ? '编辑 E院中心' : 'E院中心'}</h2></div>
+          <div className="mobile-center-header-actions">
+            {!centerEditing ? <EcenterEditButton onClick={() => setCenterEditing(true)}>编辑</EcenterEditButton> : null}
+            <button type="button" onClick={closeCenter} aria-label="关闭 E院中心">×</button>
+          </div>
         </header>
-        <nav aria-label="E院中心功能">
+        {centerEditing ? <EcenterShortcutEditorPanel
+          initialFeatures={userFeatures}
+          variant="mobile"
+          onSaved={(features) => setUserFeatures(features)}
+          onDone={() => setCenterEditing(false)}
+        /> : <nav aria-label="E院中心功能">
           {menuItems.map((item) => <button type="button" key={item.featureKey} onClick={() => navigateFromCenter(item.href)}>
-            <span className="mobile-center-item-icon"><UiIcon name={item.icon} /></span>
-            <span>{item.label}</span>
-            {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
-          </button>)}
-        </nav>
+              <span className="mobile-center-item-icon"><UiIcon name={item.icon} /></span>
+              <span>{item.label}</span>
+              {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+            </button>)}
+        </nav>}
       </section>
     </>,
     document.body,

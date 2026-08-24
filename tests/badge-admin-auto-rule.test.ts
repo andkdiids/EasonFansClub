@@ -168,17 +168,21 @@ test('preview is read-only, permission protected and available from the rule are
 test('backfill requires confirmation, saved badge state and limited-badge protection', () => {
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   const engine = read('lib/badge-rule-engine.ts')
-  assert.match(manager, /window\.confirm\(`将为当前符合/)
+  assert.match(manager, /window\.confirm\(`将为\$\{period\}当前符合/)
   assert.match(manager, /请先保存勋章，再执行自动补发/)
-  assert.match(manager, /限定勋章不可自动补发/)
-  assert.match(engine, /限定勋章没有可靠的历史达标时间，不能使用自动历史补发/)
+  assert.match(manager, /扫描限定期补发/)
+  assert.match(manager, /需手动补发/)
+  assert.match(engine, /HISTORICAL_WINDOW/)
+  assert.match(read('lib/badge-historical.ts'), /该规则无法可靠判断限定期历史资格/)
 })
 
 test('Tier and availability controls are optional and clear fields when disabled', () => {
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   assert.match(manager, /tierEnabled/)
   assert.match(manager, /limitedEnabled/)
-  assert.match(manager, /tierLevel: event\.target\.value === 'SERIES'/)
+  assert.match(manager, /这是成长型分级勋章/)
+  assert.match(manager, /Array\.from\(\{ length: 99/)
+  assert.match(read('lib/badge-admin.ts'), /等级必须是 1 到 99 的整数/)
   assert.match(manager, /availableUntil: event\.target\.checked \? draft\.availableUntil : null/)
 })
 

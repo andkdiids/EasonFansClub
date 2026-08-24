@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef } from 'react'
+import { installAuthenticatedFetchGuard } from '@/lib/client-auth'
 
 /**
  * Re-check the HttpOnly session cookie when the app shell is hydrated. The
@@ -12,6 +13,10 @@ import { useEffect, useRef } from 'react'
 export function AuthSessionRestore({ initialUserId }: Readonly<{ initialUserId: string | null }>) {
   const router = useRouter()
   const didRequest = useRef(false)
+
+  useEffect(() => {
+    return installAuthenticatedFetchGuard()
+  }, [])
 
   useEffect(() => {
     if (didRequest.current) return
@@ -28,6 +33,11 @@ export function AuthSessionRestore({ initialUserId }: Readonly<{ initialUserId: 
         if (cancelled || !response.ok) return
         const body = await response.json().catch(() => null) as { user?: { id?: unknown } | null } | null
         if (cancelled) return
+        // Only an explicit `{ user: null }` or a complete user object is
+        // authoritative. A malformed 2xx response must not refresh the shell
+        // into an anonymous state.
+        if (!body || !Object.prototype.hasOwnProperty.call(body, 'user')) return
+        if (body.user !== null && typeof body.user?.id !== 'string') return
         const resolvedUserId = typeof body?.user?.id === 'string' ? body.user.id : null
         if (resolvedUserId !== initialUserId) router.refresh()
       })

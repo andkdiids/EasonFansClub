@@ -6229,3 +6229,58 @@ body:has(.duel-page) .app-page-content {
 @media (min-width:768px) {
   .badge-museum-item-image .badge-visual { width:60px; height:60px; }
 }
+
+/* Per-user E院中心 shortcut editing. The registry still controls metadata;
+   this surface only edits the current user's order and hidden state. */
+.sidebar-section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-right:14px; }
+.sidebar-section-heading .sidebar-section-label { margin:4px 0 0; }
+.ecenter-edit-button { display:inline-flex; min-height:28px; align-items:center; justify-content:center; gap:4px; border:1px solid var(--border); border-radius:2px; padding:3px 7px; color:var(--foreground-muted); background:var(--surface); font-size:10px; font-weight:850; white-space:nowrap; }
+.ecenter-edit-button:hover { color:var(--primary); border-color:var(--primary); background:var(--surface-subtle); }
+.ecenter-edit-button svg { width:13px; height:13px; }
+.ecenter-shortcut-editor { min-width:0; color:var(--foreground); }
+.ecenter-shortcut-editor-sidebar { margin:7px 12px 10px; border:1px solid var(--border); padding:9px; background:var(--surface-subtle); }
+.ecenter-editor-heading { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
+.ecenter-editor-kicker { color:var(--primary); font-size:9px; font-weight:900; letter-spacing:.12em; }
+.ecenter-editor-heading h3 { margin-top:2px; font-size:13px; font-weight:950; }
+.ecenter-editor-done { min-height:30px; border:1px solid var(--primary); border-radius:2px; padding:4px 9px; color:var(--primary); background:var(--surface); font-size:10px; font-weight:900; }
+.ecenter-editor-done:disabled,.ecenter-reset-layout:disabled { cursor:not-allowed; opacity:.55; }
+.ecenter-editor-hint { margin-top:8px; color:var(--foreground-muted); font-size:9px; line-height:1.5; }
+.ecenter-editor-state { margin:9px 0; color:var(--foreground-muted); font-size:10px; line-height:1.5; }
+.ecenter-editor-list { display:flex; min-width:0; flex-direction:column; gap:5px; margin-top:8px; }
+.ecenter-editor-item { display:flex; min-width:0; min-height:42px; align-items:center; gap:6px; border:1px solid var(--border); padding:4px 5px; background:var(--surface); transition:border-color 120ms ease,background 120ms ease,opacity 120ms ease; }
+.ecenter-editor-item.is-dragging { opacity:.48; }
+.ecenter-editor-item.is-drop-target { border-color:var(--primary); background:var(--navigation-active); }
+.ecenter-editor-drag-handle { display:grid; width:28px; min-width:28px; height:32px; place-items:center; color:var(--foreground-muted); font-size:20px; line-height:1; cursor:grab; user-select:none; }
+.ecenter-editor-icon { display:grid; width:26px; min-width:26px; height:26px; place-items:center; color:var(--primary); }
+.ecenter-editor-icon svg { width:16px; height:16px; }
+.ecenter-editor-label { min-width:0; flex:1; overflow:hidden; font-size:10px; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.ecenter-editor-actions { display:flex; flex:none; align-items:center; gap:3px; }
+.ecenter-editor-actions button { display:grid; min-width:30px; min-height:30px; place-items:center; border:1px solid var(--border); border-radius:2px; padding:0 5px; color:var(--foreground-muted); background:var(--surface-subtle); font-size:11px; font-weight:900; }
+.ecenter-editor-actions button:disabled { cursor:not-allowed; opacity:.38; }
+.ecenter-editor-actions button:hover:not(:disabled) { color:var(--primary); border-color:var(--primary); }
+.ecenter-editor-actions .ecenter-editor-hide { min-width:auto; color:var(--danger); font-size:9px; }
+.ecenter-hidden-features { margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+.ecenter-hidden-features summary { color:var(--foreground-muted); font-size:10px; font-weight:900; cursor:pointer; }
+.ecenter-hidden-features>div { display:flex; flex-direction:column; gap:5px; margin-top:6px; }
+.ecenter-hidden-feature { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; border:1px dashed var(--border); padding:5px; font-size:10px; }
+.ecenter-hidden-feature>span { display:flex; min-width:0; align-items:center; gap:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ecenter-hidden-feature svg { width:14px; min-width:14px; color:var(--foreground-muted); }
+.ecenter-hidden-feature button,.ecenter-reset-layout { border:0; padding:2px 0; color:var(--primary); background:transparent; font-size:9px; font-weight:900; white-space:nowrap; }
+.ecenter-editor-footer { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; margin-top:9px; }
+.ecenter-editor-footer p { min-width:0; flex:1; overflow:hidden; color:var(--foreground-muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+.mobile-center-header-actions { display:flex; align-items:center; gap:6px; }
+.mobile-center-header-actions .ecenter-edit-button { width:auto; min-height:32px; border-radius:2px; padding-inline:7px; font-size:10px; }
+.ecenter-shortcut-editor-mobile { margin-top:0; }
+.ecenter-shortcut-editor-mobile .ecenter-editor-list { max-height:calc(100dvh - 270px); overflow-y:auto; overscroll-behavior:contain; padding-right:2px; }
+.ecenter-shortcut-editor-mobile .ecenter-editor-item { min-height:48px; }
+.ecenter-shortcut-editor-mobile .ecenter-editor-drag-handle { width:34px; min-width:34px; height:40px; font-size:22px; }
+.ecenter-shortcut-editor-mobile .ecenter-editor-actions button { min-width:44px; min-height:44px; }
+.ecenter-shortcut-editor-mobile .ecenter-editor-actions .ecenter-editor-hide { min-width:44px; }
+
+@media (max-width:767px) {
+  .sidebar-section-heading { padding-right:0; }
+  .ecenter-editor-heading h3 { font-size:16px; }
+  .ecenter-editor-hint { font-size:10px; }
+  .ecenter-editor-footer { align-items:flex-start; flex-direction:column; }
+  .ecenter-editor-footer p { width:100%; white-space:normal; }
+}

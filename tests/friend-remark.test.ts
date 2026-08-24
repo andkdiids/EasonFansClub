@@ -19,7 +19,7 @@ test('FriendRemark 使用单向 owner/friend 关系并提供唯一约束', () =>
 test('备注 API 只允许有效好友本人修改，空值删除备注', () => {
   const route = read('app/api/friends/[userId]/remark/route.ts')
 
-  assert.match(route, /getCurrentUser\(\)/)
+  assert.match(route, /requireUser\(\)/)
   assert.match(route, /userId === viewer\.id/)
   assert.match(route, /prisma\.friendship\.findUnique/)
   assert.match(route, /if \(!friendship \|\| block\)/)

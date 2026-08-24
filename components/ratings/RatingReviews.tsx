@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatRatingCount, type RatingReviewSort } from '@/lib/rating-types'
 import type { RatingReviewView } from '@/lib/rating-service'
+import { confirmSessionForAction } from '@/lib/client-auth'
 import { RatingStars } from './RatingStars'
 
 function formatReviewDate(value: string) {
@@ -27,8 +28,7 @@ export function RatingReviews({ reviews, sort, loggedIn, nextPath }: Readonly<{ 
   async function toggleLike(reviewId: string) {
     if (pendingId) return
     if (!loggedIn) {
-      window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`)
-      return
+      if (!(await confirmSessionForAction('/ratings/reviews/like', nextPath))) return
     }
     setPendingId(reviewId)
     setError('')

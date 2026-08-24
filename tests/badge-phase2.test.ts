@@ -150,8 +150,11 @@ test('disabled badges are rejected by the central grant service', () => {
   assert.match(read('lib/badge-service.ts'), /if \(!badge\.isEnabled \|\| !badge\.isActive\) throw new BadgeServiceError\('BADGE_DISABLED'/)
 })
 
-test('limited badge backfill refuses to guess historical attainment time', () => {
-  assert.match(read('lib/badge-rule-engine.ts'), /限定勋章没有可靠的历史达标时间，不能使用自动历史补发/)
+test('limited badge backfill uses an explicit historical capability instead of guessing', () => {
+  assert.match(read('lib/badge-rules.ts'), /supportsHistoricalBackfill: boolean/)
+  assert.match(read('lib/badge-rule-engine.ts'), /HISTORICAL_WINDOW/)
+  assert.match(read('lib/badge-historical.ts'), /getHistoricalQualificationWindow/)
+  assert.match(read('lib/badge-rule-engine.ts'), /该规则无法可靠判断限定期历史资格/)
 })
 
 test('backfill stays within the 100 to 500 batch limit', () => {
@@ -172,6 +175,7 @@ test('rule preview reads bounded user pages', () => {
   const preview = engine.slice(engine.indexOf('export async function previewBadgeRule'))
   assert.match(preview, /take: BACKFILL_BATCH_MAX/)
   assert.match(preview, /getBatchBadgeMetrics\(users, type, badge\.BadgeRule\.configJson\)/)
+  assert.match(preview, /getBatchHistoricalBadgeMetrics\(users, type, badge\.BadgeRule\.configJson, historicalWindow\)/)
   assert.match(preview, /eligibleIds\.length - ownedEligibleCount/)
   assert.doesNotMatch(preview, /pendingCount: Math\.max\(0, eligibleCount - ownedCount\)/)
 })
@@ -193,8 +197,8 @@ test('series parser only requires a business name and keeps code internal', () =
 })
 
 test('tier parser requires a positive bounded level', () => {
-  assert.match(String(parseBadgeDefinition({ name: 'A', grantType: 'MANUAL', tierEnabled: true, tierLevel: 0 }).error), /阶段/)
-  assert.equal(parseBadgeDefinition({ name: 'A', grantType: 'MANUAL', tierEnabled: true, tierLevel: 2 }).error, undefined)
+  assert.match(String(parseBadgeDefinition({ name: 'A', grantType: 'MANUAL', tierEnabled: true, tierLevel: 0 }).error), /等级/)
+  assert.equal(parseBadgeDefinition({ name: 'A', grantType: 'MANUAL', tierEnabled: true, tierLevel: 2, seriesId: 'series-1' }).error, undefined)
 })
 
 test('legacy AUTO badges without BadgeRule remain editable', () => {

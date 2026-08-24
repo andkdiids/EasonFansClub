@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
+import { confirmSessionForAction, redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 
 type EasMusicLikeType = 'song' | 'album'
 
@@ -57,10 +57,7 @@ export function EasMusicLikeButton({ type, targetId, initialLiked, initialCount,
 
   async function toggleLike() {
     if (isSubmitting) return
-    if (!loggedIn) {
-      window.location.assign(`/login?next=${encodeURIComponent(currentPath())}`)
-      return
-    }
+    if (!loggedIn && !(await confirmSessionForAction(`easmusic.like.${type}`, currentPath()))) return
 
     const previousLiked = liked
     const previousCount = count
@@ -83,7 +80,7 @@ export function EasMusicLikeButton({ type, targetId, initialLiked, initialCount,
         setCount(previousCount)
         return
       }
-      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '点赞操作失败，请稍后重试')
+      if (!response.ok) throw new Error(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : typeof data.message === 'string' ? data.message : '点赞操作失败，请稍后重试')
 
       const serverLiked = data.liked === true
       const serverCount = Number(data.likeCount)

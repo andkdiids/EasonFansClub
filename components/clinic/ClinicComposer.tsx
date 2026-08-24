@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { clinicCategoryOptions, clinicIdentityOptions, clinicNeedOptions } from '@/lib/clinic-config'
+import { confirmSessionForAction } from '@/lib/client-auth'
 import type { ClinicCategory, ClinicIdentityMode, ClinicNeedType } from '@prisma/client'
 
 export function ClinicComposer({ isAuthenticated }: Readonly<{ isAuthenticated: boolean }>) {
@@ -17,8 +18,7 @@ export function ClinicComposer({ isAuthenticated }: Readonly<{ isAuthenticated: 
 
   async function submit() {
     if (!isAuthenticated) {
-      router.push(`/login?redirect=${encodeURIComponent('/clinic/new')}`)
-      return
+      if (!(await confirmSessionForAction('clinic.composer.submit', '/clinic/new'))) return
     }
     if (saving) return
     setSaving(true)

@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { decideFriendRequest } from '@/lib/friends'
 import { getFriendRequestNotificationKey } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/friends/requests/decision',
     ip: { limit: 60, windowSeconds: 60 * 60 },

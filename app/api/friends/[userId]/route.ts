@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
+import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -11,8 +11,9 @@ type RouteContext = { params: Promise<{ userId: string }> }
  * notification, message, or historical content is created or deleted here.
  */
 export async function DELETE(_request: Request, context: RouteContext) {
-  const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ ok: false, message: '请先登录' }, { status: 401 })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const viewer = guard.user
 
   const { userId } = await context.params
   if (!userId || userId === viewer.id) {

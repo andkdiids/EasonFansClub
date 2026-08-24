@@ -1,8 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { sanitizeText } from '@/lib/security'
+import { requireUser, sanitizeText } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const FRIEND_GROUP_NAME_MAX_LENGTH = 30
@@ -18,8 +17,9 @@ function parseGroupName(value: unknown) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
   const { groupId } = await context.params
   const parsed = parseGroupName((await request.json().catch(() => null))?.name)
   if (parsed.error) return NextResponse.json({ message: parsed.error }, { status: 400, headers: privateHeaders })
@@ -42,8 +42,9 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
   const { groupId } = await context.params
   const deleted = await prisma.friendGroup.deleteMany({ where: { id: groupId, ownerId: user.id } })
   if (!deleted.count) return NextResponse.json({ message: '分组不存在' }, { status: 404, headers: privateHeaders })

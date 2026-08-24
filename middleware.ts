@@ -167,7 +167,7 @@ async function tryVerifyToken(token: string, request: NextRequest): Promise<Toke
   try {
     const { payload } = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] })
     if (typeof payload.id !== 'string' || !payload.id.trim()) {
-      logSessionInvalid('PAYLOAD_INVALID', request, token)
+      await logSessionInvalid('PAYLOAD_INVALID', request, token)
       return { session: null, internalError: false, reason: 'TOKEN_INVALID' }
     }
     const exp = typeof payload.exp === 'number' ? payload.exp : 0
@@ -186,30 +186,34 @@ async function tryVerifyToken(token: string, request: NextRequest): Promise<Toke
     // 明确区分「已过期」与「签名/格式错误」。JOSE 自身的错误属于用户
     // Cookie 无效；非 JOSE 的未知异常属于认证服务内部故障，不能返回 401。
     if (error instanceof joseErrors.JWTExpired) {
-      logSessionInvalid('SESSION_EXPIRED', request, token)
+      await logSessionInvalid('SESSION_EXPIRED', request, token)
       return { session: null, internalError: false, reason: 'TOKEN_EXPIRED' }
     }
     if (error instanceof joseErrors.JOSEError) {
-      logSessionInvalid('INVALID_SIGNATURE', request, token)
+      await logSessionInvalid('INVALID_SIGNATURE', request, token)
       return { session: null, internalError: false, reason: 'TOKEN_INVALID' }
     }
-    logSessionInvalid('VERIFICATION_ERROR', request, token)
+    await logSessionInvalid('VERIFICATION_ERROR', request, token)
     return { session: null, internalError: true, reason: 'VERIFY_FAILED' }
   }
 }
 
-function sessionTokenFingerprint(token: string) {
-  if (token.length <= 12) return '***'
-  return `${token.slice(0, 4)}...${token.slice(-8)}`
+async function sessionTokenFingerprint(token: string) {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+    return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('').slice(0, 16)
+  } catch {
+    return 'unavailable'
+  }
 }
 
-function logSessionInvalid(reason: string, request: NextRequest, token?: string) {
+async function logSessionInvalid(reason: string, request: NextRequest, token?: string) {
   console.warn('[AUTH_SESSION_INVALID]', JSON.stringify({
     reason,
     path: request.nextUrl.pathname,
     method: request.method,
     hostname: request.nextUrl.hostname,
-    tokenHash: token ? sessionTokenFingerprint(token) : undefined,
+    tokenHash: token ? await sessionTokenFingerprint(token) : undefined,
     userAgent: request.headers.get('user-agent')?.slice(0, 200) || undefined,
     at: new Date().toISOString(),
   }))

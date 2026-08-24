@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
+import { requireUser } from '@/lib/security'
 import { activeUserWhere, normalizeFriendPair } from '@/lib/friends'
 import { invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { prisma } from '@/lib/prisma'
@@ -7,8 +7,9 @@ import { prisma } from '@/lib/prisma'
 type RouteContext = { params: Promise<{ userId: string }> }
 
 export async function POST(_request: Request, context: RouteContext) {
-  const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ ok: false, message: '请先登录' }, { status: 401 })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const viewer = guard.user
 
   const { userId } = await context.params
   if (!userId || userId === viewer.id) {
@@ -46,8 +47,9 @@ export async function POST(_request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ ok: false, message: '请先登录' }, { status: 401 })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const viewer = guard.user
 
   const { userId } = await context.params
   if (!userId || userId === viewer.id) {

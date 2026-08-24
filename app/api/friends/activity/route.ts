@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
+import { requireUser } from '@/lib/security'
 import { getFriendIds } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
@@ -25,8 +25,9 @@ function parseDate(value: string | null, endOfDay = false) {
 }
 
 export async function GET(request: Request) {
-  const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const viewer = guard.user
 
   const params = new URL(request.url).searchParams
   const page = positiveInteger(params.get('page'), 1)

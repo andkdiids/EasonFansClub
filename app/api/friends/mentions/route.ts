@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { activeUserWhere } from '@/lib/friends'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const MENTION_HISTORY_DAYS = 90
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  const guard = await requireUser()
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/friends/mentions',
     ip: { limit: 120, windowSeconds: 60 },

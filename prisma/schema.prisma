@@ -3167,6 +3167,20 @@ model EcenterFeatureSetting {
   @@index([sortOrder, isEnabled])
 }
 
+model UserCenterShortcutPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  itemKey   String
+  sortOrder Int      @default(0)
+  hidden    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemKey])
+  @@index([userId, sortOrder])
+}
+
 model SmsCode {
   id        String    @id @default(cuid())
   phone     String
@@ -3449,6 +3463,7 @@ model User {
   RatingReview                                           RatingReview[]
   RatingReviewLike                                       RatingReviewLike[]
   PersonalRanking                                        PersonalRanking[]
+  UserCenterShortcutPreference                           UserCenterShortcutPreference[]
   AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
   PostReviewedBy                                         Post[]                         @relation("PostReviewedBy")

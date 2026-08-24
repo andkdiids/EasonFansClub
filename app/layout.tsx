@@ -46,7 +46,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     hasAdminPermission(sessionUser).catch(() => false),
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
   ]) : [null, emptyUnreadSummary, false, false, fallbackGrowth]
-  const ecenterFeatures = sessionUser ? await getEcenterFeaturesForUser(Boolean(canAccessAdmin)) : []
+  const ecenterFeatures = sessionUser ? await getEcenterFeaturesForUser(Boolean(canAccessAdmin), sessionUser.id) : []
   const logoUrl = publicImageUrl(appearance?.images.navLogoUrl || appearance?.images.logoUrl)
   const shellUser = sessionUser ? {
     id: sessionUser.id,

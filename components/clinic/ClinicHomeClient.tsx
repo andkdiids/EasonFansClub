@@ -2,10 +2,10 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Pagination } from '@/components/ui/Pagination'
 import { UiIcon } from '@/components/UiIcon'
 import { clinicCategoryOptions, type ClinicSort } from '@/lib/clinic-config'
+import { confirmSessionForAction } from '@/lib/client-auth'
 import type { ClinicCategory } from '@prisma/client'
 import type { ClinicPublicRecord } from '@/lib/clinic-service'
 import { ClinicRecordCard } from './ClinicRecordCard'
@@ -45,7 +45,6 @@ export function ClinicHomeClient({
   initialSort: ClinicSort
   isAuthenticated: boolean
 }>) {
-  const router = useRouter()
   const [data, setData] = useState(initialData)
   const [category, setCategory] = useState<ClinicCategory | undefined>(initialCategory)
   const [sort, setSort] = useState<ClinicSort>(initialSort)
@@ -84,14 +83,13 @@ export function ClinicHomeClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, sort])
 
-  function requireLogin() {
+  async function requireLogin() {
     if (isAuthenticated) return true
-    router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
-    return false
+    return confirmSessionForAction('clinic.home.action', window.location.pathname)
   }
 
   async function handleAspirin(record: ClinicPublicRecord) {
-    if (!requireLogin() || aspirinPendingId === record.id) return
+    if (!(await requireLogin()) || aspirinPendingId === record.id) return
     const active = record.viewerHasAspirin
     setAspirinPendingId(record.id)
     setActionMessage('')
@@ -107,6 +105,10 @@ export function ClinicHomeClient({
     } finally {
       setAspirinPendingId(null)
     }
+  }
+
+  async function openReport(target: { recordId: string }) {
+    if (await requireLogin()) setReportTarget(target)
   }
 
   function changeCategory(next: ClinicCategory | undefined) {
@@ -156,7 +158,7 @@ export function ClinicHomeClient({
       {loading && !data.items.length ? <div className="clinic-loading-state">正在读取候诊记录…</div> : null}
       {!loading && !data.items.length ? <section className="clinic-empty-state"><UiIcon name="stethoscope" /><p>今天这里还没有患者挂号。</p><Link href="/clinic/new" className="clinic-secondary-button">来做第一位患者</Link></section> : null}
       <section className="clinic-record-list" aria-live="polite">
-        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} returnHref={listReturnHref} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { if (requireLogin()) setReportTarget(target) }} />)}
+        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} returnHref={listReturnHref} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { void openReport(target) }} />)}
       </section>
       {actionMessage ? <p className="clinic-inline-message clinic-action-message" role="status">{actionMessage}</p> : null}
       {data.totalPages > 1 ? <Pagination currentPage={data.page} totalPages={data.totalPages} onPageChange={(page) => { syncClinicListUrl(buildClinicListHref(page, category, sort)); void load(page) }} disabled={loading} ariaLabel="门诊病历分页" className="clinic-pagination" /> : null}
