@@ -22,7 +22,12 @@ type UserDisplayNameProps = {
 const GOLD_START = '#b88a3b'
 const GOLD_MID = '#f3d98b'
 const GOLD_END = '#9b6a24'
-type BadgeNicknameStyle = CSSProperties & { '--badge-name-fallback'?: string }
+type BadgeNicknameStyle = CSSProperties & {
+  '--badge-name-fallback'?: string
+  '--badge-gradient-start'?: string
+  '--badge-gradient-mid'?: string
+  '--badge-gradient-end'?: string
+}
 
 export function badgeEffectClass(effectType: EquippedBadgeView['effectType']) {
   if (effectType === 'SHINE') return 'badge-effect-shine'
@@ -53,20 +58,19 @@ export function badgeNicknameStyle(badge?: UserDisplayNameBadge | null): BadgeNi
   }
   if (badge.nicknameEffect === 'GOLD') {
     return {
-      backgroundImage: `linear-gradient(105deg, ${GOLD_END} 0%, ${GOLD_START} 22%, ${GOLD_MID} 48%, ${GOLD_START} 72%, ${GOLD_END} 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
       '--badge-name-fallback': GOLD_START,
+      '--badge-gradient-start': GOLD_END,
+      '--badge-gradient-mid': GOLD_MID,
+      '--badge-gradient-end': GOLD_END,
     }
   }
   if (badge.nicknameEffect === 'GRADIENT') {
     const start = normalizeBadgeColor(badge.nicknameGradientStart) || '#0f5f78'
     const end = normalizeBadgeColor(badge.nicknameGradientEnd) || '#7c3aed'
     return {
-      backgroundImage: `linear-gradient(90deg, ${start}, ${end})`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
       '--badge-name-fallback': start,
+      '--badge-gradient-start': start,
+      '--badge-gradient-end': end,
     }
   }
   return {
@@ -92,7 +96,11 @@ export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: 
       {badge.effectType === 'SPARKLE' ? <span className="badge-visual-sparkles" aria-hidden="true"><i /><i /><i /><i /></span> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={badge.imageUrl || ''} alt={badge.name} onError={() => { if (process.env.NODE_ENV === 'development') console.warn('[badge-image] failed to load', badge.imageUrl); setFailedSource(badge.imageUrl) }} className="user-badge-image" loading="lazy" />
-      {badge.effectType === 'SHINE' ? <span className="badge-visual-shine" aria-hidden="true" /> : null}
+      {badge.effectType === 'SHINE' ? (
+        // A duplicate transparent PNG lets the shine follow the badge alpha instead of painting a rectangle.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={badge.imageUrl || ''} alt="" aria-hidden="true" className="badge-visual-shine" loading="lazy" decoding="async" onError={(event) => { event.currentTarget.style.display = 'none' }} />
+      ) : null}
     </span>
   )
 }
