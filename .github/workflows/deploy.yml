@@ -119,13 +119,14 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           APP_DIR: ${{ env.APP_DIR }}
+          DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: APP_DIR
-          command_timeout: 2m
+          envs: APP_DIR,DEPLOY_SHA
+          command_timeout: 10m
           script: |
             set -euo pipefail
 
@@ -137,9 +138,75 @@ jobs:
             test -w "${APP_DIR}/releases"
             test -w "${APP_DIR}/shared"
 
+            if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo 'DEPLOY_SHA is not a 40-character hexadecimal Git SHA.' >&2
+              exit 1
+            fi
+
+            if [ ! -e "${APP_DIR}/shared/.env" ] && [ ! -L "${APP_DIR}/shared/.env" ]; then
+              if [ ! -s "${APP_DIR}/.env" ]; then
+                echo 'Neither shared/.env nor the legacy APP_DIR/.env exists.' >&2
+                exit 1
+              fi
+              cp -p -- "${APP_DIR}/.env" "${APP_DIR}/shared/.env"
+              echo 'Copied the legacy .env into shared/.env.'
+            fi
+
+            if [ ! -e "${APP_DIR}/current" ] && [ ! -L "${APP_DIR}/current" ]; then
+              bootstrap_release="${APP_DIR}/releases/bootstrap"
+              bootstrap_paths=(
+                app
+                components
+                hooks
+                lib
+                prisma
+                public
+                types
+                server.ts
+                package.json
+                pnpm-lock.yaml
+                pnpm-workspace.yaml
+                next.config.ts
+                tsconfig.json
+                middleware.ts
+                postcss.config.js
+                tailwind.config.ts
+                eslint.config.mjs
+              )
+
+              if [ -e "${bootstrap_release}" ] || [ -L "${bootstrap_release}" ]; then
+                echo "Bootstrap release already exists while current is missing: ${bootstrap_release}" >&2
+                echo 'Refusing to overwrite a partial bootstrap release.' >&2
+                exit 1
+              fi
+
+              for bootstrap_path in "${bootstrap_paths[@]}"; do
+                if [ ! -e "${APP_DIR}/${bootstrap_path}" ] && [ ! -L "${APP_DIR}/${bootstrap_path}" ]; then
+                  echo "Legacy deployment is missing required path: ${APP_DIR}/${bootstrap_path}" >&2
+                  exit 1
+                fi
+              done
+
+              install -d -m 755 "${bootstrap_release}"
+              for bootstrap_path in "${bootstrap_paths[@]}"; do
+                cp -a -- "${APP_DIR}/${bootstrap_path}" "${bootstrap_release}/${bootstrap_path}"
+              done
+              for optional_path in .next node_modules; do
+                if [ -d "${APP_DIR}/${optional_path}" ]; then
+                  cp -a -- "${APP_DIR}/${optional_path}" "${bootstrap_release}/${optional_path}"
+                fi
+              done
+
+              ln -s -- "${APP_DIR}/shared/.env" "${bootstrap_release}/.env"
+              printf '%s\n' "${DEPLOY_SHA}" > "${bootstrap_release}/.deployed-sha"
+              touch "${bootstrap_release}/.bootstrap-release"
+              ln -s -- "${bootstrap_release}" "${APP_DIR}/current"
+              echo "Bootstrapped legacy deployment at ${bootstrap_release}."
+            fi
+
             if [ ! -L "${APP_DIR}/current" ]; then
-              echo 'Production release layout is not initialized: current must be a symlink into releases/.' >&2
-              echo 'Refusing to deploy into the legacy live directory. Bootstrap current/shared manually first.' >&2
+              echo 'Production current must be a symlink into releases/.' >&2
+              echo 'Refusing to deploy into the legacy live directory.' >&2
               exit 1
             fi
             current_target="$(readlink -f -- "${APP_DIR}/current")"
@@ -476,6 +543,11 @@ jobs:
             release_id="$(date -u +%Y%m%d%H%M%S)-${DEPLOY_SHA:0:12}"
             release_dir="${releases_dir}/${release_id}"
             previous_target="$(readlink -f -- "${current_link}")"
+            bootstrap_release="${releases_dir}/bootstrap"
+            bootstrap_mode=false
+            if [ "${previous_target}" = "${bootstrap_release}" ] && [ -f "${previous_target}/.bootstrap-release" ]; then
+              bootstrap_mode=true
+            fi
             archive_path="${incoming_dir}/${PACKAGE_NAME}"
             checksum_path="${archive_path}.sha256"
             deployment_succeeded=false
@@ -502,33 +574,69 @@ jobs:
             test -w "${releases_dir}"
 
             log_step "2/8" "Verify release layout and PM2 path"
-            if ! pm2_snapshot="$({ pm2 jlist || exit 1; } | node -e '
-              let raw = "";
-              process.stdin.on("data", (chunk) => { raw += chunk; });
-              process.stdin.on("end", () => {
-                try {
-                  const appName = process.argv[1];
-                  const app = JSON.parse(raw).find((entry) => entry.name === appName);
-                  if (!app) process.exit(2);
-                  const env = app.pm2_env || {};
-                  process.stdout.write(JSON.stringify({
-                    cwd: env.pm_cwd || "",
-                    script: env.pm_exec_path || "",
-                    execMode: env.exec_mode || "",
-                    instances: Number(env.instances || 1),
-                  }));
-                } catch {
-                  process.exit(3);
-                }
-              });
-            ' "${PM2_APP_NAME}")"; then
-              echo "PM2 app ${PM2_APP_NAME} is missing; configure it to run from ${current_link} before deployment." >&2
-              exit 1
+            read_pm2_snapshot() {
+              pm2_snapshot="$({ pm2 jlist || exit 1; } | node -e '
+                let raw = "";
+                process.stdin.on("data", (chunk) => { raw += chunk; });
+                process.stdin.on("end", () => {
+                  try {
+                    const appName = process.argv[1];
+                    const app = JSON.parse(raw).find((entry) => entry.name === appName);
+                    if (!app) process.exit(2);
+                    const env = app.pm2_env || {};
+                    process.stdout.write(JSON.stringify({
+                      cwd: env.pm_cwd || "",
+                      script: env.pm_exec_path || "",
+                      execMode: env.exec_mode || "",
+                      instances: Number(env.instances || 1),
+                    }));
+                  } catch {
+                    process.exit(3);
+                  }
+                });
+              ' "${PM2_APP_NAME}")"
+              pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
+              pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
+              pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
+              pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
+            }
+
+            pm2_is_current_release() {
+              [ "${pm2_cwd}" = "${current_link}" ] || return 1
+              case "${pm2_script}" in
+                "${current_link}/"*|server.ts) return 0 ;;
+                *) return 1 ;;
+              esac
+            }
+
+            migrate_legacy_pm2() {
+              test -f "${current_link}/server.ts"
+              echo "Migrating PM2 ${PM2_APP_NAME} to ${current_link}."
+              pm2 delete "${PM2_APP_NAME}" || true
+              (
+                cd "${current_link}"
+                pm2 start server.ts \
+                  --name "${PM2_APP_NAME}" \
+                  --interpreter ./node_modules/.bin/tsx \
+                  --cwd "${current_link}" \
+                  --update-env
+              )
+              pm2 save
+            }
+
+            if ! read_pm2_snapshot; then
+              if [ "${bootstrap_mode}" != true ]; then
+                echo "PM2 app ${PM2_APP_NAME} is missing; configure it to run from ${current_link} before deployment." >&2
+                exit 1
+              fi
+              echo "PM2 app ${PM2_APP_NAME} is missing during bootstrap; creating it from ${current_link}."
+              migrate_legacy_pm2
+              read_pm2_snapshot
+            elif [ "${bootstrap_mode}" = true ] && ! pm2_is_current_release; then
+              migrate_legacy_pm2
+              read_pm2_snapshot
             fi
-            pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
-            pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
-            pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
-            pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
+
             if [ "${pm2_cwd}" != "${current_link}" ]; then
               echo "PM2 cwd is not the stable current symlink: ${pm2_cwd}" >&2
               exit 1
