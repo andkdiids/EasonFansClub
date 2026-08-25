@@ -616,7 +616,7 @@ jobs:
             pm2_is_current_release() {
               [ "${pm2_cwd}" = "${current_link}" ] || return 1
               pm2_script_is_npm "${pm2_script}" || return 1
-              [ "${pm2_args}" = "start:server" ]
+              [ "${pm2_args}" = "run start:server" ]
             }
 
             pm2_is_legacy_tsx_deployment() {
@@ -646,9 +646,9 @@ jobs:
                   --name "${PM2_APP_NAME}" \
                   --cwd "${current_link}" \
                   --update-env \
-                  -- start:server
+                  -- run start:server
               ); then
-                echo "Failed to start PM2 ${PM2_APP_NAME} with npm start:server; aborting deployment." >&2
+                echo "Failed to start PM2 ${PM2_APP_NAME} with npm run start:server; aborting deployment." >&2
                 return 1
               fi
               if ! pm2 save; then
@@ -658,7 +658,7 @@ jobs:
             }
 
             migrate_legacy_pm2() {
-              echo "Detected legacy PM2 deployment. Migrating to npm start:server."
+              echo "Detected legacy PM2 deployment. Migrating to npm run start:server."
               if ! pm2 delete "${PM2_APP_NAME}"; then
                 echo "Failed to delete legacy PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
                 return 1
@@ -667,7 +667,7 @@ jobs:
             }
 
             migrate_legacy_tsx_pm2() {
-              echo "Detected legacy TSX PM2 deployment. Migrating to npm start:server."
+              echo "Detected legacy TSX PM2 deployment. Migrating to npm run start:server."
               if ! pm2 delete "${PM2_APP_NAME}"; then
                 echo "Failed to delete legacy TSX PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
                 return 1
@@ -719,7 +719,7 @@ jobs:
               elif ! pm2_script_is_npm "${pm2_script}"; then
                 echo "PM2 script is not npm: ${pm2_script}" >&2
               else
-                echo "PM2 args are not start:server: ${pm2_args}" >&2
+                echo "PM2 args are not run start:server: ${pm2_args}" >&2
               fi
               exit 1
             fi
