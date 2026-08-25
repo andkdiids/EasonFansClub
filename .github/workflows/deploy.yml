@@ -732,7 +732,7 @@ jobs:
 
             reload_pm2() {
               local release_sha="$1"
-              local pm2_status current_realpath expected_current
+              local current_realpath expected_current
               export NODE_ENV=production
               export DEPLOY_SHA="${release_sha}"
               export PORT="${APP_PORT}"
@@ -761,38 +761,13 @@ jobs:
                   ;;
               esac
               test -f ecosystem.config.js
-              if pm2_app_exists; then
-                if ! read_pm2_snapshot; then
-                  echo "Unable to inspect existing PM2 process ${PM2_APP_NAME}." >&2
-                  pm2 delete "${PM2_APP_NAME}" || true
-                  pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero after snapshot recovery." >&2
-                fi
-                if [ -n "${pm2_cwd:-}" ] && pm2_is_current_release; then
-                  echo "Reloading PM2 from ecosystem.config.js."
-                  pm2 reload ecosystem.config.js --update-env || {
-                    echo "PM2 reload failed, trying clean restart." >&2
-                    pm2 delete "${PM2_APP_NAME}" || true
-                    pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero after reload recovery." >&2
-                  }
-                elif [ -n "${pm2_cwd:-}" ]; then
-                  echo "Detected legacy PM2 state; recreating ${PM2_APP_NAME} from ecosystem.config.js."
-                  echo "Legacy PM2 state: cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args}" >&2
-                  pm2 delete "${PM2_APP_NAME}" || true
-                  pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero after legacy migration." >&2
-                fi
-              else
-                pm2_status=$?
-                if [ "${pm2_status}" -eq 1 ]; then
-                  echo "PM2 app ${PM2_APP_NAME} is missing; starting from ecosystem.config.js."
-                else
-                  echo "Unable to read PM2 state cleanly; trying a non-blocking clean start." >&2
-                  pm2 delete "${PM2_APP_NAME}" || true
-                fi
-                pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero while creating the process." >&2
-              fi
-              pm2 save || echo "PM2 save returned non-zero; continuing to runtime health validation." >&2
+              echo "Recreating PM2 ${PM2_APP_NAME} from ecosystem.config.js after current switch."
+              pm2 delete "${PM2_APP_NAME}" || true
+              pm2 start ecosystem.config.js --update-env
+              pm2 save || true
+              sleep 10
               echo "PM2 description after ecosystem operation:"
-              pm2 describe "${PM2_APP_NAME}" || echo "PM2 describe returned non-zero; continuing to runtime health validation." >&2
+              pm2 describe "${PM2_APP_NAME}" || true
               if read_pm2_snapshot && pm2_is_current_release; then
                 echo "PM2 configuration currently matches current release."
               else
@@ -850,15 +825,14 @@ jobs:
               echo "Health check failed; atomically restoring ${previous_target}." >&2
               atomic_switch "${previous_target}"
               if ! reload_pm2 "${previous_sha}"; then
-                echo "Rollback PM2 reload from ecosystem.config.js failed." >&2
+                echo "Rollback PM2 restart from ecosystem.config.js failed." >&2
               fi
               pm2 logs "${PM2_APP_NAME}" --lines 80 --nostream || true
             }
 
-            log_step "7/8" "Atomically switch current and reload PM2"
+            log_step "7/8" "Atomically switch current and restart PM2"
             atomic_switch "${release_dir}"
             reload_pm2 "${DEPLOY_SHA}" || echo "PM2 operation returned non-zero; continuing to settle and validate through health check." >&2
-            sleep 10
             cd "${current_link}"
             print_health_diagnostics
             if ! check_health; then
