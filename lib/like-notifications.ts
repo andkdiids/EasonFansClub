@@ -1,7 +1,9 @@
-import { Prisma } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
+import { logNotificationError } from '@/lib/notification-errors'
+import { safeNotificationTransaction } from '@/lib/notification-transaction'
 
 export type LikeNotificationTargetKind = 'post' | 'reply'
 
@@ -76,7 +78,14 @@ type LikeSnapshot = {
   latest: { userId: string; actorName: string; createdAt: Date } | null
 }
 
-async function loadLikeSnapshot(tx: Prisma.TransactionClient, target: LikeNotificationTarget): Promise<LikeSnapshot> {
+export type LikeNotificationSyncInput = {
+  recipientId: string
+  actorId?: string | null
+  actorName?: string | null
+  target: LikeNotificationTarget
+}
+
+async function loadLikeSnapshot(tx: PrismaClient, target: LikeNotificationTarget): Promise<LikeSnapshot> {
   if (target.kind === 'post') {
     const count = await tx.like.count({ where: { postId: target.id } })
     const latest = await tx.like.findFirst({
@@ -115,18 +124,14 @@ function readState(rows: LikeNotificationRow[]) {
  * table remains authoritative for the current count; Notification only stores
  * the latest actor, read state, and a stable aggregate key.
  */
-export async function syncLikeNotification(
+async function syncLikeNotificationWithSnapshot(
   tx: Prisma.TransactionClient,
-  input: {
-    recipientId: string
-    actorId?: string | null
-    actorName?: string | null
-    target: LikeNotificationTarget
-  },
+  input: LikeNotificationSyncInput,
   action: LikeNotificationAction,
+  snapshot: LikeSnapshot,
 ) {
   const key = getLikeNotificationKey(input.target.kind, input.target.id)
-  const [aggregate, legacy, snapshot] = await Promise.all([
+  const [aggregate, legacy] = await Promise.all([
     tx.notification.findUnique({
       where: { recipientId_key: { recipientId: input.recipientId, key } },
       select: { id: true, isRead: true, readAt: true, actorId: true, createdAt: true },
@@ -136,7 +141,6 @@ export async function syncLikeNotification(
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: { id: true, isRead: true, readAt: true, actorId: true, createdAt: true },
     }),
-    loadLikeSnapshot(tx, input.target),
   ])
 
   const existingRows: LikeNotificationRow[] = [
@@ -182,6 +186,44 @@ export async function syncLikeNotification(
   return notification
 }
 
+/**
+ * Public post-commit entry point. Like/ReplyLike source rows are never loaded
+ * through a caller-owned business transaction.
+ */
+export async function syncLikeNotification(input: LikeNotificationSyncInput, action: LikeNotificationAction) {
+  return syncLikeNotificationSafely(input, action)
+}
+
+/**
+ * Post-commit notification path. The Like/ReplyLike statistics are loaded
+ * before the notification-only transaction, so reconciliation never keeps one
+ * interactive transaction open while it counts source rows.
+ */
+export async function syncLikeNotificationSafely(
+  input: LikeNotificationSyncInput,
+  action: LikeNotificationAction,
+) {
+  const startedAt = Date.now()
+  try {
+    const snapshot = await loadLikeSnapshot(prisma, input.target)
+    return await safeNotificationTransaction(
+      (tx) => syncLikeNotificationWithSnapshot(tx, input, action, snapshot),
+      {
+        operation: 'like-notification-sync',
+        userId: input.recipientId,
+        notificationType: 'LIKE',
+      },
+    )
+  } catch (error) {
+    logNotificationError('like-notification-sync', {
+      durationMs: Date.now() - startedAt,
+      userId: input.recipientId,
+      notificationType: 'LIKE',
+    }, error)
+    return null
+  }
+}
+
 /** Consolidate old one-like-one-notification rows without recreating cleared rows. */
 export async function reconcileLikeNotifications(userId: string) {
   const legacy = await prisma.notification.findMany({
@@ -203,14 +245,15 @@ export async function reconcileLikeNotifications(userId: string) {
   }
   if (!targets.size) return 0
 
-  return prisma.$transaction(async (tx) => {
-    let reconciled = 0
-    for (const target of targets.values()) {
-      const result = await syncLikeNotification(tx, { recipientId: userId, target }, 'reconcile')
-      if (result) reconciled += 1
-    }
-    return reconciled
-  })
+  // Each target gets its own short notification-only transaction. Source Like
+  // counts are read before that transaction, and a single slow/invalid target
+  // is isolated from the rest of the maintenance pass.
+  let reconciled = 0
+  for (const target of targets.values()) {
+    const result = await syncLikeNotificationSafely({ recipientId: userId, target }, 'reconcile')
+    if (result) reconciled += 1
+  }
+  return reconciled
 }
 
 export async function loadLikeNotificationStats(targets: LikeNotificationTarget[]) {

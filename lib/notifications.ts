@@ -21,6 +21,10 @@ const REPLY_UNAVAILABLE_TEXT = '该回复已被删除或不可查看'
 export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system', 'wall'] as const
 export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
+const NOTIFICATION_RECONCILIATION_TTL_MS = 60_000
+const MAX_NOTIFICATION_RECONCILIATION_USERS = 10_000
+const notificationReconciliationInFlight = new Map<string, Promise<void>>()
+const notificationReconciliationLastRun = new Map<string, number>()
 
 const personalTypeLabels: Record<string, string> = {
   REPLY: '回复',
@@ -388,6 +392,46 @@ async function reconcileStalePersonalNotifications(userId: string) {
   }
 }
 
+/**
+ * Reconciliation is maintenance work, not part of an unread read path. Keep
+ * one in-flight job per user and rate-limit subsequent list/read-all calls so
+ * a navbar refresh cannot create a transaction storm.
+ */
+function scheduleNotificationReconciliation(userId: string, source: 'list' | 'read-all') {
+  if (notificationReconciliationInFlight.has(userId)) return
+
+  const now = Date.now()
+  if (notificationReconciliationLastRun.size > MAX_NOTIFICATION_RECONCILIATION_USERS) {
+    for (const [cachedUserId, lastRunAt] of notificationReconciliationLastRun) {
+      if (now - lastRunAt >= NOTIFICATION_RECONCILIATION_TTL_MS) notificationReconciliationLastRun.delete(cachedUserId)
+    }
+    while (notificationReconciliationLastRun.size > MAX_NOTIFICATION_RECONCILIATION_USERS) {
+      const oldestUserId = notificationReconciliationLastRun.keys().next().value as string | undefined
+      if (!oldestUserId) break
+      notificationReconciliationLastRun.delete(oldestUserId)
+    }
+  }
+  const lastRun = notificationReconciliationLastRun.get(userId) || 0
+  if (now - lastRun < NOTIFICATION_RECONCILIATION_TTL_MS) return
+
+  notificationReconciliationLastRun.set(userId, now)
+  const task = (async () => {
+    const [likeResult, staleResult] = await Promise.allSettled([
+      reconcileLikeNotifications(userId),
+      reconcileStalePersonalNotifications(userId),
+    ])
+    if (likeResult.status === 'rejected') {
+      logNotificationError(`${source}.like-reconciliation`, { userId }, likeResult.reason)
+    }
+    if (staleResult.status === 'rejected') {
+      logNotificationError(`${source}.stale-reconciliation`, { userId }, staleResult.reason)
+    }
+  })().finally(() => {
+    notificationReconciliationInFlight.delete(userId)
+  })
+  notificationReconciliationInFlight.set(userId, task)
+}
+
 async function getDirectMessageUnreadCount(userId: string) {
   try {
     const rows = await prisma.$queryRaw<Array<{ unreadCount: bigint | number }>>`
@@ -451,9 +495,8 @@ export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: 
 }
 
 export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
-  void reconcileLikeNotifications(userId).catch((error) => {
-    logNotificationError('unread-summary.like-reconciliation', { userId }, error)
-  })
+  // This endpoint is polled by the navigation/realtime fallback. It must stay
+  // read-only and cheap; reconciliation belongs to the paginated list path.
   const now = new Date()
   const [personalResult, systemResult, directMessageResult] = await Promise.allSettled([
     prisma.$queryRaw<Array<{
@@ -514,16 +557,6 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
   // Direct messages have their own conversation read cursor and are rendered
   // by the notification center as a dedicated entry, not as Notification rows.
   const summary = buildUnreadSummary(personalCounts, systemCount, directMessages)
-  console.info('[notifications.unread-summary]', {
-    userId,
-    total: summary.total,
-    reply: summary.replies,
-    like: summary.likes,
-    request: summary.friendRequests,
-    message: summary.messages,
-    feedback: summary.feedback,
-    system: summary.system,
-  })
   return summary
 }
 
@@ -558,12 +591,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   // Reconciliation cleans up historical notification ghosts, but it is not
   // required to render the current page. Run it in the background so a stale
   // relation or a partially migrated optional table cannot crash the route.
-  void reconcileLikeNotifications(userId).catch((error) => {
-    logNotificationError('list.like-reconciliation', { userId }, error)
-  })
-  void reconcileStalePersonalNotifications(userId).catch((error) => {
-    logNotificationError('list.stale-reconciliation', { userId }, error)
-  })
+  scheduleNotificationReconciliation(userId, 'list')
   const now = new Date()
   const category = parseNotificationCategory(options.category)
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || 20) || 20, 1), MAX_NOTIFICATION_PAGE_SIZE)
@@ -1186,12 +1214,7 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
   // 对账（清理历史幽灵通知 / 点赞聚合）属于维护性工作，不是"全部已读"的必要路径。
   // 列表接口已经在后台异步对账，这里改为后台执行，避免阻塞用户点击的响应时间，
   // 让"全部已读"在一笔事务内完成（一次 UPDATE WHERE isRead=false + 系统通知已读标记）。
-  void reconcileLikeNotifications(userId).catch((error) => {
-    logNotificationError('read-all.like-reconciliation', { userId }, error)
-  })
-  void reconcileStalePersonalNotifications(userId).catch((error) => {
-    logNotificationError('read-all.stale-reconciliation', { userId }, error)
-  })
+  scheduleNotificationReconciliation(userId, 'read-all')
 }
 
 /**

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { feedbackInclude, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 
@@ -20,7 +21,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     return NextResponse.json({ message: '反馈不存在，或你无权查看' }, { status: 404 })
   }
 
-  const [feedbackUpdate, replyUpdate, notificationUpdate] = await prisma.$transaction([
+  const [feedbackUpdate, replyUpdate] = await prisma.$transaction([
     prisma.feedback.updateMany({
       where: { id: feedback.id, userId: guard.user.id, userUnread: true },
       data: { userUnread: false },
@@ -29,7 +30,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
       where: { feedbackId: feedback.id, authorRole: 'ADMIN', isReadByUser: false },
       data: { isReadByUser: true },
     }),
-    prisma.notification.updateMany({
+  ])
+  const notificationUpdate = await safeNotificationWrite(
+    () => prisma.notification.updateMany({
       where: {
         recipientId: guard.user.id,
         isRead: false,
@@ -37,7 +40,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
       },
       data: { isRead: true, readAt: new Date() },
     }),
-  ])
+    { operation: 'feedback-detail-mark-notifications-read', userId: guard.user.id, notificationType: 'FEEDBACK' },
+  )
   if (feedback.userUnread || replyUpdate.count > 0) {
     feedback.userUnread = false
     feedback.FeedbackReply = feedback.FeedbackReply.map((reply) =>
@@ -45,7 +49,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     )
   }
 
-  if (feedbackUpdate.count > 0 || replyUpdate.count > 0 || notificationUpdate.count > 0) {
+  if (feedbackUpdate.count > 0 || replyUpdate.count > 0 || (notificationUpdate?.count || 0) > 0) {
     emitRealtime(guard.user.id, 'feedback', { feedbackId })
   }
 

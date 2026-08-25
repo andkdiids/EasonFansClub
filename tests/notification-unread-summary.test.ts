@@ -47,12 +47,26 @@ test('all unread sources use the same isRead authority and preserve failures', (
   assert.match(service, /isRead: false/)
   assert.match(service, /AND n\.isRead = 0/)
   assert.match(service, /export async function getUnreadNotificationCount\(userId: string\)[\s\S]*getUnreadSummary\(userId\)/)
-  assert.doesNotMatch(layout, /getUnreadSummary\(sessionUser\.id\)\.catch/)
+  assert.match(layout, /getUnreadSummary\(sessionUser\.id\)\.catch/)
+  assert.match(layout, /layout\.unread-summary/)
   assert.match(summaryRoute, /UNREAD_SUMMARY_UNAVAILABLE/)
   assert.match(summaryRoute, /status: 503/)
   assert.match(countRoute, /UNREAD_SUMMARY_UNAVAILABLE/)
   assert.match(provider, /cache: 'no-store'/)
   assert.match(provider, /if \(!response\.ok\) return/)
+})
+
+test('unread-summary stays read-only and reconciliation is deduplicated off the hot path', () => {
+  const service = read('lib/notifications.ts')
+  const summaryStart = service.indexOf('export async function getUnreadSummary')
+  const summaryEnd = service.indexOf('export async function getUnreadNotificationCount')
+  const summary = service.slice(summaryStart, summaryEnd)
+
+  assert.doesNotMatch(summary, /reconcileLikeNotifications|reconcileStalePersonalNotifications/)
+  assert.match(service, /NOTIFICATION_RECONCILIATION_TTL_MS/)
+  assert.match(service, /notificationReconciliationInFlight/)
+  assert.match(service, /scheduleNotificationReconciliation\(userId, 'list'\)/)
+  assert.match(service, /scheduleNotificationReconciliation\(userId, 'read-all'\)/)
 })
 
 test('mark-all-read and clear-all are server-side full-user operations', () => {
