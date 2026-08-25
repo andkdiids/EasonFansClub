@@ -8,6 +8,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -120,7 +121,7 @@ export async function POST(_request: Request, context: RouteContext) {
   const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
   if (committedNotificationData) {
     await safeNotificationWrite(
-      () => prisma.notification.create(committedNotificationData),
+      () => createNotification(committedNotificationData),
       { operation: 'daily-message-like-notification', userId: committedNotificationData.data.recipientId, notificationType: 'LIKE' },
     )
   }

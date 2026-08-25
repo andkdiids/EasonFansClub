@@ -12,6 +12,7 @@ import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, pu
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { upsertNotification } from '@/lib/notification-write'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -377,7 +378,7 @@ export async function POST(request: Request) {
   const committedNotificationData = notificationData as Prisma.NotificationUpsertArgs | null
   if (committedNotificationData) {
     await safeNotificationWrite(
-      () => prisma.notification.upsert(committedNotificationData),
+      () => upsertNotification(committedNotificationData),
       { operation: 'profile-wall-message-notification', userId: committedNotificationData.create.recipientId, notificationType: 'REPLY' },
     )
   }

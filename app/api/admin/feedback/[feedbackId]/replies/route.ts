@@ -5,6 +5,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
   const guard = await requireAdmin('feedback_manage')
@@ -70,7 +71,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
 
   const { updated, replyId } = transactionResult
   await safeNotificationWrite(
-    () => prisma.notification.create({
+    () => createNotification({
       data: {
         type: 'ADMIN',
         title: '你的反馈收到回复',

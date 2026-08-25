@@ -5,6 +5,7 @@ import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
 import type { Prisma, StickerReportReason } from '@prisma/client'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createManyNotifications, createNotification } from '@/lib/notification-write'
 
 /** 选择器可见表情：未隐藏、未下架、所属合集已通过审核。 */
 const VISIBLE_STICKER_WHERE = {
@@ -910,7 +911,7 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
         }),
       ])
       if (!administrators.length) return
-      await prisma.notification.createMany({
+      await createManyNotifications({
         data: administrators.map((administrator) => ({
           recipientId: administrator.id,
           actorId: input.creatorId,
@@ -1024,7 +1025,7 @@ export async function reviewStickerPack(input: {
       ? '已经上架表情商店，快去查看吧！'
       : `原因：${rejectionReason}`
   await safeNotificationWrite(
-    () => prisma.notification.create({
+    () => createNotification({
       data: {
         recipientId: pack.creatorId,
         actorId: input.reviewerId,

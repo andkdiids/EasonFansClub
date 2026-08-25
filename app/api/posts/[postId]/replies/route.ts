@@ -12,6 +12,7 @@ import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createManyNotifications } from '@/lib/notification-write'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -274,7 +275,7 @@ export async function POST(request: Request, { params }: Params) {
   ]
   if (notificationData.length) {
     await safeNotificationWrite(
-      () => prisma.notification.createMany({ data: notificationData, skipDuplicates: true }),
+      () => createManyNotifications({ data: notificationData, skipDuplicates: true }),
       { operation: 'post-reply-notifications', userId: user.id, notificationType: 'REPLY' },
     )
   }

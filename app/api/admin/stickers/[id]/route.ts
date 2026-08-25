@@ -6,6 +6,7 @@ import { requireAdmin, sanitizeText } from '@/lib/security'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +83,7 @@ export async function PATCH(
       ? '已经上架表情商店，可在「我的表情包 → 我创建的表情包」查看详情。'
       : `原因：${updated.rejectionReason || '内容不符合规范'}`
     await safeNotificationWrite(
-      () => prisma.notification.create({
+      () => createNotification({
         data: {
           recipientId: updated.creatorId,
           actorId: guard.user.id,

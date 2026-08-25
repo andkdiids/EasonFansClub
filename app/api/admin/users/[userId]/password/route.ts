@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireSuperAdmin } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { upsertNotification } from '@/lib/notification-write'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 const securitySetupNotificationKey = 'security-setup-required-after-admin-reset'
@@ -44,7 +45,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }, { timeout: 15_000, maxWait: 5_000 })
 
     await safeNotificationWrite(
-      () => prisma.notification.upsert({
+      () => upsertNotification({
         where: { recipientId_key: { recipientId: userId, key: securitySetupNotificationKey } },
         update: {
           title: '密码已由超级管理员重置',

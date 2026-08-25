@@ -20,7 +20,7 @@ test('sendBirthdayGreeting rejects users without a birthday (1: 无生日用户 
   // 未设置生日时必然 return false（不会创建通知）
   assert.match(greetFn, /return false/)
   // 通知创建语句位于所有 return false 之后（隐含：空生日路径无法到达）
-  assert.match(greetFn, /prisma\.notification\.create/)
+  assert.match(greetFn, /createNotification\(/)
 })
 
 test('sendBirthdayGreeting rejects users whose birthday is not today (2: 非今日生日 → 0 通知)', () => {
@@ -33,7 +33,7 @@ test('sendBirthdayGreeting sends exactly one greeting to a real today-birthday u
   // 通过生日校验、逐年去重查重后，才创建一条通知
   assert.match(greetFn, /BIRTHDAY_GREETING_KEY_PREFIX\}-\$\{year\}/)
   assert.match(greetFn, /prisma\.notification\.findFirst/)
-  assert.match(greetFn, /prisma\.notification\.create/)
+  assert.match(greetFn, /createNotification\(/)
   // 仍保留幂等：命中已存在则跳过（不会重复创建）
   assert.match(greetFn, /if \(existing\) return false/)
 })

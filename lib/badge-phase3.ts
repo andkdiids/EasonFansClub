@@ -2,6 +2,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { formatUid } from '@/lib/uid'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { prisma } from '@/lib/prisma'
+import { createNotification } from '@/lib/notification-write'
 
 export const MAX_BADGE_SHOWCASE_SLOTS = 6
 export const BADGE_PHASE3_MAX_DEPTH = 5
@@ -153,7 +154,7 @@ async function createBadgeGrantNotification(userId: string, grants: readonly Gra
     ? `你已获得${names}勋章。${tierLines.length ? ` ${tierLines.join('；')}` : ''}`
     : `你已获得${names}。${tierLines.length ? ` ${tierLines.join('；')}` : ''}`
   try {
-    await prisma.notification.create({
+    await createNotification({
       data: {
         recipientId: userId,
         type: 'BADGE',
@@ -251,7 +252,7 @@ export async function processBadgeGrantEffects(input: { userId: string; grants: 
     if (user) {
       for (const seriesId of [...new Set(state.completedSeriesIds)]) {
         try {
-          await prisma.notification.create({
+          await createNotification({
             data: {
               recipientId: input.userId,
               type: 'BADGE',

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import type { Prisma } from '@prisma/client'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { upsertNotification } from '@/lib/notification-write'
 
 export const securityQuestionCount = 1
 export const securityQuestionNotificationKey = 'complete-security-questions'
@@ -85,7 +86,7 @@ export async function ensureSecurityQuestionNotification(userId: string) {
   const count = await prisma.userSecurityQuestion.count({ where: { userId } })
   if (count >= securityQuestionCount) return
   await safeNotificationWrite(
-    () => prisma.notification.upsert({
+    () => upsertNotification({
       where: { recipientId_key: { recipientId: userId, key: securityQuestionNotificationKey } },
       update: {},
       create: {

@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createManyNotifications } from '@/lib/notification-write'
 import { formatBeijingMonthDayTime } from '@/lib/beijing-time'
 import { getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
           select: { id: true },
         })
         if (!administrators.length) return
-        await prisma.notification.createMany({
+        await createManyNotifications({
           data: administrators.map((administrator) => ({
             recipientId: administrator.id,
             actorId: guard.user.id,

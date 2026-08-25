@@ -6,6 +6,7 @@ import { sanitizeText } from '@/lib/security'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { upsertNotification } from '@/lib/notification-write'
 
 export const CONCERT_CONTRIBUTION_TYPES = ['SHOW', 'SETLIST', 'ENCORE'] as const
 export type ConcertContributionTypeValue = typeof CONCERT_CONTRIBUTION_TYPES[number]
@@ -395,7 +396,7 @@ export async function approveConcertContribution({ contributionId, reviewerId, a
   })
   const { notification, ...result } = resultWithNotification
   await safeNotificationWrite(
-    () => prisma.notification.upsert(notification),
+    () => upsertNotification(notification),
     { operation: 'concert-contribution-approved', userId: notification.create.recipientId, notificationType: 'SYSTEM' },
   )
   return result
@@ -438,7 +439,7 @@ export async function rejectConcertContribution(contributionId: string, reviewer
   })
   const { notification, ...result } = resultWithNotification
   await safeNotificationWrite(
-    () => prisma.notification.upsert(notification),
+    () => upsertNotification(notification),
     { operation: 'concert-contribution-rejected', userId: notification.create.recipientId, notificationType: 'SYSTEM' },
   )
   return result

@@ -12,6 +12,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, sanitizeText } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 const clinicAuthorSelect = {
   id: true,
@@ -335,7 +336,7 @@ export async function createClinicConsultation(input: {
   const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
   if (committedNotificationData) {
     await safeNotificationWrite(
-      () => prisma.notification.create(committedNotificationData),
+      () => createNotification(committedNotificationData),
       { operation: 'clinic-consultation-created', userId: committedNotificationData.data.recipientId, notificationType: 'REPLY' },
     )
   }

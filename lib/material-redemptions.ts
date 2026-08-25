@@ -22,6 +22,7 @@ import {
   type MaterialRedemptionSchedule,
 } from '@/lib/material-redemption-domain'
 import { sanitizeText } from '@/lib/security'
+import { createNotification } from '@/lib/notification-write'
 
 export const MATERIAL_REDEMPTION_PERMISSION = 'material_redemption_manage' as const
 
@@ -691,7 +692,7 @@ export async function exchangeMaterialRedemption(userId: string, materialId: str
 
 async function notifyMaterialOrder(userId: string, orderId: string, content: string, title: string) {
   try {
-    await prisma.notification.create({
+    await createNotification({
       data: {
         recipientId: userId,
         type: 'ACTIVITY',

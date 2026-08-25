@@ -14,6 +14,7 @@ import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
+import { createManyNotifications } from '@/lib/notification-write'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -822,7 +823,7 @@ async function handleEditPost(
         select: { id: true },
       })
       if (admins.length && reviewNotificationKey) {
-        await prisma.notification.createMany({
+        await createManyNotifications({
           data: admins.map((admin) => ({
             recipientId: admin.id,
             type: 'ADMIN' as const,

@@ -9,6 +9,7 @@ import { parseTodayImageInput } from '@/lib/today-image-url'
 import { getTodayEventRecords } from '@/lib/today-events'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createManyNotifications } from '@/lib/notification-write'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
         })
         administratorIds = admins.map((admin) => admin.id)
         if (!admins.length) return
-        await prisma.notification.createMany({
+        await createManyNotifications({
           data: admins.map((admin) => ({
             recipientId: admin.id,
             type: 'ADMIN' as const,

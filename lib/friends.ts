@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notifications'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -122,7 +123,7 @@ export async function createFriendRequest(
   }, { timeout: 15_000, maxWait: 5_000 })
 
   await safeNotificationWrite(
-    () => prisma.notification.create({
+    () => createNotification({
       data: {
         recipientId: receiver.id,
         actorId: currentUser.id,
@@ -209,7 +210,7 @@ export async function decideFriendRequest(userId: string, requestId: string, act
   }, { operation: 'friend-request-mark-read', userId, notificationType: 'FRIEND_REQUEST' })
   if (action === 'accept') {
     await safeNotificationWrite(
-      () => prisma.notification.create({
+      () => createNotification({
         data: {
           recipientId: result.senderId,
           actorId: result.receiverId,

@@ -12,6 +12,7 @@ import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -189,7 +190,7 @@ export async function POST(request: Request, context: RouteContext) {
   const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
   if (committedNotificationData) {
     await safeNotificationWrite(
-      () => prisma.notification.create(committedNotificationData),
+      () => createNotification(committedNotificationData),
       { operation: 'daily-message-comment-notification', userId: committedNotificationData.data.recipientId, notificationType: 'REPLY' },
     )
   }

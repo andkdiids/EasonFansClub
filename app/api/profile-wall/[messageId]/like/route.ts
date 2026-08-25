@@ -8,6 +8,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { unauthenticatedResponse } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
 export async function GET(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
@@ -105,7 +106,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
   const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
   if (committedNotificationData) {
     await safeNotificationWrite(
-      () => prisma.notification.create(committedNotificationData),
+      () => createNotification(committedNotificationData),
       { operation: 'profile-wall-like-notification', userId: committedNotificationData.data.recipientId, notificationType: 'LIKE' },
     )
   }

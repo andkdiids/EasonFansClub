@@ -5,6 +5,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -32,7 +33,7 @@ export async function POST(_request: Request, context: RouteContext) {
 
   if (created) {
     await safeNotificationWrite(
-      () => prisma.notification.create({
+      () => createNotification({
         data: {
           recipientId: userId,
           actorId: guard.user.id,

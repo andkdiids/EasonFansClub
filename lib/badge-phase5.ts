@@ -8,6 +8,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { formatUid } from '@/lib/uid'
 import { evaluateBadgeMetric, getBatchBadgeMetrics } from '@/lib/badge-rule-engine'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { upsertNotification } from '@/lib/notification-write'
 
 export const MAX_BADGE_TRACKING = 10
 export const BADGE_RECOMMENDATION_LIMIT = 3
@@ -191,7 +192,7 @@ export async function processTrackedBadgeMilestones(userId: string, ruleTypes?: 
     }, { timeout: 15_000, maxWait: 5_000 })
     if (trackingAdvanced && user.showBadgeProgressNotifications) {
       await safeNotificationWrite(
-        () => prisma.notification.upsert({
+        () => upsertNotification({
           where: { recipientId_key: { recipientId: userId, key: `badge-progress:${userId}:${row.Badge.id}:${milestone}` } },
           create: {
             recipientId: userId, type: 'BADGE', title: '🎖 勋章进度提醒',

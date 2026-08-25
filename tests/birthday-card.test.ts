@@ -24,7 +24,7 @@ test('404 root cause: birthday greeting once linked to a non-existent route, now
   // 修复后指向生日祝福卡片页
   assert.match(birthdayLib, /link:\s*'\/birthday-card'/)
   // 通知中心点击入口同步改为卡片页
-  assert.match(client, /case 'BIRTHDAY_GREETING':\s*return \{ label: '查看生日卡片', href: '\/birthday-card' \}/)
+  assert.match(client, /case 'BIRTHDAY_GREETING':[\s\S]*label: '查看生日卡片',[\s\S]*href: '\/birthday-card'/)
 })
 
 test('history birthday notifications are repaired without deletion (2: 历史通知兼容)', () => {
@@ -92,7 +92,7 @@ test('privacy: generation is never gated by birthday visibility, and the card on
   assert.match(greetFn, /user\.birthMonth !== month \|\| user\.birthDay !== day/)
   // 好友生日提醒同样不受 birthdayPublic 影响，且点击进入好友主页而非卡片
   assert.match(birthdayLib, /export async function sendFriendBirthdayReminders/)
-  assert.match(birthdayLib, /type: 'FRIEND_BIRTHDAY'/)
+  assert.match(birthdayLib, /type: 'BIRTHDAY_GREETING'/)
   assert.match(birthdayLib, /link: `\/user\/\${source\.uid}`/)
   // 卡片页根据 birthdayPublic 决定是否展示生日日期
   assert.match(cardPage, /birthdayPublic && fresh\.birthMonth && fresh\.birthDay/)
@@ -102,11 +102,13 @@ test('privacy: generation is never gated by birthday visibility, and the card on
 })
 
 test('notification types and categories are consistent end-to-end (类型与分类一致)', () => {
-  assert.match(schema, /FRIEND_BIRTHDAY/)
+  const notificationTypeEnum = schema.match(/enum NotificationType\s*\{([\s\S]*?)\n\}/)?.[1] || ''
+  assert.match(notificationTypeEnum, /BIRTHDAY_GREETING/)
+  assert.doesNotMatch(notificationTypeEnum, /FRIEND_BIRTHDAY/)
   assert.match(migration, /'FRIEND_BIRTHDAY'/)
-  assert.match(notificationsLib, /FRIEND_BIRTHDAY: '好友生日'/)
-  assert.match(notificationsLib, /type === 'FRIEND_BIRTHDAY'\) return 'friend'/)
-  assert.match(notificationsLib, /'FRIEND_BIRTHDAY'\) AND \(n\.link IS NULL OR n\.link NOT LIKE '\/feedback\/%'\)/)
+  assert.match(notificationsLib, /BIRTHDAY_GREETING: '生日'/)
+  assert.match(notificationsLib, /type === 'BIRTHDAY_GREETING' && link\?\.startsWith\(FRIEND_BIRTHDAY_LINK_PREFIX\)\) return 'friend'/)
+  assert.match(notificationsLib, /type = 'BIRTHDAY_GREETING' AND n\.link LIKE '\/user\/%'/)
   // 好友生日提醒归类到「好友」而非「系统」
-  assert.doesNotMatch(notificationsLib, /NOT IN \('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE'\) AND/)
+  assert.doesNotMatch(notificationsLib, /GUESS_SONG_DUEL_INVITE/)
 })

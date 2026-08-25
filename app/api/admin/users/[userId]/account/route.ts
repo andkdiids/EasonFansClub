@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireSuperAdmin, sanitizeText } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -42,7 +43,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }, { timeout: 15_000, maxWait: 5_000 })
 
     await safeNotificationWrite(
-      () => prisma.notification.create({
+      () => createNotification({
         data: {
           recipientId: userId,
           type: 'SYSTEM',

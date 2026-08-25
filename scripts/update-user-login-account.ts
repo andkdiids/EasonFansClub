@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { maskLoginAccount, maskUserId, normalizeLoginAccount, validateLoginAccountValue } from '../lib/login-account'
+import { createNotificationWithDb } from '../lib/notification-write'
 import { formatUid } from '../lib/uid'
 import { getScriptPrisma } from './script-prisma'
 
@@ -42,7 +43,7 @@ async function main() {
     } else {
       await tx.$executeRaw`UPDATE "User" SET username = ${next.account} WHERE id = ${target.id}`
     }
-    await tx.notification.create({ data: { recipientId: target.id, type: 'SYSTEM', title: '登录账号已由管理员修改', content: '您的登录账号已由超级管理员修改。下次登录时请使用新的登录账号。如非本人申请，请及时联系管理员。', link: '/settings/security' } })
+    await createNotificationWithDb(tx, { data: { recipientId: target.id, type: 'SYSTEM', title: '登录账号已由管理员修改', content: '您的登录账号已由超级管理员修改。下次登录时请使用新的登录账号。如非本人申请，请及时联系管理员。', link: '/settings/security' } }, { operation: 'controlled-login-account-change', userId: target.id })
     await tx.adminActionLog.create({ data: { adminId: operator.id, targetUserId: target.id, action: 'USER_ACCOUNT_CHANGED_CONTROLLED_SCRIPT', detail: { previousAccount: maskLoginAccount(target.username), newAccount: maskLoginAccount(next.account), reason } } })
   })
   console.info(JSON.stringify({ mode: 'applied', targetUid: formatUid(target.uid), targetUserId: maskUserId(target.id) }, null, 2))

@@ -15,6 +15,7 @@ import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
+import { createManyNotifications } from '@/lib/notification-write'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -357,7 +358,7 @@ export async function POST(request: Request) {
             select: { id: true },
           })
           if (!admins.length) return
-          await prisma.notification.createMany({
+          await createManyNotifications({
             data: admins.map((admin) => ({
               recipientId: admin.id,
               type: 'ADMIN' as const,

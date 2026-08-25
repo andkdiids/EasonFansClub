@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createManyNotifications } from '@/lib/notification-write'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,7 +60,7 @@ export async function POST(
         })
         administratorIds = administrators.map((administrator) => administrator.id)
         if (!administrators.length) return
-        await prisma.notification.createMany({
+        await createManyNotifications({
           data: administrators.map((administrator) => ({
             recipientId: administrator.id,
             actorId: guard.user.id,

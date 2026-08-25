@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { createNotification } from '@/lib/notification-write'
 
 export const dynamic = 'force-dynamic'
 
@@ -158,7 +159,7 @@ async function writeReviewNotification(input: {
   }
 
   try {
-    await prisma.notification.create({
+    await createNotification({
       data: {
         recipientId: input.authorId,
         actorId: input.operatorId,
