@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { createNotification } from '@/lib/notification-write'
 import { grantBadge } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
@@ -144,7 +145,7 @@ export async function sendBirthdayGreeting(userId: string, dateKey = getShanghai
     const { title, content } = await pickBirthdayMessage()
 
     const created = await safeNotificationWrite(
-      () => prisma.notification.create({
+      () => createNotification({
         data: {
           recipientId: userId,
           type: 'BIRTHDAY_GREETING',
@@ -224,10 +225,10 @@ export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()
       const { source, friendId, key } = target
       if (existingReminderKeys.has(`${friendId}:${key}`)) continue
       try {
-        await prisma.notification.create({
+        await createNotification({
           data: {
             recipientId: friendId,
-            type: 'FRIEND_BIRTHDAY',
+            type: 'BIRTHDAY_GREETING',
             title: '🎂 好友生日',
             content: `🎂 今天是好友 ${source.nickname} 的生日，送上一份祝福吧`,
             key,

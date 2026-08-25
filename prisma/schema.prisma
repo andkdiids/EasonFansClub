@@ -4238,9 +4238,6 @@ enum NotificationType {
   BADGE
   FRIEND_REQUEST
   BIRTHDAY_GREETING
-  GUESS_SONG_DUEL_INVITE
-  USER_REWARD
-  FRIEND_BIRTHDAY
 }
 
 enum PageLayoutRevisionSource {

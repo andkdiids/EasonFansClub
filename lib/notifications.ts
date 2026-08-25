@@ -24,6 +24,8 @@ const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 
 const NOTIFICATION_RECONCILIATION_TTL_MS = 60_000
 const MAX_NOTIFICATION_RECONCILIATION_USERS = 10_000
 const MAX_STALE_NOTIFICATION_RECONCILIATION_ROWS = 200
+const DUEL_INVITE_LINK_PREFIX = '/games/guess-song/duel'
+const FRIEND_BIRTHDAY_LINK_PREFIX = '/user/'
 const notificationReconciliationInFlight = new Map<string, Promise<void>>()
 const notificationReconciliationLastRun = new Map<string, number>()
 
@@ -38,9 +40,6 @@ const personalTypeLabels: Record<string, string> = {
   FOLLOW: '关注',
   BADGE: '勋章',
   BIRTHDAY_GREETING: '生日',
-  GUESS_SONG_DUEL_INVITE: '听听·对决',
-  USER_REWARD: '获得奖励',
-  FRIEND_BIRTHDAY: '好友生日',
 }
 
 const systemTypeLabels: Record<string, string> = {
@@ -58,7 +57,9 @@ export function getNotificationCategory(type: string, link?: string | null) {
   if (link && /^\/user\/\d+\/wall(\?|$)/.test(link)) return 'wall'
   if (type === 'REPLY') return 'reply'
   if (type === 'LIKE') return 'like'
-  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW' || type === 'GUESS_SONG_DUEL_INVITE' || type === 'FRIEND_BIRTHDAY') return 'friend'
+  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'friend'
+  if (type === 'ACTIVITY' && (link?.startsWith(DUEL_INVITE_LINK_PREFIX) || link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX))) return 'friend'
+  if (type === 'BIRTHDAY_GREETING' && link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX)) return 'friend'
   if (type === 'MESSAGE') return 'messages'
   return 'system'
 }
@@ -86,11 +87,23 @@ export function getNotificationCategoryFilter(category: string): Prisma.Notifica
   if (category === 'reply') return { type: 'REPLY', OR: [{ link: null }, { AND: [{ link: { not: { contains: '/wall' } } }, { link: { not: { startsWith: '/feedback/' } } }] }] }
   if (category === 'like') return { type: 'LIKE', OR: [{ link: null }, { AND: [{ link: { not: { contains: '/wall' } } }, { link: { not: { startsWith: '/feedback/' } } }] }] }
   if (category === 'wall') return { AND: [{ type: { in: ['REPLY', 'LIKE'] } }, { link: { startsWith: '/user/' } }, { link: { contains: '/wall' } }] }
-  if (category === 'friend') return { type: { in: ['FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'FRIEND_BIRTHDAY'] } }
+  if (category === 'friend') return {
+    OR: [
+      { type: { in: ['FRIEND_REQUEST', 'FOLLOW'] } },
+      { type: 'ACTIVITY', link: { startsWith: DUEL_INVITE_LINK_PREFIX } },
+      { type: 'ACTIVITY', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } },
+      { type: 'BIRTHDAY_GREETING', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } },
+    ],
+  }
   if (category === 'messages') return { type: 'MESSAGE' }
   if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
   return {
-    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE', 'FRIEND_BIRTHDAY'] },
+    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE'] },
+    AND: [
+      { NOT: { type: 'ACTIVITY', link: { startsWith: DUEL_INVITE_LINK_PREFIX } } },
+      { NOT: { type: 'ACTIVITY', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } } },
+      { NOT: { type: 'BIRTHDAY_GREETING', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } } },
+    ],
     OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }],
   }
 }
@@ -118,10 +131,10 @@ function getPersonalNotificationCategorySql(category: NotificationCategory) {
     case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR (n.link NOT LIKE '%/wall%' AND n.link NOT LIKE '/feedback/%'))")
     case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR (n.link NOT LIKE '%/wall%' AND n.link NOT LIKE '/feedback/%'))")
     case 'wall': return Prisma.raw("AND n.type IN ('REPLY','LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%'")
-    case 'friend': return Prisma.raw("AND n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'FRIEND_BIRTHDAY')")
+    case 'friend': return Prisma.raw("AND (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%'))")
     case 'messages': return Prisma.raw("AND n.type = 'MESSAGE'")
     case 'feedback': return Prisma.raw("AND n.link LIKE '/feedback/%'")
-    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE', 'FRIEND_BIRTHDAY') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
     default: return Prisma.empty
   }
 }
@@ -210,6 +223,7 @@ export type UnifiedNotification = {
   category: string
   title: string
   content: string | null
+  key?: string | null
   link: string | null
   targetUrl: string | null
   actorName: string | null
@@ -520,10 +534,10 @@ async function loadUnreadSummary(userId: string): Promise<UnreadSummary> {
         COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') AND (n.link IS NULL OR n.link NOT LIKE '%/wall%') THEN 1 END) AS replies,
         COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') AND (n.link IS NULL OR n.link NOT LIKE '%/wall%') THEN 1 END) AS likes,
         COUNT(CASE WHEN n.type IN ('REPLY', 'LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%' THEN 1 END) AS wall,
-        COUNT(CASE WHEN n.type IN ('FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'FRIEND_BIRTHDAY') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
+        COUNT(CASE WHEN (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
         COUNT(CASE WHEN n.type = 'MESSAGE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS messages,
         COUNT(CASE WHEN n.link LIKE '/feedback/%' THEN 1 END) AS feedback,
-        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'GUESS_SONG_DUEL_INVITE', 'MESSAGE', 'FRIEND_BIRTHDAY') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount
+        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount
       FROM Notification n
       WHERE n.recipientId = ${userId}
         AND n.isRead = 0
@@ -830,6 +844,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         category: getNotificationCategory(item.type, link),
         title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, link, 'personal'),
         content: likeTitle ? null : resolveNotificationActorText(item.content, actorName),
+        key: item.key,
         link,
         targetUrl: link,
         actorName,

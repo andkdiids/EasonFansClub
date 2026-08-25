@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
 import { logNotificationError } from '@/lib/notification-errors'
 import { safeNotificationTransaction } from '@/lib/notification-transaction'
+import { upsertNotificationWithDb } from '@/lib/notification-write'
 
 export type LikeNotificationTargetKind = 'post' | 'reply'
 
@@ -188,12 +189,16 @@ async function syncLikeNotificationWithSnapshot(
     ...(isNewLike ? { isRead: false, readAt: null } : preservedReadState),
   }
 
-  const notification = await tx.notification.upsert({
-    where: { recipientId_key: { recipientId: input.recipientId, key } },
-    update: data,
-    create: data,
-    select: { id: true, isRead: true, readAt: true },
-  })
+  const notification = await upsertNotificationWithDb(
+    tx,
+    {
+      where: { recipientId_key: { recipientId: input.recipientId, key } },
+      update: data,
+      create: data,
+      select: { id: true, isRead: true, readAt: true },
+    },
+    { operation: 'like-notification-upsert', userId: input.recipientId },
+  )
 
   const legacyIds = legacy.map((row) => row.id)
   if (legacyIds.length) await tx.notification.deleteMany({ where: { id: { in: legacyIds } } })

@@ -6,15 +6,16 @@ import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 import {
+  ACTIVITY_NOTIFICATION_TYPE,
   USER_REWARD_MAX_AMOUNT,
-  USER_REWARD_NOTIFICATION_TYPE,
   USER_REWARD_PAGE_SIZE,
   USER_REWARD_PERMISSION,
   USER_REWARD_REASON_MAX_LENGTH,
 } from '@/lib/user-reward-constants'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createNotification } from '@/lib/notification-write'
 
-export { USER_REWARD_MAX_AMOUNT, USER_REWARD_NOTIFICATION_TYPE, USER_REWARD_PAGE_SIZE, USER_REWARD_PERMISSION, USER_REWARD_REASON_MAX_LENGTH }
+export { ACTIVITY_NOTIFICATION_TYPE, USER_REWARD_MAX_AMOUNT, USER_REWARD_PAGE_SIZE, USER_REWARD_PERMISSION, USER_REWARD_REASON_MAX_LENGTH }
 
 const MYSQL_SIGNED_INT_MAX = 2_147_483_647
 const forbiddenUserRewardReasonPhrases = [
@@ -344,7 +345,7 @@ export async function grantUserReward(input: UserRewardInput) {
             amount: normalized.experienceAmount,
             type: 'ADMIN',
             description: normalized.reason,
-            sourceType: USER_REWARD_NOTIFICATION_TYPE,
+            sourceType: 'USER_REWARD',
             sourceId: reward.id,
           },
         })
@@ -389,7 +390,7 @@ export async function grantUserReward(input: UserRewardInput) {
         notification: {
           data: {
             recipientId: recipient.id,
-            type: USER_REWARD_NOTIFICATION_TYPE,
+            type: ACTIVITY_NOTIFICATION_TYPE,
             title: '获得奖励',
             content: buildUserRewardNotificationContent(normalized),
             link: '/profile',
@@ -402,8 +403,8 @@ export async function grantUserReward(input: UserRewardInput) {
     const { notification, ...result } = resultWithNotification
     if (notification) {
       await safeNotificationWrite(
-        () => prisma.notification.create(notification),
-        { operation: 'user-reward-granted', userId: notification.data.recipientId, notificationType: USER_REWARD_NOTIFICATION_TYPE },
+        () => createNotification(notification),
+        { operation: 'user-reward-granted', userId: notification.data.recipientId, notificationType: ACTIVITY_NOTIFICATION_TYPE },
       )
     }
     return result

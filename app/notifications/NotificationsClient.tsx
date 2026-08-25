@@ -17,7 +17,7 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
-const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING', 'USER_REWARD'])
+const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
 
 function isSystemLikeNotification(item: UnifiedNotification) {
   // 系统通知来源、无操作人，或显式的系统类型（含生日纪念）均视为系统类
@@ -30,7 +30,7 @@ function isSystemNotification(item: UnifiedNotification) {
 }
 
 function isBirthdayNotification(item: UnifiedNotification) {
-  return item.type === 'BIRTHDAY_GREETING'
+  return item.type === 'BIRTHDAY_GREETING' || (item.type === 'ACTIVITY' && item.link?.startsWith('/user/') === true)
 }
 
 /**
@@ -53,8 +53,12 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
     case 'FRIEND_REQUEST':
     case 'FOLLOW':
       return { label: '去好友', href: '/friends#received-requests' }
-    case 'GUESS_SONG_DUEL_INVITE':
-      return { label: '接受对决邀请', href: item.link || '/games/guess-song/duel' }
+    case 'ACTIVITY':
+      if (item.key?.startsWith('user-reward:')) return { label: '查看成长', href: item.link || '/profile' }
+      if (item.link?.startsWith('/user/')) return { label: '去好友主页', href: item.link }
+      return item.link?.startsWith('/games/guess-song/duel')
+        ? { label: '接受对决邀请', href: item.link }
+        : target ? { label: '查看活动', href: target } : null
     case 'MESSAGE':
       return { label: '打开私信', action: 'dock' }
     case 'ADMIN':
@@ -64,11 +68,9 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
     case 'BADGE':
       return target ? { label: '查看徽章', href: target } : { label: '查看徽章', href: '/profile' }
     case 'BIRTHDAY_GREETING':
-      return { label: '查看生日卡片', href: '/birthday-card' }
-    case 'FRIEND_BIRTHDAY':
-      return target ? { label: '去好友主页', href: target } : null
-    case 'USER_REWARD':
-      return { label: '查看成长', href: item.link || '/profile' }
+      return item.link?.startsWith('/user/')
+        ? { label: '去好友主页', href: item.link }
+        : { label: '查看生日卡片', href: '/birthday-card' }
     case 'ANNOUNCEMENT':
     case 'MAINTENANCE':
     case 'SECURITY':
@@ -774,7 +776,7 @@ export function NotificationsClient({
     const target = systemNotification ? null : getNotificationTarget(item)
     const systemLike = isSystemLikeNotification(item)
     const isBirthday = isBirthdayNotification(item)
-    const isUserReward = item.type === 'USER_REWARD'
+    const isUserReward = item.key?.startsWith('user-reward:') === true
     const isReplyNotification = item.type === 'REPLY' || item.category === 'feedback'
     const replyPreview = item.replyPreview?.trim() || null
     const fallbackContent = item.content?.trim() || null
