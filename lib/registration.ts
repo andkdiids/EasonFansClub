@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAccountSecuritySettings } from '@/lib/account-security'
+import { getAccountSecuritySettings, type AccountSecuritySettings } from '@/lib/account-security'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
+import { safeRetryableDbRead } from '@/lib/db-timeout'
 import type { Prisma } from '@prisma/client'
 import {
   isValidRegistrationControlOverride,
@@ -109,6 +110,23 @@ const registrationControlSettingDefinitions = {
   closedTitle: { key: 'registration.control.closedTitle', defaultValue: '当前暂停注册', label: '注册关闭标题' },
   closedMessage: { key: 'registration.control.closedMessage', defaultValue: '注册入口目前暂时关闭，请稍后再来。', label: '注册关闭说明' },
 } as const
+
+const DEFAULT_REGISTRATION_CONTROL_SETTINGS: RegistrationControlSettings = {
+  mode: 'MANUAL',
+  dailySchedule: [],
+  opensAt: null,
+  closesAt: null,
+  override: 'NONE',
+  closedTitle: '当前暂停注册',
+  closedMessage: '注册入口目前暂时关闭，请稍后再来。',
+}
+
+const DEFAULT_ACCOUNT_SECURITY_SETTINGS: AccountSecuritySettings = {
+  requireSecurityQuestionsForNewUsers: true,
+  notifyLegacyUsersToSetSecurityQuestions: true,
+  enableSecurityQuestionRecovery: true,
+  enableEmailPasswordReset: false,
+}
 
 export function isValidRegistrationMode(value: unknown): value is RegistrationMode {
   return typeof value === 'string' && registrationModes.includes(value as RegistrationMode)
@@ -253,11 +271,11 @@ export async function getRegistrationPolicy() {
   const allowRegister = isRegisterEnvAllowed()
   const enableTurnstile = isTurnstileEnabled()
   const [registrationMode, registrationControl, securitySettings, hospitalConfig, registrationLimitEnabled] = await Promise.all([
-    getStoredRegistrationMode(),
-    getRegistrationControlSettings(),
-    getAccountSecuritySettings(),
-    getEHospitalCheckConfig(),
-    getRegistrationLimitEnabled(),
+    safeRetryableDbRead('registration.mode', getStoredRegistrationMode(), 'EMAIL'),
+    safeRetryableDbRead('registration.control', getRegistrationControlSettings(), DEFAULT_REGISTRATION_CONTROL_SETTINGS),
+    safeRetryableDbRead('registration.security', getAccountSecuritySettings(), DEFAULT_ACCOUNT_SECURITY_SETTINGS),
+    safeRetryableDbRead('registration.ehospital', getEHospitalCheckConfig(), null),
+    safeRetryableDbRead('registration.limit', getRegistrationLimitEnabled(), false),
   ])
   const allowPhoneRegistration = allowRegister && (registrationMode === 'PHONE' || registrationMode === 'BOTH')
   const legacyEmailRegistrationEnabled = registrationMode === 'EMAIL' || registrationMode === 'BOTH'
@@ -281,7 +299,7 @@ export async function getRegistrationPolicy() {
     turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '',
     envForcedClosed: !allowRegister,
     requireSecurityQuestionsForNewUsers: securitySettings.requireSecurityQuestionsForNewUsers,
-    ehospitalCheckEnabled: hospitalConfig.enabled,
+    ehospitalCheckEnabled: hospitalConfig?.enabled === true,
     registrationLimitEnabled,
   }
 }

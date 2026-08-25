@@ -32,7 +32,9 @@ test('取消帖子点赞只删除 Like 并刷新数量，双方积分和经验�
   assert.match(postLikeDelete, /await tx\.like\.deleteMany\(/)
   assert.match(postLikeDelete, /await tx\.like\.count\(/)
   assert.match(postLikeDelete, /await tx\.post\.update\(/)
-  assert.match(postLikeDelete, /syncLikeNotification\([\s\S]*'unlike'/)
+  assert.match(postLikeDelete, /void syncLikeNotification\(input\)/)
+  assert.doesNotMatch(postLikeDelete, /syncLikeNotification\([\s\S]*'unlike'/)
+  assert.doesNotMatch(postLikeDelete, /await syncLikeNotification\(/)
   assert.doesNotMatch(postLikeDelete, forbiddenRewardEffects)
 })
 

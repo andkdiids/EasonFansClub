@@ -553,6 +553,46 @@ test('主 Geo provider 返回 429 时回退到 fallback provider 并返回其结
   }
 })
 
+test('主 Geo provider 429 后进入 cooldown，不会对每个新 IP 重复请求', async () => {
+  const originalFetch = globalThis.fetch
+  const previousApiUrl = process.env.IP_LOCATION_API_URL
+  const previousFallbackUrl = process.env.IP_LOCATION_FALLBACK_API_URL
+  const previousSource = process.env.TRUSTED_CLIENT_IP_SOURCE
+  const previousDiagnostics = process.env.IP_DIAGNOSTICS_LOG
+
+  process.env.IP_LOCATION_API_URL = 'https://primary.test/{ip}/json/'
+  process.env.IP_LOCATION_FALLBACK_API_URL = 'https://fallback.test/{ip}/json/'
+  process.env.TRUSTED_CLIENT_IP_SOURCE = 'nginx'
+  process.env.IP_DIAGNOSTICS_LOG = 'false'
+  clearIpLocationCacheForTests()
+
+  const requestedUrls: string[] = []
+  globalThis.fetch = async (input) => {
+    const url = String(input)
+    requestedUrls.push(url)
+    if (url.startsWith('https://primary.test')) return new Response('', { status: 429 })
+    return new Response(JSON.stringify({ country_code: 'CN', region_code: 'GD' }), { status: 200 })
+  }
+
+  try {
+    await resolveIpLocation(new Request('https://ecfc.fans/api/posts', { headers: { 'x-ecfc-client-ip': '106.60.110.102' } }))
+    await resolveIpLocation(new Request('https://ecfc.fans/api/posts', { headers: { 'x-ecfc-client-ip': '106.60.110.103' } }))
+    assert.equal(requestedUrls.filter((url) => url.startsWith('https://primary.test')).length, 1)
+    assert.equal(requestedUrls.filter((url) => url.startsWith('https://fallback.test')).length, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearIpLocationCacheForTests()
+    if (previousApiUrl === undefined) delete process.env.IP_LOCATION_API_URL
+    else process.env.IP_LOCATION_API_URL = previousApiUrl
+    if (previousFallbackUrl === undefined) delete process.env.IP_LOCATION_FALLBACK_API_URL
+    else process.env.IP_LOCATION_FALLBACK_API_URL = previousFallbackUrl
+    if (previousSource === undefined) delete process.env.TRUSTED_CLIENT_IP_SOURCE
+    else process.env.TRUSTED_CLIENT_IP_SOURCE = previousSource
+    if (previousDiagnostics === undefined) delete process.env.IP_DIAGNOSTICS_LOG
+    else process.env.IP_DIAGNOSTICS_LOG = previousDiagnostics
+  }
+})
+
 test('主 provider 与 fallback 全部失败时返回 null，绝不退回广东', async () => {
   const originalFetch = globalThis.fetch
   const previousApiUrl = process.env.IP_LOCATION_API_URL

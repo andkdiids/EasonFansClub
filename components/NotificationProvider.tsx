@@ -85,6 +85,7 @@ export function NotificationProvider({
   const tabIdRef = useRef('')
   const initialSummaryRef = useRef(initialSummary)
   const latestRealtimeAtRef = useRef(0)
+  const summaryRefreshRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     initialSummaryRef.current = initialSummary
@@ -235,17 +236,31 @@ export function NotificationProvider({
   const refresh = useCallback(async () => {
     if (!userId) return
 
-    try {
-      const response = await fetch('/api/notifications/unread-summary', {
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-      })
-      if (!response.ok) return
+    const inFlight = summaryRefreshRef.current
+    if (inFlight) {
+      await inFlight
+      return
+    }
 
-      const nextSummary: unknown = await response.json()
-      if (isUnreadSummary(nextSummary)) setSummary(nextSummary)
-    } catch {
-      // 保留最近一次成功统计，不能把请求失败误显示成 0 条未读。
+    const request = (async () => {
+      try {
+        const response = await fetch('/api/notifications/unread-summary', {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+        if (!response.ok) return
+
+        const nextSummary: unknown = await response.json()
+        if (isUnreadSummary(nextSummary)) setSummary(nextSummary)
+      } catch {
+        // 保留最近一次成功统计，不能把请求失败误显示成 0 条未读。
+      }
+    })()
+    summaryRefreshRef.current = request
+    try {
+      await request
+    } finally {
+      if (summaryRefreshRef.current === request) summaryRefreshRef.current = null
     }
   }, [userId])
 

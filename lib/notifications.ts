@@ -23,6 +23,7 @@ export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
 const NOTIFICATION_RECONCILIATION_TTL_MS = 60_000
 const MAX_NOTIFICATION_RECONCILIATION_USERS = 10_000
+const MAX_STALE_NOTIFICATION_RECONCILIATION_ROWS = 200
 const notificationReconciliationInFlight = new Map<string, Promise<void>>()
 const notificationReconciliationLastRun = new Map<string, number>()
 
@@ -242,6 +243,11 @@ export type UnreadSummary = {
   total: number
 }
 
+// Multiple browser tabs and realtime/focus events can reach the same process
+// together. Share the read-only aggregate while it is in flight; this does
+// not change the source of truth and does not start reconciliation.
+const unreadSummaryInFlight = new Map<string, Promise<UnreadSummary>>()
+
 export type UnreadPersonalCounts = {
   replies: number
   likes: number
@@ -289,6 +295,8 @@ async function loadDailyNotificationComments(
 async function reconcileStalePersonalNotifications(userId: string) {
   const unread = await prisma.notification.findMany({
     where: getUnreadNotificationWhere(userId),
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: MAX_STALE_NOTIFICATION_RECONCILIATION_ROWS,
     select: {
       id: true,
       type: true,
@@ -494,7 +502,7 @@ export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: 
   }
 }
 
-export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
+async function loadUnreadSummary(userId: string): Promise<UnreadSummary> {
   // This endpoint is polled by the navigation/realtime fallback. It must stay
   // read-only and cheap; reconciliation belongs to the paginated list path.
   const now = new Date()
@@ -558,6 +566,19 @@ export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
   // by the notification center as a dedicated entry, not as Notification rows.
   const summary = buildUnreadSummary(personalCounts, systemCount, directMessages)
   return summary
+}
+
+export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
+  const inFlight = unreadSummaryInFlight.get(userId)
+  if (inFlight) return inFlight
+
+  const request = loadUnreadSummary(userId)
+  unreadSummaryInFlight.set(userId, request)
+  try {
+    return await request
+  } finally {
+    if (unreadSummaryInFlight.get(userId) === request) unreadSummaryInFlight.delete(userId)
+  }
 }
 
 export async function getUnreadNotificationCount(userId: string) {

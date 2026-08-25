@@ -14,6 +14,9 @@ export type LikeNotificationTarget = {
 }
 
 const LIKE_NOTIFICATION_KEY_PREFIX = 'like:'
+const MAX_LEGACY_NOTIFICATIONS_PER_TARGET = 100
+const MAX_LIKE_RECONCILIATION_ROWS = 200
+const MAX_LIKE_RECONCILIATION_TARGETS = 50
 
 export function getLikeNotificationKey(kind: LikeNotificationTargetKind, id: string) {
   return `${LIKE_NOTIFICATION_KEY_PREFIX}${kind}:${id}`
@@ -65,6 +68,7 @@ export function parseLikeNotificationTarget(input: {
 
 type LikeNotificationRow = {
   id: string
+  key: string | null
   isRead: boolean
   readAt: Date | null
   actorId: string | null
@@ -128,17 +132,24 @@ async function syncLikeNotificationWithSnapshot(
   snapshot: LikeSnapshot,
 ) {
   const key = getLikeNotificationKey(input.target.kind, input.target.id)
-  const [aggregate, legacy] = await Promise.all([
-    tx.notification.findUnique({
-      where: { recipientId_key: { recipientId: input.recipientId, key } },
-      select: { id: true, isRead: true, readAt: true, actorId: true, createdAt: true },
-    }),
-    tx.notification.findMany({
-      where: { recipientId: input.recipientId, type: 'LIKE', key: null, link: input.target.link },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, isRead: true, readAt: true, actorId: true, createdAt: true },
-    }),
-  ])
+  // One bounded read keeps the notification transaction short and avoids two
+  // concurrent batch queries competing for the same interactive connection.
+  // The source Like/ReplyLike statistics were already loaded outside tx.
+  const rows = await tx.notification.findMany({
+    where: {
+      recipientId: input.recipientId,
+      type: 'LIKE',
+      OR: [
+        { key },
+        { key: null, link: input.target.link },
+      ],
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: MAX_LEGACY_NOTIFICATIONS_PER_TARGET,
+    select: { id: true, key: true, isRead: true, readAt: true, actorId: true, createdAt: true },
+  })
+  const aggregate = rows.find((row) => row.key === key) || null
+  const legacy = rows.filter((row) => row.key === null)
 
   const existingRows: LikeNotificationRow[] = [
     ...(aggregate ? [aggregate] : []),
@@ -238,6 +249,8 @@ export async function reconcileLikeNotifications(userId: string) {
         { key: { startsWith: LIKE_NOTIFICATION_KEY_PREFIX } },
       ],
     },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: MAX_LIKE_RECONCILIATION_ROWS,
     select: { type: true, key: true, link: true },
   })
   const targets = new Map<string, LikeNotificationTarget>()
@@ -251,7 +264,7 @@ export async function reconcileLikeNotifications(userId: string) {
   // counts are read before that transaction, and a single slow/invalid target
   // is isolated from the rest of the maintenance pass.
   let reconciled = 0
-  for (const target of targets.values()) {
+  for (const target of Array.from(targets.values()).slice(0, MAX_LIKE_RECONCILIATION_TARGETS)) {
     const result = await syncLikeNotificationSafely({ recipientId: userId, target })
     if (result) reconciled += 1
   }

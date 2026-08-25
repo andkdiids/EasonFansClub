@@ -32,7 +32,7 @@ test('notification list fetch and unread-summary refresh are one-way responsibil
 
 test('unread-summary aggregates personal notifications without loading the unread rows', () => {
   const notifications = read('lib/notifications.ts')
-  const summaryStart = notifications.indexOf('export async function getUnreadSummary')
+  const summaryStart = notifications.indexOf('async function loadUnreadSummary')
   const summaryEnd = notifications.indexOf('export async function getUnreadNotificationCount')
   assert.ok(summaryStart >= 0)
   assert.ok(summaryEnd > summaryStart)
@@ -42,6 +42,7 @@ test('unread-summary aggregates personal notifications without loading the unrea
   assert.match(summary, /COUNT\(CASE WHEN/)
   assert.doesNotMatch(summary, /prisma\.notification\.findMany\(/)
   assert.doesNotMatch(summary, /reconcileStalePersonalNotifications\(/)
+  assert.match(notifications, /unreadSummaryInFlight/)
 })
 
 test('notification actions update local list and summary without forcing a router refresh', () => {

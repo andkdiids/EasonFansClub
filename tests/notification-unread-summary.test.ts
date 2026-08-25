@@ -58,11 +58,13 @@ test('all unread sources use the same isRead authority and preserve failures', (
 
 test('unread-summary stays read-only and reconciliation is deduplicated off the hot path', () => {
   const service = read('lib/notifications.ts')
-  const summaryStart = service.indexOf('export async function getUnreadSummary')
+  const summaryStart = service.indexOf('async function loadUnreadSummary')
   const summaryEnd = service.indexOf('export async function getUnreadNotificationCount')
+  assert.ok(summaryStart >= 0)
   const summary = service.slice(summaryStart, summaryEnd)
 
   assert.doesNotMatch(summary, /reconcileLikeNotifications|reconcileStalePersonalNotifications/)
+  assert.match(service, /unreadSummaryInFlight/)
   assert.match(service, /NOTIFICATION_RECONCILIATION_TTL_MS/)
   assert.match(service, /notificationReconciliationInFlight/)
   assert.match(service, /scheduleNotificationReconciliation\(userId, 'list'\)/)

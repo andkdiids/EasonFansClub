@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
+import { logNotificationError } from '@/lib/notification-errors'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
@@ -104,8 +105,20 @@ export async function POST(request: Request, context: RouteContext) {
   }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
-  if (notificationInput) await syncLikeNotification(notificationInput)
-  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
+  if (notificationInput) {
+    const input = notificationInput as LikeNotificationSyncInput
+    const recipientId = result.notifiedUserId
+    void syncLikeNotification(input)
+      .catch((error) => logNotificationError('like-notification-background', { userId: input.recipientId, notificationType: 'LIKE' }, error))
+      .finally(() => {
+        if (!recipientId) return
+        try { emitRealtime(recipientId, 'notification') } catch (error) {
+          logNotificationError('like-notification-realtime', { userId: recipientId, notificationType: 'LIKE' }, error)
+        }
+      })
+  } else if (result.notifiedUserId) {
+    emitRealtime(result.notifiedUserId, 'notification')
+  }
   return NextResponse.json(result)
 }
 
@@ -146,7 +159,19 @@ export async function DELETE(request: Request, context: RouteContext) {
   }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
-  if (notificationInput) await syncLikeNotification(notificationInput)
-  if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
+  if (notificationInput) {
+    const input = notificationInput as LikeNotificationSyncInput
+    const recipientId = result.notifiedUserId
+    void syncLikeNotification(input)
+      .catch((error) => logNotificationError('like-notification-background', { userId: input.recipientId, notificationType: 'LIKE' }, error))
+      .finally(() => {
+        if (!recipientId) return
+        try { emitRealtime(recipientId, 'notification') } catch (error) {
+          logNotificationError('like-notification-realtime', { userId: recipientId, notificationType: 'LIKE' }, error)
+        }
+      })
+  } else if (result.notifiedUserId) {
+    emitRealtime(result.notifiedUserId, 'notification')
+  }
   return NextResponse.json(result)
 }

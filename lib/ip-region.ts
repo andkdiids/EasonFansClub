@@ -200,6 +200,7 @@ const DEFAULT_IP_LOCATION_TIMEOUT_MS = 2500
 const DEFAULT_IP_LOCATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 const FAILED_IP_LOCATION_CACHE_TTL_MS = 60 * 1000
 const MAX_IP_LOCATION_CACHE_ENTRIES = 2000
+const DEFAULT_IP_PROVIDER_429_COOLDOWN_MS = 5 * 60 * 1000
 
 type LocationCacheEntry = {
   expiresAt: number
@@ -212,9 +213,11 @@ type IpLookupResult =
   | 'success'
   | 'timeout'
   | 'provider-error'
+  | 'rate-limited'
   | 'unknown-region'
 
 const ipLocationCache = new Map<string, LocationCacheEntry>()
+const ipProvider429CooldownUntil = new Map<string, number>()
 type LocationLookup = {
   location: IpLocation | null
   lookupResult: IpLookupResult
@@ -223,6 +226,13 @@ type LocationLookup = {
 }
 
 const ipLocationInFlight = new Map<string, Promise<LocationLookup>>()
+
+function ipProvider429CooldownMs() {
+  const configuredMs = Number(process.env.IP_LOCATION_429_COOLDOWN_MS)
+  return Number.isFinite(configuredMs) && configuredMs >= 60_000 && configuredMs <= 60 * 60 * 1000
+    ? configuredMs
+    : DEFAULT_IP_PROVIDER_429_COOLDOWN_MS
+}
 
 function stringValue(value: unknown) {
   if (typeof value === 'string') return value.trim()
@@ -506,7 +516,7 @@ async function fetchOneProvider(
     })
     if (response.status === 429) {
       console.warn('[ip-location.provider]', { provider: label, status: 429, reason: 'rate_limited' })
-      return { location: null, lookupResult: 'provider-error' }
+      return { location: null, lookupResult: 'rate-limited' }
     }
     if (!response.ok) {
       console.warn('[ip-location.provider]', { provider: label, status: response.status, reason: 'http_error' })
@@ -546,11 +556,27 @@ async function fetchIpLocation(ip: string): Promise<LocationLookup> {
   for (const template of templates) {
     const label = providerLabel(template)
     lastProvider = label
+    const cooldownUntil = ipProvider429CooldownUntil.get(label) || 0
+    if (cooldownUntil > Date.now()) {
+      lastResult = 'rate-limited'
+      continue
+    }
+    if (cooldownUntil) ipProvider429CooldownUntil.delete(label)
+
     const result = await fetchOneProvider(buildProviderUrl(template, ip), label)
     if (result.location) {
       return { location: result.location, lookupResult: 'success', provider: label, cacheHit: false }
     }
     lastResult = result.lookupResult
+    if (result.lookupResult === 'rate-limited') {
+      const expiresAt = Date.now() + ipProvider429CooldownMs()
+      ipProvider429CooldownUntil.set(label, expiresAt)
+      console.warn('[ip-location.provider.cooldown]', {
+        provider: label,
+        cooldownMs: expiresAt - Date.now(),
+        reason: 'rate_limited',
+      })
+    }
   }
   return { location: null, lookupResult: lastResult, provider: lastProvider, cacheHit: false }
 }
@@ -688,6 +714,7 @@ export async function updateUserIpRegion(userId: string, source: Request | IpLoc
 export function clearIpLocationCacheForTests() {
   ipLocationCache.clear()
   ipLocationInFlight.clear()
+  ipProvider429CooldownUntil.clear()
 }
 
 // Kept as a narrow compatibility export for older callers outside this app.

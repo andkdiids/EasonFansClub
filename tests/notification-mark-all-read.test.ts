@@ -42,8 +42,8 @@ test('全部已读：后端一笔事务完成，不在热路径做对账', () =>
   // 不再 await 阻塞用户点击响应。
   assert.doesNotMatch(service, /await reconcileLikeNotifications/)
   assert.doesNotMatch(service, /await reconcileStalePersonalNotifications/)
-  assert.match(service, /void reconcileLikeNotifications\(userId\)\.catch/)
-  assert.match(service, /void reconcileStalePersonalNotifications\(userId\)\.catch/)
+  assert.match(service, /scheduleNotificationReconciliation\(userId, 'read-all'\)/)
+  assert.match(service, /Promise\.allSettled\(\[/)
 })
 
 test('全部已读：顶部角标（AppShell）与未读汇总同源，成功后归零', () => {
