@@ -589,7 +589,6 @@ jobs:
                       cwd: env.pm_cwd || "",
                       script: env.pm_exec_path || "",
                       args: Array.isArray(env.args) ? env.args.join(" ") : String(env.args || ""),
-                      interpreter: env.exec_interpreter || "",
                       execMode: env.exec_mode || "",
                       instances: Number(env.instances || 1),
                     }));
@@ -601,27 +600,21 @@ jobs:
               pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
               pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
               pm2_args="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).args)' "${pm2_snapshot}")"
-              pm2_interpreter="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).interpreter)' "${pm2_snapshot}")"
               pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
               pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
             }
 
-            pm2_interpreter_matches_current() {
-              local interpreter_path expected_interpreter
-              interpreter_path="${pm2_interpreter}"
-              case "${interpreter_path}" in
-                /*) ;;
-                *) interpreter_path="${pm2_cwd}/${interpreter_path}" ;;
+            pm2_script_is_npm() {
+              case "$1" in
+                npm|*/npm|npm.cmd|*/npm.cmd) return 0 ;;
+                *) return 1 ;;
               esac
-              expected_interpreter="${current_link}/node_modules/.bin/tsx"
-              [ -x "${interpreter_path}" ] || return 1
-              [ "$(readlink -f -- "${interpreter_path}")" = "$(readlink -f -- "${expected_interpreter}")" ]
             }
 
             pm2_is_current_release() {
               [ "${pm2_cwd}" = "${current_link}" ] || return 1
-              [ "${pm2_script}" = "${current_link}/server.ts" ] || return 1
-              pm2_interpreter_matches_current
+              pm2_script_is_npm "${pm2_script}" || return 1
+              [ "${pm2_args}" = "start:server" ]
             }
 
             pm2_is_legacy_deployment() {
@@ -631,10 +624,7 @@ jobs:
               [ -x "${current_link}/node_modules/.bin/tsx" ] || return 1
               [ "${pm2_cwd}" = "${APP_DIR}" ] || return 1
 
-              case "${pm2_script}" in
-                npm|*/npm|npm.cmd|*/npm.cmd) ;;
-                *) return 1 ;;
-              esac
+              pm2_script_is_npm "${pm2_script}" || return 1
               case "${pm2_args}" in
                 start|start\ *) return 0 ;;
                 *) return 1 ;;
@@ -644,13 +634,13 @@ jobs:
             start_current_pm2() {
               if ! (
                 cd "${current_link}"
-                pm2 start "${current_link}/server.ts" \
+                pm2 start npm \
                   --name "${PM2_APP_NAME}" \
-                  --interpreter "${current_link}/node_modules/.bin/tsx" \
                   --cwd "${current_link}" \
-                  --update-env
+                  --update-env \
+                  -- start:server
               ); then
-                echo "Failed to start PM2 ${PM2_APP_NAME} with ${current_link}/server.ts; aborting deployment." >&2
+                echo "Failed to start PM2 ${PM2_APP_NAME} with npm start:server; aborting deployment." >&2
                 return 1
               fi
               if ! pm2 save; then
@@ -660,7 +650,7 @@ jobs:
             }
 
             migrate_legacy_pm2() {
-              echo "Detected legacy PM2 deployment. Migrating to current/server.ts."
+              echo "Detected legacy PM2 deployment. Migrating to npm start:server."
               if ! pm2 delete "${PM2_APP_NAME}"; then
                 echo "Failed to delete legacy PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
                 return 1
@@ -699,14 +689,14 @@ jobs:
             if ! pm2_is_current_release; then
               if [ "${pm2_cwd}" != "${current_link}" ]; then
                 echo "PM2 cwd is not the stable current symlink: ${pm2_cwd}" >&2
-              elif [ "${pm2_script}" != "${current_link}/server.ts" ]; then
-                echo "PM2 script is not the stable current server: ${pm2_script}" >&2
+              elif ! pm2_script_is_npm "${pm2_script}"; then
+                echo "PM2 script is not npm: ${pm2_script}" >&2
               else
-                echo "PM2 interpreter is not the current release tsx: ${pm2_interpreter}" >&2
+                echo "PM2 args are not start:server: ${pm2_args}" >&2
               fi
               exit 1
             fi
-            echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args} interpreter=${pm2_interpreter}"
+            echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args}"
 
             log_step "3/8" "Verify and extract package into a new release"
             cd "${incoming_dir}"
