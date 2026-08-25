@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "easonfansclub",
-      cwd: process.cwd(),
+      cwd: "/home/apps/easonfansclub/current",
       script: "npm",
       args: "run start",
       env: {

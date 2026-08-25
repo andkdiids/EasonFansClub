@@ -732,16 +732,32 @@ jobs:
 
             reload_pm2() {
               local release_sha="$1"
-              local pm2_status
+              local pm2_status current_realpath expected_current
               export NODE_ENV=production
               export DEPLOY_SHA="${release_sha}"
               export PORT="${APP_PORT}"
               cd "${current_link}"
+              echo "PM2 launch cwd:"
+              pwd
+              echo "PM2 launch release:"
+              current_realpath="$(readlink -f -- .)"
+              echo "${current_realpath}"
+              expected_current="$(readlink -f -- "${current_link}")"
+              if [ -z "${current_realpath}" ] || [ "${current_realpath}" != "${expected_current}" ]; then
+                echo "PM2 launch directory does not resolve through current: ${current_realpath}" >&2
+                return 1
+              fi
+              case "${current_realpath}" in
+                "${releases_dir}/"*) ;;
+                *)
+                  echo "PM2 launch directory is outside releases/: ${current_realpath}" >&2
+                  return 1
+                  ;;
+              esac
+              test -f ecosystem.config.js
               if pm2_app_exists; then
                 echo "Reloading PM2 from ecosystem.config.js."
-                if ! pm2 reload ecosystem.config.js \
-                  --only "${PM2_APP_NAME}" \
-                  --update-env; then
+                if ! pm2 reload ecosystem.config.js --update-env; then
                   echo "Failed to reload PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
                   return 1
                 fi
@@ -751,9 +767,7 @@ jobs:
                   return 1
                 fi
                 echo "PM2 app ${PM2_APP_NAME} is missing; starting from ecosystem.config.js."
-                if ! pm2 start ecosystem.config.js \
-                  --only "${PM2_APP_NAME}" \
-                  --update-env; then
+                if ! pm2 start ecosystem.config.js --update-env; then
                   echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
                   return 1
                 fi
@@ -762,11 +776,28 @@ jobs:
                 echo "Failed to save PM2 process list." >&2
                 return 1
               fi
+              echo "PM2 description after ecosystem operation:"
+              if ! pm2 describe "${PM2_APP_NAME}"; then
+                echo "PM2 describe failed for ${PM2_APP_NAME}." >&2
+                return 1
+              fi
               if ! read_pm2_snapshot || ! pm2_is_current_release; then
                 echo "PM2 final validation failed: cwd=${pm2_cwd:-} script=${pm2_script:-} args=${pm2_args:-}" >&2
                 return 1
               fi
               echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args} interpreter=${pm2_interpreter}"
+            }
+
+            print_health_diagnostics() {
+              echo "===== Health check diagnostics =====" >&2
+              echo "current release target:" >&2
+              readlink -f -- "${current_link}" >&2 || true
+              echo "PM2 description:" >&2
+              pm2 describe "${PM2_APP_NAME}" >&2 || true
+              echo "Local HTTP headers:" >&2
+              curl -I --max-time 10 "http://127.0.0.1:${APP_PORT}" >&2 || true
+              echo "PM2 error log (last 100 lines):" >&2
+              tail -100 -- "${HOME}/.pm2/logs/${PM2_APP_NAME}-error.log" >&2 || true
             }
 
             check_health() {
@@ -783,6 +814,7 @@ jobs:
                 echo "Health attempt ${attempt}/10 did not confirm release ${DEPLOY_SHA}."
                 sleep 3
               done
+              print_health_diagnostics
               return 1
             }
 
@@ -800,7 +832,14 @@ jobs:
 
             log_step "7/8" "Atomically switch current and reload PM2"
             atomic_switch "${release_dir}"
-            if ! reload_pm2 "${DEPLOY_SHA}" || ! check_health; then
+            post_switch_ok=true
+            if ! reload_pm2 "${DEPLOY_SHA}"; then
+              post_switch_ok=false
+              print_health_diagnostics
+            elif ! check_health; then
+              post_switch_ok=false
+            fi
+            if [ "${post_switch_ok}" != true ]; then
               rollback_release
               exit 1
             fi
