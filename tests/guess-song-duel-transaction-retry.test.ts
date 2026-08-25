@@ -71,7 +71,11 @@ test('production start binds Next to loopback while development remains unchange
 
   assert.equal(packageJson.scripts.start, 'next start -H 127.0.0.1 -p 3000')
   assert.equal(packageJson.scripts.dev, 'next dev')
-  assert.match(deployWorkflow, /pm2 restart easonfansclub --update-env/)
+  assert.match(deployWorkflow, /releases_dir=.*\/releases/)
+  assert.match(deployWorkflow, /mv -Tf -- "\$\{temporary_link\}" "\$\{current_link\}"/)
+  assert.match(deployWorkflow, /pm2 (reload|restart) "\$\{PM2_APP_NAME\}" --update-env/)
+  assert.match(deployWorkflow, /\/api\/health\/live/)
+  assert.match(deployWorkflow, /scripts\/run-birthday-daily-job\.sh/)
   assert.match(deployWorkflow, /Application port must be bound to localhost behind Nginx\./)
   assert.match(configureWorkflow, /Application port must be bound to localhost behind Nginx\./)
   assert.match(client, /const createRoomInFlightRef = useRef\(false\)/)

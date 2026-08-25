@@ -27,6 +27,7 @@ const publicExactPaths = new Set([
 
 const publicPathPrefixes = [
   '/api/auth/',
+  '/api/health/',
   '/_next/',
   '/easmusic/',
   '/images/',

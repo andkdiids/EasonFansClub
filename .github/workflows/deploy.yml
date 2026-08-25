@@ -74,6 +74,7 @@ jobs:
             tsconfig.json \
             next-env.d.ts \
             middleware.ts \
+            scripts/run-birthday-daily-job.sh \
             postcss.config.js \
             tailwind.config.ts \
             eslint.config.mjs
@@ -81,7 +82,7 @@ jobs:
           echo "===== [package 2/4] Validate archive ====="
           test -s ".deploy/${PACKAGE_NAME}"
           tar -tzf ".deploy/${PACKAGE_NAME}" > .deploy/package-contents.txt
-          for required_path in app components lib prisma public server.ts package.json pnpm-lock.yaml; do
+          for required_path in app components lib prisma public server.ts package.json pnpm-lock.yaml scripts/run-birthday-daily-job.sh; do
             if ! grep -Eq "^${required_path}(/|$)" .deploy/package-contents.txt; then
               echo "::error::Required production path is missing from deploy package: ${required_path}"
               exit 1
@@ -129,12 +130,37 @@ jobs:
             set -euo pipefail
 
             mkdir -p "${APP_DIR}/.deploy-incoming"
+            mkdir -p "${APP_DIR}/releases" "${APP_DIR}/shared"
             test -d "${APP_DIR}"
             test -w "${APP_DIR}"
             test -w "${APP_DIR}/.deploy-incoming"
+            test -w "${APP_DIR}/releases"
+            test -w "${APP_DIR}/shared"
+
+            if [ ! -L "${APP_DIR}/current" ]; then
+              echo 'Production release layout is not initialized: current must be a symlink into releases/.' >&2
+              echo 'Refusing to deploy into the legacy live directory. Bootstrap current/shared manually first.' >&2
+              exit 1
+            fi
+            current_target="$(readlink -f -- "${APP_DIR}/current")"
+            case "${current_target}" in
+              "${APP_DIR}/releases/"*) ;;
+              *)
+                echo "Production current target is outside releases/: ${current_target}" >&2
+                exit 1
+                ;;
+            esac
+            test -r "${APP_DIR}/shared/.env"
+            test -s "${APP_DIR}/shared/.env"
+            test -s "${current_target}/.deployed-sha"
+            if ! grep -Eq '^[0-9a-f]{40}$' "${current_target}/.deployed-sha"; then
+              echo 'Current release is missing a valid deployment SHA marker.' >&2
+              exit 1
+            fi
 
             echo "Deploy user: $(id -un)"
             echo "Application directory: ${APP_DIR}"
+            echo "Current release: ${current_target}"
             stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
             echo "Remote uptime:"
             uptime
@@ -402,22 +428,23 @@ jobs:
           echo "SHA256_OK"
           echo "Upload finished at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-      - name: Install, migrate, build, and restart
+      - name: Build release, migrate, switch, and reload
         uses: appleboy/ssh-action@v1
         env:
           APP_DIR: ${{ env.APP_DIR }}
           APP_PORT: ${{ env.APP_PORT }}
           PACKAGE_NAME: ${{ env.PACKAGE_NAME }}
           DEPLOY_SHA: ${{ github.sha }}
+          PM2_APP_NAME: easonfansclub
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: APP_DIR,APP_PORT,PACKAGE_NAME,DEPLOY_SHA
+          envs: APP_DIR,APP_PORT,PACKAGE_NAME,DEPLOY_SHA,PM2_APP_NAME
           command_timeout: 35m
           script: |
-            set -euo pipefail
+            set -Eeuo pipefail
 
             log_step() {
               printf '\n===== [deploy %s] %s =====\n' "$1" "$2"
@@ -433,41 +460,125 @@ jobs:
             command -v pnpm
             command -v pm2
 
-            log_step "2/8" "Verify uploaded package"
+            if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo 'DEPLOY_SHA is not a 40-character hexadecimal Git SHA.' >&2
+              exit 1
+            fi
+            if [[ ! "${PACKAGE_NAME}" =~ ^easonfansclub-[0-9a-f]{40}\.tar\.gz$ ]]; then
+              echo 'PACKAGE_NAME has an unexpected format.' >&2
+              exit 1
+            fi
+
+            releases_dir="${APP_DIR}/releases"
+            shared_dir="${APP_DIR}/shared"
+            current_link="${APP_DIR}/current"
             incoming_dir="${APP_DIR}/.deploy-incoming"
+            release_id="$(date -u +%Y%m%d%H%M%S)-${DEPLOY_SHA:0:12}"
+            release_dir="${releases_dir}/${release_id}"
+            previous_target="$(readlink -f -- "${current_link}")"
+            archive_path="${incoming_dir}/${PACKAGE_NAME}"
+            checksum_path="${archive_path}.sha256"
+            deployment_succeeded=false
+
+            on_exit() {
+              local status=$?
+              if [ "${deployment_succeeded}" != true ] && [ -d "${release_dir}" ]; then
+                printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
+              fi
+              return "${status}"
+            }
+            trap on_exit EXIT
+
+            case "${previous_target}" in
+              "${releases_dir}/"*) ;;
+              *)
+                echo "Current target is outside the release root: ${previous_target}" >&2
+                exit 1
+                ;;
+            esac
+            test -r "${shared_dir}/.env"
+            test -s "${shared_dir}/.env"
+            test -s "${previous_target}/.deployed-sha"
+            test -w "${releases_dir}"
+
+            log_step "2/8" "Verify release layout and PM2 path"
+            if ! pm2_snapshot="$({ pm2 jlist || exit 1; } | node -e '
+              let raw = "";
+              process.stdin.on("data", (chunk) => { raw += chunk; });
+              process.stdin.on("end", () => {
+                try {
+                  const appName = process.argv[1];
+                  const app = JSON.parse(raw).find((entry) => entry.name === appName);
+                  if (!app) process.exit(2);
+                  const env = app.pm2_env || {};
+                  process.stdout.write(JSON.stringify({
+                    cwd: env.pm_cwd || "",
+                    script: env.pm_exec_path || "",
+                    execMode: env.exec_mode || "",
+                    instances: Number(env.instances || 1),
+                  }));
+                } catch {
+                  process.exit(3);
+                }
+              });
+            ' "${PM2_APP_NAME}")"; then
+              echo "PM2 app ${PM2_APP_NAME} is missing; configure it to run from ${current_link} before deployment." >&2
+              exit 1
+            fi
+            pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
+            pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
+            pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
+            pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
+            if [ "${pm2_cwd}" != "${current_link}" ]; then
+              echo "PM2 cwd is not the stable current symlink: ${pm2_cwd}" >&2
+              exit 1
+            fi
+            case "${pm2_script}" in
+              "${current_link}/"*|server.ts) ;;
+              *)
+                echo "PM2 script is not under the stable current symlink: ${pm2_script}" >&2
+                exit 1
+                ;;
+            esac
+            echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd}"
+
+            log_step "3/8" "Verify and extract package into a new release"
             cd "${incoming_dir}"
             echo "Remote package size: $(stat -c '%s bytes' "${PACKAGE_NAME}")"
             sha256sum -c "${PACKAGE_NAME}.sha256"
-
-            log_step "3/8" "Extract source into existing application directory"
-            cd "${APP_DIR}"
-            tar -xzf "${incoming_dir}/${PACKAGE_NAME}"
-
-            test -f .env
-            test -f package.json
-            test -f pnpm-lock.yaml
-            test -f server.ts
-
-            if ! grep -Eq '^TRUSTED_CLIENT_IP_SOURCE=("nginx"|nginx|"cloudflare"|cloudflare)[[:space:]]*$' .env; then
-              echo 'Production .env must set TRUSTED_CLIENT_IP_SOURCE=nginx or cloudflare to match the active trusted proxy boundary.' >&2
+            archive_listing="${incoming_dir}/${PACKAGE_NAME}.contents"
+            tar -tzf "${archive_path}" > "${archive_listing}"
+            if grep -Eq '(^/|(^|/)\.\.(/|$))' "${archive_listing}"; then
+              echo 'Deploy archive contains an absolute or parent-traversal path.' >&2
               exit 1
             fi
+            if grep -Eq '(^|/)(node_modules|\.git|tests|\.env($|\.)|\.log$)' "${archive_listing}"; then
+              echo 'Deploy archive contains a forbidden development, secret, or temporary file.' >&2
+              exit 1
+            fi
+            install -d -m 755 "${release_dir}"
+            tar -xzf "${archive_path}" -C "${release_dir}" --no-same-owner
+            ln -s "${shared_dir}/.env" "${release_dir}/.env"
+            printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deployed-sha"
+
+            test -f "${release_dir}/package.json"
+            test -f "${release_dir}/pnpm-lock.yaml"
+            test -f "${release_dir}/server.ts"
+            test -L "${release_dir}/.env"
 
             node -v
             pnpm -v
             pm2 -v
 
-            log_step "4/8" "Install production dependencies"
+            log_step "4/8" "Install dependencies and generate Prisma client in release"
+            cd "${release_dir}"
             install_started="$(date +%s)"
             pnpm install --frozen-lockfile
             test -d node_modules
             echo "Dependency install completed in $(( $(date +%s) - install_started ))s."
-
-            log_step "5/8" "Apply existing migrations and generate Prisma client"
-            pnpm prisma migrate deploy
             pnpm prisma generate
 
-            log_step "6/8" "Build Next.js production bundle"
+            log_step "5/8" "Build release before touching current"
             build_started="$(date +%s)"
             build_node_options="--max-old-space-size=4096"
             echo "Node build options: ${build_node_options}"
@@ -480,41 +591,115 @@ jobs:
             echo "Existing next build processes before build:"
             pgrep -af "next build" || true
             NODE_OPTIONS="${build_node_options}" pnpm build
+            test -s "${release_dir}/.next/BUILD_ID"
+            test -d "${release_dir}/.next/static"
+            test -d "${release_dir}/public"
             echo "Memory after build:"
             free -h || true
             echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-            log_step "7/8" "Restart PM2 application"
-            pm2 restart easonfansclub --update-env
-            echo "PM2 restart command completed successfully."
+            log_step "6/8" "Apply backward-compatible migrations after build"
+            pnpm migration:check:mysql
+            NODE_ENV=production pnpm prisma migrate deploy
 
-            rm -f "${incoming_dir:?}/${PACKAGE_NAME}" \
-              "${incoming_dir:?}/${PACKAGE_NAME}.sha256"
-
-            log_step "8/8" "Run local health check"
-            for attempt in $(seq 1 10); do
-              if curl --fail --silent --show-error \
-                --max-time 10 \
-                "http://127.0.0.1:${APP_PORT}/login" > /dev/null; then
-                break
+            atomic_switch() {
+              local target="$1"
+              local temporary_link="${APP_DIR}/.current-${release_id}-${RANDOM}"
+              case "${target}" in
+                "${releases_dir}/"*) ;;
+                *) echo "Refusing to point current outside releases/: ${target}" >&2; return 1 ;;
+              esac
+              if [ -e "${temporary_link}" ] || [ -L "${temporary_link}" ]; then
+                rm -f -- "${temporary_link}"
               fi
+              ln -s -- "${target}" "${temporary_link}"
+              mv -Tf -- "${temporary_link}" "${current_link}"
+            }
 
-              if [ "${attempt}" -eq 10 ]; then
-                echo "Application health check failed after ${attempt} attempts."
-                pm2 logs easonfansclub --lines 80 --nostream
-                exit 1
+            reload_pm2() {
+              local release_sha="$1"
+              export NODE_ENV=production
+              export DEPLOY_SHA="${release_sha}"
+              export PORT="${APP_PORT}"
+              if [ "${pm2_exec_mode}" = "cluster_mode" ] && [ "${pm2_instances}" -gt 1 ]; then
+                echo "Reloading PM2 cluster (${pm2_instances} instances)."
+                pm2 reload "${PM2_APP_NAME}" --update-env
+              else
+                echo "Restarting PM2 fork/single instance without changing exec mode."
+                pm2 restart "${PM2_APP_NAME}" --update-env
               fi
+            }
 
-              sleep 3
-            done
+            check_health() {
+              local health_response active_target deployed_sha
+              for attempt in $(seq 1 10); do
+                health_response="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${APP_PORT}/api/health/live" || true)"
+                active_target="$(readlink -f -- "${current_link}" || true)"
+                deployed_sha="$(cat "${current_link}/.deployed-sha" 2>/dev/null || true)"
+                if [ "${active_target}" = "${release_dir}" ] &&
+                   [ "${deployed_sha}" = "${DEPLOY_SHA}" ] &&
+                   printf '%s' "${health_response}" | grep -Fq "\"release\":\"${DEPLOY_SHA}\""; then
+                  return 0
+                fi
+                echo "Health attempt ${attempt}/10 did not confirm release ${DEPLOY_SHA}."
+                sleep 3
+              done
+              return 1
+            }
 
-            pm2 describe easonfansclub
-            if ! ss -ltn | grep -Eq "[[:space:]](127\\.0\\.0\\.1|\\[::1\\]):${APP_PORT}[[:space:]]"; then
-              echo 'Application port must be bound to localhost behind Nginx.' >&2
+            rollback_release() {
+              local previous_sha
+              previous_sha="$(cat "${previous_target}/.deployed-sha")"
+              printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
+              echo "Health check failed; atomically restoring ${previous_target}." >&2
+              atomic_switch "${previous_target}"
+              reload_pm2 "${previous_sha}" || pm2 restart "${PM2_APP_NAME}" --update-env || true
+              pm2 logs "${PM2_APP_NAME}" --lines 80 --nostream || true
+            }
+
+            log_step "7/8" "Atomically switch current and reload PM2"
+            atomic_switch "${release_dir}"
+            if ! reload_pm2 "${DEPLOY_SHA}" || ! check_health; then
+              rollback_release
               exit 1
             fi
-            printf '%s\n' "${DEPLOY_SHA}" > .deployed-sha
-            test "$(cat .deployed-sha)" = "${DEPLOY_SHA}"
+
+            log_step "8/8" "Verify release and retain rollback metadata"
+            if ! ss -ltn | grep -Eq "[[:space:]](127\\.0\\.0\\.1|\\[::1\\]):${APP_PORT}[[:space:]]"; then
+              echo 'Application port must be bound to localhost behind Nginx.' >&2
+              rollback_release
+              exit 1
+            fi
+            previous_metadata="${shared_dir}/previous-release"
+            previous_metadata_tmp="${shared_dir}/.previous-release-${release_id}.tmp"
+            printf '%s\n' "${previous_target}" > "${previous_metadata_tmp}"
+            mv -Tf -- "${previous_metadata_tmp}" "${previous_metadata}"
+            pm2 describe "${PM2_APP_NAME}"
+            echo "Current release: $(readlink -f -- "${current_link}")"
+            echo "Previous release: ${previous_target}"
+
+            kept=0
+            while IFS= read -r release_entry; do
+              release_path="${release_entry#* }"
+              [ -n "${release_path}" ] || continue
+              case "${release_path}" in
+                "${releases_dir}/"*) ;;
+                *) continue ;;
+              esac
+              if [ "${release_path}" = "${release_dir}" ] ||
+                 [ "${release_path}" = "${previous_target}" ] ||
+                 [ -f "${release_path}/.deploy-failed" ]; then
+                continue
+              fi
+              kept=$((kept + 1))
+              if [ "${kept}" -gt 4 ]; then
+                echo "Removing old successful release: ${release_path}"
+                rm -rf -- "${release_path}"
+              fi
+            done < <(find "${releases_dir}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr)
+
+            rm -f -- "${archive_path}" "${checksum_path}" "${archive_listing}"
+            deployment_succeeded=true
             echo "Deployment health check passed for ${DEPLOY_SHA}."
 
       - name: Verify public website
