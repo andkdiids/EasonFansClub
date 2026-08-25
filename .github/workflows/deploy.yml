@@ -545,11 +545,6 @@ jobs:
             release_id="$(date -u +%Y%m%d%H%M%S)-${DEPLOY_SHA:0:12}"
             release_dir="${releases_dir}/${release_id}"
             previous_target="$(readlink -f -- "${current_link}")"
-            bootstrap_release="${releases_dir}/bootstrap"
-            bootstrap_mode=false
-            if [ "${previous_target}" = "${bootstrap_release}" ]; then
-              bootstrap_mode=true
-            fi
             archive_path="${incoming_dir}/${PACKAGE_NAME}"
             checksum_path="${archive_path}.sha256"
             deployment_succeeded=false
@@ -575,183 +570,8 @@ jobs:
             test -s "${previous_target}/.deployed-sha"
             test -w "${releases_dir}"
 
-            log_step "2/8" "Verify release layout and PM2 path"
-            read_pm2_snapshot() {
-              pm2_snapshot="$({ pm2 jlist || exit 1; } | node -e '
-                let raw = "";
-                process.stdin.on("data", (chunk) => { raw += chunk; });
-                process.stdin.on("end", () => {
-                  try {
-                    const appName = process.argv[1];
-                    const app = JSON.parse(raw).find((entry) => entry.name === appName);
-                    if (!app) process.exit(2);
-                    const env = app.pm2_env || {};
-                    process.stdout.write(JSON.stringify({
-                      cwd: env.pm_cwd || "",
-                      script: env.pm_exec_path || "",
-                      args: Array.isArray(env.args) ? env.args.join(" ") : String(env.args || ""),
-                      interpreter: env.exec_interpreter || "",
-                      execMode: env.exec_mode || "",
-                      instances: Number(env.instances || 1),
-                    }));
-                  } catch {
-                    process.exit(3);
-                  }
-                });
-              ' "${PM2_APP_NAME}")"
-              pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
-              pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
-              pm2_args="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).args)' "${pm2_snapshot}")"
-              pm2_interpreter="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).interpreter)' "${pm2_snapshot}")"
-              pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
-              pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
-            }
-
-            pm2_script_is_npm() {
-              case "$1" in
-                npm|*/npm|npm.cmd|*/npm.cmd) return 0 ;;
-                *) return 1 ;;
-              esac
-            }
-
-            pm2_is_current_release() {
-              [ "${pm2_cwd}" = "${current_link}" ] || return 1
-              pm2_script_is_npm "${pm2_script}" || return 1
-              [ "${pm2_args}" = "run start:server" ]
-            }
-
-            pm2_is_legacy_tsx_deployment() {
-              [ "${pm2_cwd}" = "${current_link}" ] || return 1
-              [ "${pm2_script}" = "${current_link}/server.ts" ] || return 1
-              [ "${pm2_interpreter}" = "${current_link}/node_modules/.bin/tsx" ]
-            }
-
-            pm2_is_intermediate_npm_deployment() {
-              [ "${pm2_cwd}" = "${current_link}" ] || return 1
-              pm2_script_is_npm "${pm2_script}" || return 1
-              [ "${pm2_args}" = "start:server" ]
-            }
-
-            pm2_is_legacy_deployment() {
-              [ "${bootstrap_mode}" = true ] || return 1
-              [ -e "${current_link}" ] || [ -L "${current_link}" ] || return 1
-              [ -f "${current_link}/server.ts" ] || return 1
-              [ -x "${current_link}/node_modules/.bin/tsx" ] || return 1
-              [ "${pm2_cwd}" = "${APP_DIR}" ] || return 1
-
-              pm2_script_is_npm "${pm2_script}" || return 1
-              case "${pm2_args}" in
-                start|start\ *) return 0 ;;
-                *) return 1 ;;
-              esac
-            }
-
-            start_current_pm2() {
-              if [ ! -f "${current_link}/ecosystem.config.js" ]; then
-                echo "PM2 ecosystem config is missing: ${current_link}/ecosystem.config.js" >&2
-                return 1
-              fi
-              if ! (
-                cd "${current_link}"
-                pm2 start ecosystem.config.js \
-                  --only "${PM2_APP_NAME}" \
-                  --update-env
-              ); then
-                echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js; aborting deployment." >&2
-                return 1
-              fi
-              if ! pm2 save; then
-                echo "Failed to save PM2 process list after starting ${PM2_APP_NAME}; aborting deployment." >&2
-                return 1
-              fi
-            }
-
-            migrate_legacy_pm2() {
-              echo "Detected legacy PM2 deployment. Migrating with ecosystem.config.js."
-              if ! pm2 delete "${PM2_APP_NAME}"; then
-                echo "Failed to delete legacy PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
-                return 1
-              fi
-              start_current_pm2
-            }
-
-            migrate_legacy_tsx_pm2() {
-              echo "Detected legacy TSX PM2 deployment. Migrating with ecosystem.config.js."
-              if ! pm2 delete "${PM2_APP_NAME}"; then
-                echo "Failed to delete legacy TSX PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
-                return 1
-              fi
-              start_current_pm2
-            }
-
-            migrate_intermediate_npm_pm2() {
-              echo "Detected intermediate PM2 npm deployment with missing run argument. Migrating with ecosystem.config.js."
-              if ! pm2 delete "${PM2_APP_NAME}"; then
-                echo "Failed to delete intermediate PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
-                return 1
-              fi
-              start_current_pm2
-            }
-
-            if ! read_pm2_snapshot; then
-              if [ "${bootstrap_mode}" != true ]; then
-                echo "PM2 app ${PM2_APP_NAME} is missing; configure it to run from ${current_link} before deployment." >&2
-                exit 1
-              fi
-              echo "PM2 app ${PM2_APP_NAME} is missing during bootstrap; creating it from ${current_link}."
-              if ! start_current_pm2; then
-                exit 1
-              fi
-              if ! read_pm2_snapshot; then
-                echo "PM2 app ${PM2_APP_NAME} could not be read after bootstrap start; aborting deployment." >&2
-                exit 1
-              fi
-            elif [ "${pm2_cwd}" != "${current_link}" ]; then
-              if pm2_is_legacy_deployment; then
-                if ! migrate_legacy_pm2; then
-                  exit 1
-                fi
-                if ! read_pm2_snapshot; then
-                  echo "PM2 app ${PM2_APP_NAME} could not be read after legacy migration; aborting deployment." >&2
-                  exit 1
-                fi
-              else
-                echo "PM2 cwd is not the stable current symlink and does not match the allowed legacy deployment: ${pm2_cwd}" >&2
-                exit 1
-              fi
-            fi
-
-            if pm2_is_legacy_tsx_deployment; then
-              if ! migrate_legacy_tsx_pm2; then
-                exit 1
-              fi
-              if ! read_pm2_snapshot; then
-                echo "PM2 app ${PM2_APP_NAME} could not be read after legacy TSX migration; aborting deployment." >&2
-                exit 1
-              fi
-            fi
-
-            if pm2_is_intermediate_npm_deployment; then
-              if ! migrate_intermediate_npm_pm2; then
-                exit 1
-              fi
-              if ! read_pm2_snapshot; then
-                echo "PM2 app ${PM2_APP_NAME} could not be read after intermediate npm migration; aborting deployment." >&2
-                exit 1
-              fi
-            fi
-
-            if ! pm2_is_current_release; then
-              if [ "${pm2_cwd}" != "${current_link}" ]; then
-                echo "PM2 cwd is not the stable current symlink: ${pm2_cwd}" >&2
-              elif ! pm2_script_is_npm "${pm2_script}"; then
-                echo "PM2 script is not npm: ${pm2_script}" >&2
-              else
-                echo "PM2 args are not run start:server: ${pm2_args}" >&2
-              fi
-              exit 1
-            fi
-            echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args} interpreter=${pm2_interpreter}"
+            log_step "2/8" "Verify stable deployment layout"
+            test -L "${current_link}"
 
             log_step "3/8" "Verify and extract package into a new release"
             cd "${incoming_dir}"
@@ -828,18 +648,125 @@ jobs:
               mv -Tf -- "${temporary_link}" "${current_link}"
             }
 
+            read_pm2_snapshot() {
+              local pm2_json pm2_snapshot
+              if ! pm2_json="$(pm2 jlist)"; then
+                echo "Unable to read PM2 process list." >&2
+                return 1
+              fi
+              if ! pm2_snapshot="$(printf '%s' "${pm2_json}" | node -e '
+                let raw = "";
+                process.stdin.on("data", (chunk) => { raw += chunk; });
+                process.stdin.on("end", () => {
+                  try {
+                    const appName = process.argv[1];
+                    const app = JSON.parse(raw).find((entry) => entry.name === appName);
+                    if (!app) process.exit(1);
+                    const env = app.pm2_env || {};
+                    process.stdout.write(JSON.stringify({
+                      cwd: env.pm_cwd || "",
+                      script: env.pm_exec_path || "",
+                      args: Array.isArray(env.args) ? env.args.join(" ") : String(env.args || ""),
+                      interpreter: env.exec_interpreter || "",
+                      execMode: env.exec_mode || "",
+                      instances: Number(env.instances || 1),
+                    }));
+                  } catch {
+                    process.exit(2);
+                  }
+                });
+              ' "${PM2_APP_NAME}")"; then
+                echo "PM2 app ${PM2_APP_NAME} is not present in the process list." >&2
+                return 1
+              fi
+              pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
+              pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
+              pm2_args="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).args)' "${pm2_snapshot}")"
+              pm2_interpreter="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).interpreter)' "${pm2_snapshot}")"
+              pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
+              pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
+            }
+
+            pm2_app_exists() {
+              local pm2_json pm2_status
+              if ! pm2_json="$(pm2 jlist)"; then
+                echo "Unable to read PM2 process list." >&2
+                return 2
+              fi
+              if printf '%s' "${pm2_json}" | node -e '
+                let raw = "";
+                process.stdin.on("data", (chunk) => { raw += chunk; });
+                process.stdin.on("end", () => {
+                  try {
+                    const appName = process.argv[1];
+                    const exists = JSON.parse(raw).some((entry) => entry.name === appName);
+                    process.exit(exists ? 0 : 1);
+                  } catch {
+                    process.exit(2);
+                  }
+                });
+              ' "${PM2_APP_NAME}"; then
+                return 0
+              else
+                pm2_status=$?
+                if [ "${pm2_status}" -eq 1 ]; then
+                  return 1
+                fi
+                echo "PM2 process list is invalid; refusing to create a duplicate process." >&2
+                return 2
+              fi
+            }
+
+            pm2_script_is_npm() {
+              case "$1" in
+                npm|*/npm|npm.cmd|*/npm.cmd) return 0 ;;
+                *) return 1 ;;
+              esac
+            }
+
+            pm2_is_current_release() {
+              [ "${pm2_cwd}" = "${current_link}" ] || return 1
+              pm2_script_is_npm "${pm2_script}" || return 1
+              [ "${pm2_args}" = "run start" ]
+            }
+
             reload_pm2() {
               local release_sha="$1"
+              local pm2_status
               export NODE_ENV=production
               export DEPLOY_SHA="${release_sha}"
               export PORT="${APP_PORT}"
-              if [ "${pm2_exec_mode}" = "cluster_mode" ] && [ "${pm2_instances}" -gt 1 ]; then
-                echo "Reloading PM2 cluster (${pm2_instances} instances)."
-                pm2 reload "${PM2_APP_NAME}" --update-env
+              cd "${current_link}"
+              if pm2_app_exists; then
+                echo "Reloading PM2 from ecosystem.config.js."
+                if ! pm2 reload ecosystem.config.js \
+                  --only "${PM2_APP_NAME}" \
+                  --update-env; then
+                  echo "Failed to reload PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
+                  return 1
+                fi
               else
-                echo "Restarting PM2 fork/single instance without changing exec mode."
-                pm2 restart "${PM2_APP_NAME}" --update-env
+                pm2_status=$?
+                if [ "${pm2_status}" -ne 1 ]; then
+                  return 1
+                fi
+                echo "PM2 app ${PM2_APP_NAME} is missing; starting from ecosystem.config.js."
+                if ! pm2 start ecosystem.config.js \
+                  --only "${PM2_APP_NAME}" \
+                  --update-env; then
+                  echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
+                  return 1
+                fi
               fi
+              if ! pm2 save; then
+                echo "Failed to save PM2 process list." >&2
+                return 1
+              fi
+              if ! read_pm2_snapshot || ! pm2_is_current_release; then
+                echo "PM2 final validation failed: cwd=${pm2_cwd:-} script=${pm2_script:-} args=${pm2_args:-}" >&2
+                return 1
+              fi
+              echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args} interpreter=${pm2_interpreter}"
             }
 
             check_health() {
@@ -865,7 +792,9 @@ jobs:
               printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
               echo "Health check failed; atomically restoring ${previous_target}." >&2
               atomic_switch "${previous_target}"
-              reload_pm2 "${previous_sha}" || pm2 restart "${PM2_APP_NAME}" --update-env || true
+              if ! reload_pm2 "${previous_sha}"; then
+                echo "Rollback PM2 reload from ecosystem.config.js failed." >&2
+              fi
               pm2 logs "${PM2_APP_NAME}" --lines 80 --nostream || true
             }
 
