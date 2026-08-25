@@ -74,6 +74,7 @@ jobs:
             tsconfig.json \
             next-env.d.ts \
             middleware.ts \
+            scripts/check-migrations-mysql.ts \
             scripts/run-birthday-daily-job.sh \
             postcss.config.js \
             tailwind.config.ts \
@@ -82,7 +83,7 @@ jobs:
           echo "===== [package 2/4] Validate archive ====="
           test -s ".deploy/${PACKAGE_NAME}"
           tar -tzf ".deploy/${PACKAGE_NAME}" > .deploy/package-contents.txt
-          for required_path in app components lib prisma public server.ts package.json pnpm-lock.yaml scripts/run-birthday-daily-job.sh; do
+          for required_path in app components lib prisma public server.ts package.json pnpm-lock.yaml scripts/check-migrations-mysql.ts scripts/run-birthday-daily-job.sh; do
             if ! grep -Eq "^${required_path}(/|$)" .deploy/package-contents.txt; then
               echo "::error::Required production path is missing from deploy package: ${required_path}"
               exit 1
