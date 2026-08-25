@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { Prisma, ProfileWallVisibility } from '@prisma/client'
+import { Prisma, ProfileWallVisibility, type VerificationStatus } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
@@ -361,6 +361,7 @@ export async function PATCH(request: Request) {
     phone?: string | null
     emailVerifiedAt?: Date | null
     phoneVerifiedAt?: Date | null
+    verificationStatus?: VerificationStatus
     birthMonth?: number
     birthDay?: number
     birthdaySetAt?: Date
@@ -415,7 +416,9 @@ export async function PATCH(request: Request) {
     if (nicknameValidation.error) return NextResponse.json({ message: nicknameValidation.error }, { status: 400 })
   }
 
-  if (email !== undefined && data.email !== current.email) {
+  const currentEmail = normalizeEmail(current.email)
+  const emailChanged = email !== undefined && data.email !== currentEmail
+  if (emailChanged) {
     if (data.email) {
       const existing = await prisma.user.findFirst({
         where: { email: data.email, isDeleted: false, NOT: { id: guard.user.id } },
@@ -424,6 +427,7 @@ export async function PATCH(request: Request) {
       if (existing) return NextResponse.json({ message: '该邮箱已被绑定' }, { status: 409 })
     }
     data.emailVerifiedAt = null
+    data.verificationStatus = data.email ? 'PENDING' : 'NONE'
   }
 
   const currentPhoneE164 = current.phone ? normalizePhoneNumber(current.phone, phoneCountry)?.e164 : null
@@ -624,7 +628,7 @@ export async function PATCH(request: Request) {
   profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)
 
   let emailVerificationSent = false
-  if (profile.email && profile.email !== current.email) {
+  if (profile.email && emailChanged) {
     const verification = await createVerificationForUser(guard.user.id, profile.email)
     await sendVerificationEmail(profile.email, verification.verificationUrl, 'change-email')
     emailVerificationSent = true

@@ -11,6 +11,8 @@ export type UserDeletionPreview = {
     avatarUrl: string | null
     phone: string | null
     email: string | null
+    phoneVerifiedAt: Date | null
+    emailVerifiedAt: Date | null
     createdAt: Date
     role: UserRole
   }
@@ -62,6 +64,8 @@ export async function getUserDeletionPreview(userId: string): Promise<UserDeleti
       avatarUrl: true,
       phone: true,
       email: true,
+      phoneVerifiedAt: true,
+      emailVerifiedAt: true,
       createdAt: true,
       role: true,
       Profile: { select: { displayName: true, avatarUrl: true } },
@@ -112,6 +116,8 @@ export async function getUserDeletionPreview(userId: string): Promise<UserDeleti
       avatarUrl: user.Profile?.avatarUrl || user.avatarUrl,
       phone: user.phone,
       email: user.email,
+      phoneVerifiedAt: user.phoneVerifiedAt,
+      emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       role: user.role,
     },

@@ -1,5 +1,6 @@
 import type { Prisma, User } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { normalizeLoginAccount } from '@/lib/login-account'
 import { getPhoneLookupVariants, type PhoneCountryCode } from '@/lib/phone-number'
 
 export const inactiveUserStatuses = ['BANNED', 'DELETED', 'MERGED', 'DISABLED'] as const
@@ -35,6 +36,22 @@ export function isCompleteActiveUser(
   user: Pick<User, 'uid' | 'status' | 'isDeleted'> & { Profile?: unknown | null },
 ) {
   return Boolean(user.uid && user.status === 'ACTIVE' && !user.isDeleted && user.Profile)
+}
+
+/**
+ * Build the shared account-recovery lookup. User.phone and User.email are the
+ * only canonical identity fields; usernameNormalized is retained solely for
+ * the existing security-question/email-recovery entry points.
+ */
+export function getLoginIdentifierWhere(identifier: string, phoneCountry: PhoneCountryCode = 'CN'): Prisma.UserWhereInput {
+  const normalized = identifier.trim()
+  return {
+    OR: [
+      { usernameNormalized: normalizeLoginAccount(normalized) },
+      { email: normalized.toLowerCase() },
+      ...getPhoneLookupVariants(normalized, phoneCountry).map((phone) => ({ phone })),
+    ],
+  }
 }
 
 export async function findCompleteActiveUserByIdentifier(identifier: string) {

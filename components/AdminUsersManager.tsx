@@ -2,8 +2,10 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { getPhoneInputParts, type PhoneCountryCode } from '@/lib/phone-number'
 
 type AdminUser = {
   id: string
@@ -37,6 +39,8 @@ type DeletePreview = {
     avatarUrl: string | null
     phone: string | null
     email: string | null
+    phoneVerifiedAt: string | null
+    emailVerifiedAt: string | null
     createdAt: string
     role: string
   }
@@ -76,10 +80,12 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
   const [deletePublicContent, setDeletePublicContent] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [securityBusyUserId, setSecurityBusyUserId] = useState<string | null>(null)
-  const [emailTarget, setEmailTarget] = useState<AdminUser | null>(null)
-  const [emailInput, setEmailInput] = useState('')
-  const [emailError, setEmailError] = useState('')
-  const [emailBusyUserId, setEmailBusyUserId] = useState<string | null>(null)
+  const [contactTarget, setContactTarget] = useState<AdminUser | null>(null)
+  const [contactEmailInput, setContactEmailInput] = useState('')
+  const [contactPhoneInput, setContactPhoneInput] = useState('')
+  const [contactPhoneCountry, setContactPhoneCountry] = useState<PhoneCountryCode>('CN')
+  const [contactError, setContactError] = useState('')
+  const [contactBusyUserId, setContactBusyUserId] = useState<string | null>(null)
 
   async function loadUsers(search = query) {
     setLoading(true)
@@ -143,40 +149,44 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
     }
   }
 
-  function openEmailModal(user: AdminUser) {
-    setEmailTarget(user)
-    setEmailInput(user.email || '')
-    setEmailError('')
+  function openContactModal(user: AdminUser) {
+    const phoneParts = getPhoneInputParts(user.phone || '')
+    setContactTarget(user)
+    setContactEmailInput(user.email || '')
+    setContactPhoneInput(phoneParts.value)
+    setContactPhoneCountry(phoneParts.country)
+    setContactError('')
     setError('')
     setMessage('')
   }
 
-  async function updateEmail() {
-    if (!emailTarget || emailBusyUserId || !emailInput.trim()) return
+  async function updateContact() {
+    if (!contactTarget || contactBusyUserId) return
 
-    setEmailBusyUserId(emailTarget.id)
-    setEmailError('')
+    setContactBusyUserId(contactTarget.id)
+    setContactError('')
     setError('')
     setMessage('')
     try {
-      const response = await fetch(`/api/admin/users/${emailTarget.id}`, {
+      const response = await fetch(`/api/admin/users/${contactTarget.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ action: 'updateEmail', email: emailInput.trim() }),
+        body: JSON.stringify({
+          action: 'updateContact',
+          email: contactEmailInput.trim(),
+          phone: contactPhoneInput.trim(),
+          phoneCountry: contactPhoneCountry,
+        }),
       })
       const data = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(data?.message || '绑定邮箱修改失败')
-      setUsers((current) => current.map((item) => item.id === emailTarget.id
-        ? { ...item, email: data?.user?.email || emailInput.trim().toLowerCase(), emailVerifiedAt: data?.user?.emailVerifiedAt || null }
-        : item))
-      setEmailTarget(null)
-      setMessage(data?.message || '绑定邮箱已修改')
+      if (!response.ok) throw new Error(data?.message || '联系方式修改失败')
+      setContactTarget(null)
+      await loadUsers(query)
+      setMessage(data?.message || '联系方式已修改')
     } catch (updateError) {
-      setEmailError(updateError instanceof Error ? updateError.message : '绑定邮箱修改失败')
-    } finally {
-      setEmailBusyUserId(null)
-    }
+      setContactError(updateError instanceof Error ? updateError.message : '联系方式修改失败')
+    } finally { setContactBusyUserId(null) }
   }
 
   async function updateSecurityRecovery(user: AdminUser) {
@@ -318,10 +328,10 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
                     {canManageUserEmail ? (
                       <button
                         type="button"
-                        onClick={() => openEmailModal(user)}
+                        onClick={() => openContactModal(user)}
                         className="mb-2 ml-2 min-h-10 rounded-full border border-sky-200 bg-sky-50 px-4 text-sm font-black text-brand-700"
                       >
-                        修改绑定邮箱
+                        修改联系方式
                       </button>
                     ) : null}
                     <button
@@ -373,7 +383,8 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
                   <div>
                     <p className="text-xl font-black text-brand-950">{preview.user.nickname}</p>
                     <p className="text-sm font-bold text-slate-500">UID {formatUid(preview.user.uid)} / {preview.user.role}</p>
-                    <p className="mt-1 text-xs font-bold text-slate-400">{preview.user.phone || '未绑定手机'} / {preview.user.email || '未绑定邮箱'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-400">{preview.user.phone || '未绑定手机'} · {preview.user.phone ? (preview.user.phoneVerifiedAt ? '手机号已验证' : '手机号未验证') : '手机号未绑定'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-400">{preview.user.email || '未绑定邮箱'} · {preview.user.email ? (preview.user.emailVerifiedAt ? '邮箱已验证' : '邮箱未验证') : '邮箱未绑定'}</p>
                     <p className="mt-1 text-xs font-bold text-slate-400">注册于 {formatDate(preview.user.createdAt)}</p>
                   </div>
                 </div>
@@ -435,19 +446,19 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
         </div>
       ) : null}
 
-      {emailTarget ? (
+      {contactTarget ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[28px] border border-sky-100 bg-white p-6 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[28px] border border-sky-100 bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Account Email</p>
-                <h3 className="mt-2 text-2xl font-black text-brand-950">修改绑定邮箱</h3>
-                <p className="mt-2 text-sm font-bold leading-7 text-slate-500">为 {emailTarget.nickname}（UID {formatUid(emailTarget.uid)}）直接更新绑定邮箱，不需要原邮箱或新邮箱验证码。</p>
+                <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Account Contact</p>
+                <h3 className="mt-2 text-2xl font-black text-brand-950">修改联系方式</h3>
+                <p className="mt-2 text-sm font-bold leading-7 text-slate-500">为 {contactTarget.nickname}（UID {formatUid(contactTarget.uid)}）更新 User 表中的 canonical 手机号和邮箱。手机号或邮箱发生变化后，对应验证状态会清零。</p>
               </div>
               <button
                 type="button"
-                onClick={() => setEmailTarget(null)}
-                disabled={emailBusyUserId === emailTarget.id}
+                onClick={() => setContactTarget(null)}
+                disabled={contactBusyUserId === contactTarget.id}
                 className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700"
               >
                 取消
@@ -455,34 +466,48 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
             </div>
 
             <label className="mt-6 block text-sm font-black text-brand-950">
-              新绑定邮箱
+              绑定邮箱（可留空清除）
               <input
                 type="email"
-                value={emailInput}
-                onChange={(event) => setEmailInput(event.target.value)}
+                value={contactEmailInput}
+                onChange={(event) => setContactEmailInput(event.target.value)}
                 placeholder="name@example.com"
                 autoFocus
                 className="mt-2 min-h-12 w-full rounded-2xl border border-sky-100 px-4 font-bold outline-none focus:border-brand-400"
               />
             </label>
-            {emailError ? <p className="mt-3 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{emailError}</p> : null}
+
+            <label className="mt-5 block text-sm font-black text-brand-950">
+              绑定手机号（可留空清除）
+              <InternationalPhoneInput
+                value={contactPhoneInput}
+                country={contactPhoneCountry}
+                onChange={setContactPhoneInput}
+                onCountryChange={setContactPhoneCountry}
+                disabled={contactBusyUserId === contactTarget.id}
+                placeholder="请输入本地手机号码"
+                containerClassName="mt-2"
+                inputClassName="font-bold"
+              />
+            </label>
+            {contactError ? <p className="mt-3 rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{contactError}</p> : null}
 
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => setEmailTarget(null)}
-                disabled={emailBusyUserId === emailTarget.id}
+                onClick={() => setContactTarget(null)}
+                disabled={contactBusyUserId === contactTarget.id}
                 className="min-h-11 rounded-full bg-sky-50 px-5 text-sm font-black text-brand-700"
               >
                 取消
               </button>
               <button
                 type="button"
-                onClick={updateEmail}
-                disabled={!emailInput.trim() || emailBusyUserId === emailTarget.id}
+                onClick={updateContact}
+                disabled={contactBusyUserId === contactTarget.id}
                 className="min-h-11 rounded-full bg-brand-700 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {emailBusyUserId === emailTarget.id ? '保存中…' : '保存绑定邮箱'}
+                {contactBusyUserId === contactTarget.id ? '保存中…' : '保存联系方式'}
               </button>
             </div>
           </div>

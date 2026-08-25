@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
 import { normalizeText } from '@/lib/validators'
-import { normalizeLoginAccount } from '@/lib/login-account'
+import { getLoginIdentifierWhere } from '@/lib/users'
 
 const genericMessage = '如果账号可使用密保找回，系统将进入下一步。'
 
@@ -23,11 +23,7 @@ export async function POST(request: Request) {
   const settings = await getAccountSecuritySettings()
   if (!settings.enableSecurityQuestionRecovery) return NextResponse.json({ message: '系统密保问题找回功能已关闭，请使用其他可用方式或联系管理员。' }, { status: 403 })
   const user = await prisma.user.findFirst({
-    where: { isDeleted: false, status: 'ACTIVE', OR: [
-      { usernameNormalized: normalizeLoginAccount(identifier) },
-      { email: { equals: identifier } },
-      { phone: identifier },
-    ] },
+    where: { isDeleted: false, status: 'ACTIVE', ...getLoginIdentifierWhere(identifier) },
     select: { id: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { question: true, sortOrder: true } } },
   })
   const availability = getSecurityQuestionRecoveryAvailability({

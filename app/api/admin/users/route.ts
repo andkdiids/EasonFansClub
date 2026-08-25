@@ -8,6 +8,9 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 
 const DEFAULT_PAGE_SIZE = 100
 const MAX_PAGE_SIZE = 100
+const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   const guard = await requireAdmin('user_manage')
@@ -124,5 +127,5 @@ export async function GET(request: Request) {
     page,
     limit,
     hasMore,
-  })
+  }, { headers: noStoreHeaders })
 }

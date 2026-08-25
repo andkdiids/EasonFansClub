@@ -16,6 +16,7 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
     where: { id },
     select: {
       id: true, uid: true, username: true, nickname: true, email: true, phone: true, role: true, status: true,
+      emailVerifiedAt: true, phoneVerifiedAt: true, verificationStatus: true,
       level: true, exp: true, points: true, createdAt: true, lastLoginAt: true, mustSetupSecurity: true,
       Profile: { select: { displayName: true, avatarUrl: true } },
       _count: { select: { Post: true, Reply: true, CheckIn: true, UserAchievement: true, Notification_Notification_recipientIdToUser: true } },
@@ -24,7 +25,20 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   if (!user) notFound()
   const nickname = user.nickname?.trim() || 'E院用户'
   if (user.Profile) user.Profile.avatarUrl = publicImageVariantUrl(user.Profile.avatarUrl, 'avatar-md')
-  const details = [['昵称', nickname], ['UID', formatUid(user.uid)], ['内部账号', user.username], ['角色', user.role], ['状态', user.status], ['邮箱', user.email || '未绑定'], ['手机', user.phone || '未绑定'], ['等级', `Lv.${user.level}`], ['挂号费', String(user.points)]]
+  const details = [
+    ['昵称', nickname],
+    ['UID', formatUid(user.uid)],
+    ['内部账号', user.username],
+    ['角色', user.role],
+    ['状态', user.status],
+    ['邮箱', user.email || '未绑定'],
+    ['邮箱验证', user.email ? (user.emailVerifiedAt ? '已验证' : '未验证') : '未绑定'],
+    ['手机', user.phone || '未绑定'],
+    ['手机验证', user.phone ? (user.phoneVerifiedAt ? '已验证' : '未验证') : '未绑定'],
+    ['整体验证状态', user.verificationStatus],
+    ['等级', `Lv.${user.level}`],
+    ['挂号费', String(user.points)],
+  ]
 
   return <><main className="mx-auto max-w-5xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
     <Link href="/admin/users" className="text-sm font-black text-brand-700">← 返回用户管理</Link>
