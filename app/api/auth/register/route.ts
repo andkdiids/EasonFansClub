@@ -18,6 +18,7 @@ import { hashToken } from '@/lib/tokens'
 import { MAX_UID } from '@/lib/uid'
 import { findActiveConflict, findLoginAccountConflict } from '@/lib/users'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
+import { getContactAdvisoryLockNames } from '@/lib/user-contact'
 import { normalizeText } from '@/lib/validators'
 import { NICKNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
@@ -159,8 +160,7 @@ export async function POST(request: Request) {
     const storedSecurityQuestions = parseStoredSecurityQuestions(draft.securityQuestions)
 
     const registrationLockNames = [
-      createMySqlAdvisoryLockName('registration:email', email),
-      createMySqlAdvisoryLockName('registration:phone', phone),
+      ...getContactAdvisoryLockNames({ email, phone, phoneCountry: draftPhone.country }),
       createMySqlAdvisoryLockName('registration:username', draft.usernameNormalized),
     ]
     const user = await prisma.$transaction(async (tx) => withMySqlAdvisoryLocks(

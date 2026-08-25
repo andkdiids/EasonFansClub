@@ -5,6 +5,7 @@ import { maskLoginAccount, validateAdminLoginAccount } from '@/lib/login-account
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireSuperAdmin, sanitizeText } from '@/lib/security'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -29,15 +30,6 @@ export async function PATCH(request: Request, context: RouteContext) {
       if (conflict && conflict.id !== target.id) throw new Error('ACCOUNT_ALREADY_EXISTS')
 
       const user = await tx.user.update({ where: { id: userId }, data: { username: validation.account, usernameNormalized: validation.usernameNormalized }, select: { id: true, uid: true, username: true, nickname: true } })
-      await tx.notification.create({
-        data: {
-          recipientId: userId,
-          type: 'SYSTEM',
-          title: '登录账号已由管理员修改',
-          content: '您的登录账号已由超级管理员修改。下次登录时请使用新的登录账号。如非本人申请，请及时联系管理员。',
-          link: '/settings/security',
-        },
-      })
       await tx.adminActionLog.create({
         data: {
           adminId: guard.user.id,
@@ -47,8 +39,20 @@ export async function PATCH(request: Request, context: RouteContext) {
         },
       })
       return user
-    })
+    }, { timeout: 15_000, maxWait: 5_000 })
 
+    await safeNotificationWrite(
+      () => prisma.notification.create({
+        data: {
+          recipientId: userId,
+          type: 'SYSTEM',
+          title: '登录账号已由管理员修改',
+          content: '您的登录账号已由超级管理员修改。下次登录时请使用新的登录账号。如非本人申请，请及时联系管理员。',
+          link: '/settings/security',
+        },
+      }),
+      { operation: 'admin-login-account-changed', userId, notificationType: 'SYSTEM' },
+    )
     invalidateCurrentUserCache(userId)
     emitRealtime(userId, 'notification')
     return NextResponse.json({ user: result, message: '登录账号修改成功' })

@@ -6,6 +6,7 @@ import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getShanghaiDateKey, parseBeijingDate } from '@/lib/checkin'
 import { runDailyJob } from '@/lib/daily-job-execution'
 import { getTodayMonthDay } from '@/lib/today'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 /** 生日祝福通知标题与内容（不出现用户名、不写「祝 xxx 生日快乐」、不写生日日期）。 */
 export const BIRTHDAY_GREETING_TITLE = '🎂 生日纪念'
@@ -142,17 +143,21 @@ export async function sendBirthdayGreeting(userId: string, dateKey = getShanghai
 
     const { title, content } = await pickBirthdayMessage()
 
-    await prisma.notification.create({
-      data: {
-        recipientId: userId,
-        type: 'BIRTHDAY_GREETING',
-        title,
-        content,
-        key,
-        link: '/birthday-card',
-        actorId: null,
-      },
-    })
+    const created = await safeNotificationWrite(
+      () => prisma.notification.create({
+        data: {
+          recipientId: userId,
+          type: 'BIRTHDAY_GREETING',
+          title,
+          content,
+          key,
+          link: '/birthday-card',
+          actorId: null,
+        },
+      }),
+      { operation: 'birthday-greeting', userId, notificationType: 'BIRTHDAY_GREETING' },
+    )
+    if (!created) return false
     emitRealtime(userId, 'notification')
     return true
   } catch (error) {

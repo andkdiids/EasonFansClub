@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
@@ -34,37 +35,40 @@ export async function PATCH(request: Request, context: RouteContext) {
         data: { status: 'CANCELLED' },
       })
       if (!updated.count) return null
-
-      const exactNotification = await tx.notification.findFirst({
-        where: {
-          recipientId: pending.receiverId,
-          actorId: user.id,
-          type: 'FRIEND_REQUEST',
-          key: getFriendRequestNotificationKey(requestId),
-          isRead: false,
-        },
-        select: { id: true },
-      })
-      const legacyNotification = exactNotification ? null : await tx.notification.findFirst({
-        where: {
-          recipientId: pending.receiverId,
-          actorId: user.id,
-          type: 'FRIEND_REQUEST',
-          title: '好友申请',
-          key: null,
-          isRead: false,
-          createdAt: { gte: pending.createdAt },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true },
-      })
-      const notification = exactNotification || legacyNotification
-      if (notification) {
-        await tx.notification.update({ where: { id: notification.id }, data: { isRead: true, readAt: new Date() } })
-      }
-      return { receiverId: pending.receiverId }
-    })
+      return { receiverId: pending.receiverId, createdAt: pending.createdAt }
+    }, { timeout: 15_000, maxWait: 5_000 })
     if (!cancelled) return NextResponse.json({ message: '好友申请不存在或已处理' }, { status: 404 })
+    await safeNotificationWrite(
+      async () => {
+        const exactNotification = await prisma.notification.findFirst({
+          where: {
+            recipientId: cancelled.receiverId,
+            actorId: user.id,
+            type: 'FRIEND_REQUEST',
+            key: getFriendRequestNotificationKey(requestId),
+            isRead: false,
+          },
+          select: { id: true },
+        })
+        const notification = exactNotification || await prisma.notification.findFirst({
+          where: {
+            recipientId: cancelled.receiverId,
+            actorId: user.id,
+            type: 'FRIEND_REQUEST',
+            title: '好友申请',
+            key: null,
+            isRead: false,
+            createdAt: { gte: cancelled.createdAt },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        })
+        if (notification) {
+          await prisma.notification.update({ where: { id: notification.id }, data: { isRead: true, readAt: new Date() } })
+        }
+      },
+      { operation: 'friend-request-cancel-mark-read', userId: cancelled.receiverId, notificationType: 'FRIEND_REQUEST' },
+    )
     emitRealtimeMany([user.id, cancelled.receiverId], 'friend-request', { requestId })
     return NextResponse.json({ message: '好友申请已取消' })
   }

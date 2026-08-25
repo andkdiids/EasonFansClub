@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getStorePackDetail } from '@/lib/sticker-center'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ packId: string }> },
 ) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const { packId } = await params
   if (!packId) return NextResponse.json({ message: '缺少合集标识' }, { status: 400 })
   const detail = await getStorePackDetail(packId, user.id)

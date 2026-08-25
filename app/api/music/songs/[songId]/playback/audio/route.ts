@@ -3,6 +3,7 @@ import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { canPlayFullMusic } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { streamProtectedGuessSongAudio } from '@/lib/protected-audio'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,7 +21,7 @@ async function handle(request: Request, context: RouteContext) {
     throw error
   }
   if (!user) {
-    return NextResponse.json({ ok: false, code: 'AUTH_REQUIRED', message: '请先登录' }, { status: 401 })
+    return unauthenticatedResponse()
   }
   if (!canPlayFullMusic(user)) {
     return NextResponse.json({ ok: false, code: 'FULL_PLAYBACK_FORBIDDEN', message: '当前账号没有完整音乐播放权限' }, { status: 403 })

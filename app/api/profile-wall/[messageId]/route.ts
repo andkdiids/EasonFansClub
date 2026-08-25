@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
   const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!viewer) return unauthenticatedResponse()
 
   const { messageId } = await params
   const message = await prisma.profileWallMessage.findUnique({

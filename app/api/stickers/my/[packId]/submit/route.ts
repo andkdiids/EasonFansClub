@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,27 +49,31 @@ export async function POST(
         data: { status: 'PENDING', reviewedAt: null },
       })
       if (updated.count === 0) throw new Error('STICKER_PACK_NOT_REJECTED')
+    }, { timeout: 15_000, maxWait: 5_000 })
 
-      const administrators = await tx.user.findMany({
-        where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
-        select: { id: true },
-      })
-      administratorIds = administrators.map((administrator) => administrator.id)
-      if (administrators.length) {
-        await tx.notification.createMany({
+    await safeNotificationWrite(
+      async () => {
+        const administrators = await prisma.user.findMany({
+          where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+          select: { id: true },
+        })
+        administratorIds = administrators.map((administrator) => administrator.id)
+        if (!administrators.length) return
+        await prisma.notification.createMany({
           data: administrators.map((administrator) => ({
             recipientId: administrator.id,
             actorId: guard.user.id,
             type: 'ADMIN' as const,
             title: '表情包重新提交审核',
-            content: `用户重新提交了表情包《${current.name}》，请前往审核中心处理。`,
+            content: `用户重新提交了表情包《${pack.name}》，请前往审核中心处理。`,
             link: '/admin/stickers',
             key: `sticker-pack-resubmit:${packId}:${randomUUID()}`,
           })),
           skipDuplicates: true,
         })
-      }
-    })
+      },
+      { operation: 'sticker-pack-resubmit', userId: guard.user.id, notificationType: 'ADMIN' },
+    )
 
     emitRealtimeMany(administratorIds, 'notification')
     revalidatePath('/profile/stickers')

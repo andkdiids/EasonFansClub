@@ -17,6 +17,13 @@ type Options = {
 
 const OPEN_STATE = 1
 const CONNECT_TIMEOUT_MS = 6_000
+const reconnectDelays = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000]
+const fallbackDelays = [5_000, 10_000, 15_000, 30_000]
+
+function jitteredDelay(baseMs: number) {
+  const jitter = baseMs * 0.2 * (Math.random() * 2 - 1)
+  return Math.max(250, Math.round(baseMs + jitter))
+}
 
 export class UndercoverStarRealtimeClient {
   private socket: WebSocket | null = null
@@ -28,6 +35,12 @@ export class UndercoverStarRealtimeClient {
   private failures = 0
   private hadConnectionFailure = false
   private options: Options
+  private readonly resumeConnection = () => {
+    if (this.generation <= 0 || this.socket?.readyState === OPEN_STATE || document.visibilityState === 'hidden') return
+    if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    this.connect(this.generation)
+  }
 
   constructor(options: Options = {}) {
     this.options = options
@@ -42,13 +55,17 @@ export class UndercoverStarRealtimeClient {
     this.generation += 1
     this.failures = 0
     this.hadConnectionFailure = false
+    window.addEventListener('online', this.resumeConnection)
+    document.addEventListener('visibilitychange', this.resumeConnection)
     this.connect(this.generation)
   }
 
   stop(incrementGeneration = true) {
     if (incrementGeneration) this.generation += 1
+    window.removeEventListener('online', this.resumeConnection)
+    document.removeEventListener('visibilitychange', this.resumeConnection)
     if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer)
-    if (this.fallbackTimer !== null) window.clearInterval(this.fallbackTimer)
+    if (this.fallbackTimer !== null) window.clearTimeout(this.fallbackTimer)
     if (this.pingTimer !== null) window.clearInterval(this.pingTimer)
     if (this.connectTimer !== null) window.clearTimeout(this.connectTimer)
     this.reconnectTimer = null
@@ -74,6 +91,7 @@ export class UndercoverStarRealtimeClient {
 
   private connect(generation: number) {
     if (generation !== this.generation || typeof window === 'undefined') return
+    if (this.socket && this.socket.readyState < 2) return
     this.options.onStatus?.('connecting')
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws/undercover`)
@@ -127,8 +145,9 @@ export class UndercoverStarRealtimeClient {
       this.hadConnectionFailure = true
       this.options.onStatus?.(this.failures >= 3 ? 'offline' : 'reconnecting')
       this.startFallback(generation)
-      const delay = Math.min(8_000, 500 * 2 ** Math.min(this.failures - 1, 4))
-      this.reconnectTimer = window.setTimeout(() => this.connect(generation), delay)
+      const delay = reconnectDelays[Math.min(this.failures - 1, reconnectDelays.length - 1)]
+      if (navigator.onLine === false || document.visibilityState === 'hidden') return
+      this.reconnectTimer = window.setTimeout(() => this.connect(generation), jitteredDelay(delay))
     }
   }
 
@@ -190,12 +209,20 @@ export class UndercoverStarRealtimeClient {
         this.options.onStatus?.('reconnecting')
       }
     }
-    void poll()
-    this.fallbackTimer = window.setInterval(() => void poll(), 3_000)
+    const schedule = () => {
+      if (generation !== this.generation || this.socket?.readyState === OPEN_STATE || this.fallbackTimer !== null) return
+      const delay = fallbackDelays[Math.min(Math.max(this.failures - 1, 0), fallbackDelays.length - 1)]
+      this.fallbackTimer = window.setTimeout(() => {
+        this.fallbackTimer = null
+        if (generation !== this.generation || this.socket?.readyState === OPEN_STATE) return
+        void poll().finally(schedule)
+      }, jitteredDelay(delay))
+    }
+    void poll().finally(schedule)
   }
 
   private stopFallback() {
-    if (this.fallbackTimer !== null) window.clearInterval(this.fallbackTimer)
+    if (this.fallbackTimer !== null) window.clearTimeout(this.fallbackTimer)
     this.fallbackTimer = null
   }
 }

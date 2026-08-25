@@ -32,9 +32,6 @@ type BadgeTextStyle = CSSProperties & {
   '--badge-text-base'?: string
   '--badge-text-highlight'?: string
 }
-type BadgeVisualStyle = CSSProperties & {
-  '--badge-shine-mask'?: string
-}
 type BadgeNameBadge = Pick<UserDisplayNameBadge, 'name' | 'effectType'> & Partial<Pick<UserDisplayNameBadge, 'nicknameEffect' | 'nicknameColor' | 'nicknameGradientStart' | 'nicknameGradientEnd'>>
 
 export function badgeEffectClass(effectType: EquippedBadgeView['effectType']) {
@@ -113,16 +110,17 @@ export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: 
   const hasImage = Boolean(badge.imageUrl && failedSource !== badge.imageUrl)
   if (!hasImage) return <span className={`user-badge-placeholder ${sizeClass} ${className}`} aria-label={badge.name}>?</span>
   const effectClass = badgeEffectClass(badge.effectType)
-  const visualStyle: BadgeVisualStyle | undefined = badge.effectType === 'SHINE'
-    ? { '--badge-shine-mask': `url(${JSON.stringify(badge.imageUrl || '')})` }
-    : undefined
   return (
-    <span className={`badge-visual ${sizeClass} ${effectClass} ${className}`.trim()} style={visualStyle}>
+    <span className={`badge-visual ${sizeClass} ${effectClass} ${className}`.trim()}>
       {badge.effectType === 'SPARKLE' ? <span className="badge-visual-sparkles" aria-hidden="true"><i /><i /><i /><i /></span> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={badge.imageUrl || ''} alt={badge.name} onError={() => { if (process.env.NODE_ENV === 'development') console.warn('[badge-image] failed to load', badge.imageUrl); setFailedSource(badge.imageUrl) }} className="user-badge-image" loading="lazy" />
       {badge.effectType === 'SHINE' ? (
-        <span className="badge-shimmer-clip" aria-hidden="true"><span className="badge-shimmer-layer" /></span>
+        <span className="badge-shimmer-clip" aria-hidden="true">
+          {/* The duplicate keeps the source PNG/WebP alpha; the scan can never paint the wrapper rectangle. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={badge.imageUrl || ''} alt="" className="badge-shimmer-layer" />
+        </span>
       ) : null}
     </span>
   )

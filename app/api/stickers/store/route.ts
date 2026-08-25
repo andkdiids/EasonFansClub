@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getStorePacks, getStoreCategories } from '@/lib/sticker-center'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const url = new URL(request.url)
   const sortRaw = url.searchParams.get('sort') || 'hot'

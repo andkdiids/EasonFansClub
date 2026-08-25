@@ -5,6 +5,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,26 +73,28 @@ export async function PATCH(
       })
       if (!review) throw new Error('STICKER_PACK_NOT_FOUND')
 
-      const isApprove = action === 'approve'
-      const title = isApprove
-        ? `你的表情包《${review.name}》已通过审核`
-        : `你的表情包《${review.name}》未通过审核`
-      const content = isApprove
-        ? '已经上架表情商店，可在「我的表情包 → 我创建的表情包」查看详情。'
-        : `原因：${review.rejectionReason || '内容不符合规范'}`
-      await tx.notification.create({
+      return review
+    }, { timeout: 15_000, maxWait: 5_000 })
+    const title = action === 'approve'
+      ? `你的表情包《${updated.name}》已通过审核`
+      : `你的表情包《${updated.name}》未通过审核`
+    const content = action === 'approve'
+      ? '已经上架表情商店，可在「我的表情包 → 我创建的表情包」查看详情。'
+      : `原因：${updated.rejectionReason || '内容不符合规范'}`
+    await safeNotificationWrite(
+      () => prisma.notification.create({
         data: {
-          recipientId: review.creatorId,
+          recipientId: updated.creatorId,
           actorId: guard.user.id,
           type: 'ADMIN',
           title,
           content,
-          link: getStickerPackReviewNotificationLink(review.id, review.status),
-          key: `sticker-pack-review:${review.id}:${review.status.toLowerCase()}:${reviewedAt.getTime()}`,
+          link: getStickerPackReviewNotificationLink(updated.id, updated.status),
+          key: `sticker-pack-review:${updated.id}:${updated.status.toLowerCase()}:${reviewedAt.getTime()}`,
         },
-      })
-      return review
-    })
+      }),
+      { operation: 'sticker-pack-review', userId: updated.creatorId, notificationType: 'ADMIN' },
+    )
     emitRealtime(updated.creatorId, 'notification')
     // 返回完整的 pack 给前端以刷新本地状态
     const pack = await prisma.stickerPack.findUnique({

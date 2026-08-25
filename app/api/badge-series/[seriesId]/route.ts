@@ -3,6 +3,7 @@ import { getBadgeCollection } from '@/lib/badge-service'
 import { getCurrentUser } from '@/lib/auth'
 import { parseUidParam } from '@/lib/uid'
 import { prisma } from '@/lib/prisma'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 type RouteContext = { params: Promise<{ seriesId: string }> }
@@ -19,7 +20,7 @@ export async function GET(request: Request, context: RouteContext) {
     const target = await prisma.user.findFirst({ where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } }, select: { id: true } })
     targetId = target?.id || null
   }
-  if (!targetId) return NextResponse.json({ message: '请先登录或指定有效用户' }, { status: 401 })
+  if (!targetId) return unauthenticatedResponse('请先登录或指定有效用户')
   const [series, collection] = await Promise.all([
     prisma.badgeSeries.findUnique({ where: { id: seriesId }, select: { id: true, code: true, name: true, description: true, sortOrder: true, isEnabled: true, completionRewardBadgeId: true } }),
     getBadgeCollection(targetId, viewer?.id),

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
   const guard = await requireAdmin('feedback_manage')
@@ -34,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   }
 
   const now = new Date()
-  const updated = await prisma.$transaction(async (tx) => {
+  const transactionResult = await prisma.$transaction(async (tx) => {
     const reply = await tx.feedbackReply.create({
       data: {
         feedbackId,
@@ -53,19 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
       })
     }
 
-    await tx.notification.create({
-      data: {
-        type: 'ADMIN',
-        title: '你的反馈收到回复',
-        content: '管理员回复了你的反馈。',
-        link: `/feedback/${feedback.id}?focus=${reply.id}`,
-        recipientId: feedback.userId,
-        actorId: guard.user.id,
-        key: `feedback-reply:${feedback.id}:${reply.id}`,
-      },
-    })
-
-    return tx.feedback.update({
+    const updated = await tx.feedback.update({
       where: { id: feedbackId },
       data: {
         status: feedback.status === 'PROCESSING' ? 'PROCESSING' : 'REPLIED',
@@ -76,8 +65,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
       },
       include: feedbackInclude,
     })
-  })
+    return { updated, replyId: reply.id }
+  }, { timeout: 15_000, maxWait: 5_000 })
 
+  const { updated, replyId } = transactionResult
+  await safeNotificationWrite(
+    () => prisma.notification.create({
+      data: {
+        type: 'ADMIN',
+        title: '你的反馈收到回复',
+        content: '管理员回复了你的反馈。',
+        link: `/feedback/${feedback.id}?focus=${replyId}`,
+        recipientId: feedback.userId,
+        actorId: guard.user.id,
+        key: `feedback-reply:${feedback.id}:${replyId}`,
+      },
+    }),
+    { operation: 'admin-feedback-reply', userId: feedback.userId, notificationType: 'ADMIN' },
+  )
   emitRealtime(feedback.userId, 'feedback', { feedbackId })
   return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true, forAdmin: true }), message: '回复已发送' })
 }

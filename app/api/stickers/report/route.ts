@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { reportSticker } from '@/lib/sticker-center'
 import type { StickerReportReason } from '@prisma/client'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,7 @@ const VALID_REASONS: StickerReportReason[] = ['PORN', 'ABUSE', 'VIOLATION', 'OTH
 /** 举报违规表情包。 */
 export async function POST(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const body = await request.json().catch(() => null)
   const stickerId = String(body?.stickerId || '').trim()

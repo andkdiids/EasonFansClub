@@ -19,6 +19,12 @@ type RealtimeClientOptions = {
 const reconnectDelays = [1000, 2000, 4000, 8000, 15_000, 30_000]
 const fallbackIntervalMs = 90_000
 const fallbackAfterFailures = 3
+const reconnectJitterRatio = 0.2
+
+function jitteredDelay(baseMs: number) {
+  const jitter = baseMs * reconnectJitterRatio * (Math.random() * 2 - 1)
+  return Math.max(250, Math.round(baseMs + jitter))
+}
 
 function websocketUrl() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -156,10 +162,11 @@ export class RealtimeClient {
     this.reconnectAttempt += 1
     this.setStatus(this.fallbackActive ? 'fallback' : 'retrying')
     this.clearReconnectTimer()
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null
       this.connect()
-    }, delay)
+    }, jitteredDelay(delay))
   }
 
   private activateFallback() {

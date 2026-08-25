@@ -5,7 +5,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -34,7 +34,7 @@ async function getConversation(userId: string, conversationId: string) {
 
 export async function GET(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
   const rateLimited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations/messages',
     ip: { limit: 240, windowSeconds: 60 },
@@ -94,7 +94,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
   let normalizedContent = ''
   try {
     const user = await getCurrentUser()
-    if (!user) return messageFailure(401, 'UNAUTHORIZED', '请先登录')
+    if (!user) return messageFailure(401, 'UNAUTHENTICATED', '请先登录')
     senderId = user.id
     const limited = await enforceApiRateLimit(request, user.id, {
       endpoint: '/api/direct-conversations/messages',

@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { formatUid } from '@/lib/uid'
 import { evaluateBadgeMetric, getBatchBadgeMetrics } from '@/lib/badge-rule-engine'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const MAX_BADGE_TRACKING = 10
 export const BADGE_RECOMMENDATION_LIMIT = 3
@@ -184,22 +185,27 @@ export async function processTrackedBadgeMilestones(userId: string, ruleTypes?: 
     if (progress.percentage >= 100) continue
     const milestone = highestBadgeMilestone(progress.percentage)
     if (!milestone || milestone <= row.lastMilestone) continue
-    const changed = await prisma.$transaction(async (tx) => {
+    const trackingAdvanced = await prisma.$transaction(async (tx) => {
       const update = await tx.userBadgeTracking.updateMany({ where: { id: row.id, lastMilestone: { lt: milestone } }, data: { lastMilestone: milestone } })
-      if (!update.count || !user.showBadgeProgressNotifications) return false
-      await tx.notification.upsert({
-        where: { recipientId_key: { recipientId: userId, key: `badge-progress:${userId}:${row.Badge.id}:${milestone}` } },
-        create: {
-          recipientId: userId, type: 'BADGE', title: '🎖 勋章进度提醒',
-          content: `「${row.Badge.name}」已经完成 ${milestone}%，${remainingLabel(type, progress.current, progress.target)}即可获得。`,
-          link: `/user/${formatUid(user.uid)}/badges?badge=${encodeURIComponent(row.Badge.id)}`,
-          key: `badge-progress:${userId}:${row.Badge.id}:${milestone}`,
-        },
-        update: {},
-      })
-      return true
-    })
-    if (changed) { notified += 1; emitRealtime(userId, 'notification') }
+      return update.count > 0
+    }, { timeout: 15_000, maxWait: 5_000 })
+    if (trackingAdvanced && user.showBadgeProgressNotifications) {
+      await safeNotificationWrite(
+        () => prisma.notification.upsert({
+          where: { recipientId_key: { recipientId: userId, key: `badge-progress:${userId}:${row.Badge.id}:${milestone}` } },
+          create: {
+            recipientId: userId, type: 'BADGE', title: '🎖 勋章进度提醒',
+            content: `「${row.Badge.name}」已经完成 ${milestone}%，${remainingLabel(type, progress.current, progress.target)}即可获得。`,
+            link: `/user/${formatUid(user.uid)}/badges?badge=${encodeURIComponent(row.Badge.id)}`,
+            key: `badge-progress:${userId}:${row.Badge.id}:${milestone}`,
+          },
+          update: {},
+        }),
+        { operation: 'badge-progress', userId, notificationType: 'BADGE' },
+      )
+      notified += 1
+      emitRealtime(userId, 'notification')
+    }
   }
   return { checked: rows.length, notified }
 }

@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notifications'
 import { emitRealtimeMany } from '@/lib/realtime'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -117,7 +118,11 @@ export async function createFriendRequest(
       },
     })
 
-    await tx.notification.create({
+    return request
+  }, { timeout: 15_000, maxWait: 5_000 })
+
+  await safeNotificationWrite(
+    () => prisma.notification.create({
       data: {
         recipientId: receiver.id,
         actorId: currentUser.id,
@@ -125,12 +130,11 @@ export async function createFriendRequest(
         title: '好友申请',
         content: `${currentUser.nickname} 向你发送了好友申请`,
         link: '/friends#received-requests',
-        key: getFriendRequestNotificationKey(request.id),
+        key: getFriendRequestNotificationKey(friendRequest.id),
       },
-    })
-
-    return request
-  })
+    }),
+    { operation: 'friend-request-created', userId: receiver.id, notificationType: 'FRIEND_REQUEST' },
+  )
 
   emitRealtimeMany([currentUser.id, receiver.id], 'friend-request', { requestId: friendRequest.id })
 
@@ -154,7 +158,26 @@ export async function decideFriendRequest(userId: string, requestId: string, act
       where: { id: requestId },
       data: { status: action === 'accept' ? 'ACCEPTED' : 'REJECTED' },
     })
-    const exactNotification = await tx.notification.findFirst({
+    if (action === 'accept') {
+      const [userAId, userBId] = normalizeFriendPair(friendRequest.senderId, friendRequest.receiverId)
+      await tx.friendship.upsert({
+        where: { userAId_userBId: { userAId, userBId } },
+        update: {},
+        create: { userAId, userBId },
+      })
+    }
+
+    return {
+      request: updated,
+      senderId: friendRequest.senderId,
+      receiverId: friendRequest.receiverId,
+      requestCreatedAt: friendRequest.createdAt,
+    }
+  }, { timeout: 15_000, maxWait: 5_000 })
+
+  if (!result) return { status: 404 as const, body: { message: '好友申请不存在或已处理' }, badgeEvaluationUserIds: [] as string[] }
+  await safeNotificationWrite(async () => {
+    const exactNotification = await prisma.notification.findFirst({
       where: {
         recipientId: userId,
         type: 'FRIEND_REQUEST',
@@ -163,55 +186,43 @@ export async function decideFriendRequest(userId: string, requestId: string, act
       },
       select: { id: true },
     })
-    const legacyNotification = exactNotification ? null : await tx.notification.findFirst({
+    const legacyNotification = exactNotification ? null : await prisma.notification.findFirst({
       where: {
         recipientId: userId,
-        actorId: friendRequest.senderId,
+        actorId: result.senderId,
         type: 'FRIEND_REQUEST',
         title: '好友申请',
         key: null,
         isRead: false,
-        createdAt: { gte: friendRequest.createdAt },
+        createdAt: { gte: result.requestCreatedAt },
       },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     })
     const requestNotification = exactNotification || legacyNotification
     if (requestNotification) {
-      await tx.notification.update({
+      await prisma.notification.update({
         where: { id: requestNotification.id },
         data: { isRead: true, readAt: new Date() },
       })
     }
-
-    if (action === 'accept') {
-      const [userAId, userBId] = normalizeFriendPair(friendRequest.senderId, friendRequest.receiverId)
-      await tx.friendship.upsert({
-        where: { userAId_userBId: { userAId, userBId } },
-        update: {},
-        create: { userAId, userBId },
-      })
-      await tx.notification.create({
+  }, { operation: 'friend-request-mark-read', userId, notificationType: 'FRIEND_REQUEST' })
+  if (action === 'accept') {
+    await safeNotificationWrite(
+      () => prisma.notification.create({
         data: {
-          recipientId: friendRequest.senderId,
-          actorId: friendRequest.receiverId,
+          recipientId: result.senderId,
+          actorId: result.receiverId,
           type: 'FRIEND_REQUEST',
           title: '好友申请已通过',
           content: '你的好友申请已通过',
           link: '/friends#received-requests',
-          key: getFriendRequestAcceptedNotificationKey(friendRequest.id),
+          key: getFriendRequestAcceptedNotificationKey(requestId),
         },
-      })
-    }
-
-    return {
-      request: updated,
-      senderId: friendRequest.senderId,
-      receiverId: friendRequest.receiverId,
-    }
-  })
-
-  if (!result) return { status: 404 as const, body: { message: '好友申请不存在或已处理' }, badgeEvaluationUserIds: [] as string[] }
+      }),
+      { operation: 'friend-request-accepted', userId: result.senderId, notificationType: 'FRIEND_REQUEST' },
+    )
+  }
   emitRealtimeMany([result.senderId, result.receiverId], 'friend-request', { requestId })
   return {
     status: 200 as const,

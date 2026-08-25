@@ -11,8 +11,13 @@ export function guessSongOk<T>(data: T, status = 200) {
 export function guessSongError(error: string, status: number, code?: string) {
   const headers: Record<string, string> = { 'Cache-Control': 'private, no-store' }
   if (status === 429) headers['Retry-After'] = '1'
+  const normalizedCode = code
+    || (status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 429 ? 'RATE_LIMITED' : status >= 500 ? 'SERVICE_UNAVAILABLE' : undefined)
+  const normalizedError = status >= 500 && /登录/.test(error)
+    ? '服务暂时不可用，请稍后重试。'
+    : error
   return NextResponse.json(
-    { ok: false, data: null, error, code },
+    { ok: false, data: null, error: normalizedError, code: normalizedCode },
     { status, headers },
   )
 }

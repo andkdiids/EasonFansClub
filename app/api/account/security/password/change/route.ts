@@ -6,6 +6,7 @@ import { verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
@@ -35,9 +36,12 @@ export async function POST(request: Request) {
   const passwordHash = await bcrypt.hash(body.password, 12)
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id: user.id }, data: { passwordHash } })
-    await tx.notification.create({ data: { recipientId: user.id, type: 'SYSTEM', title: '密码修改成功', content: '您的登录密码已通过原密码验证完成修改。如非本人操作，请及时联系管理员。', link: '/settings/security' } })
     await tx.accountSecurityLog.create({ data: { userId: user.id, action: 'PASSWORD_CHANGED_WITH_CURRENT_PASSWORD', ipAddress: ip, userAgent: request.headers.get('user-agent')?.slice(0, 500), metadata: { method: 'CURRENT_PASSWORD' } } })
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
+  await safeNotificationWrite(
+    () => prisma.notification.create({ data: { recipientId: user.id, type: 'SYSTEM', title: '密码修改成功', content: '您的登录密码已通过原密码验证完成修改。如非本人操作，请及时联系管理员。', link: '/settings/security' } }),
+    { operation: 'password-changed', userId: user.id, notificationType: 'SYSTEM' },
+  )
   emitRealtime(user.id, 'notification')
   invalidateCurrentUserCache(user.id)
   return NextResponse.json({ message: '密码修改成功' })

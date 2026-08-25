@@ -5,6 +5,7 @@ import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, feedbackIncl
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { formatBeijingMonthDayTime } from '@/lib/beijing-time'
 import { getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
@@ -62,66 +63,67 @@ export async function POST(request: Request) {
   const now = new Date()
   let feedback
   try {
-    feedback = await prisma.$transaction(async (tx) => {
-    const created = await tx.feedback.create({
-      data: {
-        userId: guard.user.id,
-        title,
-        type,
-        content,
-        contact: contact || null,
-        status: 'OPEN',
-        adminUnread: true,
-        userUnread: false,
-        lastReplyAt: now,
-        lastUserReplyAt: now,
-        idempotencyKeyHash,
-      },
-      select: { id: true },
-    })
-
-    const message = await tx.feedbackReply.create({
-      data: {
-        feedbackId: created.id,
-        adminId: guard.user.id,
-        authorRole: 'USER',
-        content,
-        isReadByAdmin: false,
-        isReadByUser: true,
-      },
-      select: { id: true },
-    })
-
-    if (attachments.length) {
-      await tx.feedbackAttachment.createMany({
-        data: attachments.map((item) => ({ ...item, feedbackId: created.id, replyId: message.id })),
+    const feedbackId = await prisma.$transaction(async (tx) => {
+      const created = await tx.feedback.create({
+        data: {
+          userId: guard.user.id,
+          title,
+          type,
+          content,
+          contact: contact || null,
+          status: 'OPEN',
+          adminUnread: true,
+          userUnread: false,
+          lastReplyAt: now,
+          lastUserReplyAt: now,
+          idempotencyKeyHash,
+        },
+        select: { id: true },
       })
-    }
 
-    const administrators = await tx.user.findMany({
-      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
-      select: { id: true },
-    })
-    if (administrators.length) {
-      await tx.notification.createMany({
-        data: administrators.map((administrator) => ({
-          recipientId: administrator.id,
-          actorId: guard.user.id,
-          type: 'ADMIN' as const,
-          title: '收到新的用户反馈',
-          content: `用户昵称：${guard.user.nickname}\n反馈标题：${title}\n提交时间：${formatBeijingMonthDayTime(now)}`,
-          link: '/admin/feedback',
-          key: `feedback-new:${created.id}`,
-        })),
-        skipDuplicates: true,
+      const message = await tx.feedbackReply.create({
+        data: {
+          feedbackId: created.id,
+          adminId: guard.user.id,
+          authorRole: 'USER',
+          content,
+          isReadByAdmin: false,
+          isReadByUser: true,
+        },
+        select: { id: true },
       })
-    }
 
-    return tx.feedback.findUniqueOrThrow({
-      where: { id: created.id },
-      include: feedbackInclude,
-    })
-    })
+      if (attachments.length) {
+        await tx.feedbackAttachment.createMany({
+          data: attachments.map((item) => ({ ...item, feedbackId: created.id, replyId: message.id })),
+        })
+      }
+
+      return created.id
+    }, { timeout: 15_000, maxWait: 5_000 })
+    feedback = await prisma.feedback.findUniqueOrThrow({ where: { id: feedbackId }, include: feedbackInclude })
+    await safeNotificationWrite(
+      async () => {
+        const administrators = await prisma.user.findMany({
+          where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+          select: { id: true },
+        })
+        if (!administrators.length) return
+        await prisma.notification.createMany({
+          data: administrators.map((administrator) => ({
+            recipientId: administrator.id,
+            actorId: guard.user.id,
+            type: 'ADMIN' as const,
+            title: '收到新的用户反馈',
+            content: `用户昵称：${guard.user.nickname}\n反馈标题：${title}\n提交时间：${formatBeijingMonthDayTime(now)}`,
+            link: '/admin/feedback',
+            key: `feedback-new:${feedbackId}`,
+          })),
+          skipDuplicates: true,
+        })
+      },
+      { operation: 'feedback-created', userId: guard.user.id, notificationType: 'ADMIN' },
+    )
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       feedback = await prisma.feedback.findUnique({ where: { idempotencyKeyHash }, include: feedbackInclude })

@@ -25,7 +25,10 @@ export function musicUploadError(response: Response, data: UploadErrorBody) {
     : typeof data.message === 'string' ? data.message : ''
   if (serverError) return serverError
   if (response.status === 400) return '上传内容无效，请重新选择文件'
-  if (response.status === 401) return '登录状态已失效，请重新登录'
+  if (response.status === 401) {
+    return data.code === 'UNAUTHENTICATED' ? '登录状态已失效，请重新登录' : '登录状态暂时无法确认，请稍后重试'
+  }
+  if (data.code === 'AUTH_SESSION_UNCERTAIN' || data.code === 'AUTH_SERVICE_UNAVAILABLE') return '登录状态暂时无法确认，请稍后重试'
   if (response.status === 403) return '当前账号没有音乐管理权限'
   if (response.status === 413) return '文件超过服务器上传限制'
   if (response.status >= 500) return `服务器处理失败（HTTP ${response.status}）`

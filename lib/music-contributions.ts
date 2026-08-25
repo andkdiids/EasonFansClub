@@ -5,6 +5,7 @@ import { buildConcertSlugPath } from '@/lib/music-slug'
 import { sanitizeText } from '@/lib/security'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const CONCERT_CONTRIBUTION_TYPES = ['SHOW', 'SETLIST', 'ENCORE'] as const
 export type ConcertContributionTypeValue = typeof CONCERT_CONTRIBUTION_TYPES[number]
@@ -271,7 +272,7 @@ function formalSetlistRows(payload: SetlistContributionPayload, concertId: strin
 }
 
 export async function approveConcertContribution({ contributionId, reviewerId, allowDuplicate = false, payloadOverride }: ApproveOptions) {
-  return prismaTransaction(async (tx) => {
+  const resultWithNotification = await prismaTransaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`ConcertContribution\` WHERE \`id\` = ${contributionId} FOR UPDATE`
     const current = await tx.concertContribution.findUnique({
       where: { id: contributionId },
@@ -373,32 +374,42 @@ export async function approveConcertContribution({ contributionId, reviewerId, a
       await tx.concertContribution.update({ where: { id: contributionId }, data: { targetShowId: target.id } })
     }
 
-    await tx.notification.upsert({
-      where: { recipientId_key: { recipientId: current.submitterId, key: contributionNotificationKey(contributionId, true) } },
-      create: {
-        recipientId: current.submitterId,
-        type: 'SYSTEM',
-        title: contributionNotificationText(type, true),
-        content: '资料已经进入 Eason in Concert 正式数据体系。',
-        link: showPath,
-        key: contributionNotificationKey(contributionId, true),
-      },
-      update: { title: contributionNotificationText(type, true), content: '资料已经进入 Eason in Concert 正式数据体系。', link: showPath, isRead: false, readAt: null },
-    })
-
-    return { id: contributionId, type, showId, showPath }
+    return {
+      id: contributionId,
+      type,
+      showId,
+      showPath,
+      notification: {
+        where: { recipientId_key: { recipientId: current.submitterId, key: contributionNotificationKey(contributionId, true) } },
+        create: {
+          recipientId: current.submitterId,
+          type: 'SYSTEM' as const,
+          title: contributionNotificationText(type, true),
+          content: '资料已经进入 Eason in Concert 正式数据体系。',
+          link: showPath,
+          key: contributionNotificationKey(contributionId, true),
+        },
+        update: { title: contributionNotificationText(type, true), content: '资料已经进入 Eason in Concert 正式数据体系。', link: showPath, isRead: false, readAt: null },
+      } as Prisma.NotificationUpsertArgs,
+    }
   })
+  const { notification, ...result } = resultWithNotification
+  await safeNotificationWrite(
+    () => prisma.notification.upsert(notification),
+    { operation: 'concert-contribution-approved', userId: notification.create.recipientId, notificationType: 'SYSTEM' },
+  )
+  return result
 }
 
 type TransactionCallback<T> = (tx: Prisma.TransactionClient) => Promise<T>
 
 // Kept as a tiny indirection so every publishing path visibly uses the shared Prisma transaction API.
 async function prismaTransaction<T>(callback: TransactionCallback<T>) {
-  return prisma.$transaction(callback)
+  return prisma.$transaction(callback, { timeout: 15_000, maxWait: 5_000 })
 }
 
 export async function rejectConcertContribution(contributionId: string, reviewerId: string, reviewNote: string) {
-  return prismaTransaction(async (tx) => {
+  const resultWithNotification = await prismaTransaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`ConcertContribution\` WHERE \`id\` = ${contributionId} FOR UPDATE`
     const current = await tx.concertContribution.findUnique({ where: { id: contributionId }, select: { id: true, type: true, submitterId: true, status: true } })
     if (!current || current.status !== 'PENDING') throw new ContributionAlreadyProcessedError()
@@ -408,20 +419,29 @@ export async function rejectConcertContribution(contributionId: string, reviewer
     })
     if (rejected.count !== 1) throw new ContributionAlreadyProcessedError()
     const content = sanitizeText(reviewNote, 2000)
-    await tx.notification.upsert({
-      where: { recipientId_key: { recipientId: current.submitterId, key: contributionNotificationKey(contributionId, false) } },
-      create: {
-        recipientId: current.submitterId,
-        type: 'SYSTEM',
-        title: contributionNotificationText(current.type as ConcertContributionTypeValue, false),
-        content: content ? `审核原因：${content}` : '请在“我的投稿”中查看审核结果。',
-        link: `/music/concerts/contribute?submission=${encodeURIComponent(contributionId)}`,
-        key: contributionNotificationKey(contributionId, false),
-      },
-      update: { content: content ? `审核原因：${content}` : '请在“我的投稿”中查看审核结果。', isRead: false, readAt: null },
-    })
-    return { id: contributionId, type: current.type as ConcertContributionTypeValue }
+    return {
+      id: contributionId,
+      type: current.type as ConcertContributionTypeValue,
+      notification: {
+        where: { recipientId_key: { recipientId: current.submitterId, key: contributionNotificationKey(contributionId, false) } },
+        create: {
+          recipientId: current.submitterId,
+          type: 'SYSTEM' as const,
+          title: contributionNotificationText(current.type as ConcertContributionTypeValue, false),
+          content: content ? `审核原因：${content}` : '请在“我的投稿”中查看审核结果。',
+          link: `/music/concerts/contribute?submission=${encodeURIComponent(contributionId)}`,
+          key: contributionNotificationKey(contributionId, false),
+        },
+        update: { content: content ? `审核原因：${content}` : '请在“我的投稿”中查看审核结果。', isRead: false, readAt: null },
+      } as Prisma.NotificationUpsertArgs,
+    }
   })
+  const { notification, ...result } = resultWithNotification
+  await safeNotificationWrite(
+    () => prisma.notification.upsert(notification),
+    { operation: 'concert-contribution-rejected', userId: notification.create.recipientId, notificationType: 'SYSTEM' },
+  )
+  return result
 }
 
 export function contributionTypeLabel(type: string) {

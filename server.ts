@@ -1,3 +1,4 @@
+import 'next/dist/server/node-environment'
 import { createServer, type IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import next from 'next'
@@ -21,6 +22,14 @@ const maxConnectionsPerIp = 20
 const maxAttemptsPerIp = 30
 const attemptWindowMs = 60_000
 const heartbeatIntervalMs = 30_000
+const websocketPaths = [websocketPath, duelWebsocketPath, undercoverWebsocketPath, undercoverChatWebsocketPath] as const
+
+const websocketMetrics = {
+  upgradeRejected: 0,
+  connectionOpen: 0,
+  connectionClose: 0,
+  error: 0,
+}
 
 type RateWindow = { startedAt: number; count: number }
 type RealtimeSocket = WebSocket & { isAlive?: boolean; realtimeUserId?: string; realtimeIp?: string }
@@ -29,6 +38,34 @@ const activeConnectionsByUser = new Map<string, number>()
 const activeConnectionsByIp = new Map<string, number>()
 const upgradeAttemptsByIp = new Map<string, RateWindow>()
 const realtimeSockets = new Set<RealtimeSocket>()
+
+function releaseSha() {
+  const value = process.env.DEPLOY_SHA?.trim() || ''
+  return /^[0-9a-f]{40}$/i.test(value) ? value : 'unknown'
+}
+
+function runtimeName() {
+  return process.env.NODE_ENV || 'unknown'
+}
+
+function websocketLog(event: string, details: Record<string, unknown> = {}) {
+  console.info(`[${event}]`, {
+    event,
+    runtime: runtimeName(),
+    release: releaseSha(),
+    ...details,
+  })
+}
+
+function websocketErrorLog(details: Record<string, unknown> = {}) {
+  websocketMetrics.error += 1
+  console.warn('[websocket.error]', {
+    event: 'websocket.error',
+    runtime: runtimeName(),
+    release: releaseSha(),
+    ...details,
+  })
+}
 
 function firstHeader(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
@@ -69,7 +106,14 @@ function toWebRequest(request: IncomingMessage) {
   return new Request(requestUrl(request), { headers })
 }
 
-function rejectUpgrade(socket: Duplex, status: number, message: string) {
+function rejectUpgrade(socket: Duplex, status: number, message: string, path = 'unknown') {
+  websocketMetrics.upgradeRejected += 1
+  websocketLog('websocket.upgrade.rejected', {
+    path,
+    status,
+    reason: message,
+    upgradeRejected: websocketMetrics.upgradeRejected,
+  })
   socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
   socket.destroy()
 }
@@ -105,29 +149,29 @@ function parsePort() {
 async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
   const url = requestUrl(request)
   if (url.pathname !== websocketPath && url.pathname !== duelWebsocketPath && url.pathname !== undercoverWebsocketPath && url.pathname !== undercoverChatWebsocketPath) {
-    rejectUpgrade(socket, 404, 'Not Found')
+    rejectUpgrade(socket, 404, 'Not Found', url.pathname)
     return null
   }
 
   const ip = requestIp(request)
   if (!isUpgradeAllowed(ip)) {
-    rejectUpgrade(socket, 429, 'Too Many Requests')
+    rejectUpgrade(socket, 429, 'Too Many Requests', url.pathname)
     return null
   }
 
   if (!hasValidRequestOrigin(toWebRequest(request))) {
-    rejectUpgrade(socket, 403, 'Forbidden')
+    rejectUpgrade(socket, 403, 'Forbidden', url.pathname)
     return null
   }
 
   if ((activeConnectionsByIp.get(ip) || 0) >= maxConnectionsPerIp) {
-    rejectUpgrade(socket, 429, 'Too Many Requests')
+    rejectUpgrade(socket, 429, 'Too Many Requests', url.pathname)
     return null
   }
 
   const tokens = cookieValues(request, authCookieName)
   if (!tokens.length) {
-    rejectUpgrade(socket, 401, 'Unauthorized')
+    rejectUpgrade(socket, 401, 'Unauthorized', url.pathname)
     return null
   }
 
@@ -145,17 +189,17 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
       }
     }
     if (!user) {
-      rejectUpgrade(socket, authUnavailable ? 503 : 401, authUnavailable ? 'Service Unavailable' : 'Unauthorized')
+      rejectUpgrade(socket, authUnavailable ? 503 : 401, authUnavailable ? 'Service Unavailable' : 'Unauthorized', url.pathname)
       return null
     }
     if ((activeConnectionsByUser.get(user.id) || 0) >= maxConnectionsPerUser) {
-      rejectUpgrade(socket, 429, 'Too Many Requests')
+      rejectUpgrade(socket, 429, 'Too Many Requests', url.pathname)
       return null
     }
     return { user, ip, channel: url.pathname === duelWebsocketPath ? 'duel' as const : url.pathname === undercoverWebsocketPath ? 'undercover' as const : url.pathname === undercoverChatWebsocketPath ? 'undercover-chat' as const : 'summary' as const }
   } catch (error) {
-    console.error('[realtime.authorize]', error)
-    rejectUpgrade(socket, 503, 'Service Unavailable')
+    websocketErrorLog({ stage: 'authorize', errorName: error instanceof Error ? error.name : 'UNKNOWN', path: url.pathname })
+    rejectUpgrade(socket, 503, 'Service Unavailable', url.pathname)
     return null
   }
 }
@@ -181,10 +225,18 @@ async function start() {
 
   websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string; channel: 'summary' | 'duel' | 'undercover' | 'undercover-chat' }) => {
     const { user, ip } = auth
+    const path = requestUrl(request).pathname
     socket.isAlive = true
     socket.realtimeUserId = user.id
     socket.realtimeIp = ip
     realtimeSockets.add(socket)
+    websocketMetrics.connectionOpen += 1
+    websocketLog('websocket.connection.open', {
+      path,
+      channel: auth.channel,
+      activeConnections: realtimeSockets.size,
+      connectionOpen: websocketMetrics.connectionOpen,
+    })
     increment(activeConnectionsByUser, user.id)
     increment(activeConnectionsByIp, ip)
     let closed = false
@@ -230,8 +282,21 @@ async function start() {
       }
       socket.close(1008, 'read-only realtime channel')
     })
-    socket.on('close', cleanup)
-    socket.on('error', cleanup)
+    socket.on('close', (code) => {
+      cleanup()
+      websocketMetrics.connectionClose += 1
+      websocketLog('websocket.connection.close', {
+        path,
+        channel: auth.channel,
+        code,
+        activeConnections: realtimeSockets.size,
+        connectionClose: websocketMetrics.connectionClose,
+      })
+    })
+    socket.on('error', (error) => {
+      websocketErrorLog({ stage: 'connection', path, channel: auth.channel, errorName: error instanceof Error ? error.name : 'UNKNOWN' })
+      cleanup()
+    })
 
     if (auth.channel !== 'summary') return
     void realtimePublisher.sendInitial(user.id, socket).catch((error) => {
@@ -247,8 +312,9 @@ async function start() {
         websocketServer.emit('connection', websocket, request, auth)
       })
     }).catch((error) => {
-      console.error('[realtime.upgrade]', error)
-      rejectUpgrade(socket, 503, 'Service Unavailable')
+      const path = requestUrl(request).pathname
+      websocketErrorLog({ stage: 'upgrade', path, errorName: error instanceof Error ? error.name : 'UNKNOWN' })
+      rejectUpgrade(socket, 503, 'Service Unavailable', path)
     })
   })
 
@@ -273,11 +339,18 @@ async function start() {
   process.once('SIGINT', shutdown)
 
   server.listen(port, hostname, () => {
+    websocketLog('websocket.server.started', {
+      port,
+      hostname,
+      paths: websocketPaths,
+      activeConnections: realtimeSockets.size,
+    })
     console.log(`[ecfc] Next + realtime server listening on http://${hostname}:${port}`)
   })
 }
 
 void start().catch((error) => {
+  websocketErrorLog({ stage: 'startup', errorName: error instanceof Error ? error.name : 'UNKNOWN' })
   console.error('[ecfc.server]', error)
   process.exitCode = 1
 })

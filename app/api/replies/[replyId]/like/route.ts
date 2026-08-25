@@ -4,7 +4,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
-import { syncLikeNotification } from '@/lib/like-notifications'
+import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
@@ -68,6 +68,7 @@ export async function POST(request: Request, context: RouteContext) {
   if (limited) return limited
 
   const { replyId } = await context.params
+  let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
     const reply = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
@@ -88,21 +89,22 @@ export async function POST(request: Request, context: RouteContext) {
     const likeCount = await tx.replyLike.count({ where: { replyId } })
     await tx.reply.update({ where: { id: replyId }, data: { likeCount } })
     if (reply.authorId !== guard.user.id) {
-      await syncLikeNotification(tx, {
+      notificationInput = {
         recipientId: reply.authorId,
         actorId: guard.user.id,
         actorName: guard.user.nickname,
         target: { kind: 'reply', id: reply.id, link: `/posts/${reply.postId}?focus=${reply.id}` },
-      }, existing ? 'unlike' : 'like')
+      }
     }
     return {
       isLiked: !existing,
       likeCount,
       notifiedUserId: reply.authorId !== guard.user.id ? reply.authorId : null,
     }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
+  if (notificationInput) await syncLikeNotification(notificationInput)
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }
@@ -118,6 +120,7 @@ export async function DELETE(request: Request, context: RouteContext) {
   if (limited) return limited
 
   const { replyId } = await context.params
+  let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
     const reply = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
@@ -129,20 +132,21 @@ export async function DELETE(request: Request, context: RouteContext) {
     const likeCount = await tx.replyLike.count({ where: { replyId } })
     await tx.reply.update({ where: { id: replyId }, data: { likeCount } })
     if (reply.authorId !== guard.user.id) {
-      await syncLikeNotification(tx, {
+      notificationInput = {
         recipientId: reply.authorId,
         actorId: guard.user.id,
         target: { kind: 'reply', id: reply.id, link: `/posts/${reply.postId}?focus=${reply.id}` },
-      }, 'unlike')
+      }
     }
     return {
       isLiked: false,
       likeCount,
       notifiedUserId: reply.authorId !== guard.user.id ? reply.authorId : null,
     }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '回复不存在' }, { status: 404 })
+  if (notificationInput) await syncLikeNotification(notificationInput)
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

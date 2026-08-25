@@ -167,7 +167,7 @@ async function createBadgeGrantNotification(userId: string, grants: readonly Gra
   } catch (error) {
     // Concurrent retries can hit the notification key. The grant itself is
     // already durable and must not be turned into a failed business action.
-    if (!(error instanceof Error && /P2002|Unique constraint/i.test(error.message))) throw error
+    console.error('[badge.grant.notification]', { userId, error })
   }
 }
 

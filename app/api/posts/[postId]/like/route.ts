@@ -5,8 +5,8 @@ import { publicImageUrl } from '@/lib/images'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { syncLikeNotification } from '@/lib/like-notifications'
-import { enforceApiRateLimit } from '@/lib/security'
+import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
+import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -14,7 +14,7 @@ type Params = { params: Promise<{ postId: string }> }
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
 export async function GET(request: Request, { params }: Params) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/posts/like',
     user: { limit: 120, windowSeconds: 60 },
@@ -61,7 +61,7 @@ export async function GET(request: Request, { params }: Params) {
 
 export async function POST(request: Request, { params }: Params) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录后再点赞' }, { status: 401 })
+  if (!user) return unauthenticatedResponse('请先登录后再点赞')
   const limited = await enforceApiRateLimit(request, user.id, {
     ip: { limit: 120, windowSeconds: 60 },
     user: { limit: 60, windowSeconds: 60 },
@@ -70,6 +70,7 @@ export async function POST(request: Request, { params }: Params) {
   if (limited) return limited
 
   const { postId } = await params
+  let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
@@ -93,25 +94,30 @@ export async function POST(request: Request, { params }: Params) {
     })
 
     if (post.authorId !== user.id) {
-      await syncLikeNotification(tx, {
-        recipientId: post.authorId,
-        actorId: user.id,
-        actorName: user.nickname,
-        target: { kind: 'post', id: postId, link: `/posts/${postId}` },
-      }, 'like')
+      notificationInput = {
+  recipientId: post.authorId,
+  actorId: user.id,
+  actorName: user.nickname,
+  target: {
+    kind: 'post',
+    id: postId,
+    link: `/posts/${postId}`,
+  },
+}
     }
 
     return { isLiked: true, likeCount: updatedPost.likeCount, notifiedUserId: post.authorId !== user.id ? post.authorId : null }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
+  if (notificationInput) await syncLikeNotification(notificationInput)
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }
 
 export async function DELETE(request: Request, { params }: Params) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const limited = await enforceApiRateLimit(request, user.id, {
     ip: { limit: 120, windowSeconds: 60 },
     user: { limit: 60, windowSeconds: 60 },
@@ -120,6 +126,7 @@ export async function DELETE(request: Request, { params }: Params) {
   if (limited) return limited
 
   const { postId } = await params
+  let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
     const post = await tx.post.findFirst({ where: { ...publicPostWhere, id: postId }, select: { likeCount: true, authorId: true } })
     if (!post) return null
@@ -133,11 +140,16 @@ export async function DELETE(request: Request, { params }: Params) {
     })
 
     if (post.authorId !== user.id) {
-      await syncLikeNotification(tx, {
-        recipientId: post.authorId,
-        actorId: user.id,
-        target: { kind: 'post', id: postId, link: `/posts/${postId}` },
-      }, 'unlike')
+     notificationInput = {
+  recipientId: post.authorId,
+  actorId: user.id,
+  actorName: user.nickname,
+  target: {
+    kind: 'post',
+    id: postId,
+    link: `/posts/${postId}`,
+  },
+}
     }
 
     return {
@@ -145,9 +157,10 @@ export async function DELETE(request: Request, { params }: Params) {
       likeCount: Math.max(updatedPost.likeCount, 0),
       notifiedUserId: post.authorId !== user.id ? post.authorId : null,
     }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
+  if (notificationInput) await syncLikeNotification(notificationInput)
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

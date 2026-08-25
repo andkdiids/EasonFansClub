@@ -10,6 +10,7 @@ import { duelRewardBusinessKey, DUEL_REWARD_ACTION, resolveDuelRewardDecision } 
 import { syncUserAchievements } from '@/lib/achievements'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { prisma } from '@/lib/prisma'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 import {
   DUEL_ANSWER_SECONDS,
   DUEL_AUDIO_DELAY_MS,
@@ -1302,19 +1303,22 @@ export async function createDuelInvite(userId: string, roomId: string, inviteeId
       },
       select: { id: true },
     })
-    await tx.notification.create({
+    return invite
+  }, { timeout: 15_000, maxWait: 5_000 })
+  await safeNotificationWrite(
+    () => prisma.notification.create({
       data: {
         recipientId: inviteeId,
         actorId: userId,
         type: 'GUESS_SONG_DUEL_INVITE',
         title: `听听 · ${room.mode === 'BUZZER' ? '抢答模式' : '比分模式'}邀请`,
         content: `${inviterName} 邀请你进行「听听 · ${room.mode === 'BUZZER' ? '抢答模式' : '比分模式'}」，房间：${room.roomCode}`,
-        link: `/games/guess-song/duel?invite=${encodeURIComponent(`${invite.id}.${token}`)}`,
-        key: `guess-song-duel-invite:${invite.id}`,
+        link: `/games/guess-song/duel?invite=${encodeURIComponent(`${result.id}.${token}`)}`,
+        key: `guess-song-duel-invite:${result.id}`,
       },
-    })
-    return invite
-  })
+    }),
+    { operation: 'guess-song-duel-invite', userId: inviteeId, notificationType: 'GUESS_SONG_DUEL_INVITE' },
+  )
   return { id: result.id, roomCode: room.roomCode }
 }
 

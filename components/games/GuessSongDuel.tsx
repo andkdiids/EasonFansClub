@@ -16,6 +16,12 @@ type DuelHistoryItem = { result: DuelMatchResult; roomCode: string }
 type ApiPayload = { ok?: boolean; message?: string; code?: string; [key: string]: unknown }
 type DuelApiError = Error & { code?: string; status?: number }
 const emptyActiveDuel: DuelActiveState = { activeRoom: null, activeMatch: null, isInActiveDuel: false }
+const duelReconnectDelays = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000]
+
+function jitteredDuelDelay(baseMs: number) {
+  const jitter = baseMs * 0.2 * (Math.random() * 2 - 1)
+  return Math.max(250, Math.round(baseMs + jitter))
+}
 
 async function api<T extends ApiPayload>(url: string, init?: RequestInit) {
   const response = await fetch(url, { ...init, cache: 'no-store' })
@@ -461,6 +467,10 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     }
     const connect = () => {
       if (stoppedRef.current || socketRef.current || typeof window === 'undefined') return
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const socket = new WebSocket(`${protocol}//${window.location.host}/ws/duel`)
       socketRef.current = socket
@@ -497,12 +507,13 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         timeSyncTimersRef.current = []
         socketRef.current = null
         if (stoppedRef.current) return
-        const delay = [500, 1000, 2000, 4000, 8000, 15_000][Math.min(reconnectAttemptRef.current, 5)]
+        const delay = duelReconnectDelays[Math.min(reconnectAttemptRef.current, duelReconnectDelays.length - 1)]
         reconnectAttemptRef.current += 1
+        if (navigator.onLine === false || document.visibilityState === 'hidden') return
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null
           connect()
-        }, delay)
+        }, jitteredDuelDelay(delay))
       }
       socket.onerror = () => socket.close()
     }
@@ -513,10 +524,15 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     }, DUEL_ROOM_POLL_INTERVAL_MS)
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return
+      if (socketRef.current?.readyState !== WebSocket.OPEN) connect()
       sendHeartbeat()
       void syncDuelState()
     }
+    const handleOnline = () => {
+      if (!stoppedRef.current && socketRef.current?.readyState !== WebSocket.OPEN) connect()
+    }
     document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('online', handleOnline)
     void syncDuelState()
     return () => {
       stoppedRef.current = true
@@ -525,6 +541,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       for (const timer of timeSyncTimersRef.current) window.clearTimeout(timer)
       timeSyncTimersRef.current = []
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('online', handleOnline)
       if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = null
       const socket = socketRef.current

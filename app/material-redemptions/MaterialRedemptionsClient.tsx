@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 type Material = {
   id: string
   title: string
-  description: string
+  description: string | null
   coverImageUrl: string | null
   cost: number
   stockRemaining: number
@@ -18,8 +18,15 @@ type Material = {
   stateLabel: string
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
+function formatCompactDate(value: string) {
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Shanghai',
+  })
 }
 
 function displayStateLabel(material: Material) {
@@ -74,10 +81,11 @@ export function MaterialRedemptionsClient() {
             </div>
             <div className="material-redemption-card-body">
               <div className="material-redemption-card-heading"><h2>{material.title}</h2><span>{displayStateLabel(material)}</span></div>
+              {material.description?.trim() ? <p className="material-redemption-card-description">{material.description}</p> : null}
               <div className="material-redemption-card-meta">
                 <p>{material.cost === 0 ? '免费兑换' : <><strong>{material.cost}</strong> 挂号费</>}</p>
                 <p className={material.stockRemaining < 1 ? 'is-sold-out' : ''}>{material.stockRemaining < 1 ? '已兑完' : <>剩余 <strong>{material.stockRemaining}</strong> / {material.stockTotal}</>}</p>
-                <p>核销至 {formatDate(material.redeemEndAt)}</p>
+                <p>核销至 {formatCompactDate(material.redeemEndAt)}</p>
               </div>
             </div>
           </Link>

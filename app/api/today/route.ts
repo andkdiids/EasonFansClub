@@ -8,6 +8,7 @@ import { getTodayMonthDay, isTodayEventType, parseTodayDate } from '@/lib/today'
 import { parseTodayImageInput } from '@/lib/today-image-url'
 import { getTodayEventRecords } from '@/lib/today-events'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,40 +66,41 @@ export async function POST(request: Request) {
       },
       select: { id: true, status: true, title: true },
     })
+    return createdEvent
+  }, { timeout: 15_000, maxWait: 5_000 })
 
-    if (moderationStatus === 'PENDING') {
-      const admins = await tx.user.findMany({
-        where: {
-          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-          status: 'ACTIVE',
-          isDeleted: false,
-          OR: [
-            { role: 'SUPER_ADMIN' },
-            { AdminPermission: { some: { permissionKey: 'today_manage', enabled: true } } },
-          ],
-        },
-        select: { id: true },
-      })
-      administratorIds = admins.map((admin) => admin.id)
-
-      if (admins.length) {
-        await tx.notification.createMany({
+  if (moderationStatus === 'PENDING') {
+    await safeNotificationWrite(
+      async () => {
+        const admins = await prisma.user.findMany({
+          where: {
+            role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+            status: 'ACTIVE',
+            isDeleted: false,
+            OR: [
+              { role: 'SUPER_ADMIN' },
+              { AdminPermission: { some: { permissionKey: 'today_manage', enabled: true } } },
+            ],
+          },
+          select: { id: true },
+        })
+        administratorIds = admins.map((admin) => admin.id)
+        if (!admins.length) return
+        await prisma.notification.createMany({
           data: admins.map((admin) => ({
             recipientId: admin.id,
             type: 'ADMIN' as const,
             title: '有新的今日内容等待审核',
-            content: createdEvent.title,
+            content: event.title,
             link: '/admin/today',
-            key: `today-review:${createdEvent.id}`,
+            key: `today-review:${event.id}`,
           })),
           skipDuplicates: true,
         })
-      }
-    }
-
-    return createdEvent
-  })
-
+      },
+      { operation: 'today-event-review', userId: guard.user.id, notificationType: 'ADMIN' },
+    )
+  }
   emitRealtimeMany(administratorIds, 'notification')
   return NextResponse.json({
     event,

@@ -6,13 +6,13 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
-import { enforceApiRateLimit } from '@/lib/security'
+import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function GET(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations',
     ip: { limit: 240, windowSeconds: 60 },
@@ -122,7 +122,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations',
     ip: { limit: 60, windowSeconds: 60 },

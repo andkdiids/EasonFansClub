@@ -6,8 +6,15 @@ import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 export const dynamic = 'force-dynamic'
 
 function forbidden(status: number) {
-  const error = status === 401 ? '请先登录' : '当前账号没有歌词处方库管理权限'
-  return NextResponse.json({ ok: false, data: null, error }, { status })
+  const isUnauthenticated = status === 401
+  const isUnavailable = status >= 500
+  const error = isUnauthenticated
+    ? '请先登录'
+    : isUnavailable
+      ? '权限服务暂时不可用，请稍后重试'
+      : '当前账号没有歌词处方库管理权限'
+  const code = isUnauthenticated ? 'UNAUTHENTICATED' : isUnavailable ? 'AUTH_SERVICE_UNAVAILABLE' : 'FORBIDDEN'
+  return NextResponse.json({ ok: false, data: null, error, code }, { status })
 }
 
 export async function GET(request: Request) {

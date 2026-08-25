@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentUser } from '@/lib/auth'
 import { addPackToLibrary, removePackFromLibrary } from '@/lib/sticker-center'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,7 @@ export async function POST(
   { params }: { params: Promise<{ packId: string }> },
 ) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const { packId } = await params
   if (!packId) return NextResponse.json({ message: '缺少合集标识' }, { status: 400 })
   try {
@@ -38,7 +39,7 @@ export async function DELETE(
   { params }: { params: Promise<{ packId: string }> },
 ) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const { packId } = await params
   if (!packId) return NextResponse.json({ message: '缺少合集标识' }, { status: 400 })
   try {

@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getMyStickers, getPickerData } from '@/lib/sticker-center'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 /** 个人表情包中心：我的上传列表 + 选择器数据。 */
 export async function GET(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const url = new URL(request.url)
   const mode = url.searchParams.get('mode')

@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { enforceApiRateLimit } from '@/lib/security'
+import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401, headers: privateHeaders })
+  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations/clear',
     user: { limit: 30, windowSeconds: 60 },

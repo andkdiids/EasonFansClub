@@ -6,11 +6,12 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { sanitizeText } from '@/lib/security'
+import { sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -297,7 +298,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const viewer = await getCurrentUser()
-  if (!viewer) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!viewer) return unauthenticatedResponse()
 
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null
@@ -329,6 +330,7 @@ export async function POST(request: Request) {
   }
 
   let notifiedUserId: string | null = null
+  let notificationData: Prisma.NotificationUpsertArgs | null = null
   const message = await prisma.$transaction(async (tx) => {
     const created = await tx.profileWallMessage.create({
       data: { senderId: viewer.id, receiverId: receiver.id, parentId: parentMessage?.id || null, content: rawContent, ipRegion },
@@ -355,7 +357,7 @@ export async function POST(request: Request) {
       // Profile-wall interactions are reply-style notifications rather than
       // direct messages. The unique key makes retrying this transaction
       // idempotent without creating a second notification for one message.
-      await tx.notification.upsert({
+      notificationData = {
         where: { recipientId_key: { recipientId, key: notificationKey } },
         update: {},
         create: {
@@ -367,11 +369,18 @@ export async function POST(request: Request) {
           link: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}`,
           key: notificationKey,
         },
-      })
+      }
     }
     return created
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
+  const committedNotificationData = notificationData as Prisma.NotificationUpsertArgs | null
+  if (committedNotificationData) {
+    await safeNotificationWrite(
+      () => prisma.notification.upsert(committedNotificationData),
+      { operation: 'profile-wall-message-notification', userId: committedNotificationData.create.recipientId, notificationType: 'REPLY' },
+    )
+  }
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   const createdRow = await loadWallMessage(message.id)
   if (!createdRow) return NextResponse.json({ message: '留言已保存，但读取新留言失败' }, { status: 500 })

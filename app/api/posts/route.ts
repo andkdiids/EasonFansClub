@@ -8,7 +8,7 @@ import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
-import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
@@ -209,7 +209,7 @@ export async function POST(request: Request) {
   }
 
   if (!user) {
-    return NextResponse.json({ message: '\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55' }, { status: 401 })
+    return unauthenticatedResponse('登录状态已失效，请重新登录')
   }
 
   const limited = await enforceApiRateLimit(request, user.id, {
@@ -393,7 +393,7 @@ export async function POST(request: Request) {
   } catch (error) {
     logPostCreateError(phase, error, user.id, input.boardId)
     if (error instanceof PostCreateBusinessError && error.reason === 'AUTH_SESSION_EXPIRED') {
-      return NextResponse.json({ message: '\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55' }, { status: 401 })
+      return unauthenticatedResponse('登录状态已失效，请重新登录')
     }
     const code = prismaErrorCode(error)
     if (code === 'P2002') {

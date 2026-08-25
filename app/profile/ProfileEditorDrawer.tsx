@@ -109,7 +109,7 @@ export function ProfileEditorDrawer({
         >
           <div className="profile-editor-header flex shrink-0 items-center justify-between border-b px-5 py-4">
             <div className="min-w-0">
-              <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
+              <p className="profile-editor-eyebrow text-xs font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
               <h2 id="profile-editor-title" className="mt-1 text-xl font-black text-brand-950">编辑资料</h2>
             </div>
             <button

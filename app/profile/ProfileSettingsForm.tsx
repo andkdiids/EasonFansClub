@@ -41,6 +41,7 @@ type CropState = {
   scale: number
   x: number
   y: number
+  previewFrameWidth?: number
   naturalWidth?: number
   naturalHeight?: number
 }
@@ -56,7 +57,7 @@ const maxBackgroundSourceSize = 10 * 1024 * 1024
 const backgroundUploadTimeoutMs = 30000
 const BACKGROUND_MAX_WIDTH = 1920
 const BACKGROUND_TARGET_ASPECT = 4.5
-// 裁剪弹窗的固定像素尺寸（9:2 = 4.5:1），导出时按相同比例放大，保证预览与导出区域完全一致。
+// 桌面端预览上限；移动端会按实际容器宽度缩放，导出时仍按原有目标尺寸放大。
 const BACKGROUND_FRAME_WIDTH = 450
 const BACKGROUND_FRAME_HEIGHT = 100
 
@@ -251,9 +252,9 @@ async function cropBackgroundToWebp(crop: CropState) {
   const targetWidth = Math.min(BACKGROUND_MAX_WIDTH, IW)
   const targetHeight = Math.round(targetWidth / BACKGROUND_TARGET_ASPECT)
 
-  // 预览裁剪框固定为 BACKGROUND_FRAME_WIDTH 像素，导出时按相同比例放大到 targetWidth，
-  // 保证「预览看到的区域 === 导出保存的区域」。因此 crop.x/y 需同步换算到导出坐标系。
-  const factor = targetWidth / BACKGROUND_FRAME_WIDTH
+  // 预览裁剪框可能因移动端宽度而变化，导出时按当前显示宽度换算回目标坐标系，
+  // 保证「预览看到的区域 === 导出保存的区域」，且不降低最终 WebP 的导出尺寸。
+  const factor = targetWidth / Math.max(1, crop.previewFrameWidth || BACKGROUND_FRAME_WIDTH)
   const canvasCrop: CropState = {
     ...crop,
     x: crop.x * factor,
@@ -315,9 +316,42 @@ export function ProfileSettingsForm({
   const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const backgroundInputRef = useRef<HTMLInputElement>(null)
+  const backgroundFrameRef = useRef<HTMLDivElement>(null)
+  const [backgroundFrameSize, setBackgroundFrameSize] = useState({ width: BACKGROUND_FRAME_WIDTH, height: BACKGROUND_FRAME_HEIGHT })
+  const [backgroundFrameReady, setBackgroundFrameReady] = useState(false)
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [pendingDefaultAvatarUrl, setPendingDefaultAvatarUrl] = useState<string | null>(null)
   const [backgroundPreview, setBackgroundPreview] = useState(initialProfile.backgroundUrl || '')
+  const isBackgroundCropOpen = backgroundCrop !== null
+
+  useEffect(() => {
+    if (!isBackgroundCropOpen) {
+      setBackgroundFrameReady(false)
+      return
+    }
+
+    const frame = backgroundFrameRef.current
+    if (!frame) return
+
+    const updateFrameSize = () => {
+      const width = Math.max(1, Math.min(BACKGROUND_FRAME_WIDTH, Math.round(frame.getBoundingClientRect().width)))
+      const height = width / BACKGROUND_TARGET_ASPECT
+      setBackgroundFrameSize((current) => {
+        if (current.width === width && current.height === height) return current
+        return { width, height }
+      })
+      setBackgroundFrameReady(true)
+    }
+
+    updateFrameSize()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateFrameSize)
+    observer?.observe(frame)
+    window.addEventListener('resize', updateFrameSize)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', updateFrameSize)
+    }
+  }, [isBackgroundCropOpen])
   
 
   useEffect(() => {
@@ -368,6 +402,7 @@ export function ProfileSettingsForm({
   function resetBackgroundCrop() {
     if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
     setBackgroundCrop(null)
+    setBackgroundFrameReady(false)
     if (backgroundInputRef.current) backgroundInputRef.current.value = ''
   }
 
@@ -397,6 +432,7 @@ export function ProfileSettingsForm({
     }
 
     if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
+    setBackgroundFrameReady(false)
     const objectUrl = URL.createObjectURL(file)
     let naturalWidth: number | undefined
     let naturalHeight: number | undefined
@@ -528,7 +564,7 @@ export function ProfileSettingsForm({
     setMessage('')
 
     try {
-      const cropped = await cropBackgroundToWebp(backgroundCrop)
+      const cropped = await cropBackgroundToWebp({ ...backgroundCrop, previewFrameWidth: backgroundFrameSize.width })
       const body = new FormData()
       body.append('file', cropped.blob, cropped.fileName)
       body.append('kind', 'background')
@@ -642,22 +678,22 @@ export function ProfileSettingsForm({
 
   const avatarPreview = profileImageUrl(form.avatarUrl)
 
-  // 预览裁剪框固定 450×100（9:2），与导出使用完全相同的坐标系，确保「所见即所得」。
-  const backgroundLayout = backgroundCrop?.naturalWidth
+  // 预览裁剪框保持个人主页背景的 9:2 横向比例，使用实际显示尺寸计算背景位置。
+  const backgroundLayout = backgroundCrop && backgroundFrameReady && backgroundCrop.naturalWidth
     ? computeBackgroundLayout(
         backgroundCrop,
         backgroundCrop.naturalWidth,
         backgroundCrop.naturalHeight ?? 0,
-        BACKGROUND_FRAME_WIDTH,
-        BACKGROUND_FRAME_HEIGHT,
+        backgroundFrameSize.width,
+        backgroundFrameSize.height,
       )
     : null
 
   return (
     <>
       <form onSubmit={handleSubmit} className="profile-settings-form space-y-5 rounded-[28px] border p-6 shadow-sm">
-        <div>
-          <p className="text-sm font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
+        <div className="profile-settings-intro">
+          <p className="profile-editor-eyebrow text-sm font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
           <h2 className="mt-2 text-2xl font-black text-brand-950">编辑资料</h2>
           <p className="mt-2 text-sm font-bold text-slate-500">编辑内容只会更新你的个人资料；手机号和邮箱仅在这里自己可见。</p>
         </div>
@@ -1000,48 +1036,50 @@ export function ProfileSettingsForm({
       ) : null}
 
       {backgroundCrop ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">
-          <section className="profile-background-crop w-full max-w-lg rounded-[28px] p-5 shadow-2xl">
-            <h3 className="text-xl font-black text-brand-950">调整背景图</h3>
-            <p className="mt-1 text-sm font-bold text-slate-500">拖动图片调整显示区域，使用滑块缩放。建议把人物主体放在画面中央。</p>
-            <div
-              className="relative mx-auto mt-5 touch-none overflow-hidden rounded-2xl bg-slate-900"
-              style={{ width: BACKGROUND_FRAME_WIDTH, height: BACKGROUND_FRAME_HEIGHT }}
-              onPointerDown={onBackgroundCropPointerDown}
-              onPointerMove={onBackgroundCropPointerMove}
-              onPointerUp={onBackgroundCropPointerUp}
-            >
-              {backgroundLayout ? (
-                <div
-                  className="absolute left-0 top-0"
-                  style={{
-                    width: BACKGROUND_FRAME_WIDTH,
-                    height: BACKGROUND_FRAME_HEIGHT,
-                    backgroundImage: `url(${backgroundCrop.url})`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundSize: `${backgroundLayout.drawWidth}px ${backgroundLayout.drawHeight}px`,
-                    backgroundPosition: `${backgroundLayout.translateX}px ${backgroundLayout.translateY}px`,
-                  }}
+        <div className="profile-background-crop-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55">
+          <section className="profile-background-crop flex max-h-[calc(100dvh-24px)] w-full max-w-lg min-w-0 flex-col rounded-[28px] p-5 shadow-2xl">
+            <div className="profile-background-crop-content min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+              <h3 className="text-xl font-black text-brand-950">调整背景图</h3>
+              <p className="profile-background-crop-description mt-1 text-sm font-bold text-slate-500">拖动图片调整显示区域，使用滑块缩放。建议把人物主体放在画面中央。</p>
+              <div
+                ref={backgroundFrameRef}
+                className="profile-background-crop-frame relative mx-auto mt-5 aspect-[9/2] w-full max-w-[450px] min-w-0 touch-none overflow-hidden rounded-2xl bg-slate-900"
+                onPointerDown={onBackgroundCropPointerDown}
+                onPointerMove={onBackgroundCropPointerMove}
+                onPointerUp={onBackgroundCropPointerUp}
+              >
+                {backgroundLayout ? (
+                  <div
+                    className="absolute left-0 top-0"
+                    style={{
+                      width: backgroundFrameSize.width,
+                      height: backgroundFrameSize.height,
+                      backgroundImage: `url(${backgroundCrop.url})`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundSize: `${backgroundLayout.drawWidth}px ${backgroundLayout.drawHeight}px`,
+                      backgroundPosition: `${backgroundLayout.translateX}px ${backgroundLayout.translateY}px`,
+                    }}
+                  />
+                ) : null}
+                <div className="pointer-events-none absolute inset-0 ring-2 ring-white/70" />
+              </div>
+              <label className="mt-5 block min-w-0">
+                <span className="text-sm font-black text-slate-700">缩放</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.01"
+                  value={backgroundCrop.scale}
+                  onChange={(event) => setBackgroundCrop({ ...backgroundCrop, scale: Number(event.target.value) })}
+                  className="profile-background-crop-range mt-2 w-full max-w-full min-w-0"
                 />
-              ) : null}
-              <div className="pointer-events-none absolute inset-0 ring-2 ring-white/70" />
+              </label>
             </div>
-            <label className="mt-5 block">
-              <span className="text-sm font-black text-slate-700">缩放</span>
-              <input
-                type="range"
-                min="1"
-                max="3"
-                step="0.01"
-                value={backgroundCrop.scale}
-                onChange={(event) => setBackgroundCrop({ ...backgroundCrop, scale: Number(event.target.value) })}
-                className="mt-2 w-full"
-              />
-            </label>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={resetBackgroundCrop} className="rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700">取消</button>
-              <button type="button" onClick={confirmBackgroundUpload} disabled={uploading === 'background'} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
-                {uploading === 'background' ? '上传中...' : '使用此背景图'}
+            <div className="profile-background-crop-actions mt-5 flex shrink-0 min-w-0 justify-end gap-2">
+              <button type="button" onClick={resetBackgroundCrop} className="profile-background-crop-cancel min-w-0 rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700">取消</button>
+              <button type="button" onClick={confirmBackgroundUpload} disabled={uploading === 'background'} className="profile-background-crop-confirm min-w-0 rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
+                {uploading === 'background' ? '上传中...' : '使用此背景'}
               </button>
             </div>
           </section>

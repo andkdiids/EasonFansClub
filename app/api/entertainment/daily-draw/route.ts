@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { getEntertainmentDailyDrawStatus, issueEntertainmentDailyDraw } from '@/lib/entertainment'
-import { rejectInvalidRequestOrigin } from '@/lib/security'
+import { rejectInvalidRequestOrigin, unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 function unauthorized() {
-  return NextResponse.json({ ok: false, data: null, error: '请先登录后再抽取今日处方' }, { status: 401 })
+  return unauthenticatedResponse('请先登录后再抽取今日处方', undefined, { data: null, error: '请先登录后再抽取今日处方' })
 }
 
 function serviceError(error: unknown, operation: string) {

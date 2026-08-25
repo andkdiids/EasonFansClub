@@ -5,6 +5,7 @@ import { invalidateCurrentUserCache } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireSuperAdmin } from '@/lib/security'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 const securitySetupNotificationKey = 'security-setup-required-after-admin-reset'
@@ -31,7 +32,19 @@ export async function PATCH(request: Request, context: RouteContext) {
         data: { passwordHash, mustSetupSecurity: true },
         select: { id: true, uid: true, nickname: true, mustSetupSecurity: true },
       })
-      await tx.notification.upsert({
+      await tx.adminActionLog.create({
+        data: {
+          adminId: guard.user.id,
+          targetUserId: userId,
+          action: 'RESET_USER_PASSWORD',
+          detail: { mustSetupSecurity: true },
+        },
+      })
+      return updated
+    }, { timeout: 15_000, maxWait: 5_000 })
+
+    await safeNotificationWrite(
+      () => prisma.notification.upsert({
         where: { recipientId_key: { recipientId: userId, key: securitySetupNotificationKey } },
         update: {
           title: '密码已由超级管理员重置',
@@ -49,18 +62,9 @@ export async function PATCH(request: Request, context: RouteContext) {
           content: '请使用新密码登录，并重新设置账号密保问题。',
           link: '/settings/security-questions',
         },
-      })
-      await tx.adminActionLog.create({
-        data: {
-          adminId: guard.user.id,
-          targetUserId: userId,
-          action: 'RESET_USER_PASSWORD',
-          detail: { mustSetupSecurity: true },
-        },
-      })
-      return updated
-    })
-
+      }),
+      { operation: 'admin-password-reset', userId, notificationType: 'SYSTEM' },
+    )
     invalidateCurrentUserCache(userId)
     emitRealtime(userId, 'notification')
     return NextResponse.json({ user, message: '密码已重置，用户登录后需要重新设置密保问题' })

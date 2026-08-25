@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { toggleStickerFavorite } from '@/lib/sticker-center'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 /** 切换收藏：已收藏则取消，否则收藏。 */
 export async function POST(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const body = await request.json().catch(() => null)
   const stickerId = String(body?.stickerId || '').trim()

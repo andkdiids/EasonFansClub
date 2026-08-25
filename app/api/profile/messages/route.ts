@@ -6,10 +6,11 @@ import { publicImageUrl } from '@/lib/images'
 import { getProfileRecordPagination } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export async function GET(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const url = new URL(request.url)
   const requestedPage = Math.max(1, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1)

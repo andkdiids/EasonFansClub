@@ -4,6 +4,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
 import type { Prisma, StickerReportReason } from '@prisma/client'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 /** 选择器可见表情：未隐藏、未下架、所属合集已通过审核。 */
 const VISIBLE_STICKER_WHERE = {
@@ -897,30 +898,33 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
       })),
     })
 
-    const creator = await tx.user.findUniqueOrThrow({
-      where: { id: input.creatorId },
-      select: { nickname: true },
-    })
-    const administrators = await tx.user.findMany({
-      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
-      select: { id: true },
-    })
-    if (administrators.length) {
-      await tx.notification.createMany({
+    return pack
+  }, { timeout: 15_000, maxWait: 5_000 })
+  await safeNotificationWrite(
+    async () => {
+      const [creator, administrators] = await Promise.all([
+        prisma.user.findUniqueOrThrow({ where: { id: input.creatorId }, select: { nickname: true } }),
+        prisma.user.findMany({
+          where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+          select: { id: true },
+        }),
+      ])
+      if (!administrators.length) return
+      await prisma.notification.createMany({
         data: administrators.map((administrator) => ({
           recipientId: administrator.id,
           actorId: input.creatorId,
           type: 'ADMIN' as const,
           title: '新的表情包审核申请',
-          content: `用户 ${creator.nickname} 提交了表情包《${pack.name}》，请前往审核中心处理。`,
+          content: `用户 ${creator.nickname} 提交了表情包《${result.name}》，请前往审核中心处理。`,
           link: '/admin/stickers',
-          key: `sticker-pack-review:${pack.id}`,
+          key: `sticker-pack-review:${result.id}`,
         })),
         skipDuplicates: true,
       })
-    }
-    return pack
-  })
+    },
+    { operation: 'sticker-pack-submitted', userId: input.creatorId, notificationType: 'ADMIN' },
+  )
   void emitRealtimeToAdmins('notification')
   return { packId: result.id, status: 'PENDING' }
 }
@@ -1019,17 +1023,20 @@ export async function reviewStickerPack(input: {
     input.action === 'APPROVE'
       ? '已经上架表情商店，快去查看吧！'
       : `原因：${rejectionReason}`
-  await prisma.notification.create({
-    data: {
-      recipientId: pack.creatorId,
-      actorId: input.reviewerId,
-      type: 'ADMIN',
-      title,
-      content,
-      link: getStickerPackReviewNotificationLink(input.packId, newStatus),
-      key: `sticker-pack-review:${input.packId}:${newStatus.toLowerCase()}:${now.getTime()}`,
-    },
-  })
+  await safeNotificationWrite(
+    () => prisma.notification.create({
+      data: {
+        recipientId: pack.creatorId,
+        actorId: input.reviewerId,
+        type: 'ADMIN',
+        title,
+        content,
+        link: getStickerPackReviewNotificationLink(input.packId, newStatus),
+        key: `sticker-pack-review:${input.packId}:${newStatus.toLowerCase()}:${now.getTime()}`,
+      },
+    }),
+    { operation: 'sticker-pack-review', userId: pack.creatorId, notificationType: 'ADMIN' },
+  )
   emitRealtime(pack.creatorId, 'notification')
   return { status: newStatus, packName: pack.name }
 }

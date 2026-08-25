@@ -8,6 +8,7 @@
     "dev:8000": "next dev -p 8000",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3000",
+    "start:server": "tsx server.ts",
     "start:next": "next start",
     "start:8000": "tsx server.ts -p 8000",
     "cloudflare:build": "opennextjs-cloudflare build",

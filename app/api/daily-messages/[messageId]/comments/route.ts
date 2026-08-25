@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -10,6 +11,7 @@ import { formatBeijingDate } from '@/lib/checkin'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -140,6 +142,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   let notifiedUserId: string | null = null
+  let notificationData: Prisma.NotificationCreateArgs | null = null
   const comment = await prisma.$transaction(async (tx) => {
     const dailyMessage = await tx.dailyMessage.findUnique({
       where: { id: messageId },
@@ -166,7 +169,7 @@ export async function POST(request: Request, context: RouteContext) {
     const recipientId = parentComment?.authorId || dailyMessage.userId
     if (recipientId !== guard.user.id) {
       notifiedUserId = recipientId
-      await tx.notification.create({
+      notificationData = {
         data: {
           recipientId,
           actorId: guard.user.id,
@@ -177,12 +180,19 @@ export async function POST(request: Request, context: RouteContext) {
             : `${guard.user.nickname} 评论了你的挂号留言`,
           link: `/checkin?date=${formatBeijingDate(dailyMessage.date)}&message=${messageId}&focus=${created.id}`,
         },
-      })
+      }
     }
 
     return created
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
+  const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
+  if (committedNotificationData) {
+    await safeNotificationWrite(
+      () => prisma.notification.create(committedNotificationData),
+      { operation: 'daily-message-comment-notification', userId: committedNotificationData.data.recipientId, notificationType: 'REPLY' },
+    )
+  }
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   const equippedBadge = await getEquippedBadgesForUsers([guard.user.id])
   return NextResponse.json({

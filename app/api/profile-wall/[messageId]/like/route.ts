@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { unauthenticatedResponse } from '@/lib/security'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
 export async function GET(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const { messageId } = await params
 
   const message = await prisma.profileWallMessage.findFirst({
@@ -62,7 +65,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
 
 export async function POST(_request: Request, { params }: { params: Promise<{ messageId: string }> }) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const { messageId } = await params
 
   const message = await prisma.profileWallMessage.findFirst({
@@ -71,6 +74,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
   })
   if (!message) return NextResponse.json({ message: '该留言已被删除或无法查看' }, { status: 404 })
 
+  let notificationData: Prisma.NotificationCreateArgs | null = null
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.profileWallLike.findUnique({
       where: { messageId_userId: { messageId, userId: user.id } },
@@ -81,7 +85,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
     } else {
       await tx.profileWallLike.create({ data: { messageId, userId: user.id } })
       if (message.senderId !== user.id) {
-        await tx.notification.create({
+        notificationData = {
           data: {
             recipientId: message.senderId,
             actorId: user.id,
@@ -90,14 +94,21 @@ export async function POST(_request: Request, { params }: { params: Promise<{ me
             content: `${user.nickname} 赞了你的留言`,
             link: `/user/${String(message.User_ProfileWallMessage_receiverIdToUser.uid).padStart(5, '0')}/wall?focus=${messageId}`,
           },
-        })
+        }
       }
     }
     const likeCount = await tx.profileWallLike.count({ where: { messageId } })
     await tx.profileWallMessage.update({ where: { id: messageId }, data: { likeCount } })
     return { liked: !existing, likeCount, notifiedUserId: !existing && message.senderId !== user.id ? message.senderId : null }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
+  const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
+  if (committedNotificationData) {
+    await safeNotificationWrite(
+      () => prisma.notification.create(committedNotificationData),
+      { operation: 'profile-wall-like-notification', userId: committedNotificationData.data.recipientId, notificationType: 'LIKE' },
+    )
+  }
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

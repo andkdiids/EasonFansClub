@@ -11,6 +11,7 @@ import type { EquippedBadgeView } from '@/lib/badge-types'
 import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, sanitizeText } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 const clinicAuthorSelect = {
   id: true,
@@ -264,6 +265,7 @@ export async function createClinicConsultation(input: {
   const notificationContent = maskClinicTextWithWords(content, await getEnabledBannedWords()).slice(0, 120)
 
   await clinicRateLimit(input.authorId, 'clinic:consultation', 1, CLINIC_CONSULTATION_RATE_LIMIT_SECONDS)
+  let notificationData: Prisma.NotificationCreateArgs | null = null
   const result = await prisma.$transaction(async (tx) => {
     const record = await tx.clinicRecord.findFirst({
       where: { id: input.recordId, status: 'ACTIVE' },
@@ -313,7 +315,7 @@ export async function createClinicConsultation(input: {
     let notifiedUserId: string | null = null
     if (recipientId !== input.authorId) {
       notifiedUserId = recipientId
-      await tx.notification.create({
+      notificationData = {
         data: {
           recipientId,
           // Do not store the anonymous actor in a public notification payload.
@@ -324,12 +326,19 @@ export async function createClinicConsultation(input: {
           link: `/clinic/${input.recordId}?focus=${created.id}`,
           key: `clinic-consultation:${created.id}:${recipientId}`,
         },
-      })
+      }
     }
 
     return { id: created.id, notifiedUserId }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
+  const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
+  if (committedNotificationData) {
+    await safeNotificationWrite(
+      () => prisma.notification.create(committedNotificationData),
+      { operation: 'clinic-consultation-created', userId: committedNotificationData.data.recipientId, notificationType: 'REPLY' },
+    )
+  }
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return result
 }

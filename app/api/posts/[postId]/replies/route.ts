@@ -5,12 +5,13 @@ import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { appendContentImages, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -45,7 +46,7 @@ function parseMentions(value: unknown, content: string, currentUserId: string) {
 
 export async function POST(request: Request, { params }: Params) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录后再回复' }, { status: 401 })
+  if (!user) return unauthenticatedResponse('请先登录后再回复')
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/posts/replies',
     ip: { limit: 120, windowSeconds: 10 * 60 },
@@ -154,6 +155,7 @@ export async function POST(request: Request, { params }: Params) {
     }
   }
 
+  const replyRecipientId = parentReply?.authorId || post.authorId
   const reply = await prisma.$transaction(async (tx) => {
     for (const userId of [...new Set([user.id, post.authorId])].sort()) {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
@@ -214,34 +216,6 @@ export async function POST(request: Request, { params }: Params) {
           displayText: mention.displayText,
         })),
       })
-      await tx.notification.createMany({
-        data: requestedMentions.map((mention) => ({
-          recipientId: mention.userId,
-          actorId: user.id,
-          type: 'REPLY' as const,
-          title: `${user.nickname}在回复中提到了你`,
-          content: `${user.nickname}在回复中提到了你`,
-          link: `/posts/${postId}?focus=${createdReply.id}`,
-          key: `reply-mention:${createdReply.id}:${mention.userId}`,
-        })),
-        skipDuplicates: true,
-      })
-    }
-
-    const replyRecipientId = parentReply?.authorId || post.authorId
-    if (replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId)) {
-      await tx.notification.create({
-        data: {
-          recipientId: replyRecipientId,
-          actorId: user.id,
-          type: 'REPLY',
-          title: parentReply ? '有人回复了你的评论' : '你的帖子有新回复',
-          content: parentReply
-            ? `${user.nickname} 回复了你的评论`
-            : `${user.nickname} 回复了你的帖子`,
-          link: `/posts/${postId}?focus=${createdReply.id}`,
-        },
-      })
     }
 
     await tx.post.update({
@@ -265,7 +239,7 @@ export async function POST(request: Request, { params }: Params) {
         ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : []),
       ],
     }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
   if ('duplicateReplyId' in reply) {
     return NextResponse.json({
@@ -275,6 +249,35 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const { createdReply, rewardPoints } = reply
+  const notificationData = [
+    ...requestedMentions.map((mention) => ({
+      recipientId: mention.userId,
+      actorId: user.id,
+      type: 'REPLY' as const,
+      title: `${user.nickname}在回复中提到了你`,
+      content: `${user.nickname}在回复中提到了你`,
+      link: `/posts/${postId}?focus=${createdReply.id}`,
+      key: `reply-mention:${createdReply.id}:${mention.userId}`,
+    })),
+    ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId)
+      ? [{
+          recipientId: replyRecipientId,
+          actorId: user.id,
+          type: 'REPLY' as const,
+          title: parentReply ? '有人回复了你的评论' : '你的帖子有新回复',
+          content: parentReply
+            ? `${user.nickname} 回复了你的评论`
+            : `${user.nickname} 回复了你的帖子`,
+          link: `/posts/${postId}?focus=${createdReply.id}`,
+        }]
+      : []),
+  ]
+  if (notificationData.length) {
+    await safeNotificationWrite(
+      () => prisma.notification.createMany({ data: notificationData, skipDuplicates: true }),
+      { operation: 'post-reply-notifications', userId: user.id, notificationType: 'REPLY' },
+    )
+  }
   emitRealtimeMany(reply.notificationRecipientIds, 'notification')
   const { User: replyAuthor, sticker: replySticker, ...serializedReply } = createdReply
   const mentionUserById = new Map(mentionedFriends.map((friend) => [friend.id, friend]))

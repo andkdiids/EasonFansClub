@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { formatBeijingDate } from '@/lib/checkin'
 import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
@@ -6,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -78,6 +80,7 @@ export async function POST(_request: Request, context: RouteContext) {
   if (limited) return limited
 
   const { messageId } = await context.params
+  let notificationData: Prisma.NotificationCreateArgs | null = null
   const result = await prisma.$transaction(async (tx) => {
     const message = await tx.dailyMessage.findFirst({
       where: { id: messageId, isDeleted: false },
@@ -94,7 +97,7 @@ export async function POST(_request: Request, context: RouteContext) {
     } else {
       await tx.dailyMessageLike.create({ data: { messageId, userId: guard.user.id } })
       if (message.userId !== guard.user.id) {
-        await tx.notification.create({
+        notificationData = {
           data: {
             recipientId: message.userId,
             actorId: guard.user.id,
@@ -104,16 +107,23 @@ export async function POST(_request: Request, context: RouteContext) {
             // 带上留言日期，确保历史留言也能在挂号页正确定位（否则只加载今天的留言会找不到目标）。
             link: `/checkin?date=${formatBeijingDate(message.date)}&message=${messageId}`,
           },
-        })
+        }
       }
     }
 
     const likeCount = await tx.dailyMessageLike.count({ where: { messageId } })
     await tx.dailyMessage.update({ where: { id: messageId }, data: { likeCount } })
     return { isLiked: !existing, likeCount, notifiedUserId: !existing && message.userId !== guard.user.id ? message.userId : null }
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
 
   if (!result) return NextResponse.json({ message: '留言不存在' }, { status: 404 })
+  const committedNotificationData = notificationData as Prisma.NotificationCreateArgs | null
+  if (committedNotificationData) {
+    await safeNotificationWrite(
+      () => prisma.notification.create(committedNotificationData),
+      { operation: 'daily-message-like-notification', userId: committedNotificationData.data.recipientId, notificationType: 'LIKE' },
+    )
+  }
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
   return NextResponse.json(result)
 }

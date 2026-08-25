@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -30,16 +31,19 @@ export async function POST(_request: Request, context: RouteContext) {
   }
 
   if (created) {
-    await prisma.notification.create({
-      data: {
-        recipientId: userId,
-        actorId: guard.user.id,
-        type: 'FOLLOW',
-        title: '你有新的关注者',
-        content: `${guard.user.nickname} 关注了你`,
-        link: `/users/${guard.user.id}`,
-      },
-    })
+    await safeNotificationWrite(
+      () => prisma.notification.create({
+        data: {
+          recipientId: userId,
+          actorId: guard.user.id,
+          type: 'FOLLOW',
+          title: '你有新的关注者',
+          content: `${guard.user.nickname} 关注了你`,
+          link: `/users/${guard.user.id}`,
+        },
+      }),
+      { operation: 'follow-created', userId, notificationType: 'FOLLOW' },
+    )
     triggerBadgeEvaluation(userId, 'FOLLOW_CREATED')
     emitRealtime(userId, 'notification')
   }

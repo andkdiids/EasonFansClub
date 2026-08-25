@@ -2,6 +2,7 @@ import { hashPassword, verifyPassword } from '@/lib/password'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import type { Prisma } from '@prisma/client'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export const securityQuestionCount = 1
 export const securityQuestionNotificationKey = 'complete-security-questions'
@@ -83,18 +84,21 @@ export async function ensureSecurityQuestionNotification(userId: string) {
   if (!settings.notifyLegacyUsersToSetSecurityQuestions) return
   const count = await prisma.userSecurityQuestion.count({ where: { userId } })
   if (count >= securityQuestionCount) return
-  await prisma.notification.upsert({
-    where: { recipientId_key: { recipientId: userId, key: securityQuestionNotificationKey } },
-    update: {},
-    create: {
-      recipientId: userId,
-      key: securityQuestionNotificationKey,
-      type: 'SYSTEM',
-      title: '请设置账号密保问题',
-      content: '设置一个仅你知道答案的密保问题，可用于安全地找回账号。',
-      link: '/settings/security-questions',
-    },
-  })
+  await safeNotificationWrite(
+    () => prisma.notification.upsert({
+      where: { recipientId_key: { recipientId: userId, key: securityQuestionNotificationKey } },
+      update: {},
+      create: {
+        recipientId: userId,
+        key: securityQuestionNotificationKey,
+        type: 'SYSTEM',
+        title: '请设置账号密保问题',
+        content: '设置一个仅你知道答案的密保问题，可用于安全地找回账号。',
+        link: '/settings/security-questions',
+      },
+    }),
+    { operation: 'security-question-reminder', userId, notificationType: 'SYSTEM' },
+  )
   emitRealtime(userId, 'notification')
 }
 

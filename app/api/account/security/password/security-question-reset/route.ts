@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 const wrongAnswerAction = 'account-password:wrong-security-answer'
 
@@ -57,9 +58,12 @@ export async function POST(request: Request) {
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id: user.id }, data: { passwordHash } })
     await tx.rateLimitLog.deleteMany({ where: { key: accountKey, action: wrongAnswerAction } })
-    await tx.notification.create({ data: { recipientId: user.id, type: 'SYSTEM', title: '密码重置成功', content: '您的登录密码已通过密保问题完成重置。如非本人操作，请及时联系管理员。', link: '/settings/security' } })
     await tx.accountSecurityLog.create({ data: { userId: user.id, action: 'PASSWORD_RESET_WITH_SECURITY_QUESTION', ipAddress: ip, userAgent: request.headers.get('user-agent')?.slice(0, 500), metadata: { method: 'SECURITY_QUESTION' } } })
-  })
+  }, { timeout: 15_000, maxWait: 5_000 })
+  await safeNotificationWrite(
+    () => prisma.notification.create({ data: { recipientId: user.id, type: 'SYSTEM', title: '密码重置成功', content: '您的登录密码已通过密保问题完成重置。如非本人操作，请及时联系管理员。', link: '/settings/security' } }),
+    { operation: 'password-reset-security-question', userId: user.id, notificationType: 'SYSTEM' },
+  )
   emitRealtime(user.id, 'notification')
   invalidateCurrentUserCache(user.id)
   return NextResponse.json({ message: '密码重置成功' })

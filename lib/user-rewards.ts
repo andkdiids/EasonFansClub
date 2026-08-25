@@ -12,6 +12,7 @@ import {
   USER_REWARD_PERMISSION,
   USER_REWARD_REASON_MAX_LENGTH,
 } from '@/lib/user-reward-constants'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export { USER_REWARD_MAX_AMOUNT, USER_REWARD_NOTIFICATION_TYPE, USER_REWARD_PAGE_SIZE, USER_REWARD_PERMISSION, USER_REWARD_REASON_MAX_LENGTH }
 
@@ -298,7 +299,7 @@ function isUniqueConstraintError(error: unknown) {
 export async function grantUserReward(input: UserRewardInput) {
   const normalized = normalizeUserRewardInput(input)
   try {
-    return await prisma.$transaction(async (tx) => {
+    const resultWithNotification = await prisma.$transaction(async (tx) => {
       const existing = await tx.userReward.findUnique({ where: { transactionId: normalized.transactionId } })
       if (existing) {
         assertIdempotencyMatch(existing, normalized)
@@ -364,17 +365,6 @@ export async function grantUserReward(input: UserRewardInput) {
       }
 
       const updatedUser = await tx.user.findUniqueOrThrow({ where: { id: recipient.id }, select: rewardUserSelect })
-      await tx.notification.create({
-        data: {
-          recipientId: recipient.id,
-          type: USER_REWARD_NOTIFICATION_TYPE,
-          title: '获得奖励',
-          content: buildUserRewardNotificationContent(normalized),
-          link: '/profile',
-          key: `user-reward:${reward.id}`,
-          createdAt: reward.createdAt,
-        },
-      })
       await tx.adminActionLog.create({
         data: {
           adminId: normalized.operatorId,
@@ -392,8 +382,31 @@ export async function grantUserReward(input: UserRewardInput) {
         },
       })
 
-      return { duplicate: false, reward, user: updatedUser }
-    })
+      return {
+        duplicate: false,
+        reward,
+        user: updatedUser,
+        notification: {
+          data: {
+            recipientId: recipient.id,
+            type: USER_REWARD_NOTIFICATION_TYPE,
+            title: '获得奖励',
+            content: buildUserRewardNotificationContent(normalized),
+            link: '/profile',
+            key: `user-reward:${reward.id}`,
+            createdAt: reward.createdAt,
+          },
+        } as Prisma.NotificationCreateArgs,
+      }
+    }, { timeout: 15_000, maxWait: 5_000 })
+    const { notification, ...result } = resultWithNotification
+    if (notification) {
+      await safeNotificationWrite(
+        () => prisma.notification.create(notification),
+        { operation: 'user-reward-granted', userId: notification.data.recipientId, notificationType: USER_REWARD_NOTIFICATION_TYPE },
+      )
+    }
+    return result
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error
 

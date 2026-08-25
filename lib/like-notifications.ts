@@ -13,8 +13,6 @@ export type LikeNotificationTarget = {
   link: string
 }
 
-export type LikeNotificationAction = 'like' | 'unlike' | 'reconcile'
-
 const LIKE_NOTIFICATION_KEY_PREFIX = 'like:'
 
 export function getLikeNotificationKey(kind: LikeNotificationTargetKind, id: string) {
@@ -127,7 +125,6 @@ function readState(rows: LikeNotificationRow[]) {
 async function syncLikeNotificationWithSnapshot(
   tx: Prisma.TransactionClient,
   input: LikeNotificationSyncInput,
-  action: LikeNotificationAction,
   snapshot: LikeSnapshot,
 ) {
   const key = getLikeNotificationKey(input.target.kind, input.target.id)
@@ -155,9 +152,15 @@ async function syncLikeNotificationWithSnapshot(
     return null
   }
 
-  // A cleared notification must not be recreated by a read-time reconciliation.
-  // A genuinely new like is allowed to create a new aggregate row.
-  if (action !== 'like' && existingRows.length === 0) return null
+  // Infer the event from the committed source rows instead of requiring every
+  // caller to pass a second action argument. A newly-created like is the
+  // current latest actor; reconciliation and unlike operations either have no
+  // actor or leave another actor as the latest row.
+  const isNewLike = Boolean(input.actorId && snapshot.latest?.userId === input.actorId)
+
+  // A cleared notification must not be recreated by a read-time reconciliation
+  // or by an unlike that leaves other likes behind.
+  if (!isNewLike && existingRows.length === 0) return null
 
   const preservedReadState = readState(existingRows)
   const actorId = snapshot.latest?.userId || input.actorId || aggregate?.actorId || legacy[0]?.actorId || null
@@ -171,7 +174,7 @@ async function syncLikeNotificationWithSnapshot(
     link: input.target.link,
     key,
     createdAt: snapshot.latest?.createdAt || aggregate?.createdAt || legacy[0]?.createdAt || new Date(),
-    ...(action === 'like' ? { isRead: false, readAt: null } : preservedReadState),
+    ...(isNewLike ? { isRead: false, readAt: null } : preservedReadState),
   }
 
   const notification = await tx.notification.upsert({
@@ -190,8 +193,8 @@ async function syncLikeNotificationWithSnapshot(
  * Public post-commit entry point. Like/ReplyLike source rows are never loaded
  * through a caller-owned business transaction.
  */
-export async function syncLikeNotification(input: LikeNotificationSyncInput, action: LikeNotificationAction) {
-  return syncLikeNotificationSafely(input, action)
+export async function syncLikeNotification(input: LikeNotificationSyncInput) {
+  return syncLikeNotificationSafely(input)
 }
 
 /**
@@ -201,13 +204,12 @@ export async function syncLikeNotification(input: LikeNotificationSyncInput, act
  */
 export async function syncLikeNotificationSafely(
   input: LikeNotificationSyncInput,
-  action: LikeNotificationAction,
 ) {
   const startedAt = Date.now()
   try {
     const snapshot = await loadLikeSnapshot(prisma, input.target)
     return await safeNotificationTransaction(
-      (tx) => syncLikeNotificationWithSnapshot(tx, input, action, snapshot),
+      (tx) => syncLikeNotificationWithSnapshot(tx, input, snapshot),
       {
         operation: 'like-notification-sync',
         userId: input.recipientId,
@@ -250,7 +252,7 @@ export async function reconcileLikeNotifications(userId: string) {
   // is isolated from the rest of the maintenance pass.
   let reconciled = 0
   for (const target of targets.values()) {
-    const result = await syncLikeNotificationSafely({ recipientId: userId, target }, 'reconcile')
+    const result = await syncLikeNotificationSafely({ recipientId: userId, target })
     if (result) reconciled += 1
   }
   return reconciled
