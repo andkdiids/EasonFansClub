@@ -221,7 +221,7 @@ async function logSessionInvalid(reason: string, request: NextRequest, token?: s
 
 function unauthorizedApiResponse() {
   return withNoStoreHeaders(NextResponse.json(
-    { ok: false, code: 'UNAUTHORIZED', message: '请先登录' },
+    { ok: false, code: 'UNAUTHENTICATED', message: '请先登录' },
     { status: 401 },
   ))
 }

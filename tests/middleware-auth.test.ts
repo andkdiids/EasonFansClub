@@ -55,7 +55,7 @@ async function expectUnauthorizedApi(path: string) {
   assert.match(response.headers.get('content-type') || '', /application\/json/)
   assert.deepEqual(await response.json(), {
     ok: false,
-    code: 'UNAUTHORIZED',
+    code: 'UNAUTHENTICATED',
     message: '请先登录',
   })
 }

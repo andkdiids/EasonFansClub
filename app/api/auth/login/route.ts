@@ -95,7 +95,7 @@ export async function POST(request: Request) {
     if (!user) {
       const message = identifierType === 'email' ? '邮箱未注册' : '手机号未注册'
       return NextResponse.json(
-        { message, errors: { identifier: message } },
+        { code: 'INVALID_CREDENTIALS', message, errors: { identifier: message } },
         { status: 401, headers: noStoreHeaders },
       )
     }
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
     if (!passwordResult.valid) {
       await recordLoginSecurityEvent(user.id, request, 'INVALID_PASSWORD')
       return NextResponse.json(
-        { message: '密码错误', errors: { password: '密码错误' } },
+        { code: 'INVALID_CREDENTIALS', message: '密码错误', errors: { password: '密码错误' } },
         { status: 401, headers: noStoreHeaders },
       )
     }

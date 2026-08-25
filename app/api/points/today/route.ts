@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getTodayRegistrationFeeSummary } from '@/lib/registration-fee'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,10 +13,7 @@ const privateNoStoreHeaders = {
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) {
-    return NextResponse.json(
-      { ok: false, data: null, error: '请先登录后查看挂号费记录' },
-      { status: 401, headers: privateNoStoreHeaders },
-    )
+    return unauthenticatedResponse('请先登录后查看挂号费记录', privateNoStoreHeaders, { data: null, error: '请先登录后查看挂号费记录' })
   }
 
   try {

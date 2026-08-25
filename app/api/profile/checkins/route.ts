@@ -3,10 +3,11 @@ import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { safeDb } from '@/lib/db-timeout'
 import { prisma } from '@/lib/prisma'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export async function GET() {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const monthStart = new Date()
   monthStart.setDate(1)

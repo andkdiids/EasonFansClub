@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { parseCheckInDateKey } from '@/lib/checkin-history'
 import { prisma } from '@/lib/prisma'
+import { unauthenticatedResponse } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ dateKey: string }> }
 
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(_request: Request, context: RouteContext) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const { dateKey } = await context.params
   if (!parseCheckInDateKey(dateKey)) {

@@ -17,6 +17,23 @@ export function isAdminRole(role: UserRole) {
   return role === 'ADMIN' || role === 'SUPER_ADMIN'
 }
 
+/** A 401 reserved for a confirmed missing/invalid browser session. */
+export function unauthenticatedResponse(message = '请先登录', headers?: HeadersInit, extra: Record<string, unknown> = {}) {
+  const responseHeaders = new Headers(headers)
+  if (!responseHeaders.has('Cache-Control')) responseHeaders.set('Cache-Control', 'private, no-store, max-age=0')
+  return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED', message, ...extra }, {
+    status: 401,
+    headers: responseHeaders,
+  })
+}
+
+function forbiddenResponse(message: string) {
+  return NextResponse.json({ ok: false, code: 'FORBIDDEN', message }, {
+    status: 403,
+    headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+  })
+}
+
 export async function requireUser(): Promise<GuardResult> {
   let user: SessionUser | null
   try {
@@ -34,7 +51,7 @@ export async function requireUser(): Promise<GuardResult> {
   if (!user) {
     return {
       user: null,
-      response: NextResponse.json({ ok: false, code: 'UNAUTHORIZED', message: '请先登录' }, { status: 401 }),
+      response: unauthenticatedResponse(),
     }
   }
 
@@ -49,7 +66,7 @@ export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<
   if (!allowed) {
     return {
       user: null,
-      response: NextResponse.json({ message: '当前管理员未获得此权限' }, { status: 403 }),
+      response: forbiddenResponse('当前管理员未获得此权限'),
     }
   }
 
@@ -63,7 +80,7 @@ export async function requireSuperAdmin(): Promise<GuardResult> {
   if (result.user.role !== 'SUPER_ADMIN') {
     return {
       user: null,
-      response: NextResponse.json({ message: '只有超级管理员可以执行此操作' }, { status: 403 }),
+      response: forbiddenResponse('只有超级管理员可以执行此操作'),
     }
   }
 

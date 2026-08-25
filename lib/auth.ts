@@ -22,6 +22,7 @@ export type SessionUser = {
   avatarUrl?: string | null
   level?: number
   experience?: number
+  checkinMoodEnabled?: boolean
   role: UserRole
   canPlayFullMusic?: boolean
   equippedBadge?: EquippedBadgeView | null
@@ -126,6 +127,7 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
             avatarUrl: true,
             level: true,
             experience: true,
+            checkinMoodEnabled: true,
             role: true,
             canPlayFullMusic: true,
             status: true,
@@ -151,6 +153,7 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
         avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
         level: user.level,
         experience: user.experience,
+        checkinMoodEnabled: user.checkinMoodEnabled,
         role: user.role,
         canPlayFullMusic: user.canPlayFullMusic,
         equippedBadge,

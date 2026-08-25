@@ -229,7 +229,7 @@ test('服务端使用 crypto.randomInt，客户端不自行随机或伪造失败
 
 test('用户抽奖接口未登录返回 401 且不把异常堆栈返回前端', () => {
   const route = source('app/api/entertainment/daily-draw/route.ts')
-  assert.match(route, /status: 401/)
+  assert.match(route, /unauthenticatedResponse\(/)
   assert.match(route, /ok: false, data: null, error:/)
   assert.doesNotMatch(route, /error\.stack/)
 })

@@ -22,7 +22,14 @@ export type SessionAuthorityResult = {
 
 /** Pure classification so the 401/5xx contract can be regression-tested. */
 export function classifySessionAuthority(status: number, body: unknown): SessionAuthorityState {
-  if (status === 401) return 'invalid'
+  // A business endpoint's HTTP status alone is not proof that the browser
+  // session is gone. Only an explicit authentication code may invalidate the
+  // session; /api/auth/me normally confirms this with a 200 { user: null }.
+  if (status === 401) {
+    return body && typeof body === 'object' && (body as { code?: unknown }).code === 'UNAUTHENTICATED'
+      ? 'invalid'
+      : 'unknown'
+  }
   if (status === 500 || status === 503 || status >= 502) return 'unknown'
   if (status < 200 || status >= 300 || !body || typeof body !== 'object') return 'unknown'
 

@@ -40,6 +40,15 @@ test('Case 1/有效 Session + 正常数据库 → authenticated', () => {
   assert.match(auth, /for \(const sessionUser of sessionUsers\)/)
 })
 
+test('WebSocket 鉴权与 HTTP 一样遍历同名 Cookie，旧 Cookie 不遮蔽新 Cookie', () => {
+  const server = source('server.ts')
+  assert.match(server, /function cookieValues\(/)
+  assert.match(server, /const tokens = cookieValues\(request, authCookieName\)/)
+  assert.match(server, /for \(const token of tokens\)/)
+  assert.match(server, /authUnavailable \? 503 : 401/)
+  assert.doesNotMatch(server, /function cookieValue\(/)
+})
+
 test('Case 2/Session 已过期 → 401（明确区分 SESSION_EXPIRED）', () => {
   assert.match(middleware, /error instanceof joseErrors\.JWTExpired/)
   assert.match(middleware, /SESSION_EXPIRED/)
@@ -59,7 +68,8 @@ test('Case 3/Session 不存在 → 401（NO_COOKIE，仅 API 记录诊断）', (
 test('Case 4/数据库异常 → 500/503，绝不 401', () => {
   // requireUser：DB 异常 → 503「登录服务暂时不可用」；用户 null 才 401
   assert.match(security, /登录服务暂时不可用，请稍后再试/)
-  assert.match(security, /code: 'UNAUTHORIZED', message: '请先登录'/)
+  assert.match(security, /unauthenticatedResponse\(\)/)
+  assert.match(security, /code: 'UNAUTHENTICATED'/)
   // /api/auth/me：503/500 明确 code，不伪装成 user:null 的 200
   assert.match(meRoute, /status: 503/)
   assert.match(meRoute, /AUTH_SERVICE_UNAVAILABLE/)
@@ -87,8 +97,24 @@ test('Case 6/普通 API 返回 401 但权威 Session 仍有效 → 不 logout（
   }
   assert.equal(classifySessionAuthority(500, { user: null }), 'unknown')
   assert.equal(classifySessionAuthority(503, { user: null }), 'unknown')
-  assert.equal(classifySessionAuthority(401, { user: { id: 'still-valid' } }), 'invalid')
+  assert.equal(classifySessionAuthority(401, { user: { id: 'still-valid' } }), 'unknown')
+  assert.equal(classifySessionAuthority(401, { code: 'UNAUTHENTICATED' }), 'invalid')
   assert.equal(classifySessionAuthority(200, { user: { id: 'still-valid' } }), 'valid')
+})
+
+test('统一业务错误封装不会把鉴权服务异常渲染成请登录', () => {
+  const wantListenApi = source('lib/want-listen-api.ts')
+  const guessSongApi = source('lib/guess-song-api.ts')
+  const lyricsApi = source('app/api/admin/entertainment/lyrics/route.ts')
+
+  for (const api of [wantListenApi, guessSongApi]) {
+    assert.match(api, /status === 401 \? 'UNAUTHENTICATED'/)
+    assert.match(api, /status === 403 \? 'FORBIDDEN'/)
+    assert.match(api, /status >= 500 && \/登录\/.test\(error\)/)
+    assert.match(api, /服务暂时不可用，请稍后重试/)
+  }
+  assert.match(lyricsApi, /AUTH_SERVICE_UNAVAILABLE/)
+  assert.match(lyricsApi, /UNAUTHENTICATED/)
 })
 
 test('Case 7/权威 Session 确认失效 → 明确 logout（AUTH_FORCE_LOGOUT 诊断）', () => {

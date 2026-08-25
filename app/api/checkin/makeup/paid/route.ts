@@ -62,8 +62,8 @@ export async function POST(request: Request) {
   try {
     const user = await getCurrentUser()
     if (!user) {
-      log('error', { result: 'error', errorName: 'Unauthenticated', errorCode: 'SESSION_INVALID' })
-      return response({ message: '请先登录后再补签', code: 'SESSION_INVALID' }, 401, requestId)
+      log('error', { result: 'error', errorName: 'Unauthenticated', errorCode: 'UNAUTHENTICATED' })
+      return response({ message: '请先登录后再补签', code: 'UNAUTHENTICATED' }, 401, requestId)
     }
     userId = user.id
 

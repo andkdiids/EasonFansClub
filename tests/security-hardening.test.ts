@@ -84,5 +84,6 @@ test('client auth keeps 403/429/5xx as non-logout states', () => {
   assert.equal(classifySessionAuthority(403, { user: null }), 'unknown')
   assert.equal(classifySessionAuthority(429, { user: null }), 'unknown')
   assert.equal(classifySessionAuthority(500, { user: null }), 'unknown')
-  assert.equal(classifySessionAuthority(401, { user: null }), 'invalid')
+  assert.equal(classifySessionAuthority(401, { user: null }), 'unknown')
+  assert.equal(classifySessionAuthority(401, { code: 'UNAUTHENTICATED' }), 'invalid')
 })

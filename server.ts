@@ -37,19 +37,20 @@ function requestIp(request: IncomingMessage) {
   return getClientIpFromHeaders(request.headers, request.socket.remoteAddress)
 }
 
-function cookieValue(request: IncomingMessage, name: string) {
+function cookieValues(request: IncomingMessage, name: string) {
   const cookieHeader = firstHeader(request.headers.cookie) || ''
+  const values: string[] = []
   for (const part of cookieHeader.split(';')) {
     const separator = part.indexOf('=')
     if (separator <= 0 || part.slice(0, separator).trim() !== name) continue
     const value = part.slice(separator + 1).trim()
     try {
-      return decodeURIComponent(value)
+      values.push(decodeURIComponent(value))
     } catch {
-      return value
+      values.push(value)
     }
   }
-  return undefined
+  return values
 }
 
 function requestUrl(request: IncomingMessage) {
@@ -123,16 +124,27 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
     return null
   }
 
-  const token = cookieValue(request, authCookieName)
-  if (!token) {
+  const tokens = cookieValues(request, authCookieName)
+  if (!tokens.length) {
     rejectUpgrade(socket, 401, 'Unauthorized')
     return null
   }
 
   try {
-    const user = await getCurrentUserFromSessionToken(token)
+    let user: Awaited<ReturnType<typeof getCurrentUserFromSessionToken>> = null
+    let authUnavailable = false
+    for (const token of tokens) {
+      try {
+        user = await getCurrentUserFromSessionToken(token)
+        if (user) break
+      } catch {
+        // A stale duplicate cookie must not hide a valid later cookie. Keep
+        // service failures distinct from an actually unauthenticated socket.
+        authUnavailable = true
+      }
+    }
     if (!user) {
-      rejectUpgrade(socket, 401, 'Unauthorized')
+      rejectUpgrade(socket, authUnavailable ? 503 : 401, authUnavailable ? 'Service Unavailable' : 'Unauthorized')
       return null
     }
     if ((activeConnectionsByUser.get(user.id) || 0) >= maxConnectionsPerUser) {

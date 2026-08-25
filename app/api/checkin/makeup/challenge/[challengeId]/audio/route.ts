@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { streamProtectedGuessSongAudio } from '@/lib/protected-audio'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -10,7 +11,7 @@ type Context = { params: Promise<{ challengeId: string }> }
 
 async function handle(request: Request, { params }: Context) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
   const { challengeId } = await params
   const challenge = await prisma.makeupChallenge.findFirst({
     where: { id: challengeId, userId: user.id },

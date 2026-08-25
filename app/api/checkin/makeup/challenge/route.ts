@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import {
   assertUserMakeupAvailable,
   CHECK_IN_MAKEUP_PLAYBACK_SECONDS,
@@ -25,7 +25,7 @@ function serialize(challenge: {
 export async function POST(request: Request) {
   if (rejectInvalidRequestOrigin(request)) return NextResponse.json({ message: '请求来源校验失败' }, { status: 403 })
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录后再开始挑战' }, { status: 401 })
+  if (!user) return unauthenticatedResponse('请先登录后再开始挑战')
   const body = await request.json().catch(() => null) as { targetDate?: unknown } | null
   const targetDateKey = sanitizeText(body?.targetDate, 10)
   const now = new Date()

@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { getBeijingDateKey } from '@/lib/beijing-time'
 import { prisma } from '@/lib/prisma'
 import { CHECK_IN_MAKEUP_COST, getEligibleMakeupDates, getMakeupOperationWeek, getShanghaiMonthKey, isMakeupOperationInWeek, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ function parseYearParam(value: string | null) {
 
 export async function GET(request: Request) {
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  if (!user) return unauthenticatedResponse()
 
   const now = new Date()
   const current = getCurrentCheckInMonth(now)

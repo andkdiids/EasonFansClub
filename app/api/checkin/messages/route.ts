@@ -4,6 +4,7 @@ import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/chec
 import { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getFriendFollowedIds, getFriendIds } from '@/lib/friends'
+import { unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ function parseRequestedDate(value: string | null) {
 export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user) {
-    return NextResponse.json({ message: '请先登录' }, { status: 401 })
+    return unauthenticatedResponse()
   }
 
   const url = new URL(request.url)
