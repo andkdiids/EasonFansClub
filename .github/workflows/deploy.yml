@@ -589,6 +589,7 @@ jobs:
                       cwd: env.pm_cwd || "",
                       script: env.pm_exec_path || "",
                       args: Array.isArray(env.args) ? env.args.join(" ") : String(env.args || ""),
+                      interpreter: env.exec_interpreter || "",
                       execMode: env.exec_mode || "",
                       instances: Number(env.instances || 1),
                     }));
@@ -600,6 +601,7 @@ jobs:
               pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
               pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
               pm2_args="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).args)' "${pm2_snapshot}")"
+              pm2_interpreter="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).interpreter)' "${pm2_snapshot}")"
               pm2_exec_mode="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).execMode)' "${pm2_snapshot}")"
               pm2_instances="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).instances))' "${pm2_snapshot}")"
             }
@@ -615,6 +617,12 @@ jobs:
               [ "${pm2_cwd}" = "${current_link}" ] || return 1
               pm2_script_is_npm "${pm2_script}" || return 1
               [ "${pm2_args}" = "start:server" ]
+            }
+
+            pm2_is_legacy_tsx_deployment() {
+              [ "${pm2_cwd}" = "${current_link}" ] || return 1
+              [ "${pm2_script}" = "${current_link}/server.ts" ] || return 1
+              [ "${pm2_interpreter}" = "${current_link}/node_modules/.bin/tsx" ]
             }
 
             pm2_is_legacy_deployment() {
@@ -658,6 +666,15 @@ jobs:
               start_current_pm2
             }
 
+            migrate_legacy_tsx_pm2() {
+              echo "Detected legacy TSX PM2 deployment. Migrating to npm start:server."
+              if ! pm2 delete "${PM2_APP_NAME}"; then
+                echo "Failed to delete legacy TSX PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
+                return 1
+              fi
+              start_current_pm2
+            }
+
             if ! read_pm2_snapshot; then
               if [ "${bootstrap_mode}" != true ]; then
                 echo "PM2 app ${PM2_APP_NAME} is missing; configure it to run from ${current_link} before deployment." >&2
@@ -686,6 +703,16 @@ jobs:
               fi
             fi
 
+            if pm2_is_legacy_tsx_deployment; then
+              if ! migrate_legacy_tsx_pm2; then
+                exit 1
+              fi
+              if ! read_pm2_snapshot; then
+                echo "PM2 app ${PM2_APP_NAME} could not be read after legacy TSX migration; aborting deployment." >&2
+                exit 1
+              fi
+            fi
+
             if ! pm2_is_current_release; then
               if [ "${pm2_cwd}" != "${current_link}" ]; then
                 echo "PM2 cwd is not the stable current symlink: ${pm2_cwd}" >&2
@@ -696,7 +723,7 @@ jobs:
               fi
               exit 1
             fi
-            echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args}"
+            echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args} interpreter=${pm2_interpreter}"
 
             log_step "3/8" "Verify and extract package into a new release"
             cd "${incoming_dir}"
