@@ -78,12 +78,13 @@ jobs:
             scripts/run-birthday-daily-job.sh \
             postcss.config.js \
             tailwind.config.ts \
-            eslint.config.mjs
+            eslint.config.mjs \
+            ecosystem.config.js
 
           echo "===== [package 2/4] Validate archive ====="
           test -s ".deploy/${PACKAGE_NAME}"
           tar -tzf ".deploy/${PACKAGE_NAME}" > .deploy/package-contents.txt
-          for required_path in app components lib prisma public server.ts package.json pnpm-lock.yaml scripts/check-migrations-mysql.ts scripts/run-birthday-daily-job.sh; do
+          for required_path in app components lib prisma public server.ts package.json pnpm-lock.yaml ecosystem.config.js scripts/check-migrations-mysql.ts scripts/run-birthday-daily-job.sh; do
             if ! grep -Eq "^${required_path}(/|$)" .deploy/package-contents.txt; then
               echo "::error::Required production path is missing from deploy package: ${required_path}"
               exit 1
@@ -625,6 +626,12 @@ jobs:
               [ "${pm2_interpreter}" = "${current_link}/node_modules/.bin/tsx" ]
             }
 
+            pm2_is_intermediate_npm_deployment() {
+              [ "${pm2_cwd}" = "${current_link}" ] || return 1
+              pm2_script_is_npm "${pm2_script}" || return 1
+              [ "${pm2_args}" = "start:server" ]
+            }
+
             pm2_is_legacy_deployment() {
               [ "${bootstrap_mode}" = true ] || return 1
               [ -e "${current_link}" ] || [ -L "${current_link}" ] || return 1
@@ -640,15 +647,17 @@ jobs:
             }
 
             start_current_pm2() {
+              if [ ! -f "${current_link}/ecosystem.config.js" ]; then
+                echo "PM2 ecosystem config is missing: ${current_link}/ecosystem.config.js" >&2
+                return 1
+              fi
               if ! (
                 cd "${current_link}"
-                pm2 start npm \
-                  --name "${PM2_APP_NAME}" \
-                  --cwd "${current_link}" \
-                  --update-env \
-                  -- run start:server
+                pm2 start ecosystem.config.js \
+                  --only "${PM2_APP_NAME}" \
+                  --update-env
               ); then
-                echo "Failed to start PM2 ${PM2_APP_NAME} with npm run start:server; aborting deployment." >&2
+                echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js; aborting deployment." >&2
                 return 1
               fi
               if ! pm2 save; then
@@ -658,7 +667,7 @@ jobs:
             }
 
             migrate_legacy_pm2() {
-              echo "Detected legacy PM2 deployment. Migrating to npm run start:server."
+              echo "Detected legacy PM2 deployment. Migrating with ecosystem.config.js."
               if ! pm2 delete "${PM2_APP_NAME}"; then
                 echo "Failed to delete legacy PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
                 return 1
@@ -667,9 +676,18 @@ jobs:
             }
 
             migrate_legacy_tsx_pm2() {
-              echo "Detected legacy TSX PM2 deployment. Migrating to npm run start:server."
+              echo "Detected legacy TSX PM2 deployment. Migrating with ecosystem.config.js."
               if ! pm2 delete "${PM2_APP_NAME}"; then
                 echo "Failed to delete legacy TSX PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
+                return 1
+              fi
+              start_current_pm2
+            }
+
+            migrate_intermediate_npm_pm2() {
+              echo "Detected intermediate PM2 npm deployment with missing run argument. Migrating with ecosystem.config.js."
+              if ! pm2 delete "${PM2_APP_NAME}"; then
+                echo "Failed to delete intermediate PM2 app ${PM2_APP_NAME}; aborting deployment." >&2
                 return 1
               fi
               start_current_pm2
@@ -713,6 +731,16 @@ jobs:
               fi
             fi
 
+            if pm2_is_intermediate_npm_deployment; then
+              if ! migrate_intermediate_npm_pm2; then
+                exit 1
+              fi
+              if ! read_pm2_snapshot; then
+                echo "PM2 app ${PM2_APP_NAME} could not be read after intermediate npm migration; aborting deployment." >&2
+                exit 1
+              fi
+            fi
+
             if ! pm2_is_current_release; then
               if [ "${pm2_cwd}" != "${current_link}" ]; then
                 echo "PM2 cwd is not the stable current symlink: ${pm2_cwd}" >&2
@@ -747,6 +775,7 @@ jobs:
             test -f "${release_dir}/package.json"
             test -f "${release_dir}/pnpm-lock.yaml"
             test -f "${release_dir}/server.ts"
+            test -f "${release_dir}/ecosystem.config.js"
             test -L "${release_dir}/.env"
 
             node -v
