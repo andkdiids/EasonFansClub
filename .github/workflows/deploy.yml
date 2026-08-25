@@ -756,10 +756,27 @@ jobs:
               esac
               test -f ecosystem.config.js
               if pm2_app_exists; then
-                echo "Reloading PM2 from ecosystem.config.js."
-                if ! pm2 reload ecosystem.config.js --update-env; then
-                  echo "Failed to reload PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
+                if ! read_pm2_snapshot; then
+                  echo "Unable to inspect existing PM2 process ${PM2_APP_NAME}." >&2
                   return 1
+                fi
+                if pm2_is_current_release; then
+                  echo "Reloading PM2 from ecosystem.config.js."
+                  if ! pm2 reload ecosystem.config.js --update-env; then
+                    echo "Failed to reload PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
+                    return 1
+                  fi
+                else
+                  echo "Detected legacy PM2 state; recreating ${PM2_APP_NAME} from ecosystem.config.js."
+                  echo "Legacy PM2 state: cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args}" >&2
+                  if ! pm2 delete "${PM2_APP_NAME}"; then
+                    echo "Failed to delete legacy PM2 process ${PM2_APP_NAME}." >&2
+                    return 1
+                  fi
+                  if ! pm2 start ecosystem.config.js --update-env; then
+                    echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js after legacy migration." >&2
+                    return 1
+                  fi
                 fi
               else
                 pm2_status=$?
