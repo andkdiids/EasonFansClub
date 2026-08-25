@@ -5,6 +5,7 @@ import { WebSocket as WsWebSocket, WebSocketServer, type WebSocket } from 'next/
 import { authCookieName, getCurrentUserFromSessionToken } from './lib/auth'
 import { getClientIpFromHeaders } from './lib/client-ip'
 import { hasValidRequestOrigin } from './lib/security'
+import { ensureRuntimeObservability } from './lib/runtime-observability'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
 import { undercoverRealtimeHub } from './lib/undercover-star-realtime'
@@ -160,6 +161,7 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
 }
 
 async function start() {
+  ensureRuntimeObservability()
   const dev = process.env.NODE_ENV === 'development'
   const port = parsePort()
   const hostname = process.env.HOST || '127.0.0.1'

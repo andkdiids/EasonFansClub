@@ -5,6 +5,7 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { logCheckInBackgroundTask, logSlowCheckInRequest, safeErrorCode } from '@/lib/checkin-observability'
 import { CUSTOM_MOOD_BANNED_WORD_MESSAGE, CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_TYPE, PRESET_MOOD_TYPE, normalizeCustomMoodText, validateCustomMoodInput } from '@/lib/checkin-mood'
 import { getCheckInMessage, invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { getTodayCheckInCount } from '@/lib/checkin-stats'
@@ -14,12 +15,11 @@ import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience 
 import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
-import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { invalidateHomeDataCache } from '@/lib/home-data'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
-
-const SLOW_CHECKIN_REQUEST_MS = 1000
+import { updateUserIpRegion } from '@/lib/ip-region'
+import { ensureRuntimeObservability } from '@/lib/runtime-observability'
 
 function getCheckInRequestId(request: Request) {
   const provided = request.headers.get('x-request-id')?.trim()
@@ -51,17 +51,30 @@ async function runCheckInPostProcess(input: {
   dailyMessageId: string | null
   todayKey: string
   today: Date
-  ipLocation: Parameters<typeof updateUserIpRegion>[1]
+  ipSource: Parameters<typeof updateUserIpRegion>[1]
   mood: string | null
   moodType: string | null
   moodEmoji: string | null
   moodText: string | null
   message: string
 }) {
+  // These tasks are intentionally outside the response path. DailyTaskProgress
+  // and achievements are derived from the CheckIn fact and can be repaired by
+  // scripts/reconcile-checkin-derived-state.ts if a process exits mid-flight.
+  // FriendActivity, IP region and badge evaluation are independent projections.
   const jobs: Array<{ phase: string; run: () => Promise<unknown> | unknown }> = [
     {
       phase: 'ipRegion',
-      run: () => updateUserIpRegion(input.userId, input.ipLocation),
+      run: async () => {
+        const region = await updateUserIpRegion(input.userId, input.ipSource, { rethrow: true })
+        if (input.dailyMessageId) {
+          await prisma.dailyMessage.update({
+            where: { id: input.dailyMessageId },
+            data: { ipRegion: region },
+          })
+        }
+        return region
+      },
     },
     {
       phase: 'friendActivity',
@@ -118,11 +131,37 @@ async function runCheckInPostProcess(input: {
     },
     {
       phase: 'badgeEvaluation',
-      run: () => triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED'),
+      run: async () => {
+        const completed = await triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED')
+        if (!completed) throw new Error('BADGE_EVALUATION_FAILED')
+      },
     },
   ]
 
-  const results = await Promise.allSettled(jobs.map((job) => Promise.resolve().then(job.run)))
+  const results = await Promise.allSettled(jobs.map(async (job) => {
+    const startedAt = Date.now()
+    try {
+      const value = await job.run()
+      logCheckInBackgroundTask({
+        requestId: input.requestId,
+        userId: input.userId,
+        backgroundTask: job.phase,
+        durationMs: Date.now() - startedAt,
+        success: true,
+      })
+      return value
+    } catch (error) {
+      logCheckInBackgroundTask({
+        requestId: input.requestId,
+        userId: input.userId,
+        backgroundTask: job.phase,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        errorCode: safeErrorCode(error),
+      })
+      throw error
+    }
+  }))
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
       logCheckInPostProcessError({
@@ -135,26 +174,10 @@ async function runCheckInPostProcess(input: {
   })
 }
 
-function logSlowCheckIn(input: {
-  requestId: string
-  userId: string
-  totalMs: number
-  authMs: number
-  precheckMs: number
-  transactionMs: number
-  postProcessMs: number
-}) {
-  if (input.totalMs <= SLOW_CHECKIN_REQUEST_MS) return
-  console.warn('[checkin.performance]', {
-    route: '/api/checkin',
-    method: 'POST',
-    ...input,
-  })
-}
-
 function logSlowCheckInPostProcess(input: { requestId: string; userId: string; postProcessMs: number }) {
-  if (input.postProcessMs <= SLOW_CHECKIN_REQUEST_MS) return
+  if (input.postProcessMs <= 1200) return
   console.warn('[checkin.post_process.performance]', {
+    event: 'checkin.background_summary',
     route: '/api/checkin',
     method: 'POST',
     ...input,
@@ -162,16 +185,32 @@ function logSlowCheckInPostProcess(input: { requestId: string; userId: string; p
 }
 
 export async function GET(request: Request) {
+  ensureRuntimeObservability()
+  const requestId = getCheckInRequestId(request)
+  const routeStartedAt = Date.now()
+  const authStartedAt = Date.now()
   const user = await getCurrentUser()
-  if (!user) return NextResponse.json({ message: '请先登录' }, { status: 401 })
+  const authMs = Date.now() - authStartedAt
+  if (!user) {
+    const response = unauthenticatedResponse()
+    const responseBuildMs = Date.now() - routeStartedAt
+    logSlowCheckInRequest({ requestId, method: 'GET', totalMs: Date.now() - routeStartedAt, authMs, responseBuildMs, success: false, errorCode: 'UNAUTHENTICATED' })
+    return response
+  }
+  const rateLimitStartedAt = Date.now()
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/checkin',
     user: { limit: 120, windowSeconds: 60 },
   })
-  if (limited) return limited
+  const rateLimitMs = Date.now() - rateLimitStartedAt
+  if (limited) {
+    logSlowCheckInRequest({ requestId, method: 'GET', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, success: false, errorCode: 'RATE_LIMITED' })
+    return limited
+  }
 
   const today = startOfLocalDay()
   const todayKey = getShanghaiDateKey()
+  const dbStatsStartedAt = Date.now()
   const [profile, todayCheckIn, todayCount, history] = await Promise.all([
     safeDb(
       'User.findUnique checkinApi.profile',
@@ -192,11 +231,19 @@ export async function GET(request: Request) {
     getTodayCheckInCount(todayKey),
     safeDb('CheckIn.findMany checkinApi.history', prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }), []),
   ])
+  const dbStatsMs = Date.now() - dbStatsStartedAt
 
-  if (!profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+  if (!profile) {
+    const responseBuildStartedAt = Date.now()
+    const response = NextResponse.json({ message: '用户不存在' }, { status: 404 })
+    const responseBuildMs = Date.now() - responseBuildStartedAt
+    logSlowCheckInRequest({ requestId, method: 'GET', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, dbStatsMs, responseBuildMs, dateKey: todayKey, success: false, errorCode: 'USER_NOT_FOUND' })
+    return response
+  }
 
   const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
-  return NextResponse.json({
+  const responseBuildStartedAt = Date.now()
+  const response = NextResponse.json({
     checkedToday: Boolean(todayCheckIn),
     todayCheckIn,
     consecutiveDays: streaks.currentStreak,
@@ -212,22 +259,36 @@ export async function GET(request: Request) {
     checkinMoodEnabled: profile.checkinMoodEnabled,
     todayValue: formatBeijingDate(today),
   })
+  const responseBuildMs = Date.now() - responseBuildStartedAt
+  logSlowCheckInRequest({ requestId, method: 'GET', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, dbStatsMs, responseBuildMs, dateKey: todayKey, success: true })
+  return response
 }
 
 export async function POST(request: Request) {
+  ensureRuntimeObservability()
   const requestId = getCheckInRequestId(request)
   const routeStartedAt = Date.now()
   const authStartedAt = Date.now()
   const user = await getCurrentUser()
   const authMs = Date.now() - authStartedAt
-  if (!user) return NextResponse.json({ message: '请先登录后再挂号' }, { status: 401 })
-  const precheckStartedAt = Date.now()
+  if (!user) {
+    const responseBuildStartedAt = Date.now()
+    const response = unauthenticatedResponse('请先登录后再挂号')
+    logSlowCheckInRequest({ requestId, method: 'POST', totalMs: Date.now() - routeStartedAt, authMs, responseBuildMs: Date.now() - responseBuildStartedAt, success: false, errorCode: 'UNAUTHENTICATED' })
+    return response
+  }
+  const rateLimitStartedAt = Date.now()
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/checkin',
     ip: { limit: 30, windowSeconds: 60 },
     user: { limit: 5, windowSeconds: 60 },
   }, '挂号请求过于频繁，请稍后再试')
-  if (limited) return limited
+  const rateLimitMs = Date.now() - rateLimitStartedAt
+  if (limited) {
+    logSlowCheckInRequest({ requestId, method: 'POST', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, success: false, errorCode: 'RATE_LIMITED' })
+    return limited
+  }
+  const precheckStartedAt = Date.now()
 
   const body = await request.json().catch(() => null)
   const requestedMoodType = body?.moodType === CUSTOM_MOOD_TYPE ? CUSTOM_MOOD_TYPE : PRESET_MOOD_TYPE
@@ -248,8 +309,7 @@ export async function POST(request: Request) {
   if (validatedCustomMood && (await checkBannedWords(validatedCustomMood.text)).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: CUSTOM_MOOD_BANNED_WORD_MESSAGE }, { status: 400 })
   }
-  const preference = await prisma.user.findUnique({ where: { id: user.id }, select: { checkinMoodEnabled: true } })
-  if (!preference) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+  const preference = { checkinMoodEnabled: user.checkinMoodEnabled }
   const mood = preference.checkinMoodEnabled ? requestedMood : null
   const customMood = preference.checkinMoodEnabled ? validatedCustomMood : null
   const rawMessage = sanitizeText(body?.message, 300)
@@ -257,8 +317,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
   const message = rawMessage
-  const ipLocation = await resolveIpLocation(request)
-  const ipRegion = ipLocation?.label || null
 
   if (preference.checkinMoodEnabled && !mood && !customMood) {
     return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
@@ -273,6 +331,7 @@ export async function POST(request: Request) {
     select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
   })
   if (existing) {
+    const precheckMs = Date.now() - precheckStartedAt
     const [profile, history] = await Promise.all([
       prisma.user.findUnique({
         where: { id: user.id },
@@ -282,7 +341,8 @@ export async function POST(request: Request) {
     ])
     // 与 GET 同一口径:连续天数只按签到记录重算,不读 User.consecutiveDays / CheckIn.streakDay 快照
     const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
-    return NextResponse.json({
+    const responseBuildStartedAt = Date.now()
+    const response = NextResponse.json({
       message: '今天已经挂号过了',
       checkedToday: true,
       checkDate: formatBeijingDate(today),
@@ -298,6 +358,8 @@ export async function POST(request: Request) {
       gainedExp: 0,
       created: false,
     })
+    logSlowCheckInRequest({ requestId, method: 'POST', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, precheckMs, responseBuildMs: Date.now() - responseBuildStartedAt, dateKey: todayKey, success: true })
+    return response
   }
 
   const precheckMs = Date.now() - precheckStartedAt
@@ -380,7 +442,9 @@ export async function POST(request: Request) {
           moodEmoji: customMood?.emoji ?? null,
           moodText: customMood?.text ?? null,
           content: message,
-          ipRegion,
+          // IP geolocation is optional metadata and is filled by the
+          // post-response ipRegion task. It must not extend the core path.
+          ipRegion: null,
         },
         select: { id: true },
       })
@@ -417,7 +481,8 @@ export async function POST(request: Request) {
       ])
       // 并发冲突时同样按签到记录重算,保证与其它分支同一口径
       const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
-      return NextResponse.json({
+      const responseBuildStartedAt = Date.now()
+      const response = NextResponse.json({
         message: '今日已挂号', checkedToday: true, checkDate: todayKey, todayCheckIn,
         consecutiveDays: streaks.currentStreak,
         currentStreak: streaks.currentStreak,
@@ -425,12 +490,15 @@ export async function POST(request: Request) {
         points: profile?.points ?? 0, exp: profile?.exp ?? 0, experience: profile?.experience ?? 0,
         level: profile?.level ?? 1, gainedPoints: 0, gainedExp: 0, created: false,
       })
+      logSlowCheckInRequest({ requestId, method: 'POST', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, precheckMs, transactionMs: Date.now() - transactionStartedAt, responseBuildMs: Date.now() - responseBuildStartedAt, dateKey: todayKey, success: true })
+      return response
     }
+    logSlowCheckInRequest({ requestId, method: 'POST', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, precheckMs, transactionMs: Date.now() - transactionStartedAt, dateKey: todayKey, success: false, errorCode: safeErrorCode(error) })
     throw error
   }
 
   const transactionMs = Date.now() - transactionStartedAt
-  const postProcessStartedAt = Date.now()
+  const postCriticalStartedAt = Date.now()
   invalidateCheckInMessagesCache()
   invalidateHomeDataCache()
   const createdMessage = result.dailyMessageId
@@ -445,6 +513,7 @@ export async function POST(request: Request) {
         return null
       })
     : null
+  const postCriticalMs = Date.now() - postCriticalStartedAt
 
   const backgroundPostProcessStartedAt = Date.now()
   void runCheckInPostProcess({
@@ -454,7 +523,7 @@ export async function POST(request: Request) {
     dailyMessageId: result.dailyMessageId,
     todayKey,
     today,
-    ipLocation,
+    ipSource: request,
     mood: mood?.key ?? null,
     moodType: mood ? PRESET_MOOD_TYPE : customMood ? CUSTOM_MOOD_TYPE : null,
     moodEmoji: customMood?.emoji ?? null,
@@ -470,11 +539,8 @@ export async function POST(request: Request) {
     })
   })
 
-  const postProcessMs = Date.now() - postProcessStartedAt
-  const totalMs = Date.now() - routeStartedAt
-  logSlowCheckIn({ requestId, userId: user.id, totalMs, authMs, precheckMs, transactionMs, postProcessMs })
-
-  return NextResponse.json({
+  const responseBuildStartedAt = Date.now()
+  const response = NextResponse.json({
     message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
@@ -496,4 +562,7 @@ export async function POST(request: Request) {
     level: result.user.level,
     created: true,
   })
+  const responseBuildMs = Date.now() - responseBuildStartedAt
+  logSlowCheckInRequest({ requestId, method: 'POST', userId: user.id, totalMs: Date.now() - routeStartedAt, authMs, rateLimitMs, precheckMs, transactionMs, postCriticalMs, responseBuildMs, dateKey: todayKey, success: true })
+  return response
 }

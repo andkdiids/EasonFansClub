@@ -138,7 +138,7 @@ test('每日挂号费查询按北京时间边界倒序读取当前用户正向�
   const route = read('app/api/points/today/route.ts')
   const service = read('lib/registration-fee.ts')
   assert.match(route, /getCurrentUser\(\)/)
-  assert.match(route, /status: 401/)
+  assert.match(route, /unauthenticatedResponse\(/)
   assert.match(route, /private, no-store/)
   assert.match(service, /getShanghaiDayRange\(now\)/)
   assert.match(service, /createdAt: \{ gte: start, lt: end \}/)

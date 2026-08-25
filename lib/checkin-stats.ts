@@ -18,6 +18,10 @@ type CacheEntry<T> = {
   expiresAt: number
   pending: boolean
   promise: Promise<T>
+  cacheHits: number
+  singleflightJoins: number
+  cacheHitLogged: boolean
+  singleflightJoinLogged: boolean
 }
 
 const configuredCheckInStatsCacheTtlMs = Number(process.env.CHECKIN_STATS_CACHE_TTL_MS || 45000)
@@ -27,10 +31,31 @@ const checkInStatsCacheTtlMs = Number.isFinite(configuredCheckInStatsCacheTtlMs)
 const checkInCountCache = new Map<string, CacheEntry<number>>()
 const checkInStatsCache = new Map<string, CacheEntry<CheckInPublicStats>>()
 
+function logCacheEvent(event: 'cache_hit' | 'cache_miss' | 'singleflight_join' | 'db_refresh', key: string, extra: Record<string, unknown> = {}) {
+  console.info('[checkin.stats_cache]', { event, key, ...extra })
+}
+
 function cached<T>(cache: Map<string, CacheEntry<T>>, key: string, loader: () => Promise<T>) {
   const now = Date.now()
   const existing = cache.get(key)
-  if (existing && (existing.pending || existing.expiresAt > now)) return existing.promise
+  if (existing?.pending) {
+    existing.singleflightJoins += 1
+    if (!existing.singleflightJoinLogged) {
+      existing.singleflightJoinLogged = true
+      logCacheEvent('singleflight_join', key)
+    }
+    return existing.promise
+  }
+  if (existing && existing.expiresAt > now) {
+    existing.cacheHits += 1
+    if (!existing.cacheHitLogged) {
+      existing.cacheHitLogged = true
+      logCacheEvent('cache_hit', key)
+    }
+    return existing.promise
+  }
+
+  logCacheEvent('cache_miss', key)
 
   const promise = loader()
     .then((value) => {
@@ -38,6 +63,11 @@ function cached<T>(cache: Map<string, CacheEntry<T>>, key: string, loader: () =>
       if (current?.promise === promise) {
         current.pending = false
         current.expiresAt = Date.now() + checkInStatsCacheTtlMs
+        logCacheEvent('db_refresh', key, {
+          cacheHits: current.cacheHits,
+          singleflightJoins: current.singleflightJoins,
+          ttlMs: checkInStatsCacheTtlMs,
+        })
       }
       return value
     })
@@ -45,7 +75,15 @@ function cached<T>(cache: Map<string, CacheEntry<T>>, key: string, loader: () =>
       if (cache.get(key)?.promise === promise) cache.delete(key)
       throw error
     })
-  cache.set(key, { expiresAt: now + checkInStatsCacheTtlMs, pending: true, promise })
+  cache.set(key, {
+    expiresAt: now + checkInStatsCacheTtlMs,
+    pending: true,
+    promise,
+    cacheHits: 0,
+    singleflightJoins: 0,
+    cacheHitLogged: false,
+    singleflightJoinLogged: false,
+  })
   return promise
 }
 

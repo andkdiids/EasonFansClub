@@ -98,7 +98,8 @@ test('规则引擎复用中心授予服务、按事件筛选规则并提供游�
 
 test('事件触发不阻塞主流程，且关键业务成功后才调用', () => {
   const engine = read('lib/badge-rule-engine.ts')
-  assert.match(engine, /void evaluateBadgesForEvent\(userId, eventType\)\.catch/)
+  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType\)/)
+  assert.match(engine, /void task/)
   assert.match(read('app/api/posts/route.ts'), /moderationStatus === 'APPROVED'\) triggerBadgeEvaluation\(user\.id, 'POST_CREATED'\)/)
   assert.match(read('app/api/checkin/route.ts'), /triggerBadgeEvaluation\(input\.userId, 'CHECKIN_CREATED'\)/)
   assert.match(read('app/api/admin/posts/review/route.ts'), /triggerBadgeEvaluation\(current\.authorId, 'POST_APPROVED'\)/)

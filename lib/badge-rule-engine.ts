@@ -165,10 +165,22 @@ export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEva
 }
 
 /** Event hooks deliberately do not await this function, so badge rules cannot slow or roll back the primary action. */
-export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluationEvent) {
-  void evaluateBadgesForEvent(userId, eventType).catch((error) => {
+export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluationEvent): Promise<boolean> {
+  const task = evaluateBadgesForEvent(userId, eventType).then((summary) => {
+    if (summary.failed > 0) {
+      console.error('[badge-rule.event.partial]', { userId, eventType, failed: summary.failed, failures: summary.failures.slice(0, 10) })
+      return false
+    }
+    return true
+  }).catch((error) => {
     console.error('[badge-rule.event]', { userId, eventType, error })
+    return false
   })
+  // Existing event hooks intentionally do not await this promise. It resolves
+  // to false after logging instead of rejecting, so ignored hooks cannot create
+  // an unhandled rejection. A durable caller may await it and inspect false.
+  void task
+  return task
 }
 
 export type BadgeMetricUser = { id: string; createdAt: Date }

@@ -96,6 +96,14 @@ test('签到后处理失败不会影响主响应，且性能日志不包含敏�
   assert.doesNotMatch(performanceLog, /token|session|password|phone|ipAddress|ip:/i)
 })
 
+test('IP 地理解析也在响应外执行，不把外部服务等待带入签到核心路径', () => {
+  const route = read('app/api/checkin/route.ts')
+  assert.doesNotMatch(route, /resolveIpLocation\(request\)/)
+  assert.match(route, /phase: 'ipRegion'/)
+  assert.match(route, /updateUserIpRegion\(input\.userId, input\.ipSource/)
+  assert.match(route, /ipSource: request/)
+})
+
 test('POST 核心事务只保留签到与必要奖励写入，并把非核心写入移到事务后', () => {
   const route = read('app/api/checkin/route.ts')
   const transaction = route.slice(route.indexOf('prisma.$transaction'), route.indexOf('const transactionMs'))

@@ -665,7 +665,7 @@ function isRequest(value: Request | IpLocation | null): value is Request {
   return 'headers' in value
 }
 
-export async function updateUserIpRegion(userId: string, source: Request | IpLocation | null) {
+export async function updateUserIpRegion(userId: string, source: Request | IpLocation | null, options?: { rethrow?: boolean }) {
   const location = isRequest(source)
     ? await resolveIpLocation(source)
     : source
@@ -679,6 +679,7 @@ export async function updateUserIpRegion(userId: string, source: Request | IpLoc
   } catch (error) {
     // IP metadata is optional and must never block the primary user action.
     console.error('[ip-region.update]', error)
+    if (options?.rethrow) throw error
   }
 
   return region

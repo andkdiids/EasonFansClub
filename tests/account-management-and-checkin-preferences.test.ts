@@ -38,7 +38,8 @@ test('账号修改接口独立鉴权、事务更新并记录脱敏日志', () =>
 test('数据库为登录账号和签到偏好提供约束与安全默认值', () => {
   const schema = source('prisma/schema.prisma')
   const migration = source('prisma/migrations/20260719120000_add_login_account_and_checkin_preferences/migration.sql')
-  assert.match(schema, /username\s+String\s*\n\s*usernameNormalized\s+String\s+@unique/)
+  assert.match(schema, /model User \{[\s\S]*?\busername\s+String\b/)
+  assert.match(schema, /model User \{[\s\S]*?\busernameNormalized\s+String\s+@unique\b/)
   assert.match(schema, /checkinMoodEnabled\s+Boolean\s+@default\(true\)/)
   assert.match(schema, /model DailyMessage \{[\s\S]*?mood\s+String\?/)
   assert.match(migration, /DEFAULT true/)
@@ -58,8 +59,9 @@ test('用户密码接口分离、bcrypt cost 12 且日志不含密码或答案',
     const metadata = route.match(/metadata:\s*\{[^}]+\}/g)?.join('') || ''
     assert.doesNotMatch(metadata, /body\.|passwordHash|answerHash/i)
   }
-  assert.match(reset, /take: 1/)
-  assert.match(reset, /checkRateLimit\(accountKey, wrongAnswerAction, 5\)/)
+  assert.match(reset, /UserSecurityQuestion:\s*\{\s*select:\s*\{\s*sortOrder: true,\s*answerHash: true\s*\}\s*\}/)
+  assert.match(reset, /questionCount:\s*user\.UserSecurityQuestion \? 1 : 0/)
+  assert.match(reset, /consumeRateLimit\(accountKey, wrongAnswerAction, 5, 30 \* 60\)/)
   assert.match(reset, /30 \* 60/)
 })
 
@@ -83,12 +85,17 @@ test('邮箱链接重置新增独立 API 并保留原有安全设置入口', () 
 test('签到偏好只能修改本人并由签到 API 依据数据库值判断 mood', () => {
   const preference = source('app/api/account/preferences/route.ts')
   const checkin = source('app/api/checkin/route.ts')
+  const auth = source('lib/auth.ts')
   assert.match(preference, /where: \{ id: guard\.user\.id \}/)
   assert.doesNotMatch(preference, /body\?\.(userId|targetUserId)/)
-  assert.match(checkin, /select: \{ checkinMoodEnabled: true \}/)
+  assert.match(auth, /checkinMoodEnabled: true/)
+  assert.match(checkin, /const user = await getCurrentUser\(\)/)
+  assert.match(checkin, /unauthenticatedResponse\(\)/)
+  assert.match(checkin, /const preference = \{ checkinMoodEnabled: user\.checkinMoodEnabled \}/)
   assert.match(checkin, /preference\.checkinMoodEnabled \? requestedMood : null/)
   assert.match(checkin, /mood: mood\?\.key \?\? null/)
-  assert.match(checkin, /mood: \{ not: null \}/)
+  assert.match(checkin, /checkinMoodEnabled: profile\.checkinMoodEnabled/)
+  assert.doesNotMatch(checkin, /select: \{ checkinMoodEnabled: true \}/)
   assert.equal(calcMoodIndex([]), 0)
 })
 
