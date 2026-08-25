@@ -736,6 +736,12 @@ jobs:
               export NODE_ENV=production
               export DEPLOY_SHA="${release_sha}"
               export PORT="${APP_PORT}"
+              pm2_cwd=""
+              pm2_script=""
+              pm2_args=""
+              pm2_interpreter=""
+              pm2_exec_mode=""
+              pm2_instances=""
               cd "${current_link}"
               echo "PM2 launch cwd:"
               pwd
@@ -758,85 +764,87 @@ jobs:
               if pm2_app_exists; then
                 if ! read_pm2_snapshot; then
                   echo "Unable to inspect existing PM2 process ${PM2_APP_NAME}." >&2
-                  return 1
+                  pm2 delete "${PM2_APP_NAME}" || true
+                  pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero after snapshot recovery." >&2
                 fi
-                if pm2_is_current_release; then
+                if [ -n "${pm2_cwd:-}" ] && pm2_is_current_release; then
                   echo "Reloading PM2 from ecosystem.config.js."
-                  if ! pm2 reload ecosystem.config.js --update-env; then
-                    echo "Failed to reload PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
-                    return 1
-                  fi
-                else
+                  pm2 reload ecosystem.config.js --update-env || {
+                    echo "PM2 reload failed, trying clean restart." >&2
+                    pm2 delete "${PM2_APP_NAME}" || true
+                    pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero after reload recovery." >&2
+                  }
+                elif [ -n "${pm2_cwd:-}" ]; then
                   echo "Detected legacy PM2 state; recreating ${PM2_APP_NAME} from ecosystem.config.js."
                   echo "Legacy PM2 state: cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args}" >&2
-                  if ! pm2 delete "${PM2_APP_NAME}"; then
-                    echo "Failed to delete legacy PM2 process ${PM2_APP_NAME}." >&2
-                    return 1
-                  fi
-                  if ! pm2 start ecosystem.config.js --update-env; then
-                    echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js after legacy migration." >&2
-                    return 1
-                  fi
+                  pm2 delete "${PM2_APP_NAME}" || true
+                  pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero after legacy migration." >&2
                 fi
               else
                 pm2_status=$?
-                if [ "${pm2_status}" -ne 1 ]; then
-                  return 1
+                if [ "${pm2_status}" -eq 1 ]; then
+                  echo "PM2 app ${PM2_APP_NAME} is missing; starting from ecosystem.config.js."
+                else
+                  echo "Unable to read PM2 state cleanly; trying a non-blocking clean start." >&2
+                  pm2 delete "${PM2_APP_NAME}" || true
                 fi
-                echo "PM2 app ${PM2_APP_NAME} is missing; starting from ecosystem.config.js."
-                if ! pm2 start ecosystem.config.js --update-env; then
-                  echo "Failed to start PM2 ${PM2_APP_NAME} from ecosystem.config.js." >&2
-                  return 1
-                fi
+                pm2 start ecosystem.config.js --update-env || echo "PM2 start returned non-zero while creating the process." >&2
               fi
-              if ! pm2 save; then
-                echo "Failed to save PM2 process list." >&2
-                return 1
-              fi
+              pm2 save || echo "PM2 save returned non-zero; continuing to runtime health validation." >&2
               echo "PM2 description after ecosystem operation:"
-              if ! pm2 describe "${PM2_APP_NAME}"; then
-                echo "PM2 describe failed for ${PM2_APP_NAME}." >&2
-                return 1
+              pm2 describe "${PM2_APP_NAME}" || echo "PM2 describe returned non-zero; continuing to runtime health validation." >&2
+              if read_pm2_snapshot && pm2_is_current_release; then
+                echo "PM2 configuration currently matches current release."
+              else
+                echo "PM2 configuration is not yet confirmed; runtime health validation will retry after startup settling." >&2
               fi
-              if ! read_pm2_snapshot || ! pm2_is_current_release; then
-                echo "PM2 final validation failed: cwd=${pm2_cwd:-} script=${pm2_script:-} args=${pm2_args:-}" >&2
-                return 1
-              fi
-              echo "PM2 exec_mode=${pm2_exec_mode} instances=${pm2_instances} cwd=${pm2_cwd} script=${pm2_script} args=${pm2_args} interpreter=${pm2_interpreter}"
+              echo "PM2 exec_mode=${pm2_exec_mode:-} instances=${pm2_instances:-} cwd=${pm2_cwd:-} script=${pm2_script:-} args=${pm2_args:-} interpreter=${pm2_interpreter:-}"
+              return 0
             }
 
             print_health_diagnostics() {
               echo "===== Health check diagnostics =====" >&2
+              echo "pwd:" >&2
+              pwd >&2 || true
               echo "current release target:" >&2
               readlink -f -- "${current_link}" >&2 || true
+              echo "deployed SHA:" >&2
+              cat "${current_link}/.deployed-sha" >&2 || true
               echo "PM2 description:" >&2
               pm2 describe "${PM2_APP_NAME}" >&2 || true
+              echo "Listening port:" >&2
+              ss -lntp | grep "${APP_PORT}" >&2 || true
               echo "Local HTTP headers:" >&2
               curl -I --max-time 10 "http://127.0.0.1:${APP_PORT}" >&2 || true
-              echo "PM2 error log (last 100 lines):" >&2
-              tail -100 -- "${HOME}/.pm2/logs/${PM2_APP_NAME}-error.log" >&2 || true
+              echo "PM2 error log (last 200 lines):" >&2
+              tail -200 -- "${HOME}/.pm2/logs/${PM2_APP_NAME}-error.log" >&2 || true
             }
 
             check_health() {
-              local health_response active_target deployed_sha
+              local health_response active_target deployed_sha pm2_ready
               for attempt in $(seq 1 10); do
                 health_response="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${APP_PORT}/api/health/live" || true)"
                 active_target="$(readlink -f -- "${current_link}" || true)"
                 deployed_sha="$(cat "${current_link}/.deployed-sha" 2>/dev/null || true)"
+                pm2_ready=false
+                if read_pm2_snapshot 2>/dev/null && pm2_is_current_release; then
+                  pm2_ready=true
+                fi
                 if [ "${active_target}" = "${release_dir}" ] &&
                    [ "${deployed_sha}" = "${DEPLOY_SHA}" ] &&
-                   printf '%s' "${health_response}" | grep -Fq "\"release\":\"${DEPLOY_SHA}\""; then
+                   printf '%s' "${health_response}" | grep -Fq "\"release\":\"${DEPLOY_SHA}\"" &&
+                   [ "${pm2_ready}" = true ]; then
                   return 0
                 fi
-                echo "Health attempt ${attempt}/10 did not confirm release ${DEPLOY_SHA}."
+                echo "Health attempt ${attempt}/10 did not confirm release ${DEPLOY_SHA} (pm2_ready=${pm2_ready})."
                 sleep 3
               done
-              print_health_diagnostics
               return 1
             }
 
             rollback_release() {
               local previous_sha
+              print_health_diagnostics
               previous_sha="$(cat "${previous_target}/.deployed-sha")"
               printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
               echo "Health check failed; atomically restoring ${previous_target}." >&2
@@ -849,14 +857,11 @@ jobs:
 
             log_step "7/8" "Atomically switch current and reload PM2"
             atomic_switch "${release_dir}"
-            post_switch_ok=true
-            if ! reload_pm2 "${DEPLOY_SHA}"; then
-              post_switch_ok=false
-              print_health_diagnostics
-            elif ! check_health; then
-              post_switch_ok=false
-            fi
-            if [ "${post_switch_ok}" != true ]; then
+            reload_pm2 "${DEPLOY_SHA}" || echo "PM2 operation returned non-zero; continuing to settle and validate through health check." >&2
+            sleep 10
+            cd "${current_link}"
+            print_health_diagnostics
+            if ! check_health; then
               rollback_release
               exit 1
             fi
@@ -871,7 +876,7 @@ jobs:
             previous_metadata_tmp="${shared_dir}/.previous-release-${release_id}.tmp"
             printf '%s\n' "${previous_target}" > "${previous_metadata_tmp}"
             mv -Tf -- "${previous_metadata_tmp}" "${previous_metadata}"
-            pm2 describe "${PM2_APP_NAME}"
+            pm2 describe "${PM2_APP_NAME}" || true
             echo "Current release: $(readlink -f -- "${current_link}")"
             echo "Previous release: ${previous_target}"
 
