@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 
@@ -12,6 +13,15 @@ export type DailyJobRunResult<T> =
   | { executed: true; status: 'completed'; value: T }
   | { executed: false; status: DailyJobSkipReason }
 
+type DailyJobClaim = { runToken: string } | DailyJobSkipReason
+
+export class DailyJobLeaseLostError extends Error {
+  constructor(jobKey: string, dateKey: string) {
+    super(`DAILY_JOB_LEASE_LOST:${jobKey}:${dateKey}`)
+    this.name = 'DailyJobLeaseLostError'
+  }
+}
+
 function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
@@ -21,20 +31,21 @@ function serializeJobError(error: unknown) {
   return message.slice(0, 4000)
 }
 
-async function claimDailyJob(jobKey: string, dateKey: string): Promise<true | DailyJobSkipReason> {
+async function claimDailyJob(jobKey: string, dateKey: string): Promise<DailyJobClaim> {
   const now = new Date()
+  const runToken = randomUUID()
   try {
     await prisma.dailyJobExecution.create({
-      data: { jobKey, dateKey, status: 'RUNNING', startedAt: now },
+      data: { jobKey, dateKey, status: 'RUNNING', runToken, startedAt: now },
     })
-    return true
+    return { runToken }
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error
   }
 
   const existing = await prisma.dailyJobExecution.findUnique({
     where: { jobKey_dateKey: { jobKey, dateKey } },
-    select: { status: true, startedAt: true },
+    select: { status: true, startedAt: true, runToken: true },
   })
   if (!existing) return 'already_running'
   if (existing.status === 'SUCCEEDED') return 'already_completed'
@@ -45,18 +56,19 @@ async function claimDailyJob(jobKey: string, dateKey: string): Promise<true | Da
       jobKey,
       dateKey,
       OR: [
-        { status: 'FAILED' },
-        { status: 'RUNNING', startedAt: { lt: staleBefore } },
+        { status: 'FAILED', runToken: existing.runToken },
+        { status: 'RUNNING', startedAt: { lt: staleBefore }, runToken: existing.runToken },
       ],
     },
     data: {
       status: 'RUNNING',
+      runToken,
       startedAt: now,
       finishedAt: null,
       error: null,
     },
   })
-  if (takeover.count === 1) return true
+  if (takeover.count === 1) return { runToken }
 
   const current = await prisma.dailyJobExecution.findUnique({
     where: { jobKey_dateKey: { jobKey, dateKey } },
@@ -65,26 +77,32 @@ async function claimDailyJob(jobKey: string, dateKey: string): Promise<true | Da
   return current?.status === 'SUCCEEDED' ? 'already_completed' : 'already_running'
 }
 
+async function finishDailyJob(jobKey: string, dateKey: string, runToken: string, status: 'SUCCEEDED' | 'FAILED', error?: string) {
+  const result = await prisma.dailyJobExecution.updateMany({
+    where: { jobKey, dateKey, runToken },
+    data: {
+      status,
+      finishedAt: new Date(),
+      error: error || null,
+    },
+  })
+  if (result.count !== 1) throw new DailyJobLeaseLostError(jobKey, dateKey)
+}
+
 export async function runDailyJob<T>(input: {
   jobKey: string
   dateKey: string
   run: () => Promise<T>
 }): Promise<DailyJobRunResult<T>> {
   const claimed = await claimDailyJob(input.jobKey, input.dateKey)
-  if (claimed !== true) return { executed: false, status: claimed }
+  if (typeof claimed === 'string') return { executed: false, status: claimed }
 
   try {
     const value = await input.run()
-    await prisma.dailyJobExecution.update({
-      where: { jobKey_dateKey: { jobKey: input.jobKey, dateKey: input.dateKey } },
-      data: { status: 'SUCCEEDED', finishedAt: new Date(), error: null },
-    })
+    await finishDailyJob(input.jobKey, input.dateKey, claimed.runToken, 'SUCCEEDED')
     return { executed: true, status: 'completed', value }
   } catch (error) {
-    await prisma.dailyJobExecution.update({
-      where: { jobKey_dateKey: { jobKey: input.jobKey, dateKey: input.dateKey } },
-      data: { status: 'FAILED', finishedAt: new Date(), error: serializeJobError(error) },
-    }).catch((updateError) => {
+    await finishDailyJob(input.jobKey, input.dateKey, claimed.runToken, 'FAILED', serializeJobError(error)).catch((updateError) => {
       console.error('[daily-job.execution.mark-failed]', {
         jobKey: input.jobKey,
         dateKey: input.dateKey,

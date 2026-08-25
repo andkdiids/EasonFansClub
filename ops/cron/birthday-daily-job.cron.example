@@ -1,0 +1,11 @@
+# Copy this file to /etc/cron.d only after replacing the paths and installing
+# /etc/eason-fans-club/birthday-job.env outside the repository. That env file
+# must export DAILY_JOB_SECRET and DAILY_JOB_URL; it must be root-readable only.
+# CRON_TZ makes the schedule explicit even if the host timezone is UTC.
+CRON_TZ=Asia/Shanghai
+
+# The endpoint is DB-idempotent. The two later invocations retry only FAILED
+# jobs; SUCCEEDED and an active RUNNING lease return without a second run.
+10 0 * * * appuser . /etc/eason-fans-club/birthday-job.env && /bin/sh /home/apps/easonfansclub/current/scripts/run-birthday-daily-job.sh >> /var/log/eason-fans-club/birthday-job.log 2>&1
+15 0 * * * appuser . /etc/eason-fans-club/birthday-job.env && /bin/sh /home/apps/easonfansclub/current/scripts/run-birthday-daily-job.sh >> /var/log/eason-fans-club/birthday-job.log 2>&1
+20 0 * * * appuser . /etc/eason-fans-club/birthday-job.env && /bin/sh /home/apps/easonfansclub/current/scripts/run-birthday-daily-job.sh >> /var/log/eason-fans-club/birthday-job.log 2>&1

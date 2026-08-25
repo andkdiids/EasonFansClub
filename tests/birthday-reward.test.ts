@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { POST as runBirthdayDailyJob } from '../app/api/internal/daily-jobs/birthday/route'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -10,6 +11,7 @@ const schemaEnumNotification = schema.slice(schema.indexOf('enum NotificationTyp
 const loginRoute = read('app/api/auth/login/route.ts')
 const homeData = read('lib/home-data.ts')
 const adminPage = read('app/admin/page.tsx')
+const dailyJobRoute = read('app/api/internal/daily-jobs/birthday/route.ts')
 const notificationsLib = read('lib/notifications.ts')
 
 test('NotificationType enum gains BIRTHDAY_GREETING without adding a table', () => {
@@ -75,9 +77,10 @@ test('multiple grant calls never duplicate UserBadge (5: 多次调用不重复 U
   assert.match(schema.slice(schema.indexOf('model UserBadge')), /@@unique\(\[userId, badgeId\]\)/)
 })
 
-test('login flow also grants greeting per-user (no cron needed)', () => {
+test('login flow keeps an idempotent per-user greeting fallback while the batch stays in the daily job', () => {
   assert.match(loginRoute, /import \{ ensureBirthdayBadge, sendBirthdayGreeting \} from '@\/lib\/birthday'/)
   assert.match(loginRoute, /await sendBirthdayGreeting\(user\.id\)/)
+  assert.match(loginRoute, /\.catch\(\(greetingError\) => \{/)
 })
 
 test('homepage load only reads birthday stats and never triggers the batch task', () => {
@@ -89,9 +92,35 @@ test('birthday greeting gets a friendly label in notification list', () => {
   assert.match(notificationsLib, /BIRTHDAY_GREETING:\s*'生日'/)
 })
 
-test('admin dashboard shows sent greetings and awarded badges counts', () => {
-  assert.match(adminPage, /countBirthdayGreetingsSent/)
-  assert.match(adminPage, /countBirthdayBadgesAwarded/)
-  assert.match(adminPage, /\['生日祝福', birthdayGreetings\]/)
-  assert.match(adminPage, /\['生日徽章', birthdayBadges\]/)
+test('homepage stays read-only and the protected daily endpoint owns the batch task', () => {
+  assert.doesNotMatch(homeData, /grantTodayBirthdayRewards|triggerBirthdayRewardsSweep/)
+  assert.match(homeData, /countTodayBirthdays/)
+  assert.match(dailyJobRoute, /export async function POST\(request: Request\)/)
+  assert.doesNotMatch(dailyJobRoute, /export async function GET\(/)
+  assert.match(dailyJobRoute, /x-daily-job-secret/)
+  assert.match(dailyJobRoute, /status: 503/)
+  assert.match(dailyJobRoute, /status: 403/)
+  assert.match(dailyJobRoute, /runDailyBirthdayRewards\(dateKey\)/)
+  assert.match(dailyJobRoute, /executed: result\.executed/)
+  assert.match(dailyJobRoute, /status: result\.status/)
+})
+
+test('birthday daily endpoint rejects missing and invalid secrets before touching the database', async () => {
+  const previousSecret = process.env.DAILY_JOB_SECRET
+  const request = (secret?: string) => new Request('http://127.0.0.1/api/internal/daily-jobs/birthday', {
+    method: 'POST',
+    headers: secret ? { 'x-daily-job-secret': secret } : undefined,
+    body: '{}',
+  })
+
+  try {
+    process.env.DAILY_JOB_SECRET = 'unit-test-secret'
+    assert.equal((await runBirthdayDailyJob(request())).status, 403)
+    assert.equal((await runBirthdayDailyJob(request('wrong-secret'))).status, 403)
+    delete process.env.DAILY_JOB_SECRET
+    assert.equal((await runBirthdayDailyJob(request('unit-test-secret'))).status, 503)
+  } finally {
+    if (previousSecret === undefined) delete process.env.DAILY_JOB_SECRET
+    else process.env.DAILY_JOB_SECRET = previousSecret
+  }
 })

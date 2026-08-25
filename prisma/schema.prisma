@@ -3246,6 +3246,9 @@ model DailyJobExecution {
   jobKey     String
   dateKey    String
   status     DailyJobExecutionStatus @default(RUNNING)
+  // Nullable for rows created by the phase-1 schema. New claims always write
+  // a token and every terminal update is compare-and-set by this value.
+  runToken   String?                 @db.VarChar(64)
   startedAt  DateTime                @default(now())
   finishedAt DateTime?
   error      String?                 @db.Text

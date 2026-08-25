@@ -1,7 +1,8 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { grantBadge } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
-import { safeDb } from '@/lib/db-timeout'
+import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getShanghaiDateKey, parseBeijingDate } from '@/lib/checkin'
 import { runDailyJob } from '@/lib/daily-job-execution'
 import { getTodayMonthDay } from '@/lib/today'
@@ -72,7 +73,7 @@ export async function countTodayBirthdays(dateKey = getShanghaiDateKey()): Promi
  * 若今天是该用户的生日，则授予「生日纪念」徽章。
  * - 幂等：依靠 UserBadge 的 (userId, badgeId) 唯一约束，每年生日只会保留一条。
  * - 不绑定年份：只要月日匹配即授予，因此永久保留。
- * - 失败不抛出，避免影响登录 / 资料页主流程。
+ * - 失败向调用方抛出：登录 / 资料页调用方自行隔离；每日任务据此标记失败并重试。
  */
 export async function ensureBirthdayBadge(userId: string, dateKey = getShanghaiDateKey()): Promise<void> {
   try {
@@ -101,6 +102,7 @@ export async function ensureBirthdayBadge(userId: string, dateKey = getShanghaiD
     })
   } catch (error) {
     console.error('[birthday.ensureBadge]', error)
+    throw error
   }
 }
 
@@ -155,7 +157,7 @@ export async function sendBirthdayGreeting(userId: string, dateKey = getShanghai
     return true
   } catch (error) {
     console.error('[birthday.sendGreeting]', error)
-    return false
+    throw error
   }
 }
 
@@ -164,67 +166,81 @@ export async function sendBirthdayGreeting(userId: string, dateKey = getShanghai
  * - 提醒内容提及生日好友昵称，actor 设为生日用户，点击进入其主页 `/user/[uid]`，不打开生日卡片。
  * - 生日公开设置不影响好友提醒：无论 birthdayPublic 是否为 true，均照常发送。
  * - 幂等：以 key = `friend-birthday:${生日用户id}:${year}` + (recipientId) 唯一约束保证同好友同年每个生日用户只提醒一次。
- * - 失败不影响其他流程：整体及单好友异常均被吞掉并记录日志。
+ * - 单好友失败不影响其他提醒；失败计数会让每日任务最终失败并触发重试。
  */
 export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()): Promise<void> {
+  let failedReminderCount = 0
   try {
     const { date, month, day } = getBirthdayDateContext(dateKey)
     const year = getShanghaiYear(date)
-    const birthdayUsers = await safeDb(
+    const birthdayUsers = await withDbTimeout(
       'User.findMany birthday.friendReminder.sources',
       prisma.user.findMany({
         where: { status: 'ACTIVE', isDeleted: false, birthMonth: month, birthDay: day },
         select: { id: true, uid: true, nickname: true },
       }),
-      [],
       5000,
     )
     if (birthdayUsers.length === 0) return
 
     const ids = birthdayUsers.map((user) => user.id)
-    const friendships = await safeDb(
+    const friendships = await withDbTimeout(
       'Friendship.findMany birthday.friendReminder',
       prisma.friendship.findMany({
         where: { OR: [{ userAId: { in: ids } }, { userBId: { in: ids } }] },
         select: { userAId: true, userBId: true },
       }),
-      [],
       5000,
     )
 
+    const reminderTargets: Array<{ source: typeof birthdayUsers[number]; friendId: string; key: string }> = []
     for (const source of birthdayUsers) {
       const friendIds = new Set<string>()
       for (const friendship of friendships) {
         if (friendship.userAId === source.id) friendIds.add(friendship.userBId)
         else if (friendship.userBId === source.id) friendIds.add(friendship.userAId)
       }
-      for (const friendId of friendIds) {
-        try {
-          const key = `friend-birthday:${source.id}:${year}`
-          const existing = await prisma.notification.findFirst({
-            where: { recipientId: friendId, type: 'FRIEND_BIRTHDAY', key },
-            select: { id: true },
-          })
-          if (existing) continue
-          await prisma.notification.create({
-            data: {
-              recipientId: friendId,
-              type: 'FRIEND_BIRTHDAY',
-              title: '🎂 好友生日',
-              content: `🎂 今天是好友 ${source.nickname} 的生日，送上一份祝福吧`,
-              key,
-              link: `/user/${source.uid}`,
-              actorId: source.id,
-            },
-          })
-          emitRealtime(friendId, 'notification')
-        } catch (error) {
-          console.error('[birthday.friendReminder.user]', friendId, error)
-        }
+      for (const friendId of friendIds) reminderTargets.push({ source, friendId, key: `friend-birthday:${source.id}:${year}` })
+    }
+
+    const existingReminders = reminderTargets.length
+      ? await withDbTimeout(
+          'Notification.findMany birthday.friendReminder.existing',
+          prisma.notification.findMany({
+            where: { OR: reminderTargets.map((target) => ({ recipientId: target.friendId, key: target.key })) },
+            select: { recipientId: true, key: true },
+          }),
+          5000,
+        )
+      : []
+    const existingReminderKeys = new Set(existingReminders.map((item) => `${item.recipientId}:${item.key || ''}`))
+
+    for (const target of reminderTargets) {
+      const { source, friendId, key } = target
+      if (existingReminderKeys.has(`${friendId}:${key}`)) continue
+      try {
+        await prisma.notification.create({
+          data: {
+            recipientId: friendId,
+            type: 'FRIEND_BIRTHDAY',
+            title: '🎂 好友生日',
+            content: `🎂 今天是好友 ${source.nickname} 的生日，送上一份祝福吧`,
+            key,
+            link: `/user/${source.uid}`,
+            actorId: source.id,
+          },
+        })
+        emitRealtime(friendId, 'notification')
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') continue
+        failedReminderCount += 1
+        console.error('[birthday.friendReminder.user]', friendId, error)
       }
     }
+    if (failedReminderCount > 0) throw new Error(`BIRTHDAY_FRIEND_REMINDER_PARTIAL_FAILURE:${failedReminderCount}`)
   } catch (error) {
     console.error('[birthday.sendFriendBirthdayReminders]', error)
+    throw error
   }
 }
 
@@ -232,13 +248,14 @@ export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()
  * 统一生日奖励服务：扫描今天过生日的有效用户，逐个授予「生日纪念」徽章并发送生日祝福通知，
  * 同时给这些生日用户的「好友」发送生日提醒。
  * - 幂等：徽章靠 UserBadge(userId, badgeId) 唯一约束，通知靠 key 唯一约束，重复执行安全。
- * - 失败不影响调用方：整体及单用户异常均被吞掉并记录日志。
+ * - 单用户失败不影响其他生日用户；失败计数会让每日任务失败并允许后续重试。
  * - 由受保护的内部每日任务调用；重复执行由通知、徽章唯一约束共同保证安全。
  */
 export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()): Promise<void> {
+  let failedUserCount = 0
   try {
     const { month, day } = getBirthdayDateContext(dateKey)
-    const users = await safeDb(
+    const users = await withDbTimeout(
       'User.findMany birthday.rewards',
       prisma.user.findMany({
         where: {
@@ -249,7 +266,6 @@ export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()):
         },
         select: { id: true },
       }),
-      [],
       5000,
     )
 
@@ -258,14 +274,18 @@ export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()):
         await ensureBirthdayBadge(user.id, dateKey)
         await sendBirthdayGreeting(user.id, dateKey)
       } catch (error) {
+        failedUserCount += 1
         console.error('[birthday.grantRewards.user]', user.id, error)
       }
     }
+
+    if (failedUserCount > 0) throw new Error(`BIRTHDAY_USER_PARTIAL_FAILURE:${failedUserCount}`)
 
     // 好友生日提醒与本人生日通知相互独立：即便上面没有任何生日用户，也由内部自行短路。
     await sendFriendBirthdayReminders(dateKey)
   } catch (error) {
     console.error('[birthday.grantTodayBirthdayRewards]', error)
+    throw error
   }
 }
 

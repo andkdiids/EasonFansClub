@@ -69,12 +69,25 @@ test('birthday badge is auto-granted on login and on visiting own profile', () =
 test('admin can see today birthday count and a privacy-safe list page', () => {
   const admin = read('app/admin/page.tsx')
   const list = read('app/admin/birthdays/page.tsx')
-  assert.match(admin, /countTodayBirthdays\(\)/)
-  assert.match(admin, /\['今日生日', todayBirthdays\]/)
-  assert.match(list, /requireAdminPage\('\/admin\/birthdays'\)/)
+  const dailyJob = read('app/api/internal/daily-jobs/birthday/route.ts')
+  const execution = read('lib/daily-job-execution.ts')
+  assert.match(admin, /href: '\/admin\/birthdays'/)
+  assert.match(admin, /title: '生日管理'/)
+  assert.doesNotMatch(admin, /countTodayBirthdays\(\)/)
+  assert.match(list, /requireAdminPage\('\/admin\/birthdays',/)
+  assert.match(list, /birthMonth: month/)
+  assert.match(list, /birthDay: day/)
   // 列表只展示 UID / 昵称 / 注册时间，渲染层不输出生日日期或头像
   assert.match(list, /formatUid\(item\.uid\)/)
   assert.doesNotMatch(list, /item\.birthMonth|item\.birthDay|item\.avatarUrl|<img/)
+  assert.match(dailyJob, /runDailyBirthdayRewards\(dateKey\)/)
+  assert.match(execution, /status: 'RUNNING'/)
+  assert.match(execution, /status: 'SUCCEEDED'/)
+  assert.match(execution, /status: 'FAILED'/)
+  assert.match(execution, /where: \{ jobKey, dateKey, runToken \}/)
+  assert.match(execution, /already_completed/)
+  assert.match(execution, /already_running/)
+  assert.match(execution, /randomUUID\(\)/)
 })
 
 test('public user modules never expose birthday fields (privacy boundary)', () => {
