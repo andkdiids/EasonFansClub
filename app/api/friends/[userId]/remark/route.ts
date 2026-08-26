@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
 import { requireUser, sanitizeText } from '@/lib/security'
+import { normalizeFriendRemark } from '@/lib/friend-display-name'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -43,7 +44,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ ok: false, message: '只有当前有效好友可以设置备注' }, { status: 403 })
   }
 
-  const remark = sanitizeText(body.remark, 20)
+  const remark = normalizeFriendRemark(sanitizeText(body.remark, 20))
   if (!remark) {
     await prisma.friendRemark.deleteMany({ where: { ownerId: viewer.id, friendId: target.id } })
     return NextResponse.json({ ok: true, data: { remark: null } })

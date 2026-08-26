@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { activeUserWhere } from '@/lib/friends'
-import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap, normalizeFriendRemark } from '@/lib/friend-remarks'
 import { getUndercoverPresenceForUsers } from '@/lib/undercover-star'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
@@ -182,7 +182,7 @@ export async function GET(request: Request) {
 
 async function searchUsers(currentUserId: string, q: string) {
   const numericUid = /^\d+$/.test(q) ? Number(q) : null
-  const [users, growthLevels] = await Promise.all([
+  const [nicknameUsers, matchingRemarks, growthLevels] = await Promise.all([
     prisma.user.findMany({
       where: {
         uid: { gt: 0 },
@@ -197,8 +197,35 @@ async function searchUsers(currentUserId: string, q: string) {
       take: 20,
       select: publicFriendSelect,
     }),
+    // FriendDock is an authenticated contact search. Include the viewer's
+    // own aliases in its candidate set, but keep the alias itself viewer
+    // scoped and still verify the friendship through loadFriendRemarkMap.
+    prisma.friendRemark.findMany({
+      where: { ownerId: currentUserId, remark: { contains: q } },
+      select: { friendId: true },
+      take: 100,
+    }),
     listGrowthLevels().catch(() => [...defaultGrowthLevels]),
   ])
+  const nicknameUserIds = new Set(nicknameUsers.map((item) => item.id))
+  const remarkOnlyIds = [...new Set(matchingRemarks.map((item) => item.friendId))]
+    .filter((id) => !nicknameUserIds.has(id))
+  const remarkOnlyUsers = remarkOnlyIds.length
+    ? await prisma.user.findMany({
+        where: { ...activeUserWhere, id: { in: remarkOnlyIds } },
+        orderBy: [{ lastActiveAt: 'desc' }, { uid: 'asc' }],
+        select: publicFriendSelect,
+      })
+    : []
+  const remarkMatchedIds = new Set(matchingRemarks.map((item) => item.friendId))
+  const users = [...nicknameUsers, ...remarkOnlyUsers]
+    .sort((left, right) => {
+      const remarkMatchOrder = Number(remarkMatchedIds.has(right.id)) - Number(remarkMatchedIds.has(left.id))
+      if (remarkMatchOrder) return remarkMatchOrder
+      const lastActiveOrder = (right.lastActiveAt?.getTime() || 0) - (left.lastActiveAt?.getTime() || 0)
+      return lastActiveOrder || left.uid - right.uid
+    })
+    .slice(0, 20)
   const ids = users.map((item) => item.id)
   const [friendships, requests, blocks] = ids.length ? await Promise.all([
     prisma.friendship.findMany({
@@ -252,9 +279,9 @@ async function searchUsers(currentUserId: string, q: string) {
                   : 'NONE'
       const growth = calculateGrowthSummary(item.experience, growthLevels)
       return {
-        // This branch is site-wide public-user search.  The relationship
-        // status is private, but the primary name is never viewer-specific.
-        ...serializePublicUser(item, growth.level, growth.levelName, remarkMap.get(item.id) || null, equippedBadgeMap.get(item.id) || null, false),
+        // A contact search is private. Only an actual current friend gets
+        // the viewer-owned alias; pending/non-friend results stay public.
+        ...serializePublicUser(item, growth.level, growth.levelName, remarkMap.get(item.id) || null, equippedBadgeMap.get(item.id) || null, relationshipStatus === 'FRIEND'),
         groupId: groupByFriend.get(item.id) || null,
         relationshipStatus,
         requestId: relationshipStatus === 'INCOMING_PENDING' ? request?.id : null,
@@ -343,7 +370,7 @@ function serializePublicUser(
   isFriendContext = Boolean(friendRemark),
 ) {
   const nickname = getPublicUserDisplayName(friend)
-  const normalizedRemark = friendRemark?.trim() || null
+  const normalizedRemark = normalizeFriendRemark(friendRemark)
   return {
     id: friend.id,
     uid: friend.uid,

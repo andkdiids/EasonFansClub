@@ -205,9 +205,9 @@ test('EasMusic 首页使用全部专辑并提供 Eason in Concert 时间轴入�
 })
 
 test('现有移动导航仍保持五项且 EasMusic 入口不变', () => {
-  const navigation = read('components/layout/navigation.ts')
-  assert.match(navigation, /href: '\/music'/)
-  assert.doesNotMatch(navigation, /href: '\/music\/live'/)
+  const navigationRegistry = read('lib/navigation-registry.ts')
+  assert.match(navigationRegistry, /featureKey: 'MUSIC',[\s\S]*href: '\/music',[\s\S]*mobile: true/)
+  assert.doesNotMatch(navigationRegistry, /href: '\/music\/live'/)
   const mobile = read('components/layout/MobileNavigation.tsx')
   assert.match(mobile, /primaryNavigation\.filter\(\(item\) => item\.mobile\)/)
 })

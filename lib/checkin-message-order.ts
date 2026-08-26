@@ -1,3 +1,5 @@
+import { CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
+
 export type CheckInMessageOrderItem = {
   id: string
   createdAt: string
@@ -59,7 +61,7 @@ export function planFriendCheckInMessagePage({
   followedCount,
   ordinaryCount,
   page = 1,
-  pageSize = 5,
+  pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
 }: {
   ownCount: number
   followedCount: number
@@ -67,7 +69,7 @@ export function planFriendCheckInMessagePage({
   page?: number
   pageSize?: number
 }): FriendCheckInPagePlan {
-  const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || 5))
+  const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || CHECK_IN_MESSAGE_PAGE_SIZE))
   const safeRequestedPage = Math.max(1, Math.trunc(page) || 1)
   const counts = {
     own: Math.max(0, Math.trunc(ownCount) || 0),

@@ -287,7 +287,20 @@ type DailyCommentNotificationRow = {
   content: string
   moderationStatus: string
   isDeleted: boolean
-  DailyMessage: { isDeleted: boolean; moderationStatus: string }
+  DailyMessage: {
+    isDeleted: boolean
+    moderationStatus: string
+    userId: string
+    User: { status: string; isDeleted: boolean; Profile: { id: string } | null }
+  }
+}
+
+function canViewDailyNotificationMessage(row: DailyCommentNotificationRow, viewerId: string) {
+  const userIsActive = row.DailyMessage.User.status === 'ACTIVE' && !row.DailyMessage.User.isDeleted
+  if (!userIsActive || row.DailyMessage.isDeleted) return false
+  const isPublic = ['APPROVED', 'VIOLATION'].includes(row.DailyMessage.moderationStatus)
+    && Boolean(row.DailyMessage.User.Profile)
+  return isPublic || row.DailyMessage.userId === viewerId
 }
 
 async function loadDailyNotificationComments(
@@ -305,7 +318,14 @@ async function loadDailyNotificationComments(
         content: true,
         moderationStatus: true,
         isDeleted: true,
-        DailyMessage: { select: { isDeleted: true, moderationStatus: true } },
+        DailyMessage: {
+          select: {
+            isDeleted: true,
+            moderationStatus: true,
+            userId: true,
+            User: { select: { status: true, isDeleted: true, Profile: { select: { id: true } } } },
+          },
+        },
       },
     })
     return { rows, failed: false }
@@ -804,7 +824,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     const target = parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
     return target ? [target] : []
   })
-  const [remarkResult, likeCountResult, actorBadgeResult, friendshipResult, growthLevelResult] = await Promise.allSettled([
+  const [remarkResult, likeCountResult, actorBadgeResult, friendshipResult, actorRequestResult, growthLevelResult] = await Promise.allSettled([
     loadFriendRemarkMap(userId, actorIds),
     loadLikeNotificationStats(likeTargets),
     getEquippedBadgesForUsers(actorIds),
@@ -817,6 +837,18 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
             ],
           },
           select: { userAId: true, userBId: true },
+        })
+      : Promise.resolve([]),
+    actorIds.length
+      ? prisma.friendRequest.findMany({
+          where: {
+            status: 'PENDING',
+            OR: [
+              { senderId: userId, receiverId: { in: actorIds } },
+              { receiverId: userId, senderId: { in: actorIds } },
+            ],
+          },
+          select: { id: true, senderId: true, receiverId: true },
         })
       : Promise.resolve([]),
     actorIds.length ? listGrowthLevels() : Promise.resolve([...defaultGrowthLevels]),
@@ -849,6 +881,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         return []
       })()
   const actorFriendIds = new Set(actorFriendshipRows.flatMap((row) => [row.userAId, row.userBId]).filter((id) => id !== userId))
+  const actorRequestRows = actorRequestResult.status === 'fulfilled'
+    ? actorRequestResult.value
+    : (() => {
+        logNotificationError('list.actor-friend-requests', { userId, page, pageSize, category }, actorRequestResult.reason)
+        return []
+      })()
   const growthLevels = growthLevelResult.status === 'fulfilled'
     ? growthLevelResult.value
     : (() => {
@@ -873,6 +911,18 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
           })
         : null
       const actorName = actorDisplayName
+      const actorRequest = actor
+        ? actorRequestRows.find((request) => request.senderId === actor.id || request.receiverId === actor.id)
+        : null
+      const relationshipStatus = actor?.id === userId
+        ? 'SELF' as const
+        : actor && actorFriendIds.has(actor.id)
+          ? 'FRIEND' as const
+          : actorRequest?.senderId === userId
+            ? 'OUTGOING_PENDING' as const
+            : actorRequest
+              ? 'INCOMING_PENDING' as const
+              : 'NONE' as const
       const actorProfile = actor && actor.status === 'ACTIVE' && !actor.isDeleted
         ? (() => {
             const growth = calculateGrowthSummary(actor.experience, growthLevels)
@@ -900,7 +950,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
                     bio,
                   }
                 : null,
-              relationshipStatus: actor.id === userId ? 'SELF' as const : actorFriendIds.has(actor.id) ? 'FRIEND' as const : 'NONE' as const,
+              relationshipStatus,
+              requestId: relationshipStatus === 'INCOMING_PENDING' ? actorRequest?.id || null : null,
             } satisfies FriendDockUser
           })()
         : null
@@ -1090,7 +1141,11 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         fallbackItemIds.push(item.id)
         return { ...item, replyDisabledReason: REPLY_DELETED_TEXT, replyPreview: REPLY_DELETED_TEXT }
       }
-      if (comment.DailyMessage.isDeleted || !['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus)) {
+      if (comment.DailyMessage.isDeleted) {
+        fallbackItemIds.push(item.id)
+        return { ...item, replyDisabledReason: REPLY_DELETED_TEXT, replyPreview: REPLY_DELETED_TEXT }
+      }
+      if (!canViewDailyNotificationMessage(comment, userId)) {
         fallbackItemIds.push(item.id)
         return { ...item, replyDisabledReason: REPLY_NO_PERMISSION_TEXT, replyPreview: REPLY_NO_PERMISSION_TEXT }
       }

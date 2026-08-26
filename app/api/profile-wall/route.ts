@@ -65,7 +65,7 @@ type SerializedWallMessage = {
   canDelete: boolean
   liked: boolean
   likeCount: number
-  likers: Array<{ uid: number; nickname: string; displayName: string; avatarUrl: string | null; equippedBadge: EquippedBadgeView | null }>
+  likers: Array<{ id: string; uid: number; nickname: string; friendRemark: string | null; displayName: string; avatarUrl: string | null; equippedBadge: EquippedBadgeView | null }>
   commentCount: number
   sender: {
     uid: number
@@ -129,8 +129,10 @@ function buildWallTree(rows: WallRow[]) {
 
 function serializeWallLikers(likes: WallLiker[], equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>) {
   return likes.map((like) => ({
+    id: like.userId,
     uid: like.User.uid,
     nickname: getPublicUserDisplayName(like.User),
+    friendRemark: null,
     displayName: getPublicUserDisplayName(like.User),
     avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
     equippedBadge: equippedBadgeMap.get(like.userId) || null,

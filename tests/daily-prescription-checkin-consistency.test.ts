@@ -39,7 +39,7 @@ test('挂号通知会按留言和回复 ID 定向加载，不受默认分页窗�
   assert.match(messages, /focusCommentId\?: string/)
   assert.match(messages, /id: focusCommentId, messageId, isDeleted: false/)
   assert.match(messages, /getCheckInReplyStatus/)
-  assert.match(panel, /focusErrorKind === 'load'/)
+  assert.match(panel, /focusErrorKind === 'LOAD_FAILED'/)
   assert.match(panel, /该回复已被删除/)
   assert.match(panel, /你暂时无法查看这条回复/)
 })
@@ -50,7 +50,7 @@ test('通知回复状态区分有效、明确删除和查询失败', () => {
   assert.match(service, /loadDailyNotificationComments/)
   assert.match(service, /暂时无法加载回复，请稍后重试/)
   assert.match(service, /该回复已被删除或不可查看/)
-  assert.match(service, /DailyMessage: \{ select: \{ isDeleted: true, moderationStatus: true \} \}/)
+  assert.match(service, /DailyMessage: \{\s*select: \{\s*isDeleted: true,[\s\S]*moderationStatus: true,[\s\S]*userId: true,[\s\S]*User: \{ select:/)
 })
 
 test('个人主页挂号留言保留真实回复并提供展开入口', () => {

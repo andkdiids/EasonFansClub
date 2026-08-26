@@ -24,6 +24,7 @@ import type { FriendDockUser, RelationshipStatus, UndercoverPresence } from '@/l
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { mergeUniqueFriendPage, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
+import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 import {
   calculateFriendListRestoredScrollTop,
   createFriendListReturnState,
@@ -704,10 +705,19 @@ export function FriendDock({
     }
     const closeFromOtherOverlay = () => closeDock()
     const updateRemark = (event: Event) => {
-      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null; displayName?: string }>).detail
-      if (!detail?.targetUserId || typeof detail.displayName !== 'string') return
+      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null }>).detail
+      if (!detail?.targetUserId) return
+      const friendRemark = normalizeFriendRemark(detail.remark)
       const update = (items: FriendDockUser[]) => items.map((item) => item.id === detail.targetUserId
-        ? { ...item, friendRemark: detail.remark?.trim() || null, displayName: detail.displayName! }
+        ? {
+            ...item,
+            friendRemark,
+            displayName: getFriendDisplayName({
+              nickname: item.nickname,
+              friendRemark,
+              isFriendContext: item.relationshipStatus === undefined || item.relationshipStatus === 'FRIEND',
+            }),
+          }
         : item)
       const updatedFriends = update(friendsRef.current)
       friendsRef.current = updatedFriends
@@ -1168,7 +1178,7 @@ export function FriendDock({
     setError('')
     let password = ''
     if (presence.requiresPassword) {
-      const prompted = window.prompt(`输入「${friend.displayName || friend.nickname || 'E院用户'}」的房间密码以加入`) as string | null
+      const prompted = window.prompt(`输入「${getFriendDisplayName({ nickname: friend.nickname, friendRemark: friend.friendRemark, isFriendContext: true })}」的房间密码以加入`) as string | null
       if (prompted === null) return
       password = prompted
     }
@@ -1267,8 +1277,8 @@ export function FriendDock({
             <>
               <button type="button" onClick={leaveChat} aria-label="返回好友列表">←</button>
               <button type="button" className="friend-dock-chat-person" onClick={() => setProfileFriend(chatFriend)}>
-                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.displayName || chatFriend.nickname || 'E院用户'} className="h-8 w-8" />
-                <span><strong><UserDisplayName name={chatFriend.displayName || chatFriend.nickname || 'E院用户'} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
+                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} className="h-8 w-8" />
+                <span><strong><UserDisplayName name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
@@ -1623,9 +1633,9 @@ function FriendRow({
   onFollow: () => void
 }) {
   const [actionsOpen, setActionsOpen] = useState(false)
-  const name = friend.displayName || friend.nickname || 'E院用户'
-  const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const status = friend.relationshipStatus || 'FRIEND'
+  const name = getFriendDisplayName({ nickname: friend.nickname, friendRemark: friend.friendRemark, isFriendContext: status === 'FRIEND' })
+  const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const presence = friend.undercoverPresence
   return (
     <article data-friend-id={friend.id} className={`friend-dock-row ${friend.unreadCount ? 'has-unread' : ''}`}>

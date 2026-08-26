@@ -20,8 +20,10 @@ test('公开展示名称只取 nickname，异常时不泄露 username', () => {
     '违规用户',
   )
 
-  const helper = read('lib/friend-remarks.ts')
-  assert.match(helper, /user\.nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
+  const helper = read('lib/friend-display-name.ts')
+  const publicHelper = read('lib/friend-remarks.ts')
+  assert.match(helper, /nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
+  assert.match(publicHelper, /user\.nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
   assert.doesNotMatch(helper, /user\.username\b/)
 })
 
@@ -76,7 +78,7 @@ test('好友申请和对决邀请不使用过宽 User 查询或旧 name 回退',
   assert.match(friendsPage, /User_FriendRequest_senderIdToUser: \{ select: friendRequestUserSelect \}/)
   assert.match(friendsPage, /User_FriendRequest_receiverIdToUser: \{ select: friendRequestUserSelect \}/)
   assert.doesNotMatch(friendsPage, /include: \{ Profile: true \}/)
-  assert.match(duel, /getPublicUserDisplayNameFromNickname\(friend\.nickname, '好友'\)/)
+  assert.match(duel, /getFriendDisplayName\(/)
   assert.doesNotMatch(duel, /friend\.name/)
   assert.doesNotMatch(duel, /friend\.nickname\s*\|\|\s*friend\.name/)
 })

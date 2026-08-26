@@ -5,10 +5,11 @@ import { buildMusicLyricSnippet } from '../lib/music-search'
 
 test('移动底部导航固定为首页、广场、E院中心、EasMusic、我的', () => {
   const navigation = readFileSync('components/layout/navigation.ts', 'utf8')
+  const navigationRegistry = readFileSync('lib/navigation-registry.ts', 'utf8')
   const mobile = readFileSync('components/layout/MobileNavigation.tsx', 'utf8')
-  const ecenterRegistry = readFileSync('lib/ecenter-features.ts', 'utf8')
+  const ecenterRegistry = readFileSync('lib/navigation-registry.ts', 'utf8')
   const shell = readFileSync('components/layout/AppShell.tsx', 'utf8')
-  assert.match(navigation, /href: '\/music'[\s\S]*mobile: true/)
+  assert.match(navigationRegistry, /featureKey: 'MUSIC',[\s\S]*href: '\/music',[\s\S]*mobile: true/)
   assert.doesNotMatch(navigation, /href: '\/notifications'[\s\S]{0,120}mobile: true/)
   assert.match(mobile, /aria-label="E院中心"/)
   assert.match(mobile, /UiIcon name="grid"/)

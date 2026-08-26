@@ -8,7 +8,7 @@ import { canApplyDuelAnswerAccepted, canApplyDuelMatchSnapshot, duelQuestionIden
 import type { DuelActiveState, DuelClientCommand, DuelMatchResult, DuelMatchState, DuelOption, DuelRealtimeEvent, DuelRoomState } from '@/lib/guess-song-duel-protocol'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
-import { getPublicUserDisplayNameFromNickname } from '@/lib/public-user-name'
+import { getFriendDisplayName } from '@/lib/friend-display-name'
 
 type Friend = { id: string; nickname?: string; displayName?: string | null; friendRemark?: string | null; avatarUrl?: string | null; profile?: { displayName?: string | null } | null; equippedBadge?: EquippedBadgeView | null }
 type DuelStats = { wins: number; participations: number; winRate: number }
@@ -39,7 +39,11 @@ function avatar(user: { name: string; avatarUrl: string | null }) {
 }
 
 function friendName(friend: Friend) {
-  return friend.displayName?.trim() || getPublicUserDisplayNameFromNickname(friend.nickname, '好友')
+  return getFriendDisplayName({
+    nickname: friend.nickname,
+    friendRemark: friend.friendRemark,
+    isFriendContext: true,
+  })
 }
 
 function formatDuration(startedAt: string, finishedAt: string | null) {
@@ -90,7 +94,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const [joinPassword, setJoinPassword] = useState('')
   const [pendingJoinRoom, setPendingJoinRoom] = useState<DuelRoomState | null>(null)
   const [friends, setFriends] = useState<Friend[]>([])
-  const [privateFriendDisplayNames, setPrivateFriendDisplayNames] = useState<Record<string, string>>({})
   const [inviteOpen, setInviteOpen] = useState(false)
   const [selectedFriendId, setSelectedFriendId] = useState('')
   const [audioBlocked, setAudioBlocked] = useState(false)
@@ -130,8 +133,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   // 记录已播放音频的题目 token，保证每道题只播放一次，且不会在题目切换残留。
   const playedAudioTokenRef = useRef<string | null>(null)
   const answerPendingRef = useRef<string | null>(null)
-  const privateFriendDisplayNamesRef = useRef<Record<string, string>>({})
-  const privateFriendNameLookupsRef = useRef(new Set<string>())
   const syncSequenceRef = useRef(0)
   const requestGenerationRef = useRef(0)
   const latestMatchRef = useRef<DuelMatchState | null>(null)
@@ -154,27 +155,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     audioAttemptedTokenRef.current = null
     playedAudioTokenRef.current = null
   }, [])
-
-  const hydratePrivateFriendDisplayNames = useCallback(async (userIds: string[]) => {
-    const ids = [...new Set(userIds.filter((id) => id && id !== userId))]
-      .filter((id) => !privateFriendNameLookupsRef.current.has(id))
-    if (!ids.length) return
-    ids.forEach((id) => privateFriendNameLookupsRef.current.add(id))
-    try {
-      const data = await api<{ friends: Array<{ id: string; displayName?: string | null }> }>(
-        `/api/friends/display-names?ids=${encodeURIComponent(ids.join(','))}`,
-      )
-      const next = Object.fromEntries((data.friends || [])
-        .filter((friend) => friend.id && friend.displayName?.trim())
-        .map((friend) => [friend.id, friend.displayName!.trim()]))
-      if (!Object.keys(next).length) return
-      Object.assign(privateFriendDisplayNamesRef.current, next)
-      setPrivateFriendDisplayNames((current) => ({ ...current, ...next }))
-    } catch {
-      // Public nickname remains the safe fallback if the private lookup is
-      // unavailable.  The duel protocol itself never carries friend remarks.
-    }
-  }, [userId])
 
   const setDuelError = useCallback((reason: unknown) => {
     setError(reason instanceof Error ? reason.message : '对决请求失败')
@@ -224,7 +204,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
   const applyMatchSnapshot = useCallback((next: DuelMatchState) => {
     if (!canApplyDuelMatchSnapshot(matchIdRef.current, latestMatchRef.current, next)) return false
-    void hydratePrivateFriendDisplayNames(next.players.map((player) => player.userId))
     const previous = latestMatchRef.current
     const questionChanged = !previous || !sameDuelQuestionIdentity(getDuelQuestionIdentity(previous), getDuelQuestionIdentity(next))
     latestMatchRef.current = next
@@ -265,7 +244,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       setView('match')
     }
     return true
-  }, [clearQuestionLocalState, hydratePrivateFriendDisplayNames, loadLobby, userId])
+  }, [clearQuestionLocalState, loadLobby, userId])
 
   const openRoom = useCallback((nextRoom: DuelRoomState) => {
     requestGenerationRef.current += 1
@@ -291,9 +270,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     setMatch(null)
     setQuestionResult(null)
     setView(nextRoom.matchId ? 'match' : 'room')
-    void hydratePrivateFriendDisplayNames([nextRoom.host.id, nextRoom.challenger?.id || ''])
     router.replace(`/games/guess-song/duel?room=${encodeURIComponent(nextRoom.id)}`)
-  }, [hydratePrivateFriendDisplayNames, resetToLobby, router])
+  }, [resetToLobby, router])
 
   useEffect(() => {
     roomIdRef.current = roomId
@@ -327,19 +305,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     void boot()
   }, [initialInviteToken, loadLobby, openRoom, router, setDuelError, userId])
 
-  useEffect(() => {
-    const updatePrivateFriendDisplayName = (event: Event) => {
-      const detail = (event as CustomEvent<{ targetUserId?: string; displayName?: string }>).detail
-      if (!detail?.targetUserId || !detail.displayName?.trim()) return
-      const displayName = detail.displayName.trim()
-      privateFriendNameLookupsRef.current.add(detail.targetUserId)
-      privateFriendDisplayNamesRef.current[detail.targetUserId] = displayName
-      setPrivateFriendDisplayNames((current) => ({ ...current, [detail.targetUserId!]: displayName }))
-    }
-    window.addEventListener('friend-remark:updated', updatePrivateFriendDisplayName)
-    return () => window.removeEventListener('friend-remark:updated', updatePrivateFriendDisplayName)
-  }, [])
-
   const syncDuelState = useCallback((force = false) => {
     const currentRoomId = roomIdRef.current
     const currentMatchId = matchIdRef.current
@@ -365,7 +330,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         const roomData = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(currentRoomId || '')}`, { signal: controller.signal })
         if (!isCurrentRoom()) return
         const nextRoom = roomData.room
-        void hydratePrivateFriendDisplayNames([nextRoom.host.id, nextRoom.challenger?.id || ''])
         setRoom(nextRoom)
         if (nextRoom.status === 'CLOSED' && !nextRoom.matchId) {
           resetToLobby(new Error('房间已过期或已关闭'))
@@ -402,7 +366,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     })()
     syncRequestRef.current = { key, generation, controller, promise }
     return promise
-  }, [applyMatchSnapshot, hydratePrivateFriendDisplayNames, resetToLobby])
+  }, [applyMatchSnapshot, resetToLobby])
 
   useEffect(() => {
     if (room?.status === 'PLAYING' && view !== 'match' && view !== 'result') setView('match')
@@ -416,7 +380,6 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       return
     }
     if (event.type === 'ROOM_STATE') {
-      void hydratePrivateFriendDisplayNames([event.state.host.id, event.state.challenger?.id || ''])
       setRoom(event.state)
       if (event.state.status === 'CLOSED' && !event.state.matchId) {
         resetToLobby(new Error('房主已离开，房间已关闭'))
@@ -494,7 +457,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       if (event.code === 'STALE_ROUND' || event.code === 'MATCH_FINISHED') void syncDuelState()
       else setError(event.message)
     }
-  }, [applyMatchSnapshot, hydratePrivateFriendDisplayNames, resetToLobby, syncDuelState, userId])
+  }, [applyMatchSnapshot, resetToLobby, syncDuelState, userId])
 
   useEffect(() => {
     if (!roomId && !matchId) return
@@ -769,7 +732,9 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
   const currentQuestion = match?.question
   const activeMode = match?.mode || room?.mode || selectedMode
-  const getDuelDisplayName = (player: { id?: string; userId?: string; name: string }) => privateFriendDisplayNames[player.id || player.userId || ''] || player.name
+  // Room/match state is public shared game state. Never overlay the current
+  // viewer's private friend remark onto names received from the duel protocol.
+  const getDuelDisplayName = (player: { name: string }) => player.name
   const currentQuestionIdentity = match && currentQuestion ? getDuelQuestionIdentity(match) : null
   const visibleAnswerFeedback = currentQuestionIdentity && answerFeedback && sameDuelQuestionIdentity(answerFeedback.identity, currentQuestionIdentity) ? answerFeedback : null
   const questionInteractionKey = currentQuestionIdentity ? duelQuestionIdentityKey(currentQuestionIdentity) : match ? `${match.matchId}:${match.currentQuestionIndex}:waiting` : 'no-question'

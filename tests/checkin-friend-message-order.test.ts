@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { CHECK_IN_MESSAGE_PAGE_SIZE } from '../lib/checkin-pagination'
 import { normalizeFriendCheckInMessages, planFriendCheckInMessagePage } from '../lib/checkin-message-order'
 
 type Message = {
@@ -86,6 +87,34 @@ test('本人、关注、普通三组分页不会把关注好友留在后页', ()
   const sixthPage = planFriendCheckInMessagePage({ ownCount: 1, followedCount: 1, ordinaryCount: 40, page: 6, pageSize: 7 })
   assert.deepEqual(sixthPage.followed, { offset: 1, take: 0 })
   assert.deepEqual(sixthPage.ordinary, { offset: 33, take: 7 })
+})
+
+test('普通与好友留言初始查询显式复用同一页大小，好友列表由服务端分页', () => {
+  const page = readFileSync('app/checkin/page.tsx', 'utf8')
+  const service = readFileSync('lib/checkin-messages.ts', 'utf8')
+  const api = readFileSync('app/api/checkin/messages/route.ts', 'utf8')
+
+  assert.equal(CHECK_IN_MESSAGE_PAGE_SIZE, 5)
+  assert.match(page, /page: requestedMessagePage,\s+pageSize: CHECK_IN_MESSAGE_PAGE_SIZE/)
+  assert.match(page, /page: 1,\s+pageSize: CHECK_IN_MESSAGE_PAGE_SIZE/)
+  assert.match(service, /skip: offset,\s+take,\s+page: 1,\s+pageSize: take/)
+  assert.match(service, /Math\.ceil\(total \/ safePageSize\)/)
+  assert.match(api, /pageSize,/)
+})
+
+test('好友留言使用共享页大小时最后一页数量与总页数正确', () => {
+  const lastPage = planFriendCheckInMessagePage({ ownCount: 1, followedCount: 2, ordinaryCount: 8, page: 3, pageSize: CHECK_IN_MESSAGE_PAGE_SIZE })
+
+  assert.deepEqual(lastPage, {
+    page: 3,
+    pageSize: CHECK_IN_MESSAGE_PAGE_SIZE,
+    total: 11,
+    totalPages: 3,
+    hasMore: false,
+    own: { offset: 1, take: 0 },
+    followed: { offset: 2, take: 0 },
+    ordinary: { offset: 7, take: 1 },
+  })
 })
 
 test('挂号成功事件只把本人的留言送入好友面板第一页并触发同步', () => {

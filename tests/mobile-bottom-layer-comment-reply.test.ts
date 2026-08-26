@@ -12,7 +12,7 @@ const commentBoundary = read('components/CommentSectionBoundary.tsx')
 const css = read('app/globals.css')
 const friendDock = read('components/FriendDock.tsx')
 const mobileNavigation = read('components/layout/MobileNavigation.tsx')
-const ecenterRegistry = read('lib/ecenter-features.ts')
+const navigationRegistry = read('lib/navigation-registry.ts')
 const appShell = read('components/layout/AppShell.tsx')
 const forum = read('components/ForumHome.tsx')
 
@@ -187,7 +187,7 @@ test('E院中心打开时隐藏好友、返回顶部和布局工具', () => {
 
 test('E院中心保留三列且活动中心入口继续可用', () => {
   assert.match(css, /\.mobile-center-sheet>nav \{ display:grid; grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
-  assert.match(ecenterRegistry, /featureKey: 'ACTIVITY_CENTER',[\s\S]*label: '活动中心',[\s\S]*href: '\/activities'/)
+  assert.match(navigationRegistry, /featureKey: 'ACTIVITY_CENTER',[\s\S]*label: '活动中心',[\s\S]*href: '\/activities'/)
   assert.match(mobileNavigation, /ecenterFeatures\.filter/)
 })
 
@@ -219,7 +219,7 @@ test('集中层级保证导航、窗口、中心、对话框、图片与 Toast �
 test('EasMusic 对话框沿用集中层级且公开现场路由未被改写', () => {
   assert.match(read('components/music/MusicSearchDialog.tsx'), /z-\[var\(--layer-dialog\)\]/)
   assert.match(read('components/music/live/AttendancePanel.tsx'), /z-\[var\(--layer-dialog\)\]/)
-  assert.match(read('components/layout/navigation.ts'), /href: '\/music'[\s\S]*mobile: true/)
+  assert.match(navigationRegistry, /featureKey: 'MUSIC',[\s\S]*href: '\/music',[\s\S]*mobile: true/)
 })
 
 test('移动底栏固定在 visual viewport 并记录开发期定位诊断', () => {

@@ -390,8 +390,8 @@ test('歌曲详情个人数据由客户端隔离请求', () => {
 })
 
 test('移动导航仍保持原EasMusic入口且未新增我的现场底栏', () => {
-  const source = read('components/layout/navigation.ts')
-  assert.match(source, /href: '\/music'/)
+  const source = read('lib/navigation-registry.ts')
+  assert.match(source, /featureKey: 'MUSIC',[\s\S]*href: '\/music',[\s\S]*mobile: true/)
   assert.doesNotMatch(source, /href: '\/music\/live\/me'/)
 })
 

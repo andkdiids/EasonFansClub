@@ -9,6 +9,7 @@ import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
 import { UserDisplayName } from '@/components/UserDisplayName'
+import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 
 type ActivityType = '' | 'CHECKIN' | 'POST' | 'BADGE'
 type TimeFilter = 'today' | 'yesterday' | '7days' | 'custom'
@@ -23,6 +24,7 @@ type FriendActivity = {
   targetUrl: string | null
   createdAt: string
   actor: {
+    id: string
     uid: number
     nickname: string
     displayName?: string | null
@@ -105,6 +107,26 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
     return () => controller.abort()
   }, [activityType, compact, customEnd, customStart, limit, page, timeFilter])
 
+  useEffect(() => {
+    const updateRemark = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null }>).detail
+      if (!detail?.targetUserId) return
+      const friendRemark = normalizeFriendRemark(detail.remark)
+      setActivities((current) => current.map((item) => item.actor.id === detail.targetUserId
+        ? {
+            ...item,
+            actor: {
+              ...item.actor,
+              friendRemark,
+              displayName: getFriendDisplayName({ nickname: item.actor.nickname, friendRemark, isFriendContext: true }),
+            },
+          }
+        : item))
+    }
+    window.addEventListener('friend-remark:updated', updateRemark)
+    return () => window.removeEventListener('friend-remark:updated', updateRemark)
+  }, [])
+
   function changeTime(value: TimeFilter) {
     setTimeFilter(value)
     setPage(1)
@@ -148,7 +170,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
         {!loading && !failed && !activities.length ? <p className="rounded-2xl bg-sky-50 p-5 text-center text-sm font-black text-slate-500">该筛选条件下暂无好友动态</p> : null}
         {!loading && !failed ? activities.map((item) => {
           const mood = item.type === 'CHECKIN' ? getMoodDisplay(item) : null
-          const name = item.actor.displayName || item.actor.nickname || 'E院用户'
+          const name = getFriendDisplayName({ nickname: item.actor.nickname, friendRemark: item.actor.friendRemark, isFriendContext: true })
           const avatar = profileImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
           const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : item.type === 'BADGE' ? '获得勋章' : '最近发帖'
           const targetUrl = normalizeStoredInternalPath(item.targetUrl)

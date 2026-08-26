@@ -49,7 +49,7 @@ test('资料卡按本人、好友、申请中和非好友状态提供相应操�
   assert.match(profileCard, /status === 'OUTGOING_PENDING'/)
   assert.match(profileCard, /status === 'INCOMING_PENDING'/)
   assert.match(profileCard, /查看好友申请/)
-  assert.match(profileCard, /进入个人主页/)
+  assert.match(profileCard, /查看主页/)
   assert.match(profileCard, /initialStatus="NONE"/)
 })
 

@@ -1,26 +1,27 @@
+import { NAVIGATION_REGISTRY, type NavigationRegistryItem } from '@/lib/navigation-registry'
+
 export type AppNavigationItem = {
+  featureKey: string
   href: string
   label: string
-  icon: 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'user' | 'sticker' | 'stethoscope' | 'pill' | 'settings' | 'gift'
+  icon: NavigationRegistryItem['icon']
   activePrefixes?: readonly string[]
   mobile?: boolean
   showsUnread?: boolean
   children?: AppNavigationItem[]
 }
 
-export const primaryNavigation: AppNavigationItem[] = [
-  { href: '/community', label: '首页', icon: 'home', mobile: true },
-  { href: '/forum', label: 'E院广场', icon: 'forum', activePrefixes: ['/forum', '/boards', '/posts'], mobile: true },
-  { href: '/music', label: 'EasMusic', icon: 'music', activePrefixes: ['/music'], mobile: true },
-  { href: '/today', label: '今日', icon: 'archive', activePrefixes: ['/today'] },
-  { href: '/games', label: '娱乐天空', icon: 'star', activePrefixes: ['/games', '/entertainment'] },
-  { href: '/clinic', label: '阿士匹灵门诊部', icon: 'stethoscope', activePrefixes: ['/clinic'] },
-  { href: '/ratings', label: '歌·颂', icon: 'music', activePrefixes: ['/ratings'] },
-  { href: '/trending', label: '热门帖子', icon: 'chart', activePrefixes: ['/trending'] },
-  { href: '/activities', label: '活动中心', icon: 'calendar', activePrefixes: ['/activities'] },
-  { href: '/notifications', label: '消息', icon: 'bell', activePrefixes: ['/notifications'], showsUnread: true },
-  { href: '/profile', label: '我的', icon: 'user', activePrefixes: ['/profile', '/user', '/settings'], mobile: true },
-]
+export const primaryNavigation: AppNavigationItem[] = NAVIGATION_REGISTRY
+  .filter((item) => item.showInDesktopSidebar && item.sidebarSection === 'primary')
+  .map((item) => ({
+    featureKey: item.featureKey,
+    href: item.href,
+    label: item.label,
+    icon: item.icon,
+    activePrefixes: item.activePrefixes,
+    mobile: 'mobile' in item ? item.mobile : undefined,
+    showsUnread: 'showsUnread' in item ? item.showsUnread : undefined,
+  }))
 
 export function isAppNavigationActive(pathname: string, item: AppNavigationItem) {
   const prefixes = item.activePrefixes || [item.href]

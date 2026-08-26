@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, resolveCheckInNotificationTarget, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, resolveCheckInNotificationTarget, type CheckInMessagePagination, type CheckInMessageSort, type CheckInNotificationResolutionStatus, type CheckInNotificationTarget } from '@/lib/checkin-messages'
+import { CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
 import { getCheckInPublicStats } from '@/lib/checkin-stats'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
@@ -35,11 +36,21 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   let notificationTargetDate: Date | null = null
   const rawNotificationMessageId = (params.message || params.messageId || params.dailyMessageId)?.slice(0, 80) || ''
   const rawNotificationFocusId = (params.focus || params.replyId || params.commentId || params.reply)?.slice(0, 80) || ''
-  let notificationTarget = { messageId: null as string | null, commentId: null as string | null, date: null as Date | null }
+  let notificationTarget: CheckInNotificationTarget = {
+    messageId: null,
+    commentId: null,
+    date: null,
+    status: 'NOT_FOUND',
+  }
   let notificationTargetResolutionFailed = false
   if (rawNotificationMessageId || rawNotificationFocusId) {
     try {
-      notificationTarget = await resolveCheckInNotificationTarget({ messageId: rawNotificationMessageId, commentId: rawNotificationFocusId })
+      notificationTarget = await resolveCheckInNotificationTarget({
+        messageId: rawNotificationMessageId,
+        commentId: rawNotificationFocusId,
+        viewerId: sessionUser.id,
+        viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+      })
     } catch {
       // Keep the page usable when the durable-target lookup itself times out;
       // the focus UI reports a load failure instead of misclassifying it as
@@ -109,7 +120,9 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
         sort,
         viewerId: sessionUser.id,
         viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+        friendContext: false,
         page: requestedMessagePage,
+        pageSize: CHECK_IN_MESSAGE_PAGE_SIZE,
       }),
       { messages: [], pagination: emptyMessagePagination },
       8000,
@@ -136,38 +149,74 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       stickyUserId: sessionUser.id,
       followedUserIds: followedFriendIds,
       page: 1,
+      pageSize: CHECK_IN_MESSAGE_PAGE_SIZE,
+      friendContext: true,
     }),
     { messages: [], pagination: emptyMessagePagination },
     8000,
   )
   const selectedMessages = selectedMessagePage.messages
   let messagesForDisplay = selectedMessages
-  let focusErrorKind: 'load' | 'deleted' | 'not-found' | 'unavailable' | undefined
-  if (notificationTargetResolutionFailed) focusErrorKind = 'load'
-  if (notificationMessageId && focusErrorKind !== 'load') {
+  let friendMessagesForDisplay = friendMessages.messages
+  let focusScope: 'public' | 'friends' = friendMessages.messages.some((item) => item.id === notificationMessageId) ? 'friends' : 'public'
+  let focusErrorKind: CheckInNotificationResolutionStatus | undefined
+  if (notificationTargetResolutionFailed) focusErrorKind = 'LOAD_FAILED'
+  if (notificationMessageId && focusErrorKind !== 'LOAD_FAILED') {
     try {
-      const focusedMessage = await getCheckInMessage({
+      const initialFocusedMessage = await getCheckInMessage({
         messageId: notificationMessageId,
         focusCommentId: notificationFocusId || undefined,
         selectedDate,
         nextDate,
         viewerId: sessionUser.id,
         viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+        friendContext: false,
       })
-      if (focusedMessage) {
-        messagesForDisplay = selectedMessages.some((item) => item.id === focusedMessage.id)
-          ? selectedMessages.map((item) => item.id === focusedMessage.id ? focusedMessage : item)
-          : [focusedMessage, ...selectedMessages]
+      if (initialFocusedMessage) {
+        let focusedMessage = initialFocusedMessage
+        const isFriendTarget = focusedMessage.userId === sessionUser.id
+          || friendIds.includes(focusedMessage.userId)
+          || friendMessages.messages.some((item) => item.id === focusedMessage.id)
+        focusScope = isFriendTarget ? 'friends' : 'public'
+        if (isFriendTarget) {
+          focusedMessage = await getCheckInMessage({
+            messageId: notificationMessageId,
+            focusCommentId: notificationFocusId || undefined,
+            selectedDate,
+            nextDate,
+            viewerId: sessionUser.id,
+            viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+            friendContext: true,
+          }) || focusedMessage
+        }
+        if (isFriendTarget) {
+          friendMessagesForDisplay = friendMessages.messages.some((item) => item.id === focusedMessage.id)
+            ? friendMessages.messages.map((item) => item.id === focusedMessage.id ? focusedMessage : item)
+            : [focusedMessage, ...friendMessages.messages]
+        } else {
+          messagesForDisplay = selectedMessages.some((item) => item.id === focusedMessage.id)
+            ? selectedMessages.map((item) => item.id === focusedMessage.id ? focusedMessage : item)
+            : [focusedMessage, ...selectedMessages]
+        }
       }
       if (notificationFocusId) {
-        const replyStatus = await getCheckInReplyStatus({ messageId: notificationMessageId, commentId: notificationFocusId })
-        if (replyStatus === 'deleted') focusErrorKind = 'deleted'
-        if (replyStatus === 'not-found') focusErrorKind = 'not-found'
-        if (replyStatus === 'unavailable' || (replyStatus === 'visible' && !focusedMessage)) focusErrorKind = 'unavailable'
+        const replyStatus = await getCheckInReplyStatus({
+          messageId: notificationMessageId,
+          commentId: notificationFocusId,
+          viewerId: sessionUser.id,
+          viewerCanModerate: sessionUser.role === 'ADMIN' || sessionUser.role === 'SUPER_ADMIN',
+        })
+        if (replyStatus === 'deleted') focusErrorKind = 'DELETED'
+        if (replyStatus === 'not-found') focusErrorKind = 'NOT_FOUND'
+        if (replyStatus === 'unavailable') focusErrorKind = 'FORBIDDEN'
+        if (replyStatus === 'visible' && !initialFocusedMessage) focusErrorKind = 'LOAD_FAILED'
       }
+      if (notificationTarget.status === 'DELETED') focusErrorKind = 'DELETED'
+      if (notificationTarget.status === 'NOT_FOUND') focusErrorKind = 'NOT_FOUND'
+      if (notificationTarget.status === 'FORBIDDEN') focusErrorKind = 'FORBIDDEN'
     } catch (error) {
       console.error('[checkin:notification-target-load-failed]', { messageId: notificationMessageId, focusId: notificationFocusId, error })
-      focusErrorKind = 'load'
+      focusErrorKind = 'LOAD_FAILED'
     }
   }
   if (!user) redirect('/login')
@@ -199,7 +248,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           todayCheckIn={todayCheckInPayload}
           selectedMessages={messagesForDisplay}
           selectedMessagesPagination={selectedMessagePage.pagination}
-          friendMessages={friendMessages.messages}
+          friendMessages={friendMessagesForDisplay}
           friendMessagesPagination={friendMessages.pagination}
           friendFollowedUserIds={followedFriendIds}
           selectedDateValue={selectedDateValue}
@@ -217,6 +266,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           focusMessageId={notificationMessageId || undefined}
           focusCommentId={notificationFocusId || undefined}
           focusErrorKind={focusErrorKind}
+          focusScope={focusScope}
         />
       </main>
     </>

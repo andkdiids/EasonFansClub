@@ -56,7 +56,7 @@ test('通知头像资料卡与正文目标交互仍保留', () => {
   const client = read('app/notifications/NotificationsClient.tsx')
 
   assert.match(client, /event\.stopPropagation\(\)/)
-  assert.match(client, /setSelectedActor\(\{ friend: actorCardFriend, unavailable: item\.actorUnavailable \}\)/)
+  assert.match(client, /setSelectedActor\(\{[\s\S]*?friend: actorCardFriend,[\s\S]*?unavailable: item\.actorUnavailable/)
   assert.match(client, /const target = systemNotification \? null : getNotificationTarget\(item\)/)
   assert.match(client, /await navigateToNotification\(item\)/)
 })

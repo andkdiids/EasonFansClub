@@ -10,6 +10,8 @@ import {
 } from '@/lib/ecenter-features'
 
 type EditorFeature = EcenterFeatureItem
+type EditorListSection = 'primary' | 'quick' | 'center'
+type EditorFeatureGroup = { key: EditorListSection; label?: string; features: EditorFeature[] }
 
 type EcenterShortcutEditorPanelProps = Readonly<{
   initialFeatures: readonly EditorFeature[]
@@ -31,11 +33,22 @@ function featureFromApi(value: unknown): EditorFeature[] {
   return value.filter((item): item is EditorFeature => Boolean(item && typeof item === 'object' && 'featureKey' in item && 'label' in item && 'href' in item && 'icon' in item))
 }
 
+function featureBelongsToEditor(
+  feature: EditorFeature,
+  variant: EcenterShortcutEditorPanelProps['variant'],
+  section?: EditorListSection,
+) {
+  if (variant === 'sidebar') {
+    return feature.showInDesktopSidebar && (!section || feature.sidebarSection === section)
+  }
+  return feature.showInCenter
+}
+
 export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, variant }: EcenterShortcutEditorPanelProps) {
   const [features, setFeatures] = useState<EditorFeature[]>(() => normalizeEcenterFeatureOrder(initialFeatures))
   const featuresRef = useRef<EditorFeature[]>(features)
   const itemRefs = useRef(new Map<string, HTMLElement>())
-  const pointerDragRef = useRef<{ pointerId: number; featureKey: string } | null>(null)
+  const pointerDragRef = useRef<{ pointerId: number; featureKey: string; section: EditorListSection } | null>(null)
   const [draggedKey, setDraggedKey] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -63,8 +76,19 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
     return () => controller.abort()
   }, [])
 
-  const visibleFeatures = useMemo(() => features.filter((feature) => !feature.hidden), [features])
-  const hiddenFeatures = useMemo(() => features.filter((feature) => feature.hidden), [features])
+  const featureGroups = useMemo<EditorFeatureGroup[]>(() => {
+    const sections: EditorListSection[] = variant === 'sidebar' ? ['primary', 'quick'] : ['center']
+    return sections.map((section) => ({
+      key: section,
+      label: variant === 'sidebar' ? (section === 'primary' ? '主要导航' : '快捷入口') : undefined,
+      features: features.filter((feature) => !feature.hidden && featureBelongsToEditor(feature, variant, section)),
+    }))
+  }, [features, variant])
+  const visibleFeatures = useMemo(() => featureGroups.flatMap((group) => group.features), [featureGroups])
+  const hiddenFeatures = useMemo(() => features.filter((feature) => feature.hidden && featureBelongsToEditor(feature, variant)), [features, variant])
+  const ecenterOnlyFeatures = useMemo(() => variant === 'sidebar'
+    ? features.filter((feature) => feature.showInCenter && !feature.showInDesktopSidebar)
+    : [], [features, variant])
 
   function updateFeatures(next: readonly EditorFeature[]) {
     const normalized = normalizeEcenterFeatureOrder(next)
@@ -81,28 +105,29 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
     ))
   }
 
-  function moveTo(featureKey: string, targetIndex: number) {
+  function moveTo(featureKey: string, targetIndex: number, section: EditorListSection) {
     if (loading || saving) return
-    const next = reorderEcenterFeatures(featuresRef.current, featureKey, targetIndex)
+    const next = reorderEcenterFeatures(featuresRef.current, featureKey, targetIndex, { include: (feature) => featureBelongsToEditor(feature, variant, section) })
     if (!hasSameOrder(featuresRef.current, next)) updateFeatures(next)
   }
 
-  function getDropIndex(clientY: number) {
-    if (!visibleFeatures.length) return -1
-    const targetIndex = visibleFeatures.findIndex((feature) => {
+  function getDropIndex(clientY: number, section: EditorListSection) {
+    const sortableFeatures = featuresRef.current.filter((feature) => !feature.hidden && featureBelongsToEditor(feature, variant, section))
+    if (!sortableFeatures.length) return -1
+    const targetIndex = sortableFeatures.findIndex((feature) => {
       const element = itemRefs.current.get(feature.featureKey)
       if (!element) return false
       const rect = element.getBoundingClientRect()
       return clientY < rect.top + rect.height / 2
     })
-    return targetIndex >= 0 ? targetIndex : visibleFeatures.length - 1
+    return targetIndex >= 0 ? targetIndex : sortableFeatures.length - 1
   }
 
-  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>, featureKey: string) {
+  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>, featureKey: string, section: EditorListSection) {
     if (loading || saving || event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    pointerDragRef.current = { pointerId: event.pointerId, featureKey }
+    pointerDragRef.current = { pointerId: event.pointerId, featureKey, section }
     setDraggedKey(featureKey)
     setDropKey(featureKey)
   }
@@ -111,10 +136,11 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
     const drag = pointerDragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
     event.preventDefault()
-    const targetIndex = getDropIndex(event.clientY)
-    const targetFeature = visibleFeatures[targetIndex]
+    const sortableFeatures = featuresRef.current.filter((feature) => !feature.hidden && featureBelongsToEditor(feature, variant, drag.section))
+    const targetIndex = getDropIndex(event.clientY, drag.section)
+    const targetFeature = sortableFeatures[targetIndex]
     setDropKey(targetFeature?.featureKey || null)
-    if (targetIndex >= 0) moveTo(drag.featureKey, targetIndex)
+    if (targetIndex >= 0) moveTo(drag.featureKey, targetIndex, drag.section)
   }
 
   function handlePointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
@@ -195,30 +221,47 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
     <p className="ecenter-editor-hint">按住左侧手柄拖动调整顺序；手机端也可以使用上下按钮。</p>
     <div className="ecenter-editor-list-heading"><h4>快捷入口列表</h4></div>
     <div className="ecenter-editor-list" aria-label="可见快捷入口" onPointerMove={handlePointerMove} onPointerUp={handlePointerEnd} onPointerCancel={handlePointerEnd}>
-      {visibleFeatures.map((feature, index) => <article
-        key={feature.featureKey}
-        className={`ecenter-editor-item${draggedKey === feature.featureKey ? ' is-dragging' : ''}${dropKey === feature.featureKey ? ' is-drop-target' : ''}`}
-        ref={(element) => {
-          if (element) itemRefs.current.set(feature.featureKey, element)
-          else itemRefs.current.delete(feature.featureKey)
-        }}
-      >
-        <button
-          type="button"
-          className="ecenter-editor-drag-handle"
-          onPointerDown={(event) => handlePointerDown(event, feature.featureKey)}
-          aria-label={`拖动${feature.label}调整顺序`}
-        >≡</button>
-        <span className="ecenter-editor-icon"><UiIcon name={feature.icon} /></span>
-        <span className="ecenter-editor-label">{feature.label}</span>
-        <span className="ecenter-editor-actions">
-          <button type="button" onClick={() => moveTo(feature.featureKey, index - 1)} disabled={loading || saving || index === 0} aria-label={`将${feature.label}上移`}>↑</button>
-          <button type="button" onClick={() => moveTo(feature.featureKey, index + 1)} disabled={loading || saving || index === visibleFeatures.length - 1} aria-label={`将${feature.label}下移`}>↓</button>
-          <button type="button" className="ecenter-editor-hide" onClick={() => hideFeature(feature.featureKey)} disabled={loading || saving}>{controlLabel}</button>
-        </span>
-      </article>)}
+      {featureGroups.map((group) => <div className="ecenter-editor-group" key={group.key}>
+        {group.label ? <h5>{group.label}</h5> : null}
+        {group.features.map((feature, index) => <article
+          key={feature.featureKey}
+          className={`ecenter-editor-item${draggedKey === feature.featureKey ? ' is-dragging' : ''}${dropKey === feature.featureKey ? ' is-drop-target' : ''}`}
+          ref={(element) => {
+            if (element) itemRefs.current.set(feature.featureKey, element)
+            else itemRefs.current.delete(feature.featureKey)
+          }}
+        >
+          <button
+            type="button"
+            className="ecenter-editor-drag-handle"
+            onPointerDown={(event) => handlePointerDown(event, feature.featureKey, group.key)}
+            aria-label={`拖动${feature.label}调整顺序`}
+          >≡</button>
+          <span className="ecenter-editor-icon"><UiIcon name={feature.icon} /></span>
+          <span className="ecenter-editor-label">{feature.label}</span>
+          <span className="ecenter-editor-actions">
+            <button type="button" onClick={() => moveTo(feature.featureKey, index - 1, group.key)} disabled={loading || saving || index === 0} aria-label={`将${feature.label}上移`}>↑</button>
+            <button type="button" onClick={() => moveTo(feature.featureKey, index + 1, group.key)} disabled={loading || saving || index === group.features.length - 1} aria-label={`将${feature.label}下移`}>↓</button>
+            {feature.hideable
+              ? <button type="button" className="ecenter-editor-hide" onClick={() => hideFeature(feature.featureKey)} disabled={loading || saving || !feature.editable}>{controlLabel}</button>
+              : <span className="ecenter-editor-fixed">固定</span>}
+          </span>
+        </article>)}
+      </div>)}
       {visibleFeatures.length === 0 ? <p className="ecenter-editor-state">当前没有显示中的快捷入口。</p> : null}
     </div>
+    {variant === 'sidebar' && ecenterOnlyFeatures.length > 0 ? <section className="ecenter-editor-center-only" aria-label="仅在 E院中心展示的功能">
+      <h4>仅在 E院中心展示</h4>
+      <p>以下功能不属于桌面左侧导航，但仍保留在移动端 E院中心中。</p>
+      <div>
+        {ecenterOnlyFeatures.map((feature) => <div className="ecenter-editor-center-only-item" key={feature.featureKey}>
+          <span><UiIcon name={feature.icon} />{feature.label}</span>
+          {feature.hidden
+            ? <button type="button" onClick={() => restoreFeature(feature.featureKey)} disabled={loading || saving || !feature.editable}>恢复显示</button>
+            : <button type="button" onClick={() => hideFeature(feature.featureKey)} disabled={loading || saving || !feature.editable}>隐藏</button>}
+        </div>)}
+      </div>
+    </section> : null}
     <details className="ecenter-hidden-features">
       <summary>已隐藏的功能 ({hiddenFeatures.length})</summary>
       <div>

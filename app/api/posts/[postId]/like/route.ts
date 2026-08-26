@@ -45,8 +45,10 @@ export async function GET(request: Request, { params }: Params) {
   const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
   return NextResponse.json({
     likers: likes.map((like) => ({
+      id: like.User.id,
       uid: like.User.uid,
       nickname: getPublicUserDisplayName(like.User),
+      friendRemark: null,
       displayName: getPublicUserDisplayName(like.User),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
       equippedBadge: equippedBadgeMap.get(like.User.id) || null,

@@ -89,6 +89,7 @@ export async function GET(request: Request) {
     const other = row.ConversationParticipant.find((participant) => participant.userId !== user.id)
     const otherUser = other?.User
       ? {
+          id: other.User.id,
           uid: other.User.uid,
           nickname: getPublicUserDisplayName(other.User),
           friendRemark: other.User.id ? (remarkMap.get(other.User.id) || null) : null,

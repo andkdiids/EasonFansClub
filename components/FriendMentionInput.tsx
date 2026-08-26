@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 
 export type MentionDraft = {
   userId: string
@@ -143,9 +144,27 @@ export function FriendMentionInput({
     }
   }, [trigger])
 
+  useEffect(() => {
+    const updateRemark = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null }>).detail
+      if (!detail?.targetUserId) return
+      const friendRemark = normalizeFriendRemark(detail.remark)
+      setFriends((current) => current.map((friend) => friend.id === detail.targetUserId
+        ? {
+            ...friend,
+            friendRemark,
+            displayName: getFriendDisplayName({ nickname: friend.nickname || friend.name, friendRemark, isFriendContext: true }),
+            name: getFriendDisplayName({ nickname: friend.nickname || friend.name, friendRemark, isFriendContext: true }),
+          }
+        : friend))
+    }
+    window.addEventListener('friend-remark:updated', updateRemark)
+    return () => window.removeEventListener('friend-remark:updated', updateRemark)
+  }, [])
+
   function selectFriend(friend: MentionFriend) {
     if (!trigger) return
-    const name = friend.displayName?.trim() || friend.name
+    const name = getFriendDisplayName({ nickname: friend.nickname || friend.name, friendRemark: friend.friendRemark, isFriendContext: true })
     const displayText = `@${name}`
     const nextValue = `${value.slice(0, trigger.start)}${displayText} ${value.slice(trigger.end)}`
     const nextMention = {
@@ -200,9 +219,9 @@ export function FriendMentionInput({
               className="flex min-h-12 w-full items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-left last:border-b-0 hover:bg-[var(--navigation-active)]"
             >
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                <SafeAvatar src={friend.avatarUrl} name={friend.displayName?.trim() || friend.name} uid={friend.uid} />
+                <SafeAvatar src={friend.avatarUrl} name={getFriendDisplayName({ nickname: friend.nickname || friend.name, friendRemark: friend.friendRemark, isFriendContext: true })} uid={friend.uid} />
               </span>
-              <span className="min-w-0 truncate text-sm font-black text-[var(--foreground)]">{friend.displayName?.trim() || friend.name}</span>
+              <span className="min-w-0 truncate text-sm font-black text-[var(--foreground)]">{getFriendDisplayName({ nickname: friend.nickname || friend.name, friendRemark: friend.friendRemark, isFriendContext: true })}</span>
             </button>
           ))}
         </div>

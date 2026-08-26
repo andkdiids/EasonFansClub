@@ -53,7 +53,7 @@ test('他人主页不查询或渲染帖子回复好友统计', () => {
 test('好友头像打开安全资料卡且资料卡提供主页和私信', () => {
   assert.match(friendDock, /onProfile=\{\(\) => setProfileFriend\(friend\)\}/)
   assert.match(friendDock, /<FriendProfileCard/)
-  assert.match(friendCard, /个人主页/)
+  assert.match(friendCard, /查看主页/)
   assert.match(friendCard, /发私信/)
   assert.match(friendCard, /event\.target === event\.currentTarget/)
   assert.doesNotMatch(friendCard + friendList, /passwordHash|email: true|phone: true|securityQuestion/)

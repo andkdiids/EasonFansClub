@@ -1020,6 +1020,7 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   --layer-center-sheet: 110;
   --layer-dialog: 120;
   --layer-image-viewer: 100000;
+  --layer-friend-profile: 100001;
   --layer-toast: 150;
   --background: #f4f6f9; --surface: #fff; --surface-subtle: #f8fafc; --surface-elevated: #fff;
   --foreground: #111827; --foreground-muted: #667085; --border: #e5e9f0; --border-strong: #cfd6df;
@@ -1848,7 +1849,6 @@ flex-direction:column;
   .friend-dock-panel { position:fixed; top:50%; right:0; bottom:auto; left:auto; width:80vw; max-width:420px; height:82vh; height:82dvh; max-height:calc(100vh - 120px); max-height:calc(100dvh - 120px); contain:layout paint; overflow:hidden; border-radius:18px 0 0 18px; transform:translateY(-50%); animation:friend-dock-drawer-in 180ms ease-out; }
   .friend-dock-panel.is-list,.friend-dock-panel.is-chat { height:82vh; height:82dvh; max-height:calc(100vh - 120px); max-height:calc(100dvh - 120px); }
   .friend-dock-panel .friend-list-layout,.friend-dock-panel .friend-chat-layout { min-height:0; overflow:hidden; }
-  .friend-dock-panel .friend-profile-card-layer { position:absolute; inset:0; }
   .friend-dock-backdrop { inset:0; bottom:0; width:100vw; height:100dvh; min-height:100svh; }
   .friend-dock-toggle { min-width:52px; border-right:0; border-radius:12px 0 0 12px; }
   .friend-dock-collapse { border-right:0; }
@@ -6350,6 +6350,9 @@ body:has(.duel-page) .app-page-content {
 .ecenter-editor-list-heading h4 { margin:0; color:var(--foreground); font-size:11px; font-weight:950; letter-spacing:.04em; }
 .ecenter-editor-list { display:flex; min-width:0; min-height:0; flex:1 1 auto; flex-direction:column; gap:5px; margin-top:7px; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; scrollbar-width:none; -ms-overflow-style:none; }
 .ecenter-editor-list::-webkit-scrollbar { display:none; width:0; height:0; }
+.ecenter-editor-group { display:flex; min-width:0; flex:none; flex-direction:column; gap:5px; }
+.ecenter-editor-group + .ecenter-editor-group { margin-top:5px; border-top:1px solid var(--border); padding-top:7px; }
+.ecenter-editor-group h5 { margin:0; color:var(--foreground-muted); font-size:10px; font-weight:950; letter-spacing:.04em; }
 .ecenter-editor-item { display:flex; width:100%; max-width:100%; min-width:0; min-height:40px; flex:none; align-items:center; gap:5px; box-sizing:border-box; overflow:hidden; border:1px solid var(--border); padding:3px 5px; background:var(--surface); touch-action:pan-y; transition:border-color 120ms ease,background 120ms ease,opacity 120ms ease; }
 .ecenter-editor-item.is-dragging { opacity:.48; }
 .ecenter-editor-item.is-drop-target { border-color:var(--primary); background:var(--navigation-active); }
@@ -6363,6 +6366,15 @@ body:has(.duel-page) .app-page-content {
 .ecenter-editor-actions button:disabled { cursor:not-allowed; opacity:.38; }
 .ecenter-editor-actions button:hover:not(:disabled) { color:var(--primary); border-color:var(--primary); }
 .ecenter-editor-actions .ecenter-editor-hide { min-width:auto; color:var(--danger); font-size:9px; }
+.ecenter-editor-fixed { display:inline-flex; min-height:30px; align-items:center; padding:0 5px; color:var(--foreground-muted); font-size:9px; font-weight:900; white-space:nowrap; }
+.ecenter-editor-center-only { flex:none; margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+.ecenter-editor-center-only h4 { margin:0; color:var(--foreground); font-size:11px; font-weight:950; }
+.ecenter-editor-center-only>p { margin:4px 0 6px; color:var(--foreground-muted); font-size:9px; line-height:1.45; }
+.ecenter-editor-center-only>div { display:flex; flex-direction:column; gap:4px; }
+.ecenter-editor-center-only-item { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; border:1px dashed var(--border); padding:5px; font-size:10px; }
+.ecenter-editor-center-only-item>span { display:flex; min-width:0; align-items:center; gap:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ecenter-editor-center-only-item svg { width:14px; min-width:14px; color:var(--foreground-muted); }
+.ecenter-editor-center-only-item button { flex:none; border:0; padding:2px 0; color:var(--primary); background:transparent; font-size:9px; font-weight:900; white-space:nowrap; }
 .ecenter-hidden-features { margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
 .ecenter-hidden-features summary { color:var(--foreground-muted); font-size:10px; font-weight:900; cursor:pointer; }
 .ecenter-hidden-features>div { display:flex; flex-direction:column; gap:5px; margin-top:6px; }
@@ -6524,4 +6536,22 @@ body:has(.duel-page) .app-page-content {
 @media (max-width:767px) {
   .friend-group-dialog-backdrop { display:flex; align-items:flex-end; padding:0; }
   .friend-group-dialog { width:100%; max-width:none; max-height:min(90dvh,calc(100dvh - 8px)); border-right:0; border-bottom:0; border-left:0; padding:20px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px)); }
+}
+
+/* The sidebar remains a real scroll container; only its native scrollbar is
+   hidden so long navigation and the shortcut editor stay reachable. */
+.app-sidebar-scroll { scrollbar-width:none; -ms-overflow-style:none; -webkit-overflow-scrolling:touch; }
+.app-sidebar-scroll::-webkit-scrollbar { display:none; width:0; height:0; }
+
+/* FriendProfileCard is portalled to body.  This prevents notification pages,
+   fixed navigation, and drawer stacking contexts from covering the card. */
+.friend-profile-card-layer { position:fixed; z-index:var(--layer-friend-profile); inset:0; display:grid; box-sizing:border-box; place-items:center; overflow-y:auto; overscroll-behavior:contain; padding:max(18px,env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) max(18px,env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px)); background:rgba(2,8,18,.42); touch-action:manipulation; }
+.friend-profile-card { width:min(310px,calc(100vw - 24px)); max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px); box-sizing:border-box; overflow-y:auto; overscroll-behavior:contain; }
+.friend-profile-card-state { margin:18px 0 0; color:var(--foreground-muted); font-size:13px; font-weight:800; line-height:1.6; }
+.friend-profile-card-state.is-error { color:var(--danger); }
+.friend-profile-card-retry { min-height:40px; margin-top:14px; border:1px solid var(--primary); border-radius:10px; padding:0 16px; color:var(--primary-foreground); background:var(--primary); font-size:12px; font-weight:900; }
+
+@media (max-width:767px) {
+  .friend-profile-card-layer { padding-top:max(12px,env(safe-area-inset-top,0px)); padding-right:max(12px,env(safe-area-inset-right,0px)); padding-bottom:max(12px,env(safe-area-inset-bottom,0px)); padding-left:max(12px,env(safe-area-inset-left,0px)); }
+  .friend-profile-card { width:100%; max-width:420px; max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px); border-radius:18px; }
 }

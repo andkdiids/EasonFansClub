@@ -6,8 +6,8 @@ import { calculateGrowthSummary } from '../lib/growth'
 const read = (path: string) => readFileSync(path, 'utf8')
 
 test('反馈与更新只保留一个前台导航并支持旧路由', () => {
-  const nav = read('components/layout/navigation.ts')
-  assert.match(nav, /label: '反馈与更新'/)
+  const nav = read('lib/navigation-registry.ts')
+  assert.match(nav, /featureKey: 'FEEDBACK',[\s\S]*label: '反馈与更新'/)
   assert.doesNotMatch(nav, /label: '更新日志'/)
   assert.match(read('app/changelog/page.tsx'), /redirect\('\/feedback\?tab=updates'\)/)
   assert.match(read('app/updates/page.tsx'), /redirect\('\/feedback\?tab=updates'\)/)

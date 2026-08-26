@@ -13,7 +13,7 @@ import type {
   PageLayoutModuleDensity,
   PageLayoutModuleRenderer,
 } from '@/components/page-layout/PageLayoutRenderer'
-import type { CheckInDisplayMessageItem, CheckInMessageItem, CheckInMessagePagination, CheckInMessageSort } from '@/lib/checkin-messages'
+import type { CheckInDisplayMessageItem, CheckInMessageItem, CheckInMessagePagination, CheckInMessageSort, CheckInNotificationResolutionStatus } from '@/lib/checkin-messages'
 import type { PageLayoutConfig } from '@/lib/page-layout/types'
 
 export type TodayCheckInPayload = TodayCheckIn
@@ -46,7 +46,8 @@ export type CheckInLayoutModuleProps = {
   checkinMoodEnabled?: boolean
   focusMessageId?: string
   focusCommentId?: string
-  focusErrorKind?: 'load' | 'deleted' | 'not-found' | 'unavailable'
+  focusErrorKind?: CheckInNotificationResolutionStatus
+  focusScope?: 'public' | 'friends'
   previewMode?: boolean
 }
 
@@ -202,6 +203,7 @@ export function createCheckInLayoutModules({
   focusMessageId,
   focusCommentId,
   focusErrorKind,
+  focusScope,
 }: CheckInLayoutModuleProps): Record<string, PageLayoutModuleRenderer> {
   // 管理员（ADMIN / SUPER_ADMIN）可在挂号页删除留言；仅控制按钮展示，接口侧仍独立鉴权。
   const canManageMessages = sessionUserRole === 'ADMIN' || sessionUserRole === 'SUPER_ADMIN'
@@ -233,9 +235,9 @@ export function createCheckInLayoutModules({
             initialSort={sort}
             sessionUserId={sessionUserId}
             previewMode={previewMode}
-            focusMessageId={focusMessageId}
-            focusCommentId={focusCommentId}
-            focusErrorKind={focusErrorKind}
+            focusMessageId={focusScope === 'friends' ? undefined : focusMessageId}
+            focusCommentId={focusScope === 'friends' ? undefined : focusCommentId}
+            focusErrorKind={focusScope === 'friends' ? undefined : focusErrorKind}
             canManageMessages={canManageMessages}
           />
         ),
@@ -252,6 +254,9 @@ export function createCheckInLayoutModules({
             initialSort={sort}
             sessionUserId={sessionUserId}
             previewMode={previewMode}
+            focusMessageId={focusScope === 'friends' ? focusMessageId : undefined}
+            focusCommentId={focusScope === 'friends' ? focusCommentId : undefined}
+            focusErrorKind={focusScope === 'friends' ? focusErrorKind : undefined}
             emptyText="暂无好友挂号留言"
             canManageMessages={canManageMessages}
           />

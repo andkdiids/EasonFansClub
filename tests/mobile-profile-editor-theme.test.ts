@@ -6,7 +6,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 test('E院中心增加好友动态且保留管理员条件入口', () => {
   const navigation = read('components/layout/MobileNavigation.tsx')
-  const registry = read('lib/ecenter-features.ts')
+  const registry = read('lib/navigation-registry.ts')
   assert.match(registry, /featureKey: 'FRIEND_ACTIVITY',[\s\S]*href: '\/friends\/activity'/)
   assert.match(navigation, /ecenterFeatures\.filter/)
   assert.match(navigation, /requiresAdmin/)

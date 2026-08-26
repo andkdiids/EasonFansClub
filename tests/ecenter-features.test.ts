@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   ECENTER_FEATURES,
   applyEcenterShortcutPreferences,
+  filterEcenterFeaturesForEditor,
   filterEcenterFeaturesForUser,
   getVisibleEcenterFeatures,
   mergeEcenterFeatureSettings,
@@ -18,9 +19,9 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 test('没有数据库覆盖时使用 Registry 默认顺序，勋章展览馆不强制排第一', () => {
   const features = mergeEcenterFeatureSettings([])
-  assert.equal(features[0]?.featureKey, 'CREATE_POST')
-  assert.equal(features.findIndex((feature) => feature.featureKey === 'BADGE_MUSEUM'), 8)
-  assert.deepEqual(features.slice(1, 4).map((feature) => feature.featureKey), ['CHECKIN', 'DAILY_PRESCRIPTION', 'ENTERTAINMENT'])
+  assert.equal(features[0]?.featureKey, 'HOME')
+  assert.equal(features.findIndex((feature) => feature.featureKey === 'BADGE_MUSEUM'), 15)
+  assert.deepEqual(features.slice(0, 4).map((feature) => feature.featureKey), ['HOME', 'FORUM', 'MUSIC', 'TODAY'])
   assert.equal(features.length, ECENTER_FEATURES.length)
 })
 
@@ -43,7 +44,7 @@ test('未知数据库 key 被忽略，未来 Registry 新入口无需 seed 也�
     featureKey: 'FUTURE_TEST_FEATURE',
     label: '未来测试功能',
     href: '/future-test-feature',
-    defaultSortOrder: 15,
+    defaultSortOrder: 999,
     activePrefixes: ['/future-test-feature'],
   }
   const futureMerged = mergeFeatureRegistryWithSettings([...ECENTER_FEATURES, futureFeature], [])
@@ -57,9 +58,9 @@ test('权限过滤后顺序稳定，ADMIN 只对后台权限用户可见', () =>
     { featureKey: 'BADGE_MUSEUM', sortOrder: 2, isEnabled: true },
   ])
   const regularUserFeatures = filterEcenterFeaturesForUser(features, false)
-  assert.deepEqual(regularUserFeatures.slice(0, 2).map((feature) => feature.featureKey), ['CREATE_POST', 'CHECKIN'])
+  assert.deepEqual(regularUserFeatures.slice(0, 2).map((feature) => feature.featureKey), ['BADGE_MUSEUM', 'TODAY'])
   assert.equal(regularUserFeatures.some((feature) => feature.featureKey === 'ADMIN'), false)
-  assert.equal(regularUserFeatures.findIndex((feature) => feature.featureKey === 'BADGE_MUSEUM'), 2)
+  assert.equal(regularUserFeatures.findIndex((feature) => feature.featureKey === 'BADGE_MUSEUM'), 0)
   assert.equal(filterEcenterFeaturesForUser(features, true)[0]?.featureKey, 'ADMIN')
 })
 
@@ -72,9 +73,9 @@ test('ADMIN 配置到第三位时只参与管理员列表，普通用户列表�
   const features = mergeEcenterFeatureSettings(overrides)
   const adminFeatures = filterEcenterFeaturesForUser(features, true)
   const regularFeatures = filterEcenterFeaturesForUser(features, false)
-  assert.equal(adminFeatures[2]?.featureKey, 'ADMIN')
+  assert.equal(adminFeatures[0]?.featureKey, 'ADMIN')
   assert.equal(regularFeatures.some((feature) => feature.featureKey === 'ADMIN'), false)
-  assert.deepEqual(regularFeatures.slice(0, 4).map((feature) => feature.featureKey), ['CREATE_POST', 'CHECKIN', 'DAILY_PRESCRIPTION', 'ENTERTAINMENT'])
+  assert.deepEqual(regularFeatures.slice(0, 4).map((feature) => feature.featureKey), ['TODAY', 'ENTERTAINMENT', 'CLINIC', 'RATINGS'])
 })
 
 test('重复 sortOrder 使用默认顺序和 featureKey 作为稳定次级排序', () => {
@@ -113,7 +114,7 @@ test('主弹窗、快捷入口和移动端不再维护重复的中心入口数�
   const sidebar = read('components/layout/Sidebar.tsx')
   const navigation = read('components/layout/navigation.ts')
   assert.match(mobile, /ecenterFeatures/)
-  assert.match(sidebar, /userFeatures\.filter/)
+  assert.match(sidebar, /resolvedFeatures\.filter/)
   assert.doesNotMatch(navigation, /quickNavigation/)
 })
 
@@ -231,7 +232,7 @@ test('隐藏和恢复只改变可见性，不会把用户保存顺序重排成�
 })
 
 test('上移下移使用同一个不可变重排函数并保留边界', () => {
-  const base = mergeEcenterFeatureSettings([]).slice(0, 3)
+  const base = mergeEcenterFeatureSettings([]).filter((feature) => ['CREATE_POST', 'CHECKIN', 'DAILY_PRESCRIPTION'].includes(feature.featureKey))
   const movedUp = reorderEcenterFeatures(base, 'DAILY_PRESCRIPTION', 1)
   assert.deepEqual(movedUp.map((feature) => feature.featureKey), ['CREATE_POST', 'DAILY_PRESCRIPTION', 'CHECKIN'])
   const movedDown = reorderEcenterFeatures(base, 'CREATE_POST', 1)
@@ -250,6 +251,41 @@ test('用户偏好 API 严格拒绝未知、重复和非法排序项', () => {
   assert.equal('error' in unknown, true)
   assert.equal('error' in duplicate, true)
   assert.equal('error' in invalidOrder, true)
+})
+
+test('统一注册表覆盖桌面入口，固定入口可编辑但不可隐藏，E院中心专属入口明确分组', () => {
+  const base = mergeEcenterFeatureSettings([])
+  const editorForUser = filterEcenterFeaturesForEditor(base, false)
+  const desktopKeys = base.filter((feature) => feature.showInDesktopSidebar && !feature.requiresAdmin).map((feature) => feature.featureKey)
+  const editorKeys = editorForUser.map((feature) => feature.featureKey)
+  for (const key of desktopKeys) assert.equal(editorKeys.includes(key), true, `${key} 应出现在编辑器`)
+  assert.equal(editorKeys.includes('ADMIN'), false)
+  assert.equal(filterEcenterFeaturesForEditor(base, true).some((feature) => feature.featureKey === 'ADMIN'), true)
+  assert.equal(base.find((feature) => feature.featureKey === 'CREATE_POST')?.showInDesktopSidebar, false)
+  assert.equal(base.find((feature) => feature.featureKey === 'CREATE_POST')?.showInCenter, true)
+  assert.equal(base.find((feature) => feature.featureKey === 'HOME')?.hideable, false)
+  assert.equal(base.find((feature) => feature.featureKey === 'PROFILE')?.hideable, false)
+})
+
+test('老用户缺失新入口时按稳定 ID 自动补齐，固定入口不会被旧 hidden 状态隐藏', () => {
+  const base = mergeEcenterFeatureSettings([])
+  const resolved = applyEcenterShortcutPreferences(base, [
+    { itemKey: 'TODAY', sortOrder: 0, hidden: false },
+    { itemKey: 'HOME', sortOrder: 1, hidden: true },
+  ])
+  assert.equal(resolved[0]?.featureKey, 'TODAY')
+  assert.equal(resolved.some((feature) => feature.featureKey === 'FORUM'), true)
+  assert.equal(resolved.some((feature) => feature.featureKey === 'MUSIC'), true)
+  assert.equal(resolved.find((feature) => feature.featureKey === 'HOME')?.hidden, false)
+  assert.equal(new Set(resolved.map((feature) => feature.featureKey)).size, resolved.length)
+})
+
+test('桌面范围排序只重排桌面入口，不会把 E院中心专属入口混入左侧导航', () => {
+  const base = mergeEcenterFeatureSettings([])
+  const reordered = reorderEcenterFeatures(base, 'CHECKIN', 0, { include: (feature) => feature.showInDesktopSidebar })
+  const desktop = reordered.filter((feature) => feature.showInDesktopSidebar && !feature.hidden)
+  assert.equal(desktop[0]?.featureKey, 'CHECKIN')
+  assert.equal(reordered.find((feature) => feature.featureKey === 'CREATE_POST')?.showInDesktopSidebar, false)
 })
 
 test('用户偏好接口只能使用当前登录身份，批量事务不会调用业务删除接口', () => {

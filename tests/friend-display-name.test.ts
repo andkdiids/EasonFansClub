@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { getFriendDisplayName } from '../lib/friend-remarks'
+import { getFriendDisplayName } from '../lib/friend-display-name'
 
 const read = (file: string) => readFileSync(file, 'utf8')
 
@@ -21,7 +21,7 @@ test('好友列表 DTO 保留公开 nickname，并返回 friendRemark/displayNam
   assert.match(route, /Profile\.displayName is a public profile field/)
   assert.match(types, /displayName: string/)
   assert.match(types, /friendRemark\?: string \| null/)
-  assert.match(dock, /const name = friend\.displayName \|\| friend\.nickname/)
+  assert.match(dock, /const name = getFriendDisplayName\(\{ nickname: friend\.nickname/)
 })
 
 test('备注保存事件会即时同步好友列表、分组、聊天和资料卡 state', () => {
@@ -58,10 +58,9 @@ test('通知和游戏邀请只在本地好友语境使用备注，房间/排行�
   const leaderboard = read('lib/guess-song-leaderboard.ts')
 
   assert.match(notifications, /actorName: actorDisplayName/)
-  assert.match(duel, /friend\.displayName\?\.trim\(\)/)
+  assert.match(duel, /getFriendDisplayName\(\{\n\s+nickname: friend\.nickname/)
   assert.match(privateRoomNames, /loadFriendRemarkMap/)
-  assert.match(duel, /hydratePrivateFriendDisplayNames/)
-  assert.match(duel, /getDuelDisplayName/)
+  assert.match(duel, /getDuelDisplayName = \(player: \{ name: string \}\) => player\.name/)
   assert.match(duelService, /name: getPublicUserDisplayName/)
   assert.doesNotMatch(duelService, /loadFriendRemarkMap|friendRemark/)
   assert.doesNotMatch(leaderboard, /loadFriendRemarkMap|resolveFriendDisplayName/)
@@ -69,11 +68,13 @@ test('通知和游戏邀请只在本地好友语境使用备注，房间/排行�
 
 test('备注查询按批量 map 加载，不对每个好友单独请求', () => {
   const helper = read('lib/friend-remarks.ts')
+  const displayHelper = read('lib/friend-display-name.ts')
   const list = read('app/api/friends/list/route.ts')
   const conversations = read('app/api/direct-conversations/route.ts')
   const privateRoomNames = read('app/api/friends/display-names/route.ts')
 
   assert.match(helper, /prisma\.friendRemark\.findMany/)
+  assert.match(displayHelper, /normalizeFriendRemark/)
   assert.match(helper, /friendId: \{ in: ids \}/)
   assert.match(list, /loadFriendRemarkMap\(user\.id, visibleFriendIds\)/)
   assert.match(conversations, /loadFriendRemarkMap\(user\.id, otherUserIds\)/)

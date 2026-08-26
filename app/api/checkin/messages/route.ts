@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { formatBeijingDate, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { getCheckInMessagesPage, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
 import { withDbTimeout } from '@/lib/db-timeout'
 import { getFriendFollowedIds, getFriendIds } from '@/lib/friends'
 import { unauthenticatedResponse } from '@/lib/security'
@@ -56,6 +57,7 @@ export async function GET(request: Request) {
         followedUserIds,
         page,
         pageSize,
+        friendContext: scope === 'friends',
       }),
     )
 

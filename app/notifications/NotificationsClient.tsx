@@ -17,6 +17,7 @@ import { parseNotificationCategory, type NotificationCategory, type UnifiedNotif
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
 import type { FriendDockUser } from '@/lib/friend-types'
+import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
@@ -118,11 +119,17 @@ function getInitial(uid?: number | null) {
   return uid ? String(uid).padStart(5, '0').slice(0, 1) : 'E'
 }
 
+function replaceNotificationActorPrefix(value: string | null, previousName: string | null, nextName: string) {
+  if (!value || !previousName || previousName === nextName || !value.startsWith(previousName)) return value
+  return `${nextName}${value.slice(previousName.length)}`
+}
+
 function getNotificationActorCardFriend(item: UnifiedNotification): FriendDockUser | null {
   if (item.actorProfile) return item.actorProfile
-  if (!item.actorUnavailable || item.actorUid === null) return null
-  // Keep a deleted/disabled actor as a safe placeholder so the shared card
-  // can explain the state without exposing internal account fields.
+  if (item.actorUid === null) return null
+  // Keep a safe placeholder for deleted/disabled actors and for a rare
+  // hydration miss.  The latter can be replaced by the authenticated friend
+  // search request while the shared card remains open.
   const createdAt = item.createdAt instanceof Date ? item.createdAt.toISOString() : new Date(item.createdAt).toISOString()
   return {
     id: `notification-actor:${item.actorUid}`,
@@ -152,6 +159,15 @@ type NotificationReadResponse = {
     isRead: boolean
     readAt: string | null
   }
+}
+
+type SelectedActor = {
+  key: string
+  item: UnifiedNotification
+  friend: FriendDockUser
+  unavailable: boolean
+  loading: boolean
+  error: string | null
 }
 
 // 通过 NotificationProvider 即时递减共享未读数，随后用服务端汇总校正为权威值。
@@ -301,7 +317,12 @@ export function NotificationsClient({
   const [loadError, setLoadError] = useState(initialLoadError || '')
   const [loadWarning, setLoadWarning] = useState(initialLoadWarning || '')
   const [selectedSystemNotification, setSelectedSystemNotification] = useState<UnifiedNotification | null>(null)
-  const [selectedActor, setSelectedActor] = useState<{ friend: FriendDockUser; unavailable: boolean } | null>(null)
+  const [selectedActor, setSelectedActor] = useState<SelectedActor | null>(null)
+  const actorProfileRequestRef = useRef<{ key: string; controller: AbortController } | null>(null)
+
+  useEffect(() => () => {
+    actorProfileRequestRef.current?.controller.abort()
+  }, [])
 
   const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[], nextPagination?: NotificationPagination) => {
     const merged = filterDismissedSystemNotifications(serverNotifications).map((item) => {
@@ -426,6 +447,42 @@ export function NotificationsClient({
       window.removeEventListener('realtime:event', onRealtimeEvent)
       document.removeEventListener('visibilitychange', sync)
     }
+  }, [refreshNotifications])
+
+  useEffect(() => {
+    const updateRemark = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null }>).detail
+      if (!detail?.targetUserId) return
+      const friendRemark = normalizeFriendRemark(detail.remark)
+      setNotifications((current) => current.map((item) => {
+        const actorProfile = item.actorProfile
+        if (!actorProfile || actorProfile.id !== detail.targetUserId) return item
+        const nextName = getFriendDisplayName({
+          nickname: actorProfile.nickname,
+          friendRemark,
+          isFriendContext: actorProfile.relationshipStatus === 'FRIEND',
+        })
+        return {
+          ...item,
+          actorName: nextName,
+          title: replaceNotificationActorPrefix(item.title, item.actorName, nextName) || item.title,
+          content: replaceNotificationActorPrefix(item.content, item.actorName, nextName),
+          actorProfile: { ...actorProfile, friendRemark, displayName: nextName },
+        }
+      }))
+      setSelectedActor((current) => {
+        if (!current || current.friend.id !== detail.targetUserId) return current
+        const nextName = getFriendDisplayName({
+          nickname: current.friend.nickname,
+          friendRemark,
+          isFriendContext: current.friend.relationshipStatus === 'FRIEND',
+        })
+        return { ...current, friend: { ...current.friend, friendRemark, displayName: nextName } }
+      })
+      void refreshNotifications()
+    }
+    window.addEventListener('friend-remark:updated', updateRemark)
+    return () => window.removeEventListener('friend-remark:updated', updateRemark)
   }, [refreshNotifications])
 
   useEffect(() => () => {
@@ -797,6 +854,39 @@ export function NotificationsClient({
     }
   }
 
+  function closeActorProfile() {
+    actorProfileRequestRef.current?.controller.abort()
+    actorProfileRequestRef.current = null
+    setSelectedActor(null)
+  }
+
+  async function loadNotificationActorProfile(item: UnifiedNotification, key: string) {
+    if (item.actorUid === null) return
+    actorProfileRequestRef.current?.controller.abort()
+    const controller = new AbortController()
+    actorProfileRequestRef.current = { key, controller }
+    setSelectedActor((current) => current?.key === key ? { ...current, loading: true, error: null } : current)
+    try {
+      const response = await fetch(`/api/friends/list?q=${encodeURIComponent(String(item.actorUid))}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      const data = await response.json().catch(() => null) as { results?: FriendDockUser[] } | null
+      const friend = data?.results?.find((candidate) => candidate.uid === item.actorUid) || null
+      if (!response.ok || !friend) throw new Error('actor profile unavailable')
+      setSelectedActor((current) => current?.key === key
+        ? { ...current, friend, unavailable: false, loading: false, error: null }
+        : current)
+    } catch {
+      if (controller.signal.aborted) return
+      setSelectedActor((current) => current?.key === key
+        ? { ...current, loading: false, error: '用户资料加载失败，请重试' }
+        : current)
+    } finally {
+      if (actorProfileRequestRef.current?.controller === controller) actorProfileRequestRef.current = null
+    }
+  }
+
   function renderNotification(item: UnifiedNotification) {
     const itemKey = `${item.source}:${item.id}`
     const category = (item.category || 'system') as NotificationCategory
@@ -864,7 +954,18 @@ export function NotificationsClient({
                   event.preventDefault()
                   event.stopPropagation()
                   void markRead(item)
-                  setSelectedActor({ friend: actorCardFriend, unavailable: item.actorUnavailable })
+                  actorProfileRequestRef.current?.controller.abort()
+                  actorProfileRequestRef.current = null
+                  const needsProfileLoad = !item.actorProfile && !item.actorUnavailable
+                  setSelectedActor({
+                    key: itemKey,
+                    item,
+                    friend: actorCardFriend,
+                    unavailable: item.actorUnavailable,
+                    loading: needsProfileLoad,
+                    error: null,
+                  })
+                  if (needsProfileLoad) void loadNotificationActorProfile(item, itemKey)
                 }}
                 onKeyDown={(event) => event.stopPropagation()}
               >
@@ -1116,14 +1217,26 @@ export function NotificationsClient({
         />
       ) : null}
       {selectedActor ? <FriendProfileCard
+        key={selectedActor.friend.id}
         friend={selectedActor.friend}
         unavailableMessage={selectedActor.unavailable ? '该用户已不存在' : undefined}
+        loading={selectedActor.loading}
+        error={selectedActor.error}
+        onRetry={() => void loadNotificationActorProfile(selectedActor.item, selectedActor.key)}
         showMessage={selectedActor.friend.relationshipStatus === 'FRIEND'}
-        onClose={() => setSelectedActor(null)}
-        onNavigate={() => setSelectedActor(null)}
+        onRelationshipChange={(status) => setSelectedActor((current) => current ? {
+          ...current,
+          friend: {
+            ...current.friend,
+            relationshipStatus: status,
+            requestId: status === 'INCOMING_PENDING' ? current.friend.requestId : null,
+          },
+        } : current)}
+        onClose={closeActorProfile}
+        onNavigate={closeActorProfile}
         onMessage={() => {
           const friend = selectedActor.friend
-          setSelectedActor(null)
+          closeActorProfile()
           window.dispatchEvent(new CustomEvent('friend-dock:open', { detail: { action: 'chat', friend } }))
         }}
       /> : null}

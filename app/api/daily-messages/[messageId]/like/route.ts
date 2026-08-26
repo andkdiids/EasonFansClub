@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { formatBeijingDate } from '@/lib/checkin'
-import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
@@ -33,12 +33,19 @@ type LikerRow = {
   }
 }
 
-function serializeLiker(row: LikerRow, equippedBadgeMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView>) {
+function serializeLiker(
+  row: LikerRow,
+  equippedBadgeMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView>,
+  friendRemarkMap: ReadonlyMap<string, string>,
+) {
   const nickname = getPublicUserDisplayName(row.User)
+  const friendRemark = friendRemarkMap.get(row.User.id) || null
   return {
+    id: row.User.id,
     uid: row.User.uid,
     nickname,
-    displayName: nickname,
+    friendRemark,
+    displayName: getFriendDisplayName({ nickname, friendRemark, isFriendContext: Boolean(friendRemark) }),
     avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
     equippedBadge: equippedBadgeMap.get(row.User.id) || null,
   }
@@ -61,8 +68,12 @@ export async function GET(_request: Request, context: RouteContext) {
     take: 50,
     select: { User: { select: likerUserSelect } },
   })
-  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
-  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, equippedBadgeMap)) })
+  const likerIds = likes.map((like) => like.User.id)
+  const [equippedBadgeMap, friendRemarkMap] = await Promise.all([
+    getEquippedBadgesForUsers(likerIds),
+    loadFriendRemarkMap(guard.user.id, likerIds),
+  ])
+  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, equippedBadgeMap, friendRemarkMap)) })
 }
 
 export async function POST(_request: Request, context: RouteContext) {

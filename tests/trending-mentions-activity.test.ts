@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 const navigation = read('components/layout/navigation.ts')
 const mobileNavigation = read('components/layout/MobileNavigation.tsx')
+const navigationRegistry = read('lib/navigation-registry.ts')
 const rankings = read('app/rankings/page.tsx')
 const gameLeaderboardPage = read('app/entertainment/guess-song/leaderboard/page.tsx')
 const gameLeaderboardApi = read('app/api/entertainment/guess-song/leaderboard/route.ts')
@@ -23,8 +24,7 @@ const schema = read('prisma/schema.prisma')
 test('普通排行榜从桌面和移动入口移除并由热门帖子替代', () => {
   assert.doesNotMatch(navigation, /href: '\/rankings'/)
   assert.doesNotMatch(mobileNavigation, /href: '\/rankings'/)
-  assert.match(navigation, /href: '\/trending', label: '热门帖子'/)
-  assert.match(mobileNavigation, /href: '\/trending', label: '热门帖子'/)
+  assert.match(navigationRegistry, /featureKey: 'TRENDING_POSTS'[\s\S]*label: '热门帖子', href: '\/trending'/)
 })
 
 test('普通排行榜仅管理员可调试且普通用户重定向到 E院中心', () => {
@@ -80,8 +80,7 @@ test('热门卡片只负责跳转并展示摘要、作者、板块、指标和�
 })
 
 test('活动入口统一命名且 Hero 不再链接生日专题', () => {
-  assert.match(navigation, /href: '\/activities', label: '活动中心'/)
-  assert.match(mobileNavigation, /href: '\/activities', label: '活动中心'/)
+  assert.match(navigationRegistry, /featureKey: 'ACTIVITY_CENTER'[\s\S]*label: '活动中心', href: '\/activities'/)
   assert.doesNotMatch(activities, /生日应援专题|href="\/birthday"/)
   assert.match(birthday, /redirect\('\/activities'\)/)
 })

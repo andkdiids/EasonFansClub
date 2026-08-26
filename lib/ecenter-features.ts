@@ -1,49 +1,23 @@
-import type { IconName } from '@/components/UiIcon'
 import { prisma } from '@/lib/prisma'
+import {
+  NAVIGATION_REGISTRY,
+  type NavigationFeatureKey,
+  type NavigationRegistryItem,
+} from '@/lib/navigation-registry'
+
+export { NAVIGATION_REGISTRY }
 
 /**
  * The E院中心 registry is the only source of fixed feature metadata.
  * Database rows may override order and visibility only; they never provide
  * routes, icons, labels, or permissions.
  */
-export const ECENTER_FEATURES = [
-  { featureKey: 'CREATE_POST', label: '发布帖子', href: '/posts/new', icon: 'forum', title: '发布帖子', defaultSortOrder: 1, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/posts/new'] },
-  { featureKey: 'CHECKIN', label: '每日挂号', href: '/checkin', icon: 'check', title: '每日挂号', defaultSortOrder: 2, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/checkin'] },
-  { featureKey: 'DAILY_PRESCRIPTION', label: '每日处方', href: '/games/daily-prescription', icon: 'pill', title: '每日处方', defaultSortOrder: 3, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/games/daily-prescription'] },
-  { featureKey: 'ENTERTAINMENT', label: '娱乐天空', href: '/games', icon: 'star', title: '娱乐天空', defaultSortOrder: 4, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/games', '/entertainment'] },
-  { featureKey: 'CLINIC', label: '阿士匹灵门诊部', href: '/clinic', icon: 'stethoscope', title: '阿士匹灵门诊部', defaultSortOrder: 5, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/clinic'] },
-  { featureKey: 'RATINGS', label: '歌·颂', href: '/ratings', icon: 'chart', title: '歌·颂', defaultSortOrder: 6, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/ratings'] },
-  { featureKey: 'ACTIVITY_CENTER', label: '活动中心', href: '/activities', icon: 'calendar', title: '活动中心', defaultSortOrder: 7, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/activities'] },
-  { featureKey: 'TODAY', label: '今日', href: '/today', icon: 'archive', title: '历史上的今天', defaultSortOrder: 8, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/today'] },
-  { featureKey: 'BADGE_MUSEUM', label: '勋章展览馆', href: '/badges', icon: 'archive', title: 'E院勋章展览馆', defaultSortOrder: 9, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/badges'] },
-  { featureKey: 'MATERIAL_REDEMPTIONS', label: '还有什么可以送给你', href: '/material-redemptions', icon: 'gift', title: '还有什么可以送给你', defaultSortOrder: 10, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/material-redemptions'] },
-  { featureKey: 'STICKERS', label: '表情包商店', href: '/stickers', icon: 'sticker', title: '表情包商店', defaultSortOrder: 10, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/stickers', '/profile/stickers'] },
-  { featureKey: 'NOTIFICATIONS', label: '通知中心', href: '/notifications', icon: 'bell', title: '通知中心', defaultSortOrder: 11, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, showsUnread: true, activePrefixes: ['/notifications'] },
-  { featureKey: 'FRIEND_ACTIVITY', label: '好友动态', href: '/friends/activity', icon: 'friends', title: '好友动态', defaultSortOrder: 12, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/friends'] },
-  { featureKey: 'TRENDING_POSTS', label: '热门帖子', href: '/trending', icon: 'chart', title: '热门帖子', defaultSortOrder: 13, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, activePrefixes: ['/trending'] },
-  { featureKey: 'FEEDBACK', label: '反馈与更新', href: '/feedback', icon: 'feedback', title: '反馈与更新', defaultSortOrder: 14, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: true, activePrefixes: ['/feedback'] },
-  { featureKey: 'ADMIN', label: '后台管理', href: '/admin', icon: 'settings', title: '后台管理', defaultSortOrder: 15, defaultEnabled: true, isManageable: true, showInCenter: true, showInQuickNavigation: false, requiresAdmin: true, activePrefixes: ['/admin'] },
-] as const satisfies readonly EcenterFeatureDefinition[]
+export const ECENTER_FEATURES = NAVIGATION_REGISTRY
 
-export type EcenterFeatureDefinition = {
-  featureKey: string
-  label: string
-  href: string
-  icon: EcenterFeatureIcon
-  title: string
-  defaultSortOrder: number
-  defaultEnabled: boolean
-  isManageable: boolean
-  showInCenter: boolean
-  showInQuickNavigation: boolean
-  activePrefixes: readonly string[]
-  showsUnread?: boolean
-  requiresAdmin?: boolean
-}
+export type EcenterFeatureDefinition = NavigationRegistryItem
+export type EcenterFeatureIcon = NavigationRegistryItem['icon']
 
-export type EcenterFeatureIcon = Exclude<IconName, 'search' | 'edit' | 'grid' | 'menu' | 'arrow-up' | 'logout'>
-
-export type EcenterFeatureKey = (typeof ECENTER_FEATURES)[number]['featureKey']
+export type EcenterFeatureKey = NavigationFeatureKey
 
 export type EcenterFeatureItem = {
   featureKey: EcenterFeatureKey
@@ -58,6 +32,11 @@ export type EcenterFeatureItem = {
   isManageable: boolean
   showInCenter: boolean
   showInQuickNavigation: boolean
+  showInDesktopSidebar: boolean
+  sidebarSection: NavigationRegistryItem['sidebarSection']
+  mobile?: boolean
+  editable: boolean
+  hideable: boolean
   activePrefixes: readonly string[]
   showsUnread: boolean
   requiresAdmin: boolean
@@ -102,6 +81,7 @@ export function mergeFeatureRegistryWithSettings(
   return stableSort(registry.map((definition) => {
     const override = overrideByKey.get(definition.featureKey)
     return {
+      ...definition,
       featureKey: definition.featureKey,
       label: definition.label,
       href: definition.href,
@@ -114,7 +94,11 @@ export function mergeFeatureRegistryWithSettings(
       isManageable: definition.isManageable,
       showInCenter: definition.showInCenter,
       showInQuickNavigation: definition.showInQuickNavigation,
-      activePrefixes: definition.activePrefixes,
+      showInDesktopSidebar: definition.showInDesktopSidebar,
+      sidebarSection: definition.sidebarSection,
+      mobile: definition.mobile,
+      editable: definition.editable,
+      hideable: definition.hideable,
       showsUnread: 'showsUnread' in definition && definition.showsUnread === true,
       requiresAdmin: 'requiresAdmin' in definition && definition.requiresAdmin === true,
       hidden: false,
@@ -129,6 +113,19 @@ export function mergeEcenterFeatureSettings(overrides: readonly EcenterFeatureOv
 export function filterEcenterFeaturesForUser(features: readonly EcenterFeatureItem[], canAccessAdmin: boolean) {
   return features.filter((feature) => (
     feature.showInCenter
+    && feature.isEnabled
+    && (!feature.requiresAdmin || canAccessAdmin)
+  ))
+}
+
+/**
+ * The editor needs the union of the desktop sidebar and E院中心 entries.
+ * Entries that only belong to E院中心 remain available for the mobile
+ * surface, while desktop-only entries are no longer invisible to the editor.
+ */
+export function filterEcenterFeaturesForEditor(features: readonly EcenterFeatureItem[], canAccessAdmin: boolean) {
+  return features.filter((feature) => (
+    (feature.showInCenter || feature.showInDesktopSidebar)
     && feature.isEnabled
     && (!feature.requiresAdmin || canAccessAdmin)
   ))
@@ -154,7 +151,9 @@ export function applyEcenterShortcutPreferences(
   return ordered.map((feature, index) => ({
     ...feature,
     sortOrder: index,
-    hidden: preferenceByKey.get(feature.featureKey)?.hidden ?? feature.hidden,
+    hidden: feature.hideable
+      ? (preferenceByKey.get(feature.featureKey)?.hidden ?? feature.hidden)
+      : false,
   }))
 }
 
@@ -168,9 +167,11 @@ export function reorderEcenterFeatures(
   features: readonly EcenterFeatureItem[],
   featureKey: string,
   targetIndex: number,
+  options: Readonly<{ include?: (feature: EcenterFeatureItem) => boolean }> = {},
 ) {
   const ordered = stableSort([...features])
-  const visible = ordered.filter((feature) => !feature.hidden)
+  const include = options.include || (() => true)
+  const visible = ordered.filter((feature) => !feature.hidden && include(feature))
   const currentIndex = visible.findIndex((feature) => feature.featureKey === featureKey)
   if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visible.length || currentIndex === targetIndex) {
     return normalizeEcenterFeatureOrder(ordered)
@@ -180,7 +181,9 @@ export function reorderEcenterFeatures(
   const [moved] = nextVisible.splice(currentIndex, 1)
   nextVisible.splice(targetIndex, 0, moved)
   let visibleIndex = 0
-  const next = ordered.map((feature) => feature.hidden ? feature : nextVisible[visibleIndex++])
+  const next = ordered.map((feature) => (
+    feature.hidden || !include(feature) ? feature : nextVisible[visibleIndex++]
+  ))
   return normalizeEcenterFeatureOrder(next)
 }
 
@@ -191,7 +194,7 @@ export function setEcenterFeatureHidden(
   hidden: boolean,
 ) {
   return normalizeEcenterFeatureOrder(stableSort([...features]).map((feature) => (
-    feature.featureKey === featureKey ? { ...feature, hidden } : feature
+    feature.featureKey === featureKey ? { ...feature, hidden: feature.hideable ? hidden : false } : feature
   )))
 }
 
@@ -214,11 +217,12 @@ export function validateEcenterShortcutPreferences(
     const row = item as Record<string, unknown>
     const itemKey = typeof row.itemKey === 'string' ? row.itemKey : ''
     const definition = registryByKey.get(itemKey)
-    if (!definition || !definition.isManageable || seen.has(itemKey)) return { error: '包含未知、重复或不可管理的 E院中心功能入口' }
+    if (!definition || !definition.editable || seen.has(itemKey)) return { error: '包含未知、重复或不可管理的 E院中心功能入口' }
     if (!Number.isSafeInteger(row.sortOrder) || Number(row.sortOrder) < 0 || Number(row.sortOrder) > 100000) {
       return { error: '入口排序必须是 0 至 100000 的整数' }
     }
     if (typeof row.hidden !== 'boolean') return { error: '入口隐藏状态格式不正确' }
+    if (!definition.hideable && row.hidden === true) return { error: '固定入口不允许隐藏' }
     seen.add(itemKey)
     preferences.push({ itemKey, sortOrder: Number(row.sortOrder), hidden: row.hidden })
   }
@@ -279,12 +283,12 @@ async function readUserShortcutPreferences(userId: string): Promise<EcenterShort
 }
 
 export async function getEcenterFeatureEditorState(userId: string, canAccessAdmin: boolean) {
-  const systemFeatures = filterEcenterFeaturesForUser(mergeEcenterFeatureSettings(await readOverrides()), canAccessAdmin)
+  const systemFeatures = filterEcenterFeaturesForEditor(mergeEcenterFeatureSettings(await readOverrides()), canAccessAdmin)
   return applyEcenterShortcutPreferences(systemFeatures, await readUserShortcutPreferences(userId))
 }
 
 export async function getEcenterFeaturesForUser(canAccessAdmin: boolean, userId?: string) {
-  if (!userId) return filterEcenterFeaturesForUser(mergeEcenterFeatureSettings(await readOverrides()), canAccessAdmin)
+  if (!userId) return filterEcenterFeaturesForEditor(mergeEcenterFeatureSettings(await readOverrides()), canAccessAdmin)
   const features = await getEcenterFeatureEditorState(userId, canAccessAdmin)
   return features.filter((feature) => !feature.hidden)
 }

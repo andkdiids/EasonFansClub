@@ -10,9 +10,9 @@ import { EcenterEditButton, EcenterShortcutEditorPanel } from './EcenterShortcut
 import { UserProfileSummary, type AppShellGrowth } from '@/components/UserProfileSummary'
 import type { SessionShellUser } from '@/lib/auth'
 import type { EcenterFeatureItem } from '@/lib/ecenter-features'
-import { isAppNavigationActive, primaryNavigation, type AppNavigationItem } from './navigation'
+import { isAppNavigationActive, type AppNavigationItem } from './navigation'
 
-type NavLeafItem = Pick<AppNavigationItem, 'href' | 'label' | 'icon' | 'activePrefixes' | 'showsUnread'>
+type NavLeafItem = Pick<AppNavigationItem, 'href' | 'label' | 'icon' | 'activePrefixes' | 'showsUnread'> & { featureKey: string }
 type NavLeafProps = { item: NavLeafItem; pathname: string; unreadCount: number }
 
 function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
@@ -63,12 +63,22 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ec
 
   function navigation(items: readonly NavLeafItem[], label: string) {
     return <nav className="sidebar-nav" aria-label={label}>{items.map((item) => (
-      <NavLeaf key={`${label}-${item.label}`} item={item} pathname={pathname} unreadCount={unreadCount} />
+      <NavLeaf key={item.featureKey} item={item} pathname={pathname} unreadCount={unreadCount} />
     ))}</nav>
   }
 
-  const fallbackQuickNavigation = ecenterFeatures.filter((item) => !item.hidden && item.showInQuickNavigation)
-  const quickNavigation = userFeatures.length > 0 ? userFeatures.filter((item) => !item.hidden && item.showInQuickNavigation) : fallbackQuickNavigation
+  const resolvedFeatures = userFeatures.length > 0 ? userFeatures : ecenterFeatures
+  const visibleFeatures = resolvedFeatures.filter((item) => (
+    !item.hidden
+    && item.isEnabled
+    && (!item.requiresAdmin || canAccessAdmin)
+  ))
+  const primaryNavigation = visibleFeatures.filter((item) => (
+    item.showInDesktopSidebar && item.sidebarSection === 'primary'
+  ))
+  const quickNavigation = visibleFeatures.filter((item) => (
+    item.showInDesktopSidebar && item.sidebarSection === 'quick' && item.showInQuickNavigation
+  ))
 
   return <>
     <aside className="app-sidebar">
@@ -80,7 +90,6 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ec
           <EcenterEditButton onClick={() => setEcenterEditing(true)}>编辑</EcenterEditButton>
         </div> : null}
         {!ecenterEditing ? navigation(quickNavigation, '快捷入口') : null}
-        {canAccessAdmin ? <nav className="sidebar-nav sidebar-admin-nav" aria-label="管理入口"><Link href="/admin" aria-current={pathname.startsWith('/admin') ? 'page' : undefined}><UiIcon name="settings" /><span>后台管理</span></Link></nav> : null}
       </div>
       <div ref={menuRootRef} className="sidebar-user">
       {menuOpen ? <div className="sidebar-user-menu" role="menu">

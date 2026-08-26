@@ -30,7 +30,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
   const fallbackMenuItems = ecenterFeatures.filter((item) => !item.hidden && item.showInCenter && (!item.requiresAdmin || canAccessAdmin))
   const menuItems = userFeatures.length > 0 ? userFeatures.filter((item) => !item.hidden && item.showInCenter && (!item.requiresAdmin || canAccessAdmin)) : fallbackMenuItems
   const centerActive = menuItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
-  const renderItem = (item: (typeof items)[number]) => <Link key={item.href} href={item.href} aria-current={isAppNavigationActive(pathname, item) ? 'page' : undefined} className={item.showsUnread ? 'mobile-notifications' : undefined}>
+  const renderItem = (item: (typeof items)[number]) => <Link key={item.featureKey} href={item.href} aria-current={isAppNavigationActive(pathname, item) ? 'page' : undefined} className={item.showsUnread ? 'mobile-notifications' : undefined}>
     <UiIcon name={item.icon} />{item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}<span>{item.label}</span>
   </Link>
 

@@ -28,13 +28,14 @@ test('备注 API 只允许有效好友本人修改，空值删除备注', () => 
 })
 
 test('显示名解析按 viewer 读取备注，profile context 保留公开昵称', () => {
-  const resolver = read('lib/friend-remarks.ts')
+  const resolver = read('lib/friend-display-name.ts')
+  const remarkResolver = read('lib/friend-remarks.ts')
   const profilePage = read('app/user/[uid]/page.tsx')
 
   assert.match(resolver, /export function getFriendDisplayName\(/)
-  assert.match(resolver, /context !== 'profile'/)
-  assert.match(resolver, /loadFriendRemarkMap/)
-  assert.match(resolver, /user\.nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
+  assert.match(remarkResolver, /context !== 'profile'/)
+  assert.match(remarkResolver, /loadFriendRemarkMap/)
+  assert.match(resolver, /nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
   assert.match(profilePage, /const name = getPublicUserDisplayName\(user\)/)
   assert.match(profilePage, /FriendRemarkEditor targetUserId=\{user\.id\}/)
 })

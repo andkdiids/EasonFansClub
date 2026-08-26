@@ -1,22 +1,19 @@
 import { prisma } from '@/lib/prisma'
 import type { LikeAvatarUser } from '@/components/LikeAvatars'
-import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { planFriendCheckInMessagePage } from '@/lib/checkin-message-order'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
+
+export { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessagePageSize } from '@/lib/checkin-pagination'
 
 export type CheckInMessageSort = 'latest' | 'hot'
 
 type CheckInMessagesResult = Awaited<ReturnType<typeof getCheckInMessagesUncached>>
 export type CheckInMessageItem = CheckInMessagesResult[number]
-export const CHECK_IN_MESSAGE_PAGE_SIZE = 5
-export const CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE = 7
 const publicDailyMessageStatuses: Array<'APPROVED' | 'VIOLATION'> = ['APPROVED', 'VIOLATION']
-
-export function getCheckInMessagePageSize(isDesktop: boolean) {
-  return isDesktop ? CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE : CHECK_IN_MESSAGE_PAGE_SIZE
-}
 export type CheckInMessagePagination = {
   page: number
   pageSize: number
@@ -33,6 +30,70 @@ export type CheckInNotificationTarget = {
   messageId: string | null
   commentId: string | null
   date: Date | null
+  status: CheckInNotificationTargetStatus
+}
+
+/**
+ * The notification center and the check-in page need to distinguish a target
+ * that is missing from one that exists but is no longer visible.  Keeping the
+ * result explicit prevents a valid reply from being reported as a generic
+ * "no permission" error when it simply lives outside the current list page.
+ */
+export type CheckInNotificationTargetStatus = 'FOUND' | 'DELETED' | 'NOT_FOUND' | 'FORBIDDEN'
+export type CheckInNotificationResolutionStatus = CheckInNotificationTargetStatus | 'LOAD_FAILED'
+
+const checkInNotificationMessageSelect = {
+  id: true,
+  date: true,
+  isDeleted: true,
+  moderationStatus: true,
+  userId: true,
+  User: {
+    select: {
+      status: true,
+      isDeleted: true,
+      Profile: { select: { id: true } },
+    },
+  },
+} as const
+
+type CheckInNotificationMessage = {
+  id: string
+  date: Date
+  isDeleted: boolean
+  moderationStatus: string
+  userId: string
+  User: { status: string; isDeleted: boolean; Profile: { id: string } | null }
+}
+
+function isActiveCheckInUser(user: CheckInNotificationMessage['User']) {
+  return user.status === 'ACTIVE' && !user.isDeleted
+}
+
+function isPublicCheckInMessage(message: CheckInNotificationMessage) {
+  return !message.isDeleted
+    && publicDailyMessageStatuses.includes(message.moderationStatus as 'APPROVED' | 'VIOLATION')
+    && isActiveCheckInUser(message.User)
+    && Boolean(message.User.Profile)
+}
+
+function canViewCheckInNotificationMessage(
+  message: CheckInNotificationMessage,
+  viewerId?: string,
+  viewerCanModerate = false,
+) {
+  if (isPublicCheckInMessage(message)) return true
+  if (viewerCanModerate && !message.isDeleted && isActiveCheckInUser(message.User)) return true
+  return Boolean(viewerId && message.userId === viewerId && !message.isDeleted && isActiveCheckInUser(message.User))
+}
+
+function getCheckInNotificationMessageStatus(
+  message: CheckInNotificationMessage,
+  viewerId?: string,
+  viewerCanModerate = false,
+): CheckInNotificationTargetStatus {
+  if (message.isDeleted) return 'DELETED'
+  return canViewCheckInNotificationMessage(message, viewerId, viewerCanModerate) ? 'FOUND' : 'FORBIDDEN'
 }
 
 /**
@@ -44,28 +105,53 @@ export type CheckInNotificationTarget = {
 export async function resolveCheckInNotificationTarget({
   messageId,
   commentId,
+  viewerId,
+  viewerCanModerate = false,
 }: {
   messageId?: string | null
   commentId?: string | null
+  viewerId?: string | null
+  viewerCanModerate?: boolean
 }): Promise<CheckInNotificationTarget> {
   const safeMessageId = messageId?.trim() || null
   const safeCommentId = commentId?.trim() || null
-  if (!safeMessageId && !safeCommentId) return { messageId: null, commentId: null, date: null }
+  if (!safeMessageId && !safeCommentId) return { messageId: null, commentId: null, date: null, status: 'NOT_FOUND' }
 
   const comment = safeCommentId
     ? await prisma.dailyMessageComment.findUnique({
         where: { id: safeCommentId },
-        select: { messageId: true, DailyMessage: { select: { date: true } } },
+        select: {
+          id: true,
+          messageId: true,
+          isDeleted: true,
+          DailyMessage: { select: checkInNotificationMessageSelect },
+        },
       })
     : null
   if (comment) {
-    return { messageId: comment.messageId, commentId: safeCommentId, date: comment.DailyMessage.date }
+    return {
+      messageId: comment.messageId,
+      commentId: safeCommentId,
+      date: comment.DailyMessage.date,
+      status: comment.isDeleted
+        ? 'DELETED'
+        : getCheckInNotificationMessageStatus(comment.DailyMessage, viewerId || undefined, viewerCanModerate),
+    }
   }
 
   const message = safeMessageId
-    ? await prisma.dailyMessage.findUnique({ where: { id: safeMessageId }, select: { date: true } })
+    ? await prisma.dailyMessage.findUnique({ where: { id: safeMessageId }, select: checkInNotificationMessageSelect })
     : null
-  return { messageId: safeMessageId, commentId: safeCommentId, date: message?.date || null }
+  return {
+    messageId: message?.id || safeMessageId,
+    commentId: safeCommentId,
+    date: message?.date || null,
+    status: safeCommentId
+      ? 'NOT_FOUND'
+      : message
+        ? getCheckInNotificationMessageStatus(message, viewerId || undefined, viewerCanModerate)
+        : 'NOT_FOUND',
+  }
 }
 
 export type AnonymousCheckInMessageItem = {
@@ -176,6 +262,46 @@ function buildCheckInMessagesWhere({
   }
 }
 
+/**
+ * A notification target is not a list query.  It must be loadable even when
+ * the message is outside the current page, and the author must still be able
+ * to open their own valid message from a notification.  Keep this narrower
+ * than the normal feed query so the relaxed owner/moderator branches are only
+ * reachable when an exact durable message ID was supplied.
+ */
+function buildFocusedCheckInMessageWhere({
+  messageId,
+  selectedDate,
+  nextDate,
+  viewerId,
+  viewerCanModerate,
+}: {
+  messageId: string
+  selectedDate: Date
+  nextDate: Date
+  viewerId: string
+  viewerCanModerate: boolean
+}) {
+  const activeUser = { status: 'ACTIVE' as const, isDeleted: false }
+  return {
+    id: messageId,
+    date: { gte: selectedDate, lt: nextDate },
+    OR: [
+      {
+        isDeleted: false,
+        moderationStatus: { in: publicDailyMessageStatuses },
+        User: { ...activeUser, Profile: { isNot: null } },
+      },
+      {
+        isDeleted: false,
+        userId: viewerId,
+        User: activeUser,
+      },
+      ...(viewerCanModerate ? [{ isDeleted: false, User: activeUser }] : []),
+    ],
+  }
+}
+
 function getCheckInMessagesOrderBy(sort: CheckInMessageSort) {
   return sort === 'hot'
     ? [
@@ -210,6 +336,7 @@ export async function getCheckInMessages({
   pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
   skip,
   take,
+  friendContext = false,
 }: {
   selectedDate: Date
   nextDate: Date
@@ -222,6 +349,8 @@ export async function getCheckInMessages({
   pageSize?: number
   skip?: number
   take?: number
+  /** True only for the authenticated viewer's private friend feed. */
+  friendContext?: boolean
 }): Promise<CheckInMessagesResult> {
   const safePage = Math.max(1, Math.trunc(page) || 1)
   const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || CHECK_IN_MESSAGE_PAGE_SIZE))
@@ -236,6 +365,7 @@ export async function getCheckInMessages({
     sort,
     viewerId,
     viewerCanModerate ? 'moderator' : 'member',
+    friendContext ? 'friend' : 'public',
     userScope,
     orderByCreatedAtDesc ? 'createdAt' : 'display',
     safeSkip,
@@ -255,6 +385,7 @@ export async function getCheckInMessages({
     orderByCreatedAtDesc,
     skip: safeSkip,
     take: safeTake,
+    friendContext,
   }).catch((error) => {
     checkInMessagesCache.delete(cacheKey)
     throw error
@@ -274,6 +405,7 @@ export async function getCheckInMessagesPage({
   followedUserIds,
   page = 1,
   pageSize = CHECK_IN_MESSAGE_PAGE_SIZE,
+  friendContext = false,
 }: {
   selectedDate: Date
   nextDate: Date
@@ -287,6 +419,7 @@ export async function getCheckInMessagesPage({
   followedUserIds?: string[]
   page?: number
   pageSize?: number
+  friendContext?: boolean
 }): Promise<CheckInMessagesPage> {
   const safePageSize = Math.min(50, Math.max(1, Math.trunc(pageSize) || CHECK_IN_MESSAGE_PAGE_SIZE))
   const safeRequestedPage = Math.max(1, Math.trunc(page) || 1)
@@ -307,6 +440,7 @@ export async function getCheckInMessagesPage({
             orderByCreatedAtDesc: true,
             page: 1,
             pageSize: 1,
+            friendContext,
           })
         : Promise.resolve([] as CheckInMessageItem[]),
       followedFriendUserIds.length
@@ -345,6 +479,7 @@ export async function getCheckInMessagesPage({
         take,
         page: 1,
         pageSize: take,
+        friendContext,
       })
       messages.push(...rows)
     }
@@ -385,6 +520,7 @@ export async function getCheckInMessagesPage({
     userIds,
     page: safePage,
     pageSize: safePageSize,
+    friendContext,
   })
 
   return {
@@ -400,6 +536,7 @@ export async function getCheckInMessage({
   viewerId,
   viewerCanModerate = false,
   focusCommentId,
+  friendContext = false,
 }: {
   messageId: string
   selectedDate: Date
@@ -407,15 +544,18 @@ export async function getCheckInMessage({
   viewerId: string
   viewerCanModerate?: boolean
   focusCommentId?: string
+  friendContext?: boolean
 }): Promise<CheckInMessageItem | null> {
   const messages = await getCheckInMessagesUncached({
     messageId,
     focusCommentId,
+    focusedTarget: true,
     selectedDate,
     nextDate,
     sort: 'latest',
     viewerId,
     viewerCanModerate,
+    friendContext,
   })
   return messages[0] || null
 }
@@ -423,6 +563,7 @@ export async function getCheckInMessage({
 async function getCheckInMessagesUncached({
   messageId,
   focusCommentId,
+  focusedTarget = false,
   selectedDate,
   nextDate,
   sort,
@@ -432,9 +573,11 @@ async function getCheckInMessagesUncached({
   orderByCreatedAtDesc,
   skip,
   take,
+  friendContext,
 }: {
   messageId?: string
   focusCommentId?: string
+  focusedTarget?: boolean
   selectedDate: Date
   nextDate: Date
   sort: CheckInMessageSort
@@ -444,11 +587,20 @@ async function getCheckInMessagesUncached({
   orderByCreatedAtDesc?: boolean
   skip?: number
   take?: number
+  friendContext: boolean
 }) {
   if (userIds && userIds.length === 0) return []
 
   const rows = await prisma.dailyMessage.findMany({
-    where: buildCheckInMessagesWhere({ messageId, selectedDate, nextDate, userIds }),
+    where: messageId && focusedTarget
+      ? buildFocusedCheckInMessageWhere({
+          messageId,
+          selectedDate,
+          nextDate,
+          viewerId,
+          viewerCanModerate,
+        })
+      : buildCheckInMessagesWhere({ messageId, selectedDate, nextDate, userIds }),
     orderBy: orderByCreatedAtDesc
       ? [{ createdAt: 'desc' as const }, { id: 'desc' as const }]
       : getCheckInMessagesOrderBy(sort),
@@ -554,7 +706,10 @@ async function getCheckInMessagesUncached({
     ...rowsWithFocus.flatMap((item) => item.DailyMessageLike.map((like) => like.userId)),
     ...rowsWithFocus.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
   ]
-  const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
+  const [equippedBadgeMap, friendRemarkMap] = await Promise.all([
+    getEquippedBadgesForUsers(displayNameUserIds),
+    friendContext ? loadFriendRemarkMap(viewerId, displayNameUserIds) : Promise.resolve(new Map<string, string>()),
+  ])
 
   return rowsWithFocus.map((item) => {
     const publicUser = {
@@ -585,7 +740,9 @@ async function getCheckInMessagesUncached({
         Profile: comment.User.Profile ? { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) } : comment.User.Profile,
       },
     }))
-    const authorName = getPublicUserDisplayName(item.User)
+    const authorNickname = getPublicUserDisplayName(item.User)
+    const authorRemark = friendRemarkMap.get(item.userId) || null
+    const authorName = getFriendDisplayName({ nickname: authorNickname, friendRemark: authorRemark, isFriendContext: friendContext })
     return {
       ...item,
       content: publicModerationText(item.content, item.moderationStatus),
@@ -594,13 +751,21 @@ async function getCheckInMessagesUncached({
       DailyMessageComment: publicComments,
       author: {
         ...publicUser,
-        profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl), displayName: authorName } : item.User.Profile,
+        friendRemark: authorRemark,
+        displayName: authorName,
+        profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl), displayName: item.User.Profile.displayName } : item.User.Profile,
       },
       likes: viewerLikeIdByMessage.has(item.id) ? [{ id: viewerLikeIdByMessage.get(item.id)! }] : [],
       likers: item.DailyMessageLike.map((like) => ({
+        id: like.User.id,
         uid: like.User.uid,
         nickname: getPublicUserDisplayName(like.User),
-            displayName: getPublicUserDisplayName(like.User),
+        friendRemark: friendRemarkMap.get(like.User.id) || null,
+        displayName: getFriendDisplayName({
+          nickname: getPublicUserDisplayName(like.User),
+          friendRemark: friendRemarkMap.get(like.User.id),
+          isFriendContext: friendContext,
+        }),
         avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl || null),
         equippedBadge: equippedBadgeMap.get(like.User.id) || null,
       })),
@@ -615,10 +780,16 @@ async function getCheckInMessagesUncached({
         content: publicModerationText(comment.content, comment.moderationStatus),
         author: {
           ...publicComments.find((candidate) => candidate.id === comment.id)!.User,
+          friendRemark: friendRemarkMap.get(comment.User.id) || null,
+          displayName: getFriendDisplayName({
+            nickname: getPublicUserDisplayName(comment.User),
+            friendRemark: friendRemarkMap.get(comment.User.id),
+            isFriendContext: friendContext,
+          }),
           profile: comment.User.Profile ? {
             ...comment.User.Profile,
             avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl),
-            displayName: getPublicUserDisplayName(comment.User),
+            displayName: comment.User.Profile.displayName,
           } : comment.User.Profile,
         },
         canDelete: viewerCanModerate || comment.User.id === viewerId,
@@ -632,17 +803,33 @@ async function getCheckInMessagesUncached({
 
 export type CheckInReplyStatus = 'visible' | 'deleted' | 'not-found' | 'unavailable'
 
-export async function getCheckInReplyStatus({ messageId, commentId }: { messageId: string; commentId: string }): Promise<CheckInReplyStatus> {
+export async function getCheckInReplyStatus({
+  messageId,
+  commentId,
+  viewerId,
+  viewerCanModerate = false,
+}: {
+  messageId: string
+  commentId: string
+  viewerId?: string
+  viewerCanModerate?: boolean
+}): Promise<CheckInReplyStatus> {
   const comment = await prisma.dailyMessageComment.findUnique({
     where: { id: commentId },
     select: {
       messageId: true,
       isDeleted: true,
-      DailyMessage: { select: { isDeleted: true, moderationStatus: true } },
+      DailyMessage: {
+        select: {
+          ...checkInNotificationMessageSelect,
+        },
+      },
     },
   })
 
   if (!comment || comment.messageId !== messageId) return 'not-found'
-  if (comment.DailyMessage.isDeleted || !['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus)) return 'unavailable'
-  return comment.isDeleted ? 'deleted' : 'visible'
+  if (comment.isDeleted || comment.DailyMessage.isDeleted) return 'deleted'
+  return getCheckInNotificationMessageStatus(comment.DailyMessage, viewerId, viewerCanModerate) === 'FOUND'
+    ? 'visible'
+    : 'unavailable'
 }

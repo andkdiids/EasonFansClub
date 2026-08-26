@@ -6,20 +6,31 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
+import { getFriendDisplayName } from '@/lib/friend-display-name'
 
 /**
  * 点赞用户数据结构（各内容类型点赞关系联查 User 后的统一视图）。
  * 头像跳转目标为公开个人病历页 /user/[uid]，隐私规则由该页自行保证。
  */
 export type LikeAvatarUser = {
+  id: string
   uid: number
   nickname: string
-  displayName?: string | null
-  avatarUrl?: string | null
-  equippedBadge?: EquippedBadgeView | null
+  friendRemark: string | null
+  displayName: string
+  avatarUrl: string | null
+  equippedBadge: EquippedBadgeView | null
 }
 
 const MAX_INLINE_AVATARS = 10
+
+function likerDisplayName(liker: LikeAvatarUser) {
+  return getFriendDisplayName({
+    nickname: liker.nickname || liker.displayName,
+    friendRemark: liker.friendRemark,
+    isFriendContext: Boolean(liker.friendRemark),
+  })
+}
 
 /**
  * 朋友圈式点赞头像行：❤ + 最多 10 个点赞用户头像，超出显示 +N。
@@ -86,10 +97,10 @@ export function LikeAvatars({
       >
         <span className="text-xs text-red-500" aria-hidden>❤</span>
         {inlineLikers.map((liker) => (
-          <span key={liker.uid} className="grid h-6 w-6 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
+          <span key={liker.id} className="grid h-6 w-6 place-items-center overflow-hidden rounded-full bg-brand-950 text-[10px] font-black text-white">
             <SafeAvatar
               src={profileImageUrl(liker.avatarUrl)}
-              name={liker.nickname || 'E院用户'}
+              name={likerDisplayName(liker)}
               uid={liker.uid}
               className="h-full w-full"
               textClassName="text-[10px]"
@@ -106,7 +117,7 @@ export function LikeAvatars({
           {!isLoading && !loadError ? (
             <ul className="flex flex-wrap gap-x-3 gap-y-1.5">
               {displayLikers.map((liker) => (
-                <li key={liker.uid}>
+                <li key={liker.id}>
                   <a
                     href={`/user/${formatUid(liker.uid)}`}
                     onClick={(event) => event.stopPropagation()}
@@ -115,13 +126,13 @@ export function LikeAvatars({
                     <span className="grid h-5 w-5 place-items-center overflow-hidden rounded-full bg-brand-950 text-[9px] font-black text-white">
                       <SafeAvatar
                         src={profileImageUrl(liker.avatarUrl)}
-                        name={liker.nickname || 'E院用户'}
+                        name={likerDisplayName(liker)}
                         uid={liker.uid}
                         className="h-full w-full"
                         textClassName="text-[9px]"
                       />
                     </span>
-                    <UserDisplayName name={liker.nickname || 'E院用户'} uid={liker.uid} badge={liker.equippedBadge} compact />
+                    <UserDisplayName name={likerDisplayName(liker)} uid={liker.uid} badge={liker.equippedBadge} compact />
                   </a>
                 </li>
               ))}

@@ -608,8 +608,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     liked: viewerLikedReplyIds.has(reply.id),
     likers: Array.isArray(ReplyLike)
       ? ReplyLike.map((like) => ({
+          id: like.User.id,
           uid: like.User.uid,
           nickname: getPublicUserDisplayName(like.User),
+          friendRemark: null,
           displayName: getPublicUserDisplayName(like.User),
           avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
           equippedBadge: equippedBadgeMap.get(like.User.id) || null,
@@ -741,8 +743,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           </div>
           <LikeAvatars
             likers={(post.Like || []).map((like) => ({
+              id: like.User.id,
               uid: like.User.uid,
               nickname: getPublicUserDisplayName(like.User),
+              friendRemark: null,
               displayName: getPublicUserDisplayName(like.User),
               avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
               equippedBadge: equippedBadgeMap.get(like.User.id) || null,

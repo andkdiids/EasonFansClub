@@ -12,7 +12,8 @@ import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
-import { anonymizeCheckInMessages, getCheckInMessagePageSize, CHECK_IN_MESSAGE_PAGE_SIZE, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort, type CheckInNotificationResolutionStatus } from '@/lib/checkin-messages'
+import { getCheckInMessagePageSize, CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { checkInMessageAuthorId } from '@/lib/checkin-message-order'
 import { getCheckInReplyToggleLabel, getVisibleCheckInReplyCount } from '@/lib/checkin-reply-display'
@@ -21,6 +22,7 @@ import { profileImageUrl } from '@/lib/images'
 import { scrollToSectionTop } from '@/lib/pagination'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
+import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 
 type DailyComment = CheckInDisplayMessageItem['comments'][number]
 type FlattenedDailyComment = {
@@ -123,7 +125,7 @@ function flattenCommentThread(
 }
 
 function getCommentAuthorName(author: DailyComment['author']) {
-  return 'uid' in author ? author.nickname || 'E院用户' : author.name
+  return 'uid' in author ? author.displayName || author.nickname || 'E院用户' : author.name
 }
 
 function getCommentAuthorBadge(author: DailyComment['author']) {
@@ -164,7 +166,7 @@ export function CheckInMessagesPanel({
   previewMode?: boolean
   focusMessageId?: string
   focusCommentId?: string
-  focusErrorKind?: 'load' | 'deleted' | 'not-found' | 'unavailable'
+  focusErrorKind?: CheckInNotificationResolutionStatus
   /** 服务端根据当前登录用户角色计算的管理员标记：是否显示留言删除入口（接口侧仍独立鉴权）。 */
   canManageMessages?: boolean
 }>) {
@@ -194,6 +196,7 @@ export function CheckInMessagesPanel({
   const pageSizeRef = useRef(CHECK_IN_MESSAGE_PAGE_SIZE)
   const currentPageRef = useRef(initialPagination?.page || 1)
   const initialQueryRef = useRef({ date: initialDate, sort: initialSort })
+  const handledFocusKeyRef = useRef('')
   useEffect(() => {
     likeCtxRef.current = likeCtx
   })
@@ -359,15 +362,20 @@ export function CheckInMessagesPanel({
   }, [page, totalPages])
 
   useEffect(() => {
-    if (previewMode || (!focusMessageId && !focusCommentId)) return
-    if (focusErrorKind === 'load') {
+    if (previewMode) return
+    if (!focusMessageId && !focusCommentId) {
+      handledFocusKeyRef.current = ''
+      setFocusError('')
+      return
+    }
+    if (focusErrorKind === 'LOAD_FAILED') {
       setFocusError(focusCommentId ? '暂时无法加载回复，请稍后重试' : '暂时无法加载留言，请稍后重试')
       return
     }
-    if (focusCommentId && (focusErrorKind === 'deleted' || focusErrorKind === 'not-found' || focusErrorKind === 'unavailable')) {
-      setFocusError(focusErrorKind === 'deleted'
+    if (focusCommentId && (focusErrorKind === 'DELETED' || focusErrorKind === 'NOT_FOUND' || focusErrorKind === 'FORBIDDEN')) {
+      setFocusError(focusErrorKind === 'DELETED'
         ? '该回复已被删除'
-        : focusErrorKind === 'not-found' ? '该回复不存在或已失效' : '你暂时无法查看这条回复')
+        : focusErrorKind === 'NOT_FOUND' ? '该回复不存在或已失效' : '你暂时无法查看这条回复')
       return
     }
     const messageIndex = messages.findIndex((item) =>
@@ -375,8 +383,8 @@ export function CheckInMessagesPanel({
     )
     if (messageIndex < 0) {
       setFocusError(focusCommentId
-        ? focusErrorKind === 'deleted' ? '该回复已被删除' : focusErrorKind === 'not-found' ? '该回复不存在或已失效' : '你暂时无法查看这条回复'
-        : '该内容已被删除或无法查看')
+        ? focusErrorKind === 'DELETED' ? '该回复已被删除' : focusErrorKind === 'NOT_FOUND' ? '该回复不存在或已失效' : focusErrorKind === 'FORBIDDEN' ? '你暂时无法查看这条回复' : '暂时无法定位这条回复'
+        : focusErrorKind === 'DELETED' ? '该留言已被删除' : focusErrorKind === 'FORBIDDEN' ? '你暂时无法查看这条留言' : focusErrorKind === 'NOT_FOUND' ? '该留言不存在或已失效' : '该内容已被删除或无法查看')
       return
     }
     setFocusError('')
@@ -397,10 +405,13 @@ export function CheckInMessagesPanel({
       }
     }
     const targetElementId = focusCommentId ? `comment-${focusCommentId}` : `message-${message.id}`
+    const focusKey = `${focusMessageId || message.id}:${focusCommentId || ''}`
+    if (handledFocusKeyRef.current === focusKey) return
     let highlightTimer: number | undefined
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(targetElementId)
       if (!target) return
+      handledFocusKeyRef.current = focusKey
       target.scrollIntoView({ behavior: 'smooth', block: 'center' })
       target.classList.add('notification-focus-target')
       highlightTimer = window.setTimeout(() => target.classList.remove('notification-focus-target'), 2600)
@@ -469,6 +480,51 @@ export function CheckInMessagesPanel({
     window.addEventListener('checkin:messages-changed', handleMessagesChanged)
     return () => window.removeEventListener('checkin:messages-changed', handleMessagesChanged)
   }, [date, loadMessages, messages, previewMode, sort])
+
+  useEffect(() => {
+    if (previewMode || anonymous || scope !== 'friends') return
+    const updateRemark = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null }>).detail
+      if (!detail?.targetUserId) return
+      const friendRemark = normalizeFriendRemark(detail.remark)
+      setMessages((current) => current.map((item): CheckInDisplayMessageItem => {
+        if (!('author' in item) || !('uid' in item.author)) return item
+        const privateItem = item as CheckInMessageItem
+        const author = privateItem.author
+        if (!('uid' in author)) return item
+        const rootAuthorMatches = author.id === detail.targetUserId
+        const commentMatches = privateItem.comments.some((comment) => 'uid' in comment.author && comment.author.id === detail.targetUserId)
+        const likerMatches = privateItem.likers.some((liker) => liker.id === detail.targetUserId)
+        if (!rootAuthorMatches && !commentMatches && !likerMatches) return privateItem
+        return {
+          ...privateItem,
+          author: rootAuthorMatches
+            ? { ...author, friendRemark, displayName: getFriendDisplayName({ nickname: author.nickname, friendRemark, isFriendContext: true }) }
+            : author,
+          comments: privateItem.comments.map((comment) => {
+            if (!('uid' in comment.author) || comment.author.id !== detail.targetUserId) return comment
+            return {
+              ...comment,
+              author: {
+                ...comment.author,
+                friendRemark,
+                displayName: getFriendDisplayName({ nickname: comment.author.nickname, friendRemark, isFriendContext: true }),
+              },
+            }
+          }),
+          likers: privateItem.likers.map((liker) => liker.id === detail.targetUserId
+            ? {
+                ...liker,
+                friendRemark,
+                displayName: getFriendDisplayName({ nickname: liker.nickname, friendRemark, isFriendContext: true }),
+              }
+            : liker),
+        }
+      }))
+    }
+    window.addEventListener('friend-remark:updated', updateRemark)
+    return () => window.removeEventListener('friend-remark:updated', updateRemark)
+  }, [anonymous, previewMode, scope])
 
   // 管理员删除留言：复用后台既有软删除接口（服务端校验 daily_message_manage 权限），
   // 成功后只从当前列表局部移除目标留言，不重新加载列表、不改动分页/筛选/滚动位置。
@@ -552,7 +608,7 @@ export function CheckInMessagesPanel({
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMoodDisplay(item)
           const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null
-          const name = fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : 'E院用户')
+          const name = fullIdentity?.displayName || fullIdentity?.nickname || ('author' in item && 'name' in item.author ? item.author.name : 'E院用户')
           const avatar = profileImageUrl(fullIdentity?.profile?.avatarUrl || fullIdentity?.avatarUrl)
           const commentTree = buildCommentTree(item.comments)
           const rootComments = commentTree.get(null) || []
@@ -561,12 +617,19 @@ export function CheckInMessagesPanel({
           const likeOverride = likeCtx.getLike(item.id)
           const effectiveLiked = likeOverride ? likeOverride.liked : ('liked' in item ? item.liked : item.likes.length > 0)
           const effectiveLikeCount = likeOverride ? likeOverride.likeCount : item.likeCount
-          const threadComments = flattenCommentThread(rootComments, commentTree, name)
-          const showAllReplies = Boolean(expandedReplies[item.id])
-          const visibleThreadComments = threadComments.slice(0, getVisibleCheckInReplyCount(threadComments.length, showAllReplies))
+           const threadComments = flattenCommentThread(rootComments, commentTree, name)
+           const showAllReplies = Boolean(expandedReplies[item.id])
+           const isFocusedMessage = item.id === focusMessageId || item.comments.some((comment) => comment.id === focusCommentId)
+           // A notification target may be an old nested reply outside the
+           // normal preview window. Once the exact target is loaded, render
+           // the complete thread so the target and its ancestors are real DOM
+           // nodes before the scroll/highlight effect runs.
+           const visibleThreadComments = isFocusedMessage && focusCommentId
+             ? threadComments
+             : threadComments.slice(0, getVisibleCheckInReplyCount(threadComments.length, showAllReplies))
           const replyToggleLabel = getCheckInReplyToggleLabel(threadComments.length, showAllReplies)
           return (
-            <article key={item.id} id={`message-${item.id}`} className={`checkin-message-card ${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border shadow-sm`}>
+            <article key={item.id} id={`message-${item.id}`} data-checkin-message-id={item.id} className={`checkin-message-card ${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border shadow-sm`}>
               <div className={isMinimal ? 'flex gap-2' : 'flex gap-3'}>
                 {anonymous ? (
                   <div className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
@@ -628,7 +691,7 @@ export function CheckInMessagesPanel({
                         const commentName = getCommentAuthorName(comment.author)
                         const commentAvatar = profileImageUrl(commentIdentity?.profile?.avatarUrl || commentIdentity?.avatarUrl)
                         return (
-                          <div key={comment.id} id={`comment-${comment.id}`} className={`${isRoot ? 'checkin-comment-card' : 'checkin-reply-thread pl-3 sm:pl-4'} rounded-xl p-2 text-sm leading-6 text-slate-600`}>
+                          <div key={comment.id} id={`comment-${comment.id}`} data-checkin-reply-id={comment.id} className={`${isRoot ? 'checkin-comment-card' : 'checkin-reply-thread pl-3 sm:pl-4'} rounded-xl p-2 text-sm leading-6 text-slate-600`}>
                             <div className="flex items-start gap-2">
                               {anonymous || !commentIdentity ? <span className={`${isRoot ? 'h-8 w-8 text-xs' : 'h-6 w-6 text-[10px]'} grid shrink-0 place-items-center rounded-full bg-sky-100`}>E</span> : <a href={`/user/${formatUid(commentIdentity.uid)}`} className={`${isRoot ? 'h-8 w-8 text-xs' : 'h-6 w-6 text-[10px]'} grid shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 font-black text-white`}><SafeAvatar src={commentAvatar} name={commentName} uid={commentIdentity.uid} className="h-full w-full" textClassName={isRoot ? 'text-xs' : 'text-[10px]'} /></a>}
                               <div className="min-w-0 flex-1">

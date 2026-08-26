@@ -39,7 +39,7 @@ export function EcenterFeatureSettingsManager({ initial }: Readonly<{ initial: E
       const response = await fetch('/api/admin/ecenter/features', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ features: features.map(({ featureKey, sortOrder, isEnabled }) => ({ featureKey, sortOrder, isEnabled })) }),
+        body: JSON.stringify({ features: features.filter((feature) => feature.isManageable).map(({ featureKey, sortOrder, isEnabled }) => ({ featureKey, sortOrder, isEnabled })) }),
       })
       const payload = await response.json().catch(() => null)
       if (!response.ok) throw new Error(payload?.message || '保存失败，请稍后重试')
